@@ -45,6 +45,11 @@ impl<'src> Parser<'src> {
         &mut self.interner
     }
 
+    /// Consume the parser and return the interner
+    pub fn into_interner(self) -> Interner {
+        self.interner
+    }
+
     /// Advance to the next token
     fn advance(&mut self) {
         self.previous = std::mem::replace(&mut self.current, self.lexer.next_token());
@@ -598,6 +603,41 @@ mod tests {
                 assert_eq!(call.args.len(), 0);
             }
             _ => panic!("expected call"),
+        }
+    }
+
+    #[test]
+    fn parse_left_associativity() {
+        // 1 - 2 - 3 should be (1 - 2) - 3, not 1 - (2 - 3)
+        let mut parser = Parser::new("1 - 2 - 3");
+        let expr = parser.parse_expression().unwrap();
+
+        // Should be: (left: (1 - 2), op: Sub, right: 3)
+        match &expr.kind {
+            ExprKind::Binary(outer) => {
+                assert_eq!(outer.op, BinaryOp::Sub);
+                // Right should be just 3, not (2 - 3)
+                match &outer.right.kind {
+                    ExprKind::IntLiteral(3) => {} // correct
+                    _ => panic!("expected right to be 3, got {:?}", outer.right.kind),
+                }
+                // Left should be (1 - 2)
+                match &outer.left.kind {
+                    ExprKind::Binary(inner) => {
+                        assert_eq!(inner.op, BinaryOp::Sub);
+                        match &inner.left.kind {
+                            ExprKind::IntLiteral(1) => {}
+                            _ => panic!("expected inner left to be 1"),
+                        }
+                        match &inner.right.kind {
+                            ExprKind::IntLiteral(2) => {}
+                            _ => panic!("expected inner right to be 2"),
+                        }
+                    }
+                    _ => panic!("expected left to be binary"),
+                }
+            }
+            _ => panic!("expected binary"),
         }
     }
 }
