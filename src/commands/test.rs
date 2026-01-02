@@ -10,9 +10,11 @@ use std::time::{Duration, Instant};
 
 use glob::glob;
 
-use super::common::{parse_and_analyze, TermColors};
+use super::common::{TermColors, parse_and_analyze};
 use crate::codegen::{Compiler, JitContext, TestInfo};
-use crate::runtime::{call_setjmp, clear_test_jmp_buf, set_test_jmp_buf, take_assert_failure, AssertFailure, JmpBuf};
+use crate::runtime::{
+    AssertFailure, JmpBuf, call_setjmp, clear_test_jmp_buf, set_test_jmp_buf, take_assert_failure,
+};
 
 /// Status of an individual test
 #[derive(Debug, Clone)]
@@ -147,8 +149,8 @@ fn collect_test_files(paths: &[String]) -> Result<Vec<PathBuf>, String> {
 
 /// Expand a glob pattern and add matching files
 fn collect_glob_matches(pattern: &str, files: &mut Vec<PathBuf>) -> Result<(), String> {
-    let entries = glob(pattern)
-        .map_err(|e| format!("invalid glob pattern '{}': {}", pattern, e))?;
+    let entries =
+        glob(pattern).map_err(|e| format!("invalid glob pattern '{}': {}", pattern, e))?;
 
     for entry in entries {
         match entry {
@@ -169,20 +171,19 @@ fn collect_glob_matches(pattern: &str, files: &mut Vec<PathBuf>) -> Result<(), S
 /// Parse, type check, compile, and run tests from a single file
 fn run_file_tests(path: &Path) -> Result<TestResults, String> {
     // Read source file
-    let source = fs::read_to_string(path)
-        .map_err(|e| format!("could not read file: {}", e))?;
+    let source = fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
     let file_path = path.to_string_lossy();
 
     // Parse and type check
-    let analyzed = parse_and_analyze(&source, &file_path)
-        .map_err(|()| String::new())?;
+    let analyzed = parse_and_analyze(&source, &file_path).map_err(|()| String::new())?;
 
     // Compile
     let mut jit = JitContext::new();
     let tests = {
         let mut compiler = Compiler::new(&mut jit, &analyzed.interner);
         compiler.set_source_file(&path.to_string_lossy());
-        compiler.compile_program(&analyzed.program)
+        compiler
+            .compile_program(&analyzed.program)
             .map_err(|e| format!("compilation error: {}", e))?;
         compiler.take_tests()
     };

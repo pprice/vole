@@ -7,9 +7,9 @@ pub enum TokenType {
     IntLiteral,
     FloatLiteral,
     StringLiteral,
-    StringInterpStart,   // "text{
-    StringInterpMiddle,  // }text{
-    StringInterpEnd,     // }text"
+    StringInterpStart,  // "text{
+    StringInterpMiddle, // }text{
+    StringInterpEnd,    // }text"
     Identifier,
 
     // Keywords (subset for Phase 1)
@@ -54,7 +54,7 @@ pub enum TokenType {
     RBrace,
     Comma,
     Colon,
-    Arrow,  // ->
+    Arrow, // ->
 
     // Special
     Newline,
@@ -131,11 +131,11 @@ impl TokenType {
 /// Source location span
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Span {
-    pub start: usize,   // Byte offset
-    pub end: usize,     // Byte offset (exclusive)
-    pub line: u32,      // Start line (1-indexed)
-    pub column: u32,    // Start column (1-indexed)
-    pub end_line: u32,  // End line (1-indexed)
+    pub start: usize,    // Byte offset
+    pub end: usize,      // Byte offset (exclusive)
+    pub line: u32,       // Start line (1-indexed)
+    pub column: u32,     // Start column (1-indexed)
+    pub end_line: u32,   // End line (1-indexed)
     pub end_column: u32, // End column (1-indexed, exclusive)
 }
 
@@ -149,7 +149,14 @@ impl Span {
         end_line: u32,
         end_column: u32,
     ) -> Self {
-        Self { start, end, line, column, end_line, end_column }
+        Self {
+            start,
+            end,
+            line,
+            column,
+            end_line,
+            end_column,
+        }
     }
 
     /// Create a new span, computing end position for single-line tokens

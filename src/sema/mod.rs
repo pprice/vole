@@ -1,7 +1,7 @@
 // src/sema/mod.rs
-pub mod types;
-pub mod scope;
 pub mod analyzer;
+pub mod scope;
+pub mod types;
 
-pub use types::{Type, FunctionType};
 pub use analyzer::{Analyzer, TypeError};
+pub use types::{FunctionType, Type};

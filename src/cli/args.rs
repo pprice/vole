@@ -1,7 +1,7 @@
 // src/cli/args.rs
 
-use std::path::PathBuf;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 /// Vole programming language compiler and runtime
 #[derive(Parser)]

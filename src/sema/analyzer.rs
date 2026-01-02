@@ -1,8 +1,11 @@
 // src/sema/analyzer.rs
 
-use crate::frontend::*;
-use crate::sema::{scope::{Scope, Variable}, Type, FunctionType};
 use crate::errors::{Diagnostic, DiagnosticBuilder, codes};
+use crate::frontend::*;
+use crate::sema::{
+    FunctionType, Type,
+    scope::{Scope, Variable},
+};
 use std::collections::HashMap;
 
 /// A type error containing a structured diagnostic
@@ -52,23 +55,33 @@ impl Analyzer {
         self.errors.push(TypeError::new(diagnostic));
     }
 
-    pub fn analyze(&mut self, program: &Program, interner: &Interner) -> Result<(), Vec<TypeError>> {
+    pub fn analyze(
+        &mut self,
+        program: &Program,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
         // First pass: collect function signatures
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
-                    let params: Vec<Type> = func.params.iter()
+                    let params: Vec<Type> = func
+                        .params
+                        .iter()
                         .map(|p| self.resolve_type(&p.ty))
                         .collect();
-                    let return_type = func.return_type
+                    let return_type = func
+                        .return_type
                         .as_ref()
                         .map(|t| self.resolve_type(t))
                         .unwrap_or(Type::Void);
 
-                    self.functions.insert(func.name, FunctionType {
-                        params,
-                        return_type: Box::new(return_type),
-                    });
+                    self.functions.insert(
+                        func.name,
+                        FunctionType {
+                            params,
+                            return_type: Box::new(return_type),
+                        },
+                    );
                 }
                 Decl::Tests(_) => {
                     // Tests don't need signatures in the first pass
@@ -102,7 +115,11 @@ impl Analyzer {
         }
     }
 
-    fn check_function(&mut self, func: &FuncDecl, interner: &Interner) -> Result<(), Vec<TypeError>> {
+    fn check_function(
+        &mut self,
+        func: &FuncDecl,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
         let func_type = self.functions.get(&func.name).cloned().unwrap();
         self.current_function_return = Some(*func_type.return_type.clone());
 
@@ -111,10 +128,13 @@ impl Analyzer {
         self.scope = Scope::with_parent(parent_scope);
 
         for (param, ty) in func.params.iter().zip(func_type.params.iter()) {
-            self.scope.define(param.name, Variable {
-                ty: ty.clone(),
-                mutable: false,
-            });
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty.clone(),
+                    mutable: false,
+                },
+            );
         }
 
         // Check body
@@ -129,7 +149,11 @@ impl Analyzer {
         Ok(())
     }
 
-    fn check_tests(&mut self, tests_decl: &TestsDecl, interner: &Interner) -> Result<(), Vec<TypeError>> {
+    fn check_tests(
+        &mut self,
+        tests_decl: &TestsDecl,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
         for test_case in &tests_decl.tests {
             // Each test gets its own scope
             let parent_scope = std::mem::take(&mut self.scope);
@@ -186,10 +210,13 @@ impl Analyzer {
                     init_type
                 };
 
-                self.scope.define(let_stmt.name, Variable {
-                    ty: var_type,
-                    mutable: let_stmt.mutable,
-                });
+                self.scope.define(
+                    let_stmt.name,
+                    Variable {
+                        ty: var_type,
+                        mutable: let_stmt.mutable,
+                    },
+                );
             }
             Stmt::Expr(expr_stmt) => {
                 self.check_expr(&expr_stmt.expr, interner)?;
@@ -249,15 +276,15 @@ impl Analyzer {
                     Type::Void
                 };
 
-                if let Some(expected) = &self.current_function_return {
-                    if !self.types_compatible(&ret_type, expected) {
-                        let diag = self.diag_builder.error(
-                            &codes::SEMA_TYPE_MISMATCH,
-                            ret.span,
-                            format!("expected {}, found {}", expected.name(), ret_type.name()),
-                        );
-                        self.add_error(diag);
-                    }
+                if let Some(expected) = &self.current_function_return
+                    && !self.types_compatible(&ret_type, expected)
+                {
+                    let diag = self.diag_builder.error(
+                        &codes::SEMA_TYPE_MISMATCH,
+                        ret.span,
+                        format!("expected {}, found {}", expected.name(), ret_type.name()),
+                    );
+                    self.add_error(diag);
                 }
             }
         }
@@ -292,7 +319,11 @@ impl Analyzer {
                 let right_ty = self.check_expr(&bin.right, interner)?;
 
                 match bin.op {
-                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                    BinaryOp::Add
+                    | BinaryOp::Sub
+                    | BinaryOp::Mul
+                    | BinaryOp::Div
+                    | BinaryOp::Mod => {
                         if left_ty.is_numeric() && right_ty.is_numeric() {
                             // Return wider type
                             if left_ty == Type::F64 || right_ty == Type::F64 {
@@ -306,15 +337,23 @@ impl Analyzer {
                             let diag = self.diag_builder.error(
                                 &codes::SEMA_TYPE_MISMATCH,
                                 expr.span,
-                                format!("cannot perform {:?} on {} and {}", bin.op, left_ty.name(), right_ty.name()),
+                                format!(
+                                    "cannot perform {:?} on {} and {}",
+                                    bin.op,
+                                    left_ty.name(),
+                                    right_ty.name()
+                                ),
                             );
                             self.add_error(diag);
                             Ok(Type::Error)
                         }
                     }
-                    BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
-                        Ok(Type::Bool)
-                    }
+                    BinaryOp::Eq
+                    | BinaryOp::Ne
+                    | BinaryOp::Lt
+                    | BinaryOp::Gt
+                    | BinaryOp::Le
+                    | BinaryOp::Ge => Ok(Type::Bool),
                 }
             }
 
@@ -371,7 +410,11 @@ impl Analyzer {
                             let diag = self.diag_builder.error(
                                 &codes::SEMA_WRONG_ARGUMENT_COUNT,
                                 expr.span,
-                                format!("expected {} arguments, found {}", func_type.params.len(), call.args.len()),
+                                format!(
+                                    "expected {} arguments, found {}",
+                                    func_type.params.len(),
+                                    call.args.len()
+                                ),
                             );
                             self.add_error(diag);
                         }
@@ -382,7 +425,11 @@ impl Analyzer {
                                 let diag = self.diag_builder.error(
                                     &codes::SEMA_TYPE_MISMATCH,
                                     arg.span,
-                                    format!("expected {}, found {}", param_ty.name(), arg_ty.name()),
+                                    format!(
+                                        "expected {}, found {}",
+                                        param_ty.name(),
+                                        arg_ty.name()
+                                    ),
                                 );
                                 self.add_error(diag);
                             }
@@ -472,8 +519,8 @@ impl Analyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::Parser;
     use crate::errors::codes;
+    use crate::frontend::Parser;
 
     fn check(source: &str) -> Result<(), Vec<TypeError>> {
         let mut parser = Parser::new(source);
@@ -500,7 +547,10 @@ mod tests {
         let result = check(source);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert_eq!(errors[0].diagnostic.code(), codes::SEMA_UNDEFINED_VARIABLE.code);
+        assert_eq!(
+            errors[0].diagnostic.code(),
+            codes::SEMA_UNDEFINED_VARIABLE.code
+        );
     }
 
     #[test]
@@ -509,7 +559,10 @@ mod tests {
         let result = check(source);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert_eq!(errors[0].diagnostic.code(), codes::SEMA_IMMUTABLE_VARIABLE.code);
+        assert_eq!(
+            errors[0].diagnostic.code(),
+            codes::SEMA_IMMUTABLE_VARIABLE.code
+        );
     }
 
     #[test]
@@ -518,7 +571,10 @@ mod tests {
         let result = check(source);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert_eq!(errors[0].diagnostic.code(), codes::SEMA_WRONG_ARGUMENT_COUNT.code);
+        assert_eq!(
+            errors[0].diagnostic.code(),
+            codes::SEMA_WRONG_ARGUMENT_COUNT.code
+        );
     }
 
     #[test]
@@ -528,7 +584,10 @@ mod tests {
         let result = check(source);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert_eq!(errors[0].diagnostic.code(), codes::SEMA_CONDITION_NOT_BOOL.code);
+        assert_eq!(
+            errors[0].diagnostic.code(),
+            codes::SEMA_CONDITION_NOT_BOOL.code
+        );
     }
 
     #[test]
@@ -538,7 +597,14 @@ mod tests {
         assert!(result.is_err());
         let errors = result.unwrap_err();
         assert!(errors[0].diagnostic.source_line.is_some());
-        assert!(errors[0].diagnostic.source_line.as_ref().unwrap().contains("let x = y"));
+        assert!(
+            errors[0]
+                .diagnostic
+                .source_line
+                .as_ref()
+                .unwrap()
+                .contains("let x = y")
+        );
     }
 
     #[test]
