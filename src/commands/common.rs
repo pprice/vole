@@ -27,9 +27,12 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
             let lexer_errors = parser.take_lexer_errors();
             if !lexer_errors.is_empty() {
                 render_diagnostics(&lexer_errors);
+                // If we have lexer errors, the parse error is likely a consequence
+                // of trying to parse an error token - don't show duplicate
+            } else {
+                // Render the parse error only if no lexer errors
+                render_diagnostics(&[e.diagnostic]);
             }
-            // Render the parse error
-            render_diagnostics(&[e.diagnostic]);
             return Err(());
         }
     };

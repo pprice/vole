@@ -51,7 +51,7 @@ impl<'src> Parser<'src> {
 
     /// Create a parser with a custom file name for diagnostics
     pub fn with_file(source: &'src str, file: &str) -> Self {
-        let mut lexer = Lexer::new(source);
+        let mut lexer = Lexer::new_with_file(source, file);
         let current = lexer.next_token();
         Self {
             lexer,

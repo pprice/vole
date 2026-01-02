@@ -1,0 +1,6 @@
+// Test: Semantic error - type mismatch
+// Expected error: E2001 expected i64, found bool
+
+func main() {
+    let x: i64 = true
+}
