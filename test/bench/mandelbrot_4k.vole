@@ -1,0 +1,47 @@
+// Mandelbrot Benchmark - 4000x4000
+func main() {
+    let size = 4000
+    let max_iter = 50
+    let limit_sq = 4.0
+
+    let mut checksum: i64 = 0
+
+    let mut y = 0
+    while y < size {
+        let mut x = 0
+
+        while x < size {
+            let cr = 2.0 * x / size - 1.5
+            let ci = 2.0 * y / size - 1.0
+
+            let mut zr = 0.0
+            let mut zi = 0.0
+            let mut iter = 0
+
+            while iter < max_iter {
+                let zr_sq = zr * zr
+                let zi_sq = zi * zi
+
+                if zr_sq + zi_sq > limit_sq {
+                    break
+                }
+
+                let new_zr = zr_sq - zi_sq + cr
+                zi = 2.0 * zr * zi + ci
+                zr = new_zr
+
+                iter = iter + 1
+            }
+
+            if iter == max_iter {
+                checksum = checksum + 1
+            }
+
+            x = x + 1
+        }
+
+        y = y + 1
+    }
+
+    println("Mandelbrot {size}x{size}: {checksum} pixels inside")
+}
