@@ -3,4 +3,33 @@ name = "vole"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "vole"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vole"
+path = "src/bin/vole.rs"
+
 [dependencies]
+# Cranelift for JIT compilation
+cranelift = "0.116"
+cranelift-jit = "0.116"
+cranelift-module = "0.116"
+cranelift-codegen = "0.116"
+cranelift-frontend = "0.116"
+target-lexicon = "0.13"
+
+# Error handling
+thiserror = "2.0"
+miette = { version = "7.4", features = ["fancy"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
