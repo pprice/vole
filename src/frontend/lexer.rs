@@ -230,6 +230,8 @@ impl<'src> Lexer<'src> {
             "return" => Some(TokenType::KwReturn),
             "true" => Some(TokenType::KwTrue),
             "false" => Some(TokenType::KwFalse),
+            "tests" => Some(TokenType::KwTests),
+            "test" => Some(TokenType::KwTest),
             "i32" => Some(TokenType::KwI32),
             "i64" => Some(TokenType::KwI64),
             "f64" => Some(TokenType::KwF64),

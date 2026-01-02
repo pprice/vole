@@ -23,6 +23,8 @@ pub enum TokenType {
     KwReturn,
     KwTrue,
     KwFalse,
+    KwTests,
+    KwTest,
 
     // Type keywords
     KwI32,
@@ -81,6 +83,8 @@ impl TokenType {
             Self::KwReturn => "return",
             Self::KwTrue => "true",
             Self::KwFalse => "false",
+            Self::KwTests => "tests",
+            Self::KwTest => "test",
             Self::KwI32 => "i32",
             Self::KwI64 => "i64",
             Self::KwF64 => "f64",
