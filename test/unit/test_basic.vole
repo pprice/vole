@@ -1,0 +1,28 @@
+// Basic test file to verify testing framework
+
+tests {
+    test "basic assertion" {
+        assert(1 == 1)
+    }
+
+    test "math operations" {
+        assert(2 + 2 == 4)
+        assert(10 - 3 == 7)
+        assert(3 * 4 == 12)
+    }
+
+    test "comparisons" {
+        assert(5 > 3)
+        assert(3 < 5)
+        assert(5 >= 5)
+        assert(5 <= 5)
+    }
+
+    test "variables" {
+        let x = 42
+        assert(x == 42)
+        let mut y = 1
+        y = y + 1
+        assert(y == 2)
+    }
+}

@@ -1,0 +1,21 @@
+// Test that assert works in helper functions
+
+func check_positive(n: i64) {
+    assert(n > 0)
+}
+
+func check_equal(a: i64, b: i64) {
+    assert(a == b)
+}
+
+tests {
+    test "assert in helper - passing" {
+        check_positive(5)
+        check_positive(100)
+    }
+
+    test "assert in helper - equality" {
+        check_equal(2 + 2, 4)
+        check_equal(10, 10)
+    }
+}
