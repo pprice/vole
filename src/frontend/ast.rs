@@ -16,6 +16,7 @@ pub struct Program {
 #[derive(Debug)]
 pub enum Decl {
     Function(FuncDecl),
+    Tests(TestsDecl),
 }
 
 /// Function declaration
@@ -24,6 +25,21 @@ pub struct FuncDecl {
     pub name: Symbol,
     pub params: Vec<Param>,
     pub return_type: Option<TypeExpr>,
+    pub body: Block,
+    pub span: Span,
+}
+
+/// Tests block declaration
+#[derive(Debug)]
+pub struct TestsDecl {
+    pub tests: Vec<TestCase>,
+    pub span: Span,
+}
+
+/// Individual test case
+#[derive(Debug)]
+pub struct TestCase {
+    pub name: String,
     pub body: Block,
     pub span: Span,
 }

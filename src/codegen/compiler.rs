@@ -78,6 +78,9 @@ impl<'a> Compiler<'a> {
                     let name = self.interner.resolve(func.name);
                     self.jit.declare_function(name, &sig);
                 }
+                Decl::Tests(_) => {
+                    // Tests are compiled separately, skip in normal compilation
+                }
             }
         }
 
@@ -86,6 +89,9 @@ impl<'a> Compiler<'a> {
             match decl {
                 Decl::Function(func) => {
                     self.compile_function(func)?;
+                }
+                Decl::Tests(_) => {
+                    // Tests are compiled separately, skip in normal compilation
                 }
             }
         }

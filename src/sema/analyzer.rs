@@ -45,6 +45,9 @@ impl Analyzer {
                         return_type: Box::new(return_type),
                     });
                 }
+                Decl::Tests(_) => {
+                    // Tests are handled separately, skip in normal analysis
+                }
             }
         }
 
@@ -53,6 +56,9 @@ impl Analyzer {
             match decl {
                 Decl::Function(func) => {
                     self.check_function(func, interner)?;
+                }
+                Decl::Tests(_) => {
+                    // Tests are handled separately, skip in normal analysis
                 }
             }
         }
