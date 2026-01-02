@@ -1,0 +1,132 @@
+// src/runtime/builtins.rs
+
+use crate::runtime::RcString;
+use std::io::{self, Write};
+
+/// Print a string to stdout with newline
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_println_string(ptr: *const RcString) {
+    if ptr.is_null() {
+        println!();
+        return;
+    }
+    unsafe {
+        let s = (*ptr).as_str();
+        println!("{}", s);
+    }
+}
+
+/// Print an i64 to stdout with newline
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_println_i64(value: i64) {
+    println!("{}", value);
+}
+
+/// Print an f64 to stdout with newline
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_println_f64(value: f64) {
+    println!("{}", value);
+}
+
+/// Print a bool to stdout with newline
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_println_bool(value: i8) {
+    if value != 0 {
+        println!("true");
+    } else {
+        println!("false");
+    }
+}
+
+/// Concatenate two strings
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_string_concat(a: *const RcString, b: *const RcString) -> *mut RcString {
+    unsafe {
+        let s_a = if a.is_null() { "" } else { (*a).as_str() };
+        let s_b = if b.is_null() { "" } else { (*b).as_str() };
+        let result = format!("{}{}", s_a, s_b);
+        RcString::new(&result)
+    }
+}
+
+/// Convert i64 to string
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_i64_to_string(value: i64) -> *mut RcString {
+    let s = value.to_string();
+    RcString::new(&s)
+}
+
+/// Convert f64 to string
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f64_to_string(value: f64) -> *mut RcString {
+    let s = value.to_string();
+    RcString::new(&s)
+}
+
+/// Convert bool to string
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_bool_to_string(value: i8) -> *mut RcString {
+    let s = if value != 0 { "true" } else { "false" };
+    RcString::new(s)
+}
+
+/// Flush stdout (useful for interactive output)
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_flush() {
+    let _ = io::stdout().flush();
+}
+
+/// Print a character (for mandelbrot output)
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_print_char(c: u8) {
+    print!("{}", c as char);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_string_concat() {
+        let a = RcString::new("hello");
+        let b = RcString::new(" world");
+        let result = vole_string_concat(a, b);
+
+        unsafe {
+            assert_eq!((*result).as_str(), "hello world");
+            RcString::dec_ref(result);
+            RcString::dec_ref(a as *mut _);
+            RcString::dec_ref(b as *mut _);
+        }
+    }
+
+    #[test]
+    fn test_i64_to_string() {
+        let result = vole_i64_to_string(42);
+        unsafe {
+            assert_eq!((*result).as_str(), "42");
+            RcString::dec_ref(result);
+        }
+    }
+
+    #[test]
+    fn test_f64_to_string() {
+        let result = vole_f64_to_string(3.14);
+        unsafe {
+            assert!((*result).as_str().starts_with("3.14"));
+            RcString::dec_ref(result);
+        }
+    }
+
+    #[test]
+    fn test_bool_to_string() {
+        let t = vole_bool_to_string(1);
+        let f = vole_bool_to_string(0);
+        unsafe {
+            assert_eq!((*t).as_str(), "true");
+            assert_eq!((*f).as_str(), "false");
+            RcString::dec_ref(t);
+            RcString::dec_ref(f);
+        }
+    }
+}
