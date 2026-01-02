@@ -31,11 +31,12 @@ fn execute_file(path: &Path) -> Result<(), String> {
     let interner = parser.into_interner();
 
     // Type check
-    let mut analyzer = Analyzer::new();
+    let file_path = path.to_string_lossy();
+    let mut analyzer = Analyzer::new(&file_path, &source);
     analyzer.analyze(&program, &interner)
         .map_err(|errors| {
             let msgs: Vec<String> = errors.iter()
-                .map(|e| format!("  {:?}: {}", e.span, e.message))
+                .map(|e| format!("  {:?}: {}", e.span(), e.message()))
                 .collect();
             format!("type errors:\n{}", msgs.join("\n"))
         })?;
