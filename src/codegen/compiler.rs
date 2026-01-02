@@ -10,6 +10,36 @@ use crate::frontend::{
 use crate::sema::Type;
 use crate::codegen::JitContext;
 
+/// Context for control flow during compilation
+pub struct ControlFlowCtx {
+    /// Stack of loop exit blocks for break statements
+    loop_exits: Vec<Block>,
+}
+
+impl ControlFlowCtx {
+    pub fn new() -> Self {
+        Self { loop_exits: Vec::new() }
+    }
+
+    pub fn push_loop(&mut self, exit_block: Block) {
+        self.loop_exits.push(exit_block);
+    }
+
+    pub fn pop_loop(&mut self) {
+        self.loop_exits.pop();
+    }
+
+    pub fn current_loop_exit(&self) -> Option<Block> {
+        self.loop_exits.last().copied()
+    }
+}
+
+impl Default for ControlFlowCtx {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Compiled value with its type
 #[derive(Clone, Copy)]
 pub struct CompiledValue {
@@ -108,7 +138,8 @@ impl<'a> Compiler<'a> {
             }
 
             // Compile function body
-            let terminated = compile_block(&mut builder, &func.body, &mut variables, self.interner, self.pointer_type)?;
+            let mut cf_ctx = ControlFlowCtx::new();
+            let terminated = compile_block(&mut builder, &func.body, &mut variables, self.interner, self.pointer_type, &mut cf_ctx)?;
 
             // Add implicit return if no explicit return
             if !terminated {
@@ -145,31 +176,33 @@ fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::Type {
     }
 }
 
-/// Returns true if a terminating statement (return) was compiled
+/// Returns true if a terminating statement (return/break) was compiled
 fn compile_block(
     builder: &mut FunctionBuilder,
     block: &frontend::Block,
     variables: &mut HashMap<Symbol, Variable>,
     interner: &Interner,
     pointer_type: types::Type,
+    cf_ctx: &mut ControlFlowCtx,
 ) -> Result<bool, String> {
     let mut terminated = false;
     for stmt in &block.stmts {
         if terminated {
             break; // Don't compile unreachable code
         }
-        terminated = compile_stmt(builder, stmt, variables, interner, pointer_type)?;
+        terminated = compile_stmt(builder, stmt, variables, interner, pointer_type, cf_ctx)?;
     }
     Ok(terminated)
 }
 
-/// Returns true if this statement terminates (return)
+/// Returns true if this statement terminates (return/break)
 fn compile_stmt(
     builder: &mut FunctionBuilder,
     stmt: &Stmt,
     variables: &mut HashMap<Symbol, Variable>,
     interner: &Interner,
     pointer_type: types::Type,
+    cf_ctx: &mut ControlFlowCtx,
 ) -> Result<bool, String> {
     match stmt {
         Stmt::Let(let_stmt) => {
@@ -194,9 +227,86 @@ fn compile_stmt(
             }
             Ok(true)
         }
-        Stmt::While(_) | Stmt::If(_) | Stmt::Break(_) => {
-            // Will be implemented in Task 15
+        Stmt::While(while_stmt) => {
+            // Create blocks
+            let header_block = builder.create_block();  // Condition check
+            let body_block = builder.create_block();    // Loop body
+            let exit_block = builder.create_block();    // After loop
+
+            // Jump to header
+            builder.ins().jump(header_block, &[]);
+
+            // Header block - check condition
+            builder.switch_to_block(header_block);
+            let cond = compile_expr(builder, &while_stmt.condition, variables, interner, pointer_type)?;
+            // Extend bool to i32 for comparison if needed
+            let cond_i32 = builder.ins().uextend(types::I32, cond.value);
+            builder.ins().brif(cond_i32, body_block, &[], exit_block, &[]);
+
+            // Body block
+            builder.switch_to_block(body_block);
+            cf_ctx.push_loop(exit_block);
+            let body_terminated = compile_block(builder, &while_stmt.body, variables, interner, pointer_type, cf_ctx)?;
+            cf_ctx.pop_loop();
+
+            // Jump back to header (if not already terminated by break/return)
+            if !body_terminated {
+                builder.ins().jump(header_block, &[]);
+            }
+
+            // Continue in exit block
+            builder.switch_to_block(exit_block);
+
+            // Seal blocks
+            builder.seal_block(header_block);
+            builder.seal_block(body_block);
+            builder.seal_block(exit_block);
+
             Ok(false)
+        }
+        Stmt::If(if_stmt) => {
+            let cond = compile_expr(builder, &if_stmt.condition, variables, interner, pointer_type)?;
+            let cond_i32 = builder.ins().uextend(types::I32, cond.value);
+
+            let then_block = builder.create_block();
+            let else_block = builder.create_block();
+            let merge_block = builder.create_block();
+
+            builder.ins().brif(cond_i32, then_block, &[], else_block, &[]);
+
+            // Then branch
+            builder.switch_to_block(then_block);
+            let then_terminated = compile_block(builder, &if_stmt.then_branch, variables, interner, pointer_type, cf_ctx)?;
+            if !then_terminated {
+                builder.ins().jump(merge_block, &[]);
+            }
+
+            // Else branch
+            builder.switch_to_block(else_block);
+            let else_terminated = if let Some(else_branch) = &if_stmt.else_branch {
+                compile_block(builder, else_branch, variables, interner, pointer_type, cf_ctx)?
+            } else {
+                false
+            };
+            if !else_terminated {
+                builder.ins().jump(merge_block, &[]);
+            }
+
+            // Continue after if
+            builder.switch_to_block(merge_block);
+
+            builder.seal_block(then_block);
+            builder.seal_block(else_block);
+            builder.seal_block(merge_block);
+
+            // If both branches terminate, the if statement terminates
+            Ok(then_terminated && else_terminated)
+        }
+        Stmt::Break(_) => {
+            if let Some(exit_block) = cf_ctx.current_loop_exit() {
+                builder.ins().jump(exit_block, &[]);
+            }
+            Ok(true)
         }
     }
 }
@@ -439,5 +549,56 @@ mod tests {
     fn compile_multiple_ops() {
         let result = compile_and_run("func main() -> i64 { return 2 + 3 * 10 }");
         assert_eq!(result, 32); // 2 + 30
+    }
+
+    #[test]
+    fn compile_while_loop() {
+        let source = r#"
+func main() -> i64 {
+    let mut x = 0
+    while x < 10 {
+        x = x + 1
+    }
+    return x
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 10);
+    }
+
+    #[test]
+    fn compile_if_else() {
+        let source = r#"
+func main() -> i64 {
+    let x = 10
+    if x > 5 {
+        return 1
+    } else {
+        return 0
+    }
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn compile_nested_while_with_break() {
+        let source = r#"
+func main() -> i64 {
+    let mut sum = 0
+    let mut i = 0
+    while i < 100 {
+        if i == 5 {
+            break
+        }
+        sum = sum + i
+        i = i + 1
+    }
+    return sum
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 10); // 0+1+2+3+4 = 10
     }
 }
