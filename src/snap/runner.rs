@@ -107,7 +107,7 @@ pub fn normalize_paths(content: &str, file_path: &Path) -> String {
 
 /// Trim trailing whitespace
 fn trim_trailing(s: &str) -> &str {
-    s.trim_end_matches(|c| c == ' ' || c == '\n' || c == '\r' || c == '\t')
+    s.trim_end_matches([' ', '\n', '\r', '\t'])
 }
 
 /// A shareable buffer that implements Write for use with captured output functions.
