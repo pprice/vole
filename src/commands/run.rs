@@ -23,15 +23,15 @@ fn execute_file(path: &Path) -> Result<(), String> {
     // Read source file
     let source = fs::read_to_string(path)
         .map_err(|e| format!("could not read '{}': {}", path.display(), e))?;
+    let file_path = path.to_string_lossy();
 
     // Parse
-    let mut parser = Parser::new(&source);
+    let mut parser = Parser::with_file(&source, &file_path);
     let program = parser.parse_program()
-        .map_err(|e| format!("parse error at {:?}: {}", e.span, e.message))?;
+        .map_err(|e| format!("parse error at {:?}: {}", e.span(), e.message()))?;
     let interner = parser.into_interner();
 
     // Type check
-    let file_path = path.to_string_lossy();
     let mut analyzer = Analyzer::new(&file_path, &source);
     analyzer.analyze(&program, &interner)
         .map_err(|errors| {
