@@ -1,0 +1,209 @@
+// src/codegen/jit.rs
+
+use cranelift::prelude::*;
+use cranelift_jit::{JITBuilder, JITModule};
+use cranelift_module::{Module, Linkage, FuncId};
+use std::collections::HashMap;
+
+/// JIT compiler context
+pub struct JitContext {
+    pub module: JITModule,
+    pub ctx: codegen::Context,
+    pub func_ids: HashMap<String, FuncId>,
+}
+
+impl JitContext {
+    pub fn new() -> Self {
+        // Build JIT module with native ISA
+        let mut flag_builder = settings::builder();
+        flag_builder.set("use_colocated_libcalls", "false").unwrap();
+        flag_builder.set("is_pic", "false").unwrap();
+
+        let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
+            panic!("native ISA not available: {}", msg);
+        });
+
+        let isa = isa_builder
+            .finish(settings::Flags::new(flag_builder))
+            .unwrap();
+
+        let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+
+        // Register runtime functions
+        Self::register_runtime_symbols(&mut builder);
+
+        let module = JITModule::new(builder);
+        let ctx = module.make_context();
+
+        Self {
+            module,
+            ctx,
+            func_ids: HashMap::new(),
+        }
+    }
+
+    fn register_runtime_symbols(builder: &mut JITBuilder) {
+        // String functions
+        builder.symbol("vole_string_new", crate::runtime::string::vole_string_new as *const u8);
+        builder.symbol("vole_string_inc", crate::runtime::string::vole_string_inc as *const u8);
+        builder.symbol("vole_string_dec", crate::runtime::string::vole_string_dec as *const u8);
+        builder.symbol("vole_string_len", crate::runtime::string::vole_string_len as *const u8);
+        builder.symbol("vole_string_data", crate::runtime::string::vole_string_data as *const u8);
+        builder.symbol("vole_string_concat", crate::runtime::builtins::vole_string_concat as *const u8);
+
+        // Print functions
+        builder.symbol("vole_println_string", crate::runtime::builtins::vole_println_string as *const u8);
+        builder.symbol("vole_println_i64", crate::runtime::builtins::vole_println_i64 as *const u8);
+        builder.symbol("vole_println_f64", crate::runtime::builtins::vole_println_f64 as *const u8);
+        builder.symbol("vole_println_bool", crate::runtime::builtins::vole_println_bool as *const u8);
+        builder.symbol("vole_print_char", crate::runtime::builtins::vole_print_char as *const u8);
+        builder.symbol("vole_flush", crate::runtime::builtins::vole_flush as *const u8);
+
+        // Conversion functions
+        builder.symbol("vole_i64_to_string", crate::runtime::builtins::vole_i64_to_string as *const u8);
+        builder.symbol("vole_f64_to_string", crate::runtime::builtins::vole_f64_to_string as *const u8);
+        builder.symbol("vole_bool_to_string", crate::runtime::builtins::vole_bool_to_string as *const u8);
+    }
+
+    /// Get the pointer type for the target
+    pub fn pointer_type(&self) -> types::Type {
+        self.module.target_config().pointer_type()
+    }
+
+    /// Create a function signature with given parameters and return type
+    pub fn create_signature(&self, params: &[types::Type], ret: Option<types::Type>) -> Signature {
+        let mut sig = self.module.make_signature();
+        for &param in params {
+            sig.params.push(AbiParam::new(param));
+        }
+        if let Some(ret_type) = ret {
+            sig.returns.push(AbiParam::new(ret_type));
+        }
+        sig
+    }
+
+    /// Declare a function in the module
+    pub fn declare_function(&mut self, name: &str, sig: &Signature) -> FuncId {
+        let func_id = self.module
+            .declare_function(name, Linkage::Export, sig)
+            .unwrap();
+        self.func_ids.insert(name.to_string(), func_id);
+        func_id
+    }
+
+    /// Import an external function
+    pub fn import_function(&mut self, name: &str, sig: &Signature) -> FuncId {
+        let func_id = self.module
+            .declare_function(name, Linkage::Import, sig)
+            .unwrap();
+        self.func_ids.insert(name.to_string(), func_id);
+        func_id
+    }
+
+    /// Define a function (after building IR)
+    pub fn define_function(&mut self, func_id: FuncId) -> Result<(), String> {
+        self.module
+            .define_function(func_id, &mut self.ctx)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Finalize all functions and get code pointers
+    pub fn finalize(&mut self) {
+        self.module.finalize_definitions().unwrap();
+    }
+
+    /// Get a function pointer by name
+    pub fn get_function_ptr(&self, name: &str) -> Option<*const u8> {
+        self.func_ids.get(name).map(|&func_id| {
+            self.module.get_finalized_function(func_id)
+        })
+    }
+
+    /// Clear the context for reuse
+    pub fn clear(&mut self) {
+        self.ctx.clear();
+    }
+}
+
+impl Default for JitContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_jit_context() {
+        let jit = JitContext::new();
+        assert!(jit.pointer_type() == types::I64 || jit.pointer_type() == types::I32);
+    }
+
+    #[test]
+    fn create_and_call_simple_function() {
+        let mut jit = JitContext::new();
+
+        // Create a function that returns 42
+        let sig = jit.create_signature(&[], Some(types::I64));
+        let func_id = jit.declare_function("answer", &sig);
+
+        jit.ctx.func.signature = sig;
+
+        let mut builder_ctx = FunctionBuilderContext::new();
+        let mut builder = FunctionBuilder::new(&mut jit.ctx.func, &mut builder_ctx);
+
+        let entry_block = builder.create_block();
+        builder.append_block_params_for_function_params(entry_block);
+        builder.switch_to_block(entry_block);
+        builder.seal_block(entry_block);
+
+        let forty_two = builder.ins().iconst(types::I64, 42);
+        builder.ins().return_(&[forty_two]);
+
+        builder.finalize();
+
+        jit.define_function(func_id).unwrap();
+        jit.finalize();
+
+        // Get and call the function
+        let fn_ptr = jit.get_function_ptr("answer").unwrap();
+        let answer: extern "C" fn() -> i64 = unsafe { std::mem::transmute(fn_ptr) };
+        assert_eq!(answer(), 42);
+    }
+
+    #[test]
+    fn create_function_with_params() {
+        let mut jit = JitContext::new();
+
+        // Create a function that adds two i64s
+        let sig = jit.create_signature(&[types::I64, types::I64], Some(types::I64));
+        let func_id = jit.declare_function("add", &sig);
+
+        jit.ctx.func.signature = sig;
+
+        let mut builder_ctx = FunctionBuilderContext::new();
+        let mut builder = FunctionBuilder::new(&mut jit.ctx.func, &mut builder_ctx);
+
+        let entry_block = builder.create_block();
+        builder.append_block_params_for_function_params(entry_block);
+        builder.switch_to_block(entry_block);
+        builder.seal_block(entry_block);
+
+        let a = builder.block_params(entry_block)[0];
+        let b = builder.block_params(entry_block)[1];
+        let sum = builder.ins().iadd(a, b);
+        builder.ins().return_(&[sum]);
+
+        builder.finalize();
+
+        jit.define_function(func_id).unwrap();
+        jit.finalize();
+
+        let fn_ptr = jit.get_function_ptr("add").unwrap();
+        let add: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(fn_ptr) };
+        assert_eq!(add(10, 32), 42);
+        assert_eq!(add(-5, 5), 0);
+    }
+}
