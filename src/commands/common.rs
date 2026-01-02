@@ -1,10 +1,12 @@
 // src/commands/common.rs
 //! Shared utilities for CLI commands.
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 
-use crate::errors::render_diagnostics;
+use crate::codegen::{Compiler, JitContext};
+use crate::errors::{render_diagnostics, render_diagnostics_to};
 use crate::frontend::{Interner, Parser, ast::Program};
+use crate::runtime::set_stdout_capture;
 use crate::sema::Analyzer;
 
 /// Result of parsing and analyzing a source file.
@@ -95,4 +97,113 @@ impl TermColors {
     pub fn reset(&self) -> &'static str {
         if self.use_color { "\x1b[0m" } else { "" }
     }
+}
+
+/// Check a program with captured stderr output
+pub fn check_captured<W: Write + Send + 'static>(
+    source: &str,
+    file_path: &str,
+    mut stderr: W,
+) -> Result<(), ()> {
+    // Parse
+    let mut parser = Parser::with_file(source, file_path);
+    let program = match parser.parse_program() {
+        Ok(prog) => prog,
+        Err(e) => {
+            let lexer_errors = parser.take_lexer_errors();
+            if !lexer_errors.is_empty() {
+                render_diagnostics_to(&lexer_errors, &mut stderr, false);
+            } else {
+                render_diagnostics_to(&[e.diagnostic], &mut stderr, false);
+            }
+            return Err(());
+        }
+    };
+
+    let lexer_errors = parser.take_lexer_errors();
+    if !lexer_errors.is_empty() {
+        render_diagnostics_to(&lexer_errors, &mut stderr, false);
+        return Err(());
+    }
+
+    let interner = parser.into_interner();
+
+    // Type check
+    let mut analyzer = Analyzer::new(file_path, source);
+    if let Err(errors) = analyzer.analyze(&program, &interner) {
+        let diagnostics: Vec<_> = errors.iter().map(|e| e.diagnostic.clone()).collect();
+        render_diagnostics_to(&diagnostics, &mut stderr, false);
+        return Err(());
+    }
+
+    Ok(())
+}
+
+/// Run a program with captured stdout and stderr
+pub fn run_captured<W: Write + Send + 'static>(
+    source: &str,
+    file_path: &str,
+    stdout: W,
+    mut stderr: W,
+) -> Result<(), ()> {
+    // Parse and analyze
+    let mut parser = Parser::with_file(source, file_path);
+    let program = match parser.parse_program() {
+        Ok(prog) => prog,
+        Err(e) => {
+            let lexer_errors = parser.take_lexer_errors();
+            if !lexer_errors.is_empty() {
+                render_diagnostics_to(&lexer_errors, &mut stderr, false);
+            } else {
+                render_diagnostics_to(&[e.diagnostic], &mut stderr, false);
+            }
+            return Err(());
+        }
+    };
+
+    let lexer_errors = parser.take_lexer_errors();
+    if !lexer_errors.is_empty() {
+        render_diagnostics_to(&lexer_errors, &mut stderr, false);
+        return Err(());
+    }
+
+    let interner = parser.into_interner();
+
+    let mut analyzer = Analyzer::new(file_path, source);
+    if let Err(errors) = analyzer.analyze(&program, &interner) {
+        let diagnostics: Vec<_> = errors.iter().map(|e| e.diagnostic.clone()).collect();
+        render_diagnostics_to(&diagnostics, &mut stderr, false);
+        return Err(());
+    }
+
+    // Compile
+    let mut jit = JitContext::new();
+    {
+        let mut compiler = Compiler::new(&mut jit, &interner);
+        if let Err(e) = compiler.compile_program(&program) {
+            let _ = writeln!(stderr, "compilation error: {}", e);
+            return Err(());
+        }
+    }
+    jit.finalize();
+
+    // Execute with captured stdout
+    let fn_ptr = match jit.get_function_ptr("main") {
+        Some(ptr) => ptr,
+        None => {
+            let _ = writeln!(stderr, "error: no 'main' function found");
+            return Err(());
+        }
+    };
+
+    // Set up stdout capture
+    set_stdout_capture(Some(Box::new(stdout)));
+
+    let main: extern "C" fn() = unsafe { std::mem::transmute(fn_ptr) };
+    main();
+
+    // Restore normal stdout
+    set_stdout_capture(None);
+
+    Ok(())
 }
