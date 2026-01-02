@@ -6,9 +6,11 @@
 
 pub mod codes;
 pub mod diagnostic;
+pub mod render;
 
 pub use codes::{ErrorInfo, Severity};
 pub use diagnostic::{Diagnostic, DiagnosticBuilder, RelatedInfo, get_line_from_source};
+pub use render::{ConsoleRenderer, render_diagnostics};
 
 // Re-export all error codes for convenient access
 pub use codes::{
