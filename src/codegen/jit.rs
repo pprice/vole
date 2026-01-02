@@ -94,6 +94,10 @@ impl JitContext {
         // vole_flush()
         let sig = self.create_signature(&[], None);
         self.import_function("vole_flush", &sig);
+
+        // vole_assert_fail(file_ptr: *const u8, file_len: usize, line: u32)
+        let sig = self.create_signature(&[ptr_ty, types::I64, types::I32], None);
+        self.import_function("vole_assert_fail", &sig);
     }
 
     fn register_runtime_symbols(builder: &mut JITBuilder) {
@@ -117,6 +121,9 @@ impl JitContext {
         builder.symbol("vole_i64_to_string", crate::runtime::builtins::vole_i64_to_string as *const u8);
         builder.symbol("vole_f64_to_string", crate::runtime::builtins::vole_f64_to_string as *const u8);
         builder.symbol("vole_bool_to_string", crate::runtime::builtins::vole_bool_to_string as *const u8);
+
+        // Assert functions
+        builder.symbol("vole_assert_fail", crate::runtime::assert::vole_assert_fail as *const u8);
     }
 
     /// Get the pointer type for the target

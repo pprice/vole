@@ -21,6 +21,9 @@ cranelift-frontend = "0.116"
 cranelift-native = "0.116"
 target-lexicon = "0.13"
 
+# C library interop (for longjmp in test assertions)
+libc = "0.2"
+
 # Error handling
 thiserror = "2.0"
 miette = { version = "7.4", features = ["fancy"] }
