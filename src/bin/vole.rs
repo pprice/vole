@@ -1,7 +1,16 @@
 // src/bin/vole.rs
+
 use std::process::ExitCode;
+use clap::Parser;
+
+use vole::cli::Cli;
+use vole::cli::Commands;
+use vole::commands::run::run_file;
 
 fn main() -> ExitCode {
-    println!("vole 0.1.0");
-    ExitCode::SUCCESS
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Run { file } => run_file(&file),
+    }
 }
