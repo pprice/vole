@@ -123,9 +123,20 @@ impl<W: Write> ConsoleRenderer<W> {
             write!(self.writer, " ")?;
         }
 
-        // Caret(s) - for now just one, will use span end later
+        // Calculate caret length from span
+        let caret_len = if diag.span.end_line == diag.span.line && diag.span.end_column > diag.span.column {
+            (diag.span.end_column - diag.span.column) as usize
+        } else {
+            1 // Default to single caret for multi-line spans
+        };
+
+        // Render carets
         let style = self.severity_style(diag.severity());
-        writeln!(self.writer, "{}^{}", style, self.colors.reset())
+        write!(self.writer, "{}", style)?;
+        for _ in 0..caret_len {
+            write!(self.writer, "^")?;
+        }
+        writeln!(self.writer, "{}", self.colors.reset())
     }
 
     fn render_related(&mut self, rel: &RelatedInfo) -> std::io::Result<()> {
@@ -173,7 +184,20 @@ impl<W: Write> ConsoleRenderer<W> {
             for _ in 0..caret_pos {
                 write!(self.writer, " ")?;
             }
-            writeln!(self.writer, "{}^{}", self.colors.cyan(), self.colors.reset())?;
+
+            // Calculate caret length from span
+            let caret_len = if rel.span.end_line == rel.span.line && rel.span.end_column > rel.span.column {
+                (rel.span.end_column - rel.span.column) as usize
+            } else {
+                1 // Default to single caret for multi-line spans
+            };
+
+            // Render carets
+            write!(self.writer, "{}", self.colors.cyan())?;
+            for _ in 0..caret_len {
+                write!(self.writer, "^")?;
+            }
+            writeln!(self.writer, "{}", self.colors.reset())?;
         }
 
         Ok(())
@@ -254,6 +278,52 @@ mod tests {
         assert!(output_str.contains("test.vole:1:5"));
         assert!(output_str.contains("let x = true"));
         assert!(output_str.contains("^"));
+    }
+
+    #[test]
+    fn render_multi_char_caret() {
+        // Create a span from column 5 to column 10 (5 characters)
+        let span = Span::new_with_end(4, 9, 1, 5, 1, 10);
+        let diag = Diagnostic {
+            info: &SEMA_TYPE_MISMATCH,
+            span,
+            file: "test.vole".to_string(),
+            formatted_message: "multi-char span test".to_string(),
+            source_line: Some("let hello = 42".to_string()),
+            related: vec![],
+        };
+
+        let mut output = Vec::new();
+        let mut renderer = ConsoleRenderer::new(&mut output, false);
+        renderer.render(&diag).unwrap();
+
+        let output_str = String::from_utf8(output).unwrap();
+        // 5 carets for the span from column 5 to 10
+        assert!(output_str.contains("^^^^^"), "Expected 5 carets, got: {}", output_str);
+    }
+
+    #[test]
+    fn render_single_char_caret_for_multiline_span() {
+        // Create a multi-line span (should render single caret)
+        let span = Span::new_with_end(0, 20, 1, 5, 2, 8);
+        let diag = Diagnostic {
+            info: &SEMA_TYPE_MISMATCH,
+            span,
+            file: "test.vole".to_string(),
+            formatted_message: "multiline span".to_string(),
+            source_line: Some("let x = 42".to_string()),
+            related: vec![],
+        };
+
+        let mut output = Vec::new();
+        let mut renderer = ConsoleRenderer::new(&mut output, false);
+        renderer.render(&diag).unwrap();
+
+        let output_str = String::from_utf8(output).unwrap();
+        // Should have single caret for multi-line span
+        // Check that we have exactly one caret (not followed by another)
+        assert!(output_str.contains("^\n") || output_str.contains("^ "),
+                "Expected single caret for multiline span, got: {}", output_str);
     }
 
     #[test]

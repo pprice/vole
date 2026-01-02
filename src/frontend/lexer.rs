@@ -10,6 +10,7 @@ pub struct Lexer<'src> {
     line: u32,
     column: u32,
     start_column: u32,
+    start_line: u32,
     // Interpolation state
     interp_brace_depth: u32,
     in_interp_string: bool,
@@ -25,6 +26,7 @@ impl<'src> Lexer<'src> {
             line: 1,
             column: 1,
             start_column: 1,
+            start_line: 1,
             interp_brace_depth: 0,
             in_interp_string: false,
         }
@@ -36,6 +38,7 @@ impl<'src> Lexer<'src> {
 
         self.start = self.current;
         self.start_column = self.column;
+        self.start_line = self.line;
 
         let Some(c) = self.advance() else {
             return self.make_token(TokenType::Eof);
@@ -189,7 +192,14 @@ impl<'src> Lexer<'src> {
         Token::new(
             ty,
             lexeme,
-            Span::new(self.start, self.current, self.line, self.start_column),
+            Span::new_with_end(
+                self.start,
+                self.current,
+                self.start_line,
+                self.start_column,
+                self.line,
+                self.column,
+            ),
         )
     }
 
@@ -198,7 +208,14 @@ impl<'src> Lexer<'src> {
         Token::new(
             TokenType::Error,
             msg,
-            Span::new(self.start, self.current, self.line, self.start_column),
+            Span::new_with_end(
+                self.start,
+                self.current,
+                self.start_line,
+                self.start_column,
+                self.line,
+                self.column,
+            ),
         )
     }
 
@@ -446,5 +463,36 @@ mod tests {
         assert_eq!(lexer.next_token().ty, TokenType::StringInterpMiddle); // }, y={
         assert_eq!(lexer.next_token().ty, TokenType::Identifier);         // y
         assert_eq!(lexer.next_token().ty, TokenType::StringInterpEnd);    // }"
+    }
+
+    #[test]
+    fn lexer_sets_span_end_position() {
+        let mut lexer = Lexer::new("hello");
+        let token = lexer.next_token();
+
+        assert_eq!(token.ty, TokenType::Identifier);
+        assert_eq!(token.lexeme, "hello");
+
+        // Span should cover "hello" (5 characters)
+        assert_eq!(token.span.start, 0);
+        assert_eq!(token.span.end, 5);
+        assert_eq!(token.span.line, 1);
+        assert_eq!(token.span.column, 1);
+        assert_eq!(token.span.end_line, 1);
+        // After consuming 5 chars, column is at 6
+        assert_eq!(token.span.end_column, 6);
+    }
+
+    #[test]
+    fn lexer_multi_char_operator_span() {
+        let mut lexer = Lexer::new("==");
+        let token = lexer.next_token();
+
+        assert_eq!(token.ty, TokenType::EqEq);
+        assert_eq!(token.lexeme, "==");
+
+        // Span should cover "==" (2 characters)
+        assert_eq!(token.span.column, 1);
+        assert_eq!(token.span.end_column, 3);
     }
 }
