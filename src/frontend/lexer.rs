@@ -10,6 +10,9 @@ pub struct Lexer<'src> {
     line: u32,
     column: u32,
     start_column: u32,
+    // Interpolation state
+    interp_brace_depth: u32,
+    in_interp_string: bool,
 }
 
 impl<'src> Lexer<'src> {
@@ -22,6 +25,8 @@ impl<'src> Lexer<'src> {
             line: 1,
             column: 1,
             start_column: 1,
+            interp_brace_depth: 0,
+            in_interp_string: false,
         }
     }
 
@@ -40,8 +45,21 @@ impl<'src> Lexer<'src> {
             // Single character tokens
             '(' => self.make_token(TokenType::LParen),
             ')' => self.make_token(TokenType::RParen),
-            '{' => self.make_token(TokenType::LBrace),
-            '}' => self.make_token(TokenType::RBrace),
+            '{' => {
+                if self.in_interp_string {
+                    self.interp_brace_depth += 1;
+                }
+                self.make_token(TokenType::LBrace)
+            }
+            '}' => {
+                if self.in_interp_string && self.interp_brace_depth > 0 {
+                    self.interp_brace_depth -= 1;
+                    if self.interp_brace_depth == 0 {
+                        return self.string_interp_continue();
+                    }
+                }
+                self.make_token(TokenType::RBrace)
+            }
             ',' => self.make_token(TokenType::Comma),
             ':' => self.make_token(TokenType::Colon),
             '+' => self.make_token(TokenType::Plus),
@@ -275,12 +293,47 @@ impl<'src> Lexer<'src> {
                 Some('{') => {
                     // String interpolation start
                     self.advance();
+                    self.in_interp_string = true;
+                    self.interp_brace_depth = 1;
                     return self.make_token(TokenType::StringInterpStart);
                 }
                 Some('\n') => {
                     return self.error_token("Unterminated string");
                 }
                 Some(_) => {
+                    self.advance();
+                }
+            }
+        }
+    }
+
+    /// Continue scanning after an interpolation expression closes
+    fn string_interp_continue(&mut self) -> Token {
+        // We just consumed '}', now continue scanning the string
+        self.start = self.current - 1; // Include the '}'
+
+        loop {
+            match self.peek() {
+                Some('"') => {
+                    self.advance();
+                    self.in_interp_string = false;
+                    return self.make_token(TokenType::StringInterpEnd);
+                }
+                Some('{') => {
+                    self.advance();
+                    self.interp_brace_depth = 1;
+                    return self.make_token(TokenType::StringInterpMiddle);
+                }
+                Some('\n') | None => {
+                    return self.error_token("unterminated string in interpolation");
+                }
+                Some('\\') => {
+                    self.advance();
+                    if self.peek().is_some() {
+                        self.advance();
+                    }
+                }
+                _ => {
                     self.advance();
                 }
             }
@@ -365,5 +418,31 @@ mod tests {
         assert_eq!(lexer.next_token().ty, TokenType::IntLiteral);
         assert_eq!(lexer.next_token().ty, TokenType::Newline);
         assert_eq!(lexer.next_token().ty, TokenType::IntLiteral);
+    }
+
+    #[test]
+    fn lex_string_interpolation() {
+        let mut lexer = Lexer::new("\"hello {name}!\"");
+        let t1 = lexer.next_token();
+        assert_eq!(t1.ty, TokenType::StringInterpStart);
+        assert_eq!(t1.lexeme, "\"hello {");
+
+        let t2 = lexer.next_token();
+        assert_eq!(t2.ty, TokenType::Identifier);
+        assert_eq!(t2.lexeme, "name");
+
+        let t3 = lexer.next_token();
+        assert_eq!(t3.ty, TokenType::StringInterpEnd);
+        assert_eq!(t3.lexeme, "}!\"");
+    }
+
+    #[test]
+    fn lex_string_interpolation_multiple() {
+        let mut lexer = Lexer::new("\"x={x}, y={y}\"");
+        assert_eq!(lexer.next_token().ty, TokenType::StringInterpStart); // "x={
+        assert_eq!(lexer.next_token().ty, TokenType::Identifier);         // x
+        assert_eq!(lexer.next_token().ty, TokenType::StringInterpMiddle); // }, y={
+        assert_eq!(lexer.next_token().ty, TokenType::Identifier);         // y
+        assert_eq!(lexer.next_token().ty, TokenType::StringInterpEnd);    // }"
     }
 }
