@@ -264,8 +264,7 @@ impl<'a> Compiler<'a> {
             self.jit.clear();
 
             // Record test metadata
-            // Calculate line number from span
-            let line = test.span.start as u32;
+            let line = test.span.line;
             self.tests.push(TestInfo {
                 name: test.name.clone(),
                 func_name: func_name.clone(),
@@ -614,7 +613,7 @@ fn compile_expr(
             compile_string_literal(builder, s, pointer_type, module, func_ids)
         }
         ExprKind::Call(call) => {
-            compile_call(builder, call, expr.span.start, variables, interner, pointer_type, module, func_ids, source_file)
+            compile_call(builder, call, expr.span.line, variables, interner, pointer_type, module, func_ids, source_file)
         }
         ExprKind::InterpolatedString(parts) => {
             compile_interpolated_string(builder, parts, variables, interner, pointer_type, module, func_ids, source_file)
@@ -654,7 +653,7 @@ fn compile_string_literal(
 fn compile_call(
     builder: &mut FunctionBuilder,
     call: &crate::frontend::CallExpr,
-    call_span_start: usize,
+    call_line: u32,
     variables: &mut HashMap<Symbol, Variable>,
     interner: &Interner,
     pointer_type: types::Type,
@@ -672,7 +671,7 @@ fn compile_call(
     match callee_name {
         "println" => compile_println(builder, &call.args, variables, interner, pointer_type, module, func_ids, source_file),
         "print_char" => compile_print_char(builder, &call.args, variables, interner, pointer_type, module, func_ids, source_file),
-        "assert" => compile_assert(builder, &call.args, call_span_start, variables, interner, pointer_type, module, func_ids, source_file),
+        "assert" => compile_assert(builder, &call.args, call_line, variables, interner, pointer_type, module, func_ids, source_file),
         _ => compile_user_function_call(builder, callee_name, &call.args, variables, interner, pointer_type, module, func_ids, source_file),
     }
 }
@@ -758,7 +757,7 @@ fn compile_print_char(
 fn compile_assert(
     builder: &mut FunctionBuilder,
     args: &[Expr],
-    call_span_start: usize,
+    call_line: u32,
     variables: &mut HashMap<Symbol, Variable>,
     interner: &Interner,
     pointer_type: types::Type,
@@ -793,7 +792,7 @@ fn compile_assert(
         // source_file is stored in Compiler so it lives as long as the JIT
         let file_ptr = source_file.as_ptr() as i64;
         let file_len = source_file.len() as i64;
-        let line = call_span_start as i32;
+        let line = call_line as i32;
 
         let file_ptr_val = builder.ins().iconst(pointer_type, file_ptr);
         let file_len_val = builder.ins().iconst(types::I64, file_len);
