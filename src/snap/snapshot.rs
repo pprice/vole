@@ -60,7 +60,7 @@ impl Snapshot {
 
 /// Trim trailing whitespace
 fn trim_trailing(s: &str) -> &str {
-    s.trim_end_matches(|c| c == ' ' || c == '\n' || c == '\r' || c == '\t')
+    s.trim_end_matches([' ', '\n', '\r', '\t'])
 }
 
 #[cfg(test)]

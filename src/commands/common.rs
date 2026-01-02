@@ -100,6 +100,7 @@ impl TermColors {
 }
 
 /// Check a program with captured stderr output
+#[allow(clippy::result_unit_err)] // Error details are rendered internally
 pub fn check_captured<W: Write + Send + 'static>(
     source: &str,
     file_path: &str,
@@ -140,6 +141,7 @@ pub fn check_captured<W: Write + Send + 'static>(
 }
 
 /// Run a program with captured stdout and stderr
+#[allow(clippy::result_unit_err)] // Error details are rendered internally
 pub fn run_captured<W: Write + Send + 'static>(
     source: &str,
     file_path: &str,

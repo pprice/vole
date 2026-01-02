@@ -52,27 +52,23 @@ pub fn discover_tests(
             }
         } else if path.is_dir() {
             let glob_pattern = format!("{}/**/*.vole", path.display());
-            for entry in glob(&glob_pattern).map_err(|e| e.to_string())? {
-                if let Ok(p) = entry {
+            for p in glob(&glob_pattern).map_err(|e| e.to_string())?.flatten() {
+                let basename = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                if !include_skipped && basename.starts_with('_') {
+                    skipped_count += 1;
+                } else {
+                    files.insert(p);
+                }
+            }
+        } else {
+            // Treat as glob pattern
+            for p in glob(pattern).map_err(|e| e.to_string())?.flatten() {
+                if p.is_file() {
                     let basename = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
                     if !include_skipped && basename.starts_with('_') {
                         skipped_count += 1;
                     } else {
                         files.insert(p);
-                    }
-                }
-            }
-        } else {
-            // Treat as glob pattern
-            for entry in glob(pattern).map_err(|e| e.to_string())? {
-                if let Ok(p) = entry {
-                    if p.is_file() {
-                        let basename = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                        if !include_skipped && basename.starts_with('_') {
-                            skipped_count += 1;
-                        } else {
-                            files.insert(p);
-                        }
                     }
                 }
             }
