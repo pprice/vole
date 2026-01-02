@@ -1,6 +1,7 @@
 // src/codegen/compiler.rs
 
 use cranelift::prelude::*;
+use cranelift::codegen::ir::TrapCode;
 use cranelift_jit::JITModule;
 use cranelift_module::{Module, FuncId};
 use std::collections::HashMap;
@@ -8,9 +9,19 @@ use std::collections::HashMap;
 use crate::frontend::{
     self, Interner, Program, Decl, FuncDecl, TypeExpr,
     Stmt, Expr, ExprKind, BinaryOp, UnaryOp, Symbol, StringPart,
+    TestsDecl,
 };
 use crate::sema::Type;
 use crate::codegen::JitContext;
+
+/// Metadata about a compiled test
+#[derive(Debug, Clone)]
+pub struct TestInfo {
+    pub name: String,      // "basic math"
+    pub func_name: String, // "__test_0"
+    pub file: String,      // "test/unit/test_basic.vole"
+    pub line: u32,
+}
 
 /// Context for control flow during compilation
 pub struct ControlFlowCtx {
@@ -56,6 +67,8 @@ pub struct Compiler<'a> {
     jit: &'a mut JitContext,
     interner: &'a Interner,
     pointer_type: types::Type,
+    tests: Vec<TestInfo>,
+    source_file: String,
 }
 
 impl<'a> Compiler<'a> {
@@ -65,12 +78,27 @@ impl<'a> Compiler<'a> {
             jit,
             interner,
             pointer_type,
+            tests: Vec::new(),
+            source_file: String::new(),
         }
+    }
+
+    /// Set the source file path for error reporting
+    pub fn set_source_file(&mut self, file: &str) {
+        self.source_file = file.to_string();
+    }
+
+    /// Take the compiled test metadata, leaving an empty vec
+    pub fn take_tests(&mut self) -> Vec<TestInfo> {
+        std::mem::take(&mut self.tests)
     }
 
     /// Compile a complete program
     pub fn compile_program(&mut self, program: &Program) -> Result<(), String> {
-        // First pass: declare all functions
+        // Count total tests to assign unique IDs
+        let mut test_count = 0usize;
+
+        // First pass: declare all functions and tests
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
@@ -78,20 +106,29 @@ impl<'a> Compiler<'a> {
                     let name = self.interner.resolve(func.name);
                     self.jit.declare_function(name, &sig);
                 }
-                Decl::Tests(_) => {
-                    // Tests are compiled separately, skip in normal compilation
+                Decl::Tests(tests_decl) => {
+                    // Declare each test as __test_N with signature () -> i64
+                    for _ in &tests_decl.tests {
+                        let func_name = format!("__test_{}", test_count);
+                        let sig = self.jit.create_signature(&[], Some(types::I64));
+                        self.jit.declare_function(&func_name, &sig);
+                        test_count += 1;
+                    }
                 }
             }
         }
 
-        // Second pass: compile function bodies
+        // Reset counter for second pass
+        test_count = 0;
+
+        // Second pass: compile function bodies and tests
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
                     self.compile_function(func)?;
                 }
-                Decl::Tests(_) => {
-                    // Tests are compiled separately, skip in normal compilation
+                Decl::Tests(tests_decl) => {
+                    self.compile_tests(tests_decl, &mut test_count)?;
                 }
             }
         }
@@ -158,6 +195,7 @@ impl<'a> Compiler<'a> {
                 &mut cf_ctx,
                 &mut self.jit.module,
                 &self.jit.func_ids,
+                &self.source_file,
             )?;
 
             // Add implicit return if no explicit return
@@ -172,6 +210,71 @@ impl<'a> Compiler<'a> {
         // Define the function
         self.jit.define_function(func_id)?;
         self.jit.clear();
+
+        Ok(())
+    }
+
+    /// Compile all tests in a tests block
+    fn compile_tests(&mut self, tests_decl: &TestsDecl, test_count: &mut usize) -> Result<(), String> {
+        for test in &tests_decl.tests {
+            let func_name = format!("__test_{}", *test_count);
+            let func_id = *self.jit.func_ids.get(&func_name).unwrap();
+
+            // Create function signature: () -> i64
+            let sig = self.jit.create_signature(&[], Some(types::I64));
+            self.jit.ctx.func.signature = sig;
+
+            // Create function builder
+            let mut builder_ctx = FunctionBuilderContext::new();
+            {
+                let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+                let entry_block = builder.create_block();
+                builder.switch_to_block(entry_block);
+
+                // No parameters or variables for tests (they start fresh)
+                let mut variables = HashMap::new();
+
+                // Compile test body
+                let mut cf_ctx = ControlFlowCtx::new();
+                let terminated = compile_block(
+                    &mut builder,
+                    &test.body,
+                    &mut variables,
+                    self.interner,
+                    self.pointer_type,
+                    &mut cf_ctx,
+                    &mut self.jit.module,
+                    &self.jit.func_ids,
+                    &self.source_file,
+                )?;
+
+                // If not already terminated, return 0 (test passed)
+                if !terminated {
+                    let zero = builder.ins().iconst(types::I64, 0);
+                    builder.ins().return_(&[zero]);
+                }
+
+                builder.seal_all_blocks();
+                builder.finalize();
+            }
+
+            // Define the function
+            self.jit.define_function(func_id)?;
+            self.jit.clear();
+
+            // Record test metadata
+            // Calculate line number from span
+            let line = test.span.start as u32;
+            self.tests.push(TestInfo {
+                name: test.name.clone(),
+                func_name: func_name.clone(),
+                file: self.source_file.clone(),
+                line,
+            });
+
+            *test_count += 1;
+        }
 
         Ok(())
     }
@@ -205,13 +308,14 @@ fn compile_block(
     cf_ctx: &mut ControlFlowCtx,
     module: &mut JITModule,
     func_ids: &HashMap<String, FuncId>,
+    source_file: &str,
 ) -> Result<bool, String> {
     let mut terminated = false;
     for stmt in &block.stmts {
         if terminated {
             break; // Don't compile unreachable code
         }
-        terminated = compile_stmt(builder, stmt, variables, interner, pointer_type, cf_ctx, module, func_ids)?;
+        terminated = compile_stmt(builder, stmt, variables, interner, pointer_type, cf_ctx, module, func_ids, source_file)?;
     }
     Ok(terminated)
 }
@@ -226,10 +330,11 @@ fn compile_stmt(
     cf_ctx: &mut ControlFlowCtx,
     module: &mut JITModule,
     func_ids: &HashMap<String, FuncId>,
+    source_file: &str,
 ) -> Result<bool, String> {
     match stmt {
         Stmt::Let(let_stmt) => {
-            let init = compile_expr(builder, &let_stmt.init, variables, interner, pointer_type, module, func_ids)?;
+            let init = compile_expr(builder, &let_stmt.init, variables, interner, pointer_type, module, func_ids, source_file)?;
 
             let var = Variable::new(variables.len());
             builder.declare_var(var, init.ty);
@@ -238,12 +343,12 @@ fn compile_stmt(
             Ok(false)
         }
         Stmt::Expr(expr_stmt) => {
-            compile_expr(builder, &expr_stmt.expr, variables, interner, pointer_type, module, func_ids)?;
+            compile_expr(builder, &expr_stmt.expr, variables, interner, pointer_type, module, func_ids, source_file)?;
             Ok(false)
         }
         Stmt::Return(ret) => {
             if let Some(value) = &ret.value {
-                let compiled = compile_expr(builder, value, variables, interner, pointer_type, module, func_ids)?;
+                let compiled = compile_expr(builder, value, variables, interner, pointer_type, module, func_ids, source_file)?;
                 builder.ins().return_(&[compiled.value]);
             } else {
                 builder.ins().return_(&[]);
@@ -261,7 +366,7 @@ fn compile_stmt(
 
             // Header block - check condition
             builder.switch_to_block(header_block);
-            let cond = compile_expr(builder, &while_stmt.condition, variables, interner, pointer_type, module, func_ids)?;
+            let cond = compile_expr(builder, &while_stmt.condition, variables, interner, pointer_type, module, func_ids, source_file)?;
             // Extend bool to i32 for comparison if needed
             let cond_i32 = builder.ins().uextend(types::I32, cond.value);
             builder.ins().brif(cond_i32, body_block, &[], exit_block, &[]);
@@ -269,7 +374,7 @@ fn compile_stmt(
             // Body block
             builder.switch_to_block(body_block);
             cf_ctx.push_loop(exit_block);
-            let body_terminated = compile_block(builder, &while_stmt.body, variables, interner, pointer_type, cf_ctx, module, func_ids)?;
+            let body_terminated = compile_block(builder, &while_stmt.body, variables, interner, pointer_type, cf_ctx, module, func_ids, source_file)?;
             cf_ctx.pop_loop();
 
             // Jump back to header (if not already terminated by break/return)
@@ -288,7 +393,7 @@ fn compile_stmt(
             Ok(false)
         }
         Stmt::If(if_stmt) => {
-            let cond = compile_expr(builder, &if_stmt.condition, variables, interner, pointer_type, module, func_ids)?;
+            let cond = compile_expr(builder, &if_stmt.condition, variables, interner, pointer_type, module, func_ids, source_file)?;
             let cond_i32 = builder.ins().uextend(types::I32, cond.value);
 
             let then_block = builder.create_block();
@@ -299,7 +404,7 @@ fn compile_stmt(
 
             // Then branch
             builder.switch_to_block(then_block);
-            let then_terminated = compile_block(builder, &if_stmt.then_branch, variables, interner, pointer_type, cf_ctx, module, func_ids)?;
+            let then_terminated = compile_block(builder, &if_stmt.then_branch, variables, interner, pointer_type, cf_ctx, module, func_ids, source_file)?;
             if !then_terminated {
                 builder.ins().jump(merge_block, &[]);
             }
@@ -307,7 +412,7 @@ fn compile_stmt(
             // Else branch
             builder.switch_to_block(else_block);
             let else_terminated = if let Some(else_branch) = &if_stmt.else_branch {
-                compile_block(builder, else_branch, variables, interner, pointer_type, cf_ctx, module, func_ids)?
+                compile_block(builder, else_branch, variables, interner, pointer_type, cf_ctx, module, func_ids, source_file)?
             } else {
                 false
             };
@@ -342,6 +447,7 @@ fn compile_expr(
     pointer_type: types::Type,
     module: &mut JITModule,
     func_ids: &HashMap<String, FuncId>,
+    source_file: &str,
 ) -> Result<CompiledValue, String> {
     match &expr.kind {
         ExprKind::IntLiteral(n) => {
@@ -368,8 +474,8 @@ fn compile_expr(
             }
         }
         ExprKind::Binary(bin) => {
-            let left = compile_expr(builder, &bin.left, variables, interner, pointer_type, module, func_ids)?;
-            let right = compile_expr(builder, &bin.right, variables, interner, pointer_type, module, func_ids)?;
+            let left = compile_expr(builder, &bin.left, variables, interner, pointer_type, module, func_ids, source_file)?;
+            let right = compile_expr(builder, &bin.right, variables, interner, pointer_type, module, func_ids, source_file)?;
 
             // Determine result type (promote to wider type)
             let result_ty = if left.ty == types::F64 || right.ty == types::F64 {
@@ -475,7 +581,7 @@ fn compile_expr(
             Ok(CompiledValue { value: result, ty: final_ty, is_string: false })
         }
         ExprKind::Unary(un) => {
-            let operand = compile_expr(builder, &un.operand, variables, interner, pointer_type, module, func_ids)?;
+            let operand = compile_expr(builder, &un.operand, variables, interner, pointer_type, module, func_ids, source_file)?;
             let result = match un.op {
                 UnaryOp::Neg => {
                     if operand.ty == types::F64 {
@@ -493,7 +599,7 @@ fn compile_expr(
             Ok(CompiledValue { value: result, ty: operand.ty, is_string: false })
         }
         ExprKind::Assign(assign) => {
-            let value = compile_expr(builder, &assign.value, variables, interner, pointer_type, module, func_ids)?;
+            let value = compile_expr(builder, &assign.value, variables, interner, pointer_type, module, func_ids, source_file)?;
             if let Some(&var) = variables.get(&assign.target) {
                 builder.def_var(var, value.value);
                 Ok(value)
@@ -502,16 +608,16 @@ fn compile_expr(
             }
         }
         ExprKind::Grouping(inner) => {
-            compile_expr(builder, inner, variables, interner, pointer_type, module, func_ids)
+            compile_expr(builder, inner, variables, interner, pointer_type, module, func_ids, source_file)
         }
         ExprKind::StringLiteral(s) => {
             compile_string_literal(builder, s, pointer_type, module, func_ids)
         }
         ExprKind::Call(call) => {
-            compile_call(builder, call, variables, interner, pointer_type, module, func_ids)
+            compile_call(builder, call, expr.span.start, variables, interner, pointer_type, module, func_ids, source_file)
         }
         ExprKind::InterpolatedString(parts) => {
-            compile_interpolated_string(builder, parts, variables, interner, pointer_type, module, func_ids)
+            compile_interpolated_string(builder, parts, variables, interner, pointer_type, module, func_ids, source_file)
         }
     }
 }
@@ -548,11 +654,13 @@ fn compile_string_literal(
 fn compile_call(
     builder: &mut FunctionBuilder,
     call: &crate::frontend::CallExpr,
+    call_span_start: usize,
     variables: &mut HashMap<Symbol, Variable>,
     interner: &Interner,
     pointer_type: types::Type,
     module: &mut JITModule,
     func_ids: &HashMap<String, FuncId>,
+    source_file: &str,
 ) -> Result<CompiledValue, String> {
     // Get the callee name - must be an identifier for now
     let callee_name = match &call.callee.kind {
@@ -562,9 +670,10 @@ fn compile_call(
 
     // Handle builtin functions
     match callee_name {
-        "println" => compile_println(builder, &call.args, variables, interner, pointer_type, module, func_ids),
-        "print_char" => compile_print_char(builder, &call.args, variables, interner, pointer_type, module, func_ids),
-        _ => compile_user_function_call(builder, callee_name, &call.args, variables, interner, pointer_type, module, func_ids),
+        "println" => compile_println(builder, &call.args, variables, interner, pointer_type, module, func_ids, source_file),
+        "print_char" => compile_print_char(builder, &call.args, variables, interner, pointer_type, module, func_ids, source_file),
+        "assert" => compile_assert(builder, &call.args, call_span_start, variables, interner, pointer_type, module, func_ids, source_file),
+        _ => compile_user_function_call(builder, callee_name, &call.args, variables, interner, pointer_type, module, func_ids, source_file),
     }
 }
 
@@ -577,12 +686,13 @@ fn compile_println(
     pointer_type: types::Type,
     module: &mut JITModule,
     func_ids: &HashMap<String, FuncId>,
+    source_file: &str,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
         return Err("println expects exactly one argument".to_string());
     }
 
-    let arg = compile_expr(builder, &args[0], variables, interner, pointer_type, module, func_ids)?;
+    let arg = compile_expr(builder, &args[0], variables, interner, pointer_type, module, func_ids, source_file)?;
 
     // Dispatch based on argument type
     // We use is_string flag to distinguish strings from regular I64 values
@@ -616,12 +726,13 @@ fn compile_print_char(
     pointer_type: types::Type,
     module: &mut JITModule,
     func_ids: &HashMap<String, FuncId>,
+    source_file: &str,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
         return Err("print_char expects exactly one argument".to_string());
     }
 
-    let arg = compile_expr(builder, &args[0], variables, interner, pointer_type, module, func_ids)?;
+    let arg = compile_expr(builder, &args[0], variables, interner, pointer_type, module, func_ids, source_file)?;
 
     // Convert to u8 if needed (truncate from i64)
     let char_val = if arg.ty == types::I64 {
@@ -643,6 +754,70 @@ fn compile_print_char(
     Ok(CompiledValue { value: zero, ty: types::I64, is_string: false })
 }
 
+/// Compile assert builtin - checks condition and calls vole_assert_fail if false
+fn compile_assert(
+    builder: &mut FunctionBuilder,
+    args: &[Expr],
+    call_span_start: usize,
+    variables: &mut HashMap<Symbol, Variable>,
+    interner: &Interner,
+    pointer_type: types::Type,
+    module: &mut JITModule,
+    func_ids: &HashMap<String, FuncId>,
+    source_file: &str,
+) -> Result<CompiledValue, String> {
+    if args.len() != 1 {
+        return Err("assert expects exactly one argument".to_string());
+    }
+
+    // Compile the condition
+    let cond = compile_expr(builder, &args[0], variables, interner, pointer_type, module, func_ids, source_file)?;
+
+    // Create pass and fail blocks
+    let pass_block = builder.create_block();
+    let fail_block = builder.create_block();
+
+    // Branch on condition (extend bool to i32 for brif)
+    let cond_i32 = builder.ins().uextend(types::I32, cond.value);
+    builder.ins().brif(cond_i32, pass_block, &[], fail_block, &[]);
+
+    // Fail block: call vole_assert_fail and trap
+    builder.switch_to_block(fail_block);
+    {
+        // Get vole_assert_fail function
+        let func_id = func_ids.get("vole_assert_fail")
+            .ok_or_else(|| "vole_assert_fail not found".to_string())?;
+        let func_ref = module.declare_func_in_func(*func_id, builder.func);
+
+        // Pass source file pointer and length
+        // source_file is stored in Compiler so it lives as long as the JIT
+        let file_ptr = source_file.as_ptr() as i64;
+        let file_len = source_file.len() as i64;
+        let line = call_span_start as i32;
+
+        let file_ptr_val = builder.ins().iconst(pointer_type, file_ptr);
+        let file_len_val = builder.ins().iconst(types::I64, file_len);
+        let line_val = builder.ins().iconst(types::I32, line as i64);
+
+        builder.ins().call(func_ref, &[file_ptr_val, file_len_val, line_val]);
+
+        // Trap after calling assert_fail (this should not be reached due to longjmp, but
+        // we need to terminate the block)
+        builder.ins().trap(TrapCode::user(0).unwrap());
+    }
+
+    // Seal fail block
+    builder.seal_block(fail_block);
+
+    // Pass block: continue execution
+    builder.switch_to_block(pass_block);
+    builder.seal_block(pass_block);
+
+    // Assert returns void (as i64 zero)
+    let zero = builder.ins().iconst(types::I64, 0);
+    Ok(CompiledValue { value: zero, ty: types::I64, is_string: false })
+}
+
 /// Compile a call to a user-defined function
 fn compile_user_function_call(
     builder: &mut FunctionBuilder,
@@ -653,6 +828,7 @@ fn compile_user_function_call(
     pointer_type: types::Type,
     module: &mut JITModule,
     func_ids: &HashMap<String, FuncId>,
+    source_file: &str,
 ) -> Result<CompiledValue, String> {
     let func_id = func_ids.get(name)
         .ok_or_else(|| format!("undefined function: {}", name))?;
@@ -661,7 +837,7 @@ fn compile_user_function_call(
     // Compile arguments
     let mut arg_values = Vec::new();
     for arg in args {
-        let compiled = compile_expr(builder, arg, variables, interner, pointer_type, module, func_ids)?;
+        let compiled = compile_expr(builder, arg, variables, interner, pointer_type, module, func_ids, source_file)?;
         arg_values.push(compiled.value);
     }
 
@@ -689,6 +865,7 @@ fn compile_interpolated_string(
     pointer_type: types::Type,
     module: &mut JITModule,
     func_ids: &HashMap<String, FuncId>,
+    source_file: &str,
 ) -> Result<CompiledValue, String> {
     if parts.is_empty() {
         // Empty interpolated string - return empty string
@@ -703,7 +880,7 @@ fn compile_interpolated_string(
                 compile_string_literal(builder, s, pointer_type, module, func_ids)?.value
             }
             StringPart::Expr(expr) => {
-                let compiled = compile_expr(builder, expr, variables, interner, pointer_type, module, func_ids)?;
+                let compiled = compile_expr(builder, expr, variables, interner, pointer_type, module, func_ids, source_file)?;
                 value_to_string(builder, compiled, pointer_type, module, func_ids)?
             }
         };
