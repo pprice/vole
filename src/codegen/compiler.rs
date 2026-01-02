@@ -802,7 +802,8 @@ fn compile_assert(
 
         // Trap after calling assert_fail (this should not be reached due to longjmp, but
         // we need to terminate the block)
-        builder.ins().trap(TrapCode::user(0).unwrap());
+        // Note: TrapCode::user(0) returns None because TrapCode uses NonZeroU8, so we use 1
+        builder.ins().trap(TrapCode::unwrap_user(1));
     }
 
     // Seal fail block
