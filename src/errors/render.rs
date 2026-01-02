@@ -268,6 +268,14 @@ pub fn render_diagnostics(diagnostics: &[Diagnostic]) {
     }
 }
 
+/// Render diagnostics to a custom writer
+pub fn render_diagnostics_to<W: Write>(diagnostics: &[Diagnostic], writer: W, use_color: bool) {
+    let mut renderer = ConsoleRenderer::new(writer, use_color);
+    for diag in diagnostics {
+        let _ = renderer.render(diag);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
