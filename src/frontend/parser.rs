@@ -56,6 +56,7 @@ impl<'src> Parser<'src> {
     fn declaration(&mut self) -> Result<Decl, ParseError> {
         match self.current.ty {
             TokenType::KwFunc => self.function_decl(),
+            TokenType::KwTests => self.tests_decl(),
             _ => Err(ParseError {
                 message: format!("expected declaration, got {:?}", self.current.ty),
                 span: self.current.span,
@@ -96,6 +97,49 @@ impl<'src> Parser<'src> {
         let span = start_span.merge(body.span);
 
         Ok(Decl::Function(FuncDecl { name, params, return_type, body, span }))
+    }
+
+    fn tests_decl(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'tests'
+
+        self.consume(TokenType::LBrace, "expected '{' after 'tests'")?;
+        self.skip_newlines();
+
+        let mut tests = Vec::new();
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            tests.push(self.test_case()?);
+            self.skip_newlines();
+        }
+
+        self.consume(TokenType::RBrace, "expected '}' to close tests block")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(Decl::Tests(TestsDecl { tests, span }))
+    }
+
+    fn test_case(&mut self) -> Result<TestCase, ParseError> {
+        let start_span = self.current.span;
+        self.consume(TokenType::KwTest, "expected 'test'")?;
+
+        // Get test name (string literal)
+        let name = if self.current.ty == TokenType::StringLiteral {
+            let name = self.current.lexeme.clone();
+            // Remove quotes from lexeme
+            let name = name.trim_matches('"').to_string();
+            self.advance();
+            name
+        } else {
+            return Err(ParseError {
+                message: "expected test name string".to_string(),
+                span: self.current.span,
+            });
+        };
+
+        let body = self.block()?;
+        let span = start_span.merge(body.span);
+
+        Ok(TestCase { name, body, span })
     }
 
     fn parse_param(&mut self) -> Result<Param, ParseError> {
@@ -874,6 +918,31 @@ func main() {
                 }
             }
             _ => panic!("expected binary"),
+        }
+    }
+
+    #[test]
+    fn parse_tests_block() {
+        let source = r#"
+tests {
+    test "first test" {
+        let x = 1
+    }
+    test "second test" {
+        let y = 2
+    }
+}
+"#;
+        let mut parser = Parser::new(source);
+        let program = parser.parse_program().unwrap();
+        assert_eq!(program.declarations.len(), 1);
+        match &program.declarations[0] {
+            Decl::Tests(tests_decl) => {
+                assert_eq!(tests_decl.tests.len(), 2);
+                assert_eq!(tests_decl.tests[0].name, "first test");
+                assert_eq!(tests_decl.tests[1].name, "second test");
+            }
+            _ => panic!("expected Tests declaration"),
         }
     }
 }
