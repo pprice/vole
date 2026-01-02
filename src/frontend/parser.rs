@@ -35,6 +35,206 @@ impl<'src> Parser<'src> {
         self.expression(0)
     }
 
+    pub fn parse_program(&mut self) -> Result<Program, ParseError> {
+        let mut declarations = Vec::new();
+        self.skip_newlines();
+
+        while !self.check(TokenType::Eof) {
+            declarations.push(self.declaration()?);
+            self.skip_newlines();
+        }
+
+        Ok(Program { declarations })
+    }
+
+    fn skip_newlines(&mut self) {
+        while self.current.ty == TokenType::Newline {
+            self.current = self.lexer.next_token();
+        }
+    }
+
+    fn declaration(&mut self) -> Result<Decl, ParseError> {
+        match self.current.ty {
+            TokenType::KwFunc => self.function_decl(),
+            _ => Err(ParseError {
+                message: format!("expected declaration, got {:?}", self.current.ty),
+                span: self.current.span,
+            }),
+        }
+    }
+
+    fn function_decl(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'func'
+
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected function name")?;
+        let name = self.interner.intern(&name_token.lexeme);
+
+        self.consume(TokenType::LParen, "expected '(' after function name")?;
+
+        let mut params = Vec::new();
+        if !self.check(TokenType::RParen) {
+            loop {
+                let param = self.parse_param()?;
+                params.push(param);
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RParen, "expected ')' after parameters")?;
+
+        let return_type = if self.match_token(TokenType::Arrow) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        let body = self.block()?;
+        let span = start_span.merge(body.span);
+
+        Ok(Decl::Function(FuncDecl { name, params, return_type, body, span }))
+    }
+
+    fn parse_param(&mut self) -> Result<Param, ParseError> {
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected parameter name")?;
+        let name = self.interner.intern(&name_token.lexeme);
+
+        self.consume(TokenType::Colon, "expected ':' after parameter name")?;
+        let ty = self.parse_type()?;
+
+        Ok(Param { name, ty, span: name_token.span })
+    }
+
+    fn parse_type(&mut self) -> Result<TypeExpr, ParseError> {
+        let token = self.current.clone();
+        match token.ty {
+            TokenType::KwI32 => { self.advance(); Ok(TypeExpr::Primitive(PrimitiveType::I32)) }
+            TokenType::KwI64 => { self.advance(); Ok(TypeExpr::Primitive(PrimitiveType::I64)) }
+            TokenType::KwF64 => { self.advance(); Ok(TypeExpr::Primitive(PrimitiveType::F64)) }
+            TokenType::KwBool => { self.advance(); Ok(TypeExpr::Primitive(PrimitiveType::Bool)) }
+            TokenType::KwString => { self.advance(); Ok(TypeExpr::Primitive(PrimitiveType::String)) }
+            TokenType::Identifier => {
+                self.advance();
+                let sym = self.interner.intern(&token.lexeme);
+                Ok(TypeExpr::Named(sym))
+            }
+            _ => Err(ParseError {
+                message: format!("expected type, got {:?}", token.ty),
+                span: token.span,
+            }),
+        }
+    }
+
+    fn block(&mut self) -> Result<Block, ParseError> {
+        let start_span = self.current.span;
+        self.consume(TokenType::LBrace, "expected '{'")?;
+        self.skip_newlines();
+
+        let mut stmts = Vec::new();
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            stmts.push(self.statement()?);
+            self.skip_newlines();
+        }
+
+        self.consume(TokenType::RBrace, "expected '}'")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(Block { stmts, span })
+    }
+
+    fn statement(&mut self) -> Result<Stmt, ParseError> {
+        match self.current.ty {
+            TokenType::KwLet => self.let_stmt(),
+            TokenType::KwWhile => self.while_stmt(),
+            TokenType::KwIf => self.if_stmt(),
+            TokenType::KwBreak => {
+                let span = self.current.span;
+                self.advance();
+                Ok(Stmt::Break(span))
+            }
+            TokenType::KwReturn => self.return_stmt(),
+            _ => self.expr_stmt(),
+        }
+    }
+
+    fn let_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'let'
+
+        let mutable = self.match_token(TokenType::KwMut);
+
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected variable name")?;
+        let name = self.interner.intern(&name_token.lexeme);
+
+        let ty = if self.match_token(TokenType::Colon) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        self.consume(TokenType::Eq, "expected '=' in let statement")?;
+        let init = self.expression(0)?;
+        let span = start_span.merge(init.span);
+
+        Ok(Stmt::Let(LetStmt { name, ty, mutable, init, span }))
+    }
+
+    fn while_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'while'
+
+        let condition = self.expression(0)?;
+        let body = self.block()?;
+        let span = start_span.merge(body.span);
+
+        Ok(Stmt::While(WhileStmt { condition, body, span }))
+    }
+
+    fn if_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'if'
+
+        let condition = self.expression(0)?;
+        let then_branch = self.block()?;
+
+        let else_branch = if self.match_token(TokenType::KwElse) {
+            Some(self.block()?)
+        } else {
+            None
+        };
+
+        let end_span = else_branch.as_ref().map(|b| b.span).unwrap_or(then_branch.span);
+        let span = start_span.merge(end_span);
+
+        Ok(Stmt::If(IfStmt { condition, then_branch, else_branch, span }))
+    }
+
+    fn return_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'return'
+
+        let value = if self.check(TokenType::Newline) || self.check(TokenType::RBrace) || self.check(TokenType::Eof) {
+            None
+        } else {
+            Some(self.expression(0)?)
+        };
+
+        let span = value.as_ref().map(|e| start_span.merge(e.span)).unwrap_or(start_span);
+
+        Ok(Stmt::Return(ReturnStmt { value, span }))
+    }
+
+    fn expr_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let expr = self.expression(0)?;
+        let span = expr.span;
+        Ok(Stmt::Expr(ExprStmt { expr, span }))
+    }
+
     /// Get a reference to the interner
     pub fn interner(&self) -> &Interner {
         &self.interner
@@ -604,6 +804,42 @@ mod tests {
             }
             _ => panic!("expected call"),
         }
+    }
+
+    #[test]
+    fn parse_function() {
+        let source = r#"
+func main() {
+    let x = 42
+}
+"#;
+        let mut parser = Parser::new(source);
+        let program = parser.parse_program().unwrap();
+        assert_eq!(program.declarations.len(), 1);
+    }
+
+    #[test]
+    fn parse_mandelbrot_structure() {
+        let source = r#"
+func main() {
+    let size = 200
+    let mut y = 0
+    while y < size {
+        let mut x = 0
+        while x < size {
+            if x == 0 {
+                break
+            }
+            x = x + 1
+        }
+        y = y + 1
+    }
+    println("done")
+}
+"#;
+        let mut parser = Parser::new(source);
+        let program = parser.parse_program().unwrap();
+        assert_eq!(program.declarations.len(), 1);
     }
 
     #[test]
