@@ -5,8 +5,10 @@
 //! functionality for compiler errors that match void's error format.
 
 pub mod codes;
+pub mod diagnostic;
 
 pub use codes::{ErrorInfo, Severity};
+pub use diagnostic::{Diagnostic, DiagnosticBuilder, RelatedInfo, get_line_from_source};
 
 // Re-export all error codes for convenient access
 pub use codes::{
@@ -29,5 +31,3 @@ pub use codes::{
     SEMA_UNDEFINED_VARIABLE,
     SEMA_WRONG_ARGUMENT_COUNT,
 };
-
-// Will add more exports as we add diagnostic.rs and render.rs
