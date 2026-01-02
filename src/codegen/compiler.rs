@@ -1,11 +1,13 @@
 // src/codegen/compiler.rs
 
 use cranelift::prelude::*;
+use cranelift_jit::JITModule;
+use cranelift_module::{Module, FuncId};
 use std::collections::HashMap;
 
 use crate::frontend::{
     self, Interner, Program, Decl, FuncDecl, TypeExpr,
-    Stmt, Expr, ExprKind, BinaryOp, UnaryOp, Symbol,
+    Stmt, Expr, ExprKind, BinaryOp, UnaryOp, Symbol, StringPart,
 };
 use crate::sema::Type;
 use crate::codegen::JitContext;
@@ -45,6 +47,8 @@ impl Default for ControlFlowCtx {
 pub struct CompiledValue {
     pub value: Value,
     pub ty: types::Type,
+    /// True if this value is a string pointer (needed since pointer_type == I64 on 64-bit)
+    pub is_string: bool,
 }
 
 /// Compiler for generating Cranelift IR from AST
@@ -139,7 +143,16 @@ impl<'a> Compiler<'a> {
 
             // Compile function body
             let mut cf_ctx = ControlFlowCtx::new();
-            let terminated = compile_block(&mut builder, &func.body, &mut variables, self.interner, self.pointer_type, &mut cf_ctx)?;
+            let terminated = compile_block(
+                &mut builder,
+                &func.body,
+                &mut variables,
+                self.interner,
+                self.pointer_type,
+                &mut cf_ctx,
+                &mut self.jit.module,
+                &self.jit.func_ids,
+            )?;
 
             // Add implicit return if no explicit return
             if !terminated {
@@ -184,13 +197,15 @@ fn compile_block(
     interner: &Interner,
     pointer_type: types::Type,
     cf_ctx: &mut ControlFlowCtx,
+    module: &mut JITModule,
+    func_ids: &HashMap<String, FuncId>,
 ) -> Result<bool, String> {
     let mut terminated = false;
     for stmt in &block.stmts {
         if terminated {
             break; // Don't compile unreachable code
         }
-        terminated = compile_stmt(builder, stmt, variables, interner, pointer_type, cf_ctx)?;
+        terminated = compile_stmt(builder, stmt, variables, interner, pointer_type, cf_ctx, module, func_ids)?;
     }
     Ok(terminated)
 }
@@ -203,10 +218,12 @@ fn compile_stmt(
     interner: &Interner,
     pointer_type: types::Type,
     cf_ctx: &mut ControlFlowCtx,
+    module: &mut JITModule,
+    func_ids: &HashMap<String, FuncId>,
 ) -> Result<bool, String> {
     match stmt {
         Stmt::Let(let_stmt) => {
-            let init = compile_expr(builder, &let_stmt.init, variables, interner, pointer_type)?;
+            let init = compile_expr(builder, &let_stmt.init, variables, interner, pointer_type, module, func_ids)?;
 
             let var = Variable::new(variables.len());
             builder.declare_var(var, init.ty);
@@ -215,12 +232,12 @@ fn compile_stmt(
             Ok(false)
         }
         Stmt::Expr(expr_stmt) => {
-            compile_expr(builder, &expr_stmt.expr, variables, interner, pointer_type)?;
+            compile_expr(builder, &expr_stmt.expr, variables, interner, pointer_type, module, func_ids)?;
             Ok(false)
         }
         Stmt::Return(ret) => {
             if let Some(value) = &ret.value {
-                let compiled = compile_expr(builder, value, variables, interner, pointer_type)?;
+                let compiled = compile_expr(builder, value, variables, interner, pointer_type, module, func_ids)?;
                 builder.ins().return_(&[compiled.value]);
             } else {
                 builder.ins().return_(&[]);
@@ -238,7 +255,7 @@ fn compile_stmt(
 
             // Header block - check condition
             builder.switch_to_block(header_block);
-            let cond = compile_expr(builder, &while_stmt.condition, variables, interner, pointer_type)?;
+            let cond = compile_expr(builder, &while_stmt.condition, variables, interner, pointer_type, module, func_ids)?;
             // Extend bool to i32 for comparison if needed
             let cond_i32 = builder.ins().uextend(types::I32, cond.value);
             builder.ins().brif(cond_i32, body_block, &[], exit_block, &[]);
@@ -246,7 +263,7 @@ fn compile_stmt(
             // Body block
             builder.switch_to_block(body_block);
             cf_ctx.push_loop(exit_block);
-            let body_terminated = compile_block(builder, &while_stmt.body, variables, interner, pointer_type, cf_ctx)?;
+            let body_terminated = compile_block(builder, &while_stmt.body, variables, interner, pointer_type, cf_ctx, module, func_ids)?;
             cf_ctx.pop_loop();
 
             // Jump back to header (if not already terminated by break/return)
@@ -265,7 +282,7 @@ fn compile_stmt(
             Ok(false)
         }
         Stmt::If(if_stmt) => {
-            let cond = compile_expr(builder, &if_stmt.condition, variables, interner, pointer_type)?;
+            let cond = compile_expr(builder, &if_stmt.condition, variables, interner, pointer_type, module, func_ids)?;
             let cond_i32 = builder.ins().uextend(types::I32, cond.value);
 
             let then_block = builder.create_block();
@@ -276,7 +293,7 @@ fn compile_stmt(
 
             // Then branch
             builder.switch_to_block(then_block);
-            let then_terminated = compile_block(builder, &if_stmt.then_branch, variables, interner, pointer_type, cf_ctx)?;
+            let then_terminated = compile_block(builder, &if_stmt.then_branch, variables, interner, pointer_type, cf_ctx, module, func_ids)?;
             if !then_terminated {
                 builder.ins().jump(merge_block, &[]);
             }
@@ -284,7 +301,7 @@ fn compile_stmt(
             // Else branch
             builder.switch_to_block(else_block);
             let else_terminated = if let Some(else_branch) = &if_stmt.else_branch {
-                compile_block(builder, else_branch, variables, interner, pointer_type, cf_ctx)?
+                compile_block(builder, else_branch, variables, interner, pointer_type, cf_ctx, module, func_ids)?
             } else {
                 false
             };
@@ -317,33 +334,36 @@ fn compile_expr(
     variables: &mut HashMap<Symbol, Variable>,
     interner: &Interner,
     pointer_type: types::Type,
+    module: &mut JITModule,
+    func_ids: &HashMap<String, FuncId>,
 ) -> Result<CompiledValue, String> {
     match &expr.kind {
         ExprKind::IntLiteral(n) => {
             let val = builder.ins().iconst(types::I64, *n);
-            Ok(CompiledValue { value: val, ty: types::I64 })
+            Ok(CompiledValue { value: val, ty: types::I64, is_string: false })
         }
         ExprKind::FloatLiteral(n) => {
             let val = builder.ins().f64const(*n);
-            Ok(CompiledValue { value: val, ty: types::F64 })
+            Ok(CompiledValue { value: val, ty: types::F64, is_string: false })
         }
         ExprKind::BoolLiteral(b) => {
             let val = builder.ins().iconst(types::I8, if *b { 1 } else { 0 });
-            Ok(CompiledValue { value: val, ty: types::I8 })
+            Ok(CompiledValue { value: val, ty: types::I8, is_string: false })
         }
         ExprKind::Identifier(sym) => {
             if let Some(&var) = variables.get(sym) {
                 let val = builder.use_var(var);
                 // Get the type from the variable declaration
                 let ty = builder.func.dfg.value_type(val);
-                Ok(CompiledValue { value: val, ty })
+                // Note: We don't track is_string for variables yet - they inherit from their init
+                Ok(CompiledValue { value: val, ty, is_string: false })
             } else {
                 Err(format!("undefined variable: {}", interner.resolve(*sym)))
             }
         }
         ExprKind::Binary(bin) => {
-            let left = compile_expr(builder, &bin.left, variables, interner, pointer_type)?;
-            let right = compile_expr(builder, &bin.right, variables, interner, pointer_type)?;
+            let left = compile_expr(builder, &bin.left, variables, interner, pointer_type, module, func_ids)?;
+            let right = compile_expr(builder, &bin.right, variables, interner, pointer_type, module, func_ids)?;
 
             // Determine result type (promote to wider type)
             let result_ty = if left.ty == types::F64 || right.ty == types::F64 {
@@ -446,10 +466,10 @@ fn compile_expr(
                 _ => result_ty,
             };
 
-            Ok(CompiledValue { value: result, ty: final_ty })
+            Ok(CompiledValue { value: result, ty: final_ty, is_string: false })
         }
         ExprKind::Unary(un) => {
-            let operand = compile_expr(builder, &un.operand, variables, interner, pointer_type)?;
+            let operand = compile_expr(builder, &un.operand, variables, interner, pointer_type, module, func_ids)?;
             let result = match un.op {
                 UnaryOp::Neg => {
                     if operand.ty == types::F64 {
@@ -464,10 +484,10 @@ fn compile_expr(
                     builder.ins().isub(one, operand.value)
                 }
             };
-            Ok(CompiledValue { value: result, ty: operand.ty })
+            Ok(CompiledValue { value: result, ty: operand.ty, is_string: false })
         }
         ExprKind::Assign(assign) => {
-            let value = compile_expr(builder, &assign.value, variables, interner, pointer_type)?;
+            let value = compile_expr(builder, &assign.value, variables, interner, pointer_type, module, func_ids)?;
             if let Some(&var) = variables.get(&assign.target) {
                 builder.def_var(var, value.value);
                 Ok(value)
@@ -476,14 +496,259 @@ fn compile_expr(
             }
         }
         ExprKind::Grouping(inner) => {
-            compile_expr(builder, inner, variables, interner, pointer_type)
+            compile_expr(builder, inner, variables, interner, pointer_type, module, func_ids)
         }
-        ExprKind::Call(_) | ExprKind::StringLiteral(_) | ExprKind::InterpolatedString(_) => {
-            // Will be implemented in Task 16
-            let zero = builder.ins().iconst(types::I64, 0);
-            Ok(CompiledValue { value: zero, ty: types::I64 })
+        ExprKind::StringLiteral(s) => {
+            compile_string_literal(builder, s, pointer_type, module, func_ids)
+        }
+        ExprKind::Call(call) => {
+            compile_call(builder, call, variables, interner, pointer_type, module, func_ids)
+        }
+        ExprKind::InterpolatedString(parts) => {
+            compile_interpolated_string(builder, parts, variables, interner, pointer_type, module, func_ids)
         }
     }
+}
+
+/// Compile a string literal by calling vole_string_new
+fn compile_string_literal(
+    builder: &mut FunctionBuilder,
+    s: &str,
+    pointer_type: types::Type,
+    module: &mut JITModule,
+    func_ids: &HashMap<String, FuncId>,
+) -> Result<CompiledValue, String> {
+    // Get the vole_string_new function
+    let func_id = func_ids.get("vole_string_new")
+        .ok_or_else(|| "vole_string_new not found".to_string())?;
+    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+
+    // Pass the string data pointer and length as constants
+    // The string is a Rust &str, so we can get its pointer and length
+    let data_ptr = s.as_ptr() as i64;
+    let len = s.len() as i64;
+
+    let data_val = builder.ins().iconst(pointer_type, data_ptr);
+    let len_val = builder.ins().iconst(pointer_type, len);
+
+    // Call vole_string_new(data, len) -> *mut RcString
+    let call = builder.ins().call(func_ref, &[data_val, len_val]);
+    let result = builder.inst_results(call)[0];
+
+    Ok(CompiledValue { value: result, ty: pointer_type, is_string: true })
+}
+
+/// Compile a function call expression
+fn compile_call(
+    builder: &mut FunctionBuilder,
+    call: &crate::frontend::CallExpr,
+    variables: &mut HashMap<Symbol, Variable>,
+    interner: &Interner,
+    pointer_type: types::Type,
+    module: &mut JITModule,
+    func_ids: &HashMap<String, FuncId>,
+) -> Result<CompiledValue, String> {
+    // Get the callee name - must be an identifier for now
+    let callee_name = match &call.callee.kind {
+        ExprKind::Identifier(sym) => interner.resolve(*sym),
+        _ => return Err("only simple function calls are supported".to_string()),
+    };
+
+    // Handle builtin functions
+    match callee_name {
+        "println" => compile_println(builder, &call.args, variables, interner, pointer_type, module, func_ids),
+        "print_char" => compile_print_char(builder, &call.args, variables, interner, pointer_type, module, func_ids),
+        _ => compile_user_function_call(builder, callee_name, &call.args, variables, interner, pointer_type, module, func_ids),
+    }
+}
+
+/// Compile println builtin - dispatches to correct vole_println_* based on argument type
+fn compile_println(
+    builder: &mut FunctionBuilder,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, Variable>,
+    interner: &Interner,
+    pointer_type: types::Type,
+    module: &mut JITModule,
+    func_ids: &HashMap<String, FuncId>,
+) -> Result<CompiledValue, String> {
+    if args.len() != 1 {
+        return Err("println expects exactly one argument".to_string());
+    }
+
+    let arg = compile_expr(builder, &args[0], variables, interner, pointer_type, module, func_ids)?;
+
+    // Dispatch based on argument type
+    // We use is_string flag to distinguish strings from regular I64 values
+    let func_name = if arg.is_string {
+        "vole_println_string"
+    } else if arg.ty == types::F64 {
+        "vole_println_f64"
+    } else if arg.ty == types::I8 {
+        "vole_println_bool"
+    } else {
+        "vole_println_i64"
+    };
+
+    let func_id = func_ids.get(func_name)
+        .ok_or_else(|| format!("{} not found", func_name))?;
+    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+
+    builder.ins().call(func_ref, &[arg.value]);
+
+    // println returns void, but we need to return something
+    let zero = builder.ins().iconst(types::I64, 0);
+    Ok(CompiledValue { value: zero, ty: types::I64, is_string: false })
+}
+
+/// Compile print_char builtin for mandelbrot ASCII output
+fn compile_print_char(
+    builder: &mut FunctionBuilder,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, Variable>,
+    interner: &Interner,
+    pointer_type: types::Type,
+    module: &mut JITModule,
+    func_ids: &HashMap<String, FuncId>,
+) -> Result<CompiledValue, String> {
+    if args.len() != 1 {
+        return Err("print_char expects exactly one argument".to_string());
+    }
+
+    let arg = compile_expr(builder, &args[0], variables, interner, pointer_type, module, func_ids)?;
+
+    // Convert to u8 if needed (truncate from i64)
+    let char_val = if arg.ty == types::I64 {
+        builder.ins().ireduce(types::I8, arg.value)
+    } else if arg.ty == types::I8 {
+        arg.value
+    } else {
+        return Err("print_char expects an integer argument".to_string());
+    };
+
+    let func_id = func_ids.get("vole_print_char")
+        .ok_or_else(|| "vole_print_char not found".to_string())?;
+    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+
+    builder.ins().call(func_ref, &[char_val]);
+
+    // Return void (as i64 zero)
+    let zero = builder.ins().iconst(types::I64, 0);
+    Ok(CompiledValue { value: zero, ty: types::I64, is_string: false })
+}
+
+/// Compile a call to a user-defined function
+fn compile_user_function_call(
+    builder: &mut FunctionBuilder,
+    name: &str,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, Variable>,
+    interner: &Interner,
+    pointer_type: types::Type,
+    module: &mut JITModule,
+    func_ids: &HashMap<String, FuncId>,
+) -> Result<CompiledValue, String> {
+    let func_id = func_ids.get(name)
+        .ok_or_else(|| format!("undefined function: {}", name))?;
+    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+
+    // Compile arguments
+    let mut arg_values = Vec::new();
+    for arg in args {
+        let compiled = compile_expr(builder, arg, variables, interner, pointer_type, module, func_ids)?;
+        arg_values.push(compiled.value);
+    }
+
+    let call = builder.ins().call(func_ref, &arg_values);
+    let results = builder.inst_results(call);
+
+    if results.is_empty() {
+        // Void function
+        let zero = builder.ins().iconst(types::I64, 0);
+        Ok(CompiledValue { value: zero, ty: types::I64, is_string: false })
+    } else {
+        let result = results[0];
+        let ty = builder.func.dfg.value_type(result);
+        // TODO: Track is_string for function return types properly
+        Ok(CompiledValue { value: result, ty, is_string: false })
+    }
+}
+
+/// Compile an interpolated string by converting parts and concatenating
+fn compile_interpolated_string(
+    builder: &mut FunctionBuilder,
+    parts: &[StringPart],
+    variables: &mut HashMap<Symbol, Variable>,
+    interner: &Interner,
+    pointer_type: types::Type,
+    module: &mut JITModule,
+    func_ids: &HashMap<String, FuncId>,
+) -> Result<CompiledValue, String> {
+    if parts.is_empty() {
+        // Empty interpolated string - return empty string
+        return compile_string_literal(builder, "", pointer_type, module, func_ids);
+    }
+
+    // Convert each part to a string value
+    let mut string_values: Vec<Value> = Vec::new();
+    for part in parts {
+        let str_val = match part {
+            StringPart::Literal(s) => {
+                compile_string_literal(builder, s, pointer_type, module, func_ids)?.value
+            }
+            StringPart::Expr(expr) => {
+                let compiled = compile_expr(builder, expr, variables, interner, pointer_type, module, func_ids)?;
+                value_to_string(builder, compiled, pointer_type, module, func_ids)?
+            }
+        };
+        string_values.push(str_val);
+    }
+
+    // Concatenate all parts
+    if string_values.len() == 1 {
+        return Ok(CompiledValue { value: string_values[0], ty: pointer_type, is_string: true });
+    }
+
+    let concat_func_id = func_ids.get("vole_string_concat")
+        .ok_or_else(|| "vole_string_concat not found".to_string())?;
+    let concat_func_ref = module.declare_func_in_func(*concat_func_id, builder.func);
+
+    let mut result = string_values[0];
+    for &next in &string_values[1..] {
+        let call = builder.ins().call(concat_func_ref, &[result, next]);
+        result = builder.inst_results(call)[0];
+    }
+
+    Ok(CompiledValue { value: result, ty: pointer_type, is_string: true })
+}
+
+/// Convert a compiled value to a string by calling the appropriate vole_*_to_string function
+fn value_to_string(
+    builder: &mut FunctionBuilder,
+    val: CompiledValue,
+    _pointer_type: types::Type,
+    module: &mut JITModule,
+    func_ids: &HashMap<String, FuncId>,
+) -> Result<Value, String> {
+    // If already a string, return as-is
+    if val.is_string {
+        return Ok(val.value);
+    }
+
+    let func_name = if val.ty == types::F64 {
+        "vole_f64_to_string"
+    } else if val.ty == types::I8 {
+        "vole_bool_to_string"
+    } else {
+        "vole_i64_to_string"
+    };
+
+    let func_id = func_ids.get(func_name)
+        .ok_or_else(|| format!("{} not found", func_name))?;
+    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+
+    let call = builder.ins().call(func_ref, &[val.value]);
+    Ok(builder.inst_results(call)[0])
 }
 
 fn convert_to_type(builder: &mut FunctionBuilder, val: CompiledValue, target: types::Type) -> Value {
@@ -600,5 +865,182 @@ func main() -> i64 {
 "#;
         let result = compile_and_run(source);
         assert_eq!(result, 10); // 0+1+2+3+4 = 10
+    }
+
+    #[test]
+    fn compile_user_function_call() {
+        let source = r#"
+func add(a: i64, b: i64) -> i64 {
+    return a + b
+}
+
+func main() -> i64 {
+    return add(10, 32)
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn compile_user_function_call_no_args() {
+        let source = r#"
+func get_answer() -> i64 {
+    return 42
+}
+
+func main() -> i64 {
+    return get_answer()
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn compile_recursive_function() {
+        let source = r#"
+func factorial(n: i64) -> i64 {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+func main() -> i64 {
+    return factorial(5)
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 120); // 5! = 120
+    }
+
+    #[test]
+    fn compile_println_i64() {
+        // Test that println compiles and runs without crashing
+        let source = r#"
+func main() -> i64 {
+    println(42)
+    return 0
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn compile_println_bool() {
+        let source = r#"
+func main() -> i64 {
+    println(true)
+    println(false)
+    return 0
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn compile_println_f64() {
+        let source = r#"
+func main() -> i64 {
+    println(3.14)
+    return 0
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn compile_println_string() {
+        let source = r#"
+func main() -> i64 {
+    println("Hello, World!")
+    return 0
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn compile_print_char() {
+        let source = r#"
+func main() -> i64 {
+    print_char(65)
+    print_char(10)
+    return 0
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn compile_string_literal_in_let() {
+        let source = r#"
+func main() -> i64 {
+    let s = "test"
+    println(s)
+    return 0
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn compile_interpolated_string() {
+        let source = r#"
+func main() -> i64 {
+    let x = 42
+    println("The answer is {x}")
+    return 0
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn compile_interpolated_string_multiple() {
+        let source = r#"
+func main() -> i64 {
+    let a = 1
+    let b = 2
+    println("{a} + {b} = {a + b}")
+    return 0
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn compile_interpolated_string_with_bool() {
+        let source = r#"
+func main() -> i64 {
+    let flag = true
+    println("flag is {flag}")
+    return 0
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn compile_interpolated_string_with_float() {
+        let source = r#"
+func main() -> i64 {
+    let pi = 3.14159
+    println("pi = {pi}")
+    return 0
+}
+"#;
+        let result = compile_and_run(source);
+        assert_eq!(result, 0);
     }
 }

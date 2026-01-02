@@ -35,11 +35,65 @@ impl JitContext {
         let module = JITModule::new(builder);
         let ctx = module.make_context();
 
-        Self {
+        let mut jit = Self {
             module,
             ctx,
             func_ids: HashMap::new(),
-        }
+        };
+
+        // Import runtime functions so they can be called
+        jit.import_runtime_functions();
+
+        jit
+    }
+
+    /// Import all runtime functions into the module
+    fn import_runtime_functions(&mut self) {
+        let ptr_ty = self.pointer_type();
+
+        // vole_string_new(data: *const u8, len: usize) -> *mut RcString
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
+        self.import_function("vole_string_new", &sig);
+
+        // vole_string_concat(a: *const RcString, b: *const RcString) -> *mut RcString
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
+        self.import_function("vole_string_concat", &sig);
+
+        // vole_println_string(ptr: *const RcString)
+        let sig = self.create_signature(&[ptr_ty], None);
+        self.import_function("vole_println_string", &sig);
+
+        // vole_println_i64(value: i64)
+        let sig = self.create_signature(&[types::I64], None);
+        self.import_function("vole_println_i64", &sig);
+
+        // vole_println_f64(value: f64)
+        let sig = self.create_signature(&[types::F64], None);
+        self.import_function("vole_println_f64", &sig);
+
+        // vole_println_bool(value: i8)
+        let sig = self.create_signature(&[types::I8], None);
+        self.import_function("vole_println_bool", &sig);
+
+        // vole_print_char(c: u8)
+        let sig = self.create_signature(&[types::I8], None);
+        self.import_function("vole_print_char", &sig);
+
+        // vole_i64_to_string(value: i64) -> *mut RcString
+        let sig = self.create_signature(&[types::I64], Some(ptr_ty));
+        self.import_function("vole_i64_to_string", &sig);
+
+        // vole_f64_to_string(value: f64) -> *mut RcString
+        let sig = self.create_signature(&[types::F64], Some(ptr_ty));
+        self.import_function("vole_f64_to_string", &sig);
+
+        // vole_bool_to_string(value: i8) -> *mut RcString
+        let sig = self.create_signature(&[types::I8], Some(ptr_ty));
+        self.import_function("vole_bool_to_string", &sig);
+
+        // vole_flush()
+        let sig = self.create_signature(&[], None);
+        self.import_function("vole_flush", &sig);
     }
 
     fn register_runtime_symbols(builder: &mut JITBuilder) {
