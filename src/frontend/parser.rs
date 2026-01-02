@@ -333,6 +333,11 @@ impl<'src> Parser<'src> {
         self.interner
     }
 
+    /// Take lexer errors (for diagnostic rendering)
+    pub fn take_lexer_errors(&mut self) -> Vec<crate::errors::Diagnostic> {
+        self.lexer.take_errors()
+    }
+
     /// Advance to the next token
     fn advance(&mut self) {
         self.previous = std::mem::replace(&mut self.current, self.lexer.next_token());

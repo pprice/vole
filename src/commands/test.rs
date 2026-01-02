@@ -10,10 +10,9 @@ use std::time::{Duration, Instant};
 
 use glob::glob;
 
+use super::common::{parse_and_analyze, TermColors};
 use crate::codegen::{Compiler, JitContext, TestInfo};
-use crate::frontend::Parser;
 use crate::runtime::{call_setjmp, clear_test_jmp_buf, set_test_jmp_buf, take_assert_failure, AssertFailure, JmpBuf};
-use crate::sema::Analyzer;
 
 /// Status of an individual test
 #[derive(Debug, Clone)]
@@ -68,6 +67,7 @@ impl TestResults {
 /// Main entry point for the test command
 pub fn run_tests(paths: &[String]) -> ExitCode {
     let start = Instant::now();
+    let colors = TermColors::auto();
 
     // Collect all test files from the given paths
     let files = match collect_test_files(paths) {
@@ -89,11 +89,14 @@ pub fn run_tests(paths: &[String]) -> ExitCode {
     for file in &files {
         match run_file_tests(file) {
             Ok(results) => {
-                print_file_results(file, &results);
+                print_file_results(file, &results, &colors);
                 all_results.merge(results);
             }
             Err(e) => {
-                eprintln!("\n{}: error: {}", file.display(), e);
+                // Empty error means diagnostics were already rendered
+                if !e.is_empty() {
+                    eprintln!("\n{}: error: {}", file.display(), e);
+                }
                 all_results.failed += 1;
             }
         }
@@ -102,7 +105,7 @@ pub fn run_tests(paths: &[String]) -> ExitCode {
     all_results.total_duration = start.elapsed();
 
     // Print summary
-    print_summary(&all_results);
+    print_summary(&all_results, &colors);
 
     if all_results.failed > 0 {
         ExitCode::FAILURE
@@ -170,28 +173,16 @@ fn run_file_tests(path: &Path) -> Result<TestResults, String> {
         .map_err(|e| format!("could not read file: {}", e))?;
     let file_path = path.to_string_lossy();
 
-    // Parse
-    let mut parser = Parser::with_file(&source, &file_path);
-    let program = parser.parse_program()
-        .map_err(|e| format!("parse error at {:?}: {}", e.span(), e.message()))?;
-    let interner = parser.into_interner();
-
-    // Type check
-    let mut analyzer = Analyzer::new(&file_path, &source);
-    analyzer.analyze(&program, &interner)
-        .map_err(|errors| {
-            let msgs: Vec<String> = errors.iter()
-                .map(|e| format!("  {:?}: {}", e.span(), e.message()))
-                .collect();
-            format!("type errors:\n{}", msgs.join("\n"))
-        })?;
+    // Parse and type check
+    let analyzed = parse_and_analyze(&source, &file_path)
+        .map_err(|()| String::new())?;
 
     // Compile
     let mut jit = JitContext::new();
     let tests = {
-        let mut compiler = Compiler::new(&mut jit, &interner);
+        let mut compiler = Compiler::new(&mut jit, &analyzed.interner);
         compiler.set_source_file(&path.to_string_lossy());
-        compiler.compile_program(&program)
+        compiler.compile_program(&analyzed.program)
             .map_err(|e| format!("compilation error: {}", e))?;
         compiler.take_tests()
     };
@@ -257,7 +248,7 @@ fn execute_tests(tests: Vec<TestInfo>, jit: &JitContext) -> TestResults {
 }
 
 /// Print results for tests from a single file
-fn print_file_results(path: &Path, results: &TestResults) {
+fn print_file_results(path: &Path, results: &TestResults, colors: &TermColors) {
     if results.results.is_empty() {
         return;
     }
@@ -270,16 +261,24 @@ fn print_file_results(path: &Path, results: &TestResults) {
         match &result.status {
             TestStatus::Passed => {
                 println!(
-                    "  \x1b[32m\u{2713}\x1b[0m {} \x1b[90m({:.2}ms)\x1b[0m",
+                    "  {}\u{2713}{} {} {}({:.2}ms){}",
+                    colors.green(),
+                    colors.reset(),
                     result.info.name,
-                    duration_ms
+                    colors.dim(),
+                    duration_ms,
+                    colors.reset()
                 );
             }
             TestStatus::Failed(failure) => {
                 print!(
-                    "  \x1b[31m\u{2717}\x1b[0m {} \x1b[90m({:.2}ms)\x1b[0m",
+                    "  {}\u{2717}{} {} {}({:.2}ms){}",
+                    colors.red(),
+                    colors.reset(),
                     result.info.name,
-                    duration_ms
+                    colors.dim(),
+                    duration_ms,
+                    colors.reset()
                 );
                 if let Some(info) = failure {
                     println!(" - assertion failed at {}:{}", info.file, info.line);
@@ -292,24 +291,34 @@ fn print_file_results(path: &Path, results: &TestResults) {
 }
 
 /// Print overall test summary
-fn print_summary(results: &TestResults) {
+fn print_summary(results: &TestResults, colors: &TermColors) {
     let total = results.passed + results.failed;
     let duration_ms = results.total_duration.as_secs_f64() * 1000.0;
 
     println!();
     if results.failed == 0 {
         println!(
-            "\x1b[32m{} test{} passed\x1b[0m \x1b[90m({:.2}ms)\x1b[0m",
+            "{}{} test{} passed{} {}({:.2}ms){}",
+            colors.green(),
             total,
             if total == 1 { "" } else { "s" },
-            duration_ms
+            colors.reset(),
+            colors.dim(),
+            duration_ms,
+            colors.reset()
         );
     } else {
         println!(
-            "\x1b[31m{} failed\x1b[0m, \x1b[32m{} passed\x1b[0m \x1b[90m({:.2}ms)\x1b[0m",
+            "{}{} failed{}, {}{} passed{} {}({:.2}ms){}",
+            colors.red(),
             results.failed,
+            colors.reset(),
+            colors.green(),
             results.passed,
-            duration_ms
+            colors.reset(),
+            colors.dim(),
+            duration_ms,
+            colors.reset()
         );
     }
 }

@@ -4,8 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-use crate::frontend::Parser;
-use crate::sema::Analyzer;
+use super::common::parse_and_analyze;
 use crate::codegen::{JitContext, Compiler};
 
 /// Run a Vole source file
@@ -13,7 +12,10 @@ pub fn run_file(path: &Path) -> ExitCode {
     match execute_file(path) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("error: {}", e);
+            // Empty error means diagnostics were already rendered
+            if !e.is_empty() {
+                eprintln!("error: {}", e);
+            }
             ExitCode::FAILURE
         }
     }
@@ -25,27 +27,15 @@ fn execute_file(path: &Path) -> Result<(), String> {
         .map_err(|e| format!("could not read '{}': {}", path.display(), e))?;
     let file_path = path.to_string_lossy();
 
-    // Parse
-    let mut parser = Parser::with_file(&source, &file_path);
-    let program = parser.parse_program()
-        .map_err(|e| format!("parse error at {:?}: {}", e.span(), e.message()))?;
-    let interner = parser.into_interner();
-
-    // Type check
-    let mut analyzer = Analyzer::new(&file_path, &source);
-    analyzer.analyze(&program, &interner)
-        .map_err(|errors| {
-            let msgs: Vec<String> = errors.iter()
-                .map(|e| format!("  {:?}: {}", e.span(), e.message()))
-                .collect();
-            format!("type errors:\n{}", msgs.join("\n"))
-        })?;
+    // Parse and type check
+    let analyzed = parse_and_analyze(&source, &file_path)
+        .map_err(|()| String::new())?;
 
     // Compile
     let mut jit = JitContext::new();
     {
-        let mut compiler = Compiler::new(&mut jit, &interner);
-        compiler.compile_program(&program)
+        let mut compiler = Compiler::new(&mut jit, &analyzed.interner);
+        compiler.compile_program(&analyzed.program)
             .map_err(|e| format!("compilation error: {}", e))?;
     }
     jit.finalize();
