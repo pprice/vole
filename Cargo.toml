@@ -31,8 +31,12 @@ miette = { version = "7.4", features = ["fancy"] }
 # CLI
 clap = { version = "4.5", features = ["derive"] }
 
+# File globbing for test discovery
+glob = "0.3"
+
 [dev-dependencies]
 pretty_assertions = "1.4"
+tempfile = "3.10"
 
 [profile.release]
 lto = true

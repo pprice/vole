@@ -21,4 +21,10 @@ pub enum Commands {
         #[arg(value_name = "FILE")]
         file: PathBuf,
     },
+    /// Run tests in Vole source files
+    Test {
+        /// Paths to test (files, directories, or glob patterns)
+        #[arg(value_name = "PATHS", required = true)]
+        paths: Vec<String>,
+    },
 }
