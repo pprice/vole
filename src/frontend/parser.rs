@@ -1,9 +1,11 @@
 // src/frontend/parser.rs
 
-use crate::frontend::{
-    ast::*, Interner, Lexer, Span, Token, TokenType,
-};
+// ParseError intentionally contains a full Diagnostic for rich error reporting.
+// The extra size is acceptable since errors are only created in error paths.
+#![allow(clippy::result_large_err)]
+
 use crate::errors::{Diagnostic, DiagnosticBuilder, codes};
+use crate::frontend::{Interner, Lexer, Span, Token, TokenType, ast::*};
 
 pub struct Parser<'src> {
     lexer: Lexer<'src>,
@@ -63,7 +65,12 @@ impl<'src> Parser<'src> {
     }
 
     /// Helper to create a parse error using the diagnostic builder
-    fn error(&self, info: &'static crate::errors::ErrorInfo, span: Span, message: String) -> ParseError {
+    fn error(
+        &self,
+        info: &'static crate::errors::ErrorInfo,
+        span: Span,
+        message: String,
+    ) -> ParseError {
         ParseError::new(self.diag_builder.error(info, span, message))
     }
 
@@ -133,7 +140,13 @@ impl<'src> Parser<'src> {
         let body = self.block()?;
         let span = start_span.merge(body.span);
 
-        Ok(Decl::Function(FuncDecl { name, params, return_type, body, span }))
+        Ok(Decl::Function(FuncDecl {
+            name,
+            params,
+            return_type,
+            body,
+            span,
+        }))
     }
 
     fn tests_decl(&mut self) -> Result<Decl, ParseError> {
@@ -170,7 +183,10 @@ impl<'src> Parser<'src> {
             return Err(self.error(
                 &codes::PARSER_EXPECTED_TOKEN,
                 self.current.span,
-                format!("expected test name string, found '{}'", self.current.ty.as_str()),
+                format!(
+                    "expected test name string, found '{}'",
+                    self.current.ty.as_str()
+                ),
             ));
         };
 
@@ -188,17 +204,36 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::Colon, "expected ':' after parameter name")?;
         let ty = self.parse_type()?;
 
-        Ok(Param { name, ty, span: name_token.span })
+        Ok(Param {
+            name,
+            ty,
+            span: name_token.span,
+        })
     }
 
     fn parse_type(&mut self) -> Result<TypeExpr, ParseError> {
         let token = self.current.clone();
         match token.ty {
-            TokenType::KwI32 => { self.advance(); Ok(TypeExpr::Primitive(PrimitiveType::I32)) }
-            TokenType::KwI64 => { self.advance(); Ok(TypeExpr::Primitive(PrimitiveType::I64)) }
-            TokenType::KwF64 => { self.advance(); Ok(TypeExpr::Primitive(PrimitiveType::F64)) }
-            TokenType::KwBool => { self.advance(); Ok(TypeExpr::Primitive(PrimitiveType::Bool)) }
-            TokenType::KwString => { self.advance(); Ok(TypeExpr::Primitive(PrimitiveType::String)) }
+            TokenType::KwI32 => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::I32))
+            }
+            TokenType::KwI64 => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::I64))
+            }
+            TokenType::KwF64 => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::F64))
+            }
+            TokenType::KwBool => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::Bool))
+            }
+            TokenType::KwString => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::String))
+            }
             TokenType::Identifier => {
                 self.advance();
                 let sym = self.interner.intern(&token.lexeme);
@@ -264,7 +299,13 @@ impl<'src> Parser<'src> {
         let init = self.expression(0)?;
         let span = start_span.merge(init.span);
 
-        Ok(Stmt::Let(LetStmt { name, ty, mutable, init, span }))
+        Ok(Stmt::Let(LetStmt {
+            name,
+            ty,
+            mutable,
+            init,
+            span,
+        }))
     }
 
     fn while_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -275,7 +316,11 @@ impl<'src> Parser<'src> {
         let body = self.block()?;
         let span = start_span.merge(body.span);
 
-        Ok(Stmt::While(WhileStmt { condition, body, span }))
+        Ok(Stmt::While(WhileStmt {
+            condition,
+            body,
+            span,
+        }))
     }
 
     fn if_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -291,23 +336,37 @@ impl<'src> Parser<'src> {
             None
         };
 
-        let end_span = else_branch.as_ref().map(|b| b.span).unwrap_or(then_branch.span);
+        let end_span = else_branch
+            .as_ref()
+            .map(|b| b.span)
+            .unwrap_or(then_branch.span);
         let span = start_span.merge(end_span);
 
-        Ok(Stmt::If(IfStmt { condition, then_branch, else_branch, span }))
+        Ok(Stmt::If(IfStmt {
+            condition,
+            then_branch,
+            else_branch,
+            span,
+        }))
     }
 
     fn return_stmt(&mut self) -> Result<Stmt, ParseError> {
         let start_span = self.current.span;
         self.advance(); // consume 'return'
 
-        let value = if self.check(TokenType::Newline) || self.check(TokenType::RBrace) || self.check(TokenType::Eof) {
+        let value = if self.check(TokenType::Newline)
+            || self.check(TokenType::RBrace)
+            || self.check(TokenType::Eof)
+        {
             None
         } else {
             Some(self.expression(0)?)
         };
 
-        let span = value.as_ref().map(|e| start_span.merge(e.span)).unwrap_or(start_span);
+        let span = value
+            .as_ref()
+            .map(|e| start_span.merge(e.span))
+            .unwrap_or(start_span);
 
         Ok(Stmt::Return(ReturnStmt { value, span }))
     }
@@ -489,11 +548,13 @@ impl<'src> Parser<'src> {
         match token.ty {
             TokenType::IntLiteral => {
                 self.advance();
-                let value: i64 = token.lexeme.parse().map_err(|_| self.error(
-                    &codes::PARSER_UNEXPECTED_TOKEN,
-                    token.span,
-                    "invalid integer literal".to_string(),
-                ))?;
+                let value: i64 = token.lexeme.parse().map_err(|_| {
+                    self.error(
+                        &codes::PARSER_UNEXPECTED_TOKEN,
+                        token.span,
+                        "invalid integer literal".to_string(),
+                    )
+                })?;
                 Ok(Expr {
                     kind: ExprKind::IntLiteral(value),
                     span: token.span,
@@ -501,11 +562,13 @@ impl<'src> Parser<'src> {
             }
             TokenType::FloatLiteral => {
                 self.advance();
-                let value: f64 = token.lexeme.parse().map_err(|_| self.error(
-                    &codes::PARSER_UNEXPECTED_TOKEN,
-                    token.span,
-                    "invalid float literal".to_string(),
-                ))?;
+                let value: f64 = token.lexeme.parse().map_err(|_| {
+                    self.error(
+                        &codes::PARSER_UNEXPECTED_TOKEN,
+                        token.span,
+                        "invalid float literal".to_string(),
+                    )
+                })?;
                 Ok(Expr {
                     kind: ExprKind::FloatLiteral(value),
                     span: token.span,
@@ -534,9 +597,7 @@ impl<'src> Parser<'src> {
                     span: token.span,
                 })
             }
-            TokenType::StringInterpStart => {
-                self.parse_interpolated_string()
-            }
+            TokenType::StringInterpStart => self.parse_interpolated_string(),
             TokenType::Identifier => {
                 self.advance();
                 let sym = self.interner.intern(&token.lexeme);
@@ -556,20 +617,16 @@ impl<'src> Parser<'src> {
                     span,
                 })
             }
-            TokenType::Error => {
-                Err(self.error(
-                    &codes::PARSER_UNEXPECTED_TOKEN,
-                    token.span,
-                    token.lexeme.clone(),
-                ))
-            }
-            _ => {
-                Err(self.error(
-                    &codes::PARSER_EXPECTED_EXPRESSION,
-                    token.span,
-                    format!("expected expression, found '{}'", token.ty.as_str()),
-                ))
-            }
+            TokenType::Error => Err(self.error(
+                &codes::PARSER_UNEXPECTED_TOKEN,
+                token.span,
+                token.lexeme.clone(),
+            )),
+            _ => Err(self.error(
+                &codes::PARSER_EXPECTED_EXPRESSION,
+                token.span,
+                format!("expected expression, found '{}'", token.ty.as_str()),
+            )),
         }
     }
 
@@ -784,14 +841,12 @@ mod tests {
             ExprKind::Binary(bin) => {
                 assert_eq!(bin.op, BinaryOp::Mul);
                 match bin.left.kind {
-                    ExprKind::Grouping(inner) => {
-                        match inner.kind {
-                            ExprKind::Binary(inner_bin) => {
-                                assert_eq!(inner_bin.op, BinaryOp::Add);
-                            }
-                            _ => panic!("expected binary inside grouping"),
+                    ExprKind::Grouping(inner) => match inner.kind {
+                        ExprKind::Binary(inner_bin) => {
+                            assert_eq!(inner_bin.op, BinaryOp::Add);
                         }
-                    }
+                        _ => panic!("expected binary inside grouping"),
+                    },
                     _ => panic!("expected grouping on left"),
                 }
             }
@@ -820,12 +875,10 @@ mod tests {
         let mut parser = Parser::new("x = 42");
         let expr = parser.parse_expression().unwrap();
         match expr.kind {
-            ExprKind::Assign(assign) => {
-                match assign.value.kind {
-                    ExprKind::IntLiteral(n) => assert_eq!(n, 42),
-                    _ => panic!("expected int literal"),
-                }
-            }
+            ExprKind::Assign(assign) => match assign.value.kind {
+                ExprKind::IntLiteral(n) => assert_eq!(n, 42),
+                _ => panic!("expected int literal"),
+            },
             _ => panic!("expected assignment"),
         }
     }
@@ -1014,7 +1067,10 @@ tests {
         let result = parser.parse_expression();
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.diagnostic.code(), codes::PARSER_EXPECTED_EXPRESSION.code);
+        assert_eq!(
+            err.diagnostic.code(),
+            codes::PARSER_EXPECTED_EXPRESSION.code
+        );
     }
 
     #[test]
@@ -1047,7 +1103,13 @@ tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.diagnostic.source_line.is_some());
-        assert!(err.diagnostic.source_line.as_ref().unwrap().contains("func main"));
+        assert!(
+            err.diagnostic
+                .source_line
+                .as_ref()
+                .unwrap()
+                .contains("func main")
+        );
     }
 
     #[test]

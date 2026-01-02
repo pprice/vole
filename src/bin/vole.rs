@@ -1,7 +1,7 @@
 // src/bin/vole.rs
 
-use std::process::ExitCode;
 use clap::Parser;
+use std::process::ExitCode;
 
 use vole::cli::Cli;
 use vole::cli::Commands;

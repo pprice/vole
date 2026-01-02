@@ -1,6 +1,6 @@
 // src/codegen/mod.rs
-pub mod jit;
 pub mod compiler;
+pub mod jit;
 
-pub use jit::JitContext;
 pub use compiler::{Compiler, TestInfo};
+pub use jit::JitContext;

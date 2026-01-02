@@ -1,12 +1,12 @@
 // src/frontend/mod.rs
-pub mod token;
-pub mod lexer;
 pub mod ast;
 pub mod intern;
+pub mod lexer;
 pub mod parser;
+pub mod token;
 
-pub use token::{Token, TokenType, Span};
-pub use lexer::Lexer;
 pub use ast::*;
 pub use intern::Interner;
-pub use parser::{Parser, ParseError};
+pub use lexer::Lexer;
+pub use parser::{ParseError, Parser};
+pub use token::{Span, Token, TokenType};

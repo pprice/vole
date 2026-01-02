@@ -4,6 +4,7 @@ use crate::runtime::RcString;
 use std::io::{self, Write};
 
 /// Print a string to stdout with newline
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_println_string(ptr: *const RcString) {
     if ptr.is_null() {
@@ -39,6 +40,7 @@ pub extern "C" fn vole_println_bool(value: i8) {
 }
 
 /// Concatenate two strings
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_concat(a: *const RcString, b: *const RcString) -> *mut RcString {
     unsafe {
@@ -94,6 +96,7 @@ mod tests {
 
         unsafe {
             assert_eq!((*result).as_str(), "hello world");
+            // Safety: All pointers are valid from RcString::new
             RcString::dec_ref(result);
             RcString::dec_ref(a as *mut _);
             RcString::dec_ref(b as *mut _);
@@ -105,6 +108,7 @@ mod tests {
         let result = vole_i64_to_string(42);
         unsafe {
             assert_eq!((*result).as_str(), "42");
+            // Safety: result is valid from vole_i64_to_string
             RcString::dec_ref(result);
         }
     }
@@ -114,6 +118,7 @@ mod tests {
         let result = vole_f64_to_string(3.14);
         unsafe {
             assert!((*result).as_str().starts_with("3.14"));
+            // Safety: result is valid from vole_f64_to_string
             RcString::dec_ref(result);
         }
     }
@@ -125,6 +130,7 @@ mod tests {
         unsafe {
             assert_eq!((*t).as_str(), "true");
             assert_eq!((*f).as_str(), "false");
+            // Safety: t and f are valid from vole_bool_to_string
             RcString::dec_ref(t);
             RcString::dec_ref(f);
         }
