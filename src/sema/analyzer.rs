@@ -46,19 +46,19 @@ impl Analyzer {
                     });
                 }
                 Decl::Tests(_) => {
-                    // Tests are handled separately, skip in normal analysis
+                    // Tests don't need signatures in the first pass
                 }
             }
         }
 
-        // Second pass: type check function bodies
+        // Second pass: type check function bodies and tests
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
                     self.check_function(func, interner)?;
                 }
-                Decl::Tests(_) => {
-                    // Tests are handled separately, skip in normal analysis
+                Decl::Tests(tests_decl) => {
+                    self.check_tests(tests_decl, interner)?;
                 }
             }
         }
@@ -102,6 +102,36 @@ impl Analyzer {
         self.current_function_return = None;
 
         Ok(())
+    }
+
+    fn check_tests(&mut self, tests_decl: &TestsDecl, interner: &Interner) -> Result<(), Vec<TypeError>> {
+        for test_case in &tests_decl.tests {
+            // Each test gets its own scope
+            let parent_scope = std::mem::take(&mut self.scope);
+            self.scope = Scope::with_parent(parent_scope);
+
+            // Tests implicitly return void
+            self.current_function_return = Some(Type::Void);
+
+            // Type check all statements in the test body
+            self.check_block(&test_case.body, interner)?;
+
+            // Restore scope
+            if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+                self.scope = parent;
+            }
+            self.current_function_return = None;
+        }
+
+        Ok(())
+    }
+
+    fn is_assert_call(&self, callee: &Expr, interner: &Interner) -> bool {
+        if let ExprKind::Identifier(sym) = &callee.kind {
+            interner.resolve(*sym) == "assert"
+        } else {
+            false
+        }
     }
 
     fn check_block(&mut self, block: &Block, interner: &Interner) -> Result<(), Vec<TypeError>> {
@@ -269,6 +299,27 @@ impl Analyzer {
             }
 
             ExprKind::Call(call) => {
+                // Handle assert specially
+                if self.is_assert_call(&call.callee, interner) {
+                    if call.args.len() != 1 {
+                        self.errors.push(TypeError {
+                            message: format!("assert() requires exactly 1 argument, got {}", call.args.len()),
+                            span: expr.span,
+                        });
+                        return Ok(Type::Void);
+                    }
+
+                    let arg_ty = self.check_expr(&call.args[0], interner)?;
+                    if arg_ty != Type::Bool && arg_ty != Type::Error {
+                        self.errors.push(TypeError {
+                            message: format!("assert() argument must be bool, got {}", arg_ty.name()),
+                            span: call.args[0].span,
+                        });
+                    }
+
+                    return Ok(Type::Void);
+                }
+
                 if let ExprKind::Identifier(sym) = &call.callee.kind {
                     if let Some(func_type) = self.functions.get(sym) {
                         let func_type = func_type.clone();
@@ -403,5 +454,62 @@ mod tests {
     fn analyze_mutable_assignment() {
         let source = "func main() { let mut x = 1\n x = 2 }";
         assert!(check(source).is_ok());
+    }
+
+    #[test]
+    fn analyze_assert_requires_bool() {
+        // assert(42) should fail - argument must be bool
+        let source = "func main() { assert(42) }";
+        let result = check(source);
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.message.contains("bool")));
+    }
+
+    #[test]
+    fn analyze_assert_valid() {
+        // assert(1 == 1) should pass - comparison returns bool
+        let source = "func main() { assert(1 == 1) }";
+        assert!(check(source).is_ok());
+    }
+
+    #[test]
+    fn analyze_assert_with_bool_literal() {
+        let source = "func main() { assert(true) }";
+        assert!(check(source).is_ok());
+    }
+
+    #[test]
+    fn analyze_assert_wrong_arg_count() {
+        let source = "func main() { assert(true, false) }";
+        let result = check(source);
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.message.contains("1 argument")));
+    }
+
+    #[test]
+    fn analyze_tests_block() {
+        let source = r#"
+            tests {
+                test "simple assertion" {
+                    assert(true)
+                }
+            }
+        "#;
+        assert!(check(source).is_ok());
+    }
+
+    #[test]
+    fn analyze_tests_block_with_invalid_assert() {
+        let source = r#"
+            tests {
+                test "bad assertion" {
+                    assert(42)
+                }
+            }
+        "#;
+        let result = check(source);
+        assert!(result.is_err());
     }
 }
