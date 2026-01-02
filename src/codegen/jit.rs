@@ -10,6 +10,9 @@ pub struct JitContext {
     pub module: JITModule,
     pub ctx: codegen::Context,
     pub func_ids: HashMap<String, FuncId>,
+    /// Source file path stored here so it lives as long as the JIT code.
+    /// Used by assert failure messages.
+    source_file: Option<Box<str>>,
 }
 
 impl JitContext {
@@ -39,6 +42,7 @@ impl JitContext {
             module,
             ctx,
             func_ids: HashMap::new(),
+            source_file: None,
         };
 
         // Import runtime functions so they can be called
@@ -129,6 +133,21 @@ impl JitContext {
     /// Get the pointer type for the target
     pub fn pointer_type(&self) -> types::Type {
         self.module.target_config().pointer_type()
+    }
+
+    /// Set the source file path. The string is stored in the JitContext
+    /// so that it lives as long as the JIT code (for assert failure messages).
+    pub fn set_source_file(&mut self, file: &str) {
+        self.source_file = Some(file.into());
+    }
+
+    /// Get the source file path and its length as raw pointer info.
+    /// Returns (ptr, len) where ptr is stable as long as JitContext exists.
+    pub fn source_file_ptr(&self) -> (*const u8, usize) {
+        match &self.source_file {
+            Some(s) => (s.as_ptr(), s.len()),
+            None => (std::ptr::null(), 0),
+        }
     }
 
     /// Create a function signature with given parameters and return type
