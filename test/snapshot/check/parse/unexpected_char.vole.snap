@@ -1,0 +1,8 @@
+[stdout]
+
+[stderr]
+error[E1003]: expected declaration, found 'let'
+  --> <path>/unexpected_char.vole:1:1
+  |
+1 | let x = `
+  | ^^^
