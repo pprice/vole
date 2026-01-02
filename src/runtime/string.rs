@@ -1,10 +1,10 @@
 // src/runtime/string.rs
 
-use std::alloc::{alloc, dealloc, Layout};
+use crate::runtime::value::{RcHeader, TYPE_STRING};
+use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 use std::slice;
 use std::str;
-use crate::runtime::value::{RcHeader, TYPE_STRING};
 
 /// Reference-counted string
 #[repr(C)]
@@ -60,28 +60,40 @@ impl RcString {
     }
 
     /// Get the string data
+    ///
+    /// # Safety
+    /// The caller must ensure `self` points to a valid, properly initialized `RcString`.
     pub unsafe fn data(&self) -> &[u8] {
         unsafe {
-            let data_ptr = (self as *const Self as *const u8)
-                .add(std::mem::size_of::<RcString>());
+            let data_ptr = (self as *const Self as *const u8).add(std::mem::size_of::<RcString>());
             slice::from_raw_parts(data_ptr, self.len)
         }
     }
 
     /// Get as str
+    ///
+    /// # Safety
+    /// The caller must ensure `self` points to a valid, properly initialized `RcString`
+    /// containing valid UTF-8 data.
     pub unsafe fn as_str(&self) -> &str {
         unsafe { str::from_utf8_unchecked(self.data()) }
     }
 
     /// Increment reference count
-    pub fn inc_ref(ptr: *mut Self) {
+    ///
+    /// # Safety
+    /// The pointer must be null or point to a valid, properly initialized `RcString`.
+    pub unsafe fn inc_ref(ptr: *mut Self) {
         if !ptr.is_null() {
             unsafe { (*ptr).header.inc() };
         }
     }
 
     /// Decrement reference count and free if zero
-    pub fn dec_ref(ptr: *mut Self) {
+    ///
+    /// # Safety
+    /// The pointer must be null or point to a valid, properly initialized `RcString`.
+    pub unsafe fn dec_ref(ptr: *mut Self) {
         if ptr.is_null() {
             return;
         }
@@ -99,6 +111,9 @@ impl RcString {
 }
 
 // Functions exposed to JIT-compiled code
+// These functions are called from JIT-generated code which is responsible for
+// ensuring pointer validity.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_new(data: *const u8, len: usize) -> *mut RcString {
     let s = unsafe {
@@ -108,16 +123,21 @@ pub extern "C" fn vole_string_new(data: *const u8, len: usize) -> *mut RcString 
     RcString::new(s)
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_inc(ptr: *mut RcString) {
-    RcString::inc_ref(ptr);
+    // Safety: Called from JIT code which ensures pointer validity
+    unsafe { RcString::inc_ref(ptr) };
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_dec(ptr: *mut RcString) {
-    RcString::dec_ref(ptr);
+    // Safety: Called from JIT code which ensures pointer validity
+    unsafe { RcString::dec_ref(ptr) };
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_len(ptr: *const RcString) -> usize {
     if ptr.is_null() {
@@ -131,9 +151,7 @@ pub extern "C" fn vole_string_data(ptr: *const RcString) -> *const u8 {
     if ptr.is_null() {
         return ptr::null();
     }
-    unsafe {
-        (ptr as *const u8).add(std::mem::size_of::<RcString>())
-    }
+    unsafe { (ptr as *const u8).add(std::mem::size_of::<RcString>()) }
 }
 
 #[cfg(test)]
@@ -146,6 +164,7 @@ mod tests {
         unsafe {
             assert_eq!((*s).len, 5);
             assert_eq!((*s).as_str(), "hello");
+            // Safety: s is a valid pointer from RcString::new
             RcString::dec_ref(s);
         }
     }
@@ -154,15 +173,33 @@ mod tests {
     fn ref_counting() {
         let s = RcString::new("test");
         unsafe {
-            assert_eq!((*s).header.ref_count.load(std::sync::atomic::Ordering::Relaxed), 1);
+            assert_eq!(
+                (*s).header
+                    .ref_count
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                1
+            );
 
+            // Safety: s is a valid pointer from RcString::new
             RcString::inc_ref(s);
-            assert_eq!((*s).header.ref_count.load(std::sync::atomic::Ordering::Relaxed), 2);
+            assert_eq!(
+                (*s).header
+                    .ref_count
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                2
+            );
 
+            // Safety: s is still valid
             RcString::dec_ref(s);
-            assert_eq!((*s).header.ref_count.load(std::sync::atomic::Ordering::Relaxed), 1);
+            assert_eq!(
+                (*s).header
+                    .ref_count
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                1
+            );
 
-            RcString::dec_ref(s); // Frees the string
+            // Safety: s is still valid, this will free the string
+            RcString::dec_ref(s);
         }
     }
 

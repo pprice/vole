@@ -1,9 +1,9 @@
 // src/errors/render.rs
 //! Console rendering for diagnostics with ANSI color support.
 
-use std::io::Write;
-use super::diagnostic::{Diagnostic, RelatedInfo};
 use super::codes::Severity;
+use super::diagnostic::{Diagnostic, RelatedInfo};
+use std::io::Write;
 
 /// ANSI color codes
 struct Colors {
@@ -118,17 +118,22 @@ impl<W: Write> ConsoleRenderer<W> {
         write!(self.writer, " ")?;
 
         // Spaces before caret (column is 1-indexed)
-        let caret_pos = if diag.span.column > 0 { diag.span.column - 1 } else { 0 };
+        let caret_pos = if diag.span.column > 0 {
+            diag.span.column - 1
+        } else {
+            0
+        };
         for _ in 0..caret_pos {
             write!(self.writer, " ")?;
         }
 
         // Calculate caret length from span
-        let caret_len = if diag.span.end_line == diag.span.line && diag.span.end_column > diag.span.column {
-            (diag.span.end_column - diag.span.column) as usize
-        } else {
-            1 // Default to single caret for multi-line spans
-        };
+        let caret_len =
+            if diag.span.end_line == diag.span.line && diag.span.end_column > diag.span.column {
+                (diag.span.end_column - diag.span.column) as usize
+            } else {
+                1 // Default to single caret for multi-line spans
+            };
 
         // Render carets
         let style = self.severity_style(diag.severity());
@@ -180,17 +185,22 @@ impl<W: Write> ConsoleRenderer<W> {
 
             self.render_pipe(line_num_width)?;
             write!(self.writer, " ")?;
-            let caret_pos = if rel.span.column > 0 { rel.span.column - 1 } else { 0 };
+            let caret_pos = if rel.span.column > 0 {
+                rel.span.column - 1
+            } else {
+                0
+            };
             for _ in 0..caret_pos {
                 write!(self.writer, " ")?;
             }
 
             // Calculate caret length from span
-            let caret_len = if rel.span.end_line == rel.span.line && rel.span.end_column > rel.span.column {
-                (rel.span.end_column - rel.span.column) as usize
-            } else {
-                1 // Default to single caret for multi-line spans
-            };
+            let caret_len =
+                if rel.span.end_line == rel.span.line && rel.span.end_column > rel.span.column {
+                    (rel.span.end_column - rel.span.column) as usize
+                } else {
+                    1 // Default to single caret for multi-line spans
+                };
 
             // Render carets
             write!(self.writer, "{}", self.colors.cyan())?;
@@ -217,7 +227,12 @@ impl<W: Write> ConsoleRenderer<W> {
         for _ in 0..padding {
             write!(self.writer, " ")?;
         }
-        write!(self.writer, " {}|{}", self.colors.cyan(), self.colors.reset())
+        write!(
+            self.writer,
+            " {}|{}",
+            self.colors.cyan(),
+            self.colors.reset()
+        )
     }
 
     fn severity_style(&self, severity: Severity) -> &'static str {
@@ -230,7 +245,9 @@ impl<W: Write> ConsoleRenderer<W> {
 }
 
 fn count_digits(n: u32) -> u32 {
-    if n == 0 { return 1; }
+    if n == 0 {
+        return 1;
+    }
     let mut count = 0;
     let mut num = n;
     while num > 0 {
@@ -299,7 +316,11 @@ mod tests {
 
         let output_str = String::from_utf8(output).unwrap();
         // 5 carets for the span from column 5 to 10
-        assert!(output_str.contains("^^^^^"), "Expected 5 carets, got: {}", output_str);
+        assert!(
+            output_str.contains("^^^^^"),
+            "Expected 5 carets, got: {}",
+            output_str
+        );
     }
 
     #[test]
@@ -322,8 +343,11 @@ mod tests {
         let output_str = String::from_utf8(output).unwrap();
         // Should have single caret for multi-line span
         // Check that we have exactly one caret (not followed by another)
-        assert!(output_str.contains("^\n") || output_str.contains("^ "),
-                "Expected single caret for multiline span, got: {}", output_str);
+        assert!(
+            output_str.contains("^\n") || output_str.contains("^ "),
+            "Expected single caret for multiline span, got: {}",
+            output_str
+        );
     }
 
     #[test]

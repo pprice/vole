@@ -2,7 +2,7 @@
 
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{Module, Linkage, FuncId};
+use cranelift_module::{FuncId, Linkage, Module};
 use std::collections::HashMap;
 
 /// JIT compiler context
@@ -106,28 +106,76 @@ impl JitContext {
 
     fn register_runtime_symbols(builder: &mut JITBuilder) {
         // String functions
-        builder.symbol("vole_string_new", crate::runtime::string::vole_string_new as *const u8);
-        builder.symbol("vole_string_inc", crate::runtime::string::vole_string_inc as *const u8);
-        builder.symbol("vole_string_dec", crate::runtime::string::vole_string_dec as *const u8);
-        builder.symbol("vole_string_len", crate::runtime::string::vole_string_len as *const u8);
-        builder.symbol("vole_string_data", crate::runtime::string::vole_string_data as *const u8);
-        builder.symbol("vole_string_concat", crate::runtime::builtins::vole_string_concat as *const u8);
+        builder.symbol(
+            "vole_string_new",
+            crate::runtime::string::vole_string_new as *const u8,
+        );
+        builder.symbol(
+            "vole_string_inc",
+            crate::runtime::string::vole_string_inc as *const u8,
+        );
+        builder.symbol(
+            "vole_string_dec",
+            crate::runtime::string::vole_string_dec as *const u8,
+        );
+        builder.symbol(
+            "vole_string_len",
+            crate::runtime::string::vole_string_len as *const u8,
+        );
+        builder.symbol(
+            "vole_string_data",
+            crate::runtime::string::vole_string_data as *const u8,
+        );
+        builder.symbol(
+            "vole_string_concat",
+            crate::runtime::builtins::vole_string_concat as *const u8,
+        );
 
         // Print functions
-        builder.symbol("vole_println_string", crate::runtime::builtins::vole_println_string as *const u8);
-        builder.symbol("vole_println_i64", crate::runtime::builtins::vole_println_i64 as *const u8);
-        builder.symbol("vole_println_f64", crate::runtime::builtins::vole_println_f64 as *const u8);
-        builder.symbol("vole_println_bool", crate::runtime::builtins::vole_println_bool as *const u8);
-        builder.symbol("vole_print_char", crate::runtime::builtins::vole_print_char as *const u8);
-        builder.symbol("vole_flush", crate::runtime::builtins::vole_flush as *const u8);
+        builder.symbol(
+            "vole_println_string",
+            crate::runtime::builtins::vole_println_string as *const u8,
+        );
+        builder.symbol(
+            "vole_println_i64",
+            crate::runtime::builtins::vole_println_i64 as *const u8,
+        );
+        builder.symbol(
+            "vole_println_f64",
+            crate::runtime::builtins::vole_println_f64 as *const u8,
+        );
+        builder.symbol(
+            "vole_println_bool",
+            crate::runtime::builtins::vole_println_bool as *const u8,
+        );
+        builder.symbol(
+            "vole_print_char",
+            crate::runtime::builtins::vole_print_char as *const u8,
+        );
+        builder.symbol(
+            "vole_flush",
+            crate::runtime::builtins::vole_flush as *const u8,
+        );
 
         // Conversion functions
-        builder.symbol("vole_i64_to_string", crate::runtime::builtins::vole_i64_to_string as *const u8);
-        builder.symbol("vole_f64_to_string", crate::runtime::builtins::vole_f64_to_string as *const u8);
-        builder.symbol("vole_bool_to_string", crate::runtime::builtins::vole_bool_to_string as *const u8);
+        builder.symbol(
+            "vole_i64_to_string",
+            crate::runtime::builtins::vole_i64_to_string as *const u8,
+        );
+        builder.symbol(
+            "vole_f64_to_string",
+            crate::runtime::builtins::vole_f64_to_string as *const u8,
+        );
+        builder.symbol(
+            "vole_bool_to_string",
+            crate::runtime::builtins::vole_bool_to_string as *const u8,
+        );
 
         // Assert functions
-        builder.symbol("vole_assert_fail", crate::runtime::assert::vole_assert_fail as *const u8);
+        builder.symbol(
+            "vole_assert_fail",
+            crate::runtime::assert::vole_assert_fail as *const u8,
+        );
     }
 
     /// Get the pointer type for the target
@@ -164,7 +212,8 @@ impl JitContext {
 
     /// Declare a function in the module
     pub fn declare_function(&mut self, name: &str, sig: &Signature) -> FuncId {
-        let func_id = self.module
+        let func_id = self
+            .module
             .declare_function(name, Linkage::Export, sig)
             .unwrap();
         self.func_ids.insert(name.to_string(), func_id);
@@ -173,7 +222,8 @@ impl JitContext {
 
     /// Import an external function
     pub fn import_function(&mut self, name: &str, sig: &Signature) -> FuncId {
-        let func_id = self.module
+        let func_id = self
+            .module
             .declare_function(name, Linkage::Import, sig)
             .unwrap();
         self.func_ids.insert(name.to_string(), func_id);
@@ -194,9 +244,9 @@ impl JitContext {
 
     /// Get a function pointer by name
     pub fn get_function_ptr(&self, name: &str) -> Option<*const u8> {
-        self.func_ids.get(name).map(|&func_id| {
-            self.module.get_finalized_function(func_id)
-        })
+        self.func_ids
+            .get(name)
+            .map(|&func_id| self.module.get_finalized_function(func_id))
     }
 
     /// Clear the context for reuse

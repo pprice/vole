@@ -1,10 +1,10 @@
 // src/frontend/lexer.rs
 
 use crate::errors::{
-    Diagnostic, DiagnosticBuilder,
-    LEXER_INVALID_NUMBER, LEXER_UNEXPECTED_CHARACTER, LEXER_UNTERMINATED_STRING,
+    Diagnostic, DiagnosticBuilder, LEXER_INVALID_NUMBER, LEXER_UNEXPECTED_CHARACTER,
+    LEXER_UNTERMINATED_STRING,
 };
-use crate::frontend::{Token, TokenType, Span};
+use crate::frontend::{Span, Token, TokenType};
 
 pub struct Lexer<'src> {
     source: &'src str,
@@ -166,13 +166,8 @@ impl<'src> Lexer<'src> {
 
     /// Skip whitespace (spaces and tabs) and comments
     fn skip_whitespace(&mut self) {
-        loop {
-            match self.peek() {
-                Some(' ') | Some('\t') | Some('\r') => {
-                    self.advance();
-                }
-                _ => break,
-            }
+        while let Some(' ') | Some('\t') | Some('\r') = self.peek() {
+            self.advance();
         }
     }
 
@@ -237,11 +232,9 @@ impl<'src> Lexer<'src> {
             self.column,
         );
         let message = format!("unexpected character '{}'", c);
-        let diagnostic = self.diag_builder.error(
-            &LEXER_UNEXPECTED_CHARACTER,
-            span,
-            message.clone(),
-        );
+        let diagnostic =
+            self.diag_builder
+                .error(&LEXER_UNEXPECTED_CHARACTER, span, message.clone());
         self.errors.push(diagnostic);
         Token::new(TokenType::Error, message, span)
     }
@@ -257,11 +250,9 @@ impl<'src> Lexer<'src> {
             self.column,
         );
         let message = "unterminated string literal".to_string();
-        let diagnostic = self.diag_builder.error(
-            &LEXER_UNTERMINATED_STRING,
-            span,
-            message.clone(),
-        );
+        let diagnostic = self
+            .diag_builder
+            .error(&LEXER_UNTERMINATED_STRING, span, message.clone());
         self.errors.push(diagnostic);
         Token::new(TokenType::Error, message, span)
     }
@@ -278,11 +269,9 @@ impl<'src> Lexer<'src> {
             self.column,
         );
         let message = "invalid number literal".to_string();
-        let diagnostic = self.diag_builder.error(
-            &LEXER_INVALID_NUMBER,
-            span,
-            message.clone(),
-        );
+        let diagnostic = self
+            .diag_builder
+            .error(&LEXER_INVALID_NUMBER, span, message.clone());
         self.errors.push(diagnostic);
         Token::new(TokenType::Error, message, span)
     }
@@ -338,22 +327,21 @@ impl<'src> Lexer<'src> {
         }
 
         // Check for decimal point followed by digit
-        if self.peek() == Some('.') {
-            if let Some(next) = self.peek_next() {
-                if next.is_ascii_digit() {
-                    // Consume the dot
+        if self.peek() == Some('.')
+            && let Some(next) = self.peek_next()
+            && next.is_ascii_digit()
+        {
+            // Consume the dot
+            self.advance();
+            // Consume the fractional part
+            while let Some(c) = self.peek() {
+                if c.is_ascii_digit() {
                     self.advance();
-                    // Consume the fractional part
-                    while let Some(c) = self.peek() {
-                        if c.is_ascii_digit() {
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
-                    return self.make_token(TokenType::FloatLiteral);
+                } else {
+                    break;
                 }
             }
+            return self.make_token(TokenType::FloatLiteral);
         }
 
         self.make_token(TokenType::IntLiteral)
@@ -527,10 +515,10 @@ mod tests {
     fn lex_string_interpolation_multiple() {
         let mut lexer = Lexer::new("\"x={x}, y={y}\"");
         assert_eq!(lexer.next_token().ty, TokenType::StringInterpStart); // "x={
-        assert_eq!(lexer.next_token().ty, TokenType::Identifier);         // x
+        assert_eq!(lexer.next_token().ty, TokenType::Identifier); // x
         assert_eq!(lexer.next_token().ty, TokenType::StringInterpMiddle); // }, y={
-        assert_eq!(lexer.next_token().ty, TokenType::Identifier);         // y
-        assert_eq!(lexer.next_token().ty, TokenType::StringInterpEnd);    // }"
+        assert_eq!(lexer.next_token().ty, TokenType::Identifier); // y
+        assert_eq!(lexer.next_token().ty, TokenType::StringInterpEnd); // }"
     }
 
     #[test]

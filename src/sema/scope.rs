@@ -33,9 +33,9 @@ impl Scope {
     }
 
     pub fn get(&self, name: Symbol) -> Option<&Variable> {
-        self.variables.get(&name).or_else(|| {
-            self.parent.as_ref().and_then(|p| p.get(name))
-        })
+        self.variables
+            .get(&name)
+            .or_else(|| self.parent.as_ref().and_then(|p| p.get(name)))
     }
 
     pub fn into_parent(self) -> Option<Scope> {

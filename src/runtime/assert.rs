@@ -78,6 +78,7 @@ pub unsafe fn call_setjmp(buf: *mut JmpBuf) -> i32 {
 ///
 /// If in test context (jmp_buf is set), records the failure and longjmps back.
 /// If not in test context, prints an error and aborts.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_assert_fail(file: *const u8, file_len: usize, line: u32) {
     let file_str = unsafe {
@@ -98,7 +99,9 @@ pub extern "C" fn vole_assert_fail(file: *const u8, file_len: usize, line: u32) 
                     line,
                 }));
             });
-            unsafe { siglongjmp(buf, 1); }
+            unsafe {
+                siglongjmp(buf, 1);
+            }
         } else {
             // Not in test context - abort
             eprintln!("assertion failed at {}:{}", file_str, line);

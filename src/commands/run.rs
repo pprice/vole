@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use super::common::parse_and_analyze;
-use crate::codegen::{JitContext, Compiler};
+use crate::codegen::{Compiler, JitContext};
 
 /// Run a Vole source file
 pub fn run_file(path: &Path) -> ExitCode {
@@ -28,20 +28,21 @@ fn execute_file(path: &Path) -> Result<(), String> {
     let file_path = path.to_string_lossy();
 
     // Parse and type check
-    let analyzed = parse_and_analyze(&source, &file_path)
-        .map_err(|()| String::new())?;
+    let analyzed = parse_and_analyze(&source, &file_path).map_err(|()| String::new())?;
 
     // Compile
     let mut jit = JitContext::new();
     {
         let mut compiler = Compiler::new(&mut jit, &analyzed.interner);
-        compiler.compile_program(&analyzed.program)
+        compiler
+            .compile_program(&analyzed.program)
             .map_err(|e| format!("compilation error: {}", e))?;
     }
     jit.finalize();
 
     // Execute main
-    let fn_ptr = jit.get_function_ptr("main")
+    let fn_ptr = jit
+        .get_function_ptr("main")
         .ok_or_else(|| "no 'main' function found".to_string())?;
 
     // Call main - it may or may not return a value

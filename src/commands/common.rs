@@ -4,7 +4,7 @@
 use std::io::IsTerminal;
 
 use crate::errors::render_diagnostics;
-use crate::frontend::{ast::Program, Interner, Parser};
+use crate::frontend::{Interner, Parser, ast::Program};
 use crate::sema::Analyzer;
 
 /// Result of parsing and analyzing a source file.
@@ -17,6 +17,7 @@ pub struct AnalyzedProgram {
 ///
 /// Returns `Ok(AnalyzedProgram)` on success, or `Err(())` if there were
 /// errors (diagnostics are rendered to stderr before returning).
+#[allow(clippy::result_unit_err)] // Error details are rendered internally
 pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgram, ()> {
     // Parse
     let mut parser = Parser::with_file(source, file_path);
