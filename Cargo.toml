@@ -11,6 +11,10 @@ path = "src/lib.rs"
 name = "vole"
 path = "src/bin/vole.rs"
 
+[[bin]]
+name = "vole-snap"
+path = "src/bin/vole_snap.rs"
+
 [dependencies]
 # Cranelift for JIT compilation
 cranelift = "0.116"

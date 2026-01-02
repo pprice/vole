@@ -5,4 +5,4 @@ pub mod diff;
 pub mod runner;
 
 pub use snapshot::Snapshot;
-pub use runner::{run_tests, bless_tests};
+pub use runner::{run_tests, bless_tests, TestSummary};
