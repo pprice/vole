@@ -864,4 +864,10 @@ mod tests {
         let source = "func main() { let x: i32 = 42 * 3 }";
         assert!(check(source).is_ok());
     }
+
+    #[test]
+    fn analyze_i32_to_i64_widening() {
+        let source = "func main() { let x: i32 = 42\n let y: i64 = x }";
+        assert!(check(source).is_ok());
+    }
 }
