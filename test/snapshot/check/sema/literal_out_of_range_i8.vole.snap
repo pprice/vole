@@ -1,9 +1,7 @@
 [stdout]
 
 [stderr]
-E2001
-
-  x expected i8, found integer literal
+  x [E2001]: expected i8, found integer literal
    ,-[<path>/literal_out_of_range_i8.vole:2:17]
  1 | func main() {
  2 |     let x: i8 = 200

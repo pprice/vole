@@ -10,5 +10,7 @@ pub mod sema;
 
 pub use lexer::LexerError;
 pub use parser::ParserError;
-pub use report::{render_to_stderr, render_to_string, render_to_writer};
+pub use report::{
+    get_color_mode, render_to_stderr, render_to_string, render_to_writer, set_color_mode,
+};
 pub use sema::SemanticError;

@@ -1,9 +1,7 @@
 [stdout]
 
 [stderr]
-E2002
-
-  x undefined variable 'undefined_var'
+  x [E2002]: undefined variable 'undefined_var'
    ,-[<path>/undefined_variable.vole:2:13]
  1 | func main() {
  2 |     println(undefined_var)
