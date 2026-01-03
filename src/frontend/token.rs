@@ -41,6 +41,7 @@ pub enum TokenType {
     Percent,
     EqEq,
     BangEq,
+    Bang, // !
     Lt,
     Gt,
     LtEq,
@@ -97,6 +98,7 @@ impl TokenType {
             Self::Percent => "%",
             Self::EqEq => "==",
             Self::BangEq => "!=",
+            Self::Bang => "!",
             Self::Lt => "<",
             Self::Gt => ">",
             Self::LtEq => "<=",
