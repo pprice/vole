@@ -71,20 +71,22 @@ pub enum PrimitiveType {
 }
 
 /// Block of statements
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
     pub span: Span,
 }
 
 /// Statements
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Stmt {
     Let(LetStmt),
     Expr(ExprStmt),
     While(WhileStmt),
+    For(ForStmt),
     If(IfStmt),
     Break(Span),
+    Continue(Span),
     Return(ReturnStmt),
 }
 
@@ -99,22 +101,31 @@ pub struct LetStmt {
 }
 
 /// Expression statement
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExprStmt {
     pub expr: Expr,
     pub span: Span,
 }
 
 /// While loop
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WhileStmt {
     pub condition: Expr,
     pub body: Block,
     pub span: Span,
 }
 
+/// For-in loop
+#[derive(Debug, Clone)]
+pub struct ForStmt {
+    pub var_name: Symbol,
+    pub iterable: Expr,
+    pub body: Block,
+    pub span: Span,
+}
+
 /// If statement/expression
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IfStmt {
     pub condition: Expr,
     pub then_branch: Block,
@@ -123,7 +134,7 @@ pub struct IfStmt {
 }
 
 /// Return statement
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ReturnStmt {
     pub value: Option<Expr>,
     pub span: Span,
@@ -153,9 +164,18 @@ pub enum ExprKind {
     Unary(Box<UnaryExpr>),
     Call(Box<CallExpr>),
     Assign(Box<AssignExpr>),
+    Range(Box<RangeExpr>),
 
     // Grouping
     Grouping(Box<Expr>),
+}
+
+/// Range expression (e.g., 0..10 or 0..=10)
+#[derive(Debug, Clone)]
+pub struct RangeExpr {
+    pub start: Expr,
+    pub end: Expr,
+    pub inclusive: bool,
 }
 
 /// Part of an interpolated string
