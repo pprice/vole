@@ -1,0 +1,37 @@
+// Semantic equality tests for mixed integer and float types
+
+tests "semantic equality" {
+    test "i32 equals i64 with same value" {
+        let a: i32 = 42
+        let b: i64 = 42
+        assert(a == b)
+        assert(b == a)
+    }
+
+    test "i32 equals i64 for negative values" {
+        let a: i32 = -100
+        let b: i64 = -100
+        assert(a == b)
+    }
+
+    test "i32 not equals different i64" {
+        let a: i32 = 42
+        let b: i64 = 43
+        assert(a != b)
+    }
+
+    test "i32 equals float with same value" {
+        let a: i32 = 42
+        let b: f64 = 42.0
+        assert(a == b)
+    }
+
+    test "zero equality across types" {
+        let i: i32 = 0
+        let l: i64 = 0
+        let f: f64 = 0.0
+        assert(i == l)
+        assert(i == f)
+        assert(l == f)
+    }
+}

@@ -1,0 +1,189 @@
+// Self Type Tests
+// Tests for the Self keyword in interfaces and implementations
+
+// === Interfaces ===
+
+interface Comparable {
+    func compare(other: Self) -> i32
+}
+
+interface Clonable {
+    func clone() -> Self
+}
+
+interface Chainable {
+    func chain() -> Self
+}
+
+interface BinaryOp {
+    func combine(other: Self) -> Self
+}
+
+interface Addable {
+    func add(other: Self) -> Self
+}
+
+interface Subtractable {
+    func sub(other: Self) -> Self
+}
+
+// === Implementations ===
+
+record Point implements Comparable {
+    x: i32,
+    y: i32,
+
+    func compare(other: Self) -> i32 {
+        return self.x - other.x
+    }
+}
+
+record Position implements Clonable {
+    x: i32,
+    y: i32,
+
+    func clone() -> Self {
+        return Position { x: self.x, y: self.y }
+    }
+}
+
+class Counter implements Comparable {
+    value: i32,
+
+    func compare(other: Self) -> i32 {
+        return self.value - other.value
+    }
+}
+
+record Builder implements Chainable {
+    count: i32,
+
+    func chain() -> Self {
+        return Builder { count: self.count + 1 }
+    }
+}
+
+record Vector implements BinaryOp {
+    x: i32,
+    y: i32,
+
+    func combine(other: Self) -> Self {
+        return Vector { x: self.x + other.x, y: self.y + other.y }
+    }
+}
+
+record Number implements Addable, Subtractable {
+    value: i32,
+
+    func add(other: Self) -> Self {
+        return Number { value: self.value + other.value }
+    }
+
+    func sub(other: Self) -> Self {
+        return Number { value: self.value - other.value }
+    }
+}
+
+// === Tests ===
+
+tests {
+
+    test "Self type in interface method" {
+        let a = Point { x: 10, y: 5 }
+        let b = Point { x: 3, y: 8 }
+        assert(a.compare(b) == 7)
+    }
+
+    test "Self type with negative result" {
+        let a = Point { x: 5, y: 0 }
+        let b = Point { x: 10, y: 0 }
+        assert(a.compare(b) == -5)
+    }
+
+    test "Self type in class method" {
+        let a = Counter { value: 100 }
+        let b = Counter { value: 42 }
+        assert(a.compare(b) == 58)
+    }
+
+    test "Self type as return type" {
+        let p = Position { x: 10, y: 20 }
+        let p2 = p.clone()
+        assert(p2.x == 10)
+        assert(p2.y == 20)
+    }
+
+    test "Self type with zero result" {
+        let a = Point { x: 7, y: 3 }
+        let b = Point { x: 7, y: 99 }
+        assert(a.compare(b) == 0)
+    }
+
+    test "cloned object is independent" {
+        let p = Position { x: 5, y: 5 }
+        let p2 = p.clone()
+        assert(p.x == 5)
+        assert(p2.x == 5)
+    }
+
+    test "single chain" {
+        let b = Builder { count: 0 }
+        let b2 = b.chain()
+        assert(b2.count == 1)
+    }
+
+    test "multiple chains" {
+        let b = Builder { count: 0 }
+        let b2 = b.chain().chain().chain()
+        assert(b2.count == 3)
+    }
+
+    test "combine two vectors" {
+        let v1 = Vector { x: 1, y: 2 }
+        let v2 = Vector { x: 3, y: 4 }
+        let v3 = v1.combine(v2)
+        assert(v3.x == 4)
+        assert(v3.y == 6)
+    }
+
+    test "combine chain" {
+        let v1 = Vector { x: 1, y: 1 }
+        let v2 = Vector { x: 2, y: 2 }
+        let v3 = Vector { x: 3, y: 3 }
+        let result = v1.combine(v2).combine(v3)
+        assert(result.x == 6)
+        assert(result.y == 6)
+    }
+
+    test "multiple interfaces - add" {
+        let a = Number { value: 10 }
+        let b = Number { value: 3 }
+        assert(a.add(b).value == 13)
+    }
+
+    test "multiple interfaces - sub" {
+        let a = Number { value: 10 }
+        let b = Number { value: 3 }
+        assert(a.sub(b).value == 7)
+    }
+
+    test "chain add and sub" {
+        let a = Number { value: 10 }
+        let b = Number { value: 5 }
+        let c = Number { value: 2 }
+        let result = a.add(b).sub(c)
+        assert(result.value == 13)
+    }
+
+    test "Self with large values" {
+        let a = Counter { value: 1000000 }
+        let b = Counter { value: 999999 }
+        assert(a.compare(b) == 1)
+    }
+
+    test "Self with negative class values" {
+        let a = Counter { value: -10 }
+        let b = Counter { value: -5 }
+        assert(a.compare(b) == -5)
+    }
+}

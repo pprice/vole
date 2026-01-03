@@ -1,0 +1,82 @@
+// Error handling tests
+
+error DivByZero {}
+error Overflow { value: i32, max: i32 }
+error NotFound {}
+
+func divide(a: i32, b: i32) -> fallible(i32, DivByZero) {
+    if b == 0 {
+        raise DivByZero {}
+    }
+    return a / b
+}
+
+func safeMath(a: i32, b: i32) -> fallible(i32, DivByZero | Overflow) {
+    if b == 0 {
+        raise DivByZero {}
+    }
+    if a > 100 {
+        raise Overflow {}
+    }
+    return a / b
+}
+
+error ReraiseA { x: i32 }
+error ReraiseB { y: string }
+
+func mayFailAB() -> fallible(i32, ReraiseA | ReraiseB) {
+    raise ReraiseA { x: 42 }
+}
+
+func wrapperOnlyA() -> fallible(i32, ReraiseA) {
+    return try mayFailAB() catch {
+        ReraiseA => raise  // Should re-raise as ReraiseA, not ReraiseA|ReraiseB
+        ReraiseB => 0
+    }
+}
+
+tests "error handling" {
+    test "bare raise types to matched pattern" {
+        // If bare raise was typed as ReraiseA|ReraiseB, this wouldn't compile
+        // because wrapperOnlyA only declares ReraiseA
+        let result = try wrapperOnlyA() catch { ReraiseA => -1 }
+        assert(result == -1)
+    }
+    test "try success returns value" {
+        let result = try divide(10, 2) catch {
+            DivByZero {} => -1
+        }
+        assert(result == 5)
+    }
+
+    test "try catch handles error" {
+        let result = try divide(10, 0) catch {
+            DivByZero {} => -1
+        }
+        assert(result == -1)
+    }
+
+    test "union error types success" {
+        let result = try safeMath(50, 2) catch {
+            DivByZero {} => -1
+            Overflow {} => 100
+        }
+        assert(result == 25)
+    }
+
+    test "union error types div by zero" {
+        let result = try safeMath(50, 0) catch {
+            DivByZero {} => -1
+            Overflow {} => 100
+        }
+        assert(result == -1)
+    }
+
+    test "union error types overflow" {
+        let result = try safeMath(200, 2) catch {
+            DivByZero {} => -1
+            Overflow {} => 100
+        }
+        assert(result == 100)
+    }
+}

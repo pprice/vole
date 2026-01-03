@@ -1,0 +1,61 @@
+// Generic Record Tests
+
+// Simple generic wrapper record
+record Wrapper<T> {
+    data: T,
+
+    func unwrap() -> T {
+        return self.data
+    }
+}
+
+// Generic key-value record
+record KeyValue<K, V> {
+    key: K,
+    value: V,
+
+    func getKey() -> K {
+        return self.key
+    }
+
+    func getValue() -> V {
+        return self.value
+    }
+}
+
+tests {
+
+    test "generics::records::wrapper with int" {
+        let w = Wrapper { data: 100 }
+        assert(w.data == 100)
+        assert(w.unwrap() == 100)
+    }
+
+    test "generics::records::wrapper with string" {
+        let w = Wrapper { data: "wrapped" }
+        assert(w.data == "wrapped")
+        assert(w.unwrap() == "wrapped")
+    }
+
+    test "generics::records::keyvalue different types" {
+        let kv = KeyValue { key: "name", value: 42 }
+        assert(kv.getKey() == "name")
+        assert(kv.getValue() == 42)
+    }
+
+    test "generics::records::keyvalue same types" {
+        let kv = KeyValue { key: 1, value: 2 }
+        assert(kv.getKey() == 1)
+        assert(kv.getValue() == 2)
+    }
+
+    test "generics::records::nested generic" {
+        let inner = Wrapper { data: 5 }
+        let outer = Wrapper { data: inner }
+        assert(outer.data.data == 5)
+    }
+}
+
+func main() {
+    // Entry point
+}

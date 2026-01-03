@@ -1,0 +1,25 @@
+// Builtin function tests
+// Math functions now require import from std:math
+
+let math = import "std:math"
+
+tests "Math" {
+    test "abs" {
+        assert(math.abs(-42.0) == 42.0)
+        assert(math.abs(42.0) == 42.0)
+        assert(math.abs(0.0) == 0.0)
+        assert(math.abs(-1.0) == 1.0)
+    }
+
+    test "min" {
+        assert(math.min(1.0, 2.0) == 1.0)
+        assert(math.min(5.0, 3.0) == 3.0)
+        assert(math.min(-1.0, 1.0) == -1.0)
+    }
+
+    test "max" {
+        assert(math.max(1.0, 2.0) == 2.0)
+        assert(math.max(5.0, 3.0) == 5.0)
+        assert(math.max(-1.0, 1.0) == 1.0)
+    }
+}

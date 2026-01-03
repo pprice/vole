@@ -1,0 +1,94 @@
+// Test else-if chains and if-as-expression
+
+tests "else-if chains" {
+    test "first branch matches" {
+        let mut result = ""
+        if 10 > 5 {
+            result = "big"
+        } else if 10 > 0 {
+            result = "small"
+        }
+        assert(result == "big")
+    }
+
+    test "second branch matches" {
+        let mut result = ""
+        if 3 > 5 {
+            result = "big"
+        } else if 3 > 0 {
+            result = "small"
+        }
+        assert(result == "small")
+    }
+
+    test "else branch negative" {
+        let mut result = ""
+        if -5 > 0 {
+            result = "positive"
+        } else if -5 < 0 {
+            result = "negative"
+        } else {
+            result = "zero"
+        }
+        assert(result == "negative")
+    }
+
+    test "else branch zero" {
+        let mut result = ""
+        if 0 > 0 {
+            result = "positive"
+        } else if 0 < 0 {
+            result = "negative"
+        } else {
+            result = "zero"
+        }
+        assert(result == "zero")
+    }
+}
+
+tests "if as expression" {
+    test "simple if-else returns value" {
+        let sign = if 10 > 0 { "positive" } else { "non-positive" }
+        assert(sign == "positive")
+    }
+
+    test "if-else returns else branch" {
+        let sign = if -5 > 0 { "positive" } else { "non-positive" }
+        assert(sign == "non-positive")
+    }
+
+    test "if expression with integers" {
+        let abs = if -10 < 0 { 10 } else { -10 }
+        assert(abs == 10)
+    }
+
+    test "if-else-if expression" {
+        let sign = if 0 > 0 { "positive" } else if 0 < 0 { "negative" } else { "zero" }
+        assert(sign == "zero")
+    }
+
+    test "nested if expression" {
+        let result = if 5 > 0 { if 10 > 5 { "b" } else { "a" } } else { "neg" }
+        assert(result == "b")
+    }
+
+    test "nested if expression inner else" {
+        let result = if 5 > 0 { if 10 < 5 { "b" } else { "a" } } else { "neg" }
+        assert(result == "a")
+    }
+
+    test "nested if expression outer else" {
+        let result = if 5 < 0 { if 10 > 5 { "b" } else { "a" } } else { "neg" }
+        assert(result == "neg")
+    }
+
+    test "deeply nested if expression" {
+        let result = if 1 > 0 { if 2 > 0 { if 3 > 0 { "deep" } else { "c" } } else { "b" } } else { "a" }
+        assert(result == "deep")
+    }
+
+    test "if expression arithmetic" {
+        let result = if 3 > 5 { 3 * 2 } else { 3 * 3 }
+        assert(result == 9)
+    }
+}

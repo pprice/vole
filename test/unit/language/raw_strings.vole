@@ -1,0 +1,16 @@
+tests "raw strings" {
+    test "basic raw string" {
+        let s = @"hello"
+        assert(s == "hello")
+    }
+
+    test "raw string with backslash" {
+        let s = @"C:\Users\name"
+        assert(s.length == 13)
+    }
+
+    test "raw string preserves backslashes" {
+        let s = @"C:\path\to\file"
+        assert(s == @"C:\path\to\file")
+    }
+}

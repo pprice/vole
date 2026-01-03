@@ -1,0 +1,60 @@
+// Generic Function Tests
+
+// Simple identity function
+func identity<T>(x: T) -> T {
+    return x
+}
+
+// Function with multiple type parameters
+func swap<A, B>(a: A, b: B) -> B {
+    return b
+}
+
+// Function that returns first element
+func first<T>(arr: [T]) -> T {
+    return arr[0]
+}
+
+tests {
+
+    test "generics::functions::identity with int" {
+        let result = identity(42)
+        assert(result == 42)
+    }
+
+    test "generics::functions::identity with string" {
+        let result = identity("hello")
+        assert(result == "hello")
+    }
+
+    test "generics::functions::identity with bool" {
+        let result = identity(true)
+        assert(result == true)
+    }
+
+    test "generics::functions::multiple type params" {
+        let result = swap(123, "world")
+        assert(result == "world")
+    }
+
+    test "generics::functions::swap types" {
+        let result = swap("first", 456)
+        assert(result == 456)
+    }
+
+    test "generics::functions::array element" {
+        let arr = [1, 2, 3]
+        let f = first(arr)
+        assert(f == 1)
+    }
+
+    test "generics::functions::string array element" {
+        let arr = ["a", "b", "c"]
+        let f = first(arr)
+        assert(f == "a")
+    }
+}
+
+func main() {
+    // Entry point
+}

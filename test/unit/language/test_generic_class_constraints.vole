@@ -1,0 +1,26 @@
+// Test that generic classes can call methods on constrained type parameters
+
+record Person {
+    name: string,
+    age: i32,
+}
+
+class Wrapper<T: { name: string }> {
+    value: T,
+
+    func getName() -> string {
+        return self.value.name
+    }
+}
+
+tests {
+
+    test "generic class with constrained type parameter" {
+        let wrapper = Wrapper { value: Person { name: "Alice", age: 30 } }
+        assert(wrapper.getName() == "Alice")
+    }
+}
+
+func main() {
+    // Entry point
+}

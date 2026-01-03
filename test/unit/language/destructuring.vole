@@ -1,0 +1,86 @@
+// Destructuring tests
+
+record Point {
+    x: i32,
+    y: i32,
+}
+
+record Person {
+    name: string,
+    age: i32,
+}
+
+tests "destructuring" {
+    test "let basic" {
+        let p = Point { x: 10, y: 20 }
+        let { x, y } = p
+        assert(x == 10)
+        assert(y == 20)
+    }
+
+    test "let with rename" {
+        let p = Point { x: 10, y: 20 }
+        let { x: a, y: b } = p
+        assert(a == 10)
+        assert(b == 20)
+    }
+
+    test "let partial" {
+        let p = Point { x: 10, y: 20 }
+        let { x } = p
+        assert(x == 10)
+    }
+
+    test "match without destructure - type pattern only" {
+        let p: Point | i32 = Point { x: 5, y: 10 }
+        let result = match p {
+            Point => 1
+            i32 => 0
+        }
+        assert(result == 1)
+    }
+
+    test "match with destructure - constant body" {
+        let p: Point | i32 = Point { x: 5, y: 10 }
+        let result = match p {
+            Point { x, y } => 100
+            i32 => 0
+        }
+        assert(result == 100)
+    }
+
+    test "match with destructure - using x" {
+        let p: Point | i32 = Point { x: 5, y: 10 }
+        let result = match p {
+            Point { x, y } => x
+            i32 => 0
+        }
+        assert(result == 5)
+    }
+
+    test "match with destructure - using y" {
+        let p: Point | i32 = Point { x: 5, y: 10 }
+        let result = match p {
+            Point { x, y } => y
+            i32 => 0
+        }
+        assert(result == 10)
+    }
+
+    test "match with destructure - sum" {
+        let p: Point | i32 = Point { x: 5, y: 10 }
+        let result = match p {
+            Point { x, y } => x + y
+            i32 => 0
+        }
+        assert(result == 15)
+    }
+
+    test "match destructure with rename" {
+        let p = Point { x: 5, y: 10 }
+        let result = match p {
+            Point { x: a, y: b } => a * b
+        }
+        assert(result == 50)
+    }
+}

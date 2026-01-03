@@ -1,0 +1,78 @@
+// Functional Interface Tests
+//
+// A "functional interface" is an interface with exactly one abstract method.
+// Lambdas matching the signature can be assigned to variables of that interface type.
+
+// ===========================================================================
+// Basic Functional Interfaces
+// ===========================================================================
+
+interface Predicate {
+    func check(value: i32) -> bool
+}
+
+interface Consumer {
+    func accept(value: i32)
+}
+
+interface Supplier {
+    func get() -> i32
+}
+
+interface Transform {
+    func apply(value: i32) -> i32
+}
+
+interface BiTransform {
+    func apply(a: i32, b: i32) -> i32
+}
+
+// ===========================================================================
+// Working Tests (module-level functional interfaces)
+// ===========================================================================
+
+// Functional interfaces work when declared at module level
+let isPositive: Predicate = (x: i32) -> bool => x > 0
+let double: Transform = (x: i32) -> i32 => x * 2
+let add: BiTransform = (a: i32, b: i32) -> i32 => a + b
+
+tests {
+    test "predicate interface - direct call" {
+        assert(isPositive(5) == true)
+        assert(isPositive(-3) == false)
+    }
+
+    test "predicate interface - method call" {
+        assert(isPositive.check(5) == true)
+        assert(isPositive.check(-3) == false)
+    }
+
+    test "transform interface" {
+        assert(double(21) == 42)
+        assert(double.apply(21) == 42)
+    }
+
+    test "bitransform interface" {
+        assert(add(20, 22) == 42)
+        assert(add.apply(20, 22) == 42)
+    }
+}
+
+// ===========================================================================
+// Local Functional Interfaces in Test Blocks
+// ===========================================================================
+
+tests "local functional interfaces" {
+    test "local predicate in test block" {
+        let pred: Predicate = (x: i32) -> bool => x > 0
+        assert(pred(5) == true)
+        assert(pred(-3) == false)
+        assert(pred.check(10) == true)
+    }
+
+    test "local transform in test block" {
+        let triple: Transform = (x: i32) -> i32 => x * 3
+        assert(triple(7) == 21)
+        assert(triple.apply(10) == 30)
+    }
+}
