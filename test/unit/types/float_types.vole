@@ -1,0 +1,112 @@
+// Test float types and literal coercion
+
+tests "f32 type" {
+    test "f32 positive" {
+        let x: f32 = 1.5
+        assert(x > 1.0)
+        assert(x < 2.0)
+    }
+
+    test "f32 negative" {
+        let x: f32 = -2.5
+        assert(x < 0.0)
+    }
+
+    test "f32 zero" {
+        let x: f32 = 0.0
+        assert(x == 0.0)
+    }
+
+    test "f32 arithmetic" {
+        let a: f32 = 10.0
+        let b: f32 = 3.0
+        assert(a + b > 12.0)
+        assert(a - b > 6.0)
+        assert(a * b > 29.0)
+        assert(a / b > 3.0)
+    }
+}
+
+tests "f64 type" {
+    test "f64 default inference" {
+        let x = 3.14
+        assert(x > 3.0)
+        assert(x < 4.0)
+    }
+
+    test "f64 explicit" {
+        let x: f64 = 2.718281828
+        assert(x > 2.7)
+    }
+
+    test "f64 negative" {
+        let x: f64 = -1.5
+        assert(x < 0.0)
+    }
+
+    test "f64 precision" {
+        let x: f64 = 0.1
+        let y: f64 = 0.2
+        let sum = x + y
+        assert(sum > 0.29)
+        assert(sum < 0.31)
+    }
+}
+
+tests "float arithmetic" {
+    test "addition" {
+        let a = 1.5
+        let b = 2.5
+        assert(a + b == 4.0)
+    }
+
+    test "subtraction" {
+        let a = 5.0
+        let b = 2.5
+        assert(a - b == 2.5)
+    }
+
+    test "multiplication" {
+        let a = 1.5
+        assert(a * 2.0 == 3.0)
+    }
+
+    test "division" {
+        let x = 7.0
+        let y = 2.0
+        assert(x / y == 3.5)
+    }
+}
+
+tests "float comparisons" {
+    test "less than" {
+        let a: f64 = 1.5
+        let b: f64 = 2.5
+        assert(a < b)
+    }
+
+    test "greater than" {
+        let a: f64 = 3.5
+        let b: f64 = 2.5
+        assert(a > b)
+    }
+
+    test "less than or equal" {
+        let a: f64 = 2.5
+        let b: f64 = 2.5
+        assert(a <= b)
+    }
+
+    test "greater than or equal" {
+        let a: f64 = 2.5
+        let b: f64 = 2.5
+        assert(a >= b)
+    }
+
+    test "f32 comparisons" {
+        let a: f32 = 1.0
+        let b: f32 = 2.0
+        assert(a < b)
+        assert(b > a)
+    }
+}
