@@ -328,10 +328,8 @@ mod tests {
     #[test]
     fn type_normalize_union() {
         // Nested unions flatten
-        let normalized = Type::normalize_union(vec![
-            Type::I32,
-            Type::Union(vec![Type::String, Type::Nil]),
-        ]);
+        let normalized =
+            Type::normalize_union(vec![Type::I32, Type::Union(vec![Type::String, Type::Nil])]);
         assert!(matches!(normalized, Type::Union(v) if v.len() == 3));
 
         // Single element unwraps

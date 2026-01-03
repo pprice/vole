@@ -59,7 +59,7 @@ pub struct Param {
 pub enum TypeExpr {
     Primitive(PrimitiveType),
     Named(Symbol),
-    Array(Box<TypeExpr>), // [i32], [string], etc.
+    Array(Box<TypeExpr>),    // [i32], [string], etc.
     Optional(Box<TypeExpr>), // T? syntax (desugars to Union with Nil)
     Union(Vec<TypeExpr>),    // A | B | C
     Nil,                     // nil type
