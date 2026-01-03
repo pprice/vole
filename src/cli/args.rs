@@ -95,6 +95,42 @@ pub enum Commands {
     },
     /// Show version information
     Version,
+    /// Run benchmarks with timing statistics
+    Bench {
+        /// Paths to benchmark (files, directories, or glob patterns)
+        #[arg(value_name = "PATHS", required = true)]
+        paths: Vec<String>,
+
+        /// Number of runtime iterations (default: 5)
+        #[arg(short = 'n', long, default_value_t = 5)]
+        iterations: u32,
+
+        /// Warmup iterations before measuring (default: 1)
+        #[arg(short, long, default_value_t = 1)]
+        warmup: u32,
+
+        /// Save JSON results to file
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+
+        /// Show per-phase compile timing
+        #[arg(long)]
+        detailed: bool,
+
+        /// Run even on debug builds
+        #[arg(long)]
+        force: bool,
+    },
+    /// Compare benchmark results against a baseline
+    BenchCompare {
+        /// Baseline JSON file to compare against
+        #[arg(value_name = "BASELINE")]
+        baseline: PathBuf,
+
+        /// Save new results as baseline
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Clone, Debug, ValueEnum)]

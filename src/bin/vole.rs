@@ -33,5 +33,7 @@ fn main() -> ExitCode {
             imports,
         } => inspect_files(&files, inspect_type, no_tests, imports.as_deref()),
         Commands::Version => print_version(),
+        Commands::Bench { .. } => todo!("bench command not yet implemented"),
+        Commands::BenchCompare { .. } => todo!("bench-compare command not yet implemented"),
     }
 }
