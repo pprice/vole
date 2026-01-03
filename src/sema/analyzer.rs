@@ -133,6 +133,9 @@ impl Analyzer {
                 let elem_ty = self.resolve_type(elem);
                 Type::Array(Box::new(elem_ty))
             }
+            TypeExpr::Optional(_) | TypeExpr::Union(_) | TypeExpr::Nil => {
+                todo!("optional/union/nil types not yet implemented in semantic analysis")
+            }
         }
     }
 
@@ -1020,6 +1023,10 @@ impl Analyzer {
                 }
 
                 Ok(result_type.unwrap_or(Type::Void))
+            }
+
+            ExprKind::Nil | ExprKind::NullCoalesce(_) | ExprKind::Is(_) => {
+                todo!("nil/null-coalesce/is expressions not yet implemented in semantic analysis")
             }
         }
     }

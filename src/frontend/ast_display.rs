@@ -155,6 +155,21 @@ impl<'a> AstPrinter<'a> {
                 self.write_type_inline(out, elem_ty);
                 out.push(']');
             }
+            TypeExpr::Optional(inner) => {
+                self.write_type_inline(out, inner);
+                out.push('?');
+            }
+            TypeExpr::Union(types) => {
+                for (i, ty) in types.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(" | ");
+                    }
+                    self.write_type_inline(out, ty);
+                }
+            }
+            TypeExpr::Nil => {
+                out.push_str("nil");
+            }
         }
     }
 
@@ -411,6 +426,36 @@ impl<'a> AstPrinter<'a> {
                     out.push_str("body:\n");
                     arm_inner.indented().write_expr(out, &arm.body);
                 }
+            }
+
+            ExprKind::Nil => {
+                self.write_indent(out);
+                writeln!(out, "Nil").unwrap();
+            }
+
+            ExprKind::NullCoalesce(nc) => {
+                self.write_indent(out);
+                writeln!(out, "NullCoalesce").unwrap();
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("value:\n");
+                inner.indented().write_expr(out, &nc.value);
+                inner.write_indent(out);
+                out.push_str("default:\n");
+                inner.indented().write_expr(out, &nc.default);
+            }
+
+            ExprKind::Is(is_expr) => {
+                self.write_indent(out);
+                writeln!(out, "Is").unwrap();
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("value:\n");
+                inner.indented().write_expr(out, &is_expr.value);
+                inner.write_indent(out);
+                out.push_str("type: ");
+                self.write_type_inline(out, &is_expr.type_expr);
+                out.push('\n');
             }
         }
     }

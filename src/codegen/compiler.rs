@@ -548,6 +548,9 @@ fn resolve_type_expr(ty: &TypeExpr) -> Type {
             let elem_ty = resolve_type_expr(elem);
             Type::Array(Box::new(elem_ty))
         }
+        TypeExpr::Optional(_) | TypeExpr::Union(_) | TypeExpr::Nil => {
+            todo!("optional/union/nil types not yet implemented in codegen")
+        }
     }
 }
 
@@ -1531,6 +1534,10 @@ fn compile_expr(
                 ty: types::I64,
                 vole_type: result_vole_type,
             })
+        }
+
+        ExprKind::Nil | ExprKind::NullCoalesce(_) | ExprKind::Is(_) => {
+            todo!("nil/null-coalesce/is expressions not yet implemented in codegen")
         }
     }
 }
