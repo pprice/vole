@@ -140,6 +140,7 @@ pub extern "C" fn vole_array_with_capacity(capacity: usize) -> *mut RcArray {
     RcArray::with_capacity(capacity)
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_push(arr: *mut RcArray, tag: u64, value: u64) {
     unsafe {
@@ -147,16 +148,25 @@ pub extern "C" fn vole_array_push(arr: *mut RcArray, tag: u64, value: u64) {
     }
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_get_tag(arr: *const RcArray, index: usize) -> u64 {
+    if arr.is_null() {
+        return 0;
+    }
     unsafe { RcArray::get(arr, index).tag }
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_get_value(arr: *const RcArray, index: usize) -> u64 {
+    if arr.is_null() {
+        return 0;
+    }
     unsafe { RcArray::get(arr, index).value }
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64) {
     unsafe {
@@ -164,16 +174,22 @@ pub extern "C" fn vole_array_set(arr: *mut RcArray, index: usize, tag: u64, valu
     }
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_len(arr: *const RcArray) -> usize {
+    if arr.is_null() {
+        return 0;
+    }
     unsafe { RcArray::len(arr) }
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_inc(ptr: *mut RcArray) {
     unsafe { RcArray::inc_ref(ptr) }
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_dec(ptr: *mut RcArray) {
     unsafe { RcArray::dec_ref(ptr) }

@@ -46,6 +46,9 @@ impl RcArray {
     }
 
     /// Push a value onto the array
+    ///
+    /// # Safety
+    /// `arr` must be a valid pointer to an initialized `RcArray`
     pub unsafe fn push(arr: *mut Self, value: TaggedValue) {
         unsafe {
             let len = (*arr).len;
@@ -61,6 +64,9 @@ impl RcArray {
     }
 
     /// Grow the array capacity
+    ///
+    /// # Safety
+    /// `arr` must be a valid pointer to an initialized `RcArray`
     unsafe fn grow(arr: *mut Self) {
         unsafe {
             let old_cap = (*arr).capacity;
@@ -86,6 +92,10 @@ impl RcArray {
     }
 
     /// Get element at index
+    ///
+    /// # Safety
+    /// `arr` must be a valid pointer to an initialized `RcArray` and
+    /// `index` must be less than the array length
     pub unsafe fn get(arr: *const Self, index: usize) -> TaggedValue {
         unsafe {
             debug_assert!(index < (*arr).len);
@@ -94,6 +104,10 @@ impl RcArray {
     }
 
     /// Set element at index
+    ///
+    /// # Safety
+    /// `arr` must be a valid pointer to an initialized `RcArray` and
+    /// `index` must be less than the array length
     pub unsafe fn set(arr: *mut Self, index: usize, value: TaggedValue) {
         unsafe {
             debug_assert!(index < (*arr).len);
@@ -102,11 +116,17 @@ impl RcArray {
     }
 
     /// Get array length
+    ///
+    /// # Safety
+    /// `arr` must be a valid pointer to an initialized `RcArray`
     pub unsafe fn len(arr: *const Self) -> usize {
         unsafe { (*arr).len }
     }
 
     /// Increment reference count
+    ///
+    /// # Safety
+    /// `ptr` must be null or a valid pointer to an initialized `RcArray`
     pub unsafe fn inc_ref(ptr: *mut Self) {
         unsafe {
             if !ptr.is_null() {
@@ -116,6 +136,9 @@ impl RcArray {
     }
 
     /// Decrement reference count and free if zero
+    ///
+    /// # Safety
+    /// `ptr` must be null or a valid pointer to an initialized `RcArray`
     pub unsafe fn dec_ref(ptr: *mut Self) {
         if ptr.is_null() {
             return;
