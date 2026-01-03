@@ -918,6 +918,69 @@ impl<'src> Parser<'src> {
         })
     }
 
+    /// Parse a lambda expression: (params) => body
+    fn lambda_expr(&mut self, start_span: Span) -> Result<Expr, ParseError> {
+        // We've already consumed '(' - parse parameters
+        let mut params = Vec::new();
+
+        if !self.check(TokenType::RParen) {
+            loop {
+                let param_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected parameter name")?;
+                let name = self.interner.intern(&param_token.lexeme);
+
+                let ty = if self.match_token(TokenType::Colon) {
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+
+                params.push(LambdaParam {
+                    name,
+                    ty,
+                    span: param_token.span,
+                });
+
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RParen, "expected ')' after lambda parameters")?;
+
+        // Optional return type
+        let return_type = if self.match_token(TokenType::Arrow) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        self.consume(TokenType::FatArrow, "expected '=>' after lambda parameters")?;
+
+        // Parse body - block or expression
+        let body = if self.check(TokenType::LBrace) {
+            LambdaBody::Block(self.block()?)
+        } else {
+            LambdaBody::Expr(Box::new(self.expression(0)?))
+        };
+
+        let end_span = match &body {
+            LambdaBody::Block(b) => b.span,
+            LambdaBody::Expr(e) => e.span,
+        };
+
+        Ok(Expr {
+            kind: ExprKind::Lambda(Box::new(LambdaExpr {
+                params,
+                return_type,
+                body,
+                span: start_span.merge(end_span),
+            })),
+            span: start_span.merge(end_span),
+        })
+    }
+
     /// Parse a single match arm
     fn match_arm(&mut self) -> Result<MatchArm, ParseError> {
         let start_span = self.current.span;
