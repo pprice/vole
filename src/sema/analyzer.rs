@@ -182,24 +182,14 @@ impl Analyzer {
     fn check_stmt(&mut self, stmt: &Stmt, interner: &Interner) -> Result<(), Vec<TypeError>> {
         match stmt {
             Stmt::Let(let_stmt) => {
-                let init_type = self.check_expr(&let_stmt.init, interner)?;
+                let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t));
+                let init_type = self.check_expr_expecting(
+                    &let_stmt.init,
+                    declared_type.as_ref(),
+                    interner,
+                )?;
 
-                let var_type = if let Some(ty) = &let_stmt.ty {
-                    let declared = self.resolve_type(ty);
-                    if !self.types_compatible(&init_type, &declared) {
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: declared.name().to_string(),
-                                found: init_type.name().to_string(),
-                                span: let_stmt.span.into(),
-                            },
-                            let_stmt.span,
-                        );
-                    }
-                    declared
-                } else {
-                    init_type
-                };
+                let var_type = declared_type.unwrap_or(init_type);
 
                 self.scope.define(
                     let_stmt.name,
