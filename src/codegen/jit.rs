@@ -63,6 +63,10 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
         self.import_function("vole_string_concat", &sig);
 
+        // vole_string_eq(a: *const RcString, b: *const RcString) -> i8 (0 or 1)
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I8));
+        self.import_function("vole_string_eq", &sig);
+
         // vole_println_string(ptr: *const RcString)
         let sig = self.create_signature(&[ptr_ty], None);
         self.import_function("vole_println_string", &sig);
@@ -141,6 +145,10 @@ impl JitContext {
         builder.symbol(
             "vole_string_data",
             crate::runtime::string::vole_string_data as *const u8,
+        );
+        builder.symbol(
+            "vole_string_eq",
+            crate::runtime::string::vole_string_eq as *const u8,
         );
         builder.symbol(
             "vole_string_concat",

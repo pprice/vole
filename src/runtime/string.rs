@@ -154,6 +154,23 @@ pub extern "C" fn vole_string_data(ptr: *const RcString) -> *const u8 {
     unsafe { (ptr as *const u8).add(std::mem::size_of::<RcString>()) }
 }
 
+/// Compare two strings for equality, returns 1 if equal, 0 otherwise
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_string_eq(a: *const RcString, b: *const RcString) -> i8 {
+    if a.is_null() && b.is_null() {
+        return 1;
+    }
+    if a.is_null() || b.is_null() {
+        return 0;
+    }
+    unsafe {
+        let a_str = (*a).as_str();
+        let b_str = (*b).as_str();
+        if a_str == b_str { 1 } else { 0 }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
