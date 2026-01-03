@@ -153,6 +153,15 @@ impl<'src> Parser<'src> {
         let start_span = self.current.span;
         self.advance(); // consume 'tests'
 
+        // Parse optional label
+        let label = if self.check(TokenType::StringLiteral) {
+            let label_token = self.current.clone();
+            self.advance();
+            Some(self.process_string_content(&label_token.lexeme))
+        } else {
+            None
+        };
+
         self.consume(TokenType::LBrace, "expected '{' after 'tests'")?;
         self.skip_newlines();
 
@@ -165,7 +174,7 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::RBrace, "expected '}' to close tests block")?;
         let span = start_span.merge(self.previous.span);
 
-        Ok(Decl::Tests(TestsDecl { tests, span }))
+        Ok(Decl::Tests(TestsDecl { label, tests, span }))
     }
 
     fn test_case(&mut self) -> Result<TestCase, ParseError> {
