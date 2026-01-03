@@ -727,4 +727,10 @@ mod tests {
         let result = check(source);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn analyze_i32_literal_coercion() {
+        let source = "func main() { let x: i32 = 42 }";
+        assert!(check(source).is_ok());
+    }
 }
