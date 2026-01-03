@@ -451,6 +451,11 @@ impl<'src> Parser<'src> {
                 TokenType::GtEq => BinaryOp::Ge,
                 TokenType::AmpAmp => BinaryOp::And,
                 TokenType::PipePipe => BinaryOp::Or,
+                TokenType::Ampersand => BinaryOp::BitAnd,
+                TokenType::Pipe => BinaryOp::BitOr,
+                TokenType::Caret => BinaryOp::BitXor,
+                TokenType::LessLess => BinaryOp::Shl,
+                TokenType::GreaterGreater => BinaryOp::Shr,
                 TokenType::Eq => {
                     // Assignment - special handling
                     if let ExprKind::Identifier(sym) = left.kind {
@@ -488,7 +493,7 @@ impl<'src> Parser<'src> {
         Ok(left)
     }
 
-    /// Parse a unary expression (- or !)
+    /// Parse a unary expression (-, !, ~)
     fn unary(&mut self) -> Result<Expr, ParseError> {
         if self.match_token(TokenType::Minus) {
             let op_span = self.previous.span;
@@ -510,6 +515,19 @@ impl<'src> Parser<'src> {
             return Ok(Expr {
                 kind: ExprKind::Unary(Box::new(UnaryExpr {
                     op: UnaryOp::Not,
+                    operand,
+                })),
+                span,
+            });
+        }
+
+        if self.match_token(TokenType::Tilde) {
+            let op_span = self.previous.span;
+            let operand = self.unary()?;
+            let span = op_span.merge(operand.span);
+            return Ok(Expr {
+                kind: ExprKind::Unary(Box::new(UnaryExpr {
+                    op: UnaryOp::BitNot,
                     operand,
                 })),
                 span,
@@ -1193,6 +1211,144 @@ tests {
                         assert_eq!(inner.op, BinaryOp::And);
                     }
                     _ => panic!("expected && on right"),
+                }
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_and() {
+        let mut parser = Parser::new("a & b");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::BitAnd);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_or() {
+        let mut parser = Parser::new("a | b");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::BitOr);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_xor() {
+        let mut parser = Parser::new("a ^ b");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::BitXor);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_shift_left() {
+        let mut parser = Parser::new("a << b");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::Shl);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_shift_right() {
+        let mut parser = Parser::new("a >> b");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::Shr);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_not() {
+        let mut parser = Parser::new("~a");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Unary(un) => {
+                assert_eq!(un.op, UnaryOp::BitNot);
+            }
+            _ => panic!("expected unary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_precedence() {
+        // a | b ^ c & d should be a | (b ^ (c & d))
+        // because & > ^ > |
+        let mut parser = Parser::new("a | b ^ c & d");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::BitOr);
+                match &bin.right.kind {
+                    ExprKind::Binary(xor_bin) => {
+                        assert_eq!(xor_bin.op, BinaryOp::BitXor);
+                        match &xor_bin.right.kind {
+                            ExprKind::Binary(and_bin) => {
+                                assert_eq!(and_bin.op, BinaryOp::BitAnd);
+                            }
+                            _ => panic!("expected & on right of ^"),
+                        }
+                    }
+                    _ => panic!("expected ^ on right of |"),
+                }
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_shift_vs_additive_precedence() {
+        // a + b << c should be (a + b) << c
+        // because + > << in precedence
+        let mut parser = Parser::new("a + b << c");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::Shl);
+                match &bin.left.kind {
+                    ExprKind::Binary(add_bin) => {
+                        assert_eq!(add_bin.op, BinaryOp::Add);
+                    }
+                    _ => panic!("expected + on left of <<"),
+                }
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_vs_logical_precedence() {
+        // a && b | c should be a && (b | c)
+        // because | > && in precedence
+        let mut parser = Parser::new("a && b | c");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::And);
+                match &bin.right.kind {
+                    ExprKind::Binary(or_bin) => {
+                        assert_eq!(or_bin.op, BinaryOp::BitOr);
+                    }
+                    _ => panic!("expected | on right of &&"),
                 }
             }
             _ => panic!("expected binary expression"),

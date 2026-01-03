@@ -138,13 +138,17 @@ impl TokenType {
     /// Get precedence for binary operators (Pratt parsing)
     pub fn precedence(&self) -> u8 {
         match self {
-            Self::Eq => 1,                                      // assignment (lowest)
-            Self::PipePipe => 2,                                // logical or
-            Self::AmpAmp => 3,                                  // logical and
-            Self::EqEq | Self::BangEq => 4,                     // equality
-            Self::Lt | Self::Gt | Self::LtEq | Self::GtEq => 5, // comparison
-            Self::Plus | Self::Minus => 6,                      // additive
-            Self::Star | Self::Slash | Self::Percent => 7,      // multiplicative
+            Self::Eq => 1,                                       // assignment (lowest)
+            Self::PipePipe => 2,                                 // logical or
+            Self::AmpAmp => 3,                                   // logical and
+            Self::Pipe => 4,                                     // bitwise or
+            Self::Caret => 5,                                    // bitwise xor
+            Self::Ampersand => 6,                                // bitwise and
+            Self::EqEq | Self::BangEq => 7,                      // equality
+            Self::Lt | Self::Gt | Self::LtEq | Self::GtEq => 8,  // comparison
+            Self::LessLess | Self::GreaterGreater => 9,          // shifts
+            Self::Plus | Self::Minus => 10,                      // additive
+            Self::Star | Self::Slash | Self::Percent => 11,      // multiplicative
             _ => 0,
         }
     }
