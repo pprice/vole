@@ -17,6 +17,7 @@ pub struct Program {
 pub enum Decl {
     Function(FuncDecl),
     Tests(TestsDecl),
+    Let(LetStmt),
 }
 
 /// Function declaration
