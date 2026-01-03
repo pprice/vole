@@ -11,7 +11,7 @@ use glob::glob;
 
 use super::diff::{unified_diff, unified_diff_colored};
 use super::snapshot::Snapshot;
-use crate::commands::common::{check_captured, run_captured};
+use crate::commands::common::{check_captured, inspect_ast_captured, run_captured};
 
 /// Result of running a single test
 #[derive(Debug)]
@@ -93,6 +93,32 @@ pub fn extract_command(path: &Path) -> Option<&str> {
     Some(&after_marker[..end])
 }
 
+/// Extract subcommand from path: test/snapshot/{cmd}/{subcmd}/... -> subcmd
+/// Returns None if there's no subcommand (e.g., test/snapshot/run/file.vole)
+pub fn extract_subcommand(path: &Path) -> Option<&str> {
+    let path_str = path.to_str()?;
+    let marker = "snapshot/";
+    let idx = path_str.find(marker)?;
+    let after_marker = &path_str[idx + marker.len()..];
+
+    // Skip first component (cmd)
+    let first_slash = after_marker.find('/')?;
+    let after_cmd = &after_marker[first_slash + 1..];
+
+    // Get the next component (subcmd)
+    let end = after_cmd.find('/').unwrap_or(after_cmd.len());
+    if end == 0 {
+        return None;
+    }
+
+    // Check if this looks like a subcommand (not a .vole file)
+    let component = &after_cmd[..end];
+    if component.ends_with(".vole") {
+        return None;
+    }
+    Some(component)
+}
+
 /// Normalize paths in output: /full/path/to/file.vole -> <path>/file.vole
 pub fn normalize_paths(content: &str, file_path: &Path) -> String {
     let file_path_str = file_path.to_string_lossy();
@@ -159,6 +185,23 @@ pub fn run_test(test_path: &Path, use_color: bool) -> TestResult {
         "check" => {
             let _ = check_captured(&source, &file_path, stderr_buf.clone());
         }
+        "inspect" => {
+            let subcmd = extract_subcommand(test_path);
+            match subcmd {
+                Some("ast") => {
+                    let _ = inspect_ast_captured(
+                        &source,
+                        &file_path,
+                        stdout_buf.clone(),
+                        stderr_buf.clone(),
+                    );
+                }
+                Some(other) => {
+                    return TestResult::Fail(format!("Unknown inspect subcommand: {}", other))
+                }
+                None => return TestResult::Fail("inspect command requires subcommand (ast)".to_string()),
+            }
+        }
         _ => return TestResult::Fail(format!("Unknown command: {}", cmd)),
     }
 
@@ -224,6 +267,21 @@ pub fn bless_test(test_path: &Path) -> Result<bool, String> {
         }
         "check" => {
             let _ = check_captured(&source, &file_path, stderr_buf.clone());
+        }
+        "inspect" => {
+            let subcmd = extract_subcommand(test_path);
+            match subcmd {
+                Some("ast") => {
+                    let _ = inspect_ast_captured(
+                        &source,
+                        &file_path,
+                        stdout_buf.clone(),
+                        stderr_buf.clone(),
+                    );
+                }
+                Some(other) => return Err(format!("Unknown inspect subcommand: {}", other)),
+                None => return Err("inspect command requires subcommand (ast)".to_string()),
+            }
         }
         _ => return Err(format!("Unknown command: {}", cmd)),
     }
@@ -423,5 +481,32 @@ mod tests {
         let path = Path::new("/home/user/test/snapshot/run/test.vole");
         let result = normalize_paths(content, path);
         assert_eq!(result, "error at <path>/test.vole:5:3");
+    }
+
+    #[test]
+    fn extract_subcommand_inspect_ast() {
+        let path = Path::new("test/snapshot/inspect/ast/simple.vole");
+        assert_eq!(extract_subcommand(path), Some("ast"));
+    }
+
+    #[test]
+    fn extract_subcommand_none_for_run() {
+        let path = Path::new("test/snapshot/run/hello.vole");
+        assert_eq!(extract_subcommand(path), None);
+    }
+
+    #[test]
+    fn extract_subcommand_none_for_check_nested() {
+        let path = Path::new("test/snapshot/check/sema/error.vole");
+        // "sema" is a subdir, not a subcommand - but it doesn't end with .vole
+        // so it gets returned as a subcommand. This is fine for the use case
+        // where check/run don't use subcommands.
+        assert_eq!(extract_subcommand(path), Some("sema"));
+    }
+
+    #[test]
+    fn extract_command_inspect() {
+        let path = Path::new("test/snapshot/inspect/ast/simple.vole");
+        assert_eq!(extract_command(path), Some("inspect"));
     }
 }

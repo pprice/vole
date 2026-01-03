@@ -102,7 +102,7 @@ pub fn inspect_files(
                     Err(e) => {
                         let report = miette::Report::new(e.error.clone())
                             .with_source_code(NamedSource::new(
-                                file_path.to_string(),
+                                &file_path,
                                 source.clone(),
                             ));
                         render_to_stderr(report.as_ref());
@@ -119,7 +119,7 @@ pub fn inspect_files(
                     for err in &errors {
                         let report = miette::Report::new(err.error.clone())
                             .with_source_code(NamedSource::new(
-                                file_path.to_string(),
+                                &file_path,
                                 source.clone(),
                             ));
                         render_to_stderr(report.as_ref());
