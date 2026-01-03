@@ -1010,9 +1010,14 @@ fn compile_expr(
             // Determine result type (promote to wider type)
             let result_ty = if left.ty == types::F64 || right.ty == types::F64 {
                 types::F64
+            } else if left.ty == types::F32 || right.ty == types::F32 {
+                types::F32
             } else {
-                types::I64
+                left.ty
             };
+
+            // Save the left operand's vole_type before conversion (for signed/unsigned op selection)
+            let left_vole_type = left.vole_type.clone();
 
             // Convert operands if needed
             let left_val = convert_to_type(builder, left, result_ty);
@@ -1041,19 +1046,23 @@ fn compile_expr(
                     }
                 }
                 BinaryOp::Div => {
-                    if result_ty == types::F64 {
+                    if result_ty == types::F64 || result_ty == types::F32 {
                         builder.ins().fdiv(left_val, right_val)
+                    } else if left_vole_type.is_unsigned() {
+                        builder.ins().udiv(left_val, right_val)
                     } else {
                         builder.ins().sdiv(left_val, right_val)
                     }
                 }
                 BinaryOp::Mod => {
-                    if result_ty == types::F64 {
+                    if result_ty == types::F64 || result_ty == types::F32 {
                         // Floating-point modulo: a - (a/b).floor() * b
                         let div = builder.ins().fdiv(left_val, right_val);
                         let floor = builder.ins().floor(div);
                         let mul = builder.ins().fmul(floor, right_val);
                         builder.ins().fsub(left_val, mul)
+                    } else if left_vole_type.is_unsigned() {
+                        builder.ins().urem(left_val, right_val)
                     } else {
                         builder.ins().srem(left_val, right_val)
                     }
@@ -1073,8 +1082,12 @@ fn compile_expr(
                     }
                 }
                 BinaryOp::Lt => {
-                    if result_ty == types::F64 {
+                    if result_ty == types::F64 || result_ty == types::F32 {
                         builder.ins().fcmp(FloatCC::LessThan, left_val, right_val)
+                    } else if left_vole_type.is_unsigned() {
+                        builder
+                            .ins()
+                            .icmp(IntCC::UnsignedLessThan, left_val, right_val)
                     } else {
                         builder
                             .ins()
@@ -1082,10 +1095,14 @@ fn compile_expr(
                     }
                 }
                 BinaryOp::Gt => {
-                    if result_ty == types::F64 {
+                    if result_ty == types::F64 || result_ty == types::F32 {
                         builder
                             .ins()
                             .fcmp(FloatCC::GreaterThan, left_val, right_val)
+                    } else if left_vole_type.is_unsigned() {
+                        builder
+                            .ins()
+                            .icmp(IntCC::UnsignedGreaterThan, left_val, right_val)
                     } else {
                         builder
                             .ins()
@@ -1093,10 +1110,14 @@ fn compile_expr(
                     }
                 }
                 BinaryOp::Le => {
-                    if result_ty == types::F64 {
+                    if result_ty == types::F64 || result_ty == types::F32 {
                         builder
                             .ins()
                             .fcmp(FloatCC::LessThanOrEqual, left_val, right_val)
+                    } else if left_vole_type.is_unsigned() {
+                        builder
+                            .ins()
+                            .icmp(IntCC::UnsignedLessThanOrEqual, left_val, right_val)
                     } else {
                         builder
                             .ins()
@@ -1104,10 +1125,14 @@ fn compile_expr(
                     }
                 }
                 BinaryOp::Ge => {
-                    if result_ty == types::F64 {
+                    if result_ty == types::F64 || result_ty == types::F32 {
                         builder
                             .ins()
                             .fcmp(FloatCC::GreaterThanOrEqual, left_val, right_val)
+                    } else if left_vole_type.is_unsigned() {
+                        builder
+                            .ins()
+                            .icmp(IntCC::UnsignedGreaterThanOrEqual, left_val, right_val)
                     } else {
                         builder
                             .ins()
@@ -1121,7 +1146,13 @@ fn compile_expr(
                 BinaryOp::BitOr => builder.ins().bor(left_val, right_val),
                 BinaryOp::BitXor => builder.ins().bxor(left_val, right_val),
                 BinaryOp::Shl => builder.ins().ishl(left_val, right_val),
-                BinaryOp::Shr => builder.ins().sshr(left_val, right_val),
+                BinaryOp::Shr => {
+                    if left_vole_type.is_unsigned() {
+                        builder.ins().ushr(left_val, right_val)
+                    } else {
+                        builder.ins().sshr(left_val, right_val)
+                    }
+                }
             };
 
             // Comparison operators return I8 (bool)
@@ -1146,13 +1177,7 @@ fn compile_expr(
                 | BinaryOp::Le
                 | BinaryOp::Ge => Type::Bool,
                 BinaryOp::And | BinaryOp::Or => unreachable!(),
-                _ => {
-                    if result_ty == types::F64 {
-                        Type::F64
-                    } else {
-                        Type::I64
-                    }
-                }
+                _ => left_vole_type,
             };
 
             Ok(CompiledValue {
