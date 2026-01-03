@@ -28,6 +28,8 @@ pub struct Analyzer {
     globals: HashMap<Symbol, Type>,
     current_function_return: Option<Type>,
     errors: Vec<TypeError>,
+    /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
+    type_overrides: HashMap<Symbol, Type>,
 }
 
 impl Analyzer {
@@ -38,12 +40,23 @@ impl Analyzer {
             globals: HashMap::new(),
             current_function_return: None,
             errors: Vec::new(),
+            type_overrides: HashMap::new(),
         }
     }
 
     /// Helper to add a type error
     fn add_error(&mut self, error: SemanticError, span: Span) {
         self.errors.push(TypeError::new(error, span));
+    }
+
+    /// Get variable type with flow-sensitive overrides
+    fn get_variable_type(&self, sym: Symbol) -> Option<Type> {
+        // Check overrides first (for narrowed types inside if-blocks)
+        if let Some(ty) = self.type_overrides.get(&sym) {
+            return Some(ty.clone());
+        }
+        // Then check scope
+        self.scope.get(sym).map(|v| v.ty.clone())
     }
 
     pub fn analyze(
@@ -291,12 +304,34 @@ impl Analyzer {
                     );
                 }
 
+                // Check if condition is `x is T` for flow-sensitive narrowing
+                let narrowing_info = if let ExprKind::Is(is_expr) = &if_stmt.condition.kind {
+                    if let ExprKind::Identifier(sym) = &is_expr.value.kind {
+                        let tested_type = self.resolve_type(&is_expr.type_expr);
+                        Some((*sym, tested_type))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                // Save current overrides
+                let saved_overrides = self.type_overrides.clone();
+
+                // Then branch (with narrowing if applicable)
                 let parent = std::mem::take(&mut self.scope);
                 self.scope = Scope::with_parent(parent);
+                if let Some((sym, narrowed_type)) = &narrowing_info {
+                    self.type_overrides.insert(*sym, narrowed_type.clone());
+                }
                 self.check_block(&if_stmt.then_branch, interner)?;
                 if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
                     self.scope = parent;
                 }
+
+                // Restore overrides for else branch (no narrowing there for now)
+                self.type_overrides = saved_overrides.clone();
 
                 if let Some(else_branch) = &if_stmt.else_branch {
                     let parent = std::mem::take(&mut self.scope);
@@ -306,6 +341,9 @@ impl Analyzer {
                         self.scope = parent;
                     }
                 }
+
+                // Restore original overrides after the entire if statement
+                self.type_overrides = saved_overrides;
             }
             Stmt::For(for_stmt) => {
                 let iterable_ty = self.check_expr(&for_stmt.iterable, interner)?;
@@ -630,8 +668,9 @@ impl Analyzer {
             ExprKind::InterpolatedString(_) => Ok(Type::String),
 
             ExprKind::Identifier(sym) => {
-                if let Some(var) = self.scope.get(*sym) {
-                    Ok(var.ty.clone())
+                // Use get_variable_type to respect flow-sensitive narrowing
+                if let Some(ty) = self.get_variable_type(*sym) {
+                    Ok(ty)
                 } else {
                     let name = interner.resolve(*sym);
                     self.add_error(
@@ -1159,17 +1198,44 @@ impl Analyzer {
         if from == to {
             return true;
         }
-        // Allow numeric coercion
+
+        // Check if from can widen to to
+        if from.can_widen_to(to) {
+            return true;
+        }
+
+        // Allow numeric coercion (kept for backwards compatibility)
         if from.is_integer() && to == &Type::I64 {
             return true;
         }
         if from.is_numeric() && to == &Type::F64 {
             return true;
         }
+
+        // Check if assigning to a union that contains the from type
+        if let Type::Union(variants) = to {
+            // Direct containment
+            if variants.contains(from) {
+                return true;
+            }
+            // Also check if from can widen into a union variant
+            for variant in variants {
+                if from.can_widen_to(variant) {
+                    return true;
+                }
+            }
+        }
+
+        // Nil is compatible with any optional (union containing Nil)
+        if *from == Type::Nil && to.is_optional() {
+            return true;
+        }
+
         // Error type is compatible with anything (for error recovery)
         if from == &Type::Error || to == &Type::Error {
             return true;
         }
+
         false
     }
 }
