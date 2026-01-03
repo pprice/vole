@@ -1062,9 +1062,16 @@ impl Analyzer {
     /// Check if an integer literal value fits in the target type
     fn literal_fits(value: i64, target: &Type) -> bool {
         match target {
+            Type::I8 => value >= i8::MIN as i64 && value <= i8::MAX as i64,
+            Type::I16 => value >= i16::MIN as i64 && value <= i16::MAX as i64,
             Type::I32 => value >= i32::MIN as i64 && value <= i32::MAX as i64,
             Type::I64 => true,
-            Type::F64 => true,
+            Type::I128 => true, // i64 always fits in i128
+            Type::U8 => value >= 0 && value <= u8::MAX as i64,
+            Type::U16 => value >= 0 && value <= u16::MAX as i64,
+            Type::U32 => value >= 0 && value <= u32::MAX as i64,
+            Type::U64 => value >= 0, // i64 positive values fit
+            Type::F32 | Type::F64 => true, // Integers can become floats
             _ => false,
         }
     }
