@@ -32,6 +32,7 @@ pub struct FuncDecl {
 /// Tests block declaration
 #[derive(Debug)]
 pub struct TestsDecl {
+    pub label: Option<String>,
     pub tests: Vec<TestCase>,
     pub span: Span,
 }
