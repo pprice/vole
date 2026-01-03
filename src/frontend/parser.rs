@@ -74,6 +74,7 @@ impl<'src> Parser<'src> {
         match self.current.ty {
             TokenType::KwFunc => self.function_decl(),
             TokenType::KwTests => self.tests_decl(),
+            TokenType::KwLet => self.let_decl(),
             _ => Err(ParseError::new(
                 ParserError::UnexpectedToken {
                     token: self.current.ty.as_str().to_string(),
@@ -151,6 +152,11 @@ impl<'src> Parser<'src> {
         let span = start_span.merge(self.previous.span);
 
         Ok(Decl::Tests(TestsDecl { label, tests, span }))
+    }
+
+    fn let_decl(&mut self) -> Result<Decl, ParseError> {
+        let stmt = self.let_statement()?;
+        Ok(Decl::Let(stmt))
     }
 
     fn test_case(&mut self) -> Result<TestCase, ParseError> {
@@ -266,6 +272,11 @@ impl<'src> Parser<'src> {
     }
 
     fn let_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let stmt = self.let_statement()?;
+        Ok(Stmt::Let(stmt))
+    }
+
+    fn let_statement(&mut self) -> Result<LetStmt, ParseError> {
         let start_span = self.current.span;
         self.advance(); // consume 'let'
 
@@ -285,13 +296,13 @@ impl<'src> Parser<'src> {
         let init = self.expression(0)?;
         let span = start_span.merge(init.span);
 
-        Ok(Stmt::Let(LetStmt {
+        Ok(LetStmt {
             name,
             ty,
             mutable,
             init,
             span,
-        }))
+        })
     }
 
     fn while_stmt(&mut self) -> Result<Stmt, ParseError> {
