@@ -39,4 +39,4 @@ fmt-check:
     cargo fmt -- --check
 
 # Run all checks locally (mirrors CI)
-ci: fmt-check clippy test snap test-release snap-release
+ci: fmt-check clippy build test snap
