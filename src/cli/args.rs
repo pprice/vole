@@ -3,6 +3,8 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+use crate::commands::version::version_string;
+
 /// Color output mode
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub enum ColorMode {
@@ -30,7 +32,7 @@ pub enum ReportMode {
 /// Vole programming language compiler and runtime
 #[derive(Parser)]
 #[command(name = "vole")]
-#[command(version = "0.1.0")]
+#[command(version = version_string())]
 #[command(about = "Vole programming language", long_about = None)]
 pub struct Cli {
     /// Color output: auto, always, never
@@ -91,6 +93,8 @@ pub enum Commands {
         #[arg(long)]
         imports: Option<String>,
     },
+    /// Show version information
+    Version,
 }
 
 #[derive(Clone, Debug, ValueEnum)]
