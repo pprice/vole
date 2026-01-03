@@ -53,7 +53,7 @@ pub enum Commands {
     },
 }
 
-#[derive(Clone, ValueEnum)]
+#[derive(Clone, Debug, ValueEnum)]
 pub enum InspectType {
     Ast,
     Ir,
