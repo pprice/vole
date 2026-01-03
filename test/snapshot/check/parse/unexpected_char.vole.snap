@@ -1,8 +1,11 @@
 [stdout]
 
 [stderr]
-error[E1003]: expected declaration, found 'let'
-  --> <path>/unexpected_char.vole:1:1
-  |
-1 | let x = `
-  | ^^^
+E1003
+
+  x unexpected token 'let'
+   ,-[<path>/unexpected_char.vole:1:1]
+ 1 | let x = `
+   : ^|^
+   :  `-- unexpected
+   `----

@@ -1,10 +1,6 @@
 // src/frontend/parser.rs
 
-// ParseError intentionally contains a full Diagnostic for rich error reporting.
-// The extra size is acceptable since errors are only created in error paths.
-#![allow(clippy::result_large_err)]
-
-use crate::errors::{Diagnostic, DiagnosticBuilder, codes};
+use crate::errors::{LexerError, ParserError};
 use crate::frontend::{Interner, Lexer, Span, Token, TokenType, ast::*};
 
 pub struct Parser<'src> {
@@ -12,29 +8,19 @@ pub struct Parser<'src> {
     current: Token,
     previous: Token,
     interner: Interner,
-    diag_builder: DiagnosticBuilder,
 }
 
-/// A parse error containing a structured diagnostic
-#[derive(Debug, Clone)]
+/// A parse error wrapping a miette-enabled ParserError
+#[derive(Debug)]
 pub struct ParseError {
-    pub diagnostic: Diagnostic,
+    pub error: ParserError,
+    pub span: Span,
 }
 
 impl ParseError {
-    /// Create a new parse error from a diagnostic
-    pub fn new(diagnostic: Diagnostic) -> Self {
-        Self { diagnostic }
-    }
-
-    /// Get the error message (for backward compatibility)
-    pub fn message(&self) -> &str {
-        &self.diagnostic.formatted_message
-    }
-
-    /// Get the span (for backward compatibility)
-    pub fn span(&self) -> Span {
-        self.diagnostic.span
+    /// Create a new parse error
+    pub fn new(error: ParserError, span: Span) -> Self {
+        Self { error, span }
     }
 }
 
@@ -47,7 +33,6 @@ impl<'src> Parser<'src> {
             current,
             previous: Token::new(TokenType::Eof, "", Span::default()),
             interner: Interner::new(),
-            diag_builder: DiagnosticBuilder::new("<input>", source),
         }
     }
 
@@ -60,18 +45,7 @@ impl<'src> Parser<'src> {
             current,
             previous: Token::new(TokenType::Eof, "", Span::default()),
             interner: Interner::new(),
-            diag_builder: DiagnosticBuilder::new(file, source),
         }
-    }
-
-    /// Helper to create a parse error using the diagnostic builder
-    fn error(
-        &self,
-        info: &'static crate::errors::ErrorInfo,
-        span: Span,
-        message: String,
-    ) -> ParseError {
-        ParseError::new(self.diag_builder.error(info, span, message))
     }
 
     pub fn parse_expression(&mut self) -> Result<Expr, ParseError> {
@@ -100,10 +74,12 @@ impl<'src> Parser<'src> {
         match self.current.ty {
             TokenType::KwFunc => self.function_decl(),
             TokenType::KwTests => self.tests_decl(),
-            _ => Err(self.error(
-                &codes::PARSER_UNEXPECTED_TOKEN,
+            _ => Err(ParseError::new(
+                ParserError::UnexpectedToken {
+                    token: self.current.ty.as_str().to_string(),
+                    span: self.current.span.into(),
+                },
                 self.current.span,
-                format!("expected declaration, found '{}'", self.current.ty.as_str()),
             )),
         }
     }
@@ -189,13 +165,13 @@ impl<'src> Parser<'src> {
             self.advance();
             name
         } else {
-            return Err(self.error(
-                &codes::PARSER_EXPECTED_TOKEN,
+            return Err(ParseError::new(
+                ParserError::ExpectedToken {
+                    expected: "string".to_string(),
+                    found: self.current.ty.as_str().to_string(),
+                    span: self.current.span.into(),
+                },
                 self.current.span,
-                format!(
-                    "expected test name string, found '{}'",
-                    self.current.ty.as_str()
-                ),
             ));
         };
 
@@ -248,10 +224,11 @@ impl<'src> Parser<'src> {
                 let sym = self.interner.intern(&token.lexeme);
                 Ok(TypeExpr::Named(sym))
             }
-            _ => Err(self.error(
-                &codes::PARSER_EXPECTED_TYPE,
+            _ => Err(ParseError::new(
+                ParserError::ExpectedType {
+                    span: token.span.into(),
+                },
                 token.span,
-                format!("expected type annotation, found '{}'", token.ty.as_str()),
             )),
         }
     }
@@ -402,7 +379,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Take lexer errors (for diagnostic rendering)
-    pub fn take_lexer_errors(&mut self) -> Vec<crate::errors::Diagnostic> {
+    pub fn take_lexer_errors(&mut self) -> Vec<LexerError> {
         self.lexer.take_errors()
     }
 
@@ -432,10 +409,13 @@ impl<'src> Parser<'src> {
             self.advance();
             Ok(())
         } else {
-            Err(self.error(
-                &codes::PARSER_EXPECTED_TOKEN,
+            Err(ParseError::new(
+                ParserError::ExpectedToken {
+                    expected: msg.to_string(),
+                    found: self.current.ty.as_str().to_string(),
+                    span: self.current.span.into(),
+                },
                 self.current.span,
-                format!("{}, found '{}'", msg, self.current.ty.as_str()),
             ))
         }
     }
@@ -471,10 +451,12 @@ impl<'src> Parser<'src> {
                             span,
                         });
                     } else {
-                        return Err(self.error(
-                            &codes::PARSER_UNEXPECTED_TOKEN,
+                        return Err(ParseError::new(
+                            ParserError::UnexpectedToken {
+                                token: "invalid assignment target".to_string(),
+                                span: left.span.into(),
+                            },
                             left.span,
-                            "invalid assignment target".to_string(),
                         ));
                     }
                 }
@@ -572,10 +554,12 @@ impl<'src> Parser<'src> {
             TokenType::IntLiteral => {
                 self.advance();
                 let value: i64 = token.lexeme.parse().map_err(|_| {
-                    self.error(
-                        &codes::PARSER_UNEXPECTED_TOKEN,
+                    ParseError::new(
+                        ParserError::UnexpectedToken {
+                            token: "invalid integer literal".to_string(),
+                            span: token.span.into(),
+                        },
                         token.span,
-                        "invalid integer literal".to_string(),
                     )
                 })?;
                 Ok(Expr {
@@ -586,10 +570,12 @@ impl<'src> Parser<'src> {
             TokenType::FloatLiteral => {
                 self.advance();
                 let value: f64 = token.lexeme.parse().map_err(|_| {
-                    self.error(
-                        &codes::PARSER_UNEXPECTED_TOKEN,
+                    ParseError::new(
+                        ParserError::UnexpectedToken {
+                            token: "invalid float literal".to_string(),
+                            span: token.span.into(),
+                        },
                         token.span,
-                        "invalid float literal".to_string(),
                     )
                 })?;
                 Ok(Expr {
@@ -640,15 +626,19 @@ impl<'src> Parser<'src> {
                     span,
                 })
             }
-            TokenType::Error => Err(self.error(
-                &codes::PARSER_UNEXPECTED_TOKEN,
+            TokenType::Error => Err(ParseError::new(
+                ParserError::UnexpectedToken {
+                    token: token.lexeme.clone(),
+                    span: token.span.into(),
+                },
                 token.span,
-                token.lexeme.clone(),
             )),
-            _ => Err(self.error(
-                &codes::PARSER_EXPECTED_EXPRESSION,
+            _ => Err(ParseError::new(
+                ParserError::ExpectedExpression {
+                    found: token.ty.as_str().to_string(),
+                    span: token.span.into(),
+                },
                 token.span,
-                format!("expected expression, found '{}'", token.ty.as_str()),
             )),
         }
     }
@@ -694,10 +684,12 @@ impl<'src> Parser<'src> {
                     });
                 }
                 _ => {
-                    return Err(self.error(
-                        &codes::PARSER_UNEXPECTED_TOKEN,
+                    return Err(ParseError::new(
+                        ParserError::UnexpectedToken {
+                            token: "unterminated string interpolation".to_string(),
+                            span: self.current.span.into(),
+                        },
                         self.current.span,
-                        "unterminated string interpolation".to_string(),
                     ));
                 }
             }
@@ -1073,87 +1065,54 @@ tests {
         }
     }
 
-    // Tests for Diagnostic integration
+    // Tests for miette error integration
     #[test]
-    fn parse_error_contains_diagnostic() {
+    fn parse_error_contains_parser_error() {
         let mut parser = Parser::new("@");
         let result = parser.parse_expression();
         assert!(result.is_err());
         let err = result.unwrap_err();
-        // ParseError should contain a Diagnostic
-        assert!(err.diagnostic.code() > 0);
+        // ParseError should contain a ParserError
+        assert!(matches!(err.error, ParserError::UnexpectedToken { .. }));
     }
 
     #[test]
-    fn expected_expression_has_correct_error_code() {
+    fn expected_expression_has_correct_error_type() {
         let mut parser = Parser::new("func");
         let result = parser.parse_expression();
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(
-            err.diagnostic.code(),
-            codes::PARSER_EXPECTED_EXPRESSION.code
-        );
+        assert!(matches!(err.error, ParserError::ExpectedExpression { .. }));
     }
 
     #[test]
-    fn expected_token_has_correct_error_code() {
+    fn expected_token_has_correct_error_type() {
         let source = "func main( {}";
         let mut parser = Parser::new(source);
         let result = parser.parse_program();
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.diagnostic.code(), codes::PARSER_EXPECTED_TOKEN.code);
+        assert!(matches!(err.error, ParserError::ExpectedToken { .. }));
     }
 
     #[test]
-    fn expected_type_has_correct_error_code() {
-        let source = "func main(x: @) {}";
+    fn expected_type_has_correct_error_type() {
+        let source = "func main(x: +) {}";
         let mut parser = Parser::new(source);
         let result = parser.parse_program();
         assert!(result.is_err());
         let err = result.unwrap_err();
-        // This will hit the lexer error for @ first, then EXPECTED_TYPE
-        // For a cleaner test, use a keyword where a type is expected
-        assert!(err.diagnostic.code() > 0);
+        // Should get ExpectedType for + where type is expected
+        assert!(matches!(err.error, ParserError::ExpectedType { .. }));
     }
 
     #[test]
-    fn diagnostic_contains_source_line() {
-        let source = "func main() { @ }";
-        let mut parser = Parser::new(source);
-        let result = parser.parse_program();
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.diagnostic.source_line.is_some());
-        assert!(
-            err.diagnostic
-                .source_line
-                .as_ref()
-                .unwrap()
-                .contains("func main")
-        );
-    }
-
-    #[test]
-    fn parse_error_backward_compatibility() {
+    fn parse_error_has_span() {
         let mut parser = Parser::new("@");
         let result = parser.parse_expression();
         assert!(result.is_err());
         let err = result.unwrap_err();
-        // Test backward compatibility methods
-        assert!(!err.message().is_empty());
-        assert!(err.span().line > 0);
-    }
-
-    #[test]
-    fn parser_with_file_sets_file_name() {
-        let source = "@";
-        let mut parser = Parser::with_file(source, "test.vole");
-        let result = parser.parse_expression();
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.diagnostic.file, "test.vole");
+        assert!(err.span.line > 0);
     }
 
     #[test]
