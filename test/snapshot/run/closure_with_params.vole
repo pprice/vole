@@ -1,0 +1,7 @@
+// Closure with both captures and parameters
+func main() {
+    let base = 100
+    let add = (x: i64) => base + x
+    println(add(5))
+    println(add(50))
+}

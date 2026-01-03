@@ -43,10 +43,22 @@ pub enum Type {
     Error,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct FunctionType {
     pub params: Vec<Type>,
     pub return_type: Box<Type>,
+    /// If true, this function is a closure (has captures) and needs
+    /// to be called with the closure pointer as the first argument.
+    /// The closure pointer is passed implicitly and is not included in `params`.
+    pub is_closure: bool,
+}
+
+impl PartialEq for FunctionType {
+    fn eq(&self, other: &Self) -> bool {
+        // is_closure is not part of type equality - a closure () -> i64 is
+        // compatible with a function type () -> i64 for type checking purposes
+        self.params == other.params && self.return_type == other.return_type
+    }
 }
 
 impl Type {

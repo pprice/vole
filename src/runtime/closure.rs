@@ -159,6 +159,34 @@ pub extern "C" fn vole_closure_free(closure: *mut Closure) {
     unsafe { Closure::free(closure) }
 }
 
+/// Allocate heap memory for a captured variable
+///
+/// Returns a pointer to heap-allocated memory of the given size.
+/// The caller is responsible for freeing this memory.
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_heap_alloc(size: usize) -> *mut u8 {
+    use std::alloc::{Layout, alloc};
+    if size == 0 {
+        return std::ptr::NonNull::dangling().as_ptr();
+    }
+    let layout = Layout::from_size_align(size, 8).expect("invalid layout");
+    // Safety: layout is valid and non-zero size
+    unsafe { alloc(layout) }
+}
+
+/// Free heap-allocated memory
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_heap_free(ptr: *mut u8, size: usize) {
+    use std::alloc::{Layout, dealloc};
+    if ptr.is_null() || size == 0 {
+        return;
+    }
+    let layout = Layout::from_size_align(size, 8).expect("invalid layout");
+    // Safety: Called from JIT code which ensures pointer validity
+    unsafe { dealloc(ptr, layout) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

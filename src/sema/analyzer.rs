@@ -44,6 +44,8 @@ pub struct Analyzer {
     /// Stack of sets tracking variables defined locally in each lambda
     /// (parameters and let bindings inside the lambda body)
     lambda_locals: Vec<HashSet<Symbol>>,
+    /// Stack of side effect flags for currently analyzed lambdas
+    lambda_side_effects: Vec<bool>,
 }
 
 impl Analyzer {
@@ -57,6 +59,7 @@ impl Analyzer {
             type_overrides: HashMap::new(),
             lambda_captures: Vec::new(),
             lambda_locals: Vec::new(),
+            lambda_side_effects: Vec::new(),
         }
     }
 
@@ -107,6 +110,13 @@ impl Analyzer {
         }
     }
 
+    /// Mark the current lambda as having side effects
+    fn mark_lambda_has_side_effects(&mut self) {
+        if let Some(flag) = self.lambda_side_effects.last_mut() {
+            *flag = true;
+        }
+    }
+
     /// Get variable type with flow-sensitive overrides
     fn get_variable_type(&self, sym: Symbol) -> Option<Type> {
         // Check overrides first (for narrowed types inside if-blocks)
@@ -142,6 +152,7 @@ impl Analyzer {
                         FunctionType {
                             params,
                             return_type: Box::new(return_type),
+                            is_closure: false, // Named functions are never closures
                         },
                     );
                 }
@@ -232,6 +243,7 @@ impl Analyzer {
                 Type::Function(FunctionType {
                     params: param_types,
                     return_type: Box::new(ret),
+                    is_closure: false, // Type annotations don't know if it's a closure
                 })
             }
         }
@@ -906,6 +918,11 @@ impl Analyzer {
             ExprKind::Call(call) => {
                 // Handle assert specially
                 if self.is_assert_call(&call.callee, interner) {
+                    // Assert is an impure builtin - mark side effects if inside lambda
+                    if self.in_lambda() {
+                        self.mark_lambda_has_side_effects();
+                    }
+
                     if call.args.len() != 1 {
                         self.add_error(
                             SemanticError::WrongArgumentCount {
@@ -935,8 +952,11 @@ impl Analyzer {
 
                 if let ExprKind::Identifier(sym) = &call.callee.kind {
                     // First check if it's a top-level function
-                    if let Some(func_type) = self.functions.get(sym) {
-                        let func_type = func_type.clone();
+                    if let Some(func_type) = self.functions.get(sym).cloned() {
+                        // Calling a user-defined function - conservatively mark side effects
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                        }
                         if call.args.len() != func_type.params.len() {
                             self.add_error(
                                 SemanticError::WrongArgumentCount {
@@ -978,6 +998,10 @@ impl Analyzer {
 
                     // Check if it's a variable with a function type
                     if let Some(Type::Function(func_type)) = self.get_variable_type(*sym) {
+                        // Calling a function-typed variable - conservatively mark side effects
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                        }
                         if call.args.len() != func_type.params.len() {
                             self.add_error(
                                 SemanticError::WrongArgumentCount {
@@ -1019,7 +1043,15 @@ impl Analyzer {
 
                     // Check if it's a known builtin function
                     let name = interner.resolve(*sym);
-                    if name == "println" || name == "print_char" || name == "flush" {
+                    if name == "println"
+                        || name == "print_char"
+                        || name == "flush"
+                        || name == "print"
+                    {
+                        // Impure builtins - mark side effects if inside lambda
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                        }
                         for arg in &call.args {
                             self.check_expr(arg, interner)?;
                         }
@@ -1053,6 +1085,10 @@ impl Analyzer {
                 // Non-identifier callee (e.g., a lambda expression being called directly)
                 let callee_ty = self.check_expr(&call.callee, interner)?;
                 if let Type::Function(func_type) = callee_ty {
+                    // Calling a function-typed expression - conservatively mark side effects
+                    if self.in_lambda() {
+                        self.mark_lambda_has_side_effects();
+                    }
                     // Calling a function-typed expression
                     if call.args.len() != func_type.params.len() {
                         self.add_error(
@@ -1400,9 +1436,10 @@ impl Analyzer {
         expected_type: Option<&FunctionType>,
         interner: &Interner,
     ) -> Type {
-        // Push capture analysis stacks
+        // Push capture analysis stacks and side effects flag
         self.lambda_captures.push(HashMap::new());
         self.lambda_locals.push(HashSet::new());
+        self.lambda_side_effects.push(false);
 
         // Resolve parameter types
         let mut param_types = Vec::new();
@@ -1487,9 +1524,12 @@ impl Analyzer {
             self.scope = parent;
         }
 
-        // Pop capture stacks and store captures in the lambda
+        // Pop capture stacks, side effects flag, and store results in the lambda
         self.lambda_locals.pop();
-        if let Some(captures) = self.lambda_captures.pop() {
+        let has_side_effects = self.lambda_side_effects.pop().unwrap_or(false);
+        lambda.has_side_effects.set(has_side_effects);
+
+        let has_captures = if let Some(captures) = self.lambda_captures.pop() {
             let capture_list: Vec<Capture> = captures
                 .into_values()
                 .map(|info| Capture {
@@ -1498,8 +1538,12 @@ impl Analyzer {
                     is_mutated: info.is_mutated,
                 })
                 .collect();
+            let has_captures = !capture_list.is_empty();
             *lambda.captures.borrow_mut() = capture_list;
-        }
+            has_captures
+        } else {
+            false
+        };
 
         // Determine final return type
         let return_type = declared_return.or(expected_return).unwrap_or(body_type);
@@ -1507,6 +1551,7 @@ impl Analyzer {
         Type::Function(FunctionType {
             params: param_types,
             return_type: Box::new(return_type),
+            is_closure: has_captures,
         })
     }
 
@@ -1581,6 +1626,7 @@ impl Analyzer {
 mod tests {
     use super::*;
     use crate::frontend::Parser;
+    use crate::frontend::ast::LambdaPurity;
 
     fn check(source: &str) -> Result<(), Vec<TypeError>> {
         let mut parser = Parser::new(source);
@@ -1934,5 +1980,164 @@ mod tests {
         let lambda = get_first_lambda(&program);
         // Local y should not be captured
         assert!(lambda.captures.borrow().is_empty());
+    }
+
+    // Tests for side effect tracking and purity
+
+    #[test]
+    fn lambda_pure_no_captures_no_side_effects() {
+        let source = r#"
+            func apply(f: (i64) -> i64, v: i64) -> i64 { return f(v) }
+            func main() {
+                let f = (x: i64) => x + 1
+                apply(f, 10)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(!lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::Pure);
+    }
+
+    #[test]
+    fn lambda_has_side_effects_println() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let f: () -> i64 = () => {
+                    println("hello")
+                    return 42
+                }
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    }
+
+    #[test]
+    fn lambda_has_side_effects_print() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let f: () -> i64 = () => {
+                    print("hello")
+                    return 42
+                }
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    }
+
+    #[test]
+    fn lambda_has_side_effects_assert() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let f: () -> i64 = () => {
+                    assert(true)
+                    return 42
+                }
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    }
+
+    #[test]
+    fn lambda_has_side_effects_calling_user_function() {
+        let source = r#"
+            func helper() -> i64 { return 42 }
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let f = () => helper()
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    }
+
+    #[test]
+    fn lambda_purity_captures_immutable() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let x = 10
+                let f = () => x + 1
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(!lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::CapturesImmutable);
+    }
+
+    #[test]
+    fn lambda_purity_captures_mutable() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let mut x = 10
+                let f = () => x + 1
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(!lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::CapturesMutable);
+    }
+
+    #[test]
+    fn lambda_purity_mutates_captures() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let mut x = 10
+                let f: () -> i64 = () => {
+                    x = x + 1
+                    return x
+                }
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(!lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::MutatesCaptures);
+    }
+
+    #[test]
+    fn lambda_side_effects_take_precedence_over_captures() {
+        // Even though we capture and mutate, side effects take precedence
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let mut x = 10
+                let f: () -> i64 = () => {
+                    println("hello")
+                    x = x + 1
+                    return x
+                }
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
     }
 }
