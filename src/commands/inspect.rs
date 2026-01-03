@@ -6,8 +6,11 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use glob::glob;
+use miette::NamedSource;
 
 use crate::cli::InspectType;
+use crate::errors::render_to_stderr;
+use crate::frontend::{AstPrinter, Parser};
 
 /// Inspect compilation output for the given files
 pub fn inspect_files(
@@ -56,7 +59,7 @@ pub fn inspect_files(
         eprintln!("// {}", path.display());
 
         // Read source
-        let _source = match fs::read_to_string(path) {
+        let source = match fs::read_to_string(path) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("error: could not read '{}': {}", path.display(), e);
@@ -67,10 +70,27 @@ pub fn inspect_files(
 
         let file_path = path.to_string_lossy();
 
-        // TODO: Process based on inspect_type
         match inspect_type {
             InspectType::Ast => {
-                println!("TODO: AST for {} (no_tests={})", file_path, no_tests);
+                // Parse
+                let mut parser = Parser::with_file(&source, &file_path);
+                let program = match parser.parse_program() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let report = miette::Report::new(e.error.clone())
+                            .with_source_code(NamedSource::new(
+                                &file_path,
+                                source.clone(),
+                            ));
+                        render_to_stderr(report.as_ref());
+                        had_error = true;
+                        continue;
+                    }
+                };
+
+                let interner = parser.into_interner();
+                let printer = AstPrinter::new(&interner, no_tests);
+                print!("{}", printer.print_program(&program));
             }
             InspectType::Ir => {
                 println!("TODO: IR for {} (no_tests={})", file_path, no_tests);
