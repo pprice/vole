@@ -205,6 +205,11 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| type_to_cranelift(&resolve_type_expr(&p.ty), self.pointer_type))
             .collect();
+        let param_vole_types: Vec<Type> = func
+            .params
+            .iter()
+            .map(|p| resolve_type_expr(&p.ty))
+            .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get source file pointer before borrowing ctx.func
@@ -224,14 +229,15 @@ impl<'a> Compiler<'a> {
 
             // Bind parameters to variables
             let params = builder.block_params(entry_block).to_vec();
-            for ((name, ty), val) in param_names
+            for (((name, ty), vole_ty), val) in param_names
                 .iter()
                 .zip(param_types.iter())
+                .zip(param_vole_types.iter())
                 .zip(params.iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, var);
+                variables.insert(*name, (var, vole_ty.clone()));
             }
 
             // Compile function body
@@ -410,6 +416,11 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| type_to_cranelift(&resolve_type_expr(&p.ty), self.pointer_type))
             .collect();
+        let param_vole_types: Vec<Type> = func
+            .params
+            .iter()
+            .map(|p| resolve_type_expr(&p.ty))
+            .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get source file pointer before borrowing ctx.func
@@ -429,14 +440,15 @@ impl<'a> Compiler<'a> {
 
             // Bind parameters to variables
             let params = builder.block_params(entry_block).to_vec();
-            for ((name, ty), val) in param_names
+            for (((name, ty), vole_ty), val) in param_names
                 .iter()
                 .zip(param_types.iter())
+                .zip(param_vole_types.iter())
                 .zip(params.iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, var);
+                variables.insert(*name, (var, vole_ty.clone()));
             }
 
             // Compile function body
@@ -570,7 +582,7 @@ struct CompileCtx<'a> {
 fn compile_block(
     builder: &mut FunctionBuilder,
     block: &frontend::Block,
-    variables: &mut HashMap<Symbol, Variable>,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
     cf_ctx: &mut ControlFlowCtx,
     ctx: &mut CompileCtx,
 ) -> Result<bool, String> {
@@ -588,7 +600,7 @@ fn compile_block(
 fn compile_stmt(
     builder: &mut FunctionBuilder,
     stmt: &Stmt,
-    variables: &mut HashMap<Symbol, Variable>,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
     cf_ctx: &mut ControlFlowCtx,
     ctx: &mut CompileCtx,
 ) -> Result<bool, String> {
@@ -598,7 +610,7 @@ fn compile_stmt(
 
             let var = builder.declare_var(init.ty);
             builder.def_var(var, init.value);
-            variables.insert(let_stmt.name, var);
+            variables.insert(let_stmt.name, (var, init.vole_type));
             Ok(false)
         }
         Stmt::Expr(expr_stmt) => {
@@ -704,7 +716,7 @@ fn compile_stmt(
                 // Create loop variable as Cranelift variable
                 let var = builder.declare_var(types::I64);
                 builder.def_var(var, start_val.value);
-                variables.insert(for_stmt.var_name, var);
+                variables.insert(for_stmt.var_name, (var, Type::I64));
 
                 // Create blocks
                 let header = builder.create_block();
@@ -774,16 +786,16 @@ fn compile_stmt(
                 let zero = builder.ins().iconst(types::I64, 0);
                 builder.def_var(idx_var, zero);
 
-                // Create element variable
-                let elem_var = builder.declare_var(types::I64);
-                builder.def_var(elem_var, zero); // Initial value doesn't matter
-                variables.insert(for_stmt.var_name, elem_var);
-
                 // Determine element type from array type
-                let _elem_type = match &arr.vole_type {
+                let elem_type = match &arr.vole_type {
                     Type::Array(elem) => elem.as_ref().clone(),
                     _ => Type::I64,
                 };
+
+                // Create element variable
+                let elem_var = builder.declare_var(types::I64);
+                builder.def_var(elem_var, zero); // Initial value doesn't matter
+                variables.insert(for_stmt.var_name, (elem_var, elem_type));
 
                 // Loop blocks
                 let header = builder.create_block();
@@ -868,7 +880,7 @@ fn compile_stmt(
 fn compile_expr(
     builder: &mut FunctionBuilder,
     expr: &Expr,
-    variables: &mut HashMap<Symbol, Variable>,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     match &expr.kind {
@@ -897,15 +909,14 @@ fn compile_expr(
             })
         }
         ExprKind::Identifier(sym) => {
-            if let Some(&var) = variables.get(sym) {
-                let val = builder.use_var(var);
+            if let Some((var, vole_type)) = variables.get(sym) {
+                let val = builder.use_var(*var);
                 // Get the type from the variable declaration
                 let ty = builder.func.dfg.value_type(val);
-                // Note: We don't track vole_type for variables yet - they inherit from their init
                 Ok(CompiledValue {
                     value: val,
                     ty,
-                    vole_type: Type::Unknown,
+                    vole_type: vole_type.clone(),
                 })
             } else {
                 // Check if this is a global variable
@@ -1068,14 +1079,35 @@ fn compile_expr(
                     }
                 }
                 BinaryOp::Eq => {
-                    if result_ty == types::F64 {
+                    if matches!(left_vole_type, Type::String) {
+                        // String comparison
+                        if let Some(cmp_id) = ctx.func_ids.get("vole_string_eq") {
+                            let cmp_ref = ctx.module.declare_func_in_func(*cmp_id, builder.func);
+                            let call = builder.ins().call(cmp_ref, &[left_val, right_val]);
+                            builder.inst_results(call)[0]
+                        } else {
+                            builder.ins().icmp(IntCC::Equal, left_val, right_val)
+                        }
+                    } else if result_ty == types::F64 {
                         builder.ins().fcmp(FloatCC::Equal, left_val, right_val)
                     } else {
                         builder.ins().icmp(IntCC::Equal, left_val, right_val)
                     }
                 }
                 BinaryOp::Ne => {
-                    if result_ty == types::F64 {
+                    if matches!(left_vole_type, Type::String) {
+                        // String comparison (negate the result of eq)
+                        if let Some(cmp_id) = ctx.func_ids.get("vole_string_eq") {
+                            let cmp_ref = ctx.module.declare_func_in_func(*cmp_id, builder.func);
+                            let call = builder.ins().call(cmp_ref, &[left_val, right_val]);
+                            let eq_result = builder.inst_results(call)[0];
+                            // Negate: 1 - eq_result (since bool is 0 or 1)
+                            let one = builder.ins().iconst(types::I8, 1);
+                            builder.ins().isub(one, eq_result)
+                        } else {
+                            builder.ins().icmp(IntCC::NotEqual, left_val, right_val)
+                        }
+                    } else if result_ty == types::F64 {
                         builder.ins().fcmp(FloatCC::NotEqual, left_val, right_val)
                     } else {
                         builder.ins().icmp(IntCC::NotEqual, left_val, right_val)
@@ -1211,8 +1243,8 @@ fn compile_expr(
         }
         ExprKind::Assign(assign) => {
             let value = compile_expr(builder, &assign.value, variables, ctx)?;
-            if let Some(&var) = variables.get(&assign.target) {
-                builder.def_var(var, value.value);
+            if let Some((var, _)) = variables.get(&assign.target) {
+                builder.def_var(*var, value.value);
                 Ok(value)
             } else {
                 Err(format!(
@@ -1388,7 +1420,7 @@ fn compile_expr(
                         // Bind the scrutinee value to the identifier
                         let var = builder.declare_var(scrutinee.ty);
                         builder.def_var(var, scrutinee.value);
-                        arm_variables.insert(*name, var);
+                        arm_variables.insert(*name, (var, scrutinee.vole_type.clone()));
                         None // Always matches
                     }
                     Pattern::Literal(lit_expr) => {
@@ -1541,7 +1573,7 @@ fn compile_call(
     builder: &mut FunctionBuilder,
     call: &crate::frontend::CallExpr,
     call_line: u32,
-    variables: &mut HashMap<Symbol, Variable>,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     // Get the callee name - must be an identifier for now
@@ -1563,7 +1595,7 @@ fn compile_call(
 fn compile_println(
     builder: &mut FunctionBuilder,
     args: &[Expr],
-    variables: &mut HashMap<Symbol, Variable>,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
@@ -1605,7 +1637,7 @@ fn compile_println(
 fn compile_print_char(
     builder: &mut FunctionBuilder,
     args: &[Expr],
-    variables: &mut HashMap<Symbol, Variable>,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
@@ -1645,7 +1677,7 @@ fn compile_assert(
     builder: &mut FunctionBuilder,
     args: &[Expr],
     call_line: u32,
-    variables: &mut HashMap<Symbol, Variable>,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
@@ -1715,7 +1747,7 @@ fn compile_user_function_call(
     builder: &mut FunctionBuilder,
     name: &str,
     args: &[Expr],
-    variables: &mut HashMap<Symbol, Variable>,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     let func_id = ctx
@@ -1758,7 +1790,7 @@ fn compile_user_function_call(
 fn compile_interpolated_string(
     builder: &mut FunctionBuilder,
     parts: &[StringPart],
-    variables: &mut HashMap<Symbol, Variable>,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if parts.is_empty() {

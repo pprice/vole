@@ -11,8 +11,8 @@ tests {
     test "integer modulo" {
         assert(10 % 3 == 1)
         assert(7 % 2 == 1)
-        // Void uses mathematical modulo, result is always non-negative
-        assert(-7 % 2 == 1)
+        // Vole uses remainder semantics (like Rust/C), not mathematical modulo
+        assert(-7 % 2 == -1)
         assert(0 % 5 == 0)
     }
 
