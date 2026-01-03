@@ -25,6 +25,7 @@ impl TypeError {
 pub struct Analyzer {
     scope: Scope,
     functions: HashMap<Symbol, FunctionType>,
+    globals: HashMap<Symbol, Type>,
     current_function_return: Option<Type>,
     errors: Vec<TypeError>,
 }
@@ -34,6 +35,7 @@ impl Analyzer {
         Self {
             scope: Scope::new(),
             functions: HashMap::new(),
+            globals: HashMap::new(),
             current_function_return: None,
             errors: Vec::new(),
         }
@@ -75,6 +77,32 @@ impl Analyzer {
                 Decl::Tests(_) => {
                     // Tests don't need signatures in the first pass
                 }
+                Decl::Let(_) => {
+                    // Let declarations are processed before the second pass
+                }
+            }
+        }
+
+        // Process global let declarations first (type check and add to scope)
+        for decl in &program.declarations {
+            if let Decl::Let(let_stmt) = decl {
+                let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t));
+                let init_type = self.check_expr_expecting(
+                    &let_stmt.init,
+                    declared_type.as_ref(),
+                    interner,
+                )?;
+
+                let var_type = declared_type.unwrap_or(init_type.clone());
+
+                self.globals.insert(let_stmt.name, var_type.clone());
+                self.scope.define(
+                    let_stmt.name,
+                    Variable {
+                        ty: var_type,
+                        mutable: let_stmt.mutable,
+                    },
+                );
             }
         }
 
@@ -86,6 +114,9 @@ impl Analyzer {
                 }
                 Decl::Tests(tests_decl) => {
                     self.check_tests(tests_decl, interner)?;
+                }
+                Decl::Let(_) => {
+                    // Already processed above
                 }
             }
         }
