@@ -89,7 +89,7 @@ pub enum Stmt {
 }
 
 /// Let binding: let x = expr or let mut x = expr
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LetStmt {
     pub name: Symbol,
     pub ty: Option<TypeExpr>,
@@ -130,13 +130,13 @@ pub struct ReturnStmt {
 }
 
 /// Expressions
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Expr {
     pub kind: ExprKind,
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ExprKind {
     // Literals
     IntLiteral(i64),
@@ -159,14 +159,14 @@ pub enum ExprKind {
 }
 
 /// Part of an interpolated string
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StringPart {
     Literal(String),
     Expr(Box<Expr>),
 }
 
 /// Binary expression
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BinaryExpr {
     pub left: Expr,
     pub op: BinaryOp,
@@ -191,7 +191,7 @@ pub enum BinaryOp {
 }
 
 /// Unary expression
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnaryExpr {
     pub op: UnaryOp,
     pub operand: Expr,
@@ -204,14 +204,14 @@ pub enum UnaryOp {
 }
 
 /// Function call
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CallExpr {
     pub callee: Expr,
     pub args: Vec<Expr>,
 }
 
 /// Assignment
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AssignExpr {
     pub target: Symbol,
     pub value: Expr,

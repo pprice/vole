@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 use crate::codegen::JitContext;
 use crate::frontend::{
-    self, BinaryOp, Decl, Expr, ExprKind, FuncDecl, Interner, Program, Stmt, StringPart, Symbol,
-    TestCase, TestsDecl, TypeExpr, UnaryOp,
+    self, BinaryOp, Decl, Expr, ExprKind, FuncDecl, Interner, LetStmt, Program, Stmt, StringPart,
+    Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
 };
 use crate::sema::Type;
 
@@ -69,6 +69,8 @@ pub struct Compiler<'a> {
     interner: &'a Interner,
     pointer_type: types::Type,
     tests: Vec<TestInfo>,
+    /// Global variable declarations (let statements at module level)
+    globals: Vec<LetStmt>,
 }
 
 impl<'a> Compiler<'a> {
@@ -79,6 +81,7 @@ impl<'a> Compiler<'a> {
             interner,
             pointer_type,
             tests: Vec::new(),
+            globals: Vec::new(),
         }
     }
 
@@ -115,7 +118,7 @@ impl<'a> Compiler<'a> {
         // Count total tests to assign unique IDs
         let mut test_count = 0usize;
 
-        // First pass: declare all functions and tests
+        // First pass: declare all functions and tests, collect globals
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
@@ -132,6 +135,10 @@ impl<'a> Compiler<'a> {
                         test_count += 1;
                     }
                 }
+                Decl::Let(let_stmt) => {
+                    // Collect global variable declarations
+                    self.globals.push(let_stmt.clone());
+                }
             }
         }
 
@@ -139,6 +146,8 @@ impl<'a> Compiler<'a> {
         test_count = 0;
 
         // Second pass: compile function bodies and tests
+        // Note: Decl::Let globals are handled by inlining their initializers
+        // when referenced (see compile_expr for ExprKind::Identifier)
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
@@ -146,6 +155,9 @@ impl<'a> Compiler<'a> {
                 }
                 Decl::Tests(tests_decl) => {
                     self.compile_tests(tests_decl, &mut test_count)?;
+                }
+                Decl::Let(_) => {
+                    // Globals are handled during identifier lookup
                 }
             }
         }
@@ -221,6 +233,7 @@ impl<'a> Compiler<'a> {
                 module: &mut self.jit.module,
                 func_ids: &self.jit.func_ids,
                 source_file_ptr,
+                globals: &self.globals,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -282,6 +295,7 @@ impl<'a> Compiler<'a> {
                     module: &mut self.jit.module,
                     func_ids: &self.jit.func_ids,
                     source_file_ptr,
+                    globals: &self.globals,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -529,6 +543,8 @@ struct CompileCtx<'a> {
     module: &'a mut JITModule,
     func_ids: &'a HashMap<String, FuncId>,
     source_file_ptr: (*const u8, usize),
+    /// Global variable declarations for lookup when identifier not in local scope
+    globals: &'a [LetStmt],
 }
 
 /// Returns true if a terminating statement (return/break) was compiled
@@ -711,10 +727,18 @@ fn compile_expr(
                     is_string: false,
                 })
             } else {
-                Err(format!(
-                    "undefined variable: {}",
-                    ctx.interner.resolve(*sym)
-                ))
+                // Check if this is a global variable
+                if let Some(global) = ctx.globals.iter().find(|g| g.name == *sym) {
+                    // Compile the global's initializer expression inline
+                    // This works for constant expressions; for complex expressions,
+                    // a more sophisticated approach would be needed
+                    compile_expr(builder, &global.init, variables, ctx)
+                } else {
+                    Err(format!(
+                        "undefined variable: {}",
+                        ctx.interner.resolve(*sym)
+                    ))
+                }
             }
         }
         ExprKind::Binary(bin) => {
