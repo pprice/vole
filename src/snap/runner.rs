@@ -197,9 +197,13 @@ pub fn run_test(test_path: &Path, use_color: bool) -> TestResult {
                     );
                 }
                 Some(other) => {
-                    return TestResult::Fail(format!("Unknown inspect subcommand: {}", other))
+                    return TestResult::Fail(format!("Unknown inspect subcommand: {}", other));
                 }
-                None => return TestResult::Fail("inspect command requires subcommand (ast)".to_string()),
+                None => {
+                    return TestResult::Fail(
+                        "inspect command requires subcommand (ast)".to_string(),
+                    );
+                }
             }
         }
         _ => return TestResult::Fail(format!("Unknown command: {}", cmd)),

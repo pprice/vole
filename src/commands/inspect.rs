@@ -80,10 +80,7 @@ pub fn inspect_files(
                     Ok(p) => p,
                     Err(e) => {
                         let report = miette::Report::new(e.error.clone())
-                            .with_source_code(NamedSource::new(
-                                &file_path,
-                                source.clone(),
-                            ));
+                            .with_source_code(NamedSource::new(&file_path, source.clone()));
                         render_to_stderr(report.as_ref());
                         had_error = true;
                         continue;
@@ -101,10 +98,7 @@ pub fn inspect_files(
                     Ok(p) => p,
                     Err(e) => {
                         let report = miette::Report::new(e.error.clone())
-                            .with_source_code(NamedSource::new(
-                                &file_path,
-                                source.clone(),
-                            ));
+                            .with_source_code(NamedSource::new(&file_path, source.clone()));
                         render_to_stderr(report.as_ref());
                         had_error = true;
                         continue;
@@ -118,10 +112,7 @@ pub fn inspect_files(
                 if let Err(errors) = analyzer.analyze(&program, &interner) {
                     for err in &errors {
                         let report = miette::Report::new(err.error.clone())
-                            .with_source_code(NamedSource::new(
-                                &file_path,
-                                source.clone(),
-                            ));
+                            .with_source_code(NamedSource::new(&file_path, source.clone()));
                         render_to_stderr(report.as_ref());
                     }
                     had_error = true;
@@ -133,7 +124,9 @@ pub fn inspect_files(
                 let mut compiler = Compiler::new(&mut jit, &interner);
                 let include_tests = !no_tests;
 
-                if let Err(e) = compiler.compile_to_ir(&program, &mut std::io::stdout(), include_tests) {
+                if let Err(e) =
+                    compiler.compile_to_ir(&program, &mut std::io::stdout(), include_tests)
+                {
                     eprintln!("error: {}", e);
                     had_error = true;
                 }
