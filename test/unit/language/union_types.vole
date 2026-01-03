@@ -1,0 +1,199 @@
+// Union type tests
+
+class Dog {
+    name: string,
+}
+
+class Cat {
+    name: string,
+}
+
+record Point {
+    x: i32,
+    y: i32,
+}
+
+record Circle {
+    radius: f64,
+}
+
+tests "union types" {
+    test "i32 variant check" {
+        let x: i32 | string = 42
+        assert(x is i32)
+    }
+
+    test "string variant check" {
+        let x: i32 | string = "hello"
+        assert(x is string)
+    }
+
+    test "negative i32 check" {
+        let x: i32 | string = "hello"
+        assert(!(x is i32))
+    }
+
+    test "negative string check" {
+        let x: i32 | string = 42
+        assert(!(x is string))
+    }
+
+    test "three-way union with nil" {
+        let x: i32 | string | nil = nil
+        assert(x is nil)
+    }
+
+    test "three-way union middle variant" {
+        let x: i32 | string | nil = "test"
+        assert(x is string)
+    }
+
+    test "reassign union variable" {
+        let mut x: i32 | string = 42
+        x = "changed"
+        assert(x is string)
+    }
+
+    test "narrowing - string.length after is check" {
+        let x: i32 | string = "hello"
+        if x is string {
+            assert(x.length == 5)
+        }
+    }
+
+    test "narrowing - i32 arithmetic after is check" {
+        let x: i32 | string = 42
+        if x is i32 {
+            assert(x + 8 == 50)
+        }
+    }
+
+    test "narrowing - nil else branch" {
+        let x: string | nil = "test"
+        if x is nil {
+            assert(false)
+        } else {
+            assert(x.length == 4)
+        }
+    }
+}
+
+tests "match expressions" {
+    test "match - basic type dispatch" {
+        let x: i32 | string = 42
+        let result = match x {
+            i32 => "number"
+            string => "text"
+        }
+        assert(result == "number")
+    }
+
+    test "match - string variant" {
+        let x: i32 | string = "hello"
+        let result = match x {
+            i32 => "number"
+            string => "text"
+        }
+        assert(result == "text")
+    }
+
+    test "match - three-way union" {
+        let x: i32 | string | nil = nil
+        let result = match x {
+            i32 => 1
+            string => 2
+            nil => 3
+        }
+        assert(result == 3)
+    }
+
+    test "match - with narrowing in body" {
+        let x: i32 | string = "hello"
+        let result = match x {
+            i32 => 0
+            string => x.length
+        }
+        assert(result == 5)
+    }
+
+    test "match - wildcard pattern" {
+        let x: i32 | string = 42
+        let result = match x {
+            string => "text"
+            _ => "other"
+        }
+        assert(result == "other")
+    }
+
+    test "match - class types" {
+        let pet: Dog | Cat = Dog { name: "Rex" }
+        let result = match pet {
+            Dog => 1
+            Cat => 2
+        }
+        assert(result == 1)
+    }
+
+    test "match - class types cat" {
+        let pet: Dog | Cat = Cat { name: "Whiskers" }
+        let result = match pet {
+            Dog => 1
+            Cat => 2
+        }
+        assert(result == 2)
+    }
+
+    test "match - record types" {
+        let shape: Point | Circle = Point { x: 10, y: 20 }
+        let result = match shape {
+            Point => 1
+            Circle => 2
+        }
+        assert(result == 1)
+    }
+
+    test "match - record types circle" {
+        let shape: Point | Circle = Circle { radius: 5.0 }
+        let result = match shape {
+            Point => 1
+            Circle => 2
+        }
+        assert(result == 2)
+    }
+
+    test "match - class with field access after narrowing" {
+        let pet: Dog | Cat = Dog { name: "Buddy" }
+        let result = match pet {
+            Dog => pet.name
+            Cat => pet.name
+        }
+        assert(result == "Buddy")
+    }
+
+    test "match - mixed class and primitive" {
+        let value: Dog | i32 = 42
+        let result = match value {
+            Dog => 0
+            i32 => 1
+        }
+        assert(result == 1)
+    }
+
+    test "match - wildcard narrows to remaining types" {
+        let x: i32 | string = "hello"
+        let result = match x {
+            i32 => 0
+            _ => x.length  // _ narrows to string, so .length works
+        }
+        assert(result == 5)
+    }
+
+    test "match - wildcard with three-way union" {
+        let x: i32 | string | nil = "test"
+        let result = match x {
+            i32 => 0
+            _ => 1  // _ is string | nil
+        }
+        assert(result == 1)
+    }
+}

@@ -1,0 +1,63 @@
+// Catch arm destructuring tests
+
+error SimpleError {}
+error Overflow { value: i32, max: i32 }
+error NotFound { key: string }
+
+func mayOverflow(x: i32) -> fallible(i32, Overflow) {
+    if x > 100 {
+        raise Overflow { value: x, max: 100 }
+    }
+    return x
+}
+
+func findItem(key: string) -> fallible(string, NotFound) {
+    if key == "missing" {
+        raise NotFound { key: key }
+    }
+    return "found: " + key
+}
+
+tests "catch destructuring" {
+    test "extract single field from error" {
+        let result = try mayOverflow(200) catch {
+            Overflow { value, max } => value
+        }
+        assert(result == 200)
+    }
+
+    test "extract max field from error" {
+        let result = try mayOverflow(150) catch {
+            Overflow { value, max } => max
+        }
+        assert(result == 100)
+    }
+
+    test "use both fields in expression" {
+        let result = try mayOverflow(200) catch {
+            Overflow { value, max } => value - max
+        }
+        assert(result == 100)
+    }
+
+    test "string field extraction" {
+        let result = try findItem("missing") catch {
+            NotFound { key } => "not found: " + key
+        }
+        assert(result == "not found: missing")
+    }
+
+    test "success case still works" {
+        let result = try mayOverflow(50) catch {
+            Overflow { value, max } => -1
+        }
+        assert(result == 50)
+    }
+
+    test "simple error without destructure still works" {
+        let result = try mayOverflow(200) catch {
+            Overflow {} => -1
+        }
+        assert(result == -1)
+    }
+}

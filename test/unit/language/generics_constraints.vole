@@ -1,0 +1,36 @@
+// Generic Structural Constraint Tests
+
+// Types that satisfy HasName constraint
+record Person {
+    name: string,
+    age: i32,
+}
+
+record Animal {
+    name: string,
+    species: string,
+}
+
+// Function with structural constraint
+func getName<T: { name: string }>(x: T) -> string {
+    return x.name
+}
+
+tests {
+
+    test "generics::constraints::basic field constraint" {
+        let p = Person { name: "Alice", age: 30 }
+        let result = getName(p)
+        assert(result == "Alice")
+    }
+
+    test "generics::constraints::different type same constraint" {
+        let a = Animal { name: "Fluffy", species: "Cat" }
+        let result = getName(a)
+        assert(result == "Fluffy")
+    }
+}
+
+func main() {
+    // Entry point
+}

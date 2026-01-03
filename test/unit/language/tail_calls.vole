@@ -1,0 +1,67 @@
+// Tests for tail call optimization
+
+// Simple tail recursive function that counts down
+func countdown(n: i32) -> i32 {
+    if n <= 0 {
+        return 0
+    }
+    return countdown(n - 1)
+}
+
+// Tail recursive factorial with accumulator
+func factorial_tail(n: i32, acc: i32) -> i32 {
+    if n <= 1 {
+        return acc
+    }
+    return factorial_tail(n - 1, n * acc)
+}
+
+func factorial(n: i32) -> i32 {
+    return factorial_tail(n, 1)
+}
+
+// Mutual tail recursion
+func is_even(n: i32) -> bool {
+    if n == 0 {
+        return true
+    }
+    return is_odd(n - 1)
+}
+
+func is_odd(n: i32) -> bool {
+    if n == 0 {
+        return false
+    }
+    return is_even(n - 1)
+}
+
+tests {
+
+    test "tail call::simple countdown" {
+        assert(countdown(10) == 0)
+    }
+
+    test "tail call::factorial with accumulator" {
+        assert(factorial(5) == 120)
+        assert(factorial(10) == 3628800)
+    }
+
+    test "tail call::mutual recursion even" {
+        assert(is_even(0) == true)
+        assert(is_even(2) == true)
+        assert(is_even(4) == true)
+        assert(is_even(100) == true)
+    }
+
+    test "tail call::mutual recursion odd" {
+        assert(is_odd(1) == true)
+        assert(is_odd(3) == true)
+        assert(is_odd(99) == true)
+    }
+
+    test "tail call::deep recursion doesn't overflow" {
+        // This would overflow the stack without tail call optimization
+        // Using 10000 iterations to stress test
+        assert(countdown(10000) == 0)
+    }
+}

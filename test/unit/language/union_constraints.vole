@@ -1,0 +1,151 @@
+// Union Type Constraint Tests
+// Tests for using union types as generic constraints
+
+// === Type Aliases ===
+
+type Numeric = i32 | i64 | f64
+type Integer = i32 | i64
+type StringOrInt = string | i32
+type Addable = i32 | f64
+
+// === Generic Functions ===
+
+func double<T: Numeric>(x: T) -> T {
+    return x + x
+}
+
+func identity<T: StringOrInt>(x: T) -> T {
+    return x
+}
+
+func add<T: Addable>(a: T, b: T) -> T {
+    return a + b
+}
+
+func triple<T: Integer>(x: T) -> T {
+    return x + x + x
+}
+
+func negate<T: Numeric>(x: T) -> T {
+    return x - x - x
+}
+
+func compute<T: Numeric>(a: T, b: T, c: T) -> T {
+    return a + b + c
+}
+
+func toZero<T: Numeric>(x: T) -> T {
+    return x - x
+}
+
+// === Tests ===
+
+tests {
+
+    test "union constraint with i32" {
+        let result = double(5)
+        assert(result == 10)
+    }
+
+    test "union constraint with i64" {
+        let x: i64 = 100
+        let result = double(x)
+        assert(result == 200)
+    }
+
+    test "union constraint with f64" {
+        let result = double(3.5)
+        assert(result == 7.0)
+    }
+
+    test "union constraint preserves type" {
+        let s = identity("hello")
+        let n = identity(42)
+        assert(s == "hello")
+        assert(n == 42)
+    }
+
+    test "union constraint with two params" {
+        assert(add(10, 20) == 30)
+        assert(add(1.5, 2.5) == 4.0)
+    }
+
+    test "union constraint with negative values" {
+        assert(double(-5) == -10)
+        assert(double(-2.5) == -5.0)
+    }
+
+    test "union constraint with zero" {
+        assert(double(0) == 0)
+        assert(double(0.0) == 0.0)
+    }
+
+    test "identity with empty string" {
+        let s = identity("")
+        assert(s == "")
+    }
+
+    test "identity with zero" {
+        let n = identity(0)
+        assert(n == 0)
+    }
+
+    test "add negatives" {
+        assert(add(-5, -3) == -8)
+    }
+
+    test "add mixed sign" {
+        assert(add(10, -3) == 7)
+    }
+
+    test "integer-only constraint" {
+        assert(triple(4) == 12)
+        let x: i64 = 10
+        assert(triple(x) == 30)
+        assert(triple(-3) == -9)
+    }
+
+    test "nested generic calls" {
+        let result = double(double(3))
+        assert(result == 12)
+    }
+
+    test "chained generic operations" {
+        let a = double(5)
+        let b = double(a)
+        assert(b == 20)
+    }
+
+    test "generic with arithmetic" {
+        let x = double(3) + double(4)
+        assert(x == 14)
+    }
+
+    test "compute sum three i32" {
+        assert(compute(1, 2, 3) == 6)
+    }
+
+    test "compute sum three f64" {
+        assert(compute(1.0, 2.0, 3.0) == 6.0)
+    }
+
+    test "negate i32" {
+        assert(negate(5) == -5)
+    }
+
+    test "negate f64" {
+        assert(negate(2.5) == -2.5)
+    }
+
+    test "negate negative becomes positive" {
+        assert(negate(-3) == 3)
+    }
+
+    test "toZero i32" {
+        assert(toZero(42) == 0)
+    }
+
+    test "toZero f64" {
+        assert(toZero(3.14) == 0.0)
+    }
+}

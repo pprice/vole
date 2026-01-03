@@ -1,0 +1,70 @@
+// Class tests
+
+class Point {
+    x: i32,
+    y: i32,
+
+    func sum() -> i32 {
+        return self.x + self.y
+    }
+}
+
+class Counter {
+    value: i64,
+
+    func get() -> i64 {
+        return self.value
+    }
+
+    func increment() -> i64 {
+        self.value = self.value + 1
+        return self.value
+    }
+}
+
+tests "classes" {
+    test "basic instantiation" {
+        let p = Point { x: 10, y: 20 }
+        assert(p.x == 10)
+        assert(p.y == 20)
+    }
+
+    test "field access" {
+        let p = Point { x: 5, y: 7 }
+        assert(p.x + p.y == 12)
+    }
+
+    test "field mutation" {
+        let p = Point { x: 1, y: 2 }
+        p.x = 100
+        assert(p.x == 100)
+        assert(p.y == 2)
+    }
+
+    test "method call" {
+        let p = Point { x: 10, y: 20 }
+        assert(p.sum() == 30)
+    }
+
+    test "method returns self field" {
+        let c = Counter { value: 42 }
+        assert(c.get() == 42)
+    }
+
+    test "method mutates self field" {
+        let c = Counter { value: 0 }
+        assert(c.increment() == 1)
+        assert(c.increment() == 2)
+        assert(c.increment() == 3)
+        assert(c.get() == 3)
+    }
+
+    test "multiple instances" {
+        let c1 = Counter { value: 10 }
+        let c2 = Counter { value: 100 }
+        c1.increment()
+        c2.increment()
+        assert(c1.get() == 11)
+        assert(c2.get() == 101)
+    }
+}

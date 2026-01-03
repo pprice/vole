@@ -1,0 +1,95 @@
+// Lambda tests
+
+// Module-level lambdas:
+let simpleLambda = (x) => x * 2
+let noParams = () => 5
+let multiParams = (a, b) => a + b
+
+tests "lambdas" {
+    test "simple lambda (module level)" {
+        assert(simpleLambda(5) == 10)
+    }
+
+    test "no params (module level)" {
+        assert(noParams() == 5)
+    }
+
+    test "multiple params (module level)" {
+        assert(multiParams(2, 3) == 5)
+    }
+
+    test "lambda inside test" {
+        let double = (n) => n * 2
+        assert(double(5) == 10)
+    }
+
+    test "multi-param lambda inside test" {
+        let add = (a, b) => a + b
+        assert(add(10, 20) == 30)
+    }
+
+    test "block body" {
+        let complex = (x) => {
+            let y = x * 2
+            y + 1
+        }
+        assert(complex(5) == 11)
+    }
+
+    test "higher order" {
+        let apply = (f, x) => f(x)
+        let double = (n) => n * 2
+        assert(apply(double, 5) == 10)
+    }
+
+    test "returned lambda" {
+        let makeAdder = (n) => (x) => x + n
+        let add5 = makeAdder(5)
+        assert(add5(10) == 15)
+    }
+
+    test "closure capture" {
+        let x = 10
+        let addX = (n) => n + x
+        assert(addX(5) == 15)
+    }
+
+    test "mutable closure" {
+        let mut count = 0
+        let inc = () => {
+            count = count + 1
+            count
+        }
+        assert(inc() == 1)
+        assert(inc() == 2)
+        assert(inc() == 3)
+    }
+}
+
+tests "type annotations" {
+    test "parameter types" {
+        let add = (x: i32, y: i32) => x + y
+        assert(add(10, 20) == 30)
+    }
+
+    test "return type" {
+        let typed = (x, y) -> i32 => x + y
+        assert(typed(5, 3) == 8)
+    }
+
+    test "subtraction" {
+        let sub = (a: i32, b: i32) -> i32 => a - b
+        assert(sub(10, 5) == 5)
+    }
+}
+
+tests "lambda inference" {
+    test "bidirectional inference" {
+        func applyFn(fn: (i32) -> i32, x: i32) -> i32 {
+            return fn(x)
+        }
+        // Lambda infers x is i32 from function parameter type
+        let result = applyFn((x) => x * 2, 5)
+        assert(result == 10)
+    }
+}

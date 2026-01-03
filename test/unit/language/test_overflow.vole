@@ -1,0 +1,22 @@
+// Test integer arithmetic near overflow boundaries
+// Baseline tests: verify normal arithmetic works before adding overflow detection
+
+tests {
+    test "i32 max + 1 should work when not overflowing" {
+        let x: i32 = 2147483646  // MAX - 1
+        let y = x + 1            // Should be 2147483647 (MAX)
+        assert(y == 2147483647)
+    }
+
+    test "basic arithmetic should work" {
+        assert(100 + 200 == 300)
+        assert(1000 - 500 == 500)
+        assert(50 * 20 == 1000)
+    }
+
+    test "negation of normal values works" {
+        assert(-5 == -5)
+        assert(-(-10) == 10)
+        assert(-(100) == -100)
+    }
+}

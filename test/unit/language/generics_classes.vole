@@ -1,0 +1,101 @@
+// Generic Class Tests
+
+// Simple generic box class
+class Box<T> {
+    value: T,
+
+    func get() -> T {
+        return self.value
+    }
+
+    func set(v: T) {
+        self.value = v
+    }
+}
+
+// Helper function for method constraint test
+func callGet<U: { func get() -> i32 }>(x: U) -> i32 {
+    return x.get()
+}
+
+// Generic pair class
+class Pair<A, B> {
+    first: A,
+    second: B,
+
+    func getFirst() -> A {
+        return self.first
+    }
+
+    func getSecond() -> B {
+        return self.second
+    }
+}
+
+tests {
+
+    test "generics::classes::box with int" {
+        let box = Box { value: 42 }
+        assert(box.get() == 42)
+    }
+
+    test "generics::classes::box with string" {
+        let box = Box { value: "hello" }
+        assert(box.get() == "hello")
+    }
+
+    test "generics::classes::box mutation" {
+        let box = Box { value: 10 }
+        box.set(20)
+        assert(box.get() == 20)
+    }
+
+    test "generics::classes::pair different types" {
+        let pair = Pair { first: 1, second: "one" }
+        assert(pair.getFirst() == 1)
+        assert(pair.getSecond() == "one")
+    }
+
+    test "generics::classes::pair same types" {
+        let pair = Pair { first: "a", second: "b" }
+        assert(pair.getFirst() == "a")
+        assert(pair.getSecond() == "b")
+    }
+
+    test "generics::classes::method return type substitution" {
+        // This tests that when we instantiate Box<i32>, the get() method
+        // returns i32, not an unsubstituted type parameter T
+        let box = Box { value: 42 }
+        let x: i32 = box.get()  // Should compile - get() returns i32
+        assert(x == 42)
+    }
+
+    test "generics::classes::method parameter type substitution" {
+        // This tests that set(v: T) becomes set(v: i32) for Box<i32>
+        let box = Box { value: 0 }
+        let val: i32 = 99
+        box.set(val)  // Should compile - set() expects i32
+        assert(box.get() == 99)
+    }
+
+    test "generics::classes::method return type used in typed function" {
+        // This forces type checking by passing the result to a typed function
+        func expectInt(x: i32) -> i32 { return x }
+        let box = Box { value: 42 }
+        let result = expectInt(box.get())  // box.get() must return i32
+        assert(result == 42)
+    }
+
+    test "generics::classes::method type substitution in constraint checking" {
+        // Box<i32>.get() returns i32, so it should satisfy { func get() -> i32 }
+        // Note: Using 'func' keyword for method constraints
+        // Note: callGet is defined at top level due to test runner limitation
+        let box = Box { value: 42 }
+        let result = callGet(box)
+        assert(result == 42)
+    }
+}
+
+func main() {
+    // Entry point
+}

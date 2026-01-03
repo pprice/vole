@@ -1,0 +1,52 @@
+// Test inline cache behavior
+
+class Point {
+    x: i32,
+    y: i32,
+}
+
+class Point3D {
+    x: i32,
+    y: i32,
+    z: i32,
+}
+
+tests "inline cache" {
+    test "monomorphic field access" {
+        let p = Point { x: 10, y: 20 }
+        // Access same field multiple times (should hit IC)
+        assert(p.x == 10)
+        assert(p.x == 10)
+        assert(p.x == 10)
+    }
+
+    test "polymorphic field access" {
+        let p2 = Point { x: 1, y: 2 }
+        let p3 = Point3D { x: 10, y: 20, z: 30 }
+
+        // Access .x on different types (should populate IC overflow)
+        assert(p2.x == 1)
+        assert(p3.x == 10)
+        assert(p2.x == 1)
+        assert(p3.x == 10)
+    }
+
+    test "field mutation" {
+        let p = Point { x: 0, y: 0 }
+        p.x = 42
+        assert(p.x == 42)
+        p.x = 100
+        assert(p.x == 100)
+    }
+
+    test "multiple instances same class" {
+        let p1 = Point { x: 1, y: 2 }
+        let p2 = Point { x: 10, y: 20 }
+        let p3 = Point { x: 100, y: 200 }
+
+        // IC should be warm for Point.x after first access
+        assert(p1.x == 1)
+        assert(p2.x == 10)
+        assert(p3.x == 100)
+    }
+}

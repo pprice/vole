@@ -1,0 +1,79 @@
+// Function tests
+
+// Module-level functions:
+func add(a, b) {
+    return a + b
+}
+
+func five() {
+    return 5
+}
+
+func double(x) {
+    x * 2
+}
+
+func factorial(n) {
+    if n <= 1 { return 1 }
+    return n * factorial(n - 1)
+}
+
+func fib(n) {
+    if n <= 1 { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+
+tests "functions" {
+    test "simple function" {
+        assert(add(2, 3) == 5)
+    }
+
+    test "no args" {
+        assert(five() == 5)
+    }
+
+    test "implicit return" {
+        assert(double(21) == 42)
+    }
+
+    test "recursion" {
+        assert(factorial(5) == 120)
+    }
+
+    test "fibonacci" {
+        assert(fib(10) == 55)
+    }
+
+    test "nested function declarations" {
+        func localAdd(a, b) {
+            return a + b
+        }
+        assert(localAdd(10, 20) == 30)
+    }
+
+    test "function in function" {
+        func outer() {
+            func inner() {
+                return 42
+            }
+            return inner()
+        }
+        assert(outer() == 42)
+    }
+
+    test "closure captures variable" {
+        let x = 10
+        let add_x = (y: i32) -> i32 => x + y
+        assert(add_x(5) == 15)
+    }
+
+    test "mutable closure counter" {
+        let mut count = 0
+        let increment = () => {
+            count = count + 1
+        }
+        increment()
+        increment()
+        assert(count == 2)
+    }
+}

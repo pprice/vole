@@ -1,0 +1,100 @@
+// Bitwise operator tests
+// Note: Binary (0b) and hex (0x) literals are not supported, using decimal
+
+tests {
+    test "bitwise AND" {
+        // 12 & 10 = 8 (1100 & 1010 = 1000)
+        assert((12 & 10) == 8)
+        // 255 & 15 = 15
+        assert((255 & 15) == 15)
+        assert((255 & 0) == 0)
+        assert((123 & 123) == 123)
+    }
+
+    test "bitwise OR" {
+        // 12 | 10 = 14 (1100 | 1010 = 1110)
+        assert((12 | 10) == 14)
+        // 240 | 15 = 255
+        assert((240 | 15) == 255)
+        assert((0 | 0) == 0)
+        assert((100 | 0) == 100)
+    }
+
+    test "bitwise XOR" {
+        // 12 ^ 10 = 6 (1100 ^ 1010 = 0110)
+        assert((12 ^ 10) == 6)
+        assert((255 ^ 255) == 0)
+        assert((255 ^ 0) == 255)
+        assert((42 ^ 42) == 0)
+    }
+
+    test "left shift" {
+        assert((1 << 0) == 1)
+        assert((1 << 1) == 2)
+        assert((1 << 4) == 16)
+        assert((3 << 2) == 12)
+        // 255 << 8 = 65280
+        assert((255 << 8) == 65280)
+    }
+
+    test "right shift" {
+        assert((16 >> 1) == 8)
+        assert((16 >> 4) == 1)
+        // 65280 >> 8 = 255
+        assert((65280 >> 8) == 255)
+        assert((1 >> 1) == 0)
+    }
+
+    test "combined bitwise operations" {
+        // Set bit 3: 0 | (1 << 3) = 8
+        let x = 0 | (1 << 3)
+        assert(x == 8)
+
+        // Clear bit 3: 15 & ~8 = 7
+        let y = 15 & ~(1 << 3)
+        assert(y == 7)
+
+        // Toggle bit 2: 10 ^ 4 = 14
+        let z = 10 ^ (1 << 2)
+        assert(z == 14)
+    }
+
+    test "bitwise operator precedence" {
+        // Shifts bind tighter than AND/OR/XOR
+        // (1 << 2) | (1 << 3) = 4 | 8 = 12
+        assert((1 << 2 | 1 << 3) == 12)
+    }
+
+    test "bitwise with variables" {
+        let a = 204  // 11001100 in binary
+        let b = 170  // 10101010 in binary
+
+        // 204 & 170 = 136 (10001000)
+        assert((a & b) == 136)
+        // 204 | 170 = 238 (11101110)
+        assert((a | b) == 238)
+        // 204 ^ 170 = 102 (01100110)
+        assert((a ^ b) == 102)
+    }
+
+    test "bitwise NOT" {
+        let x = 0
+        assert((~x) != 0)
+
+        // Double negation
+        let y = 42
+        assert((~~y) == y)
+    }
+
+    test "masking operations" {
+        let value = 43981  // 0xABCD
+
+        // Extract low byte: 43981 & 255 = 205 (0xCD)
+        let low = value & 255
+        assert(low == 205)
+
+        // Extract high byte: (43981 >> 8) & 255 = 171 (0xAB)
+        let high = (value >> 8) & 255
+        assert(high == 171)
+    }
+}

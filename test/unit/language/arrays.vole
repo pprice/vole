@@ -1,0 +1,34 @@
+// Array tests
+
+tests "arrays" {
+    test "literal" {
+        let arr = [1, 2, 3]
+        assert(arr[0] == 1)
+        assert(arr[1] == 2)
+        assert(arr[2] == 3)
+    }
+
+    test "length" {
+        let arr = [1, 2, 3, 4, 5]
+        assert(arr.length == 5)
+    }
+
+    test "empty array length" {
+        let arr = []
+        assert(arr.length == 0)
+    }
+
+    test "for iteration" {
+        let mut sum = 0
+        for x in [1, 2, 3] {
+            sum = sum + x
+        }
+        assert(sum == 6)
+    }
+
+    test "nested arrays" {
+        let arr = [[1, 2], [3, 4]]
+        assert(arr[0][0] == 1)
+        assert(arr[1][1] == 4)
+    }
+}

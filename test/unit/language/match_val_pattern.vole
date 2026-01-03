@@ -1,0 +1,269 @@
+// Tests for the val pattern (value comparison in match expressions)
+// val x => ... compares match value against x, rather than binding a new variable
+
+tests "val pattern basics" {
+    test "val matches equal value" {
+        let MAGIC = 42
+        let x = 42
+        let result = match x {
+            val MAGIC => "magic"
+            _ => "other"
+        }
+        assert(result == "magic")
+    }
+
+    test "val does not match different value" {
+        let MAGIC = 42
+        let x = 99
+        let result = match x {
+            val MAGIC => "magic"
+            _ => "other"
+        }
+        assert(result == "other")
+    }
+
+    test "val with lowercase variable" {
+        let target = 100
+        let x = 100
+        let result = match x {
+            val target => "hit target"
+            _ => "missed"
+        }
+        assert(result == "hit target")
+    }
+
+    test "multiple val patterns" {
+        let A = 1
+        let B = 2
+        let C = 3
+        let x = 2
+        let result = match x {
+            val A => "got A"
+            val B => "got B"
+            val C => "got C"
+            _ => "other"
+        }
+        assert(result == "got B")
+    }
+
+    test "val with mutable variable" {
+        let mut limit = 10
+        let x = 10
+        let result1 = match x {
+            val limit => "at limit"
+            _ => "not at limit"
+        }
+        assert(result1 == "at limit")
+
+        // Change limit, re-match
+        limit = 20
+        let result2 = match x {
+            val limit => "at limit"
+            _ => "not at limit"
+        }
+        assert(result2 == "not at limit")
+    }
+}
+
+tests "val pattern with guards" {
+    test "val with guard" {
+        let target = 50
+        let x = 50
+        let result = match x {
+            val target if target > 0 => "positive target match"
+            val target => "target match"
+            _ => "no match"
+        }
+        assert(result == "positive target match")
+    }
+
+    test "val guard fails, next val matches" {
+        let target = 50
+        let x = 50
+        let result = match x {
+            val target if target > 100 => "big target"
+            val target => "target match"
+            _ => "no match"
+        }
+        assert(result == "target match")
+    }
+}
+
+tests "val vs identifier disambiguation" {
+    test "identifier binds, val compares" {
+        let magic = 42
+        let x = 42
+
+        // Without val: creates new binding
+        let result1 = match x {
+            magic => "bound to {magic}"
+        }
+        assert(result1 == "bound to 42")
+
+        // With val: compares against existing variable
+        let result2 = match x {
+            val magic => "matched value"
+            _ => "no match"
+        }
+        assert(result2 == "matched value")
+    }
+
+    test "val compares, identifier binds" {
+        let target = 999
+        let x = 5
+
+        // val pattern compares - doesn't match since 5 != 999
+        let result = match x {
+            val target => "matched target"
+            other => "got {other}"
+        }
+        assert(result == "got 5")
+    }
+}
+
+tests "val with different types" {
+    test "val with string" {
+        let greeting = "hello"
+        let s = "hello"
+        let result = match s {
+            val greeting => "matched greeting"
+            _ => "other"
+        }
+        assert(result == "matched greeting")
+    }
+
+    test "val with boolean" {
+        let flag = true
+        let b = true
+        let result = match b {
+            val flag => "matched flag"
+            _ => "other"
+        }
+        assert(result == "matched flag")
+    }
+}
+
+// Error for fallible tests
+error TestError { code: i32 }
+
+func mayFail(x: i32) -> fallible(i32, TestError) {
+    if x < 0 {
+        raise TestError { code: x }
+    }
+    return x
+}
+
+tests "val in fallible match" {
+    test "val matches success value" {
+        let target = 42
+        let result = match mayFail(42) {
+            val target => "matched target"
+            success x => "got {x}"
+            error => "failed"
+        }
+        assert(result == "matched target")
+    }
+
+    test "val does not match different success" {
+        let target = 99
+        let result = match mayFail(42) {
+            val target => "matched target"
+            success x => "got {x}"
+            error => "failed"
+        }
+        assert(result == "got 42")
+    }
+
+    test "val does not match error" {
+        let target = 42
+        let result = match mayFail(-1) {
+            val target => "matched target"
+            success x => "got {x}"
+            error => "failed"
+        }
+        assert(result == "failed")
+    }
+}
+
+tests "val mixed with literals" {
+    test "literal before val" {
+        let threshold = 100
+        let x = 42
+        let result = match x {
+            42 => "literal match"
+            val threshold => "threshold"
+            _ => "other"
+        }
+        assert(result == "literal match")
+    }
+
+    test "val before literal" {
+        let special = 42
+        let x = 42
+        let result = match x {
+            val special => "special match"
+            42 => "literal match"
+            _ => "other"
+        }
+        assert(result == "special match")
+    }
+
+    test "literal and val both in pattern" {
+        let target = 50
+
+        let r1 = match 0 {
+            0 => "zero"
+            val target => "at target"
+            100 => "hundred"
+            _ => "other"
+        }
+        assert(r1 == "zero")
+
+        let r2 = match 50 {
+            0 => "zero"
+            val target => "at target"
+            100 => "hundred"
+            _ => "other"
+        }
+        assert(r2 == "at target")
+
+        let r3 = match 100 {
+            0 => "zero"
+            val target => "at target"
+            100 => "hundred"
+            _ => "other"
+        }
+        assert(r3 == "hundred")
+
+        let r4 = match 25 {
+            0 => "zero"
+            val target => "at target"
+            100 => "hundred"
+            _ => "other"
+        }
+        assert(r4 == "other")
+    }
+}
+
+tests "val edge cases" {
+    test "val with nil comparison" {
+        let nothing: i32 | nil = nil
+        let x: i32 | nil = nil
+        let result = match x {
+            val nothing => "matched nil"
+            _ => "other"
+        }
+        assert(result == "matched nil")
+    }
+
+    test "val with expression result" {
+        // Test val pattern works with more complex values
+        let expected = 100
+        let x = 50 + 50
+        let result = match x {
+            val expected => "matched expected"
+            _ => "other"
+        }
+        assert(result == "matched expected")
+    }
+}

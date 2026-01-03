@@ -1,0 +1,31 @@
+// Record tests
+
+record Point {
+    x: i32,
+    y: i32,
+
+    func sum() -> i32 {
+        return self.x + self.y
+    }
+}
+
+tests "records" {
+    test "basic instantiation" {
+        let p = Point { x: 10, y: 20 }
+        assert(p.x == 10)
+        assert(p.y == 20)
+    }
+
+    test "field access" {
+        let p = Point { x: 5, y: 7 }
+        assert(p.x + p.y == 12)
+    }
+
+    test "method call" {
+        let p = Point { x: 10, y: 20 }
+        assert(p.sum() == 30)
+    }
+
+    // Note: Record immutability is tested via expect-error in sema tests
+    // Records cannot have their fields mutated after creation
+}

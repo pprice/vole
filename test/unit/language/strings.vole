@@ -1,0 +1,29 @@
+// String tests
+
+tests "strings" {
+    test "literal" {
+        let s = "hello"
+        assert(s == "hello")
+    }
+
+    test "length" {
+        let s = "hello"
+        assert(s.length == 5)
+    }
+
+    test "empty string" {
+        let s = ""
+        assert(s.length == 0)
+    }
+
+    test "concatenation" {
+        let a = "hello"
+        let b = " world"
+        assert(a + b == "hello world")
+    }
+
+    test "equality" {
+        assert("hello" == "hello")
+        assert("hello" != "world")
+    }
+}

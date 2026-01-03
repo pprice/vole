@@ -1,0 +1,64 @@
+// Edge case tests for arithmetic and special values - Part 1
+
+tests {
+    test "integer division" {
+        assert(10 / 3 == 3)
+        assert(7 / 2 == 3)
+        assert(-7 / 2 == -3)
+        assert(0 / 5 == 0)
+    }
+
+    test "integer modulo" {
+        assert(10 % 3 == 1)
+        assert(7 % 2 == 1)
+        // Void uses mathematical modulo, result is always non-negative
+        assert(-7 % 2 == 1)
+        assert(0 % 5 == 0)
+    }
+
+    test "float division" {
+        let x = 10.0 / 3.0
+        assert(x > 3.3 && x < 3.4)
+
+        let y = 1.0 / 2.0
+        assert(y == 0.5)
+    }
+
+    test "negative numbers" {
+        assert(-5 + 3 == -2)
+        assert(-5 - 3 == -8)
+        assert(-5 * 3 == -15)
+        assert(-5 * -3 == 15)
+        assert(--5 == 5)
+    }
+
+    test "large integers" {
+        let big: i64 = 9223372036854775807
+        assert(big > 0)
+
+        let small: i64 = -9223372036854775807
+        assert(small < 0)
+    }
+
+    test "float precision" {
+        let x = 0.1 + 0.2
+        assert(x > 0.29 && x < 0.31)
+    }
+
+    test "zero operations" {
+        assert(0 + 0 == 0)
+        assert(0 - 0 == 0)
+        assert(0 * 100 == 0)
+        assert(-0 == 0)
+        assert(-0.0 == 0.0)
+    }
+
+    test "unary negation" {
+        let x = 5
+        assert(-x == -5)
+        assert(-(-x) == 5)
+
+        let y = -10
+        assert(-y == 10)
+    }
+}

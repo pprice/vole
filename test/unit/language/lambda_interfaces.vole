@@ -1,0 +1,20 @@
+// Test lambda interface functionality
+
+interface Predicate {
+    func check(value: i32) -> bool
+}
+
+// Module-level functional interface binding (needed due to test block limitation)
+let isEven: Predicate = (x: i32) -> bool => x % 2 == 0
+
+tests {
+    test "lambda direct call" {
+        assert(isEven(4) == true)
+        assert(isEven(3) == false)
+    }
+
+    test "lambda method call" {
+        assert(isEven.check(4) == true)
+        assert(isEven.check(3) == false)
+    }
+}

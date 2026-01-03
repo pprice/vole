@@ -1,0 +1,37 @@
+// Variable declaration and assignment tests
+
+// Module-level variables for testing
+let immutableVar = 42
+let mut mutableVar = 10
+
+tests "variables" {
+    test "let immutable (module level)" {
+        assert(immutableVar == 42)
+    }
+
+    test "let mut read (module level)" {
+        assert(mutableVar == 10)
+    }
+
+    test "let inside test" {
+        let x = 42
+        assert(x == 42)
+    }
+
+    test "let mut write" {
+        let mut x = 10
+        x = 20
+        assert(x == 20)
+    }
+
+    test "multiple declarations" {
+        let a = 1
+        let b = 2
+        let c = 3
+        assert(a + b + c == 6)
+    }
+
+    // Note: Variable shadowing (let x = 10; let x = 20) is not supported.
+    // Redeclaring a variable in the same scope gives "already defined" error.
+    // Use mutation (let mut x = 10; x = 20) or nested scopes for similar effects.
+}

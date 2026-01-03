@@ -1,0 +1,104 @@
+// Test optional type syntax and operators
+
+record Person {
+    name: string,
+    age: i32,
+}
+
+record Company {
+    name: string,
+    ceo: Person?,
+}
+
+tests {
+
+    test "optional type syntax T?" {
+        // T? is syntactic sugar for T | nil
+        let x: i32? = 42
+        let y: i32? = nil
+
+        assert(x is i32)
+        assert(y is nil)
+    }
+
+    test "null coalescing with non-nil value" {
+        let x: i32? = 42
+        let result = x ?? 0
+        assert(result == 42)
+    }
+
+    test "null coalescing with nil value" {
+        let y: i32? = nil
+        let result = y ?? 99
+        assert(result == 99)
+    }
+
+    test "null coalescing with string" {
+        let s: string? = nil
+        let result = s ?? "default"
+        assert(result == "default")
+    }
+
+    test "null coalescing chain" {
+        let a: i32? = nil
+        let b: i32? = nil
+        let c: i32? = 42
+
+        // a is nil, so try b, b is nil, so try c
+        let result = a ?? b ?? c ?? 0
+        assert(result == 42)
+    }
+
+    test "optional chaining on record - non-nil" {
+        let p: Person? = Person { name: "Alice", age: 30 }
+        let name = p?.name
+        assert(name == "Alice")
+    }
+
+    test "optional chaining on record - nil" {
+        let p: Person? = nil
+        let name = p?.name
+        assert(name is nil)
+    }
+
+    test "combined optional chaining and null coalescing" {
+        let p: Person? = nil
+        let name = p?.name ?? "Unknown"
+        assert(name == "Unknown")
+    }
+
+    test "combined optional chaining and null coalescing - non-nil" {
+        let p: Person? = Person { name: "Bob", age: 25 }
+        let name = p?.name ?? "Unknown"
+        assert(name == "Bob")
+    }
+
+    test "nested optional chaining" {
+        let c: Company? = Company {
+            name: "Acme",
+            ceo: Person { name: "Eve", age: 45 }
+        }
+        let ceoName = c?.ceo?.name
+        assert(ceoName == "Eve")
+    }
+
+    test "nested optional chaining with nil" {
+        let c: Company? = Company {
+            name: "Startup",
+            ceo: nil
+        }
+        let ceoName = c?.ceo?.name ?? "No CEO"
+        assert(ceoName == "No CEO")
+    }
+
+    test "narrowing optional in if condition" {
+        let x: string? = "hello"
+        // x is narrowed to string in the then branch, allowing string operations
+        let result = if x {
+            x  // x should narrow to string
+        } else {
+            "default"
+        }
+        assert(result == "hello")
+    }
+}

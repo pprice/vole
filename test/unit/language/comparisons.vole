@@ -1,0 +1,43 @@
+// Comparison operators tests
+
+tests "comparisons" {
+    test "equality" {
+        assert(5 == 5)
+        assert(0 == 0)
+        assert(-1 == -1)
+        assert(true == true)
+        assert(false == false)
+    }
+
+    test "inequality" {
+        assert(5 != 3)
+        assert(0 != 1)
+        assert(true != false)
+    }
+
+    test "greater than" {
+        assert(5 > 3)
+        assert(0 > -1)
+        assert(100 > 99)
+    }
+
+    test "less than" {
+        assert(3 < 5)
+        assert(-1 < 0)
+        assert(99 < 100)
+    }
+
+    test "greater or equal" {
+        assert(5 >= 5)
+        assert(5 >= 3)
+        assert(0 >= 0)
+        assert(0 >= -1)
+    }
+
+    test "less or equal" {
+        assert(5 <= 5)
+        assert(3 <= 5)
+        assert(0 <= 0)
+        assert(-1 <= 0)
+    }
+}

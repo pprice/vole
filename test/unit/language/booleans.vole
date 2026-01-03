@@ -1,0 +1,40 @@
+// Boolean operations tests
+
+tests "booleans" {
+    test "literals" {
+        assert(true)
+        assert(!false)
+    }
+
+    test "and" {
+        assert(true && true)
+        assert(!(true && false))
+        assert(!(false && true))
+        assert(!(false && false))
+    }
+
+    test "or" {
+        assert(true || true)
+        assert(true || false)
+        assert(false || true)
+        assert(!(false || false))
+    }
+
+    test "not" {
+        assert(!false)
+        assert(!!true)
+        assert(!(!true))
+    }
+
+    test "and with false lhs" {
+        // When left side is false, && result is false
+        let result = false && true
+        assert(result == false)
+    }
+
+    test "or with true lhs" {
+        // When left side is true, || result is true
+        let result = true || false
+        assert(result == true)
+    }
+}
