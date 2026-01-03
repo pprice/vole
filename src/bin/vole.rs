@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 use vole::cli::Cli;
 use vole::cli::Commands;
+use vole::commands::check::check_file;
 use vole::commands::run::run_file;
 use vole::commands::test::run_tests;
 
@@ -13,6 +14,7 @@ fn main() -> ExitCode {
 
     match cli.command {
         Commands::Run { file } => run_file(&file),
+        Commands::Check { file } => check_file(&file),
         Commands::Test { paths } => run_tests(&paths),
     }
 }

@@ -37,3 +37,5 @@ jobs:
         run: just build${{ matrix.profile == 'release' && '-release' || '' }}
       - name: Test
         run: just test${{ matrix.profile == 'release' && '-release' || '' }}
+      - name: Snapshot Tests
+        run: just snap${{ matrix.profile == 'release' && '-release' || '' }}
