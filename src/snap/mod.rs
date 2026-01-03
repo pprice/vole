@@ -1,8 +1,8 @@
 // src/snap/mod.rs
 
-pub mod snapshot;
 pub mod diff;
 pub mod runner;
+pub mod snapshot;
 
+pub use runner::{TestSummary, bless_tests, run_tests};
 pub use snapshot::Snapshot;
-pub use runner::{run_tests, bless_tests, TestSummary};

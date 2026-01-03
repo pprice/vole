@@ -182,7 +182,11 @@ pub fn run_test(test_path: &Path, use_color: bool) -> TestResult {
     let snap = Snapshot::parse(&snap_content);
 
     // Compare
-    let diff_fn = if use_color { unified_diff_colored } else { unified_diff };
+    let diff_fn = if use_color {
+        unified_diff_colored
+    } else {
+        unified_diff
+    };
     let stdout_diff = diff_fn(&snap.stdout, stdout, "stdout");
     let stderr_diff = diff_fn(&snap.stderr, stderr, "stderr");
 
@@ -206,8 +210,8 @@ pub fn bless_test(test_path: &Path) -> Result<bool, String> {
     let cmd = extract_command(test_path)
         .ok_or_else(|| "Cannot determine command from path".to_string())?;
 
-    let source = fs::read_to_string(test_path)
-        .map_err(|e| format!("Could not read file: {}", e))?;
+    let source =
+        fs::read_to_string(test_path).map_err(|e| format!("Could not read file: {}", e))?;
 
     let file_path = test_path.to_string_lossy().to_string();
 
@@ -235,8 +239,7 @@ pub fn bless_test(test_path: &Path) -> Result<bool, String> {
     let snap_path = format!("{}.snap", test_path.display());
 
     let existed = Path::new(&snap_path).exists();
-    fs::write(&snap_path, snap_content)
-        .map_err(|e| format!("Could not write snapshot: {}", e))?;
+    fs::write(&snap_path, snap_content).map_err(|e| format!("Could not write snapshot: {}", e))?;
 
     Ok(existed) // true = updated, false = created
 }

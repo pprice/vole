@@ -15,7 +15,10 @@ pub fn unified_diff(expected: &str, actual: &str, label: &str) -> Option<String>
 
     // Check if there are any changes
     let has_changes = diff.ops().iter().any(|op| {
-        !matches!(diff.iter_changes(op).next().map(|c| c.tag()), Some(ChangeTag::Equal) | None)
+        !matches!(
+            diff.iter_changes(op).next().map(|c| c.tag()),
+            Some(ChangeTag::Equal) | None
+        )
     });
 
     if !has_changes {
@@ -53,9 +56,10 @@ pub fn unified_diff_colored(expected: &str, actual: &str, label: &str) -> Option
     let diff = TextDiff::from_lines(expected, actual);
     let mut output = String::new();
 
-    let has_changes = diff.ops().iter().any(|op| {
-        diff.iter_changes(op).any(|c| c.tag() != ChangeTag::Equal)
-    });
+    let has_changes = diff
+        .ops()
+        .iter()
+        .any(|op| diff.iter_changes(op).any(|c| c.tag() != ChangeTag::Equal));
 
     if !has_changes {
         return None;

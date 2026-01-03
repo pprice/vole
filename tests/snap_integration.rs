@@ -40,23 +40,31 @@ fn vole_snap_help_works() {
 fn vole_check_command_works() {
     // Test check on a valid file
     let output = Command::new("cargo")
-        .args(["run", "--bin", "vole", "--", "check", "test/snapshot/run/hello.vole"])
+        .args([
+            "run",
+            "--bin",
+            "vole",
+            "--",
+            "check",
+            "test/snapshot/run/hello.vole",
+        ])
         .output()
         .expect("Failed to run vole check");
 
-    assert!(
-        output.status.success(),
-        "Expected success for valid file"
-    );
+    assert!(output.status.success(), "Expected success for valid file");
 
     // Test check on an error file
     let output = Command::new("cargo")
-        .args(["run", "--bin", "vole", "--", "check", "test/snapshot/check/sema/undefined_variable.vole"])
+        .args([
+            "run",
+            "--bin",
+            "vole",
+            "--",
+            "check",
+            "test/snapshot/check/sema/undefined_variable.vole",
+        ])
         .output()
         .expect("Failed to run vole check");
 
-    assert!(
-        !output.status.success(),
-        "Expected failure for error file"
-    );
+    assert!(!output.status.success(), "Expected failure for error file");
 }

@@ -21,7 +21,11 @@ impl Snapshot {
             } else if line == "[stderr]" {
                 current_section = Some("stderr");
             } else if let Some(section) = current_section {
-                let target = if section == "stdout" { &mut stdout } else { &mut stderr };
+                let target = if section == "stdout" {
+                    &mut stdout
+                } else {
+                    &mut stderr
+                };
                 if !target.is_empty() {
                     target.push('\n');
                 }
