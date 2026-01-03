@@ -8,10 +8,10 @@ use std::collections::HashMap;
 
 use crate::codegen::JitContext;
 use crate::frontend::{
-    self, BinaryOp, Decl, Expr, ExprKind, FuncDecl, Interner, LetStmt, Pattern, Program, Stmt,
-    StringPart, Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
+    self, BinaryOp, Decl, Expr, ExprKind, FuncDecl, Interner, LambdaBody, LambdaExpr, LetStmt,
+    Pattern, Program, Stmt, StringPart, Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
 };
-use crate::sema::Type;
+use crate::sema::{FunctionType, Type};
 
 /// Metadata about a compiled test
 #[derive(Debug, Clone)]
@@ -80,6 +80,8 @@ pub struct Compiler<'a> {
     tests: Vec<TestInfo>,
     /// Global variable declarations (let statements at module level)
     globals: Vec<LetStmt>,
+    /// Counter for generating unique lambda names
+    lambda_counter: usize,
 }
 
 impl<'a> Compiler<'a> {
@@ -91,6 +93,7 @@ impl<'a> Compiler<'a> {
             pointer_type,
             tests: Vec::new(),
             globals: Vec::new(),
+            lambda_counter: 0,
         }
     }
 
@@ -246,9 +249,10 @@ impl<'a> Compiler<'a> {
                 interner: self.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &self.jit.func_ids,
+                func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &self.globals,
+                lambda_counter: &mut self.lambda_counter,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -308,9 +312,10 @@ impl<'a> Compiler<'a> {
                     interner: self.interner,
                     pointer_type: self.pointer_type,
                     module: &mut self.jit.module,
-                    func_ids: &self.jit.func_ids,
+                    func_ids: &mut self.jit.func_ids,
                     source_file_ptr,
                     globals: &self.globals,
+                    lambda_counter: &mut self.lambda_counter,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -457,9 +462,10 @@ impl<'a> Compiler<'a> {
                 interner: self.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &self.jit.func_ids,
+                func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &[],
+                lambda_counter: &mut self.lambda_counter,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -511,9 +517,10 @@ impl<'a> Compiler<'a> {
                 interner: self.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &self.jit.func_ids,
+                func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &[],
+                lambda_counter: &mut self.lambda_counter,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -688,10 +695,12 @@ struct CompileCtx<'a> {
     interner: &'a Interner,
     pointer_type: types::Type,
     module: &'a mut JITModule,
-    func_ids: &'a HashMap<String, FuncId>,
+    func_ids: &'a mut HashMap<String, FuncId>,
     source_file_ptr: (*const u8, usize),
     /// Global variable declarations for lookup when identifier not in local scope
     globals: &'a [LetStmt],
+    /// Counter for generating unique lambda names
+    lambda_counter: &'a mut usize,
 }
 
 /// Returns true if a terminating statement (return/break) was compiled
@@ -1801,11 +1810,181 @@ fn compile_expr(
             })
         }
 
-        ExprKind::Lambda(_lambda) => {
-            // TODO: Implement lambda codegen in Task 9-15
-            Err("Lambda expressions not yet implemented".to_string())
-        }
+        ExprKind::Lambda(lambda) => compile_lambda(builder, lambda, variables, ctx),
     }
+}
+
+/// Compile a lambda expression to a function pointer
+fn compile_lambda(
+    builder: &mut FunctionBuilder,
+    lambda: &LambdaExpr,
+    _variables: &HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    // Generate unique name for the lambda
+    let lambda_name = format!("__lambda_{}", *ctx.lambda_counter);
+    *ctx.lambda_counter += 1;
+
+    // Build parameter types from lambda params
+    let param_types: Vec<types::Type> = lambda
+        .params
+        .iter()
+        .map(|p| {
+            p.ty.as_ref()
+                .map(|t| type_to_cranelift(&resolve_type_expr(t), ctx.pointer_type))
+                .unwrap_or(types::I64)
+        })
+        .collect();
+
+    let param_vole_types: Vec<Type> = lambda
+        .params
+        .iter()
+        .map(|p| p.ty.as_ref().map(resolve_type_expr).unwrap_or(Type::I64))
+        .collect();
+
+    // Determine return type
+    let return_type = lambda
+        .return_type
+        .as_ref()
+        .map(|t| type_to_cranelift(&resolve_type_expr(t), ctx.pointer_type))
+        .unwrap_or(types::I64);
+
+    let return_vole_type = lambda
+        .return_type
+        .as_ref()
+        .map(resolve_type_expr)
+        .unwrap_or(Type::I64);
+
+    // Create signature for the lambda
+    let mut sig = ctx.module.make_signature();
+    for &param_ty in &param_types {
+        sig.params.push(AbiParam::new(param_ty));
+    }
+    sig.returns.push(AbiParam::new(return_type));
+
+    // Declare the lambda function
+    let func_id = ctx
+        .module
+        .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
+        .map_err(|e| e.to_string())?;
+
+    // Store the func_id so it can be looked up later
+    ctx.func_ids.insert(lambda_name.clone(), func_id);
+
+    // Create a new codegen context for the lambda
+    let mut lambda_ctx = ctx.module.make_context();
+    lambda_ctx.func.signature = sig.clone();
+
+    // Build the lambda function body
+    {
+        let mut lambda_builder_ctx = FunctionBuilderContext::new();
+        let mut lambda_builder =
+            FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
+
+        let entry_block = lambda_builder.create_block();
+        lambda_builder.append_block_params_for_function_params(entry_block);
+        lambda_builder.switch_to_block(entry_block);
+
+        // Map parameters to variables
+        let mut lambda_variables: HashMap<Symbol, (Variable, Type)> = HashMap::new();
+        let block_params = lambda_builder.block_params(entry_block).to_vec();
+        for (i, param) in lambda.params.iter().enumerate() {
+            let var = lambda_builder.declare_var(param_types[i]);
+            lambda_builder.def_var(var, block_params[i]);
+            lambda_variables.insert(param.name, (var, param_vole_types[i].clone()));
+        }
+
+        // Create a CompileCtx for the lambda body (but without module access for nested lambdas)
+        // For pure lambdas (no captures), we can use a simpler approach
+        let mut lambda_cf_ctx = ControlFlowCtx::new();
+
+        // Compile the body
+        let result = match &lambda.body {
+            LambdaBody::Expr(expr) => {
+                // For expression body, we need to compile within the lambda's context
+                // This is tricky because we can't recursively call compile_expr with a different builder
+                // For now, compile simple expression bodies directly
+                compile_lambda_body_expr(&mut lambda_builder, expr, &mut lambda_variables, ctx)?
+            }
+            LambdaBody::Block(block) => {
+                // For block body, compile the block and handle returns
+                let terminated = compile_block(
+                    &mut lambda_builder,
+                    block,
+                    &mut lambda_variables,
+                    &mut lambda_cf_ctx,
+                    ctx,
+                )?;
+                if terminated {
+                    // Block ended with return, no need to add another
+                    lambda_builder.seal_all_blocks();
+                    lambda_builder.finalize();
+
+                    // Define the lambda function
+                    ctx.module
+                        .define_function(func_id, &mut lambda_ctx)
+                        .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
+
+                    // Get function reference and its address
+                    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
+                    let func_addr = builder.ins().func_addr(ctx.pointer_type, func_ref);
+
+                    return Ok(CompiledValue {
+                        value: func_addr,
+                        ty: ctx.pointer_type,
+                        vole_type: Type::Function(FunctionType {
+                            params: param_vole_types,
+                            return_type: Box::new(return_vole_type),
+                        }),
+                    });
+                }
+                // Block didn't terminate, need to return a default value
+                // This shouldn't happen for well-formed code
+                let zero = lambda_builder.ins().iconst(types::I64, 0);
+                CompiledValue {
+                    value: zero,
+                    ty: types::I64,
+                    vole_type: Type::I64,
+                }
+            }
+        };
+
+        // Return the result
+        lambda_builder.ins().return_(&[result.value]);
+        lambda_builder.seal_all_blocks();
+        lambda_builder.finalize();
+    }
+
+    // Define the lambda function
+    ctx.module
+        .define_function(func_id, &mut lambda_ctx)
+        .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
+
+    // Get function reference and its address in the parent function
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
+    let func_addr = builder.ins().func_addr(ctx.pointer_type, func_ref);
+
+    Ok(CompiledValue {
+        value: func_addr,
+        ty: ctx.pointer_type,
+        vole_type: Type::Function(FunctionType {
+            params: param_vole_types,
+            return_type: Box::new(return_vole_type),
+        }),
+    })
+}
+
+/// Compile a lambda body expression
+/// This is a simplified version that handles basic expression types
+fn compile_lambda_body_expr(
+    builder: &mut FunctionBuilder,
+    expr: &Expr,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    // For pure lambdas, we can use the regular compile_expr
+    // since there are no captures to worry about
+    compile_expr(builder, expr, variables, ctx)
 }
 
 /// Compile a string literal by calling vole_string_new
