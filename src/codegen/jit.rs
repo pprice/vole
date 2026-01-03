@@ -102,6 +102,22 @@ impl JitContext {
         // vole_assert_fail(file_ptr: *const u8, file_len: usize, line: u32)
         let sig = self.create_signature(&[ptr_ty, types::I64, types::I32], None);
         self.import_function("vole_assert_fail", &sig);
+
+        // vole_array_new() -> *mut RcArray
+        let sig = self.create_signature(&[], Some(ptr_ty));
+        self.import_function("vole_array_new", &sig);
+
+        // vole_array_push(arr: *mut RcArray, tag: u64, value: u64)
+        let sig = self.create_signature(&[ptr_ty, types::I64, types::I64], None);
+        self.import_function("vole_array_push", &sig);
+
+        // vole_array_get_value(arr: *const RcArray, index: usize) -> u64
+        let sig = self.create_signature(&[ptr_ty, types::I64], Some(types::I64));
+        self.import_function("vole_array_get_value", &sig);
+
+        // vole_array_len(arr: *const RcArray) -> usize
+        let sig = self.create_signature(&[ptr_ty], Some(types::I64));
+        self.import_function("vole_array_len", &sig);
     }
 
     fn register_runtime_symbols(builder: &mut JITBuilder) {
@@ -175,6 +191,24 @@ impl JitContext {
         builder.symbol(
             "vole_assert_fail",
             crate::runtime::assert::vole_assert_fail as *const u8,
+        );
+
+        // Array functions
+        builder.symbol(
+            "vole_array_new",
+            crate::runtime::builtins::vole_array_new as *const u8,
+        );
+        builder.symbol(
+            "vole_array_push",
+            crate::runtime::builtins::vole_array_push as *const u8,
+        );
+        builder.symbol(
+            "vole_array_get_value",
+            crate::runtime::builtins::vole_array_get_value as *const u8,
+        );
+        builder.symbol(
+            "vole_array_len",
+            crate::runtime::builtins::vole_array_len as *const u8,
         );
     }
 

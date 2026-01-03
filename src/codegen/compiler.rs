@@ -64,12 +64,12 @@ impl Default for ControlFlowCtx {
 }
 
 /// Compiled value with its type
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct CompiledValue {
     pub value: Value,
     pub ty: types::Type,
-    /// True if this value is a string pointer (needed since pointer_type == I64 on 64-bit)
-    pub is_string: bool,
+    /// The Vole type of this value (needed to distinguish strings/arrays from regular I64)
+    pub vole_type: Type,
 }
 
 /// Compiler for generating Cranelift IR from AST
@@ -530,6 +530,10 @@ fn resolve_type_expr(ty: &TypeExpr) -> Type {
     match ty {
         TypeExpr::Primitive(p) => Type::from_primitive(*p),
         TypeExpr::Named(_) => Type::Error,
+        TypeExpr::Array(elem) => {
+            let elem_ty = resolve_type_expr(elem);
+            Type::Array(Box::new(elem_ty))
+        }
     }
 }
 
@@ -748,7 +752,96 @@ fn compile_stmt(
 
                 Ok(false)
             } else {
-                Err("Only range iteration supported".to_string())
+                // Array iteration
+                let arr = compile_expr(builder, &for_stmt.iterable, variables, ctx)?;
+
+                // Get array length
+                let len_id = ctx
+                    .func_ids
+                    .get("vole_array_len")
+                    .ok_or_else(|| "vole_array_len not found".to_string())?;
+                let len_ref = ctx.module.declare_func_in_func(*len_id, builder.func);
+                let len_call = builder.ins().call(len_ref, &[arr.value]);
+                let len_val = builder.inst_results(len_call)[0];
+
+                // Create index variable (i = 0)
+                let idx_var = Variable::new(variables.len());
+                builder.declare_var(idx_var, types::I64);
+                let zero = builder.ins().iconst(types::I64, 0);
+                builder.def_var(idx_var, zero);
+
+                // Create element variable
+                let elem_var = Variable::new(variables.len() + 1);
+                builder.declare_var(elem_var, types::I64);
+                builder.def_var(elem_var, zero); // Initial value doesn't matter
+                variables.insert(for_stmt.var_name, elem_var);
+
+                // Determine element type from array type
+                let _elem_type = match &arr.vole_type {
+                    Type::Array(elem) => elem.as_ref().clone(),
+                    _ => Type::I64,
+                };
+
+                // Loop blocks
+                let header = builder.create_block();
+                let body_block = builder.create_block();
+                let continue_block = builder.create_block();
+                let exit_block = builder.create_block();
+
+                builder.ins().jump(header, &[]);
+
+                // Header: check i < len
+                builder.switch_to_block(header);
+                let current_idx = builder.use_var(idx_var);
+                let cmp = builder
+                    .ins()
+                    .icmp(IntCC::SignedLessThan, current_idx, len_val);
+                builder.ins().brif(cmp, body_block, &[], exit_block, &[]);
+
+                // Body: load element, execute body
+                builder.switch_to_block(body_block);
+
+                // Get element: arr[i]
+                let get_value_id = ctx
+                    .func_ids
+                    .get("vole_array_get_value")
+                    .ok_or_else(|| "vole_array_get_value not found".to_string())?;
+                let get_value_ref = ctx.module.declare_func_in_func(*get_value_id, builder.func);
+                let current_idx = builder.use_var(idx_var);
+                let get_call = builder
+                    .ins()
+                    .call(get_value_ref, &[arr.value, current_idx]);
+                let elem_val = builder.inst_results(get_call)[0];
+                builder.def_var(elem_var, elem_val);
+
+                // Execute loop body
+                cf_ctx.push_loop(exit_block, continue_block);
+                let body_terminated =
+                    compile_block(builder, &for_stmt.body, variables, cf_ctx, ctx)?;
+                cf_ctx.pop_loop();
+
+                // Jump to continue block if not already terminated
+                if !body_terminated {
+                    builder.ins().jump(continue_block, &[]);
+                }
+
+                // Continue: increment and loop
+                builder.switch_to_block(continue_block);
+                let current_idx = builder.use_var(idx_var);
+                let next_idx = builder.ins().iadd_imm(current_idx, 1);
+                builder.def_var(idx_var, next_idx);
+                builder.ins().jump(header, &[]);
+
+                // Exit
+                builder.switch_to_block(exit_block);
+
+                // Seal blocks
+                builder.seal_block(header);
+                builder.seal_block(body_block);
+                builder.seal_block(continue_block);
+                builder.seal_block(exit_block);
+
+                Ok(false)
             }
         }
         Stmt::Break(_) => {
@@ -783,7 +876,7 @@ fn compile_expr(
             Ok(CompiledValue {
                 value: val,
                 ty: types::I64,
-                is_string: false,
+                vole_type: Type::I64,
             })
         }
         ExprKind::FloatLiteral(n) => {
@@ -791,7 +884,7 @@ fn compile_expr(
             Ok(CompiledValue {
                 value: val,
                 ty: types::F64,
-                is_string: false,
+                vole_type: Type::F64,
             })
         }
         ExprKind::BoolLiteral(b) => {
@@ -799,7 +892,7 @@ fn compile_expr(
             Ok(CompiledValue {
                 value: val,
                 ty: types::I8,
-                is_string: false,
+                vole_type: Type::Bool,
             })
         }
         ExprKind::Identifier(sym) => {
@@ -807,11 +900,11 @@ fn compile_expr(
                 let val = builder.use_var(var);
                 // Get the type from the variable declaration
                 let ty = builder.func.dfg.value_type(val);
-                // Note: We don't track is_string for variables yet - they inherit from their init
+                // Note: We don't track vole_type for variables yet - they inherit from their init
                 Ok(CompiledValue {
                     value: val,
                     ty,
-                    is_string: false,
+                    vole_type: Type::Unknown,
                 })
             } else {
                 // Check if this is a global variable
@@ -866,7 +959,7 @@ fn compile_expr(
                     return Ok(CompiledValue {
                         value: result,
                         ty: types::I8,
-                        is_string: false,
+                        vole_type: Type::Bool,
                     });
                 }
                 BinaryOp::Or => {
@@ -904,7 +997,7 @@ fn compile_expr(
                     return Ok(CompiledValue {
                         value: result,
                         ty: types::I8,
-                        is_string: false,
+                        vole_type: Type::Bool,
                     });
                 }
                 _ => {} // Fall through to regular binary handling
@@ -1043,10 +1136,28 @@ fn compile_expr(
                 _ => result_ty,
             };
 
+            // Determine vole_type for result
+            let vole_type = match bin.op {
+                BinaryOp::Eq
+                | BinaryOp::Ne
+                | BinaryOp::Lt
+                | BinaryOp::Gt
+                | BinaryOp::Le
+                | BinaryOp::Ge => Type::Bool,
+                BinaryOp::And | BinaryOp::Or => unreachable!(),
+                _ => {
+                    if result_ty == types::F64 {
+                        Type::F64
+                    } else {
+                        Type::I64
+                    }
+                }
+            };
+
             Ok(CompiledValue {
                 value: result,
                 ty: final_ty,
-                is_string: false,
+                vole_type,
             })
         }
         ExprKind::Unary(un) => {
@@ -1069,7 +1180,7 @@ fn compile_expr(
             Ok(CompiledValue {
                 value: result,
                 ty: operand.ty,
-                is_string: false,
+                vole_type: operand.vole_type.clone(),
             })
         }
         ExprKind::Assign(assign) => {
@@ -1095,6 +1206,111 @@ fn compile_expr(
         ExprKind::Range(_) => {
             // Range expressions are only supported in for-in context
             Err("Range expressions only supported in for-in context".to_string())
+        }
+        ExprKind::ArrayLiteral(elements) => {
+            // Call vole_array_new()
+            let array_new_id = ctx
+                .func_ids
+                .get("vole_array_new")
+                .ok_or_else(|| "vole_array_new not found".to_string())?;
+            let array_new_ref = ctx.module.declare_func_in_func(*array_new_id, builder.func);
+
+            let call = builder.ins().call(array_new_ref, &[]);
+            let arr_ptr = builder.inst_results(call)[0];
+
+            // Push each element
+            let array_push_id = ctx
+                .func_ids
+                .get("vole_array_push")
+                .ok_or_else(|| "vole_array_push not found".to_string())?;
+            let array_push_ref = ctx.module.declare_func_in_func(*array_push_id, builder.func);
+
+            // Track element type from first element
+            let mut elem_type = Type::Unknown;
+
+            for (i, elem) in elements.iter().enumerate() {
+                let compiled = compile_expr(builder, elem, variables, ctx)?;
+
+                // Track element type from first element
+                if i == 0 {
+                    elem_type = compiled.vole_type.clone();
+                }
+
+                // Determine tag based on type
+                let tag = match &compiled.vole_type {
+                    Type::I64 | Type::I32 => 2i64, // TYPE_I64
+                    Type::F64 => 3i64,             // TYPE_F64
+                    Type::Bool => 4i64,            // TYPE_BOOL
+                    Type::String => 1i64,          // TYPE_STRING
+                    Type::Array(_) => 5i64,        // TYPE_ARRAY
+                    _ => 2i64,                     // default to I64
+                };
+
+                let tag_val = builder.ins().iconst(types::I64, tag);
+
+                // Convert value to u64 bits
+                let value_bits = if compiled.ty == types::F64 {
+                    builder
+                        .ins()
+                        .bitcast(types::I64, MemFlags::new(), compiled.value)
+                } else if compiled.ty == types::I8 {
+                    // Bool: zero-extend to i64
+                    builder.ins().uextend(types::I64, compiled.value)
+                } else {
+                    compiled.value
+                };
+
+                builder
+                    .ins()
+                    .call(array_push_ref, &[arr_ptr, tag_val, value_bits]);
+            }
+
+            Ok(CompiledValue {
+                value: arr_ptr,
+                ty: ctx.pointer_type,
+                vole_type: Type::Array(Box::new(elem_type)),
+            })
+        }
+        ExprKind::Index(idx) => {
+            let arr = compile_expr(builder, &idx.object, variables, ctx)?;
+            let index = compile_expr(builder, &idx.index, variables, ctx)?;
+
+            // Get element type from array type
+            let elem_type = match &arr.vole_type {
+                Type::Array(elem) => elem.as_ref().clone(),
+                _ => Type::I64, // Default to I64 if type unknown
+            };
+
+            // Call vole_array_get_value(arr, index)
+            let get_value_id = ctx
+                .func_ids
+                .get("vole_array_get_value")
+                .ok_or_else(|| "vole_array_get_value not found".to_string())?;
+            let get_value_ref = ctx.module.declare_func_in_func(*get_value_id, builder.func);
+
+            let call = builder.ins().call(get_value_ref, &[arr.value, index.value]);
+            let value = builder.inst_results(call)[0];
+
+            // Convert value based on element type
+            let (result_value, result_ty) = match &elem_type {
+                Type::F64 => {
+                    let fval = builder
+                        .ins()
+                        .bitcast(types::F64, MemFlags::new(), value);
+                    (fval, types::F64)
+                }
+                Type::Bool => {
+                    let bval = builder.ins().ireduce(types::I8, value);
+                    (bval, types::I8)
+                }
+                _ => (value, types::I64), // i64, strings, arrays stay as i64/pointer
+            };
+
+            Ok(CompiledValue {
+                value: result_value,
+                ty: result_ty,
+                vole_type: elem_type,
+            })
         }
     }
 }
@@ -1128,7 +1344,7 @@ fn compile_string_literal(
     Ok(CompiledValue {
         value: result,
         ty: pointer_type,
-        is_string: true,
+        vole_type: Type::String,
     })
 }
 
@@ -1169,8 +1385,8 @@ fn compile_println(
     let arg = compile_expr(builder, &args[0], variables, ctx)?;
 
     // Dispatch based on argument type
-    // We use is_string flag to distinguish strings from regular I64 values
-    let func_name = if arg.is_string {
+    // We use vole_type to distinguish strings from regular I64 values
+    let func_name = if matches!(arg.vole_type, Type::String) {
         "vole_println_string"
     } else if arg.ty == types::F64 {
         "vole_println_f64"
@@ -1193,7 +1409,7 @@ fn compile_println(
     Ok(CompiledValue {
         value: zero,
         ty: types::I64,
-        is_string: false,
+        vole_type: Type::Void,
     })
 }
 
@@ -1232,7 +1448,7 @@ fn compile_print_char(
     Ok(CompiledValue {
         value: zero,
         ty: types::I64,
-        is_string: false,
+        vole_type: Type::Void,
     })
 }
 
@@ -1302,7 +1518,7 @@ fn compile_assert(
     Ok(CompiledValue {
         value: zero,
         ty: types::I64,
-        is_string: false,
+        vole_type: Type::Void,
     })
 }
 
@@ -1336,16 +1552,16 @@ fn compile_user_function_call(
         Ok(CompiledValue {
             value: zero,
             ty: types::I64,
-            is_string: false,
+            vole_type: Type::Void,
         })
     } else {
         let result = results[0];
         let ty = builder.func.dfg.value_type(result);
-        // TODO: Track is_string for function return types properly
+        // TODO: Track vole_type for function return types properly
         Ok(CompiledValue {
             value: result,
             ty,
-            is_string: false,
+            vole_type: Type::Unknown,
         })
     }
 }
@@ -1389,7 +1605,7 @@ fn compile_interpolated_string(
         return Ok(CompiledValue {
             value: string_values[0],
             ty: ctx.pointer_type,
-            is_string: true,
+            vole_type: Type::String,
         });
     }
 
@@ -1410,7 +1626,7 @@ fn compile_interpolated_string(
     Ok(CompiledValue {
         value: result,
         ty: ctx.pointer_type,
-        is_string: true,
+        vole_type: Type::String,
     })
 }
 
@@ -1423,7 +1639,7 @@ fn value_to_string(
     func_ids: &HashMap<String, FuncId>,
 ) -> Result<Value, String> {
     // If already a string, return as-is
-    if val.is_string {
+    if matches!(val.vole_type, Type::String) {
         return Ok(val.value);
     }
 
