@@ -260,12 +260,14 @@ impl<'src> Parser<'src> {
         match self.current.ty {
             TokenType::KwLet => self.let_stmt(),
             TokenType::KwWhile => self.while_stmt(),
+            TokenType::KwFor => self.for_stmt(),
             TokenType::KwIf => self.if_stmt(),
             TokenType::KwBreak => {
                 let span = self.current.span;
                 self.advance();
                 Ok(Stmt::Break(span))
             }
+            TokenType::KwContinue => self.continue_stmt(),
             TokenType::KwReturn => self.return_stmt(),
             _ => self.expr_stmt(),
         }
@@ -318,6 +320,35 @@ impl<'src> Parser<'src> {
             body,
             span,
         }))
+    }
+
+    fn for_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'for'
+
+        let var_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected loop variable")?;
+        let var_name = self.interner.intern(&var_token.lexeme);
+
+        self.consume(TokenType::KwIn, "expected 'in'")?;
+
+        let iterable = self.expression(0)?;
+
+        let body = self.block()?;
+        let span = start_span.merge(body.span);
+
+        Ok(Stmt::For(ForStmt {
+            var_name,
+            iterable,
+            body,
+            span,
+        }))
+    }
+
+    fn continue_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let span = self.current.span;
+        self.advance();
+        Ok(Stmt::Continue(span))
     }
 
     fn if_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -488,6 +519,22 @@ impl<'src> Parser<'src> {
                 kind: ExprKind::Binary(Box::new(BinaryExpr { left, op, right })),
                 span,
             };
+        }
+
+        // Check for range operators (lowest precedence)
+        if self.check(TokenType::DotDot) || self.check(TokenType::DotDotEqual) {
+            let inclusive = self.check(TokenType::DotDotEqual);
+            self.advance();
+            let right = self.expression(0)?;
+            let span = left.span.merge(right.span);
+            return Ok(Expr {
+                kind: ExprKind::Range(Box::new(RangeExpr {
+                    start: left,
+                    end: right,
+                    inclusive,
+                })),
+                span,
+            });
         }
 
         Ok(left)
