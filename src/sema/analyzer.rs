@@ -396,12 +396,11 @@ impl Analyzer {
 
                         if left_ty.is_numeric() && right_ty.is_numeric() {
                             // If we have an expected type and both sides match, use it
-                            if let Some(exp) = expected {
-                                if self.types_compatible(&left_ty, exp)
-                                    && self.types_compatible(&right_ty, exp)
-                                {
-                                    return Ok(exp.clone());
-                                }
+                            if let Some(exp) = expected
+                                && self.types_compatible(&left_ty, exp)
+                                && self.types_compatible(&right_ty, exp)
+                            {
+                                return Ok(exp.clone());
                             }
                             // Otherwise return wider type
                             if left_ty == Type::F64 || right_ty == Type::F64 {
@@ -464,12 +463,11 @@ impl Analyzer {
                         let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
 
                         if left_ty.is_integer() && right_ty.is_integer() {
-                            if let Some(exp) = expected {
-                                if self.types_compatible(&left_ty, exp)
-                                    && self.types_compatible(&right_ty, exp)
-                                {
-                                    return Ok(exp.clone());
-                                }
+                            if let Some(exp) = expected
+                                && self.types_compatible(&left_ty, exp)
+                                && self.types_compatible(&right_ty, exp)
+                            {
+                                return Ok(exp.clone());
                             }
                             if left_ty == Type::I64 || right_ty == Type::I64 {
                                 Ok(Type::I64)
@@ -577,17 +575,17 @@ impl Analyzer {
             // All other cases: infer type, then check compatibility
             _ => {
                 let inferred = self.check_expr(expr, interner)?;
-                if let Some(expected_ty) = expected {
-                    if !self.types_compatible(&inferred, expected_ty) {
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: expected_ty.name().to_string(),
-                                found: inferred.name().to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                    }
+                if let Some(expected_ty) = expected
+                    && !self.types_compatible(&inferred, expected_ty)
+                {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: expected_ty.name().to_string(),
+                            found: inferred.name().to_string(),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
                 }
                 Ok(inferred)
             }

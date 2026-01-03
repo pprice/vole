@@ -1,6 +1,6 @@
 // src/runtime/array.rs
 
-use crate::runtime::value::{RcHeader, TaggedValue, TYPE_ARRAY};
+use crate::runtime::value::{RcHeader, TYPE_ARRAY, TaggedValue};
 use std::alloc::{Layout, alloc, dealloc, realloc};
 use std::ptr;
 

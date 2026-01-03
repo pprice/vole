@@ -59,7 +59,7 @@ pub struct Param {
 pub enum TypeExpr {
     Primitive(PrimitiveType),
     Named(Symbol),
-    Array(Box<TypeExpr>),  // [i32], [string], etc.
+    Array(Box<TypeExpr>), // [i32], [string], etc.
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
