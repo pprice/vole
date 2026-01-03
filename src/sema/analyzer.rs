@@ -870,4 +870,11 @@ mod tests {
         let source = "func main() { let x: i32 = 42\n let y: i64 = x }";
         assert!(check(source).is_ok());
     }
+
+    #[test]
+    fn analyze_i64_to_i32_narrowing_error() {
+        let source = "func main() { let x: i64 = 42\n let y: i32 = x }";
+        let result = check(source);
+        assert!(result.is_err());
+    }
 }
