@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-E1003
+E0001
 
-  x unexpected token 'let'
-   ,-[<path>/unexpected_char.vole:1:1]
+  x unexpected character '`'
+   ,-[<path>/unexpected_char.vole:1:9]
  1 | let x = `
-   : ^|^
-   :  `-- unexpected
+   :         |
+   :         `-- unexpected character
    `----
