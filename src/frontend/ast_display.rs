@@ -130,8 +130,16 @@ impl<'a> AstPrinter<'a> {
         match ty {
             TypeExpr::Primitive(p) => {
                 let s = match p {
+                    PrimitiveType::I8 => "i8",
+                    PrimitiveType::I16 => "i16",
                     PrimitiveType::I32 => "i32",
                     PrimitiveType::I64 => "i64",
+                    PrimitiveType::I128 => "i128",
+                    PrimitiveType::U8 => "u8",
+                    PrimitiveType::U16 => "u16",
+                    PrimitiveType::U32 => "u32",
+                    PrimitiveType::U64 => "u64",
+                    PrimitiveType::F32 => "f32",
                     PrimitiveType::F64 => "f64",
                     PrimitiveType::Bool => "bool",
                     PrimitiveType::String => "string",

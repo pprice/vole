@@ -5,10 +5,21 @@ use crate::frontend::PrimitiveType;
 /// Resolved types in the type system
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
-    /// Primitive types
+    /// Signed integers
+    I8,
+    I16,
     I32,
     I64,
+    I128,
+    /// Unsigned integers
+    U8,
+    U16,
+    U32,
+    U64,
+    /// Floating point
+    F32,
     F64,
+    /// Other primitives
     Bool,
     String,
     /// Void (no return value)
@@ -34,8 +45,16 @@ pub struct FunctionType {
 impl Type {
     pub fn from_primitive(p: PrimitiveType) -> Self {
         match p {
+            PrimitiveType::I8 => Type::I8,
+            PrimitiveType::I16 => Type::I16,
             PrimitiveType::I32 => Type::I32,
             PrimitiveType::I64 => Type::I64,
+            PrimitiveType::I128 => Type::I128,
+            PrimitiveType::U8 => Type::U8,
+            PrimitiveType::U16 => Type::U16,
+            PrimitiveType::U32 => Type::U32,
+            PrimitiveType::U64 => Type::U64,
+            PrimitiveType::F32 => Type::F32,
             PrimitiveType::F64 => Type::F64,
             PrimitiveType::Bool => Type::Bool,
             PrimitiveType::String => Type::String,
@@ -44,19 +63,107 @@ impl Type {
 
     /// Check if this type is numeric (can do arithmetic)
     pub fn is_numeric(&self) -> bool {
-        matches!(self, Type::I32 | Type::I64 | Type::F64)
+        matches!(
+            self,
+            Type::I8
+                | Type::I16
+                | Type::I32
+                | Type::I64
+                | Type::I128
+                | Type::U8
+                | Type::U16
+                | Type::U32
+                | Type::U64
+                | Type::F32
+                | Type::F64
+        )
     }
 
     /// Check if this type is an integer
     pub fn is_integer(&self) -> bool {
-        matches!(self, Type::I32 | Type::I64)
+        matches!(
+            self,
+            Type::I8
+                | Type::I16
+                | Type::I32
+                | Type::I64
+                | Type::I128
+                | Type::U8
+                | Type::U16
+                | Type::U32
+                | Type::U64
+        )
+    }
+
+    /// Check if this is a signed integer type
+    pub fn is_signed(&self) -> bool {
+        matches!(
+            self,
+            Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
+        )
+    }
+
+    /// Check if this is an unsigned integer type
+    pub fn is_unsigned(&self) -> bool {
+        matches!(self, Type::U8 | Type::U16 | Type::U32 | Type::U64)
+    }
+
+    /// Check if this is a floating point type
+    pub fn is_float(&self) -> bool {
+        matches!(self, Type::F32 | Type::F64)
+    }
+
+    /// Get the bit width of a numeric type
+    pub fn bit_width(&self) -> Option<u8> {
+        match self {
+            Type::I8 | Type::U8 => Some(8),
+            Type::I16 | Type::U16 => Some(16),
+            Type::I32 | Type::U32 | Type::F32 => Some(32),
+            Type::I64 | Type::U64 | Type::F64 => Some(64),
+            Type::I128 => Some(128),
+            _ => None,
+        }
+    }
+
+    /// Check if this type can be implicitly widened to target type
+    pub fn can_widen_to(&self, target: &Type) -> bool {
+        if self == target {
+            return true;
+        }
+        match (self, target) {
+            // Signed to larger signed
+            (Type::I8, Type::I16 | Type::I32 | Type::I64 | Type::I128) => true,
+            (Type::I16, Type::I32 | Type::I64 | Type::I128) => true,
+            (Type::I32, Type::I64 | Type::I128) => true,
+            (Type::I64, Type::I128) => true,
+            // Unsigned to larger unsigned
+            (Type::U8, Type::U16 | Type::U32 | Type::U64) => true,
+            (Type::U16, Type::U32 | Type::U64) => true,
+            (Type::U32, Type::U64) => true,
+            // Unsigned to larger signed (always fits)
+            (Type::U8, Type::I16 | Type::I32 | Type::I64 | Type::I128) => true,
+            (Type::U16, Type::I32 | Type::I64 | Type::I128) => true,
+            (Type::U32, Type::I64 | Type::I128) => true,
+            (Type::U64, Type::I128) => true,
+            // Float widening
+            (Type::F32, Type::F64) => true,
+            _ => false,
+        }
     }
 
     /// Get the type name for error messages
     pub fn name(&self) -> &'static str {
         match self {
+            Type::I8 => "i8",
+            Type::I16 => "i16",
             Type::I32 => "i32",
             Type::I64 => "i64",
+            Type::I128 => "i128",
+            Type::U8 => "u8",
+            Type::U16 => "u16",
+            Type::U32 => "u32",
+            Type::U64 => "u64",
+            Type::F32 => "f32",
             Type::F64 => "f64",
             Type::Bool => "bool",
             Type::String => "string",
@@ -76,8 +183,16 @@ mod tests {
 
     #[test]
     fn type_is_numeric() {
+        assert!(Type::I8.is_numeric());
+        assert!(Type::I16.is_numeric());
         assert!(Type::I32.is_numeric());
         assert!(Type::I64.is_numeric());
+        assert!(Type::I128.is_numeric());
+        assert!(Type::U8.is_numeric());
+        assert!(Type::U16.is_numeric());
+        assert!(Type::U32.is_numeric());
+        assert!(Type::U64.is_numeric());
+        assert!(Type::F32.is_numeric());
         assert!(Type::F64.is_numeric());
         assert!(!Type::Bool.is_numeric());
         assert!(!Type::String.is_numeric());
@@ -87,14 +202,48 @@ mod tests {
     fn type_is_integer() {
         assert!(Type::I32.is_integer());
         assert!(Type::I64.is_integer());
+        assert!(Type::U32.is_integer());
         assert!(!Type::F64.is_integer());
         assert!(!Type::Bool.is_integer());
     }
 
     #[test]
+    fn type_is_signed_unsigned() {
+        assert!(Type::I32.is_signed());
+        assert!(Type::I128.is_signed());
+        assert!(!Type::U32.is_signed());
+        assert!(!Type::F64.is_signed());
+
+        assert!(Type::U32.is_unsigned());
+        assert!(Type::U64.is_unsigned());
+        assert!(!Type::I32.is_unsigned());
+    }
+
+    #[test]
+    fn type_widening() {
+        // Signed widening
+        assert!(Type::I8.can_widen_to(&Type::I16));
+        assert!(Type::I8.can_widen_to(&Type::I64));
+        assert!(!Type::I64.can_widen_to(&Type::I32));
+
+        // Unsigned widening
+        assert!(Type::U8.can_widen_to(&Type::U16));
+        assert!(Type::U16.can_widen_to(&Type::U64));
+
+        // Unsigned to signed
+        assert!(Type::U8.can_widen_to(&Type::I16));
+        assert!(Type::U32.can_widen_to(&Type::I64));
+        assert!(!Type::U64.can_widen_to(&Type::I64));
+
+        // Float widening
+        assert!(Type::F32.can_widen_to(&Type::F64));
+        assert!(!Type::F64.can_widen_to(&Type::F32));
+    }
+
+    #[test]
     fn type_from_primitive() {
         assert_eq!(Type::from_primitive(PrimitiveType::I32), Type::I32);
-        assert_eq!(Type::from_primitive(PrimitiveType::F64), Type::F64);
-        assert_eq!(Type::from_primitive(PrimitiveType::String), Type::String);
+        assert_eq!(Type::from_primitive(PrimitiveType::U64), Type::U64);
+        assert_eq!(Type::from_primitive(PrimitiveType::F32), Type::F32);
     }
 }
