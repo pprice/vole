@@ -1,0 +1,98 @@
+// Test match with literal patterns
+
+tests "integer literal patterns" {
+    test "match first arm" {
+        let x = 1
+        let result = match x {
+            1 => 100
+            2 => 200
+            _ => 999
+        }
+        assert(result == 100)
+    }
+
+    test "match second arm" {
+        let x = 2
+        let result = match x {
+            1 => 100
+            2 => 200
+            _ => 999
+        }
+        assert(result == 200)
+    }
+
+    test "match wildcard fallback" {
+        let x = 99
+        let result = match x {
+            1 => 100
+            2 => 200
+            _ => 999
+        }
+        assert(result == 999)
+    }
+
+    test "match negative integers" {
+        let x = -5
+        let result = match x {
+            -10 => 1
+            -5 => 2
+            0 => 3
+            _ => 4
+        }
+        assert(result == 2)
+    }
+
+    test "match on expression" {
+        let a = 2
+        let b = 3
+        let result = match a + b {
+            5 => 100
+            _ => 0
+        }
+        assert(result == 100)
+    }
+}
+
+tests "identifier binding patterns" {
+    test "bind value with identifier" {
+        let x = 42
+        let result = match x {
+            n => n * 2
+        }
+        assert(result == 84)
+    }
+
+    test "identifier after literals" {
+        let x = 5
+        let result = match x {
+            1 => 100
+            2 => 200
+            n => n * 10
+        }
+        assert(result == 50)
+    }
+
+    test "use binding in expression" {
+        let x = 7
+        let result = match x {
+            0 => 0
+            n => n + n
+        }
+        assert(result == 14)
+    }
+}
+
+tests "nested match" {
+    test "nested match expression" {
+        let x = 1
+        let y = 2
+        let result = match x {
+            1 => match y {
+                2 => 12
+                _ => 10
+            }
+            _ => 0
+        }
+        assert(result == 12)
+    }
+}

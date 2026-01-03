@@ -175,6 +175,9 @@ pub enum ExprKind {
 
     /// Index expression: arr[0]
     Index(Box<IndexExpr>),
+
+    /// Match expression
+    Match(Box<MatchExpr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
@@ -255,4 +258,32 @@ pub struct IndexExpr {
 pub struct AssignExpr {
     pub target: Symbol,
     pub value: Expr,
+}
+
+/// Match expression
+#[derive(Debug, Clone)]
+pub struct MatchExpr {
+    pub scrutinee: Expr,
+    pub arms: Vec<MatchArm>,
+    pub span: Span,
+}
+
+/// A single arm in a match expression
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub guard: Option<Expr>,
+    pub body: Expr,
+    pub span: Span,
+}
+
+/// Pattern for matching
+#[derive(Debug, Clone)]
+pub enum Pattern {
+    /// Wildcard pattern: _
+    Wildcard(Span),
+    /// Literal pattern: 1, "hello", true, -5
+    Literal(Expr),
+    /// Identifier pattern (binds value): n
+    Identifier { name: Symbol, span: Span },
 }

@@ -61,4 +61,42 @@ pub enum SemanticError {
         #[label("expected bool")]
         span: SourceSpan,
     },
+
+    #[error("non-exhaustive match")]
+    #[diagnostic(
+        code(E2030),
+        help("add a wildcard pattern '_' or identifier to catch remaining cases")
+    )]
+    NonExhaustiveMatch {
+        #[label("match may not cover all cases")]
+        span: SourceSpan,
+    },
+
+    #[error("match arms have incompatible types: expected {expected}, found {found}")]
+    #[diagnostic(code(E2031))]
+    MatchArmTypeMismatch {
+        expected: String,
+        found: String,
+        #[label("first arm has type {expected}")]
+        first_arm: SourceSpan,
+        #[label("this arm has type {found}")]
+        span: SourceSpan,
+    },
+
+    #[error("match guard must be boolean, found {found}")]
+    #[diagnostic(code(E2032))]
+    MatchGuardNotBool {
+        found: String,
+        #[label("expected bool")]
+        span: SourceSpan,
+    },
+
+    #[error("pattern type mismatch: expected {expected}, found {found}")]
+    #[diagnostic(code(E2033))]
+    PatternTypeMismatch {
+        expected: String,
+        found: String,
+        #[label("pattern doesn't match scrutinee type")]
+        span: SourceSpan,
+    },
 }

@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 use crate::codegen::JitContext;
 use crate::frontend::{
-    self, BinaryOp, Decl, Expr, ExprKind, FuncDecl, Interner, LetStmt, Program, Stmt, StringPart,
-    Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
+    self, BinaryOp, Decl, Expr, ExprKind, FuncDecl, Interner, LetStmt, Pattern, Program, Stmt,
+    StringPart, Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
 };
 use crate::sema::Type;
 
@@ -1307,6 +1307,168 @@ fn compile_expr(
                 value: result_value,
                 ty: result_ty,
                 vole_type: elem_type,
+            })
+        }
+
+        ExprKind::Match(match_expr) => {
+            // Compile the scrutinee (value being matched)
+            let scrutinee = compile_expr(builder, &match_expr.scrutinee, variables, ctx)?;
+
+            // Create merge block that collects results
+            // Use I64 as the result type since it can hold both integers and pointers
+            let merge_block = builder.create_block();
+            builder.append_block_param(merge_block, types::I64);
+
+            // Create blocks for each arm
+            let arm_blocks: Vec<Block> = match_expr
+                .arms
+                .iter()
+                .map(|_| builder.create_block())
+                .collect();
+
+            // Jump to first arm
+            if !arm_blocks.is_empty() {
+                builder.ins().jump(arm_blocks[0], &[]);
+            } else {
+                // No arms - should not happen after sema, but handle gracefully
+                let default_val = builder.ins().iconst(types::I64, 0);
+                let default_arg = BlockArg::from(default_val);
+                builder.ins().jump(merge_block, &[default_arg]);
+            }
+
+            // Track the result type from the first arm body
+            let mut result_vole_type = Type::Void;
+
+            // Compile each arm
+            for (i, arm) in match_expr.arms.iter().enumerate() {
+                let arm_block = arm_blocks[i];
+                let next_block = arm_blocks.get(i + 1).copied().unwrap_or(merge_block);
+
+                builder.switch_to_block(arm_block);
+
+                // Create a new variables scope for this arm
+                let mut arm_variables = variables.clone();
+
+                // Check pattern
+                let pattern_matches = match &arm.pattern {
+                    Pattern::Wildcard(_) => {
+                        // Always matches
+                        None
+                    }
+                    Pattern::Identifier { name, .. } => {
+                        // Bind the scrutinee value to the identifier
+                        let var = builder.declare_var(scrutinee.ty);
+                        builder.def_var(var, scrutinee.value);
+                        arm_variables.insert(*name, var);
+                        None // Always matches
+                    }
+                    Pattern::Literal(lit_expr) => {
+                        // Compile literal and compare
+                        let lit_val = compile_expr(builder, lit_expr, &mut arm_variables, ctx)?;
+                        let cmp = match scrutinee.ty {
+                            types::I64 | types::I32 | types::I8 => {
+                                builder
+                                    .ins()
+                                    .icmp(IntCC::Equal, scrutinee.value, lit_val.value)
+                            }
+                            types::F64 => {
+                                builder
+                                    .ins()
+                                    .fcmp(FloatCC::Equal, scrutinee.value, lit_val.value)
+                            }
+                            _ => {
+                                // For strings, need to call comparison function
+                                if let Some(cmp_id) = ctx.func_ids.get("vole_string_eq") {
+                                    let cmp_ref =
+                                        ctx.module.declare_func_in_func(*cmp_id, builder.func);
+                                    let call = builder
+                                        .ins()
+                                        .call(cmp_ref, &[scrutinee.value, lit_val.value]);
+                                    builder.inst_results(call)[0]
+                                } else {
+                                    builder
+                                        .ins()
+                                        .icmp(IntCC::Equal, scrutinee.value, lit_val.value)
+                                }
+                            }
+                        };
+                        Some(cmp)
+                    }
+                };
+
+                // Check guard if present
+                let guard_result = if let Some(guard) = &arm.guard {
+                    let guard_val = compile_expr(builder, guard, &mut arm_variables, ctx)?;
+                    // Guard must be bool (i8)
+                    Some(guard_val.value)
+                } else {
+                    None
+                };
+
+                // Combine pattern match and guard
+                let should_execute = match (pattern_matches, guard_result) {
+                    (None, None) => None, // Always execute (wildcard/identifier, no guard)
+                    (Some(p), None) => Some(p),
+                    (None, Some(g)) => Some(g),
+                    (Some(p), Some(g)) => {
+                        // Both must be true: p AND g
+                        // icmp returns i8 (bool), guard is also i8
+                        Some(builder.ins().band(p, g))
+                    }
+                };
+
+                // Create body block and skip block
+                let body_block = builder.create_block();
+
+                if let Some(cond) = should_execute {
+                    // Conditional: branch to body if true, next arm if false
+                    let cond_i32 = builder.ins().uextend(types::I32, cond);
+                    builder
+                        .ins()
+                        .brif(cond_i32, body_block, &[], next_block, &[]);
+                } else {
+                    // Unconditional: always go to body
+                    builder.ins().jump(body_block, &[]);
+                }
+
+                builder.seal_block(arm_block);
+
+                // Compile body
+                builder.switch_to_block(body_block);
+                let body_val = compile_expr(builder, &arm.body, &mut arm_variables, ctx)?;
+
+                // Track result type from first arm
+                if i == 0 {
+                    result_vole_type = body_val.vole_type.clone();
+                }
+
+                // Convert body value to I64 if needed (merge block uses I64)
+                let result_val = if body_val.ty != types::I64 {
+                    match body_val.ty {
+                        types::I8 => builder.ins().sextend(types::I64, body_val.value),
+                        types::I32 => builder.ins().sextend(types::I64, body_val.value),
+                        _ => body_val.value, // Pointers are already I64
+                    }
+                } else {
+                    body_val.value
+                };
+
+                let result_arg = BlockArg::from(result_val);
+                builder.ins().jump(merge_block, &[result_arg]);
+                builder.seal_block(body_block);
+            }
+
+            // Note: arm_blocks are sealed inside the loop after their predecessors are known
+
+            // Switch to merge block and get result
+            builder.switch_to_block(merge_block);
+            builder.seal_block(merge_block);
+
+            let result = builder.block_params(merge_block)[0];
+            Ok(CompiledValue {
+                value: result,
+                ty: types::I64,
+                vole_type: result_vole_type,
             })
         }
     }
