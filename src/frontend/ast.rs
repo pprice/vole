@@ -59,6 +59,7 @@ pub struct Param {
 pub enum TypeExpr {
     Primitive(PrimitiveType),
     Named(Symbol),
+    Array(Box<TypeExpr>),  // [i32], [string], etc.
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,6 +169,12 @@ pub enum ExprKind {
 
     // Grouping
     Grouping(Box<Expr>),
+
+    /// Array literal: [1, 2, 3]
+    ArrayLiteral(Vec<Expr>),
+
+    /// Index expression: arr[0]
+    Index(Box<IndexExpr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
@@ -234,6 +241,13 @@ pub enum UnaryOp {
 pub struct CallExpr {
     pub callee: Expr,
     pub args: Vec<Expr>,
+}
+
+/// Index expression
+#[derive(Debug, Clone)]
+pub struct IndexExpr {
+    pub object: Expr,
+    pub index: Expr,
 }
 
 /// Assignment
