@@ -211,6 +211,14 @@ impl<'src> Parser<'src> {
                 self.consume(TokenType::RBracket, "expected ']' after array element type")?;
                 Ok(TypeExpr::Array(Box::new(elem_type)))
             }
+            TokenType::KwI8 => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::I8))
+            }
+            TokenType::KwI16 => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::I16))
+            }
             TokenType::KwI32 => {
                 self.advance();
                 Ok(TypeExpr::Primitive(PrimitiveType::I32))
@@ -218,6 +226,30 @@ impl<'src> Parser<'src> {
             TokenType::KwI64 => {
                 self.advance();
                 Ok(TypeExpr::Primitive(PrimitiveType::I64))
+            }
+            TokenType::KwI128 => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::I128))
+            }
+            TokenType::KwU8 => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::U8))
+            }
+            TokenType::KwU16 => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::U16))
+            }
+            TokenType::KwU32 => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::U32))
+            }
+            TokenType::KwU64 => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::U64))
+            }
+            TokenType::KwF32 => {
+                self.advance();
+                Ok(TypeExpr::Primitive(PrimitiveType::F32))
             }
             TokenType::KwF64 => {
                 self.advance();

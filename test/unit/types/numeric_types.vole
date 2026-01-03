@@ -1,0 +1,213 @@
+// Test integer types and literal coercion
+
+tests "i8 type" {
+    test "i8 positive" {
+        let x: i8 = 127
+        assert(x == 127)
+    }
+
+    test "i8 negative" {
+        let x: i8 = -100
+        assert(x == -100)
+    }
+
+    test "i8 zero" {
+        let x: i8 = 0
+        assert(x == 0)
+    }
+
+    test "i8 arithmetic" {
+        let a: i8 = 10
+        let b: i8 = 3
+        assert(a + b == 13)
+        assert(a - b == 7)
+        assert(a * b == 30)
+        assert(a / b == 3)
+    }
+}
+
+tests "i16 type" {
+    test "i16 positive" {
+        let x: i16 = 32767
+        assert(x == 32767)
+    }
+
+    test "i16 negative" {
+        let x: i16 = -1000
+        assert(x == -1000)
+    }
+
+    test "i16 arithmetic" {
+        let a: i16 = 100
+        let b: i16 = 50
+        assert(a + b == 150)
+        assert(a - b == 50)
+    }
+}
+
+tests "i32 type" {
+    test "i32 default inference" {
+        let x = 42
+        assert(x == 42)
+    }
+
+    test "i32 explicit" {
+        let x: i32 = 2147483647
+        assert(x > 0)
+    }
+
+    test "i32 negative" {
+        let x: i32 = -1000000
+        assert(x < 0)
+    }
+
+    test "i32 arithmetic" {
+        let a = 100
+        let b = 200
+        assert(a + b == 300)
+        assert(b - a == 100)
+        assert(a * 2 == 200)
+    }
+}
+
+tests "i64 type" {
+    test "i64 explicit" {
+        let x: i64 = 9223372036854775807
+        assert(x > 0)
+    }
+
+    test "i64 small value" {
+        let x: i64 = 42
+        assert(x == 42)
+    }
+
+    test "i64 arithmetic" {
+        let a: i64 = 1000000000000
+        let b: i64 = 2
+        assert(a * b == 2000000000000)
+    }
+}
+
+tests "u8 type" {
+    test "u8 max" {
+        let x: u8 = 255
+        assert(x == 255)
+    }
+
+    test "u8 zero" {
+        let x: u8 = 0
+        assert(x == 0)
+    }
+
+    test "u8 mid" {
+        let x: u8 = 128
+        assert(x == 128)
+    }
+
+    test "u8 arithmetic" {
+        let a: u8 = 200
+        let b: u8 = 50
+        assert(a - b == 150)
+    }
+
+    test "u8 division" {
+        let a: u8 = 100
+        let b: u8 = 7
+        assert(a / b == 14)
+    }
+}
+
+tests "u16 type" {
+    test "u16 max" {
+        let x: u16 = 65535
+        assert(x == 65535)
+    }
+
+    test "u16 zero" {
+        let x: u16 = 0
+        assert(x == 0)
+    }
+
+    test "u16 arithmetic" {
+        let a: u16 = 1000
+        let b: u16 = 500
+        assert(a + b == 1500)
+    }
+}
+
+tests "u32 type" {
+    test "u32 large value" {
+        let x: u32 = 4000000000
+        assert(x > 0)
+    }
+
+    test "u32 zero" {
+        let x: u32 = 0
+        assert(x == 0)
+    }
+
+    test "u32 division" {
+        let a: u32 = 100
+        let b: u32 = 3
+        assert(a / b == 33)
+    }
+}
+
+tests "u64 type" {
+    test "u64 large value" {
+        let x: u64 = 9223372036854775807
+        assert(x > 0)
+    }
+
+    test "u64 zero" {
+        let x: u64 = 0
+        assert(x == 0)
+    }
+
+    test "u64 from i32 max" {
+        let x: u64 = 2147483647
+        assert(x == 2147483647)
+    }
+
+    test "u64 division" {
+        let a: u64 = 1000000000000
+        let b: u64 = 7
+        assert(a / b == 142857142857)
+    }
+}
+
+tests "unsigned comparisons" {
+    test "u32 comparison" {
+        let a: u32 = 100
+        let b: u32 = 200
+        assert(a < b)
+        assert(b > a)
+        assert(a <= 100)
+        assert(b >= 200)
+    }
+
+    test "u64 comparison" {
+        let a: u64 = 1000000000000
+        let b: u64 = 2000000000000
+        assert(a < b)
+        assert(b > a)
+    }
+}
+
+tests "unsigned bitwise" {
+    test "u32 shift right" {
+        let x: u32 = 256
+        assert(x >> 4 == 16)
+    }
+
+    test "u64 shift right" {
+        let x: u64 = 1024
+        assert(x >> 2 == 256)
+    }
+
+    test "u8 bitwise and" {
+        let x: u8 = 255
+        let y: u8 = 15
+        assert((x & y) == 15)
+    }
+}
