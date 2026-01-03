@@ -717,9 +717,7 @@ fn compile_stmt(
                         .ins()
                         .icmp(IntCC::SignedLessThan, current, end_val.value)
                 };
-                builder
-                    .ins()
-                    .brif(cmp, body_block, &[], exit_block, &[]);
+                builder.ins().brif(cmp, body_block, &[], exit_block, &[]);
 
                 // Body
                 builder.switch_to_block(body_block);
