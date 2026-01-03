@@ -6,7 +6,15 @@ use crate::sema::{
     FunctionType, Type,
     scope::{Scope, Variable},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// Information about a captured variable during lambda analysis
+#[derive(Debug, Clone)]
+struct CaptureInfo {
+    name: Symbol,
+    is_mutable: bool, // Was the captured variable declared with `let mut`
+    is_mutated: bool, // Does the lambda assign to this variable
+}
 
 /// A type error wrapping a miette-enabled SemanticError
 #[derive(Debug, Clone)]
@@ -30,6 +38,12 @@ pub struct Analyzer {
     errors: Vec<TypeError>,
     /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
     type_overrides: HashMap<Symbol, Type>,
+    /// Stack of lambda scopes for capture analysis. Each entry is a HashMap
+    /// mapping captured variable names to their capture info.
+    lambda_captures: Vec<HashMap<Symbol, CaptureInfo>>,
+    /// Stack of sets tracking variables defined locally in each lambda
+    /// (parameters and let bindings inside the lambda body)
+    lambda_locals: Vec<HashSet<Symbol>>,
 }
 
 impl Analyzer {
@@ -41,12 +55,56 @@ impl Analyzer {
             current_function_return: None,
             errors: Vec::new(),
             type_overrides: HashMap::new(),
+            lambda_captures: Vec::new(),
+            lambda_locals: Vec::new(),
         }
     }
 
     /// Helper to add a type error
     fn add_error(&mut self, error: SemanticError, span: Span) {
         self.errors.push(TypeError::new(error, span));
+    }
+
+    /// Check if we're currently inside a lambda
+    fn in_lambda(&self) -> bool {
+        !self.lambda_captures.is_empty()
+    }
+
+    /// Check if a symbol is a local variable in the current lambda
+    fn is_lambda_local(&self, sym: Symbol) -> bool {
+        if let Some(locals) = self.lambda_locals.last() {
+            locals.contains(&sym)
+        } else {
+            false
+        }
+    }
+
+    /// Add a local variable to the current lambda's locals set
+    fn add_lambda_local(&mut self, sym: Symbol) {
+        if let Some(locals) = self.lambda_locals.last_mut() {
+            locals.insert(sym);
+        }
+    }
+
+    /// Record a captured variable in the current lambda
+    fn record_capture(&mut self, sym: Symbol, is_mutable: bool) {
+        if let Some(captures) = self.lambda_captures.last_mut() {
+            // Only add if not already captured
+            captures.entry(sym).or_insert(CaptureInfo {
+                name: sym,
+                is_mutable,
+                is_mutated: false,
+            });
+        }
+    }
+
+    /// Mark a captured variable as mutated
+    fn mark_capture_mutated(&mut self, sym: Symbol) {
+        if let Some(captures) = self.lambda_captures.last_mut()
+            && let Some(info) = captures.get_mut(&sym)
+        {
+            info.is_mutated = true;
+        }
     }
 
     /// Get variable type with flow-sensitive overrides
@@ -280,6 +338,9 @@ impl Analyzer {
                         mutable: let_stmt.mutable,
                     },
                 );
+
+                // Track as a local if inside a lambda
+                self.add_lambda_local(let_stmt.name);
             }
             Stmt::Expr(expr_stmt) => {
                 self.check_expr(&expr_stmt.expr, interner)?;
@@ -692,6 +753,13 @@ impl Analyzer {
             ExprKind::Identifier(sym) => {
                 // Use get_variable_type to respect flow-sensitive narrowing
                 if let Some(ty) = self.get_variable_type(*sym) {
+                    // Check if this is a capture (inside lambda, not a local)
+                    if self.in_lambda() && !self.is_lambda_local(*sym) {
+                        // Look up variable info to get mutability
+                        if let Some(var) = self.scope.get(*sym) {
+                            self.record_capture(*sym, var.mutable);
+                        }
+                    }
                     Ok(ty)
                 } else {
                     let name = interner.resolve(*sym);
@@ -1034,6 +1102,13 @@ impl Analyzer {
                     let is_mutable = var.mutable;
                     let var_ty = var.ty.clone();
 
+                    // Check if this is a mutation of a captured variable
+                    if self.in_lambda() && !self.is_lambda_local(assign.target) {
+                        // Record as capture and mark as mutated
+                        self.record_capture(assign.target, is_mutable);
+                        self.mark_capture_mutated(assign.target);
+                    }
+
                     if !is_mutable {
                         let name = interner.resolve(assign.target);
                         self.add_error(
@@ -1325,6 +1400,10 @@ impl Analyzer {
         expected_type: Option<&FunctionType>,
         interner: &Interner,
     ) -> Type {
+        // Push capture analysis stacks
+        self.lambda_captures.push(HashMap::new());
+        self.lambda_locals.push(HashSet::new());
+
         // Resolve parameter types
         let mut param_types = Vec::new();
 
@@ -1364,7 +1443,7 @@ impl Analyzer {
         let outer_scope = std::mem::take(&mut self.scope);
         self.scope = Scope::with_parent(outer_scope);
 
-        // Define parameters in scope
+        // Define parameters in scope and track as locals
         for (param, ty) in lambda.params.iter().zip(param_types.iter()) {
             self.scope.define(
                 param.name,
@@ -1373,6 +1452,8 @@ impl Analyzer {
                     mutable: false,
                 },
             );
+            // Parameters are locals, not captures
+            self.add_lambda_local(param.name);
         }
 
         // Determine return type
@@ -1404,6 +1485,20 @@ impl Analyzer {
         // Restore outer scope
         if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
             self.scope = parent;
+        }
+
+        // Pop capture stacks and store captures in the lambda
+        self.lambda_locals.pop();
+        if let Some(captures) = self.lambda_captures.pop() {
+            let capture_list: Vec<Capture> = captures
+                .into_values()
+                .map(|info| Capture {
+                    name: info.name,
+                    is_mutable: info.is_mutable,
+                    is_mutated: info.is_mutated,
+                })
+                .collect();
+            *lambda.captures.borrow_mut() = capture_list;
         }
 
         // Determine final return type
@@ -1686,5 +1781,158 @@ mod tests {
         let source = "func main() { let x: i64 = 42\n let y: i32 = x }";
         let result = check(source);
         assert!(result.is_err());
+    }
+
+    // Helper to parse and analyze, returning the AST for capture inspection
+    fn parse_and_analyze(source: &str) -> (Program, Interner) {
+        let mut parser = Parser::new(source);
+        let program = parser.parse_program().unwrap();
+        let interner = parser.into_interner();
+        let mut analyzer = Analyzer::new("test.vole", source);
+        analyzer.analyze(&program, &interner).unwrap();
+        (program, interner)
+    }
+
+    // Helper to extract lambda from first statement of main function
+    fn get_first_lambda(program: &Program) -> &LambdaExpr {
+        for decl in &program.declarations {
+            if let Decl::Function(func) = decl {
+                for stmt in &func.body.stmts {
+                    if let Stmt::Let(let_stmt) = stmt {
+                        if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
+                            return lambda;
+                        }
+                    }
+                }
+            }
+        }
+        panic!("No lambda found in program");
+    }
+
+    #[test]
+    fn lambda_no_captures_when_only_params() {
+        let source = r#"
+            func apply(f: (i64) -> i64, x: i64) -> i64 { return f(x) }
+            func main() {
+                let f = (x: i64) => x + 1
+                apply(f, 10)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.captures.borrow().is_empty());
+    }
+
+    #[test]
+    fn lambda_captures_outer_variable() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let x = 10
+                let f = () => x + 1
+                apply(f)
+            }
+        "#;
+        let (program, interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        let captures = lambda.captures.borrow();
+        assert_eq!(captures.len(), 1);
+        let name = interner.resolve(captures[0].name);
+        assert_eq!(name, "x");
+        assert!(!captures[0].is_mutable);
+        assert!(!captures[0].is_mutated);
+    }
+
+    #[test]
+    fn lambda_captures_mutable_variable() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let mut x = 10
+                let f = () => x + 1
+                apply(f)
+            }
+        "#;
+        let (program, interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        let captures = lambda.captures.borrow();
+        assert_eq!(captures.len(), 1);
+        let name = interner.resolve(captures[0].name);
+        assert_eq!(name, "x");
+        assert!(captures[0].is_mutable);
+        assert!(!captures[0].is_mutated);
+    }
+
+    #[test]
+    fn lambda_captures_and_mutates_variable() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let mut x = 10
+                let f: () -> i64 = () => {
+                    x = x + 1
+                    return x
+                }
+                apply(f)
+            }
+        "#;
+        let (program, interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        let captures = lambda.captures.borrow();
+        assert_eq!(captures.len(), 1);
+        let name = interner.resolve(captures[0].name);
+        assert_eq!(name, "x");
+        assert!(captures[0].is_mutable);
+        assert!(captures[0].is_mutated);
+    }
+
+    #[test]
+    fn lambda_does_not_capture_its_own_params() {
+        let source = r#"
+            func apply(f: (i64) -> i64, v: i64) -> i64 { return f(v) }
+            func main() {
+                let f = (x: i64) => x * 2
+                apply(f, 5)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.captures.borrow().is_empty());
+    }
+
+    #[test]
+    fn lambda_does_not_capture_its_own_locals() {
+        // Test with expression body that uses a local-like pattern
+        // Note: this test verifies that locals defined in lambdas are not treated as captures
+        let source = r#"
+            func apply(f: (i64) -> i64, v: i64) -> i64 { return f(v) }
+            func main() {
+                let f = (y: i64) => y * 2
+                apply(f, 5)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        // Parameters should not be treated as captures
+        assert!(lambda.captures.borrow().is_empty());
+    }
+
+    #[test]
+    fn lambda_block_body_with_local() {
+        // Test block body with local let binding
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let f: () -> i64 = () => {
+                    let y = 5
+                    return y * 2
+                }
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        // Local y should not be captured
+        assert!(lambda.captures.borrow().is_empty());
     }
 }

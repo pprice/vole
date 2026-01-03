@@ -326,6 +326,8 @@ pub struct LambdaExpr {
     pub return_type: Option<TypeExpr>,
     pub body: LambdaBody,
     pub span: Span,
+    /// Captured variables from enclosing scopes (populated during semantic analysis)
+    pub captures: std::cell::RefCell<Vec<Capture>>,
 }
 
 /// Lambda parameter (may have inferred type)
