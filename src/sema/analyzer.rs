@@ -373,7 +373,22 @@ impl Analyzer {
                             Ok(Type::Error)
                         }
                     }
-                    UnaryOp::Not => Ok(Type::Bool),
+                    UnaryOp::Not => {
+                        if operand_ty == Type::Bool {
+                            Ok(Type::Bool)
+                        } else {
+                            let diag = self.diag_builder.error(
+                                &codes::SEMA_TYPE_MISMATCH,
+                                expr.span,
+                                format!(
+                                    "cannot apply '!' to {}, expected bool",
+                                    operand_ty.name()
+                                ),
+                            );
+                            self.add_error(diag);
+                            Ok(Type::Error)
+                        }
+                    }
                 }
             }
 
