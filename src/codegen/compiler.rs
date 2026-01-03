@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::codegen::JitContext;
 use crate::frontend::{
     self, BinaryOp, Decl, Expr, ExprKind, FuncDecl, Interner, Program, Stmt, StringPart, Symbol,
-    TestsDecl, TypeExpr, UnaryOp,
+    TestCase, TestsDecl, TypeExpr, UnaryOp,
 };
 use crate::sema::Type;
 
@@ -316,6 +316,188 @@ impl<'a> Compiler<'a> {
 
             *test_count += 1;
         }
+
+        Ok(())
+    }
+
+    /// Compile program to CLIF IR and write to the given writer.
+    /// Does not finalize for execution - just generates IR for inspection.
+    pub fn compile_to_ir<W: std::io::Write>(
+        &mut self,
+        program: &Program,
+        writer: &mut W,
+        include_tests: bool,
+    ) -> Result<(), String> {
+        // First pass: declare all functions so they can reference each other
+        let mut test_count = 0usize;
+        for decl in &program.declarations {
+            match decl {
+                Decl::Function(func) => {
+                    let sig = self.create_function_signature(func);
+                    let name = self.interner.resolve(func.name);
+                    self.jit.declare_function(name, &sig);
+                }
+                Decl::Tests(tests_decl) if include_tests => {
+                    for _ in &tests_decl.tests {
+                        let func_name = format!("__test_{}", test_count);
+                        let sig = self.jit.create_signature(&[], Some(types::I64));
+                        self.jit.declare_function(&func_name, &sig);
+                        test_count += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Second pass: build and emit IR for each function
+        for decl in &program.declarations {
+            match decl {
+                Decl::Function(func) => {
+                    let name = self.interner.resolve(func.name);
+                    self.build_function_ir(func)?;
+                    writeln!(writer, "// func {}", name).map_err(|e| e.to_string())?;
+                    writeln!(writer, "{}", self.jit.ctx.func).map_err(|e| e.to_string())?;
+                    self.jit.clear();
+                }
+                Decl::Tests(tests_decl) if include_tests => {
+                    for test in &tests_decl.tests {
+                        self.build_test_ir(test)?;
+                        writeln!(writer, "// test \"{}\"", test.name).map_err(|e| e.to_string())?;
+                        writeln!(writer, "{}", self.jit.ctx.func).map_err(|e| e.to_string())?;
+                        self.jit.clear();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Build IR for a single function without defining it.
+    /// Similar to compile_function but doesn't call define_function.
+    fn build_function_ir(&mut self, func: &FuncDecl) -> Result<(), String> {
+        // Create function signature
+        let sig = self.create_function_signature(func);
+        self.jit.ctx.func.signature = sig.clone();
+
+        // Collect param types before borrowing ctx.func
+        let param_types: Vec<types::Type> = func
+            .params
+            .iter()
+            .map(|p| type_to_cranelift(&resolve_type_expr(&p.ty), self.pointer_type))
+            .collect();
+        let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
+
+        // Get source file pointer before borrowing ctx.func
+        let source_file_ptr = self.source_file_ptr();
+
+        // Create function builder
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+            let entry_block = builder.create_block();
+            builder.append_block_params_for_function_params(entry_block);
+            builder.switch_to_block(entry_block);
+
+            // Build variables map
+            let mut variables = HashMap::new();
+
+            // Bind parameters to variables
+            let params = builder.block_params(entry_block).to_vec();
+            for ((name, ty), val) in param_names
+                .iter()
+                .zip(param_types.iter())
+                .zip(params.iter())
+            {
+                let var = builder.declare_var(*ty);
+                builder.def_var(var, *val);
+                variables.insert(*name, var);
+            }
+
+            // Compile function body
+            let mut cf_ctx = ControlFlowCtx::new();
+            let mut ctx = CompileCtx {
+                interner: self.interner,
+                pointer_type: self.pointer_type,
+                module: &mut self.jit.module,
+                func_ids: &self.jit.func_ids,
+                source_file_ptr,
+            };
+            let terminated = compile_block(
+                &mut builder,
+                &func.body,
+                &mut variables,
+                &mut cf_ctx,
+                &mut ctx,
+            )?;
+
+            // Add implicit return if no explicit return
+            if !terminated {
+                builder.ins().return_(&[]);
+            }
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        // NOTE: We intentionally do NOT call define_function here.
+        // This method is for IR inspection only.
+
+        Ok(())
+    }
+
+    /// Build IR for a single test case without defining it.
+    /// Similar to test compilation in compile_tests but doesn't call define_function.
+    fn build_test_ir(&mut self, test: &TestCase) -> Result<(), String> {
+        // Create function signature: () -> i64
+        let sig = self.jit.create_signature(&[], Some(types::I64));
+        self.jit.ctx.func.signature = sig;
+
+        // Get source file pointer before borrowing ctx.func
+        let source_file_ptr = self.source_file_ptr();
+
+        // Create function builder
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+            let entry_block = builder.create_block();
+            builder.switch_to_block(entry_block);
+
+            // No parameters or variables for tests (they start fresh)
+            let mut variables = HashMap::new();
+
+            // Compile test body
+            let mut cf_ctx = ControlFlowCtx::new();
+            let mut ctx = CompileCtx {
+                interner: self.interner,
+                pointer_type: self.pointer_type,
+                module: &mut self.jit.module,
+                func_ids: &self.jit.func_ids,
+                source_file_ptr,
+            };
+            let terminated = compile_block(
+                &mut builder,
+                &test.body,
+                &mut variables,
+                &mut cf_ctx,
+                &mut ctx,
+            )?;
+
+            // If not already terminated, return 0 (test passed)
+            if !terminated {
+                let zero = builder.ins().iconst(types::I64, 0);
+                builder.ins().return_(&[zero]);
+            }
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        // NOTE: We intentionally do NOT call define_function here.
+        // This method is for IR inspection only.
 
         Ok(())
     }
