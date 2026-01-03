@@ -125,10 +125,7 @@ pub enum SemanticError {
     },
 
     #[error("cannot infer type of lambda parameter '{name}'")]
-    #[diagnostic(
-        code(E2043),
-        help("add a type annotation: ({name}: Type) => ...")
-    )]
+    #[diagnostic(code(E2043), help("add a type annotation: ({name}: Type) => ..."))]
     CannotInferLambdaParam {
         name: String,
         #[label("type cannot be inferred")]

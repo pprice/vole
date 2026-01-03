@@ -949,21 +949,81 @@ impl Analyzer {
                         return Ok(*func_type.return_type);
                     }
 
-                    // Builtin function - allow for now (e.g., println)
+                    // Check if it's a known builtin function
+                    let name = interner.resolve(*sym);
+                    if name == "println" || name == "print_char" || name == "flush" {
+                        for arg in &call.args {
+                            self.check_expr(arg, interner)?;
+                        }
+                        return Ok(Type::Void);
+                    }
+
+                    // Check if it's a variable with a non-function type
+                    if let Some(var_ty) = self.get_variable_type(*sym) {
+                        self.add_error(
+                            SemanticError::NotCallable {
+                                ty: var_ty.name().to_string(),
+                                span: call.callee.span.into(),
+                            },
+                            call.callee.span,
+                        );
+                        // Still check args for more errors
+                        for arg in &call.args {
+                            self.check_expr(arg, interner)?;
+                        }
+                        return Ok(Type::Error);
+                    }
+
+                    // Unknown identifier - might be an undefined function
+                    // (will be caught by codegen or other checks)
                     for arg in &call.args {
                         self.check_expr(arg, interner)?;
                     }
                     return Ok(Type::Void);
                 }
 
-                self.add_error(
-                    SemanticError::TypeMismatch {
-                        expected: "function".to_string(),
-                        found: "expression".to_string(),
-                        span: call.callee.span.into(),
-                    },
-                    call.callee.span,
-                );
+                // Non-identifier callee (e.g., a lambda expression being called directly)
+                let callee_ty = self.check_expr(&call.callee, interner)?;
+                if let Type::Function(func_type) = callee_ty {
+                    // Calling a function-typed expression
+                    if call.args.len() != func_type.params.len() {
+                        self.add_error(
+                            SemanticError::WrongArgumentCount {
+                                expected: func_type.params.len(),
+                                found: call.args.len(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
+
+                    for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
+                        let arg_ty = self.check_expr(arg, interner)?;
+                        if !self.types_compatible(&arg_ty, param_ty) {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: param_ty.name().to_string(),
+                                    found: arg_ty.name().to_string(),
+                                    span: arg.span.into(),
+                                },
+                                arg.span,
+                            );
+                        }
+                    }
+
+                    return Ok(*func_type.return_type);
+                }
+
+                // Non-callable type
+                if callee_ty != Type::Error {
+                    self.add_error(
+                        SemanticError::NotCallable {
+                            ty: callee_ty.name().to_string(),
+                            span: call.callee.span.into(),
+                        },
+                        call.callee.span,
+                    );
+                }
                 Ok(Type::Error)
             }
 
