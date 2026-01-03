@@ -1,41 +1,76 @@
 // src/runtime/builtins.rs
 
 use crate::runtime::RcString;
+use std::cell::RefCell;
 use std::io::{self, Write};
+
+thread_local! {
+    static STDOUT_CAPTURE: RefCell<Option<Box<dyn Write + Send>>> = const { RefCell::new(None) };
+}
+
+/// Set a custom writer for stdout capture. Pass None to restore normal stdout.
+pub fn set_stdout_capture(writer: Option<Box<dyn Write + Send>>) {
+    STDOUT_CAPTURE.with(|cell| {
+        *cell.borrow_mut() = writer;
+    });
+}
+
+/// Write to captured stdout or real stdout
+fn write_stdout(s: &str) {
+    STDOUT_CAPTURE.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        if let Some(ref mut writer) = *borrow {
+            let _ = write!(writer, "{}", s);
+        } else {
+            print!("{}", s);
+        }
+    });
+}
+
+fn writeln_stdout(s: &str) {
+    STDOUT_CAPTURE.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        if let Some(ref mut writer) = *borrow {
+            let _ = writeln!(writer, "{}", s);
+        } else {
+            println!("{}", s);
+        }
+    });
+}
 
 /// Print a string to stdout with newline
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_println_string(ptr: *const RcString) {
     if ptr.is_null() {
-        println!();
+        writeln_stdout("");
         return;
     }
     unsafe {
         let s = (*ptr).as_str();
-        println!("{}", s);
+        writeln_stdout(s);
     }
 }
 
 /// Print an i64 to stdout with newline
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_println_i64(value: i64) {
-    println!("{}", value);
+    writeln_stdout(&value.to_string());
 }
 
 /// Print an f64 to stdout with newline
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_println_f64(value: f64) {
-    println!("{}", value);
+    writeln_stdout(&value.to_string());
 }
 
 /// Print a bool to stdout with newline
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_println_bool(value: i8) {
     if value != 0 {
-        println!("true");
+        writeln_stdout("true");
     } else {
-        println!("false");
+        writeln_stdout("false");
     }
 }
 
@@ -75,13 +110,20 @@ pub extern "C" fn vole_bool_to_string(value: i8) -> *mut RcString {
 /// Flush stdout (useful for interactive output)
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_flush() {
-    let _ = io::stdout().flush();
+    STDOUT_CAPTURE.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        if let Some(ref mut writer) = *borrow {
+            let _ = writer.flush();
+        } else {
+            let _ = io::stdout().flush();
+        }
+    });
 }
 
 /// Print a character (for mandelbrot output)
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_print_char(c: u8) {
-    print!("{}", c as char);
+    write_stdout(&(c as char).to_string());
 }
 
 #[cfg(test)]

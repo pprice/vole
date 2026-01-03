@@ -21,6 +21,12 @@ pub enum Commands {
         #[arg(value_name = "FILE")]
         file: PathBuf,
     },
+    /// Check a Vole source file for errors without running it
+    Check {
+        /// Path to the .vole file to check
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+    },
     /// Run tests in Vole source files
     Test {
         /// Paths to test (files, directories, or glob patterns)

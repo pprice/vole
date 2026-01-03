@@ -1,4 +1,5 @@
 // src/commands/mod.rs
+pub mod check;
 pub mod common;
 pub mod run;
 pub mod test;
