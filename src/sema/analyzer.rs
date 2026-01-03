@@ -780,4 +780,10 @@ mod tests {
         let source = "func main() { let x: i32 = 42 }";
         assert!(check(source).is_ok());
     }
+
+    #[test]
+    fn analyze_i32_binary_coercion() {
+        let source = "func main() { let x: i32 = 42 * 3 }";
+        assert!(check(source).is_ok());
+    }
 }
