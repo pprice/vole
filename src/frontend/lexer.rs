@@ -113,25 +113,31 @@ impl<'src> Lexer<'src> {
                 if self.match_char('&') {
                     self.make_token(TokenType::AmpAmp)
                 } else {
-                    self.error_unexpected_char('&')
+                    self.make_token(TokenType::Ampersand)
                 }
             }
             '|' => {
                 if self.match_char('|') {
                     self.make_token(TokenType::PipePipe)
                 } else {
-                    self.error_unexpected_char('|')
+                    self.make_token(TokenType::Pipe)
                 }
             }
+            '^' => self.make_token(TokenType::Caret),
+            '~' => self.make_token(TokenType::Tilde),
             '<' => {
-                if self.match_char('=') {
+                if self.match_char('<') {
+                    self.make_token(TokenType::LessLess)
+                } else if self.match_char('=') {
                     self.make_token(TokenType::LtEq)
                 } else {
                     self.make_token(TokenType::Lt)
                 }
             }
             '>' => {
-                if self.match_char('=') {
+                if self.match_char('>') {
+                    self.make_token(TokenType::GreaterGreater)
+                } else if self.match_char('=') {
                     self.make_token(TokenType::GtEq)
                 } else {
                     self.make_token(TokenType::Gt)

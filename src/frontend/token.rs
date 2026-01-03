@@ -50,6 +50,14 @@ pub enum TokenType {
     GtEq,
     Eq,
 
+    // Bitwise operators
+    Ampersand,      // &
+    Pipe,           // |
+    Caret,          // ^
+    Tilde,          // ~
+    LessLess,       // <<
+    GreaterGreater, // >>
+
     // Delimiters
     LParen,
     RParen,
@@ -108,6 +116,12 @@ impl TokenType {
             Self::LtEq => "<=",
             Self::GtEq => ">=",
             Self::Eq => "=",
+            Self::Ampersand => "&",
+            Self::Pipe => "|",
+            Self::Caret => "^",
+            Self::Tilde => "~",
+            Self::LessLess => "<<",
+            Self::GreaterGreater => ">>",
             Self::LParen => "(",
             Self::RParen => ")",
             Self::LBrace => "{",
