@@ -286,6 +286,53 @@ impl Analyzer {
         Ok(())
     }
 
+    /// Check expression against an expected type (bidirectional type checking)
+    /// If expected is None, falls back to inference mode.
+    fn check_expr_expecting(
+        &mut self,
+        expr: &Expr,
+        expected: Option<&Type>,
+        interner: &Interner,
+    ) -> Result<Type, Vec<TypeError>> {
+        match &expr.kind {
+            ExprKind::IntLiteral(value) => {
+                match expected {
+                    Some(ty) if Self::literal_fits(*value, ty) => Ok(ty.clone()),
+                    Some(ty) => {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: ty.name().to_string(),
+                                found: "integer literal".to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        Ok(ty.clone())
+                    }
+                    None => Ok(Type::I64), // default when no context
+                }
+            }
+            ExprKind::Grouping(inner) => self.check_expr_expecting(inner, expected, interner),
+            // All other cases: infer type, then check compatibility
+            _ => {
+                let inferred = self.check_expr(expr, interner)?;
+                if let Some(expected_ty) = expected {
+                    if !self.types_compatible(&inferred, expected_ty) {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: expected_ty.name().to_string(),
+                                found: inferred.name().to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
+                }
+                Ok(inferred)
+            }
+        }
+    }
+
     fn check_expr(&mut self, expr: &Expr, interner: &Interner) -> Result<Type, Vec<TypeError>> {
         match &expr.kind {
             ExprKind::IntLiteral(_) => Ok(Type::I64), // Default to i64 for now
