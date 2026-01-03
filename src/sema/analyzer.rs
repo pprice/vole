@@ -274,8 +274,45 @@ impl Analyzer {
                     }
                 }
             }
+            Stmt::For(for_stmt) => {
+                let iterable_ty = self.check_expr(&for_stmt.iterable, interner)?;
+
+                let elem_ty = match iterable_ty {
+                    Type::Range => Type::I64,
+                    _ => {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "iterable (range)".to_string(),
+                                found: iterable_ty.name().to_string(),
+                                span: for_stmt.iterable.span.into(),
+                            },
+                            for_stmt.iterable.span,
+                        );
+                        Type::Error
+                    }
+                };
+
+                let parent = std::mem::take(&mut self.scope);
+                self.scope = Scope::with_parent(parent);
+                self.scope.define(
+                    for_stmt.var_name,
+                    Variable {
+                        ty: elem_ty,
+                        mutable: false,
+                    },
+                );
+
+                self.check_block(&for_stmt.body, interner)?;
+
+                if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+                    self.scope = parent;
+                }
+            }
             Stmt::Break(_) => {
                 // Could check we're in a loop, but skipping for Phase 1
+            }
+            Stmt::Continue(_) => {
+                // Could validate we're in a loop, skip for now
             }
             Stmt::Return(ret) => {
                 let ret_type = if let Some(value) = &ret.value {
@@ -802,6 +839,23 @@ impl Analyzer {
             }
 
             ExprKind::Grouping(inner) => self.check_expr(inner, interner),
+
+            ExprKind::Range(range) => {
+                let start_ty = self.check_expr(&range.start, interner)?;
+                let end_ty = self.check_expr(&range.end, interner)?;
+
+                if !start_ty.is_integer() || !end_ty.is_integer() {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "integer".to_string(),
+                            found: format!("{} and {}", start_ty.name(), end_ty.name()),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                }
+                Ok(Type::Range)
+            }
         }
     }
 
