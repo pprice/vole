@@ -3,16 +3,70 @@
 
 use std::io::{IsTerminal, Write};
 
+use miette::NamedSource;
+
 use crate::codegen::{Compiler, JitContext};
-use crate::errors::{render_diagnostics, render_diagnostics_to};
-use crate::frontend::{Interner, Parser, ast::Program};
+use crate::errors::{LexerError, render_to_stderr, render_to_writer};
+use crate::frontend::{Interner, ParseError, Parser, ast::Program};
 use crate::runtime::set_stdout_capture;
-use crate::sema::Analyzer;
+use crate::sema::{Analyzer, TypeError};
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
     pub program: Program,
     pub interner: Interner,
+}
+
+/// Render a lexer error to stderr with source context
+fn render_lexer_error(err: &LexerError, file_path: &str, source: &str) {
+    let report = miette::Report::new(err.clone())
+        .with_source_code(NamedSource::new(file_path, source.to_string()));
+    render_to_stderr(report.as_ref());
+}
+
+/// Render a parser error to stderr with source context
+fn render_parser_error(err: &ParseError, file_path: &str, source: &str) {
+    let report = miette::Report::new(err.error.clone())
+        .with_source_code(NamedSource::new(file_path, source.to_string()));
+    render_to_stderr(report.as_ref());
+}
+
+/// Render a lexer error to a writer (for snapshots)
+fn render_lexer_error_to<W: Write>(
+    err: &LexerError,
+    file_path: &str,
+    source: &str,
+    writer: &mut W,
+) {
+    let report = miette::Report::new(err.clone())
+        .with_source_code(NamedSource::new(file_path, source.to_string()));
+    let _ = render_to_writer(report.as_ref(), writer);
+}
+
+/// Render a parser error to a writer (for snapshots)
+fn render_parser_error_to<W: Write>(
+    err: &ParseError,
+    file_path: &str,
+    source: &str,
+    writer: &mut W,
+) {
+    let report = miette::Report::new(err.error.clone())
+        .with_source_code(NamedSource::new(file_path, source.to_string()));
+    let _ = render_to_writer(report.as_ref(), writer);
+}
+
+/// Render a semantic error to stderr with source context
+fn render_sema_error(err: &TypeError, file_path: &str, source: &str) {
+    let report = miette::Report::new(err.error.clone())
+        .with_source_code(NamedSource::new(file_path, source.to_string()));
+    render_to_stderr(report.as_ref());
+}
+
+/// Render a semantic error to a writer (for snapshots)
+fn render_sema_error_to<W: Write>(err: &TypeError, file_path: &str, source: &str, writer: &mut W) {
+    let report = miette::Report::new(err.error.clone())
+        .with_source_code(NamedSource::new(file_path, source.to_string()));
+    let _ = render_to_writer(report.as_ref(), writer);
 }
 
 /// Parse and analyze a source file, rendering any diagnostics on error.
@@ -29,12 +83,11 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
             // Render any lexer errors first
             let lexer_errors = parser.take_lexer_errors();
             if !lexer_errors.is_empty() {
-                render_diagnostics(&lexer_errors);
-                // If we have lexer errors, the parse error is likely a consequence
-                // of trying to parse an error token - don't show duplicate
+                for err in &lexer_errors {
+                    render_lexer_error(err, file_path, source);
+                }
             } else {
-                // Render the parse error only if no lexer errors
-                render_diagnostics(&[e.diagnostic]);
+                render_parser_error(&e, file_path, source);
             }
             return Err(());
         }
@@ -43,7 +96,9 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
     // Check for lexer errors that didn't cause parse failure
     let lexer_errors = parser.take_lexer_errors();
     if !lexer_errors.is_empty() {
-        render_diagnostics(&lexer_errors);
+        for err in &lexer_errors {
+            render_lexer_error(err, file_path, source);
+        }
         return Err(());
     }
 
@@ -52,8 +107,9 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
     // Type check
     let mut analyzer = Analyzer::new(file_path, source);
     if let Err(errors) = analyzer.analyze(&program, &interner) {
-        let diagnostics: Vec<_> = errors.iter().map(|e| e.diagnostic.clone()).collect();
-        render_diagnostics(&diagnostics);
+        for err in &errors {
+            render_sema_error(err, file_path, source);
+        }
         return Err(());
     }
 
@@ -113,9 +169,11 @@ pub fn check_captured<W: Write + Send + 'static>(
         Err(e) => {
             let lexer_errors = parser.take_lexer_errors();
             if !lexer_errors.is_empty() {
-                render_diagnostics_to(&lexer_errors, &mut stderr, false);
+                for err in &lexer_errors {
+                    render_lexer_error_to(err, file_path, source, &mut stderr);
+                }
             } else {
-                render_diagnostics_to(&[e.diagnostic], &mut stderr, false);
+                render_parser_error_to(&e, file_path, source, &mut stderr);
             }
             return Err(());
         }
@@ -123,7 +181,9 @@ pub fn check_captured<W: Write + Send + 'static>(
 
     let lexer_errors = parser.take_lexer_errors();
     if !lexer_errors.is_empty() {
-        render_diagnostics_to(&lexer_errors, &mut stderr, false);
+        for err in &lexer_errors {
+            render_lexer_error_to(err, file_path, source, &mut stderr);
+        }
         return Err(());
     }
 
@@ -132,8 +192,9 @@ pub fn check_captured<W: Write + Send + 'static>(
     // Type check
     let mut analyzer = Analyzer::new(file_path, source);
     if let Err(errors) = analyzer.analyze(&program, &interner) {
-        let diagnostics: Vec<_> = errors.iter().map(|e| e.diagnostic.clone()).collect();
-        render_diagnostics_to(&diagnostics, &mut stderr, false);
+        for err in &errors {
+            render_sema_error_to(err, file_path, source, &mut stderr);
+        }
         return Err(());
     }
 
@@ -155,9 +216,11 @@ pub fn run_captured<W: Write + Send + 'static>(
         Err(e) => {
             let lexer_errors = parser.take_lexer_errors();
             if !lexer_errors.is_empty() {
-                render_diagnostics_to(&lexer_errors, &mut stderr, false);
+                for err in &lexer_errors {
+                    render_lexer_error_to(err, file_path, source, &mut stderr);
+                }
             } else {
-                render_diagnostics_to(&[e.diagnostic], &mut stderr, false);
+                render_parser_error_to(&e, file_path, source, &mut stderr);
             }
             return Err(());
         }
@@ -165,16 +228,20 @@ pub fn run_captured<W: Write + Send + 'static>(
 
     let lexer_errors = parser.take_lexer_errors();
     if !lexer_errors.is_empty() {
-        render_diagnostics_to(&lexer_errors, &mut stderr, false);
+        for err in &lexer_errors {
+            render_lexer_error_to(err, file_path, source, &mut stderr);
+        }
         return Err(());
     }
 
     let interner = parser.into_interner();
 
+    // Type check
     let mut analyzer = Analyzer::new(file_path, source);
     if let Err(errors) = analyzer.analyze(&program, &interner) {
-        let diagnostics: Vec<_> = errors.iter().map(|e| e.diagnostic.clone()).collect();
-        render_diagnostics_to(&diagnostics, &mut stderr, false);
+        for err in &errors {
+            render_sema_error_to(err, file_path, source, &mut stderr);
+        }
         return Err(());
     }
 

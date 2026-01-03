@@ -1,6 +1,6 @@
 // src/sema/analyzer.rs
 
-use crate::errors::{Diagnostic, DiagnosticBuilder, codes};
+use crate::errors::SemanticError;
 use crate::frontend::*;
 use crate::sema::{
     FunctionType, Type,
@@ -8,26 +8,17 @@ use crate::sema::{
 };
 use std::collections::HashMap;
 
-/// A type error containing a structured diagnostic
+/// A type error wrapping a miette-enabled SemanticError
 #[derive(Debug, Clone)]
 pub struct TypeError {
-    pub diagnostic: Diagnostic,
+    pub error: SemanticError,
+    pub span: Span,
 }
 
 impl TypeError {
-    /// Create a new type error from a diagnostic
-    pub fn new(diagnostic: Diagnostic) -> Self {
-        Self { diagnostic }
-    }
-
-    /// Get the error message (for backward compatibility)
-    pub fn message(&self) -> &str {
-        &self.diagnostic.formatted_message
-    }
-
-    /// Get the span (for backward compatibility)
-    pub fn span(&self) -> Span {
-        self.diagnostic.span
+    /// Create a new type error
+    pub fn new(error: SemanticError, span: Span) -> Self {
+        Self { error, span }
     }
 }
 
@@ -36,23 +27,21 @@ pub struct Analyzer {
     functions: HashMap<Symbol, FunctionType>,
     current_function_return: Option<Type>,
     errors: Vec<TypeError>,
-    diag_builder: DiagnosticBuilder,
 }
 
 impl Analyzer {
-    pub fn new(file: &str, source: &str) -> Self {
+    pub fn new(_file: &str, _source: &str) -> Self {
         Self {
             scope: Scope::new(),
             functions: HashMap::new(),
             current_function_return: None,
             errors: Vec::new(),
-            diag_builder: DiagnosticBuilder::new(file, source),
         }
     }
 
-    /// Helper to add a type error using the diagnostic builder
-    fn add_error(&mut self, diagnostic: Diagnostic) {
-        self.errors.push(TypeError::new(diagnostic));
+    /// Helper to add a type error
+    fn add_error(&mut self, error: SemanticError, span: Span) {
+        self.errors.push(TypeError::new(error, span));
     }
 
     pub fn analyze(
@@ -198,12 +187,14 @@ impl Analyzer {
                 let var_type = if let Some(ty) = &let_stmt.ty {
                     let declared = self.resolve_type(ty);
                     if !self.types_compatible(&init_type, &declared) {
-                        let diag = self.diag_builder.error(
-                            &codes::SEMA_TYPE_MISMATCH,
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: declared.name().to_string(),
+                                found: init_type.name().to_string(),
+                                span: let_stmt.span.into(),
+                            },
                             let_stmt.span,
-                            format!("expected {}, found {}", declared.name(), init_type.name()),
                         );
-                        self.add_error(diag);
                     }
                     declared
                 } else {
@@ -224,12 +215,13 @@ impl Analyzer {
             Stmt::While(while_stmt) => {
                 let cond_type = self.check_expr(&while_stmt.condition, interner)?;
                 if cond_type != Type::Bool && !cond_type.is_numeric() {
-                    let diag = self.diag_builder.error(
-                        &codes::SEMA_CONDITION_NOT_BOOL,
+                    self.add_error(
+                        SemanticError::ConditionNotBool {
+                            found: cond_type.name().to_string(),
+                            span: while_stmt.condition.span.into(),
+                        },
                         while_stmt.condition.span,
-                        format!("condition must be boolean, found {}", cond_type.name()),
                     );
-                    self.add_error(diag);
                 }
 
                 let parent = std::mem::take(&mut self.scope);
@@ -242,12 +234,13 @@ impl Analyzer {
             Stmt::If(if_stmt) => {
                 let cond_type = self.check_expr(&if_stmt.condition, interner)?;
                 if cond_type != Type::Bool && !cond_type.is_numeric() {
-                    let diag = self.diag_builder.error(
-                        &codes::SEMA_CONDITION_NOT_BOOL,
+                    self.add_error(
+                        SemanticError::ConditionNotBool {
+                            found: cond_type.name().to_string(),
+                            span: if_stmt.condition.span.into(),
+                        },
                         if_stmt.condition.span,
-                        format!("condition must be boolean, found {}", cond_type.name()),
                     );
-                    self.add_error(diag);
                 }
 
                 let parent = std::mem::take(&mut self.scope);
@@ -279,12 +272,14 @@ impl Analyzer {
                 if let Some(expected) = &self.current_function_return
                     && !self.types_compatible(&ret_type, expected)
                 {
-                    let diag = self.diag_builder.error(
-                        &codes::SEMA_TYPE_MISMATCH,
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: expected.name().to_string(),
+                            found: ret_type.name().to_string(),
+                            span: ret.span.into(),
+                        },
                         ret.span,
-                        format!("expected {}, found {}", expected.name(), ret_type.name()),
                     );
-                    self.add_error(diag);
                 }
             }
         }
@@ -304,12 +299,13 @@ impl Analyzer {
                     Ok(var.ty.clone())
                 } else {
                     let name = interner.resolve(*sym);
-                    let diag = self.diag_builder.error(
-                        &codes::SEMA_UNDEFINED_VARIABLE,
+                    self.add_error(
+                        SemanticError::UndefinedVariable {
+                            name: name.to_string(),
+                            span: expr.span.into(),
+                        },
                         expr.span,
-                        format!("undefined variable '{}'", name),
                     );
-                    self.add_error(diag);
                     Ok(Type::Error)
                 }
             }
@@ -334,17 +330,14 @@ impl Analyzer {
                                 Ok(Type::I32)
                             }
                         } else {
-                            let diag = self.diag_builder.error(
-                                &codes::SEMA_TYPE_MISMATCH,
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "numeric".to_string(),
+                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    span: expr.span.into(),
+                                },
                                 expr.span,
-                                format!(
-                                    "cannot perform {:?} on {} and {}",
-                                    bin.op,
-                                    left_ty.name(),
-                                    right_ty.name()
-                                ),
                             );
-                            self.add_error(diag);
                             Ok(Type::Error)
                         }
                     }
@@ -358,16 +351,14 @@ impl Analyzer {
                         if left_ty == Type::Bool && right_ty == Type::Bool {
                             Ok(Type::Bool)
                         } else {
-                            let diag = self.diag_builder.error(
-                                &codes::SEMA_TYPE_MISMATCH,
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "bool".to_string(),
+                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    span: expr.span.into(),
+                                },
                                 expr.span,
-                                format!(
-                                    "logical operator requires bool operands, found {} and {}",
-                                    left_ty.name(),
-                                    right_ty.name()
-                                ),
                             );
-                            self.add_error(diag);
                             Ok(Type::Error)
                         }
                     }
@@ -381,12 +372,14 @@ impl Analyzer {
                         if operand_ty.is_numeric() {
                             Ok(operand_ty)
                         } else {
-                            let diag = self.diag_builder.error(
-                                &codes::SEMA_TYPE_MISMATCH,
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "numeric".to_string(),
+                                    found: operand_ty.name().to_string(),
+                                    span: expr.span.into(),
+                                },
                                 expr.span,
-                                format!("cannot negate {}", operand_ty.name()),
                             );
-                            self.add_error(diag);
                             Ok(Type::Error)
                         }
                     }
@@ -394,12 +387,14 @@ impl Analyzer {
                         if operand_ty == Type::Bool {
                             Ok(Type::Bool)
                         } else {
-                            let diag = self.diag_builder.error(
-                                &codes::SEMA_TYPE_MISMATCH,
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "bool".to_string(),
+                                    found: operand_ty.name().to_string(),
+                                    span: expr.span.into(),
+                                },
                                 expr.span,
-                                format!("cannot apply '!' to {}, expected bool", operand_ty.name()),
                             );
-                            self.add_error(diag);
                             Ok(Type::Error)
                         }
                     }
@@ -410,23 +405,27 @@ impl Analyzer {
                 // Handle assert specially
                 if self.is_assert_call(&call.callee, interner) {
                     if call.args.len() != 1 {
-                        let diag = self.diag_builder.error(
-                            &codes::SEMA_WRONG_ARGUMENT_COUNT,
+                        self.add_error(
+                            SemanticError::WrongArgumentCount {
+                                expected: 1,
+                                found: call.args.len(),
+                                span: expr.span.into(),
+                            },
                             expr.span,
-                            format!("expected {} arguments, found {}", 1, call.args.len()),
                         );
-                        self.add_error(diag);
                         return Ok(Type::Void);
                     }
 
                     let arg_ty = self.check_expr(&call.args[0], interner)?;
                     if arg_ty != Type::Bool && arg_ty != Type::Error {
-                        let diag = self.diag_builder.error(
-                            &codes::SEMA_TYPE_MISMATCH,
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "bool".to_string(),
+                                found: arg_ty.name().to_string(),
+                                span: call.args[0].span.into(),
+                            },
                             call.args[0].span,
-                            format!("expected bool, found {}", arg_ty.name()),
                         );
-                        self.add_error(diag);
                     }
 
                     return Ok(Type::Void);
@@ -436,31 +435,27 @@ impl Analyzer {
                     if let Some(func_type) = self.functions.get(sym) {
                         let func_type = func_type.clone();
                         if call.args.len() != func_type.params.len() {
-                            let diag = self.diag_builder.error(
-                                &codes::SEMA_WRONG_ARGUMENT_COUNT,
+                            self.add_error(
+                                SemanticError::WrongArgumentCount {
+                                    expected: func_type.params.len(),
+                                    found: call.args.len(),
+                                    span: expr.span.into(),
+                                },
                                 expr.span,
-                                format!(
-                                    "expected {} arguments, found {}",
-                                    func_type.params.len(),
-                                    call.args.len()
-                                ),
                             );
-                            self.add_error(diag);
                         }
 
                         for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
                             let arg_ty = self.check_expr(arg, interner)?;
                             if !self.types_compatible(&arg_ty, param_ty) {
-                                let diag = self.diag_builder.error(
-                                    &codes::SEMA_TYPE_MISMATCH,
+                                self.add_error(
+                                    SemanticError::TypeMismatch {
+                                        expected: param_ty.name().to_string(),
+                                        found: arg_ty.name().to_string(),
+                                        span: arg.span.into(),
+                                    },
                                     arg.span,
-                                    format!(
-                                        "expected {}, found {}",
-                                        param_ty.name(),
-                                        arg_ty.name()
-                                    ),
                                 );
-                                self.add_error(diag);
                             }
                         }
 
@@ -474,12 +469,14 @@ impl Analyzer {
                     }
                 }
 
-                let diag = self.diag_builder.error(
-                    &codes::SEMA_TYPE_MISMATCH,
+                self.add_error(
+                    SemanticError::TypeMismatch {
+                        expected: "function".to_string(),
+                        found: "expression".to_string(),
+                        span: call.callee.span.into(),
+                    },
                     call.callee.span,
-                    "expected function name".to_string(),
                 );
-                self.add_error(diag);
                 Ok(Type::Error)
             }
 
@@ -492,30 +489,35 @@ impl Analyzer {
 
                     if !is_mutable {
                         let name = interner.resolve(assign.target);
-                        let diag = self.diag_builder.error(
-                            &codes::SEMA_IMMUTABLE_VARIABLE,
+                        self.add_error(
+                            SemanticError::ImmutableAssignment {
+                                name: name.to_string(),
+                                span: expr.span.into(),
+                                declaration: expr.span.into(), // TODO: track declaration span
+                            },
                             expr.span,
-                            format!("cannot assign to immutable variable '{}'", name),
                         );
-                        self.add_error(diag);
                     }
                     if !self.types_compatible(&value_ty, &var_ty) {
-                        let diag = self.diag_builder.error(
-                            &codes::SEMA_TYPE_MISMATCH,
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: var_ty.name().to_string(),
+                                found: value_ty.name().to_string(),
+                                span: expr.span.into(),
+                            },
                             expr.span,
-                            format!("expected {}, found {}", var_ty.name(), value_ty.name()),
                         );
-                        self.add_error(diag);
                     }
                     Ok(var_ty)
                 } else {
                     let name = interner.resolve(assign.target);
-                    let diag = self.diag_builder.error(
-                        &codes::SEMA_UNDEFINED_VARIABLE,
+                    self.add_error(
+                        SemanticError::UndefinedVariable {
+                            name: name.to_string(),
+                            span: expr.span.into(),
+                        },
                         expr.span,
-                        format!("undefined variable '{}'", name),
                     );
-                    self.add_error(diag);
                     Ok(Type::Error)
                 }
             }
@@ -548,7 +550,6 @@ impl Analyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::errors::codes;
     use crate::frontend::Parser;
 
     fn check(source: &str) -> Result<(), Vec<TypeError>> {
@@ -559,81 +560,75 @@ mod tests {
         analyzer.analyze(&program, &interner)
     }
 
-    // Tests for Diagnostic integration
+    // Tests for miette error integration
     #[test]
-    fn type_error_contains_diagnostic() {
+    fn type_error_contains_semantic_error() {
         let source = "func main() { let x: bool = 42 }";
         let result = check(source);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        // TypeError should contain a Diagnostic with code E2001
-        assert_eq!(errors[0].diagnostic.code(), codes::SEMA_TYPE_MISMATCH.code);
+        assert!(matches!(
+            errors[0].error,
+            SemanticError::TypeMismatch { .. }
+        ));
     }
 
     #[test]
-    fn undefined_variable_has_correct_error_code() {
+    fn undefined_variable_has_correct_error_type() {
         let source = "func main() { let x = y }";
         let result = check(source);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert_eq!(
-            errors[0].diagnostic.code(),
-            codes::SEMA_UNDEFINED_VARIABLE.code
-        );
+        assert!(matches!(
+            errors[0].error,
+            SemanticError::UndefinedVariable { .. }
+        ));
     }
 
     #[test]
-    fn immutable_assignment_has_correct_error_code() {
+    fn immutable_assignment_has_correct_error_type() {
         let source = "func main() { let x = 1\n x = 2 }";
         let result = check(source);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert_eq!(
-            errors[0].diagnostic.code(),
-            codes::SEMA_IMMUTABLE_VARIABLE.code
-        );
+        assert!(matches!(
+            errors[0].error,
+            SemanticError::ImmutableAssignment { .. }
+        ));
     }
 
     #[test]
-    fn wrong_argument_count_has_correct_error_code() {
+    fn wrong_argument_count_has_correct_error_type() {
         let source = "func main() { assert(true, false) }";
         let result = check(source);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert_eq!(
-            errors[0].diagnostic.code(),
-            codes::SEMA_WRONG_ARGUMENT_COUNT.code
-        );
+        assert!(matches!(
+            errors[0].error,
+            SemanticError::WrongArgumentCount { .. }
+        ));
     }
 
     #[test]
-    fn condition_not_bool_has_correct_error_code() {
+    fn condition_not_bool_has_correct_error_type() {
         // Use a string literal which is definitely not a bool or numeric
         let source = r#"func main() { if "hello" { } }"#;
         let result = check(source);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert_eq!(
-            errors[0].diagnostic.code(),
-            codes::SEMA_CONDITION_NOT_BOOL.code
-        );
+        assert!(matches!(
+            errors[0].error,
+            SemanticError::ConditionNotBool { .. }
+        ));
     }
 
     #[test]
-    fn diagnostic_contains_source_line() {
+    fn type_error_has_span() {
         let source = "func main() { let x = y }";
         let result = check(source);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(errors[0].diagnostic.source_line.is_some());
-        assert!(
-            errors[0]
-                .diagnostic
-                .source_line
-                .as_ref()
-                .unwrap()
-                .contains("let x = y")
-        );
+        assert!(errors[0].span.line > 0);
     }
 
     #[test]
@@ -673,7 +668,10 @@ mod tests {
         let result = check(source);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(errors.iter().any(|e| e.message().contains("bool")));
+        assert!(matches!(
+            errors[0].error,
+            SemanticError::TypeMismatch { ref expected, .. } if expected == "bool"
+        ));
     }
 
     #[test]
@@ -695,7 +693,14 @@ mod tests {
         let result = check(source);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(errors.iter().any(|e| e.message().contains("1 arguments")));
+        assert!(matches!(
+            errors[0].error,
+            SemanticError::WrongArgumentCount {
+                expected: 1,
+                found: 2,
+                ..
+            }
+        ));
     }
 
     #[test]

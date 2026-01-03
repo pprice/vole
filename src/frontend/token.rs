@@ -194,6 +194,19 @@ impl Span {
     }
 }
 
+impl From<Span> for miette::SourceSpan {
+    fn from(span: Span) -> Self {
+        // miette uses (offset, length)
+        (span.start, span.end - span.start).into()
+    }
+}
+
+impl From<&Span> for miette::SourceSpan {
+    fn from(span: &Span) -> Self {
+        (span.start, span.end - span.start).into()
+    }
+}
+
 /// A token with its location in source code
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {

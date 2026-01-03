@@ -1,9 +1,6 @@
 // src/frontend/lexer.rs
 
-use crate::errors::{
-    Diagnostic, DiagnosticBuilder, LEXER_INVALID_NUMBER, LEXER_UNEXPECTED_CHARACTER,
-    LEXER_UNTERMINATED_STRING,
-};
+use crate::errors::LexerError;
 use crate::frontend::{Span, Token, TokenType};
 
 pub struct Lexer<'src> {
@@ -19,8 +16,7 @@ pub struct Lexer<'src> {
     interp_brace_depth: u32,
     in_interp_string: bool,
     // Error collection
-    errors: Vec<Diagnostic>,
-    diag_builder: DiagnosticBuilder,
+    errors: Vec<LexerError>,
 }
 
 impl<'src> Lexer<'src> {
@@ -28,7 +24,7 @@ impl<'src> Lexer<'src> {
         Self::new_with_file(source, "<input>")
     }
 
-    pub fn new_with_file(source: &'src str, filename: &str) -> Self {
+    pub fn new_with_file(source: &'src str, _filename: &str) -> Self {
         Self {
             source,
             chars: source.char_indices().peekable(),
@@ -41,12 +37,11 @@ impl<'src> Lexer<'src> {
             interp_brace_depth: 0,
             in_interp_string: false,
             errors: Vec::new(),
-            diag_builder: DiagnosticBuilder::new(filename, source),
         }
     }
 
     /// Take all collected errors, leaving the internal list empty.
-    pub fn take_errors(&mut self) -> Vec<Diagnostic> {
+    pub fn take_errors(&mut self) -> Vec<LexerError> {
         std::mem::take(&mut self.errors)
     }
 
@@ -235,7 +230,7 @@ impl<'src> Lexer<'src> {
         )
     }
 
-    /// Create an error token and collect a diagnostic for an unexpected character.
+    /// Create an error token and collect an error for an unexpected character.
     fn error_unexpected_char(&mut self, c: char) -> Token {
         let span = Span::new_with_end(
             self.start,
@@ -245,15 +240,16 @@ impl<'src> Lexer<'src> {
             self.line,
             self.column,
         );
+        let error = LexerError::UnexpectedCharacter {
+            ch: c,
+            span: span.into(),
+        };
         let message = format!("unexpected character '{}'", c);
-        let diagnostic =
-            self.diag_builder
-                .error(&LEXER_UNEXPECTED_CHARACTER, span, message.clone());
-        self.errors.push(diagnostic);
+        self.errors.push(error);
         Token::new(TokenType::Error, message, span)
     }
 
-    /// Create an error token and collect a diagnostic for an unterminated string.
+    /// Create an error token and collect an error for an unterminated string.
     fn error_unterminated_string(&mut self) -> Token {
         let span = Span::new_with_end(
             self.start,
@@ -263,15 +259,13 @@ impl<'src> Lexer<'src> {
             self.line,
             self.column,
         );
+        let error = LexerError::UnterminatedString { span: span.into() };
         let message = "unterminated string literal".to_string();
-        let diagnostic = self
-            .diag_builder
-            .error(&LEXER_UNTERMINATED_STRING, span, message.clone());
-        self.errors.push(diagnostic);
+        self.errors.push(error);
         Token::new(TokenType::Error, message, span)
     }
 
-    /// Create an error token and collect a diagnostic for an invalid number literal.
+    /// Create an error token and collect an error for an invalid number literal.
     #[allow(dead_code)] // Available for future use
     fn error_invalid_number(&mut self) -> Token {
         let span = Span::new_with_end(
@@ -282,11 +276,9 @@ impl<'src> Lexer<'src> {
             self.line,
             self.column,
         );
+        let error = LexerError::InvalidNumber { span: span.into() };
         let message = "invalid number literal".to_string();
-        let diagnostic = self
-            .diag_builder
-            .error(&LEXER_INVALID_NUMBER, span, message.clone());
-        self.errors.push(diagnostic);
+        self.errors.push(error);
         Token::new(TokenType::Error, message, span)
     }
 
@@ -433,6 +425,7 @@ impl<'src> Lexer<'src> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::errors::LexerError;
 
     #[test]
     fn lex_single_char_tokens() {
@@ -576,8 +569,10 @@ mod tests {
 
         let errors = lexer.take_errors();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].code(), 1); // LEXER_UNEXPECTED_CHARACTER
-        assert_eq!(errors[0].formatted_message, "unexpected character '@'");
+        assert!(matches!(
+            &errors[0],
+            LexerError::UnexpectedCharacter { ch: '@', .. }
+        ));
     }
 
     #[test]
@@ -590,8 +585,7 @@ mod tests {
 
         let errors = lexer.take_errors();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].code(), 2); // LEXER_UNTERMINATED_STRING
-        assert_eq!(errors[0].formatted_message, "unterminated string literal");
+        assert!(matches!(&errors[0], LexerError::UnterminatedString { .. }));
     }
 
     #[test]
@@ -638,13 +632,17 @@ mod tests {
     }
 
     #[test]
-    fn lexer_new_with_file_sets_filename() {
+    fn lexer_new_with_file_creates_errors() {
         let mut lexer = Lexer::new_with_file("@", "test.vole");
         lexer.next_token();
 
         let errors = lexer.take_errors();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].file, "test.vole");
+        // File is attached when creating Report, not stored in error
+        assert!(matches!(
+            &errors[0],
+            LexerError::UnexpectedCharacter { ch: '@', .. }
+        ));
     }
 
     #[test]
