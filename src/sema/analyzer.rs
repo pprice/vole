@@ -165,7 +165,10 @@ impl Analyzer {
                 let types: Vec<Type> = variants.iter().map(|t| self.resolve_type(t)).collect();
                 Type::normalize_union(types)
             }
-            TypeExpr::Function { params, return_type } => {
+            TypeExpr::Function {
+                params,
+                return_type,
+            } => {
                 let param_types: Vec<Type> = params.iter().map(|p| self.resolve_type(p)).collect();
                 let ret = self.resolve_type(return_type);
                 Type::Function(FunctionType {
@@ -647,6 +650,17 @@ impl Analyzer {
                 // Index expressions just delegate to check_expr
                 self.check_expr(expr, interner)
             }
+            ExprKind::Lambda(lambda) => {
+                // Extract expected function type if available
+                let expected_fn = expected.and_then(|t| {
+                    if let Type::Function(ft) = t {
+                        Some(ft)
+                    } else {
+                        None
+                    }
+                });
+                Ok(self.analyze_lambda(lambda, expected_fn, interner))
+            }
             // All other cases: infer type, then check compatibility
             _ => {
                 let inferred = self.check_expr(expr, interner)?;
@@ -852,6 +866,7 @@ impl Analyzer {
                 }
 
                 if let ExprKind::Identifier(sym) = &call.callee.kind {
+                    // First check if it's a top-level function
                     if let Some(func_type) = self.functions.get(sym) {
                         let func_type = func_type.clone();
                         if call.args.len() != func_type.params.len() {
@@ -866,7 +881,18 @@ impl Analyzer {
                         }
 
                         for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
-                            let arg_ty = self.check_expr(arg, interner)?;
+                            // For lambda arguments, pass expected type for inference
+                            let arg_ty = if let ExprKind::Lambda(lambda) = &arg.kind {
+                                let expected_fn = if let Type::Function(ft) = param_ty {
+                                    Some(ft)
+                                } else {
+                                    None
+                                };
+                                self.analyze_lambda(lambda, expected_fn, interner)
+                            } else {
+                                self.check_expr(arg, interner)?
+                            };
+
                             if !self.types_compatible(&arg_ty, param_ty) {
                                 self.add_error(
                                     SemanticError::TypeMismatch {
@@ -880,13 +906,54 @@ impl Analyzer {
                         }
 
                         return Ok(*func_type.return_type);
-                    } else {
-                        // Builtin function - allow for now (e.g., println)
-                        for arg in &call.args {
-                            self.check_expr(arg, interner)?;
-                        }
-                        return Ok(Type::Void);
                     }
+
+                    // Check if it's a variable with a function type
+                    if let Some(Type::Function(func_type)) = self.get_variable_type(*sym) {
+                        if call.args.len() != func_type.params.len() {
+                            self.add_error(
+                                SemanticError::WrongArgumentCount {
+                                    expected: func_type.params.len(),
+                                    found: call.args.len(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                        }
+
+                        for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
+                            // For lambda arguments, pass expected type for inference
+                            let arg_ty = if let ExprKind::Lambda(lambda) = &arg.kind {
+                                let expected_fn = if let Type::Function(ft) = param_ty {
+                                    Some(ft)
+                                } else {
+                                    None
+                                };
+                                self.analyze_lambda(lambda, expected_fn, interner)
+                            } else {
+                                self.check_expr(arg, interner)?
+                            };
+
+                            if !self.types_compatible(&arg_ty, param_ty) {
+                                self.add_error(
+                                    SemanticError::TypeMismatch {
+                                        expected: param_ty.name().to_string(),
+                                        found: arg_ty.name().to_string(),
+                                        span: arg.span.into(),
+                                    },
+                                    arg.span,
+                                );
+                            }
+                        }
+
+                        return Ok(*func_type.return_type);
+                    }
+
+                    // Builtin function - allow for now (e.g., println)
+                    for arg in &call.args {
+                        self.check_expr(arg, interner)?;
+                    }
+                    return Ok(Type::Void);
                 }
 
                 self.add_error(
