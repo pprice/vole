@@ -205,6 +205,12 @@ impl<'src> Parser<'src> {
     fn parse_type(&mut self) -> Result<TypeExpr, ParseError> {
         let token = self.current.clone();
         match token.ty {
+            TokenType::LBracket => {
+                self.advance(); // consume '['
+                let elem_type = self.parse_type()?;
+                self.consume(TokenType::RBracket, "expected ']' after array element type")?;
+                Ok(TypeExpr::Array(Box::new(elem_type)))
+            }
             TokenType::KwI32 => {
                 self.advance();
                 Ok(TypeExpr::Primitive(PrimitiveType::I32))
@@ -584,13 +590,27 @@ impl<'src> Parser<'src> {
         self.call()
     }
 
-    /// Parse a call expression (function call)
+    /// Parse a call expression (function call) and index expressions
     fn call(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.primary()?;
 
         loop {
             if self.match_token(TokenType::LParen) {
                 expr = self.finish_call(expr)?;
+            } else if self.match_token(TokenType::LBracket) {
+                // Index expression: expr[index]
+                let index = self.expression(0)?;
+                let end_span = self.current.span;
+                self.consume(TokenType::RBracket, "expected ']' after index")?;
+
+                let span = expr.span.merge(end_span);
+                expr = Expr {
+                    kind: ExprKind::Index(Box::new(IndexExpr {
+                        object: expr,
+                        index,
+                    })),
+                    span,
+                };
             } else {
                 break;
             }
@@ -700,6 +720,31 @@ impl<'src> Parser<'src> {
                 Ok(Expr {
                     kind: ExprKind::Grouping(Box::new(expr)),
                     span,
+                })
+            }
+            TokenType::LBracket => {
+                let start_span = self.current.span;
+                self.advance(); // consume '['
+
+                let mut elements = Vec::new();
+
+                if !self.check(TokenType::RBracket) {
+                    elements.push(self.expression(0)?);
+
+                    while self.match_token(TokenType::Comma) {
+                        if self.check(TokenType::RBracket) {
+                            break; // trailing comma allowed
+                        }
+                        elements.push(self.expression(0)?);
+                    }
+                }
+
+                let end_span = self.current.span;
+                self.consume(TokenType::RBracket, "expected ']' after array elements")?;
+
+                Ok(Expr {
+                    kind: ExprKind::ArrayLiteral(elements),
+                    span: start_span.merge(end_span),
                 })
             }
             TokenType::Error => Err(ParseError::new(
