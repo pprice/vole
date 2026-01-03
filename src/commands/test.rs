@@ -337,30 +337,44 @@ fn print_file_results(
     }
 }
 
+/// Format a duration with appropriate units (ns, µs, ms, s)
+fn format_duration(d: Duration) -> String {
+    let nanos = d.as_nanos();
+    if nanos < 1_000 {
+        format!("{}ns", nanos)
+    } else if nanos < 1_000_000 {
+        format!("{:.2}µs", nanos as f64 / 1_000.0)
+    } else if nanos < 1_000_000_000 {
+        format!("{:.2}ms", nanos as f64 / 1_000_000.0)
+    } else {
+        format!("{:.2}s", d.as_secs_f64())
+    }
+}
+
 /// Print a single test result
 fn print_test_result(result: &TestResult, colors: &TermColors) {
-    let duration_ms = result.duration.as_secs_f64() * 1000.0;
+    let duration = format_duration(result.duration);
 
     match &result.status {
         TestStatus::Passed => {
             println!(
-                "  {}\u{2713}{} {} {}({:.2}ms){}",
+                "  {}\u{2713}{} {} {}({}){}",
                 colors.green(),
                 colors.reset(),
                 result.info.name,
                 colors.dim(),
-                duration_ms,
+                duration,
                 colors.reset()
             );
         }
         TestStatus::Failed(failure) => {
             print!(
-                "  {}\u{2717}{} {} {}({:.2}ms){}",
+                "  {}\u{2717}{} {} {}({}){}",
                 colors.red(),
                 colors.reset(),
                 result.info.name,
                 colors.dim(),
-                duration_ms,
+                duration,
                 colors.reset()
             );
             if let Some(info) = failure {
@@ -395,23 +409,23 @@ fn print_failures_summary(results: &TestResults, colors: &TermColors) {
 /// Print overall test summary
 fn print_summary(results: &TestResults, colors: &TermColors) {
     let total = results.passed + results.failed;
-    let duration_ms = results.total_duration.as_secs_f64() * 1000.0;
+    let duration = format_duration(results.total_duration);
 
     println!();
     if results.failed == 0 {
         println!(
-            "{}{} test{} passed{} {}({:.2}ms){}",
+            "{}{} test{} passed{} {}({}){}",
             colors.green(),
             total,
             if total == 1 { "" } else { "s" },
             colors.reset(),
             colors.dim(),
-            duration_ms,
+            duration,
             colors.reset()
         );
     } else {
         println!(
-            "{}{} failed{}, {}{} passed{} {}({:.2}ms){}",
+            "{}{} failed{}, {}{} passed{} {}({}){}",
             colors.red(),
             results.failed,
             colors.reset(),
@@ -419,7 +433,7 @@ fn print_summary(results: &TestResults, colors: &TermColors) {
             results.passed,
             colors.reset(),
             colors.dim(),
-            duration_ms,
+            duration,
             colors.reset()
         );
     }
