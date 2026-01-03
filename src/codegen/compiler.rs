@@ -447,6 +447,7 @@ impl<'a> Compiler<'a> {
                 module: &mut self.jit.module,
                 func_ids: &self.jit.func_ids,
                 source_file_ptr,
+                globals: &[],
             };
             let terminated = compile_block(
                 &mut builder,
@@ -500,6 +501,7 @@ impl<'a> Compiler<'a> {
                 module: &mut self.jit.module,
                 func_ids: &self.jit.func_ids,
                 source_file_ptr,
+                globals: &[],
             };
             let terminated = compile_block(
                 &mut builder,
@@ -696,8 +698,7 @@ fn compile_stmt(
                 let end_val = compile_expr(builder, &range.end, variables, ctx)?;
 
                 // Create loop variable as Cranelift variable
-                let var = Variable::new(variables.len());
-                builder.declare_var(var, types::I64);
+                let var = builder.declare_var(types::I64);
                 builder.def_var(var, start_val.value);
                 variables.insert(for_stmt.var_name, var);
 
@@ -765,14 +766,12 @@ fn compile_stmt(
                 let len_val = builder.inst_results(len_call)[0];
 
                 // Create index variable (i = 0)
-                let idx_var = Variable::new(variables.len());
-                builder.declare_var(idx_var, types::I64);
+                let idx_var = builder.declare_var(types::I64);
                 let zero = builder.ins().iconst(types::I64, 0);
                 builder.def_var(idx_var, zero);
 
                 // Create element variable
-                let elem_var = Variable::new(variables.len() + 1);
-                builder.declare_var(elem_var, types::I64);
+                let elem_var = builder.declare_var(types::I64);
                 builder.def_var(elem_var, zero); // Initial value doesn't matter
                 variables.insert(for_stmt.var_name, elem_var);
 
