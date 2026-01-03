@@ -198,6 +198,9 @@ pub enum ExprKind {
 
     /// Type test: value is Type
     Is(Box<IsExpr>),
+
+    /// Lambda expression: (x) => x + 1
+    Lambda(Box<LambdaExpr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
@@ -310,6 +313,48 @@ pub struct IsExpr {
     pub value: Expr,
     pub type_expr: TypeExpr,
     pub type_span: Span,
+}
+
+/// Lambda expression: (params) => body
+#[derive(Debug, Clone)]
+pub struct LambdaExpr {
+    pub params: Vec<LambdaParam>,
+    pub return_type: Option<TypeExpr>,
+    pub body: LambdaBody,
+    pub span: Span,
+}
+
+/// Lambda parameter (may have inferred type)
+#[derive(Debug, Clone)]
+pub struct LambdaParam {
+    pub name: Symbol,
+    pub ty: Option<TypeExpr>,
+    pub span: Span,
+}
+
+/// Lambda body - expression or block
+#[derive(Debug, Clone)]
+pub enum LambdaBody {
+    Expr(Box<Expr>),
+    Block(Block),
+}
+
+/// Captured variable from enclosing scope
+#[derive(Debug, Clone)]
+pub struct Capture {
+    pub name: Symbol,
+    pub is_mutable: bool,
+    pub is_mutated: bool,
+}
+
+/// Purity classification for optimization
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LambdaPurity {
+    Pure,
+    CapturesImmutable,
+    CapturesMutable,
+    MutatesCaptures,
+    HasSideEffects,
 }
 
 /// Pattern for matching

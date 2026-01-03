@@ -1796,6 +1796,11 @@ fn compile_expr(
                 vole_type: result_vole_type,
             })
         }
+
+        ExprKind::Lambda(_lambda) => {
+            // TODO: Implement lambda codegen in Task 9-15
+            Err("Lambda expressions not yet implemented".to_string())
+        }
     }
 }
 

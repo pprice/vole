@@ -1139,6 +1139,11 @@ impl Analyzer {
                 // Result is always bool
                 Ok(Type::Bool)
             }
+
+            ExprKind::Lambda(_lambda) => {
+                // TODO: Implement lambda type checking in Task 5-8
+                Ok(Type::Error)
+            }
         }
     }
 
