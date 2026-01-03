@@ -1,0 +1,25 @@
+[stdout]
+Program
+  FunctionDecl "add"
+    params: [(a: i64), (b: i64)]
+    return_type: i64
+    body:
+      Return
+        BinaryOp Add
+          Ident "a"
+          Ident "b"
+  FunctionDecl "main"
+    body:
+      Call
+        callee:
+          Ident "println"
+        args:
+          Call
+            callee:
+              Ident "add"
+            args:
+              Int 1
+              Int 2
+
+[stderr]
+// <path>/simple.vole
