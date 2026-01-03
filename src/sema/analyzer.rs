@@ -526,6 +526,16 @@ impl Analyzer {
         }
     }
 
+    /// Check if an integer literal value fits in the target type
+    fn literal_fits(value: i64, target: &Type) -> bool {
+        match target {
+            Type::I32 => value >= i32::MIN as i64 && value <= i32::MAX as i64,
+            Type::I64 => true,
+            Type::F64 => true,
+            _ => false,
+        }
+    }
+
     fn types_compatible(&self, from: &Type, to: &Type) -> bool {
         if from == to {
             return true;
