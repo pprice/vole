@@ -123,4 +123,23 @@ pub enum SemanticError {
         #[label("not a variant of the union")]
         span: SourceSpan,
     },
+
+    #[error("cannot infer type of lambda parameter '{name}'")]
+    #[diagnostic(
+        code(E2043),
+        help("add a type annotation: ({name}: Type) => ...")
+    )]
+    CannotInferLambdaParam {
+        name: String,
+        #[label("type cannot be inferred")]
+        span: SourceSpan,
+    },
+
+    #[error("cannot call non-function type '{ty}'")]
+    #[diagnostic(code(E2044))]
+    NotCallable {
+        ty: String,
+        #[label("not a function")]
+        span: SourceSpan,
+    },
 }

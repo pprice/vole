@@ -1148,9 +1148,10 @@ impl Analyzer {
                 Ok(Type::Bool)
             }
 
-            ExprKind::Lambda(_lambda) => {
-                // TODO: Implement lambda type checking in Task 5-8
-                Ok(Type::Error)
+            ExprKind::Lambda(lambda) => {
+                // For now, analyze without expected type context
+                // (Context will be passed when we have assignment/call context)
+                Ok(self.analyze_lambda(lambda, None, interner))
             }
         }
     }
@@ -1188,6 +1189,103 @@ impl Analyzer {
                 );
             }
         }
+    }
+
+    /// Analyze a lambda expression, optionally with an expected function type for inference
+    fn analyze_lambda(
+        &mut self,
+        lambda: &LambdaExpr,
+        expected_type: Option<&FunctionType>,
+        interner: &Interner,
+    ) -> Type {
+        // Resolve parameter types
+        let mut param_types = Vec::new();
+
+        for (i, param) in lambda.params.iter().enumerate() {
+            let ty = if let Some(type_expr) = &param.ty {
+                // Explicit type annotation
+                self.resolve_type(type_expr)
+            } else if let Some(expected) = expected_type {
+                // Infer from expected type
+                if i < expected.params.len() {
+                    expected.params[i].clone()
+                } else {
+                    self.add_error(
+                        SemanticError::CannotInferLambdaParam {
+                            name: interner.resolve(param.name).to_string(),
+                            span: param.span.into(),
+                        },
+                        param.span,
+                    );
+                    Type::Error
+                }
+            } else {
+                // No type info available
+                self.add_error(
+                    SemanticError::CannotInferLambdaParam {
+                        name: interner.resolve(param.name).to_string(),
+                        span: param.span.into(),
+                    },
+                    param.span,
+                );
+                Type::Error
+            };
+            param_types.push(ty);
+        }
+
+        // Push new scope for lambda body
+        let outer_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(outer_scope);
+
+        // Define parameters in scope
+        for (param, ty) in lambda.params.iter().zip(param_types.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty.clone(),
+                    mutable: false,
+                },
+            );
+        }
+
+        // Determine return type
+        let declared_return = lambda.return_type.as_ref().map(|t| self.resolve_type(t));
+        let expected_return = expected_type.map(|ft| (*ft.return_type).clone());
+
+        // Analyze body and infer return type
+        let body_type = match &lambda.body {
+            LambdaBody::Expr(expr) => {
+                // For expression body, analyze and use as return type
+                match self.check_expr(expr, interner) {
+                    Ok(ty) => ty,
+                    Err(_) => Type::Error,
+                }
+            }
+            LambdaBody::Block(block) => {
+                // For blocks, set up return type context
+                let old_return = self.current_function_return.take();
+                self.current_function_return = declared_return.clone().or(expected_return.clone());
+
+                let _ = self.check_block(block, interner);
+
+                let ret = self.current_function_return.take().unwrap_or(Type::Void);
+                self.current_function_return = old_return;
+                ret
+            }
+        };
+
+        // Restore outer scope
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+
+        // Determine final return type
+        let return_type = declared_return.or(expected_return).unwrap_or(body_type);
+
+        Type::Function(FunctionType {
+            params: param_types,
+            return_type: Box::new(return_type),
+        })
     }
 
     /// Check if an integer literal value fits in the target type
