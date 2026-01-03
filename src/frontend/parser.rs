@@ -153,6 +153,15 @@ impl<'src> Parser<'src> {
         let start_span = self.current.span;
         self.advance(); // consume 'tests'
 
+        // Parse optional label
+        let label = if self.check(TokenType::StringLiteral) {
+            let label_token = self.current.clone();
+            self.advance();
+            Some(self.process_string_content(&label_token.lexeme))
+        } else {
+            None
+        };
+
         self.consume(TokenType::LBrace, "expected '{' after 'tests'")?;
         self.skip_newlines();
 
@@ -165,7 +174,7 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::RBrace, "expected '}' to close tests block")?;
         let span = start_span.merge(self.previous.span);
 
-        Ok(Decl::Tests(TestsDecl { tests, span }))
+        Ok(Decl::Tests(TestsDecl { label, tests, span }))
     }
 
     fn test_case(&mut self) -> Result<TestCase, ParseError> {
@@ -449,6 +458,8 @@ impl<'src> Parser<'src> {
                 TokenType::Gt => BinaryOp::Gt,
                 TokenType::LtEq => BinaryOp::Le,
                 TokenType::GtEq => BinaryOp::Ge,
+                TokenType::AmpAmp => BinaryOp::And,
+                TokenType::PipePipe => BinaryOp::Or,
                 TokenType::Eq => {
                     // Assignment - special handling
                     if let ExprKind::Identifier(sym) = left.kind {
@@ -486,14 +497,26 @@ impl<'src> Parser<'src> {
 
     /// Parse a unary expression (- or !)
     fn unary(&mut self) -> Result<Expr, ParseError> {
-        if self.check(TokenType::Minus) {
-            let op_span = self.current.span;
-            self.advance();
+        if self.match_token(TokenType::Minus) {
+            let op_span = self.previous.span;
             let operand = self.unary()?;
             let span = op_span.merge(operand.span);
             return Ok(Expr {
                 kind: ExprKind::Unary(Box::new(UnaryExpr {
                     op: UnaryOp::Neg,
+                    operand,
+                })),
+                span,
+            });
+        }
+
+        if self.match_token(TokenType::Bang) {
+            let op_span = self.previous.span;
+            let operand = self.unary()?;
+            let span = op_span.merge(operand.span);
+            return Ok(Expr {
+                kind: ExprKind::Unary(Box::new(UnaryExpr {
+                    op: UnaryOp::Not,
                     operand,
                 })),
                 span,
@@ -1131,5 +1154,78 @@ tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.diagnostic.file, "test.vole");
+    }
+
+    #[test]
+    fn parse_unary_not() {
+        let mut parser = Parser::new("!true");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Unary(un) => {
+                assert_eq!(un.op, UnaryOp::Not);
+            }
+            _ => panic!("expected unary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_double_not() {
+        let mut parser = Parser::new("!!false");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Unary(un) => {
+                assert_eq!(un.op, UnaryOp::Not);
+                match &un.operand.kind {
+                    ExprKind::Unary(inner) => {
+                        assert_eq!(inner.op, UnaryOp::Not);
+                    }
+                    _ => panic!("expected nested unary"),
+                }
+            }
+            _ => panic!("expected unary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_logical_and() {
+        let mut parser = Parser::new("true && false");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::And);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_logical_or() {
+        let mut parser = Parser::new("true || false");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::Or);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_logical_precedence() {
+        // a || b && c should be a || (b && c) because && binds tighter
+        let mut parser = Parser::new("a || b && c");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::Or);
+                match &bin.right.kind {
+                    ExprKind::Binary(inner) => {
+                        assert_eq!(inner.op, BinaryOp::And);
+                    }
+                    _ => panic!("expected && on right"),
+                }
+            }
+            _ => panic!("expected binary expression"),
+        }
     }
 }

@@ -111,7 +111,21 @@ impl<'src> Lexer<'src> {
                 if self.match_char('=') {
                     self.make_token(TokenType::BangEq)
                 } else {
-                    self.error_unexpected_char('!')
+                    self.make_token(TokenType::Bang)
+                }
+            }
+            '&' => {
+                if self.match_char('&') {
+                    self.make_token(TokenType::AmpAmp)
+                } else {
+                    self.error_unexpected_char('&')
+                }
+            }
+            '|' => {
+                if self.match_char('|') {
+                    self.make_token(TokenType::PipePipe)
+                } else {
+                    self.error_unexpected_char('|')
                 }
             }
             '<' => {
@@ -631,5 +645,19 @@ mod tests {
         let errors = lexer.take_errors();
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].file, "test.vole");
+    }
+
+    #[test]
+    fn lex_bang() {
+        let mut lexer = Lexer::new("!true");
+        assert_eq!(lexer.next_token().ty, TokenType::Bang);
+        assert_eq!(lexer.next_token().ty, TokenType::KwTrue);
+    }
+
+    #[test]
+    fn lex_logical_operators() {
+        let mut lexer = Lexer::new("&& ||");
+        assert_eq!(lexer.next_token().ty, TokenType::AmpAmp);
+        assert_eq!(lexer.next_token().ty, TokenType::PipePipe);
     }
 }

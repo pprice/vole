@@ -41,6 +41,9 @@ pub enum TokenType {
     Percent,
     EqEq,
     BangEq,
+    Bang,     // !
+    AmpAmp,   // &&
+    PipePipe, // ||
     Lt,
     Gt,
     LtEq,
@@ -97,6 +100,9 @@ impl TokenType {
             Self::Percent => "%",
             Self::EqEq => "==",
             Self::BangEq => "!=",
+            Self::Bang => "!",
+            Self::AmpAmp => "&&",
+            Self::PipePipe => "||",
             Self::Lt => "<",
             Self::Gt => ">",
             Self::LtEq => "<=",
@@ -118,11 +124,13 @@ impl TokenType {
     /// Get precedence for binary operators (Pratt parsing)
     pub fn precedence(&self) -> u8 {
         match self {
-            Self::Eq => 1,
-            Self::EqEq | Self::BangEq => 2,
-            Self::Lt | Self::Gt | Self::LtEq | Self::GtEq => 3,
-            Self::Plus | Self::Minus => 4,
-            Self::Star | Self::Slash | Self::Percent => 5,
+            Self::Eq => 1,                                      // assignment (lowest)
+            Self::PipePipe => 2,                                // logical or
+            Self::AmpAmp => 3,                                  // logical and
+            Self::EqEq | Self::BangEq => 4,                     // equality
+            Self::Lt | Self::Gt | Self::LtEq | Self::GtEq => 5, // comparison
+            Self::Plus | Self::Minus => 6,                      // additive
+            Self::Star | Self::Slash | Self::Percent => 7,      // multiplicative
             _ => 0,
         }
     }
