@@ -1070,7 +1070,7 @@ impl Analyzer {
             Type::U8 => value >= 0 && value <= u8::MAX as i64,
             Type::U16 => value >= 0 && value <= u16::MAX as i64,
             Type::U32 => value >= 0 && value <= u32::MAX as i64,
-            Type::U64 => value >= 0, // i64 positive values fit
+            Type::U64 => value >= 0,       // i64 positive values fit
             Type::F32 | Type::F64 => true, // Integers can become floats
             _ => false,
         }
