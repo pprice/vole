@@ -185,6 +185,8 @@ pub enum BinaryOp {
     Gt,
     Le,
     Ge,
+    And,
+    Or,
 }
 
 /// Unary expression
