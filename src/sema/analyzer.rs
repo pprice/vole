@@ -299,7 +299,85 @@ impl Analyzer {
                         );
                         Ok(ty.clone())
                     }
-                    None => Ok(Type::I64), // default when no context
+                    None => Ok(Type::I64),
+                }
+            }
+            ExprKind::FloatLiteral(_) => {
+                match expected {
+                    Some(ty) if ty == &Type::F64 => Ok(Type::F64),
+                    Some(ty) if ty.is_numeric() => Ok(ty.clone()),
+                    Some(ty) => {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: ty.name().to_string(),
+                                found: "f64".to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        Ok(Type::F64)
+                    }
+                    None => Ok(Type::F64),
+                }
+            }
+            ExprKind::Binary(bin) => {
+                match bin.op {
+                    // Arithmetic ops: propagate expected type to both operands
+                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                        let left_ty = self.check_expr_expecting(&bin.left, expected, interner)?;
+                        let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
+
+                        if left_ty.is_numeric() && right_ty.is_numeric() {
+                            // If we have an expected type and both sides match, use it
+                            if let Some(exp) = expected {
+                                if self.types_compatible(&left_ty, exp) && self.types_compatible(&right_ty, exp) {
+                                    return Ok(exp.clone());
+                                }
+                            }
+                            // Otherwise return wider type
+                            if left_ty == Type::F64 || right_ty == Type::F64 {
+                                Ok(Type::F64)
+                            } else if left_ty == Type::I64 || right_ty == Type::I64 {
+                                Ok(Type::I64)
+                            } else {
+                                Ok(Type::I32)
+                            }
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "numeric".to_string(),
+                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                    // Comparison ops: infer left, check right against left
+                    BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
+                        let left_ty = self.check_expr_expecting(&bin.left, None, interner)?;
+                        self.check_expr_expecting(&bin.right, Some(&left_ty), interner)?;
+                        Ok(Type::Bool)
+                    }
+                    // Logical ops: both sides must be bool
+                    BinaryOp::And | BinaryOp::Or => {
+                        let left_ty = self.check_expr_expecting(&bin.left, Some(&Type::Bool), interner)?;
+                        let right_ty = self.check_expr_expecting(&bin.right, Some(&Type::Bool), interner)?;
+                        if left_ty == Type::Bool && right_ty == Type::Bool {
+                            Ok(Type::Bool)
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "bool".to_string(),
+                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
                 }
             }
             ExprKind::Grouping(inner) => self.check_expr_expecting(inner, expected, interner),
