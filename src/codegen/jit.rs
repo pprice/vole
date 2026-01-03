@@ -276,7 +276,7 @@ impl JitContext {
     pub fn define_function(&mut self, func_id: FuncId) -> Result<(), String> {
         self.module
             .define_function(func_id, &mut self.ctx)
-            .map_err(|e| e.to_string())
+            .map_err(|e| format!("Compilation error: {:?}", e))
     }
 
     /// Finalize all functions and get code pointers

@@ -616,11 +616,37 @@ fn construct_union(
         return Err("Expected union type".to_string());
     };
 
-    // Find the tag for this value's type
-    let tag = variants
-        .iter()
-        .position(|v| v == &value.vole_type)
-        .ok_or_else(|| format!("Type {:?} not in union {:?}", value.vole_type, variants))?;
+    // Find the tag for this value's type (with coercion support for integer literals)
+    // First try exact match
+    let (tag, actual_value, actual_type) = if let Some(pos) = variants.iter().position(|v| v == &value.vole_type) {
+        (pos, value.value, value.vole_type.clone())
+    } else {
+        // Try to find a compatible integer type (for literal coercion)
+        // When assigning I64 literal to i32?, we need to narrow to I32
+        let compatible = variants.iter().enumerate().find(|(_, v)| {
+            // Check if value type can narrow to this variant
+            value.vole_type.is_integer() && v.is_integer() && value.vole_type.can_widen_to(v)
+                || v.is_integer() && value.vole_type.is_integer()
+        });
+
+        match compatible {
+            Some((pos, variant_type)) => {
+                // Narrow the integer value to the variant type
+                let target_ty = type_to_cranelift(variant_type, pointer_type);
+                let narrowed = if target_ty.bytes() < value.ty.bytes() {
+                    builder.ins().ireduce(target_ty, value.value)
+                } else if target_ty.bytes() > value.ty.bytes() {
+                    builder.ins().sextend(target_ty, value.value)
+                } else {
+                    value.value
+                };
+                (pos, narrowed, variant_type.clone())
+            }
+            None => {
+                return Err(format!("Type {:?} not in union {:?}", value.vole_type, variants));
+            }
+        }
+    };
 
     // Allocate stack slot for the union
     let union_size = type_size(union_type, pointer_type);
@@ -635,8 +661,8 @@ fn construct_union(
     builder.ins().stack_store(tag_val, slot, 0);
 
     // Store payload at offset 8 (after alignment padding)
-    if value.vole_type != Type::Nil {
-        builder.ins().stack_store(value.value, slot, 8);
+    if actual_type != Type::Nil {
+        builder.ins().stack_store(actual_value, slot, 8);
     }
 
     // Return pointer to the stack slot
@@ -1729,7 +1755,21 @@ fn compile_expr(
             builder.switch_to_block(nil_block);
             builder.seal_block(nil_block);
             let default_val = compile_expr(builder, &nc.default, variables, ctx)?;
-            let default_arg = BlockArg::from(default_val.value);
+            // Coerce default value to the expected result type if needed
+            let default_coerced = if default_val.ty != cranelift_type {
+                if default_val.ty.is_int() && cranelift_type.is_int() {
+                    if cranelift_type.bytes() < default_val.ty.bytes() {
+                        builder.ins().ireduce(cranelift_type, default_val.value)
+                    } else {
+                        builder.ins().sextend(cranelift_type, default_val.value)
+                    }
+                } else {
+                    default_val.value
+                }
+            } else {
+                default_val.value
+            };
+            let default_arg = BlockArg::from(default_coerced);
             builder.ins().jump(merge_block, &[default_arg]);
 
             // Not nil block: extract payload
@@ -1826,14 +1866,20 @@ fn compile_println(
 
     // Dispatch based on argument type
     // We use vole_type to distinguish strings from regular I64 values
-    let func_name = if matches!(arg.vole_type, Type::String) {
-        "vole_println_string"
+    let (func_name, call_arg) = if matches!(arg.vole_type, Type::String) {
+        ("vole_println_string", arg.value)
     } else if arg.ty == types::F64 {
-        "vole_println_f64"
+        ("vole_println_f64", arg.value)
     } else if arg.ty == types::I8 {
-        "vole_println_bool"
+        ("vole_println_bool", arg.value)
     } else {
-        "vole_println_i64"
+        // Extend smaller integer types to I64
+        let extended = if arg.ty.is_int() && arg.ty != types::I64 {
+            builder.ins().sextend(types::I64, arg.value)
+        } else {
+            arg.value
+        };
+        ("vole_println_i64", extended)
     };
 
     let func_id = ctx
@@ -1842,7 +1888,7 @@ fn compile_println(
         .ok_or_else(|| format!("{} not found", func_name))?;
     let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
 
-    builder.ins().call(func_ref, &[arg.value]);
+    builder.ins().call(func_ref, &[call_arg]);
 
     // println returns void, but we need to return something
     let zero = builder.ins().iconst(types::I64, 0);
@@ -2083,12 +2129,18 @@ fn value_to_string(
         return Ok(val.value);
     }
 
-    let func_name = if val.ty == types::F64 {
-        "vole_f64_to_string"
+    let (func_name, call_val) = if val.ty == types::F64 {
+        ("vole_f64_to_string", val.value)
     } else if val.ty == types::I8 {
-        "vole_bool_to_string"
+        ("vole_bool_to_string", val.value)
     } else {
-        "vole_i64_to_string"
+        // Extend smaller integer types to I64
+        let extended = if val.ty.is_int() && val.ty != types::I64 {
+            builder.ins().sextend(types::I64, val.value)
+        } else {
+            val.value
+        };
+        ("vole_i64_to_string", extended)
     };
 
     let func_id = func_ids
@@ -2096,7 +2148,7 @@ fn value_to_string(
         .ok_or_else(|| format!("{} not found", func_name))?;
     let func_ref = module.declare_func_in_func(*func_id, builder.func);
 
-    let call = builder.ins().call(func_ref, &[val.value]);
+    let call = builder.ins().call(func_ref, &[call_val]);
     Ok(builder.inst_results(call)[0])
 }
 

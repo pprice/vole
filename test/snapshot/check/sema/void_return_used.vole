@@ -1,0 +1,6 @@
+func noop() {
+}
+
+func main() {
+    let x = noop()
+}

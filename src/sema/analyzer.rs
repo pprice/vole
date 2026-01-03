@@ -1190,6 +1190,8 @@ impl Analyzer {
             Type::U32 => value >= 0 && value <= u32::MAX as i64,
             Type::U64 => value >= 0,       // i64 positive values fit
             Type::F32 | Type::F64 => true, // Integers can become floats
+            // For unions, check if literal fits any numeric variant
+            Type::Union(variants) => variants.iter().any(|v| Self::literal_fits(value, v)),
             _ => false,
         }
     }

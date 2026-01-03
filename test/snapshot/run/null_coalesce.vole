@@ -1,0 +1,10 @@
+func main() {
+    let x: i32? = nil
+    let y: i32? = 42
+
+    let a = x ?? 99
+    let b = y ?? 99
+
+    println("a = {a}")
+    println("b = {b}")
+}
