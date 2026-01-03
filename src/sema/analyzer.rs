@@ -354,6 +354,23 @@ impl Analyzer {
                     | BinaryOp::Gt
                     | BinaryOp::Le
                     | BinaryOp::Ge => Ok(Type::Bool),
+                    BinaryOp::And | BinaryOp::Or => {
+                        if left_ty == Type::Bool && right_ty == Type::Bool {
+                            Ok(Type::Bool)
+                        } else {
+                            let diag = self.diag_builder.error(
+                                &codes::SEMA_TYPE_MISMATCH,
+                                expr.span,
+                                format!(
+                                    "logical operator requires bool operands, found {} and {}",
+                                    left_ty.name(),
+                                    right_ty.name()
+                                ),
+                            );
+                            self.add_error(diag);
+                            Ok(Type::Error)
+                        }
+                    }
                 }
             }
 
