@@ -9,8 +9,10 @@ use glob::glob;
 use miette::NamedSource;
 
 use crate::cli::InspectType;
+use crate::codegen::{Compiler, JitContext};
 use crate::errors::render_to_stderr;
 use crate::frontend::{AstPrinter, Parser};
+use crate::sema::Analyzer;
 
 /// Inspect compilation output for the given files
 pub fn inspect_files(
@@ -93,7 +95,48 @@ pub fn inspect_files(
                 print!("{}", printer.print_program(&program));
             }
             InspectType::Ir => {
-                println!("TODO: IR for {} (no_tests={})", file_path, no_tests);
+                // Parse
+                let mut parser = Parser::with_file(&source, &file_path);
+                let program = match parser.parse_program() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let report = miette::Report::new(e.error.clone())
+                            .with_source_code(NamedSource::new(
+                                file_path.to_string(),
+                                source.clone(),
+                            ));
+                        render_to_stderr(report.as_ref());
+                        had_error = true;
+                        continue;
+                    }
+                };
+
+                let interner = parser.into_interner();
+
+                // Type check
+                let mut analyzer = Analyzer::new(&file_path, &source);
+                if let Err(errors) = analyzer.analyze(&program, &interner) {
+                    for err in &errors {
+                        let report = miette::Report::new(err.error.clone())
+                            .with_source_code(NamedSource::new(
+                                file_path.to_string(),
+                                source.clone(),
+                            ));
+                        render_to_stderr(report.as_ref());
+                    }
+                    had_error = true;
+                    continue;
+                }
+
+                // Generate IR
+                let mut jit = JitContext::new();
+                let mut compiler = Compiler::new(&mut jit, &interner);
+                let include_tests = !no_tests;
+
+                if let Err(e) = compiler.compile_to_ir(&program, &mut std::io::stdout(), include_tests) {
+                    eprintln!("error: {}", e);
+                    had_error = true;
+                }
             }
         }
     }
