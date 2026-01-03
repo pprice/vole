@@ -618,35 +618,39 @@ fn construct_union(
 
     // Find the tag for this value's type (with coercion support for integer literals)
     // First try exact match
-    let (tag, actual_value, actual_type) = if let Some(pos) = variants.iter().position(|v| v == &value.vole_type) {
-        (pos, value.value, value.vole_type.clone())
-    } else {
-        // Try to find a compatible integer type (for literal coercion)
-        // When assigning I64 literal to i32?, we need to narrow to I32
-        let compatible = variants.iter().enumerate().find(|(_, v)| {
-            // Check if value type can narrow to this variant
-            value.vole_type.is_integer() && v.is_integer() && value.vole_type.can_widen_to(v)
-                || v.is_integer() && value.vole_type.is_integer()
-        });
+    let (tag, actual_value, actual_type) =
+        if let Some(pos) = variants.iter().position(|v| v == &value.vole_type) {
+            (pos, value.value, value.vole_type.clone())
+        } else {
+            // Try to find a compatible integer type (for literal coercion)
+            // When assigning I64 literal to i32?, we need to narrow to I32
+            let compatible = variants.iter().enumerate().find(|(_, v)| {
+                // Check if value type can narrow to this variant
+                value.vole_type.is_integer() && v.is_integer() && value.vole_type.can_widen_to(v)
+                    || v.is_integer() && value.vole_type.is_integer()
+            });
 
-        match compatible {
-            Some((pos, variant_type)) => {
-                // Narrow the integer value to the variant type
-                let target_ty = type_to_cranelift(variant_type, pointer_type);
-                let narrowed = if target_ty.bytes() < value.ty.bytes() {
-                    builder.ins().ireduce(target_ty, value.value)
-                } else if target_ty.bytes() > value.ty.bytes() {
-                    builder.ins().sextend(target_ty, value.value)
-                } else {
-                    value.value
-                };
-                (pos, narrowed, variant_type.clone())
+            match compatible {
+                Some((pos, variant_type)) => {
+                    // Narrow the integer value to the variant type
+                    let target_ty = type_to_cranelift(variant_type, pointer_type);
+                    let narrowed = if target_ty.bytes() < value.ty.bytes() {
+                        builder.ins().ireduce(target_ty, value.value)
+                    } else if target_ty.bytes() > value.ty.bytes() {
+                        builder.ins().sextend(target_ty, value.value)
+                    } else {
+                        value.value
+                    };
+                    (pos, narrowed, variant_type.clone())
+                }
+                None => {
+                    return Err(format!(
+                        "Type {:?} not in union {:?}",
+                        value.vole_type, variants
+                    ));
+                }
             }
-            None => {
-                return Err(format!("Type {:?} not in union {:?}", value.vole_type, variants));
-            }
-        }
-    };
+        };
 
     // Allocate stack slot for the union
     let union_size = type_size(union_type, pointer_type);
