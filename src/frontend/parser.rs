@@ -458,6 +458,8 @@ impl<'src> Parser<'src> {
                 TokenType::Gt => BinaryOp::Gt,
                 TokenType::LtEq => BinaryOp::Le,
                 TokenType::GtEq => BinaryOp::Ge,
+                TokenType::AmpAmp => BinaryOp::And,
+                TokenType::PipePipe => BinaryOp::Or,
                 TokenType::Eq => {
                     // Assignment - special handling
                     if let ExprKind::Identifier(sym) = left.kind {
@@ -1181,6 +1183,49 @@ tests {
                 }
             }
             _ => panic!("expected unary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_logical_and() {
+        let mut parser = Parser::new("true && false");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::And);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_logical_or() {
+        let mut parser = Parser::new("true || false");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::Or);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_logical_precedence() {
+        // a || b && c should be a || (b && c) because && binds tighter
+        let mut parser = Parser::new("a || b && c");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::Or);
+                match &bin.right.kind {
+                    ExprKind::Binary(inner) => {
+                        assert_eq!(inner.op, BinaryOp::And);
+                    }
+                    _ => panic!("expected && on right"),
+                }
+            }
+            _ => panic!("expected binary expression"),
         }
     }
 }
