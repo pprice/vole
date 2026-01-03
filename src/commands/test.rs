@@ -12,10 +12,10 @@ use std::time::{Duration, Instant};
 use super::common::{TermColors, parse_and_analyze, read_stdin};
 use crate::cli::{ColorMode, ReportMode, expand_paths};
 use crate::codegen::{Compiler, JitContext, TestInfo};
-use crate::util::format_duration;
 use crate::runtime::{
     AssertFailure, JmpBuf, call_setjmp, clear_test_jmp_buf, set_test_jmp_buf, take_assert_failure,
 };
+use crate::util::format_duration;
 
 /// Status of an individual test
 #[derive(Debug, Clone)]

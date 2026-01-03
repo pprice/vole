@@ -2,10 +2,10 @@
 //
 // Statistics computation for benchmark results.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Computed statistics from sample values
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stats {
     pub mean: f64,
     pub min: f64,

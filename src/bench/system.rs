@@ -2,11 +2,11 @@
 //
 // System information collection for benchmark context.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
 /// System information for benchmark context
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemInfo {
     pub os: String,
     pub os_version: String,
@@ -41,10 +41,7 @@ impl SystemInfo {
     pub fn display(&self) -> String {
         use crate::util::format_bytes;
 
-        let mut out = format!(
-            "System: {} {} {}",
-            self.os, self.os_version, self.arch
-        );
+        let mut out = format!("System: {} {} {}", self.os, self.os_version, self.arch);
 
         if self.cpu_cores > 0 {
             out.push_str(&format!(", {} cores", self.cpu_cores));

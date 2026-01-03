@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::bench::{ResourceUsage, Stats, SystemInfo};
 use crate::codegen::{Compiler, JitContext};
@@ -14,7 +14,7 @@ use crate::frontend::{Lexer, Parser};
 use crate::sema::Analyzer;
 
 /// Timing breakdown for compilation phases (in nanoseconds)
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompileTiming {
     pub lex_ns: u64,
     pub parse_ns: u64,
@@ -33,7 +33,7 @@ pub struct IterationMetrics {
 }
 
 /// Results for a single benchmarked file
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileResult {
     pub file: PathBuf,
     pub compile: CompileTiming,
@@ -43,7 +43,7 @@ pub struct FileResult {
 }
 
 /// Benchmark configuration
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchConfig {
     pub iterations: u32,
     pub warmup: u32,
@@ -59,7 +59,7 @@ impl Default for BenchConfig {
 }
 
 /// Information about the Vole runtime
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoleInfo {
     pub version: String,
     pub build: String,
@@ -85,7 +85,7 @@ impl VoleInfo {
 }
 
 /// Complete benchmark run results
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkRun {
     pub timestamp: String,
     pub system: SystemInfo,
