@@ -24,6 +24,13 @@ pub enum Type {
     String,
     /// Void (no return value)
     Void,
+    /// Nil type - the "absence of value" type for optionals
+    /// Distinct from Void (which is only for function returns)
+    Nil,
+    /// Union type - value can be any of the variant types
+    /// Represented at runtime as tagged union (discriminant + payload)
+    /// TODO: Consider nullable pointer optimization for pointer types (String, Array)
+    Union(Vec<Type>),
     /// Range type (e.g., 0..10)
     Range,
     /// Array type (e.g., [i32], [string])
@@ -168,11 +175,75 @@ impl Type {
             Type::Bool => "bool",
             Type::String => "string",
             Type::Void => "void",
+            Type::Nil => "nil",
+            Type::Union(_) => "union", // Display impl handles full representation
             Type::Range => "range",
             Type::Array(_) => "array",
             Type::Function(_) => "function",
             Type::Unknown => "unknown",
             Type::Error => "error",
+        }
+    }
+
+    /// Check if this is a union type containing Nil
+    pub fn is_optional(&self) -> bool {
+        matches!(self, Type::Union(types) if types.contains(&Type::Nil))
+    }
+
+    /// For an optional/union type, get the non-nil variants
+    pub fn unwrap_optional(&self) -> Option<Type> {
+        match self {
+            Type::Union(types) => {
+                let non_nil: Vec<_> = types.iter().filter(|t| **t != Type::Nil).cloned().collect();
+                match non_nil.len() {
+                    0 => None,
+                    1 => Some(non_nil.into_iter().next().unwrap()),
+                    _ => Some(Type::Union(non_nil)),
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Create an optional type (T | nil)
+    pub fn optional(inner: Type) -> Type {
+        Type::Union(vec![inner, Type::Nil])
+    }
+
+    /// Normalize a union: flatten nested unions, sort, dedupe, unwrap single-element
+    pub fn normalize_union(mut types: Vec<Type>) -> Type {
+        // Flatten nested unions
+        let mut flattened = Vec::new();
+        for ty in types.drain(..) {
+            match ty {
+                Type::Union(inner) => flattened.extend(inner),
+                other => flattened.push(other),
+            }
+        }
+
+        // Sort for canonical representation (use debug string for now)
+        flattened.sort_by_key(|t| format!("{:?}", t));
+
+        // Dedupe
+        flattened.dedup();
+
+        // Unwrap single-element union
+        if flattened.len() == 1 {
+            flattened.into_iter().next().unwrap()
+        } else {
+            Type::Union(flattened)
+        }
+    }
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Union(types) => {
+                let parts: Vec<_> = types.iter().map(|t| t.name()).collect();
+                write!(f, "{}", parts.join(" | "))
+            }
+            _ => write!(f, "{}", self.name()),
         }
     }
 }
@@ -245,5 +316,26 @@ mod tests {
         assert_eq!(Type::from_primitive(PrimitiveType::I32), Type::I32);
         assert_eq!(Type::from_primitive(PrimitiveType::U64), Type::U64);
         assert_eq!(Type::from_primitive(PrimitiveType::F32), Type::F32);
+    }
+
+    #[test]
+    fn type_optional() {
+        let opt = Type::optional(Type::I32);
+        assert!(opt.is_optional());
+        assert_eq!(opt.unwrap_optional(), Some(Type::I32));
+    }
+
+    #[test]
+    fn type_normalize_union() {
+        // Nested unions flatten
+        let normalized = Type::normalize_union(vec![
+            Type::I32,
+            Type::Union(vec![Type::String, Type::Nil]),
+        ]);
+        assert!(matches!(normalized, Type::Union(v) if v.len() == 3));
+
+        // Single element unwraps
+        let single = Type::normalize_union(vec![Type::I32]);
+        assert_eq!(single, Type::I32);
     }
 }
