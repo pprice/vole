@@ -17,12 +17,12 @@ path = "src/bin/vole_snap.rs"
 
 [dependencies]
 # Cranelift for JIT compilation
-cranelift = "0.116"
-cranelift-jit = "0.116"
-cranelift-module = "0.116"
-cranelift-codegen = "0.116"
-cranelift-frontend = "0.116"
-cranelift-native = "0.116"
+cranelift = "0.127"
+cranelift-jit = "0.127"
+cranelift-module = "0.127"
+cranelift-codegen = "0.127"
+cranelift-frontend = "0.127"
+cranelift-native = "0.127"
 target-lexicon = "0.13"
 
 # C library interop (for longjmp in test assertions)

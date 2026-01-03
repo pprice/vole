@@ -1,6 +1,6 @@
 // src/codegen/compiler.rs
 
-use cranelift::codegen::ir::TrapCode;
+use cranelift::codegen::ir::{BlockArg, TrapCode};
 use cranelift::prelude::*;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
@@ -208,8 +208,7 @@ impl<'a> Compiler<'a> {
                 .zip(param_types.iter())
                 .zip(params.iter())
             {
-                let var = Variable::new(variables.len());
-                builder.declare_var(var, *ty);
+                let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
                 variables.insert(*name, var);
             }
@@ -380,8 +379,7 @@ fn compile_stmt(
         Stmt::Let(let_stmt) => {
             let init = compile_expr(builder, &let_stmt.init, variables, ctx)?;
 
-            let var = Variable::new(variables.len());
-            builder.declare_var(var, init.ty);
+            let var = builder.declare_var(init.ty);
             builder.def_var(var, init.value);
             variables.insert(let_stmt.name, var);
             Ok(false)
@@ -557,13 +555,15 @@ fn compile_expr(
                     builder.switch_to_block(then_block);
                     builder.seal_block(then_block);
                     let right = compile_expr(builder, &bin.right, variables, ctx)?;
-                    builder.ins().jump(merge_block, &[right.value]);
+                    let right_arg = BlockArg::from(right.value);
+                    builder.ins().jump(merge_block, &[right_arg]);
 
                     // Else block: left was false, short-circuit with false
                     builder.switch_to_block(else_block);
                     builder.seal_block(else_block);
                     let false_val = builder.ins().iconst(types::I8, 0);
-                    builder.ins().jump(merge_block, &[false_val]);
+                    let false_arg = BlockArg::from(false_val);
+                    builder.ins().jump(merge_block, &[false_arg]);
 
                     // Merge block
                     builder.switch_to_block(merge_block);
@@ -593,13 +593,15 @@ fn compile_expr(
                     builder.switch_to_block(then_block);
                     builder.seal_block(then_block);
                     let true_val = builder.ins().iconst(types::I8, 1);
-                    builder.ins().jump(merge_block, &[true_val]);
+                    let true_arg = BlockArg::from(true_val);
+                    builder.ins().jump(merge_block, &[true_arg]);
 
                     // Else block: left was false, evaluate right side
                     builder.switch_to_block(else_block);
                     builder.seal_block(else_block);
                     let right = compile_expr(builder, &bin.right, variables, ctx)?;
-                    builder.ins().jump(merge_block, &[right.value]);
+                    let right_arg = BlockArg::from(right.value);
+                    builder.ins().jump(merge_block, &[right_arg]);
 
                     // Merge block
                     builder.switch_to_block(merge_block);
