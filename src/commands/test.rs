@@ -4,13 +4,13 @@
 // Discovers and executes tests from Vole source files.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use glob::glob;
-
-use super::common::{TermColors, parse_and_analyze};
+use super::common::{TermColors, parse_and_analyze, read_stdin};
+use crate::cli::{ColorMode, ReportMode, expand_paths};
 use crate::codegen::{Compiler, JitContext, TestInfo};
 use crate::runtime::{
     AssertFailure, JmpBuf, call_setjmp, clear_test_jmp_buf, set_test_jmp_buf, take_assert_failure,
@@ -24,11 +24,13 @@ pub enum TestStatus {
 }
 
 /// Result of running a single test
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TestResult {
     pub info: TestInfo,
     pub status: TestStatus,
     pub duration: Duration,
+    /// File path where this test is defined
+    pub file: PathBuf,
 }
 
 /// Aggregated results from running all tests
@@ -38,6 +40,8 @@ pub struct TestResults {
     pub failed: usize,
     pub results: Vec<TestResult>,
     pub total_duration: Duration,
+    /// Number of files skipped due to max_failures cap
+    pub skipped_files: usize,
 }
 
 impl TestResults {
@@ -47,6 +51,7 @@ impl TestResults {
             failed: 0,
             results: Vec::new(),
             total_duration: Duration::ZERO,
+            skipped_files: 0,
         }
     }
 
@@ -63,16 +68,29 @@ impl TestResults {
         self.failed += other.failed;
         self.results.extend(other.results);
         self.total_duration += other.total_duration;
+        self.skipped_files += other.skipped_files;
     }
 }
 
 /// Main entry point for the test command
-pub fn run_tests(paths: &[String]) -> ExitCode {
+/// Use "-" alone to read from stdin.
+pub fn run_tests(
+    paths: &[String],
+    filter: Option<&str>,
+    report: ReportMode,
+    max_failures: u32,
+    color: ColorMode,
+) -> ExitCode {
     let start = Instant::now();
-    let colors = TermColors::auto();
+    let colors = TermColors::with_mode(color);
+
+    // Handle stdin specially (must be alone)
+    if paths.len() == 1 && paths[0] == "-" {
+        return run_stdin_tests(filter, &report, &colors, start);
+    }
 
     // Collect all test files from the given paths
-    let files = match collect_test_files(paths) {
+    let files = match expand_paths(paths) {
         Ok(files) => files,
         Err(e) => {
             eprintln!("error: {}", e);
@@ -87,11 +105,22 @@ pub fn run_tests(paths: &[String]) -> ExitCode {
 
     // Run tests from each file
     let mut all_results = TestResults::new();
+    let failure_cap = if max_failures == 0 {
+        usize::MAX
+    } else {
+        max_failures as usize
+    };
 
-    for file in &files {
-        match run_file_tests(file) {
+    for (idx, file) in files.iter().enumerate() {
+        // Check if we've hit the failure cap
+        if all_results.failed >= failure_cap {
+            all_results.skipped_files = files.len() - idx;
+            break;
+        }
+
+        match run_file_tests(file, filter) {
             Ok(results) => {
-                print_file_results(file, &results, &colors);
+                print_file_results(file, &results, &colors, &report);
                 all_results.merge(results);
             }
             Err(e) => {
@@ -106,6 +135,11 @@ pub fn run_tests(paths: &[String]) -> ExitCode {
 
     all_results.total_duration = start.elapsed();
 
+    // For 'all' mode, reprint failures at the end
+    if matches!(report, ReportMode::All) && all_results.failed > 0 {
+        print_failures_summary(&all_results, &colors);
+    }
+
     // Print summary
     print_summary(&all_results, &colors);
 
@@ -116,72 +150,75 @@ pub fn run_tests(paths: &[String]) -> ExitCode {
     }
 }
 
-/// Collect all .vole files from the given paths (files, directories, or glob patterns)
-fn collect_test_files(paths: &[String]) -> Result<Vec<PathBuf>, String> {
-    let mut files = Vec::new();
+/// Run tests from stdin
+fn run_stdin_tests(
+    filter: Option<&str>,
+    report: &ReportMode,
+    colors: &TermColors,
+    start: Instant,
+) -> ExitCode {
+    let source = match read_stdin() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: could not read stdin: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
 
-    for path_str in paths {
-        let path = Path::new(path_str);
+    let stdin_path = PathBuf::from("<stdin>");
+    let mut all_results = TestResults::new();
 
-        if path.is_file() {
-            // Direct file path
-            if path.extension().is_some_and(|ext| ext == "vole") {
-                files.push(path.to_path_buf());
-            } else {
-                return Err(format!("'{}' is not a .vole file", path_str));
+    match run_source_tests(&source, "<stdin>", &stdin_path, filter) {
+        Ok(results) => {
+            print_file_results(&stdin_path, &results, colors, report);
+            all_results.merge(results);
+        }
+        Err(e) => {
+            if !e.is_empty() {
+                eprintln!("error: {}", e);
             }
-        } else if path.is_dir() {
-            // Directory - find all .vole files recursively
-            let pattern = format!("{}/**/*.vole", path_str);
-            collect_glob_matches(&pattern, &mut files)?;
-        } else {
-            // Treat as glob pattern
-            collect_glob_matches(path_str, &mut files)?;
+            all_results.failed += 1;
         }
     }
 
-    // Sort for deterministic ordering
-    files.sort();
-    files.dedup();
+    all_results.total_duration = start.elapsed();
 
-    Ok(files)
-}
-
-/// Expand a glob pattern and add matching files
-fn collect_glob_matches(pattern: &str, files: &mut Vec<PathBuf>) -> Result<(), String> {
-    let entries =
-        glob(pattern).map_err(|e| format!("invalid glob pattern '{}': {}", pattern, e))?;
-
-    for entry in entries {
-        match entry {
-            Ok(path) => {
-                if path.is_file() && path.extension().is_some_and(|ext| ext == "vole") {
-                    files.push(path);
-                }
-            }
-            Err(e) => {
-                return Err(format!("error reading path: {}", e));
-            }
-        }
+    // For 'all' mode, reprint failures at the end
+    if matches!(report, ReportMode::All) && all_results.failed > 0 {
+        print_failures_summary(&all_results, colors);
     }
 
-    Ok(())
+    print_summary(&all_results, colors);
+
+    if all_results.failed > 0 {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 /// Parse, type check, compile, and run tests from a single file
-fn run_file_tests(path: &Path) -> Result<TestResults, String> {
-    // Read source file
+fn run_file_tests(path: &Path, filter: Option<&str>) -> Result<TestResults, String> {
     let source = fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
     let file_path = path.to_string_lossy();
+    run_source_tests(&source, &file_path, path, filter)
+}
 
+/// Parse, type check, compile, and run tests from source code
+fn run_source_tests(
+    source: &str,
+    file_path: &str,
+    path: &Path,
+    filter: Option<&str>,
+) -> Result<TestResults, String> {
     // Parse and type check
-    let analyzed = parse_and_analyze(&source, &file_path).map_err(|()| String::new())?;
+    let analyzed = parse_and_analyze(source, file_path).map_err(|()| String::new())?;
 
     // Compile
     let mut jit = JitContext::new();
     let tests = {
         let mut compiler = Compiler::new(&mut jit, &analyzed.interner);
-        compiler.set_source_file(&path.to_string_lossy());
+        compiler.set_source_file(file_path);
         compiler
             .compile_program(&analyzed.program)
             .map_err(|e| format!("compilation error: {}", e))?;
@@ -189,16 +226,27 @@ fn run_file_tests(path: &Path) -> Result<TestResults, String> {
     };
     jit.finalize();
 
+    // Filter tests if a filter is provided
+    let tests = if let Some(pattern) = filter {
+        tests
+            .into_iter()
+            .filter(|t| t.name.contains(pattern))
+            .collect()
+    } else {
+        tests
+    };
+
     // Execute tests
-    let results = execute_tests(tests, &jit);
+    let results = execute_tests(tests, &jit, path);
 
     Ok(results)
 }
 
 /// Execute compiled tests with setjmp/longjmp for assertion failure handling
-fn execute_tests(tests: Vec<TestInfo>, jit: &JitContext) -> TestResults {
+fn execute_tests(tests: Vec<TestInfo>, jit: &JitContext, file: &Path) -> TestResults {
     let mut results = TestResults::new();
     let start = Instant::now();
+    let file_path = file.to_path_buf();
 
     for test in tests {
         let func_ptr = match jit.get_function_ptr(&test.func_name) {
@@ -208,6 +256,7 @@ fn execute_tests(tests: Vec<TestInfo>, jit: &JitContext) -> TestResults {
                     info: test,
                     status: TestStatus::Failed(None),
                     duration: Duration::ZERO,
+                    file: file_path.clone(),
                 });
                 continue;
             }
@@ -241,6 +290,7 @@ fn execute_tests(tests: Vec<TestInfo>, jit: &JitContext) -> TestResults {
             info: test,
             status,
             duration,
+            file: file_path.clone(),
         });
     }
 
@@ -249,44 +299,95 @@ fn execute_tests(tests: Vec<TestInfo>, jit: &JitContext) -> TestResults {
 }
 
 /// Print results for tests from a single file
-fn print_file_results(path: &Path, results: &TestResults, colors: &TermColors) {
+fn print_file_results(
+    path: &Path,
+    results: &TestResults,
+    colors: &TermColors,
+    report: &ReportMode,
+) {
     if results.results.is_empty() {
+        return;
+    }
+
+    // In results mode, don't print individual tests
+    if matches!(report, ReportMode::Results) {
+        return;
+    }
+
+    // Check if we should print this file's header
+    let has_relevant_results = match report {
+        ReportMode::All => true,
+        ReportMode::Failures => results.failed > 0,
+        ReportMode::Results => false,
+    };
+
+    if !has_relevant_results {
         return;
     }
 
     println!("\n{}", path.display());
 
     for result in &results.results {
-        let duration_ms = result.duration.as_secs_f64() * 1000.0;
+        // In failures mode, skip passed tests
+        if matches!(report, ReportMode::Failures) && matches!(result.status, TestStatus::Passed) {
+            continue;
+        }
 
-        match &result.status {
-            TestStatus::Passed => {
-                println!(
-                    "  {}\u{2713}{} {} {}({:.2}ms){}",
-                    colors.green(),
-                    colors.reset(),
-                    result.info.name,
-                    colors.dim(),
-                    duration_ms,
-                    colors.reset()
-                );
+        print_test_result(result, colors);
+    }
+}
+
+/// Print a single test result
+fn print_test_result(result: &TestResult, colors: &TermColors) {
+    let duration_ms = result.duration.as_secs_f64() * 1000.0;
+
+    match &result.status {
+        TestStatus::Passed => {
+            println!(
+                "  {}\u{2713}{} {} {}({:.2}ms){}",
+                colors.green(),
+                colors.reset(),
+                result.info.name,
+                colors.dim(),
+                duration_ms,
+                colors.reset()
+            );
+        }
+        TestStatus::Failed(failure) => {
+            print!(
+                "  {}\u{2717}{} {} {}({:.2}ms){}",
+                colors.red(),
+                colors.reset(),
+                result.info.name,
+                colors.dim(),
+                duration_ms,
+                colors.reset()
+            );
+            if let Some(info) = failure {
+                println!(" - assertion failed at {}:{}", info.file, info.line);
+            } else {
+                println!();
             }
-            TestStatus::Failed(failure) => {
-                print!(
-                    "  {}\u{2717}{} {} {}({:.2}ms){}",
-                    colors.red(),
-                    colors.reset(),
-                    result.info.name,
-                    colors.dim(),
-                    duration_ms,
-                    colors.reset()
-                );
-                if let Some(info) = failure {
-                    println!(" - assertion failed at {}:{}", info.file, info.line);
-                } else {
-                    println!();
-                }
+        }
+    }
+}
+
+/// Print a summary of all failures at the end (for 'all' mode)
+fn print_failures_summary(results: &TestResults, colors: &TermColors) {
+    println!("\n{}Failures:{}", colors.red(), colors.reset());
+
+    // Group failures by file
+    let mut current_file: Option<&Path> = None;
+
+    for result in &results.results {
+        if matches!(result.status, TestStatus::Failed(_)) {
+            // Print file header if changed
+            if current_file != Some(result.file.as_path()) {
+                println!("\n{}", result.file.display());
+                current_file = Some(result.file.as_path());
             }
+
+            print_test_result(result, colors);
         }
     }
 }
@@ -322,49 +423,15 @@ fn print_summary(results: &TestResults, colors: &TermColors) {
             colors.reset()
         );
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs::File;
-    use std::io::Write;
-    use tempfile::TempDir;
-
-    fn create_test_file(dir: &Path, name: &str, content: &str) -> PathBuf {
-        let path = dir.join(name);
-        let mut file = File::create(&path).unwrap();
-        file.write_all(content.as_bytes()).unwrap();
-        path
-    }
-
-    #[test]
-    fn test_collect_single_file() {
-        let dir = TempDir::new().unwrap();
-        let file = create_test_file(dir.path(), "test.vole", "fn main() {}");
-
-        let files = collect_test_files(&[file.to_string_lossy().to_string()]).unwrap();
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0], file);
-    }
-
-    #[test]
-    fn test_collect_directory() {
-        let dir = TempDir::new().unwrap();
-        create_test_file(dir.path(), "a.vole", "fn main() {}");
-        create_test_file(dir.path(), "b.vole", "fn main() {}");
-        create_test_file(dir.path(), "c.txt", "not a vole file");
-
-        let files = collect_test_files(&[dir.path().to_string_lossy().to_string()]).unwrap();
-        assert_eq!(files.len(), 2);
-    }
-
-    #[test]
-    fn test_collect_rejects_non_vole() {
-        let dir = TempDir::new().unwrap();
-        let file = create_test_file(dir.path(), "test.txt", "not vole");
-
-        let result = collect_test_files(&[file.to_string_lossy().to_string()]);
-        assert!(result.is_err());
+    // Show skipped files if failure cap was hit
+    if results.skipped_files > 0 {
+        println!(
+            "{}{} file{} skipped{} (max failures reached)",
+            colors.dim(),
+            results.skipped_files,
+            if results.skipped_files == 1 { "" } else { "s" },
+            colors.reset()
+        );
     }
 }
