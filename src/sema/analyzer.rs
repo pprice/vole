@@ -90,6 +90,16 @@ impl Analyzer {
                 let init_type =
                     self.check_expr_expecting(&let_stmt.init, declared_type.as_ref(), interner)?;
 
+                // Check if trying to use void return value
+                if init_type == Type::Void {
+                    self.add_error(
+                        SemanticError::VoidReturnUsed {
+                            span: let_stmt.init.span.into(),
+                        },
+                        let_stmt.init.span,
+                    );
+                }
+
                 let var_type = declared_type.unwrap_or(init_type.clone());
 
                 self.globals.insert(let_stmt.name, var_type.clone());
@@ -133,8 +143,14 @@ impl Analyzer {
                 let elem_ty = self.resolve_type(elem);
                 Type::Array(Box::new(elem_ty))
             }
-            TypeExpr::Optional(_) | TypeExpr::Union(_) | TypeExpr::Nil => {
-                todo!("optional/union/nil types not yet implemented in semantic analysis")
+            TypeExpr::Nil => Type::Nil,
+            TypeExpr::Optional(inner) => {
+                let inner_ty = self.resolve_type(inner);
+                Type::optional(inner_ty)
+            }
+            TypeExpr::Union(variants) => {
+                let types: Vec<Type> = variants.iter().map(|t| self.resolve_type(t)).collect();
+                Type::normalize_union(types)
             }
         }
     }
@@ -220,6 +236,16 @@ impl Analyzer {
                 let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t));
                 let init_type =
                     self.check_expr_expecting(&let_stmt.init, declared_type.as_ref(), interner)?;
+
+                // Check if trying to use void return value
+                if init_type == Type::Void {
+                    self.add_error(
+                        SemanticError::VoidReturnUsed {
+                            span: let_stmt.init.span.into(),
+                        },
+                        let_stmt.init.span,
+                    );
+                }
 
                 let var_type = declared_type.unwrap_or(init_type);
 
@@ -1025,8 +1051,54 @@ impl Analyzer {
                 Ok(result_type.unwrap_or(Type::Void))
             }
 
-            ExprKind::Nil | ExprKind::NullCoalesce(_) | ExprKind::Is(_) => {
-                todo!("nil/null-coalesce/is expressions not yet implemented in semantic analysis")
+            ExprKind::Nil => Ok(Type::Nil),
+
+            ExprKind::NullCoalesce(nc) => {
+                let value_type = self.check_expr(&nc.value, interner)?;
+
+                // Value must be an optional (union containing Nil)
+                if !value_type.is_optional() {
+                    self.add_error(
+                        SemanticError::NullCoalesceNotOptional {
+                            found: format!("{}", value_type),
+                            span: nc.value.span.into(),
+                        },
+                        nc.value.span,
+                    );
+                    return Ok(Type::Error);
+                }
+
+                // Get the non-nil type
+                let unwrapped = value_type.unwrap_optional().unwrap_or(Type::Error);
+
+                // Default must match the unwrapped type
+                let _default_type =
+                    self.check_expr_expecting(&nc.default, Some(&unwrapped), interner)?;
+
+                // Result is the non-nil type
+                Ok(unwrapped)
+            }
+
+            ExprKind::Is(is_expr) => {
+                let value_type = self.check_expr(&is_expr.value, interner)?;
+                let tested_type = self.resolve_type(&is_expr.type_expr);
+
+                // Warn/error if tested type is not a variant of value's union
+                if let Type::Union(variants) = &value_type
+                    && !variants.contains(&tested_type)
+                {
+                    self.add_error(
+                        SemanticError::IsNotVariant {
+                            tested: format!("{}", tested_type),
+                            union_type: format!("{}", value_type),
+                            span: is_expr.type_span.into(),
+                        },
+                        is_expr.type_span,
+                    );
+                }
+
+                // Result is always bool
+                Ok(Type::Bool)
             }
         }
     }
