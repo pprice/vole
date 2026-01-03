@@ -409,6 +409,34 @@ impl Analyzer {
                             Ok(Type::Error)
                         }
                     }
+                    // Bitwise ops: both sides must be integer
+                    BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl | BinaryOp::Shr => {
+                        let left_ty = self.check_expr_expecting(&bin.left, expected, interner)?;
+                        let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
+
+                        if left_ty.is_integer() && right_ty.is_integer() {
+                            if let Some(exp) = expected {
+                                if self.types_compatible(&left_ty, exp) && self.types_compatible(&right_ty, exp) {
+                                    return Ok(exp.clone());
+                                }
+                            }
+                            if left_ty == Type::I64 || right_ty == Type::I64 {
+                                Ok(Type::I64)
+                            } else {
+                                Ok(Type::I32)
+                            }
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "integer".to_string(),
+                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
                 }
             }
             ExprKind::Unary(un) => {
@@ -439,6 +467,23 @@ impl Analyzer {
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "bool".to_string(),
+                                    found: operand_ty.name().to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                    UnaryOp::BitNot => {
+                        // Bitwise not: propagate expected type, requires integer
+                        let operand_ty = self.check_expr_expecting(&un.operand, expected, interner)?;
+                        if operand_ty.is_integer() {
+                            Ok(operand_ty)
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "integer".to_string(),
                                     found: operand_ty.name().to_string(),
                                     span: expr.span.into(),
                                 },
@@ -546,6 +591,25 @@ impl Analyzer {
                             Ok(Type::Error)
                         }
                     }
+                    BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl | BinaryOp::Shr => {
+                        if left_ty.is_integer() && right_ty.is_integer() {
+                            if left_ty == Type::I64 || right_ty == Type::I64 {
+                                Ok(Type::I64)
+                            } else {
+                                Ok(Type::I32)
+                            }
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "integer".to_string(),
+                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
                 }
             }
 
@@ -574,6 +638,21 @@ impl Analyzer {
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "bool".to_string(),
+                                    found: operand_ty.name().to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                    UnaryOp::BitNot => {
+                        if operand_ty.is_integer() {
+                            Ok(operand_ty)
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "integer".to_string(),
                                     found: operand_ty.name().to_string(),
                                     span: expr.span.into(),
                                 },
