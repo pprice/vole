@@ -1,4 +1,5 @@
 // src/lib.rs
+pub mod bench;
 pub mod cli;
 pub mod codegen;
 pub mod commands;
