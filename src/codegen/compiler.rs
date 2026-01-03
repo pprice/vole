@@ -565,9 +565,16 @@ fn resolve_type_expr(ty: &TypeExpr) -> Type {
             Type::normalize_union(variant_types)
         }
         TypeExpr::Nil => Type::Nil,
-        TypeExpr::Function { .. } => {
-            // Function types will be handled in a later task
-            Type::Error
+        TypeExpr::Function {
+            params,
+            return_type,
+        } => {
+            let param_types: Vec<Type> = params.iter().map(resolve_type_expr).collect();
+            let ret_type = resolve_type_expr(return_type);
+            Type::Function(FunctionType {
+                params: param_types,
+                return_type: Box::new(ret_type),
+            })
         }
     }
 }
@@ -583,9 +590,10 @@ fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::Type {
         Type::F64 => types::F64,
         Type::Bool => types::I8,
         Type::String => pointer_type,
-        Type::Nil => types::I8,         // Nil uses minimal representation
-        Type::Union(_) => pointer_type, // Unions are passed by pointer
-        _ => types::I64,                // Default
+        Type::Nil => types::I8,            // Nil uses minimal representation
+        Type::Union(_) => pointer_type,    // Unions are passed by pointer
+        Type::Function(_) => pointer_type, // Function pointers
+        _ => types::I64,                   // Default
     }
 }
 
@@ -2028,18 +2036,114 @@ fn compile_call(
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
-    // Get the callee name - must be an identifier for now
-    let callee_name = match &call.callee.kind {
-        ExprKind::Identifier(sym) => ctx.interner.resolve(*sym),
+    // Get the callee symbol - must be an identifier for now
+    let callee_sym = match &call.callee.kind {
+        ExprKind::Identifier(sym) => *sym,
         _ => return Err("only simple function calls are supported".to_string()),
     };
 
-    // Handle builtin functions
+    let callee_name = ctx.interner.resolve(callee_sym);
+
+    // Handle builtin functions first
     match callee_name {
-        "println" => compile_println(builder, &call.args, variables, ctx),
-        "print_char" => compile_print_char(builder, &call.args, variables, ctx),
-        "assert" => compile_assert(builder, &call.args, call_line, variables, ctx),
-        _ => compile_user_function_call(builder, callee_name, &call.args, variables, ctx),
+        "println" => return compile_println(builder, &call.args, variables, ctx),
+        "print_char" => return compile_print_char(builder, &call.args, variables, ctx),
+        "assert" => return compile_assert(builder, &call.args, call_line, variables, ctx),
+        _ => {}
+    }
+
+    // Check if callee is a variable with function type (for indirect calls)
+    if let Some((var, Type::Function(ft))) = variables.get(&callee_sym) {
+        // Clone what we need to avoid borrow conflicts
+        let var = *var;
+        let ft = ft.clone();
+        return compile_indirect_call(builder, var, &ft, &call.args, variables, ctx);
+    }
+
+    // Check if callee is a global variable with function type
+    if let Some(global) = ctx.globals.iter().find(|g| g.name == callee_sym) {
+        // Compile the global's initializer to get the function pointer
+        let callee_value = compile_expr(builder, &global.init, variables, ctx)?;
+        if let Type::Function(ft) = &callee_value.vole_type {
+            return compile_indirect_call_value(
+                builder,
+                callee_value.value,
+                ft,
+                &call.args,
+                variables,
+                ctx,
+            );
+        }
+    }
+
+    // Fall back to named function call
+    compile_user_function_call(builder, callee_name, &call.args, variables, ctx)
+}
+
+/// Compile an indirect call through a function pointer variable
+fn compile_indirect_call(
+    builder: &mut FunctionBuilder,
+    var: Variable,
+    ft: &FunctionType,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    let func_ptr = builder.use_var(var);
+    compile_indirect_call_value(builder, func_ptr, ft, args, variables, ctx)
+}
+
+/// Compile an indirect call through a function pointer value
+fn compile_indirect_call_value(
+    builder: &mut FunctionBuilder,
+    func_ptr: cranelift_codegen::ir::Value,
+    ft: &FunctionType,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    // Build the Cranelift signature for the indirect call
+    let mut sig = ctx.module.make_signature();
+    for param_type in &ft.params {
+        sig.params.push(AbiParam::new(type_to_cranelift(
+            param_type,
+            ctx.pointer_type,
+        )));
+    }
+    sig.returns.push(AbiParam::new(type_to_cranelift(
+        &ft.return_type,
+        ctx.pointer_type,
+    )));
+
+    let sig_ref = builder.import_signature(sig);
+
+    // Compile arguments
+    let mut arg_values = Vec::new();
+    for arg in args {
+        let compiled = compile_expr(builder, arg, variables, ctx)?;
+        arg_values.push(compiled.value);
+    }
+
+    // Perform the indirect call
+    let call_inst = builder.ins().call_indirect(sig_ref, func_ptr, &arg_values);
+    let results = builder.inst_results(call_inst);
+
+    if results.is_empty() {
+        // Void function
+        let zero = builder.ins().iconst(types::I64, 0);
+        Ok(CompiledValue {
+            value: zero,
+            ty: types::I64,
+            vole_type: Type::Void,
+        })
+    } else {
+        let result = results[0];
+        let ty = builder.func.dfg.value_type(result);
+        Ok(CompiledValue {
+            value: result,
+            ty,
+            vole_type: (*ft.return_type).clone(),
+        })
     }
 }
 
