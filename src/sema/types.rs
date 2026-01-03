@@ -15,6 +15,8 @@ pub enum Type {
     Void,
     /// Range type (e.g., 0..10)
     Range,
+    /// Array type (e.g., [i32], [string])
+    Array(Box<Type>),
     /// Function type
     Function(FunctionType),
     /// Unknown (for type inference)
@@ -60,6 +62,7 @@ impl Type {
             Type::String => "string",
             Type::Void => "void",
             Type::Range => "range",
+            Type::Array(_) => "array",
             Type::Function(_) => "function",
             Type::Unknown => "unknown",
             Type::Error => "error",
