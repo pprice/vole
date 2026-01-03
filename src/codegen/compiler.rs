@@ -26,25 +26,34 @@ pub struct TestInfo {
 pub struct ControlFlowCtx {
     /// Stack of loop exit blocks for break statements
     loop_exits: Vec<Block>,
+    /// Stack of loop continue blocks for continue statements
+    loop_continues: Vec<Block>,
 }
 
 impl ControlFlowCtx {
     pub fn new() -> Self {
         Self {
             loop_exits: Vec::new(),
+            loop_continues: Vec::new(),
         }
     }
 
-    pub fn push_loop(&mut self, exit_block: Block) {
+    pub fn push_loop(&mut self, exit_block: Block, continue_block: Block) {
         self.loop_exits.push(exit_block);
+        self.loop_continues.push(continue_block);
     }
 
     pub fn pop_loop(&mut self) {
         self.loop_exits.pop();
+        self.loop_continues.pop();
     }
 
     pub fn current_loop_exit(&self) -> Option<Block> {
         self.loop_exits.last().copied()
+    }
+
+    pub fn current_loop_continue(&self) -> Option<Block> {
+        self.loop_continues.last().copied()
     }
 }
 
@@ -615,7 +624,8 @@ fn compile_stmt(
 
             // Body block
             builder.switch_to_block(body_block);
-            cf_ctx.push_loop(exit_block);
+            // For while loops, continue jumps to the header (condition check)
+            cf_ctx.push_loop(exit_block, header_block);
             let body_terminated = compile_block(builder, &while_stmt.body, variables, cf_ctx, ctx)?;
             cf_ctx.pop_loop();
 
@@ -675,9 +685,88 @@ fn compile_stmt(
             // If both branches terminate, the if statement terminates
             Ok(then_terminated && else_terminated)
         }
+        Stmt::For(for_stmt) => {
+            if let ExprKind::Range(range) = &for_stmt.iterable.kind {
+                // Compile range bounds
+                let start_val = compile_expr(builder, &range.start, variables, ctx)?;
+                let end_val = compile_expr(builder, &range.end, variables, ctx)?;
+
+                // Create loop variable as Cranelift variable
+                let var = Variable::new(variables.len());
+                builder.declare_var(var, types::I64);
+                builder.def_var(var, start_val.value);
+                variables.insert(for_stmt.var_name, var);
+
+                // Create blocks
+                let header = builder.create_block();
+                let body_block = builder.create_block();
+                let continue_block = builder.create_block();
+                let exit_block = builder.create_block();
+
+                builder.ins().jump(header, &[]);
+
+                // Header: load current, compare to end
+                builder.switch_to_block(header);
+                let current = builder.use_var(var);
+                let cmp = if range.inclusive {
+                    builder
+                        .ins()
+                        .icmp(IntCC::SignedLessThanOrEqual, current, end_val.value)
+                } else {
+                    builder
+                        .ins()
+                        .icmp(IntCC::SignedLessThan, current, end_val.value)
+                };
+                builder
+                    .ins()
+                    .brif(cmp, body_block, &[], exit_block, &[]);
+
+                // Body
+                builder.switch_to_block(body_block);
+                cf_ctx.push_loop(exit_block, continue_block);
+                let body_terminated =
+                    compile_block(builder, &for_stmt.body, variables, cf_ctx, ctx)?;
+                cf_ctx.pop_loop();
+
+                if !body_terminated {
+                    builder.ins().jump(continue_block, &[]);
+                }
+
+                // Continue: increment and jump to header
+                builder.switch_to_block(continue_block);
+                let current = builder.use_var(var);
+                let next = builder.ins().iadd_imm(current, 1);
+                builder.def_var(var, next);
+                builder.ins().jump(header, &[]);
+
+                // Exit
+                builder.switch_to_block(exit_block);
+
+                // Seal blocks
+                builder.seal_block(header);
+                builder.seal_block(body_block);
+                builder.seal_block(continue_block);
+                builder.seal_block(exit_block);
+
+                Ok(false)
+            } else {
+                Err("Only range iteration supported".to_string())
+            }
+        }
         Stmt::Break(_) => {
             if let Some(exit_block) = cf_ctx.current_loop_exit() {
                 builder.ins().jump(exit_block, &[]);
+            }
+            Ok(true)
+        }
+        Stmt::Continue(_) => {
+            if let Some(continue_block) = cf_ctx.current_loop_continue() {
+                builder.ins().jump(continue_block, &[]);
+                // Create an unreachable block to continue building
+                // (the code after continue is dead but Cranelift still needs a current block)
+                let unreachable = builder.create_block();
+                builder.switch_to_block(unreachable);
+                builder.seal_block(unreachable);
             }
             Ok(true)
         }
@@ -1004,6 +1093,10 @@ fn compile_expr(
         ExprKind::Call(call) => compile_call(builder, call, expr.span.line, variables, ctx),
         ExprKind::InterpolatedString(parts) => {
             compile_interpolated_string(builder, parts, variables, ctx)
+        }
+        ExprKind::Range(_) => {
+            // Range expressions are only supported in for-in context
+            Err("Range expressions only supported in for-in context".to_string())
         }
     }
 }
