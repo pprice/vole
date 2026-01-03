@@ -59,7 +59,10 @@ pub struct Param {
 pub enum TypeExpr {
     Primitive(PrimitiveType),
     Named(Symbol),
-    Array(Box<TypeExpr>), // [i32], [string], etc.
+    Array(Box<TypeExpr>),    // [i32], [string], etc.
+    Optional(Box<TypeExpr>), // T? syntax (desugars to Union with Nil)
+    Union(Vec<TypeExpr>),    // A | B | C
+    Nil,                     // nil type
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +189,15 @@ pub enum ExprKind {
 
     /// Match expression
     Match(Box<MatchExpr>),
+
+    /// Nil literal
+    Nil,
+
+    /// Null coalescing: value ?? default
+    NullCoalesce(Box<NullCoalesceExpr>),
+
+    /// Type test: value is Type
+    Is(Box<IsExpr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
@@ -283,6 +295,21 @@ pub struct MatchArm {
     pub guard: Option<Expr>,
     pub body: Expr,
     pub span: Span,
+}
+
+/// Null coalescing expression: value ?? default
+#[derive(Debug, Clone)]
+pub struct NullCoalesceExpr {
+    pub value: Expr,
+    pub default: Expr,
+}
+
+/// Type test expression: value is Type
+#[derive(Debug, Clone)]
+pub struct IsExpr {
+    pub value: Expr,
+    pub type_expr: TypeExpr,
+    pub type_span: Span,
 }
 
 /// Pattern for matching

@@ -203,6 +203,32 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_type(&mut self) -> Result<TypeExpr, ParseError> {
+        // Parse the base type first
+        let mut base = self.parse_base_type()?;
+
+        // Check for optional suffix: T?
+        while self.match_token(TokenType::Question) {
+            base = TypeExpr::Optional(Box::new(base));
+        }
+
+        // Check for union: A | B | C
+        if self.check(TokenType::Pipe) {
+            let mut variants = vec![base];
+            while self.match_token(TokenType::Pipe) {
+                let mut variant = self.parse_base_type()?;
+                // Handle optional on each variant
+                while self.match_token(TokenType::Question) {
+                    variant = TypeExpr::Optional(Box::new(variant));
+                }
+                variants.push(variant);
+            }
+            return Ok(TypeExpr::Union(variants));
+        }
+
+        Ok(base)
+    }
+
+    fn parse_base_type(&mut self) -> Result<TypeExpr, ParseError> {
         let token = self.current.clone();
         match token.ty {
             TokenType::LBracket => {
@@ -210,6 +236,10 @@ impl<'src> Parser<'src> {
                 let elem_type = self.parse_type()?;
                 self.consume(TokenType::RBracket, "expected ']' after array element type")?;
                 Ok(TypeExpr::Array(Box::new(elem_type)))
+            }
+            TokenType::KwNil => {
+                self.advance();
+                Ok(TypeExpr::Nil)
             }
             TokenType::KwI8 => {
                 self.advance();
@@ -545,6 +575,35 @@ impl<'src> Parser<'src> {
                         ));
                     }
                 }
+                TokenType::QuestionQuestion => {
+                    // Null coalescing: x ?? default (right-associative)
+                    self.advance();
+                    let default = self.expression(1)?; // precedence 1 for right-associativity
+                    let span = left.span.merge(default.span);
+                    return Ok(Expr {
+                        kind: ExprKind::NullCoalesce(Box::new(NullCoalesceExpr {
+                            value: left,
+                            default,
+                        })),
+                        span,
+                    });
+                }
+                TokenType::KwIs => {
+                    // Type test: x is Type
+                    self.advance();
+                    let type_span_start = self.current.span;
+                    let type_expr = self.parse_type()?;
+                    let type_span = type_span_start.merge(self.previous.span);
+                    let span = left.span.merge(type_span);
+                    return Ok(Expr {
+                        kind: ExprKind::Is(Box::new(IsExpr {
+                            value: left,
+                            type_expr,
+                            type_span,
+                        })),
+                        span,
+                    });
+                }
                 _ => break,
             };
 
@@ -722,6 +781,13 @@ impl<'src> Parser<'src> {
                 self.advance();
                 Ok(Expr {
                     kind: ExprKind::BoolLiteral(false),
+                    span: token.span,
+                })
+            }
+            TokenType::KwNil => {
+                self.advance();
+                Ok(Expr {
+                    kind: ExprKind::Nil,
                     span: token.span,
                 })
             }
@@ -1601,6 +1667,115 @@ tests {
                 }
             }
             _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_nil_literal() {
+        let mut parser = Parser::new("nil");
+        let expr = parser.parse_expression().unwrap();
+        assert!(matches!(expr.kind, ExprKind::Nil));
+    }
+
+    #[test]
+    fn parse_optional_type() {
+        let mut parser = Parser::new("func foo(x: i32?) {}");
+        let program = parser.parse_program().unwrap();
+        if let Decl::Function(f) = &program.declarations[0] {
+            assert!(matches!(&f.params[0].ty, TypeExpr::Optional(_)));
+        } else {
+            panic!("Expected function declaration");
+        }
+    }
+
+    #[test]
+    fn parse_union_type() {
+        let mut parser = Parser::new("func foo(x: i32 | string | nil) {}");
+        let program = parser.parse_program().unwrap();
+        if let Decl::Function(f) = &program.declarations[0] {
+            assert!(matches!(&f.params[0].ty, TypeExpr::Union(v) if v.len() == 3));
+        } else {
+            panic!("Expected function declaration");
+        }
+    }
+
+    #[test]
+    fn parse_null_coalesce() {
+        let mut parser = Parser::new("x ?? 0");
+        let expr = parser.parse_expression().unwrap();
+        assert!(matches!(expr.kind, ExprKind::NullCoalesce(_)));
+    }
+
+    #[test]
+    fn parse_is_expression() {
+        let mut parser = Parser::new("x is i32");
+        let expr = parser.parse_expression().unwrap();
+        assert!(matches!(expr.kind, ExprKind::Is(_)));
+    }
+
+    #[test]
+    fn parse_nil_type() {
+        let mut parser = Parser::new("func foo(x: nil) {}");
+        let program = parser.parse_program().unwrap();
+        if let Decl::Function(f) = &program.declarations[0] {
+            assert!(matches!(&f.params[0].ty, TypeExpr::Nil));
+        } else {
+            panic!("Expected function declaration");
+        }
+    }
+
+    #[test]
+    fn parse_chained_optional() {
+        // i32? ? should be (i32?)? (space needed because lexer tokenizes ?? as QuestionQuestion)
+        let mut parser = Parser::new("func foo(x: i32? ?) {}");
+        let program = parser.parse_program().unwrap();
+        if let Decl::Function(f) = &program.declarations[0] {
+            if let TypeExpr::Optional(inner) = &f.params[0].ty {
+                assert!(matches!(inner.as_ref(), TypeExpr::Optional(_)));
+            } else {
+                panic!("Expected Optional type");
+            }
+        } else {
+            panic!("Expected function declaration");
+        }
+    }
+
+    #[test]
+    fn parse_null_coalesce_right_associative() {
+        // a ?? b ?? c should be a ?? (b ?? c)
+        let mut parser = Parser::new("a ?? b ?? c");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::NullCoalesce(nc) => {
+                // Left should be 'a', right should be 'b ?? c'
+                assert!(matches!(nc.value.kind, ExprKind::Identifier(_)));
+                assert!(matches!(nc.default.kind, ExprKind::NullCoalesce(_)));
+            }
+            _ => panic!("expected NullCoalesce"),
+        }
+    }
+
+    #[test]
+    fn parse_is_with_optional_type() {
+        let mut parser = Parser::new("x is i32?");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Is(is_expr) => {
+                assert!(matches!(&is_expr.type_expr, TypeExpr::Optional(_)));
+            }
+            _ => panic!("expected Is expression"),
+        }
+    }
+
+    #[test]
+    fn parse_is_with_union_type() {
+        let mut parser = Parser::new("x is i32 | string");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Is(is_expr) => {
+                assert!(matches!(&is_expr.type_expr, TypeExpr::Union(v) if v.len() == 2));
+            }
+            _ => panic!("expected Is expression"),
         }
     }
 }

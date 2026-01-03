@@ -99,4 +99,28 @@ pub enum SemanticError {
         #[label("pattern doesn't match scrutinee type")]
         span: SourceSpan,
     },
+
+    #[error("cannot use return value of void function")]
+    #[diagnostic(code(E2040), help("void functions don't return a usable value"))]
+    VoidReturnUsed {
+        #[label("void function called here")]
+        span: SourceSpan,
+    },
+
+    #[error("null coalescing requires optional type, found {found}")]
+    #[diagnostic(code(E2041))]
+    NullCoalesceNotOptional {
+        found: String,
+        #[label("expected optional type")]
+        span: SourceSpan,
+    },
+
+    #[error("type '{tested}' is not a variant of '{union_type}'")]
+    #[diagnostic(code(E2042))]
+    IsNotVariant {
+        tested: String,
+        union_type: String,
+        #[label("not a variant of the union")]
+        span: SourceSpan,
+    },
 }

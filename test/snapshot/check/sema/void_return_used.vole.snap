@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  x [E2040]: cannot use return value of void function
+   ,-[<path>/void_return_used.vole:5:13]
+ 4 | func main() {
+ 5 |     let x = noop()
+   :             ^^^|^^
+   :                `-- void function called here
+ 6 | }
+   `----
+  help: void functions don't return a usable value

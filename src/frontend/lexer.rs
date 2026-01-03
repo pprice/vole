@@ -127,6 +127,13 @@ impl<'src> Lexer<'src> {
                     self.make_token(TokenType::Pipe)
                 }
             }
+            '?' => {
+                if self.match_char('?') {
+                    self.make_token(TokenType::QuestionQuestion)
+                } else {
+                    self.make_token(TokenType::Question)
+                }
+            }
             '^' => self.make_token(TokenType::Caret),
             '~' => self.make_token(TokenType::Tilde),
             '<' => {
@@ -339,6 +346,8 @@ impl<'src> Lexer<'src> {
             "in" => Some(TokenType::KwIn),
             "continue" => Some(TokenType::KwContinue),
             "match" => Some(TokenType::KwMatch),
+            "nil" => Some(TokenType::KwNil),
+            "is" => Some(TokenType::KwIs),
             "i8" => Some(TokenType::KwI8),
             "i16" => Some(TokenType::KwI16),
             "i32" => Some(TokenType::KwI32),
@@ -692,5 +701,16 @@ mod tests {
         let mut lexer = Lexer::new("&& ||");
         assert_eq!(lexer.next_token().ty, TokenType::AmpAmp);
         assert_eq!(lexer.next_token().ty, TokenType::PipePipe);
+    }
+
+    #[test]
+    fn lex_nil_is_optional() {
+        let mut lexer = Lexer::new("nil is i32? ?? 0");
+        assert_eq!(lexer.next_token().ty, TokenType::KwNil);
+        assert_eq!(lexer.next_token().ty, TokenType::KwIs);
+        assert_eq!(lexer.next_token().ty, TokenType::KwI32);
+        assert_eq!(lexer.next_token().ty, TokenType::Question);
+        assert_eq!(lexer.next_token().ty, TokenType::QuestionQuestion);
+        assert_eq!(lexer.next_token().ty, TokenType::IntLiteral);
     }
 }

@@ -1,0 +1,5 @@
+[stdout]
+a = 99
+b = 42
+
+[stderr]

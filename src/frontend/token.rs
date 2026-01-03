@@ -29,6 +29,8 @@ pub enum TokenType {
     KwIn,
     KwContinue,
     KwMatch,
+    KwNil, // nil keyword (literal and type)
+    KwIs,  // is keyword (type test)
 
     // Type keywords
     KwI8,
@@ -63,12 +65,14 @@ pub enum TokenType {
     Eq,
 
     // Bitwise operators
-    Ampersand,      // &
-    Pipe,           // |
-    Caret,          // ^
-    Tilde,          // ~
-    LessLess,       // <<
-    GreaterGreater, // >>
+    Ampersand,        // &
+    Pipe,             // |
+    Caret,            // ^
+    Tilde,            // ~
+    LessLess,         // <<
+    GreaterGreater,   // >>
+    Question,         // ?
+    QuestionQuestion, // ??
 
     // Delimiters
     LParen,
@@ -118,6 +122,8 @@ impl TokenType {
             Self::KwIn => "in",
             Self::KwContinue => "continue",
             Self::KwMatch => "match",
+            Self::KwNil => "nil",
+            Self::KwIs => "is",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",
@@ -152,6 +158,8 @@ impl TokenType {
             Self::Tilde => "~",
             Self::LessLess => "<<",
             Self::GreaterGreater => ">>",
+            Self::Question => "?",
+            Self::QuestionQuestion => "??",
             Self::LParen => "(",
             Self::RParen => ")",
             Self::LBrace => "{",
@@ -174,17 +182,17 @@ impl TokenType {
     /// Get precedence for binary operators (Pratt parsing)
     pub fn precedence(&self) -> u8 {
         match self {
-            Self::Eq => 1,                                      // assignment (lowest)
-            Self::PipePipe => 2,                                // logical or
-            Self::AmpAmp => 3,                                  // logical and
-            Self::Pipe => 4,                                    // bitwise or
-            Self::Caret => 5,                                   // bitwise xor
-            Self::Ampersand => 6,                               // bitwise and
-            Self::EqEq | Self::BangEq => 7,                     // equality
-            Self::Lt | Self::Gt | Self::LtEq | Self::GtEq => 8, // comparison
-            Self::LessLess | Self::GreaterGreater => 9,         // shifts
-            Self::Plus | Self::Minus => 10,                     // additive
-            Self::Star | Self::Slash | Self::Percent => 11,     // multiplicative
+            Self::Eq => 1,                                                   // assignment (lowest)
+            Self::PipePipe | Self::QuestionQuestion => 2, // logical or, null coalescing
+            Self::AmpAmp => 3,                            // logical and
+            Self::Pipe => 4,                              // bitwise or
+            Self::Caret => 5,                             // bitwise xor
+            Self::Ampersand => 6,                         // bitwise and
+            Self::EqEq | Self::BangEq => 7,               // equality
+            Self::Lt | Self::Gt | Self::LtEq | Self::GtEq | Self::KwIs => 8, // comparison
+            Self::LessLess | Self::GreaterGreater => 9,   // shifts
+            Self::Plus | Self::Minus => 10,               // additive
+            Self::Star | Self::Slash | Self::Percent => 11, // multiplicative
             _ => 0,
         }
     }

@@ -548,6 +548,16 @@ fn resolve_type_expr(ty: &TypeExpr) -> Type {
             let elem_ty = resolve_type_expr(elem);
             Type::Array(Box::new(elem_ty))
         }
+        TypeExpr::Optional(inner) => {
+            // T? desugars to T | nil
+            let inner_ty = resolve_type_expr(inner);
+            Type::Union(vec![inner_ty, Type::Nil])
+        }
+        TypeExpr::Union(variants) => {
+            let variant_types: Vec<Type> = variants.iter().map(resolve_type_expr).collect();
+            Type::normalize_union(variant_types)
+        }
+        TypeExpr::Nil => Type::Nil,
     }
 }
 
@@ -562,8 +572,110 @@ fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::Type {
         Type::F64 => types::F64,
         Type::Bool => types::I8,
         Type::String => pointer_type,
-        _ => types::I64, // Default
+        Type::Nil => types::I8,         // Nil uses minimal representation
+        Type::Union(_) => pointer_type, // Unions are passed by pointer
+        _ => types::I64,                // Default
     }
+}
+
+/// Get the size in bytes for a Vole type (used for union layout)
+fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
+    match ty {
+        Type::I8 | Type::U8 | Type::Bool => 1,
+        Type::I16 | Type::U16 => 2,
+        Type::I32 | Type::U32 | Type::F32 => 4,
+        Type::I64 | Type::U64 | Type::F64 => 8,
+        Type::I128 => 16,
+        Type::String | Type::Array(_) => pointer_type.bytes(), // pointer size
+        Type::Nil | Type::Void => 0,
+        Type::Union(variants) => {
+            // Tag (1 byte) + padding + max payload size, aligned to 8
+            let max_payload = variants
+                .iter()
+                .map(|t| type_size(t, pointer_type))
+                .max()
+                .unwrap_or(0);
+            // Layout: [tag:1][padding:7][payload:max_payload] aligned to 8
+            8 + max_payload.div_ceil(8) * 8
+        }
+        _ => 8, // default
+    }
+}
+
+/// Wrap a value in a union representation (stack slot with tag + payload)
+fn construct_union(
+    builder: &mut FunctionBuilder,
+    value: CompiledValue,
+    union_type: &Type,
+    pointer_type: types::Type,
+) -> Result<CompiledValue, String> {
+    use cranelift::prelude::StackSlotData;
+    use cranelift::prelude::StackSlotKind;
+
+    let Type::Union(variants) = union_type else {
+        return Err("Expected union type".to_string());
+    };
+
+    // Find the tag for this value's type (with coercion support for integer literals)
+    // First try exact match
+    let (tag, actual_value, actual_type) =
+        if let Some(pos) = variants.iter().position(|v| v == &value.vole_type) {
+            (pos, value.value, value.vole_type.clone())
+        } else {
+            // Try to find a compatible integer type (for literal coercion)
+            // When assigning I64 literal to i32?, we need to narrow to I32
+            let compatible = variants.iter().enumerate().find(|(_, v)| {
+                // Check if value type can narrow to this variant
+                value.vole_type.is_integer() && v.is_integer() && value.vole_type.can_widen_to(v)
+                    || v.is_integer() && value.vole_type.is_integer()
+            });
+
+            match compatible {
+                Some((pos, variant_type)) => {
+                    // Narrow the integer value to the variant type
+                    let target_ty = type_to_cranelift(variant_type, pointer_type);
+                    let narrowed = if target_ty.bytes() < value.ty.bytes() {
+                        builder.ins().ireduce(target_ty, value.value)
+                    } else if target_ty.bytes() > value.ty.bytes() {
+                        builder.ins().sextend(target_ty, value.value)
+                    } else {
+                        value.value
+                    };
+                    (pos, narrowed, variant_type.clone())
+                }
+                None => {
+                    return Err(format!(
+                        "Type {:?} not in union {:?}",
+                        value.vole_type, variants
+                    ));
+                }
+            }
+        };
+
+    // Allocate stack slot for the union
+    let union_size = type_size(union_type, pointer_type);
+    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        union_size,
+        0,
+    ));
+
+    // Store tag at offset 0
+    let tag_val = builder.ins().iconst(types::I8, tag as i64);
+    builder.ins().stack_store(tag_val, slot, 0);
+
+    // Store payload at offset 8 (after alignment padding)
+    if actual_type != Type::Nil {
+        builder.ins().stack_store(actual_value, slot, 8);
+    }
+
+    // Return pointer to the stack slot
+    let ptr = builder.ins().stack_addr(pointer_type, slot, 0);
+    Ok(CompiledValue {
+        value: ptr,
+        ty: pointer_type,
+        vole_type: union_type.clone(),
+    })
 }
 
 /// Context for compiling expressions and statements
@@ -608,9 +720,26 @@ fn compile_stmt(
         Stmt::Let(let_stmt) => {
             let init = compile_expr(builder, &let_stmt.init, variables, ctx)?;
 
-            let var = builder.declare_var(init.ty);
-            builder.def_var(var, init.value);
-            variables.insert(let_stmt.name, (var, init.vole_type));
+            // Check if there's a type annotation that is a union type
+            let (final_value, final_type) = if let Some(ty_expr) = &let_stmt.ty {
+                let declared_type = resolve_type_expr(ty_expr);
+                // If declared type is a union and init is not, wrap init into the union
+                if matches!(&declared_type, Type::Union(_))
+                    && !matches!(&init.vole_type, Type::Union(_))
+                {
+                    let wrapped = construct_union(builder, init, &declared_type, ctx.pointer_type)?;
+                    (wrapped.value, wrapped.vole_type)
+                } else {
+                    (init.value, init.vole_type)
+                }
+            } else {
+                (init.value, init.vole_type)
+            };
+
+            let cranelift_ty = type_to_cranelift(&final_type, ctx.pointer_type);
+            let var = builder.declare_var(cranelift_ty);
+            builder.def_var(var, final_value);
+            variables.insert(let_stmt.name, (var, final_type));
             Ok(false)
         }
         Stmt::Expr(expr_stmt) => {
@@ -1243,8 +1372,18 @@ fn compile_expr(
         }
         ExprKind::Assign(assign) => {
             let value = compile_expr(builder, &assign.value, variables, ctx)?;
-            if let Some((var, _)) = variables.get(&assign.target) {
-                builder.def_var(*var, value.value);
+            if let Some((var, var_type)) = variables.get(&assign.target) {
+                // If variable is a union and value is not, wrap the value
+                let final_value = if matches!(var_type, Type::Union(_))
+                    && !matches!(&value.vole_type, Type::Union(_))
+                {
+                    let wrapped =
+                        construct_union(builder, value.clone(), var_type, ctx.pointer_type)?;
+                    wrapped.value
+                } else {
+                    value.value
+                };
+                builder.def_var(*var, final_value);
                 Ok(value)
             } else {
                 Err(format!(
@@ -1532,6 +1671,131 @@ fn compile_expr(
                 vole_type: result_vole_type,
             })
         }
+
+        ExprKind::Nil => {
+            // Nil has no runtime value - return a zero constant
+            // The actual type will be determined by context (union wrapping)
+            let zero = builder.ins().iconst(types::I8, 0);
+            Ok(CompiledValue {
+                value: zero,
+                ty: types::I8,
+                vole_type: Type::Nil,
+            })
+        }
+
+        ExprKind::Is(is_expr) => {
+            let value = compile_expr(builder, &is_expr.value, variables, ctx)?;
+            let tested_type = resolve_type_expr(&is_expr.type_expr);
+
+            // If value is a union, check the tag
+            if let Type::Union(variants) = &value.vole_type {
+                let expected_tag = variants
+                    .iter()
+                    .position(|v| v == &tested_type)
+                    .unwrap_or(usize::MAX);
+
+                // Load tag from union (at offset 0)
+                let tag = builder
+                    .ins()
+                    .load(types::I8, MemFlags::new(), value.value, 0);
+                let expected = builder.ins().iconst(types::I8, expected_tag as i64);
+                let result = builder.ins().icmp(IntCC::Equal, tag, expected);
+
+                Ok(CompiledValue {
+                    value: result,
+                    ty: types::I8,
+                    vole_type: Type::Bool,
+                })
+            } else {
+                // Not a union, always true if types match, false otherwise
+                let result = if value.vole_type == tested_type {
+                    1i64
+                } else {
+                    0i64
+                };
+                let result_val = builder.ins().iconst(types::I8, result);
+                Ok(CompiledValue {
+                    value: result_val,
+                    ty: types::I8,
+                    vole_type: Type::Bool,
+                })
+            }
+        }
+
+        ExprKind::NullCoalesce(nc) => {
+            let value = compile_expr(builder, &nc.value, variables, ctx)?;
+
+            // Get nil tag for this union
+            let Type::Union(variants) = &value.vole_type else {
+                return Err("Expected union for ??".to_string());
+            };
+            let nil_tag = variants
+                .iter()
+                .position(|v| v == &Type::Nil)
+                .unwrap_or(usize::MAX);
+
+            // Load tag
+            let tag = builder
+                .ins()
+                .load(types::I8, MemFlags::new(), value.value, 0);
+            let nil_tag_val = builder.ins().iconst(types::I8, nil_tag as i64);
+            let is_nil = builder.ins().icmp(IntCC::Equal, tag, nil_tag_val);
+
+            // Create blocks
+            let nil_block = builder.create_block();
+            let not_nil_block = builder.create_block();
+            let merge_block = builder.create_block();
+
+            // Determine result type (unwrapped)
+            let result_vole_type = value.vole_type.unwrap_optional().unwrap_or(Type::Error);
+            let cranelift_type = type_to_cranelift(&result_vole_type, ctx.pointer_type);
+            builder.append_block_param(merge_block, cranelift_type);
+
+            builder
+                .ins()
+                .brif(is_nil, nil_block, &[], not_nil_block, &[]);
+
+            // Nil block: evaluate default
+            builder.switch_to_block(nil_block);
+            builder.seal_block(nil_block);
+            let default_val = compile_expr(builder, &nc.default, variables, ctx)?;
+            // Coerce default value to the expected result type if needed
+            let default_coerced = if default_val.ty != cranelift_type {
+                if default_val.ty.is_int() && cranelift_type.is_int() {
+                    if cranelift_type.bytes() < default_val.ty.bytes() {
+                        builder.ins().ireduce(cranelift_type, default_val.value)
+                    } else {
+                        builder.ins().sextend(cranelift_type, default_val.value)
+                    }
+                } else {
+                    default_val.value
+                }
+            } else {
+                default_val.value
+            };
+            let default_arg = BlockArg::from(default_coerced);
+            builder.ins().jump(merge_block, &[default_arg]);
+
+            // Not nil block: extract payload
+            builder.switch_to_block(not_nil_block);
+            builder.seal_block(not_nil_block);
+            let payload = builder
+                .ins()
+                .load(cranelift_type, MemFlags::new(), value.value, 8);
+            let payload_arg = BlockArg::from(payload);
+            builder.ins().jump(merge_block, &[payload_arg]);
+
+            // Merge
+            builder.switch_to_block(merge_block);
+            builder.seal_block(merge_block);
+
+            let result = builder.block_params(merge_block)[0];
+            Ok(CompiledValue {
+                value: result,
+                ty: cranelift_type,
+                vole_type: result_vole_type,
+            })
+        }
     }
 }
 
@@ -1606,14 +1870,20 @@ fn compile_println(
 
     // Dispatch based on argument type
     // We use vole_type to distinguish strings from regular I64 values
-    let func_name = if matches!(arg.vole_type, Type::String) {
-        "vole_println_string"
+    let (func_name, call_arg) = if matches!(arg.vole_type, Type::String) {
+        ("vole_println_string", arg.value)
     } else if arg.ty == types::F64 {
-        "vole_println_f64"
+        ("vole_println_f64", arg.value)
     } else if arg.ty == types::I8 {
-        "vole_println_bool"
+        ("vole_println_bool", arg.value)
     } else {
-        "vole_println_i64"
+        // Extend smaller integer types to I64
+        let extended = if arg.ty.is_int() && arg.ty != types::I64 {
+            builder.ins().sextend(types::I64, arg.value)
+        } else {
+            arg.value
+        };
+        ("vole_println_i64", extended)
     };
 
     let func_id = ctx
@@ -1622,7 +1892,7 @@ fn compile_println(
         .ok_or_else(|| format!("{} not found", func_name))?;
     let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
 
-    builder.ins().call(func_ref, &[arg.value]);
+    builder.ins().call(func_ref, &[call_arg]);
 
     // println returns void, but we need to return something
     let zero = builder.ins().iconst(types::I64, 0);
@@ -1863,12 +2133,18 @@ fn value_to_string(
         return Ok(val.value);
     }
 
-    let func_name = if val.ty == types::F64 {
-        "vole_f64_to_string"
+    let (func_name, call_val) = if val.ty == types::F64 {
+        ("vole_f64_to_string", val.value)
     } else if val.ty == types::I8 {
-        "vole_bool_to_string"
+        ("vole_bool_to_string", val.value)
     } else {
-        "vole_i64_to_string"
+        // Extend smaller integer types to I64
+        let extended = if val.ty.is_int() && val.ty != types::I64 {
+            builder.ins().sextend(types::I64, val.value)
+        } else {
+            val.value
+        };
+        ("vole_i64_to_string", extended)
     };
 
     let func_id = func_ids
@@ -1876,7 +2152,7 @@ fn value_to_string(
         .ok_or_else(|| format!("{} not found", func_name))?;
     let func_ref = module.declare_func_in_func(*func_id, builder.func);
 
-    let call = builder.ins().call(func_ref, &[val.value]);
+    let call = builder.ins().call(func_ref, &[call_val]);
     Ok(builder.inst_results(call)[0])
 }
 
