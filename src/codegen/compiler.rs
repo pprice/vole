@@ -549,7 +549,9 @@ fn compile_expr(
                     let merge_block = builder.create_block();
                     builder.append_block_param(merge_block, types::I8);
 
-                    builder.ins().brif(left.value, then_block, &[], else_block, &[]);
+                    builder
+                        .ins()
+                        .brif(left.value, then_block, &[], else_block, &[]);
 
                     // Then block: left was true, evaluate right side
                     builder.switch_to_block(then_block);
@@ -583,7 +585,9 @@ fn compile_expr(
                     let merge_block = builder.create_block();
                     builder.append_block_param(merge_block, types::I8);
 
-                    builder.ins().brif(left.value, then_block, &[], else_block, &[]);
+                    builder
+                        .ins()
+                        .brif(left.value, then_block, &[], else_block, &[]);
 
                     // Then block: left was true, short-circuit with true
                     builder.switch_to_block(then_block);
