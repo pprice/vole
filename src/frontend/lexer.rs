@@ -81,6 +81,8 @@ impl<'src> Lexer<'src> {
                 }
                 self.make_token(TokenType::RBrace)
             }
+            '[' => self.make_token(TokenType::LBracket),
+            ']' => self.make_token(TokenType::RBracket),
             ',' => self.make_token(TokenType::Comma),
             ':' => self.make_token(TokenType::Colon),
             '+' => self.make_token(TokenType::Plus),
@@ -113,25 +115,31 @@ impl<'src> Lexer<'src> {
                 if self.match_char('&') {
                     self.make_token(TokenType::AmpAmp)
                 } else {
-                    self.error_unexpected_char('&')
+                    self.make_token(TokenType::Ampersand)
                 }
             }
             '|' => {
                 if self.match_char('|') {
                     self.make_token(TokenType::PipePipe)
                 } else {
-                    self.error_unexpected_char('|')
+                    self.make_token(TokenType::Pipe)
                 }
             }
+            '^' => self.make_token(TokenType::Caret),
+            '~' => self.make_token(TokenType::Tilde),
             '<' => {
-                if self.match_char('=') {
+                if self.match_char('<') {
+                    self.make_token(TokenType::LessLess)
+                } else if self.match_char('=') {
                     self.make_token(TokenType::LtEq)
                 } else {
                     self.make_token(TokenType::Lt)
                 }
             }
             '>' => {
-                if self.match_char('=') {
+                if self.match_char('>') {
+                    self.make_token(TokenType::GreaterGreater)
+                } else if self.match_char('=') {
                     self.make_token(TokenType::GtEq)
                 } else {
                     self.make_token(TokenType::Gt)
@@ -162,6 +170,19 @@ impl<'src> Lexer<'src> {
 
             // String literal
             '"' => self.string(),
+
+            // Dot, range operators
+            '.' => {
+                if self.match_char('.') {
+                    if self.match_char('=') {
+                        self.make_token(TokenType::DotDotEqual)
+                    } else {
+                        self.make_token(TokenType::DotDot)
+                    }
+                } else {
+                    self.make_token(TokenType::Dot)
+                }
+            }
 
             // Number literal
             c if c.is_ascii_digit() => self.number(),
@@ -312,6 +333,9 @@ impl<'src> Lexer<'src> {
             "false" => Some(TokenType::KwFalse),
             "tests" => Some(TokenType::KwTests),
             "test" => Some(TokenType::KwTest),
+            "for" => Some(TokenType::KwFor),
+            "in" => Some(TokenType::KwIn),
+            "continue" => Some(TokenType::KwContinue),
             "i32" => Some(TokenType::KwI32),
             "i64" => Some(TokenType::KwI64),
             "f64" => Some(TokenType::KwF64),

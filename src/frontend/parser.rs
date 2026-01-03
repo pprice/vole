@@ -74,6 +74,7 @@ impl<'src> Parser<'src> {
         match self.current.ty {
             TokenType::KwFunc => self.function_decl(),
             TokenType::KwTests => self.tests_decl(),
+            TokenType::KwLet => self.let_decl(),
             _ => Err(ParseError::new(
                 ParserError::UnexpectedToken {
                     token: self.current.ty.as_str().to_string(),
@@ -153,6 +154,11 @@ impl<'src> Parser<'src> {
         Ok(Decl::Tests(TestsDecl { label, tests, span }))
     }
 
+    fn let_decl(&mut self) -> Result<Decl, ParseError> {
+        let stmt = self.let_statement()?;
+        Ok(Decl::Let(stmt))
+    }
+
     fn test_case(&mut self) -> Result<TestCase, ParseError> {
         let start_span = self.current.span;
         self.consume(TokenType::KwTest, "expected 'test'")?;
@@ -199,6 +205,12 @@ impl<'src> Parser<'src> {
     fn parse_type(&mut self) -> Result<TypeExpr, ParseError> {
         let token = self.current.clone();
         match token.ty {
+            TokenType::LBracket => {
+                self.advance(); // consume '['
+                let elem_type = self.parse_type()?;
+                self.consume(TokenType::RBracket, "expected ']' after array element type")?;
+                Ok(TypeExpr::Array(Box::new(elem_type)))
+            }
             TokenType::KwI32 => {
                 self.advance();
                 Ok(TypeExpr::Primitive(PrimitiveType::I32))
@@ -254,18 +266,25 @@ impl<'src> Parser<'src> {
         match self.current.ty {
             TokenType::KwLet => self.let_stmt(),
             TokenType::KwWhile => self.while_stmt(),
+            TokenType::KwFor => self.for_stmt(),
             TokenType::KwIf => self.if_stmt(),
             TokenType::KwBreak => {
                 let span = self.current.span;
                 self.advance();
                 Ok(Stmt::Break(span))
             }
+            TokenType::KwContinue => self.continue_stmt(),
             TokenType::KwReturn => self.return_stmt(),
             _ => self.expr_stmt(),
         }
     }
 
     fn let_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let stmt = self.let_statement()?;
+        Ok(Stmt::Let(stmt))
+    }
+
+    fn let_statement(&mut self) -> Result<LetStmt, ParseError> {
         let start_span = self.current.span;
         self.advance(); // consume 'let'
 
@@ -285,13 +304,13 @@ impl<'src> Parser<'src> {
         let init = self.expression(0)?;
         let span = start_span.merge(init.span);
 
-        Ok(Stmt::Let(LetStmt {
+        Ok(LetStmt {
             name,
             ty,
             mutable,
             init,
             span,
-        }))
+        })
     }
 
     fn while_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -307,6 +326,35 @@ impl<'src> Parser<'src> {
             body,
             span,
         }))
+    }
+
+    fn for_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'for'
+
+        let var_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected loop variable")?;
+        let var_name = self.interner.intern(&var_token.lexeme);
+
+        self.consume(TokenType::KwIn, "expected 'in'")?;
+
+        let iterable = self.expression(0)?;
+
+        let body = self.block()?;
+        let span = start_span.merge(body.span);
+
+        Ok(Stmt::For(ForStmt {
+            var_name,
+            iterable,
+            body,
+            span,
+        }))
+    }
+
+    fn continue_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let span = self.current.span;
+        self.advance();
+        Ok(Stmt::Continue(span))
     }
 
     fn if_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -440,6 +488,11 @@ impl<'src> Parser<'src> {
                 TokenType::GtEq => BinaryOp::Ge,
                 TokenType::AmpAmp => BinaryOp::And,
                 TokenType::PipePipe => BinaryOp::Or,
+                TokenType::Ampersand => BinaryOp::BitAnd,
+                TokenType::Pipe => BinaryOp::BitOr,
+                TokenType::Caret => BinaryOp::BitXor,
+                TokenType::LessLess => BinaryOp::Shl,
+                TokenType::GreaterGreater => BinaryOp::Shr,
                 TokenType::Eq => {
                     // Assignment - special handling
                     if let ExprKind::Identifier(sym) = left.kind {
@@ -474,10 +527,26 @@ impl<'src> Parser<'src> {
             };
         }
 
+        // Check for range operators (lowest precedence)
+        if self.check(TokenType::DotDot) || self.check(TokenType::DotDotEqual) {
+            let inclusive = self.check(TokenType::DotDotEqual);
+            self.advance();
+            let right = self.expression(0)?;
+            let span = left.span.merge(right.span);
+            return Ok(Expr {
+                kind: ExprKind::Range(Box::new(RangeExpr {
+                    start: left,
+                    end: right,
+                    inclusive,
+                })),
+                span,
+            });
+        }
+
         Ok(left)
     }
 
-    /// Parse a unary expression (- or !)
+    /// Parse a unary expression (-, !, ~)
     fn unary(&mut self) -> Result<Expr, ParseError> {
         if self.match_token(TokenType::Minus) {
             let op_span = self.previous.span;
@@ -505,16 +574,43 @@ impl<'src> Parser<'src> {
             });
         }
 
+        if self.match_token(TokenType::Tilde) {
+            let op_span = self.previous.span;
+            let operand = self.unary()?;
+            let span = op_span.merge(operand.span);
+            return Ok(Expr {
+                kind: ExprKind::Unary(Box::new(UnaryExpr {
+                    op: UnaryOp::BitNot,
+                    operand,
+                })),
+                span,
+            });
+        }
+
         self.call()
     }
 
-    /// Parse a call expression (function call)
+    /// Parse a call expression (function call) and index expressions
     fn call(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.primary()?;
 
         loop {
             if self.match_token(TokenType::LParen) {
                 expr = self.finish_call(expr)?;
+            } else if self.match_token(TokenType::LBracket) {
+                // Index expression: expr[index]
+                let index = self.expression(0)?;
+                let end_span = self.current.span;
+                self.consume(TokenType::RBracket, "expected ']' after index")?;
+
+                let span = expr.span.merge(end_span);
+                expr = Expr {
+                    kind: ExprKind::Index(Box::new(IndexExpr {
+                        object: expr,
+                        index,
+                    })),
+                    span,
+                };
             } else {
                 break;
             }
@@ -624,6 +720,31 @@ impl<'src> Parser<'src> {
                 Ok(Expr {
                     kind: ExprKind::Grouping(Box::new(expr)),
                     span,
+                })
+            }
+            TokenType::LBracket => {
+                let start_span = self.current.span;
+                self.advance(); // consume '['
+
+                let mut elements = Vec::new();
+
+                if !self.check(TokenType::RBracket) {
+                    elements.push(self.expression(0)?);
+
+                    while self.match_token(TokenType::Comma) {
+                        if self.check(TokenType::RBracket) {
+                            break; // trailing comma allowed
+                        }
+                        elements.push(self.expression(0)?);
+                    }
+                }
+
+                let end_span = self.current.span;
+                self.consume(TokenType::RBracket, "expected ']' after array elements")?;
+
+                Ok(Expr {
+                    kind: ExprKind::ArrayLiteral(elements),
+                    span: start_span.merge(end_span),
                 })
             }
             TokenType::Error => Err(ParseError::new(
@@ -1182,6 +1303,144 @@ tests {
                         assert_eq!(inner.op, BinaryOp::And);
                     }
                     _ => panic!("expected && on right"),
+                }
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_and() {
+        let mut parser = Parser::new("a & b");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::BitAnd);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_or() {
+        let mut parser = Parser::new("a | b");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::BitOr);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_xor() {
+        let mut parser = Parser::new("a ^ b");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::BitXor);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_shift_left() {
+        let mut parser = Parser::new("a << b");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::Shl);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_shift_right() {
+        let mut parser = Parser::new("a >> b");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::Shr);
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_not() {
+        let mut parser = Parser::new("~a");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Unary(un) => {
+                assert_eq!(un.op, UnaryOp::BitNot);
+            }
+            _ => panic!("expected unary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_precedence() {
+        // a | b ^ c & d should be a | (b ^ (c & d))
+        // because & > ^ > |
+        let mut parser = Parser::new("a | b ^ c & d");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::BitOr);
+                match &bin.right.kind {
+                    ExprKind::Binary(xor_bin) => {
+                        assert_eq!(xor_bin.op, BinaryOp::BitXor);
+                        match &xor_bin.right.kind {
+                            ExprKind::Binary(and_bin) => {
+                                assert_eq!(and_bin.op, BinaryOp::BitAnd);
+                            }
+                            _ => panic!("expected & on right of ^"),
+                        }
+                    }
+                    _ => panic!("expected ^ on right of |"),
+                }
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_shift_vs_additive_precedence() {
+        // a + b << c should be (a + b) << c
+        // because + > << in precedence
+        let mut parser = Parser::new("a + b << c");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::Shl);
+                match &bin.left.kind {
+                    ExprKind::Binary(add_bin) => {
+                        assert_eq!(add_bin.op, BinaryOp::Add);
+                    }
+                    _ => panic!("expected + on left of <<"),
+                }
+            }
+            _ => panic!("expected binary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_vs_logical_precedence() {
+        // a && b | c should be a && (b | c)
+        // because | > && in precedence
+        let mut parser = Parser::new("a && b | c");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Binary(bin) => {
+                assert_eq!(bin.op, BinaryOp::And);
+                match &bin.right.kind {
+                    ExprKind::Binary(or_bin) => {
+                        assert_eq!(or_bin.op, BinaryOp::BitOr);
+                    }
+                    _ => panic!("expected | on right of &&"),
                 }
             }
             _ => panic!("expected binary expression"),

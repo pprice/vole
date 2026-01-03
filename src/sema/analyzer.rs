@@ -25,6 +25,7 @@ impl TypeError {
 pub struct Analyzer {
     scope: Scope,
     functions: HashMap<Symbol, FunctionType>,
+    globals: HashMap<Symbol, Type>,
     current_function_return: Option<Type>,
     errors: Vec<TypeError>,
 }
@@ -34,6 +35,7 @@ impl Analyzer {
         Self {
             scope: Scope::new(),
             functions: HashMap::new(),
+            globals: HashMap::new(),
             current_function_return: None,
             errors: Vec::new(),
         }
@@ -75,6 +77,29 @@ impl Analyzer {
                 Decl::Tests(_) => {
                     // Tests don't need signatures in the first pass
                 }
+                Decl::Let(_) => {
+                    // Let declarations are processed before the second pass
+                }
+            }
+        }
+
+        // Process global let declarations first (type check and add to scope)
+        for decl in &program.declarations {
+            if let Decl::Let(let_stmt) = decl {
+                let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t));
+                let init_type =
+                    self.check_expr_expecting(&let_stmt.init, declared_type.as_ref(), interner)?;
+
+                let var_type = declared_type.unwrap_or(init_type.clone());
+
+                self.globals.insert(let_stmt.name, var_type.clone());
+                self.scope.define(
+                    let_stmt.name,
+                    Variable {
+                        ty: var_type,
+                        mutable: let_stmt.mutable,
+                    },
+                );
             }
         }
 
@@ -86,6 +111,9 @@ impl Analyzer {
                 }
                 Decl::Tests(tests_decl) => {
                     self.check_tests(tests_decl, interner)?;
+                }
+                Decl::Let(_) => {
+                    // Already processed above
                 }
             }
         }
@@ -101,6 +129,10 @@ impl Analyzer {
         match ty {
             TypeExpr::Primitive(p) => Type::from_primitive(*p),
             TypeExpr::Named(_) => Type::Error, // Not handling named types in Phase 1
+            TypeExpr::Array(elem) => {
+                let elem_ty = self.resolve_type(elem);
+                Type::Array(Box::new(elem_ty))
+            }
         }
     }
 
@@ -182,24 +214,11 @@ impl Analyzer {
     fn check_stmt(&mut self, stmt: &Stmt, interner: &Interner) -> Result<(), Vec<TypeError>> {
         match stmt {
             Stmt::Let(let_stmt) => {
-                let init_type = self.check_expr(&let_stmt.init, interner)?;
+                let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t));
+                let init_type =
+                    self.check_expr_expecting(&let_stmt.init, declared_type.as_ref(), interner)?;
 
-                let var_type = if let Some(ty) = &let_stmt.ty {
-                    let declared = self.resolve_type(ty);
-                    if !self.types_compatible(&init_type, &declared) {
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: declared.name().to_string(),
-                                found: init_type.name().to_string(),
-                                span: let_stmt.span.into(),
-                            },
-                            let_stmt.span,
-                        );
-                    }
-                    declared
-                } else {
-                    init_type
-                };
+                let var_type = declared_type.unwrap_or(init_type);
 
                 self.scope.define(
                     let_stmt.name,
@@ -259,8 +278,46 @@ impl Analyzer {
                     }
                 }
             }
+            Stmt::For(for_stmt) => {
+                let iterable_ty = self.check_expr(&for_stmt.iterable, interner)?;
+
+                let elem_ty = match iterable_ty {
+                    Type::Range => Type::I64,
+                    Type::Array(elem) => *elem,
+                    _ => {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "iterable (range or array)".to_string(),
+                                found: iterable_ty.name().to_string(),
+                                span: for_stmt.iterable.span.into(),
+                            },
+                            for_stmt.iterable.span,
+                        );
+                        Type::Error
+                    }
+                };
+
+                let parent = std::mem::take(&mut self.scope);
+                self.scope = Scope::with_parent(parent);
+                self.scope.define(
+                    for_stmt.var_name,
+                    Variable {
+                        ty: elem_ty,
+                        mutable: false,
+                    },
+                );
+
+                self.check_block(&for_stmt.body, interner)?;
+
+                if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+                    self.scope = parent;
+                }
+            }
             Stmt::Break(_) => {
                 // Could check we're in a loop, but skipping for Phase 1
+            }
+            Stmt::Continue(_) => {
+                // Could validate we're in a loop, skip for now
             }
             Stmt::Return(ret) => {
                 let ret_type = if let Some(value) = &ret.value {
@@ -284,6 +341,257 @@ impl Analyzer {
             }
         }
         Ok(())
+    }
+
+    /// Check expression against an expected type (bidirectional type checking)
+    /// If expected is None, falls back to inference mode.
+    fn check_expr_expecting(
+        &mut self,
+        expr: &Expr,
+        expected: Option<&Type>,
+        interner: &Interner,
+    ) -> Result<Type, Vec<TypeError>> {
+        match &expr.kind {
+            ExprKind::IntLiteral(value) => match expected {
+                Some(ty) if Self::literal_fits(*value, ty) => Ok(ty.clone()),
+                Some(ty) => {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: ty.name().to_string(),
+                            found: "integer literal".to_string(),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    Ok(ty.clone())
+                }
+                None => Ok(Type::I64),
+            },
+            ExprKind::FloatLiteral(_) => match expected {
+                Some(ty) if ty == &Type::F64 => Ok(Type::F64),
+                Some(ty) if ty.is_numeric() => Ok(ty.clone()),
+                Some(ty) => {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: ty.name().to_string(),
+                            found: "f64".to_string(),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    Ok(Type::F64)
+                }
+                None => Ok(Type::F64),
+            },
+            ExprKind::Binary(bin) => {
+                match bin.op {
+                    // Arithmetic ops: propagate expected type to both operands
+                    BinaryOp::Add
+                    | BinaryOp::Sub
+                    | BinaryOp::Mul
+                    | BinaryOp::Div
+                    | BinaryOp::Mod => {
+                        let left_ty = self.check_expr_expecting(&bin.left, expected, interner)?;
+                        let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
+
+                        if left_ty.is_numeric() && right_ty.is_numeric() {
+                            // If we have an expected type and both sides match, use it
+                            if let Some(exp) = expected {
+                                if self.types_compatible(&left_ty, exp)
+                                    && self.types_compatible(&right_ty, exp)
+                                {
+                                    return Ok(exp.clone());
+                                }
+                            }
+                            // Otherwise return wider type
+                            if left_ty == Type::F64 || right_ty == Type::F64 {
+                                Ok(Type::F64)
+                            } else if left_ty == Type::I64 || right_ty == Type::I64 {
+                                Ok(Type::I64)
+                            } else {
+                                Ok(Type::I32)
+                            }
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "numeric".to_string(),
+                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                    // Comparison ops: infer left, check right against left
+                    BinaryOp::Eq
+                    | BinaryOp::Ne
+                    | BinaryOp::Lt
+                    | BinaryOp::Gt
+                    | BinaryOp::Le
+                    | BinaryOp::Ge => {
+                        let left_ty = self.check_expr_expecting(&bin.left, None, interner)?;
+                        self.check_expr_expecting(&bin.right, Some(&left_ty), interner)?;
+                        Ok(Type::Bool)
+                    }
+                    // Logical ops: both sides must be bool
+                    BinaryOp::And | BinaryOp::Or => {
+                        let left_ty =
+                            self.check_expr_expecting(&bin.left, Some(&Type::Bool), interner)?;
+                        let right_ty =
+                            self.check_expr_expecting(&bin.right, Some(&Type::Bool), interner)?;
+                        if left_ty == Type::Bool && right_ty == Type::Bool {
+                            Ok(Type::Bool)
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "bool".to_string(),
+                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                    // Bitwise ops: both sides must be integer
+                    BinaryOp::BitAnd
+                    | BinaryOp::BitOr
+                    | BinaryOp::BitXor
+                    | BinaryOp::Shl
+                    | BinaryOp::Shr => {
+                        let left_ty = self.check_expr_expecting(&bin.left, expected, interner)?;
+                        let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
+
+                        if left_ty.is_integer() && right_ty.is_integer() {
+                            if let Some(exp) = expected {
+                                if self.types_compatible(&left_ty, exp)
+                                    && self.types_compatible(&right_ty, exp)
+                                {
+                                    return Ok(exp.clone());
+                                }
+                            }
+                            if left_ty == Type::I64 || right_ty == Type::I64 {
+                                Ok(Type::I64)
+                            } else {
+                                Ok(Type::I32)
+                            }
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "integer".to_string(),
+                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                }
+            }
+            ExprKind::Unary(un) => {
+                match un.op {
+                    UnaryOp::Neg => {
+                        // Propagate expected type through negation
+                        let operand_ty =
+                            self.check_expr_expecting(&un.operand, expected, interner)?;
+                        if operand_ty.is_numeric() {
+                            Ok(operand_ty)
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "numeric".to_string(),
+                                    found: operand_ty.name().to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                    UnaryOp::Not => {
+                        // Not always expects and returns bool
+                        let operand_ty =
+                            self.check_expr_expecting(&un.operand, Some(&Type::Bool), interner)?;
+                        if operand_ty == Type::Bool {
+                            Ok(Type::Bool)
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "bool".to_string(),
+                                    found: operand_ty.name().to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                    UnaryOp::BitNot => {
+                        // Bitwise not: propagate expected type, requires integer
+                        let operand_ty =
+                            self.check_expr_expecting(&un.operand, expected, interner)?;
+                        if operand_ty.is_integer() {
+                            Ok(operand_ty)
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "integer".to_string(),
+                                    found: operand_ty.name().to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                }
+            }
+            ExprKind::Grouping(inner) => self.check_expr_expecting(inner, expected, interner),
+            ExprKind::ArrayLiteral(elements) => {
+                let elem_expected = match expected {
+                    Some(Type::Array(elem)) => Some(elem.as_ref()),
+                    _ => None,
+                };
+
+                if elements.is_empty() {
+                    if let Some(Type::Array(elem)) = expected {
+                        return Ok(Type::Array(elem.clone()));
+                    }
+                    return Ok(Type::Array(Box::new(Type::Unknown)));
+                }
+
+                let elem_ty = self.check_expr_expecting(&elements[0], elem_expected, interner)?;
+
+                for elem in elements.iter().skip(1) {
+                    self.check_expr_expecting(elem, Some(&elem_ty), interner)?;
+                }
+
+                Ok(Type::Array(Box::new(elem_ty)))
+            }
+            ExprKind::Index(_) => {
+                // Index expressions just delegate to check_expr
+                self.check_expr(expr, interner)
+            }
+            // All other cases: infer type, then check compatibility
+            _ => {
+                let inferred = self.check_expr(expr, interner)?;
+                if let Some(expected_ty) = expected {
+                    if !self.types_compatible(&inferred, expected_ty) {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: expected_ty.name().to_string(),
+                                found: inferred.name().to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
+                }
+                Ok(inferred)
+            }
+        }
     }
 
     fn check_expr(&mut self, expr: &Expr, interner: &Interner) -> Result<Type, Vec<TypeError>> {
@@ -362,6 +670,29 @@ impl Analyzer {
                             Ok(Type::Error)
                         }
                     }
+                    BinaryOp::BitAnd
+                    | BinaryOp::BitOr
+                    | BinaryOp::BitXor
+                    | BinaryOp::Shl
+                    | BinaryOp::Shr => {
+                        if left_ty.is_integer() && right_ty.is_integer() {
+                            if left_ty == Type::I64 || right_ty == Type::I64 {
+                                Ok(Type::I64)
+                            } else {
+                                Ok(Type::I32)
+                            }
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "integer".to_string(),
+                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
                 }
             }
 
@@ -390,6 +721,21 @@ impl Analyzer {
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "bool".to_string(),
+                                    found: operand_ty.name().to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                    UnaryOp::BitNot => {
+                        if operand_ty.is_integer() {
+                            Ok(operand_ty)
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "integer".to_string(),
                                     found: operand_ty.name().to_string(),
                                     span: expr.span.into(),
                                 },
@@ -523,6 +869,93 @@ impl Analyzer {
             }
 
             ExprKind::Grouping(inner) => self.check_expr(inner, interner),
+
+            ExprKind::ArrayLiteral(elements) => {
+                if elements.is_empty() {
+                    // Empty array needs type annotation or we use Unknown
+                    Ok(Type::Array(Box::new(Type::Unknown)))
+                } else {
+                    // Infer element type from first element
+                    let elem_ty = self.check_expr(&elements[0], interner)?;
+
+                    // Check remaining elements match
+                    for elem in elements.iter().skip(1) {
+                        let ty = self.check_expr(elem, interner)?;
+                        if !self.types_compatible(&ty, &elem_ty) {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: elem_ty.name().to_string(),
+                                    found: ty.name().to_string(),
+                                    span: elem.span.into(),
+                                },
+                                elem.span,
+                            );
+                        }
+                    }
+
+                    Ok(Type::Array(Box::new(elem_ty)))
+                }
+            }
+
+            ExprKind::Index(idx) => {
+                let obj_ty = self.check_expr(&idx.object, interner)?;
+                let index_ty = self.check_expr(&idx.index, interner)?;
+
+                // Index must be integer
+                if !index_ty.is_integer() {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "integer".to_string(),
+                            found: index_ty.name().to_string(),
+                            span: idx.index.span.into(),
+                        },
+                        idx.index.span,
+                    );
+                }
+
+                // Object must be array
+                match obj_ty {
+                    Type::Array(elem_ty) => Ok(*elem_ty),
+                    _ => {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "array".to_string(),
+                                found: obj_ty.name().to_string(),
+                                span: idx.object.span.into(),
+                            },
+                            idx.object.span,
+                        );
+                        Ok(Type::Error)
+                    }
+                }
+            }
+
+            ExprKind::Range(range) => {
+                let start_ty = self.check_expr(&range.start, interner)?;
+                let end_ty = self.check_expr(&range.end, interner)?;
+
+                if !start_ty.is_integer() || !end_ty.is_integer() {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "integer".to_string(),
+                            found: format!("{} and {}", start_ty.name(), end_ty.name()),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                }
+                Ok(Type::Range)
+            }
+        }
+    }
+
+    /// Check if an integer literal value fits in the target type
+    fn literal_fits(value: i64, target: &Type) -> bool {
+        match target {
+            Type::I32 => value >= i32::MIN as i64 && value <= i32::MAX as i64,
+            Type::I64 => true,
+            Type::F64 => true,
+            _ => false,
         }
     }
 
@@ -724,6 +1157,31 @@ mod tests {
                 }
             }
         "#;
+        let result = check(source);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn analyze_i32_literal_coercion() {
+        let source = "func main() { let x: i32 = 42 }";
+        assert!(check(source).is_ok());
+    }
+
+    #[test]
+    fn analyze_i32_binary_coercion() {
+        let source = "func main() { let x: i32 = 42 * 3 }";
+        assert!(check(source).is_ok());
+    }
+
+    #[test]
+    fn analyze_i32_to_i64_widening() {
+        let source = "func main() { let x: i32 = 42\n let y: i64 = x }";
+        assert!(check(source).is_ok());
+    }
+
+    #[test]
+    fn analyze_i64_to_i32_narrowing_error() {
+        let source = "func main() { let x: i64 = 42\n let y: i32 = x }";
         let result = check(source);
         assert!(result.is_err());
     }
