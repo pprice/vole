@@ -41,6 +41,12 @@ glob = "0.3"
 # Text diffing for snapshot testing
 similar = "2.6"
 
+# Benchmarking
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+comfy-table = "7.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
 [dev-dependencies]
 pretty_assertions = "1.4"
 tempfile = "3.10"
