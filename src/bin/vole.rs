@@ -16,5 +16,6 @@ fn main() -> ExitCode {
         Commands::Run { file } => run_file(&file),
         Commands::Check { file } => check_file(&file),
         Commands::Test { paths } => run_tests(&paths),
+        Commands::Inspect { .. } => todo!("inspect command not yet implemented"),
     }
 }
