@@ -61,6 +61,7 @@ impl<'a> AstPrinter<'a> {
         match decl {
             Decl::Function(f) => self.write_func_decl(out, f),
             Decl::Tests(t) => self.write_tests_decl(out, t),
+            Decl::Let(l) => self.write_let(out, l),
         }
     }
 
@@ -141,6 +142,11 @@ impl<'a> AstPrinter<'a> {
                 let name = self.interner.resolve(*sym);
                 out.push_str(name);
             }
+            TypeExpr::Array(elem_ty) => {
+                out.push('[');
+                self.write_type_inline(out, elem_ty);
+                out.push(']');
+            }
         }
     }
 
@@ -191,6 +197,22 @@ impl<'a> AstPrinter<'a> {
             Stmt::Break(_) => {
                 self.write_indent(out);
                 out.push_str("Break\n");
+            }
+            Stmt::Continue(_) => {
+                self.write_indent(out);
+                out.push_str("Continue\n");
+            }
+            Stmt::For(f) => {
+                self.write_indent(out);
+                let var_name = self.interner.resolve(f.var_name);
+                writeln!(out, "For \"{}\"", var_name).unwrap();
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("iterable:\n");
+                inner.indented().write_expr(out, &f.iterable);
+                inner.write_indent(out);
+                out.push_str("body:\n");
+                inner.indented().write_block(out, &f.body);
             }
         }
     }
@@ -276,6 +298,11 @@ impl<'a> AstPrinter<'a> {
                     BinaryOp::Ge => "Ge",
                     BinaryOp::And => "And",
                     BinaryOp::Or => "Or",
+                    BinaryOp::BitAnd => "BitAnd",
+                    BinaryOp::BitOr => "BitOr",
+                    BinaryOp::BitXor => "BitXor",
+                    BinaryOp::Shl => "Shl",
+                    BinaryOp::Shr => "Shr",
                 };
                 writeln!(out, "BinaryOp {}", op).unwrap();
                 let inner = self.indented();
@@ -287,6 +314,7 @@ impl<'a> AstPrinter<'a> {
                 let op = match u.op {
                     UnaryOp::Neg => "Neg",
                     UnaryOp::Not => "Not",
+                    UnaryOp::BitNot => "BitNot",
                 };
                 writeln!(out, "UnaryOp {}", op).unwrap();
                 self.indented().write_expr(out, &u.operand);
@@ -316,6 +344,40 @@ impl<'a> AstPrinter<'a> {
             ExprKind::Grouping(inner) => {
                 // Skip grouping node, just print inner
                 self.write_expr(out, inner);
+            }
+            ExprKind::Range(r) => {
+                self.write_indent(out);
+                if r.inclusive {
+                    out.push_str("RangeInclusive\n");
+                } else {
+                    out.push_str("Range\n");
+                }
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("start:\n");
+                inner.indented().write_expr(out, &r.start);
+                inner.write_indent(out);
+                out.push_str("end:\n");
+                inner.indented().write_expr(out, &r.end);
+            }
+            ExprKind::ArrayLiteral(elements) => {
+                self.write_indent(out);
+                writeln!(out, "ArrayLiteral (len={})", elements.len()).unwrap();
+                let inner = self.indented();
+                for elem in elements {
+                    inner.write_expr(out, elem);
+                }
+            }
+            ExprKind::Index(idx) => {
+                self.write_indent(out);
+                out.push_str("Index\n");
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("object:\n");
+                inner.indented().write_expr(out, &idx.object);
+                inner.write_indent(out);
+                out.push_str("index:\n");
+                inner.indented().write_expr(out, &idx.index);
             }
         }
     }
