@@ -188,6 +188,11 @@ pub enum BinaryOp {
     Ge,
     And,
     Or,
+    BitAnd, // &
+    BitOr,  // |
+    BitXor, // ^
+    Shl,    // <<
+    Shr,    // >>
 }
 
 /// Unary expression
@@ -201,6 +206,7 @@ pub struct UnaryExpr {
 pub enum UnaryOp {
     Neg,
     Not,
+    BitNot, // ~
 }
 
 /// Function call
