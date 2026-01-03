@@ -129,6 +129,10 @@ impl Analyzer {
         match ty {
             TypeExpr::Primitive(p) => Type::from_primitive(*p),
             TypeExpr::Named(_) => Type::Error, // Not handling named types in Phase 1
+            TypeExpr::Array(elem) => {
+                let elem_ty = self.resolve_type(elem);
+                Type::Array(Box::new(elem_ty))
+            }
         }
     }
 
@@ -279,10 +283,11 @@ impl Analyzer {
 
                 let elem_ty = match iterable_ty {
                     Type::Range => Type::I64,
+                    Type::Array(elem) => *elem,
                     _ => {
                         self.add_error(
                             SemanticError::TypeMismatch {
-                                expected: "iterable (range)".to_string(),
+                                expected: "iterable (range or array)".to_string(),
                                 found: iterable_ty.name().to_string(),
                                 span: for_stmt.iterable.span.into(),
                             },
@@ -544,6 +549,31 @@ impl Analyzer {
                 }
             }
             ExprKind::Grouping(inner) => self.check_expr_expecting(inner, expected, interner),
+            ExprKind::ArrayLiteral(elements) => {
+                let elem_expected = match expected {
+                    Some(Type::Array(elem)) => Some(elem.as_ref()),
+                    _ => None,
+                };
+
+                if elements.is_empty() {
+                    if let Some(Type::Array(elem)) = expected {
+                        return Ok(Type::Array(elem.clone()));
+                    }
+                    return Ok(Type::Array(Box::new(Type::Unknown)));
+                }
+
+                let elem_ty = self.check_expr_expecting(&elements[0], elem_expected, interner)?;
+
+                for elem in elements.iter().skip(1) {
+                    self.check_expr_expecting(elem, Some(&elem_ty), interner)?;
+                }
+
+                Ok(Type::Array(Box::new(elem_ty)))
+            }
+            ExprKind::Index(_) => {
+                // Index expressions just delegate to check_expr
+                self.check_expr(expr, interner)
+            }
             // All other cases: infer type, then check compatibility
             _ => {
                 let inferred = self.check_expr(expr, interner)?;
@@ -839,6 +869,66 @@ impl Analyzer {
             }
 
             ExprKind::Grouping(inner) => self.check_expr(inner, interner),
+
+            ExprKind::ArrayLiteral(elements) => {
+                if elements.is_empty() {
+                    // Empty array needs type annotation or we use Unknown
+                    Ok(Type::Array(Box::new(Type::Unknown)))
+                } else {
+                    // Infer element type from first element
+                    let elem_ty = self.check_expr(&elements[0], interner)?;
+
+                    // Check remaining elements match
+                    for elem in elements.iter().skip(1) {
+                        let ty = self.check_expr(elem, interner)?;
+                        if !self.types_compatible(&ty, &elem_ty) {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: elem_ty.name().to_string(),
+                                    found: ty.name().to_string(),
+                                    span: elem.span.into(),
+                                },
+                                elem.span,
+                            );
+                        }
+                    }
+
+                    Ok(Type::Array(Box::new(elem_ty)))
+                }
+            }
+
+            ExprKind::Index(idx) => {
+                let obj_ty = self.check_expr(&idx.object, interner)?;
+                let index_ty = self.check_expr(&idx.index, interner)?;
+
+                // Index must be integer
+                if !index_ty.is_integer() {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "integer".to_string(),
+                            found: index_ty.name().to_string(),
+                            span: idx.index.span.into(),
+                        },
+                        idx.index.span,
+                    );
+                }
+
+                // Object must be array
+                match obj_ty {
+                    Type::Array(elem_ty) => Ok(*elem_ty),
+                    _ => {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "array".to_string(),
+                                found: obj_ty.name().to_string(),
+                                span: idx.object.span.into(),
+                            },
+                            idx.object.span,
+                        );
+                        Ok(Type::Error)
+                    }
+                }
+            }
 
             ExprKind::Range(range) => {
                 let start_ty = self.check_expr(&range.start, interner)?;
