@@ -169,6 +169,19 @@ impl<'src> Lexer<'src> {
             // String literal
             '"' => self.string(),
 
+            // Dot, range operators
+            '.' => {
+                if self.match_char('.') {
+                    if self.match_char('=') {
+                        self.make_token(TokenType::DotDotEqual)
+                    } else {
+                        self.make_token(TokenType::DotDot)
+                    }
+                } else {
+                    self.make_token(TokenType::Dot)
+                }
+            }
+
             // Number literal
             c if c.is_ascii_digit() => self.number(),
 
@@ -318,6 +331,9 @@ impl<'src> Lexer<'src> {
             "false" => Some(TokenType::KwFalse),
             "tests" => Some(TokenType::KwTests),
             "test" => Some(TokenType::KwTest),
+            "for" => Some(TokenType::KwFor),
+            "in" => Some(TokenType::KwIn),
+            "continue" => Some(TokenType::KwContinue),
             "i32" => Some(TokenType::KwI32),
             "i64" => Some(TokenType::KwI64),
             "f64" => Some(TokenType::KwF64),

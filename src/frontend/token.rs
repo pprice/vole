@@ -25,6 +25,9 @@ pub enum TokenType {
     KwFalse,
     KwTests,
     KwTest,
+    KwFor,
+    KwIn,
+    KwContinue,
 
     // Type keywords
     KwI32,
@@ -65,7 +68,10 @@ pub enum TokenType {
     RBrace,
     Comma,
     Colon,
-    Arrow, // ->
+    Dot,
+    DotDot,      // ..
+    DotDotEqual, // ..=
+    Arrow,       // ->
 
     // Special
     Newline,
@@ -96,6 +102,9 @@ impl TokenType {
             Self::KwFalse => "false",
             Self::KwTests => "tests",
             Self::KwTest => "test",
+            Self::KwFor => "for",
+            Self::KwIn => "in",
+            Self::KwContinue => "continue",
             Self::KwI32 => "i32",
             Self::KwI64 => "i64",
             Self::KwF64 => "f64",
@@ -128,6 +137,9 @@ impl TokenType {
             Self::RBrace => "}",
             Self::Comma => ",",
             Self::Colon => ":",
+            Self::Dot => ".",
+            Self::DotDot => "..",
+            Self::DotDotEqual => "..=",
             Self::Arrow => "->",
             Self::Newline => "newline",
             Self::Eof => "end of file",
@@ -138,17 +150,17 @@ impl TokenType {
     /// Get precedence for binary operators (Pratt parsing)
     pub fn precedence(&self) -> u8 {
         match self {
-            Self::Eq => 1,                                       // assignment (lowest)
-            Self::PipePipe => 2,                                 // logical or
-            Self::AmpAmp => 3,                                   // logical and
-            Self::Pipe => 4,                                     // bitwise or
-            Self::Caret => 5,                                    // bitwise xor
-            Self::Ampersand => 6,                                // bitwise and
-            Self::EqEq | Self::BangEq => 7,                      // equality
-            Self::Lt | Self::Gt | Self::LtEq | Self::GtEq => 8,  // comparison
-            Self::LessLess | Self::GreaterGreater => 9,          // shifts
-            Self::Plus | Self::Minus => 10,                      // additive
-            Self::Star | Self::Slash | Self::Percent => 11,      // multiplicative
+            Self::Eq => 1,                                      // assignment (lowest)
+            Self::PipePipe => 2,                                // logical or
+            Self::AmpAmp => 3,                                  // logical and
+            Self::Pipe => 4,                                    // bitwise or
+            Self::Caret => 5,                                   // bitwise xor
+            Self::Ampersand => 6,                               // bitwise and
+            Self::EqEq | Self::BangEq => 7,                     // equality
+            Self::Lt | Self::Gt | Self::LtEq | Self::GtEq => 8, // comparison
+            Self::LessLess | Self::GreaterGreater => 9,         // shifts
+            Self::Plus | Self::Minus => 10,                     // additive
+            Self::Star | Self::Slash | Self::Percent => 11,     // multiplicative
             _ => 0,
         }
     }
