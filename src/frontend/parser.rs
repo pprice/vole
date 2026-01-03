@@ -495,14 +495,26 @@ impl<'src> Parser<'src> {
 
     /// Parse a unary expression (- or !)
     fn unary(&mut self) -> Result<Expr, ParseError> {
-        if self.check(TokenType::Minus) {
-            let op_span = self.current.span;
-            self.advance();
+        if self.match_token(TokenType::Minus) {
+            let op_span = self.previous.span;
             let operand = self.unary()?;
             let span = op_span.merge(operand.span);
             return Ok(Expr {
                 kind: ExprKind::Unary(Box::new(UnaryExpr {
                     op: UnaryOp::Neg,
+                    operand,
+                })),
+                span,
+            });
+        }
+
+        if self.match_token(TokenType::Bang) {
+            let op_span = self.previous.span;
+            let operand = self.unary()?;
+            let span = op_span.merge(operand.span);
+            return Ok(Expr {
+                kind: ExprKind::Unary(Box::new(UnaryExpr {
+                    op: UnaryOp::Not,
                     operand,
                 })),
                 span,
@@ -1140,5 +1152,35 @@ tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.diagnostic.file, "test.vole");
+    }
+
+    #[test]
+    fn parse_unary_not() {
+        let mut parser = Parser::new("!true");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Unary(un) => {
+                assert_eq!(un.op, UnaryOp::Not);
+            }
+            _ => panic!("expected unary expression"),
+        }
+    }
+
+    #[test]
+    fn parse_double_not() {
+        let mut parser = Parser::new("!!false");
+        let expr = parser.parse_expression().unwrap();
+        match &expr.kind {
+            ExprKind::Unary(un) => {
+                assert_eq!(un.op, UnaryOp::Not);
+                match &un.operand.kind {
+                    ExprKind::Unary(inner) => {
+                        assert_eq!(inner.op, UnaryOp::Not);
+                    }
+                    _ => panic!("expected nested unary"),
+                }
+            }
+            _ => panic!("expected unary expression"),
+        }
     }
 }
