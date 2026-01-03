@@ -1,6 +1,6 @@
 // src/cli/args.rs
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 /// Vole programming language compiler and runtime
@@ -33,4 +33,28 @@ pub enum Commands {
         #[arg(value_name = "PATHS", required = true)]
         paths: Vec<String>,
     },
+    /// Inspect compilation output (AST, IR)
+    Inspect {
+        /// What to inspect: ast, ir
+        #[arg(value_name = "TYPE")]
+        inspect_type: InspectType,
+
+        /// Paths to inspect (files or glob patterns)
+        #[arg(value_name = "FILES", required = true)]
+        files: Vec<String>,
+
+        /// Exclude test blocks from output
+        #[arg(long)]
+        no_tests: bool,
+
+        /// Include imports: "project" or "all" (not yet implemented)
+        #[arg(long)]
+        imports: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+pub enum InspectType {
+    Ast,
+    Ir,
 }

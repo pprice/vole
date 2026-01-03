@@ -7,7 +7,7 @@ use miette::NamedSource;
 
 use crate::codegen::{Compiler, JitContext};
 use crate::errors::{LexerError, render_to_stderr, render_to_writer};
-use crate::frontend::{Interner, ParseError, Parser, ast::Program};
+use crate::frontend::{AstPrinter, Interner, ParseError, Parser, ast::Program};
 use crate::runtime::set_stdout_capture;
 use crate::sema::{Analyzer, TypeError};
 
@@ -273,6 +273,51 @@ pub fn run_captured<W: Write + Send + 'static>(
 
     // Restore normal stdout
     set_stdout_capture(None);
+
+    Ok(())
+}
+
+/// Inspect AST with captured stdout and stderr
+#[allow(clippy::result_unit_err)]
+pub fn inspect_ast_captured<W: Write>(
+    source: &str,
+    file_path: &str,
+    mut stdout: W,
+    mut stderr: W,
+) -> Result<(), ()> {
+    // Parse
+    let mut parser = Parser::with_file(source, file_path);
+    let program = match parser.parse_program() {
+        Ok(prog) => prog,
+        Err(e) => {
+            let lexer_errors = parser.take_lexer_errors();
+            if !lexer_errors.is_empty() {
+                for err in &lexer_errors {
+                    render_lexer_error_to(err, file_path, source, &mut stderr);
+                }
+            } else {
+                render_parser_error_to(&e, file_path, source, &mut stderr);
+            }
+            return Err(());
+        }
+    };
+
+    let lexer_errors = parser.take_lexer_errors();
+    if !lexer_errors.is_empty() {
+        for err in &lexer_errors {
+            render_lexer_error_to(err, file_path, source, &mut stderr);
+        }
+        return Err(());
+    }
+
+    let interner = parser.into_interner();
+
+    // Print file header to stderr
+    let _ = writeln!(stderr, "// {}", file_path);
+
+    // Print AST to stdout
+    let printer = AstPrinter::new(&interner, false);
+    let _ = write!(stdout, "{}", printer.print_program(&program));
 
     Ok(())
 }
