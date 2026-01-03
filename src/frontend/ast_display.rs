@@ -170,6 +170,20 @@ impl<'a> AstPrinter<'a> {
             TypeExpr::Nil => {
                 out.push_str("nil");
             }
+            TypeExpr::Function {
+                params,
+                return_type,
+            } => {
+                out.push('(');
+                for (i, param) in params.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    self.write_type_inline(out, param);
+                }
+                out.push_str(") -> ");
+                self.write_type_inline(out, return_type);
+            }
         }
     }
 

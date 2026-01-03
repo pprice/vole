@@ -63,6 +63,10 @@ pub enum TypeExpr {
     Optional(Box<TypeExpr>), // T? syntax (desugars to Union with Nil)
     Union(Vec<TypeExpr>),    // A | B | C
     Nil,                     // nil type
+    Function {
+        params: Vec<TypeExpr>,
+        return_type: Box<TypeExpr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

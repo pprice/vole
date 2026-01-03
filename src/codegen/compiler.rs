@@ -558,6 +558,10 @@ fn resolve_type_expr(ty: &TypeExpr) -> Type {
             Type::normalize_union(variant_types)
         }
         TypeExpr::Nil => Type::Nil,
+        TypeExpr::Function { .. } => {
+            // Function types will be handled in a later task
+            Type::Error
+        }
     }
 }
 

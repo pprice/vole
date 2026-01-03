@@ -165,6 +165,10 @@ impl Analyzer {
                 let types: Vec<Type> = variants.iter().map(|t| self.resolve_type(t)).collect();
                 Type::normalize_union(types)
             }
+            TypeExpr::Function { .. } => {
+                // Function types will be handled in a later task
+                Type::Error
+            }
         }
     }
 

@@ -231,6 +231,29 @@ impl<'src> Parser<'src> {
     fn parse_base_type(&mut self) -> Result<TypeExpr, ParseError> {
         let token = self.current.clone();
         match token.ty {
+            TokenType::LParen => {
+                // Function type: (T, T) -> R
+                self.advance(); // consume '('
+
+                let mut param_types = Vec::new();
+                if !self.check(TokenType::RParen) {
+                    param_types.push(self.parse_type()?);
+                    while self.match_token(TokenType::Comma) {
+                        param_types.push(self.parse_type()?);
+                    }
+                }
+                self.consume(
+                    TokenType::RParen,
+                    "expected ')' after function parameter types",
+                )?;
+                self.consume(TokenType::Arrow, "expected '->' after function parameters")?;
+                let return_type = self.parse_type()?;
+
+                Ok(TypeExpr::Function {
+                    params: param_types,
+                    return_type: Box::new(return_type),
+                })
+            }
             TokenType::LBracket => {
                 self.advance(); // consume '['
                 let elem_type = self.parse_type()?;
@@ -1776,6 +1799,28 @@ tests {
                 assert!(matches!(&is_expr.type_expr, TypeExpr::Union(v) if v.len() == 2));
             }
             _ => panic!("expected Is expression"),
+        }
+    }
+
+    #[test]
+    fn parse_function_type() {
+        let mut parser = Parser::new("let f: (i64, i64) -> i64 = x");
+        let result = parser.parse_program();
+        assert!(result.is_ok());
+        let program = result.unwrap();
+        if let Decl::Let(let_stmt) = &program.declarations[0] {
+            assert!(let_stmt.ty.is_some());
+            if let Some(TypeExpr::Function {
+                params,
+                return_type: _,
+            }) = &let_stmt.ty
+            {
+                assert_eq!(params.len(), 2);
+            } else {
+                panic!("expected function type");
+            }
+        } else {
+            panic!("expected let declaration");
         }
     }
 }
