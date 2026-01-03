@@ -808,9 +808,7 @@ fn compile_stmt(
                     .ok_or_else(|| "vole_array_get_value not found".to_string())?;
                 let get_value_ref = ctx.module.declare_func_in_func(*get_value_id, builder.func);
                 let current_idx = builder.use_var(idx_var);
-                let get_call = builder
-                    .ins()
-                    .call(get_value_ref, &[arr.value, current_idx]);
+                let get_call = builder.ins().call(get_value_ref, &[arr.value, current_idx]);
                 let elem_val = builder.inst_results(get_call)[0];
                 builder.def_var(elem_var, elem_val);
 
@@ -1223,7 +1221,9 @@ fn compile_expr(
                 .func_ids
                 .get("vole_array_push")
                 .ok_or_else(|| "vole_array_push not found".to_string())?;
-            let array_push_ref = ctx.module.declare_func_in_func(*array_push_id, builder.func);
+            let array_push_ref = ctx
+                .module
+                .declare_func_in_func(*array_push_id, builder.func);
 
             // Track element type from first element
             let mut elem_type = Type::Unknown;
@@ -1294,9 +1294,7 @@ fn compile_expr(
             // Convert value based on element type
             let (result_value, result_ty) = match &elem_type {
                 Type::F64 => {
-                    let fval = builder
-                        .ins()
-                        .bitcast(types::F64, MemFlags::new(), value);
+                    let fval = builder.ins().bitcast(types::F64, MemFlags::new(), value);
                     (fval, types::F64)
                 }
                 Type::Bool => {
