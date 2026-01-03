@@ -251,12 +251,36 @@ impl Type {
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Type::Function(ft) => {
+                write!(f, "(")?;
+                for (i, param) in ft.params.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", param)?;
+                }
+                write!(f, ") -> {}", ft.return_type)
+            }
             Type::Union(types) => {
-                let parts: Vec<_> = types.iter().map(|t| t.name()).collect();
+                let parts: Vec<String> = types.iter().map(|t| format!("{}", t)).collect();
                 write!(f, "{}", parts.join(" | "))
             }
+            Type::Array(elem) => write!(f, "[{}]", elem),
             _ => write!(f, "{}", self.name()),
         }
+    }
+}
+
+impl std::fmt::Display for FunctionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(")?;
+        for (i, param) in self.params.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", param)?;
+        }
+        write!(f, ") -> {}", self.return_type)
     }
 }
 
