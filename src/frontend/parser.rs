@@ -747,6 +747,7 @@ impl<'src> Parser<'src> {
                     span: start_span.merge(end_span),
                 })
             }
+            TokenType::KwMatch => self.match_expr(),
             TokenType::Error => Err(ParseError::new(
                 ParserError::UnexpectedToken {
                     token: token.lexeme.clone(),
@@ -754,6 +755,130 @@ impl<'src> Parser<'src> {
                 },
                 token.span,
             )),
+            _ => Err(ParseError::new(
+                ParserError::ExpectedExpression {
+                    found: token.ty.as_str().to_string(),
+                    span: token.span.into(),
+                },
+                token.span,
+            )),
+        }
+    }
+
+    /// Parse a match expression
+    fn match_expr(&mut self) -> Result<Expr, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'match'
+
+        // Parse the scrutinee (the value being matched)
+        let scrutinee = self.expression(0)?;
+
+        // Expect opening brace
+        self.consume(TokenType::LBrace, "expected '{' after match expression")?;
+        self.skip_newlines();
+
+        // Parse arms
+        let mut arms = Vec::new();
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            arms.push(self.match_arm()?);
+            self.skip_newlines();
+        }
+
+        let end_span = self.current.span;
+        self.consume(TokenType::RBrace, "expected '}' after match arms")?;
+
+        Ok(Expr {
+            kind: ExprKind::Match(Box::new(MatchExpr {
+                scrutinee,
+                arms,
+                span: start_span.merge(end_span),
+            })),
+            span: start_span.merge(end_span),
+        })
+    }
+
+    /// Parse a single match arm
+    fn match_arm(&mut self) -> Result<MatchArm, ParseError> {
+        let start_span = self.current.span;
+
+        // Parse pattern
+        let pattern = self.pattern()?;
+
+        // Optional guard: `if <cond>`
+        let guard = if self.match_token(TokenType::KwIf) {
+            Some(self.expression(0)?)
+        } else {
+            None
+        };
+
+        // Expect fat arrow
+        self.consume(TokenType::FatArrow, "expected '=>' after pattern")?;
+
+        // Parse body expression
+        let body = self.expression(0)?;
+
+        let end_span = body.span;
+        Ok(MatchArm {
+            pattern,
+            guard,
+            body,
+            span: start_span.merge(end_span),
+        })
+    }
+
+    /// Parse a pattern
+    fn pattern(&mut self) -> Result<Pattern, ParseError> {
+        let token = self.current.clone();
+
+        match token.ty {
+            // Wildcard: _
+            TokenType::Identifier if token.lexeme == "_" => {
+                self.advance();
+                Ok(Pattern::Wildcard(token.span))
+            }
+            // Identifier (binding pattern)
+            TokenType::Identifier => {
+                self.advance();
+                let name = self.interner.intern(&token.lexeme);
+                Ok(Pattern::Identifier {
+                    name,
+                    span: token.span,
+                })
+            }
+            // Integer literal pattern
+            TokenType::IntLiteral => {
+                let expr = self.primary()?;
+                Ok(Pattern::Literal(expr))
+            }
+            // Negative integer pattern: -5
+            TokenType::Minus => {
+                let start_span = self.current.span;
+                self.advance(); // consume '-'
+                let operand = self.primary()?;
+                let span = start_span.merge(operand.span);
+                Ok(Pattern::Literal(Expr {
+                    kind: ExprKind::Unary(Box::new(UnaryExpr {
+                        op: UnaryOp::Neg,
+                        operand,
+                    })),
+                    span,
+                }))
+            }
+            // Float literal pattern
+            TokenType::FloatLiteral => {
+                let expr = self.primary()?;
+                Ok(Pattern::Literal(expr))
+            }
+            // String literal pattern
+            TokenType::StringLiteral => {
+                let expr = self.primary()?;
+                Ok(Pattern::Literal(expr))
+            }
+            // Boolean literal patterns
+            TokenType::KwTrue | TokenType::KwFalse => {
+                let expr = self.primary()?;
+                Ok(Pattern::Literal(expr))
+            }
             _ => Err(ParseError::new(
                 ParserError::ExpectedExpression {
                     found: token.ty.as_str().to_string(),

@@ -28,6 +28,7 @@ pub enum TokenType {
     KwFor,
     KwIn,
     KwContinue,
+    KwMatch,
 
     // Type keywords
     KwI32,
@@ -74,6 +75,7 @@ pub enum TokenType {
     DotDot,      // ..
     DotDotEqual, // ..=
     Arrow,       // ->
+    FatArrow,    // =>
 
     // Special
     Newline,
@@ -107,6 +109,7 @@ impl TokenType {
             Self::KwFor => "for",
             Self::KwIn => "in",
             Self::KwContinue => "continue",
+            Self::KwMatch => "match",
             Self::KwI32 => "i32",
             Self::KwI64 => "i64",
             Self::KwF64 => "f64",
@@ -145,6 +148,7 @@ impl TokenType {
             Self::DotDot => "..",
             Self::DotDotEqual => "..=",
             Self::Arrow => "->",
+            Self::FatArrow => "=>",
             Self::Newline => "newline",
             Self::Eof => "end of file",
             Self::Error => "error",
