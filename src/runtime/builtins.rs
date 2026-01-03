@@ -1,5 +1,7 @@
 // src/runtime/builtins.rs
 
+use crate::runtime::array::RcArray;
+use crate::runtime::value::TaggedValue;
 use crate::runtime::RcString;
 use std::cell::RefCell;
 use std::io::{self, Write};
@@ -124,6 +126,57 @@ pub extern "C" fn vole_flush() {
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_print_char(c: u8) {
     write_stdout(&(c as char).to_string());
+}
+
+// Array FFI functions
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_array_new() -> *mut RcArray {
+    RcArray::new()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_array_with_capacity(capacity: usize) -> *mut RcArray {
+    RcArray::with_capacity(capacity)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_array_push(arr: *mut RcArray, tag: u64, value: u64) {
+    unsafe {
+        RcArray::push(arr, TaggedValue { tag, value });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_array_get_tag(arr: *const RcArray, index: usize) -> u64 {
+    unsafe { RcArray::get(arr, index).tag }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_array_get_value(arr: *const RcArray, index: usize) -> u64 {
+    unsafe { RcArray::get(arr, index).value }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64) {
+    unsafe {
+        RcArray::set(arr, index, TaggedValue { tag, value });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_array_len(arr: *const RcArray) -> usize {
+    unsafe { RcArray::len(arr) }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_array_inc(ptr: *mut RcArray) {
+    unsafe { RcArray::inc_ref(ptr) }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_array_dec(ptr: *mut RcArray) {
+    unsafe { RcArray::dec_ref(ptr) }
 }
 
 #[cfg(test)]
