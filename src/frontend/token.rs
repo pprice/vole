@@ -29,6 +29,8 @@ pub enum TokenType {
     KwIn,
     KwContinue,
     KwMatch,
+    KwNil, // nil keyword (literal and type)
+    KwIs,  // is keyword (type test)
 
     // Type keywords
     KwI8,
@@ -63,12 +65,14 @@ pub enum TokenType {
     Eq,
 
     // Bitwise operators
-    Ampersand,      // &
-    Pipe,           // |
-    Caret,          // ^
-    Tilde,          // ~
-    LessLess,       // <<
-    GreaterGreater, // >>
+    Ampersand,        // &
+    Pipe,             // |
+    Caret,            // ^
+    Tilde,            // ~
+    LessLess,         // <<
+    GreaterGreater,   // >>
+    Question,         // ?
+    QuestionQuestion, // ??
 
     // Delimiters
     LParen,
@@ -118,6 +122,8 @@ impl TokenType {
             Self::KwIn => "in",
             Self::KwContinue => "continue",
             Self::KwMatch => "match",
+            Self::KwNil => "nil",
+            Self::KwIs => "is",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",
@@ -152,6 +158,8 @@ impl TokenType {
             Self::Tilde => "~",
             Self::LessLess => "<<",
             Self::GreaterGreater => ">>",
+            Self::Question => "?",
+            Self::QuestionQuestion => "??",
             Self::LParen => "(",
             Self::RParen => ")",
             Self::LBrace => "{",
@@ -175,7 +183,7 @@ impl TokenType {
     pub fn precedence(&self) -> u8 {
         match self {
             Self::Eq => 1,                                      // assignment (lowest)
-            Self::PipePipe => 2,                                // logical or
+            Self::PipePipe | Self::QuestionQuestion => 2,       // logical or, null coalescing
             Self::AmpAmp => 3,                                  // logical and
             Self::Pipe => 4,                                    // bitwise or
             Self::Caret => 5,                                   // bitwise xor
