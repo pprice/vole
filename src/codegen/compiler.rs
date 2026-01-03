@@ -1832,14 +1832,33 @@ struct CaptureBinding {
     vole_type: Type,
 }
 
-/// Compile a lambda expression to a function pointer or closure
+/// Compile a lambda expression to a function pointer or closure.
+///
+/// # Pure Lambda Optimization
+///
+/// Lambdas without captures are compiled as simple function pointers, avoiding
+/// the overhead of closure allocation. This optimization is based on the purity
+/// analysis performed during semantic analysis:
+///
+/// - **Pure lambdas** (no captures): Compiled to a raw function pointer.
+///   No heap allocation needed. Example: `(x: i64) => x * 2`
+///
+/// - **Closures** (with captures): Require a closure struct that holds the
+///   function pointer plus captured values. Example: `let y = 10; (x) => x + y`
+///
+/// Note: Side effects (like calling print) don't affect this optimization since
+/// they don't require capturing any state. A lambda with side effects but no
+/// captures is still compiled as a pure function pointer.
 fn compile_lambda(
     builder: &mut FunctionBuilder,
     lambda: &LambdaExpr,
     variables: &HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
-    // Check if this lambda has captures
+    // Pure lambda optimization: if no captures, just return a function pointer.
+    // This avoids heap allocation for the closure struct.
+    // Note: We check captures directly rather than using purity() because
+    // side effects don't require closure allocation - only captures do.
     let captures = lambda.captures.borrow();
     let has_captures = !captures.is_empty();
 
