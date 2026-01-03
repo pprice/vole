@@ -165,9 +165,13 @@ impl Analyzer {
                 let types: Vec<Type> = variants.iter().map(|t| self.resolve_type(t)).collect();
                 Type::normalize_union(types)
             }
-            TypeExpr::Function { .. } => {
-                // Function types will be handled in a later task
-                Type::Error
+            TypeExpr::Function { params, return_type } => {
+                let param_types: Vec<Type> = params.iter().map(|p| self.resolve_type(p)).collect();
+                let ret = self.resolve_type(return_type);
+                Type::Function(FunctionType {
+                    params: param_types,
+                    return_type: Box::new(ret),
+                })
             }
         }
     }
