@@ -7,3 +7,4 @@ pub mod frontend;
 pub mod runtime;
 pub mod sema;
 pub mod snap;
+pub mod util;
