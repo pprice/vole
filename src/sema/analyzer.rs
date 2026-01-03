@@ -380,6 +380,44 @@ impl Analyzer {
                     }
                 }
             }
+            ExprKind::Unary(un) => {
+                match un.op {
+                    UnaryOp::Neg => {
+                        // Propagate expected type through negation
+                        let operand_ty = self.check_expr_expecting(&un.operand, expected, interner)?;
+                        if operand_ty.is_numeric() {
+                            Ok(operand_ty)
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "numeric".to_string(),
+                                    found: operand_ty.name().to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                    UnaryOp::Not => {
+                        // Not always expects and returns bool
+                        let operand_ty = self.check_expr_expecting(&un.operand, Some(&Type::Bool), interner)?;
+                        if operand_ty == Type::Bool {
+                            Ok(Type::Bool)
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "bool".to_string(),
+                                    found: operand_ty.name().to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                }
+            }
             ExprKind::Grouping(inner) => self.check_expr_expecting(inner, expected, interner),
             // All other cases: infer type, then check compatibility
             _ => {
