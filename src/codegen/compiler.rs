@@ -935,6 +935,12 @@ fn compile_expr(
                 }
                 // And/Or are handled above with short-circuit evaluation
                 BinaryOp::And | BinaryOp::Or => unreachable!(),
+                // Bitwise operators
+                BinaryOp::BitAnd => builder.ins().band(left_val, right_val),
+                BinaryOp::BitOr => builder.ins().bor(left_val, right_val),
+                BinaryOp::BitXor => builder.ins().bxor(left_val, right_val),
+                BinaryOp::Shl => builder.ins().ishl(left_val, right_val),
+                BinaryOp::Shr => builder.ins().sshr(left_val, right_val),
             };
 
             // Comparison operators return I8 (bool)
@@ -971,6 +977,7 @@ fn compile_expr(
                     let one = builder.ins().iconst(types::I8, 1);
                     builder.ins().isub(one, operand.value)
                 }
+                UnaryOp::BitNot => builder.ins().bnot(operand.value),
             };
             Ok(CompiledValue {
                 value: result,
