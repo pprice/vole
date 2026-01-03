@@ -18,6 +18,14 @@ test:
 test-release:
     cargo test --release
 
+# Run snapshot tests in debug mode
+snap:
+    cargo run --bin vole-snap -- test test/snapshot/
+
+# Run snapshot tests in release mode
+snap-release:
+    cargo run --release --bin vole-snap -- test test/snapshot/
+
 # Run clippy lints
 clippy:
     cargo clippy -- -D warnings
@@ -31,4 +39,4 @@ fmt-check:
     cargo fmt -- --check
 
 # Run all checks locally (mirrors CI)
-ci: fmt-check clippy test test-release
+ci: fmt-check clippy test snap test-release snap-release
