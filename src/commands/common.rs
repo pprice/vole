@@ -1,10 +1,11 @@
 // src/commands/common.rs
 //! Shared utilities for CLI commands.
 
-use std::io::{IsTerminal, Write};
+use std::io::{self, IsTerminal, Read, Write};
 
 use miette::NamedSource;
 
+use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext};
 use crate::errors::{LexerError, render_to_stderr, render_to_writer};
 use crate::frontend::{AstPrinter, Interner, ParseError, Parser, ast::Program};
@@ -118,6 +119,10 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
 
 /// Check if stdout supports color output.
 pub fn stdout_supports_color() -> bool {
+    // Respect NO_COLOR environment variable (https://no-color.org/)
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
     std::io::stdout().is_terminal()
 }
 
@@ -132,6 +137,16 @@ impl TermColors {
         Self {
             use_color: stdout_supports_color(),
         }
+    }
+
+    /// Create a new TermColors with explicit color mode.
+    pub fn with_mode(mode: ColorMode) -> Self {
+        let use_color = match mode {
+            ColorMode::Auto => stdout_supports_color(),
+            ColorMode::Always => true,
+            ColorMode::Never => false,
+        };
+        Self { use_color }
     }
 
     /// Green text (for success).
@@ -153,6 +168,13 @@ impl TermColors {
     pub fn reset(&self) -> &'static str {
         if self.use_color { "\x1b[0m" } else { "" }
     }
+}
+
+/// Read source code from stdin
+pub fn read_stdin() -> io::Result<String> {
+    let mut source = String::new();
+    io::stdin().read_to_string(&mut source)?;
+    Ok(source)
 }
 
 /// Check a program with captured stderr output

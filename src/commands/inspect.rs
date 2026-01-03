@@ -1,14 +1,11 @@
 // src/commands/inspect.rs
 
-use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
 use std::process::ExitCode;
 
-use glob::glob;
 use miette::NamedSource;
 
-use crate::cli::InspectType;
+use crate::cli::{InspectType, expand_paths};
 use crate::codegen::{Compiler, JitContext};
 use crate::errors::render_to_stderr;
 use crate::frontend::{AstPrinter, Parser};
@@ -21,31 +18,17 @@ pub fn inspect_files(
     no_tests: bool,
     _imports: Option<&str>,
 ) -> ExitCode {
-    // Expand globs and collect unique files
-    let mut files: Vec<PathBuf> = Vec::new();
-    let mut seen: HashSet<PathBuf> = HashSet::new();
-
-    for pattern in patterns {
-        match glob(pattern) {
-            Ok(paths) => {
-                for entry in paths.flatten() {
-                    if let Ok(canonical) = entry.canonicalize() {
-                        if seen.insert(canonical.clone()) {
-                            files.push(entry);
-                        }
-                    } else if seen.insert(entry.clone()) {
-                        files.push(entry);
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("error: invalid glob pattern '{}': {}", pattern, e);
-            }
+    // Expand patterns and collect unique files
+    let files = match expand_paths(patterns) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::FAILURE;
         }
-    }
+    };
 
     if files.is_empty() {
-        eprintln!("error: no matching files found");
+        eprintln!("error: no .vole files found");
         return ExitCode::FAILURE;
     }
 

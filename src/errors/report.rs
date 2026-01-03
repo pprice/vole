@@ -1,20 +1,137 @@
 // src/errors/report.rs
 //! Rendering utilities for miette diagnostics.
+//!
+//! We wrap diagnostics to inline the error code with the message.
+//! miette displays: `CODE\n\n  × message`
+//! We display: `  × [CODE]: message`
 
-use miette::{Diagnostic, GraphicalReportHandler, GraphicalTheme, ThemeCharacters, ThemeStyles};
+use miette::{
+    Diagnostic, GraphicalReportHandler, GraphicalTheme, LabeledSpan, Severity, SourceCode,
+    ThemeCharacters, ThemeStyles,
+};
+use std::fmt;
 use std::io::Write as IoWrite;
+use std::sync::atomic::{AtomicU8, Ordering};
 
-/// Create a handler for terminal output (unicode + colors).
-pub fn terminal_handler() -> GraphicalReportHandler {
+use crate::cli::ColorMode;
+
+/// Global color mode setting (set once at startup)
+static COLOR_MODE: AtomicU8 = AtomicU8::new(0); // 0 = Auto, 1 = Always, 2 = Never
+
+/// Set the global color mode (call once at startup)
+pub fn set_color_mode(mode: ColorMode) {
+    let value = match mode {
+        ColorMode::Auto => 0,
+        ColorMode::Always => 1,
+        ColorMode::Never => 2,
+    };
+    COLOR_MODE.store(value, Ordering::SeqCst);
+}
+
+/// Get the current color mode
+pub fn get_color_mode() -> ColorMode {
+    match COLOR_MODE.load(Ordering::SeqCst) {
+        1 => ColorMode::Always,
+        2 => ColorMode::Never,
+        _ => ColorMode::Auto,
+    }
+}
+
+/// Check if colors should be used based on current mode
+fn should_use_color() -> bool {
+    match get_color_mode() {
+        ColorMode::Auto => crate::commands::common::stdout_supports_color(),
+        ColorMode::Always => true,
+        ColorMode::Never => false,
+    }
+}
+
+/// Wrapper that inlines the error code into the message.
+/// Returns None for code() so miette won't print it separately.
+struct InlineCodeDiagnostic<'a> {
+    inner: &'a dyn Diagnostic,
+    message: String,
+}
+
+impl<'a> InlineCodeDiagnostic<'a> {
+    fn new(inner: &'a dyn Diagnostic) -> Self {
+        let message = if let Some(code) = inner.code() {
+            format!("[{}]: {}", code, inner)
+        } else {
+            inner.to_string()
+        };
+        Self { inner, message }
+    }
+}
+
+impl fmt::Debug for InlineCodeDiagnostic<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.inner, f)
+    }
+}
+
+impl fmt::Display for InlineCodeDiagnostic<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for InlineCodeDiagnostic<'_> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.inner.source()
+    }
+}
+
+impl Diagnostic for InlineCodeDiagnostic<'_> {
+    fn code<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        None // Don't show code separately - it's in the message
+    }
+
+    fn severity(&self) -> Option<Severity> {
+        self.inner.severity()
+    }
+
+    fn help<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        self.inner.help()
+    }
+
+    fn url<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        self.inner.url()
+    }
+
+    fn source_code(&self) -> Option<&dyn SourceCode> {
+        self.inner.source_code()
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
+        self.inner.labels()
+    }
+
+    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+        self.inner.related()
+    }
+
+    fn diagnostic_source(&self) -> Option<&dyn Diagnostic> {
+        self.inner.diagnostic_source()
+    }
+}
+
+/// Create a handler for terminal output (unicode + colors based on mode).
+fn terminal_handler() -> GraphicalReportHandler {
+    let styles = if should_use_color() {
+        ThemeStyles::ansi()
+    } else {
+        ThemeStyles::none()
+    };
     let theme = GraphicalTheme {
         characters: ThemeCharacters::unicode(),
-        styles: ThemeStyles::ansi(),
+        styles,
     };
     GraphicalReportHandler::new_themed(theme)
 }
 
 /// Create a handler for snapshot testing (ascii + no colors).
-pub fn snapshot_handler() -> GraphicalReportHandler {
+fn snapshot_handler() -> GraphicalReportHandler {
     let theme = GraphicalTheme {
         characters: ThemeCharacters::ascii(),
         styles: ThemeStyles::none(),
@@ -25,17 +142,19 @@ pub fn snapshot_handler() -> GraphicalReportHandler {
 /// Render to stderr with unicode/colors.
 pub fn render_to_stderr(report: &dyn Diagnostic) {
     let handler = terminal_handler();
+    let wrapped = InlineCodeDiagnostic::new(report);
     let mut output = String::new();
-    if handler.render_report(&mut output, report).is_ok() {
+    if handler.render_report(&mut output, &wrapped).is_ok() {
         eprint!("{}", output);
     }
 }
 
 /// Render to a buffer without colors (for snapshots/testing).
 pub fn render_to_string(report: &dyn Diagnostic) -> String {
-    let mut output = String::new();
     let handler = snapshot_handler();
-    let _ = handler.render_report(&mut output, report);
+    let wrapped = InlineCodeDiagnostic::new(report);
+    let mut output = String::new();
+    let _ = handler.render_report(&mut output, &wrapped);
     output
 }
 

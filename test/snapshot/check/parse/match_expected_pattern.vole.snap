@@ -1,9 +1,7 @@
 [stdout]
 
 [stderr]
-E1001
-
-  x expected expression, found '=>'
+  x [E1001]: expected expression, found '=>'
    ,-[<path>/match_expected_pattern.vole:3:9]
  2 |     match 5 {
  3 |         => 10
