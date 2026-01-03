@@ -8,6 +8,7 @@ use vole::commands::check::check_files;
 use vole::commands::inspect::inspect_files;
 use vole::commands::run::run_file;
 use vole::commands::test::run_tests;
+use vole::commands::version::print_version;
 use vole::errors::set_color_mode;
 
 fn main() -> ExitCode {
@@ -31,5 +32,6 @@ fn main() -> ExitCode {
             no_tests,
             imports,
         } => inspect_files(&files, inspect_type, no_tests, imports.as_deref()),
+        Commands::Version => print_version(),
     }
 }
