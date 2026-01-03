@@ -100,6 +100,8 @@ impl<'src> Lexer<'src> {
             '=' => {
                 if self.match_char('=') {
                     self.make_token(TokenType::EqEq)
+                } else if self.match_char('>') {
+                    self.make_token(TokenType::FatArrow)
                 } else {
                     self.make_token(TokenType::Eq)
                 }
@@ -336,6 +338,7 @@ impl<'src> Lexer<'src> {
             "for" => Some(TokenType::KwFor),
             "in" => Some(TokenType::KwIn),
             "continue" => Some(TokenType::KwContinue),
+            "match" => Some(TokenType::KwMatch),
             "i32" => Some(TokenType::KwI32),
             "i64" => Some(TokenType::KwI64),
             "f64" => Some(TokenType::KwF64),

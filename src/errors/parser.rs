@@ -53,4 +53,21 @@ pub enum ParserError {
         #[label("expected block here")]
         span: SourceSpan,
     },
+
+    #[error("expected pattern")]
+    #[diagnostic(
+        code(E1010),
+        help("patterns can be literals (1, \"hello\"), identifiers, or '_'")
+    )]
+    ExpectedPattern {
+        #[label("expected pattern")]
+        span: SourceSpan,
+    },
+
+    #[error("expected '=>' after pattern")]
+    #[diagnostic(code(E1011))]
+    ExpectedFatArrow {
+        #[label("expected '=>'")]
+        span: SourceSpan,
+    },
 }

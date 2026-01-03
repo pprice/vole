@@ -1,0 +1,96 @@
+// Test match guards
+
+tests "wildcard with guards" {
+    test "basic guard evaluation" {
+        let score = 85
+        let grade = match score {
+            _ if score >= 90 => 1
+            _ if score >= 80 => 2
+            _ if score >= 70 => 3
+            _ => 4
+        }
+        assert(grade == 2)
+    }
+
+    test "first guard matches" {
+        let score = 95
+        let grade = match score {
+            _ if score >= 90 => 1
+            _ if score >= 80 => 2
+            _ => 4
+        }
+        assert(grade == 1)
+    }
+
+    test "fallback to bare wildcard" {
+        let score = 50
+        let grade = match score {
+            _ if score >= 90 => 1
+            _ if score >= 80 => 2
+            _ if score >= 70 => 3
+            _ => 4
+        }
+        assert(grade == 4)
+    }
+
+    test "guard with complex condition" {
+        let x = 15
+        let result = match x {
+            _ if x > 10 && x < 20 => 1
+            _ if x >= 20 => 2
+            _ => 3
+        }
+        assert(result == 1)
+    }
+
+    test "guard with equality" {
+        let x = 42
+        let result = match x {
+            _ if x == 42 => 1
+            _ => 2
+        }
+        assert(result == 1)
+    }
+
+    test "negative number guards" {
+        let x = -5
+        let result = match x {
+            _ if x > 0 => 1
+            _ if x < 0 => 2
+            _ => 3
+        }
+        assert(result == 2)
+    }
+}
+
+tests "guard edge cases" {
+    test "single guarded wildcard with fallback" {
+        let x = 10
+        let result = match x {
+            _ if x > 100 => 1
+            _ => 2
+        }
+        assert(result == 2)
+    }
+
+    test "all guards fail, bare wildcard catches" {
+        let x = 0
+        let result = match x {
+            _ if x > 0 => 1
+            _ if x < 0 => 2
+            _ => 3
+        }
+        assert(result == 3)
+    }
+}
+
+tests "identifier with guards" {
+    test "identifier guard with binding" {
+        let x = 15
+        let result = match x {
+            n if n > 10 => n * 2
+            n => n
+        }
+        assert(result == 30)
+    }
+}

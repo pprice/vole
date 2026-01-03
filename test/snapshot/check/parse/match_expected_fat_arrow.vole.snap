@@ -1,0 +1,13 @@
+[stdout]
+
+[stderr]
+E1002
+
+  x expected 'expected '=>' after pattern', found 'integer'
+   ,-[<path>/match_expected_fat_arrow.vole:4:11]
+ 3 |     match x {
+ 4 |         1 5
+   :           |
+   :           `-- unexpected token
+ 5 |     }
+   `----

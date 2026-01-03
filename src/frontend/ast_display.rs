@@ -379,6 +379,57 @@ impl<'a> AstPrinter<'a> {
                 out.push_str("index:\n");
                 inner.indented().write_expr(out, &idx.index);
             }
+            ExprKind::Match(m) => {
+                self.write_indent(out);
+                out.push_str("Match\n");
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("scrutinee:\n");
+                inner.indented().write_expr(out, &m.scrutinee);
+                for (i, arm) in m.arms.iter().enumerate() {
+                    inner.write_indent(out);
+                    writeln!(out, "arm[{}]:", i).unwrap();
+                    let arm_inner = inner.indented();
+                    arm_inner.write_indent(out);
+                    out.push_str("pattern: ");
+                    arm_inner.write_pattern_inline(out, &arm.pattern);
+                    out.push('\n');
+                    if let Some(guard) = &arm.guard {
+                        arm_inner.write_indent(out);
+                        out.push_str("guard:\n");
+                        arm_inner.indented().write_expr(out, guard);
+                    }
+                    arm_inner.write_indent(out);
+                    out.push_str("body:\n");
+                    arm_inner.indented().write_expr(out, &arm.body);
+                }
+            }
+        }
+    }
+
+    fn write_pattern_inline(&self, out: &mut String, pattern: &crate::frontend::Pattern) {
+        use crate::frontend::Pattern;
+        match pattern {
+            Pattern::Wildcard(_) => out.push('_'),
+            Pattern::Literal(expr) => match &expr.kind {
+                ExprKind::IntLiteral(n) => write!(out, "{}", n).unwrap(),
+                ExprKind::FloatLiteral(n) => write!(out, "{}", n).unwrap(),
+                ExprKind::BoolLiteral(b) => write!(out, "{}", b).unwrap(),
+                ExprKind::StringLiteral(s) => write!(out, "{:?}", s).unwrap(),
+                ExprKind::Unary(u) => {
+                    out.push('-');
+                    if let ExprKind::IntLiteral(n) = &u.operand.kind {
+                        write!(out, "{}", n).unwrap();
+                    } else if let ExprKind::FloatLiteral(n) = &u.operand.kind {
+                        write!(out, "{}", n).unwrap();
+                    }
+                }
+                _ => out.push_str("<expr>"),
+            },
+            Pattern::Identifier { name, .. } => {
+                let ident = self.interner.resolve(*name);
+                out.push_str(ident);
+            }
         }
     }
 }
