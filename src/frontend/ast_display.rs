@@ -1,0 +1,370 @@
+// src/frontend/ast_display.rs
+//! Pretty-printing for AST nodes with symbol resolution.
+
+use std::fmt::Write;
+
+use crate::frontend::{
+    BinaryOp, Block, Decl, Expr, ExprKind, FuncDecl, Interner, LetStmt, Param, PrimitiveType,
+    Program, Stmt, StringPart, TestCase, TestsDecl, TypeExpr, UnaryOp,
+};
+
+/// Pretty-printer for AST nodes that resolves symbols via an Interner.
+pub struct AstPrinter<'a> {
+    interner: &'a Interner,
+    indent: usize,
+    no_tests: bool,
+}
+
+impl<'a> AstPrinter<'a> {
+    /// Create a new AstPrinter.
+    pub fn new(interner: &'a Interner, no_tests: bool) -> Self {
+        Self {
+            interner,
+            indent: 0,
+            no_tests,
+        }
+    }
+
+    /// Print an entire program to a String.
+    pub fn print_program(&self, program: &Program) -> String {
+        let mut out = String::new();
+        self.write_program(&mut out, program);
+        out
+    }
+
+    fn write_indent(&self, out: &mut String) {
+        for _ in 0..self.indent {
+            out.push_str("  ");
+        }
+    }
+
+    fn indented(&self) -> Self {
+        Self {
+            interner: self.interner,
+            indent: self.indent + 1,
+            no_tests: self.no_tests,
+        }
+    }
+
+    fn write_program(&self, out: &mut String, program: &Program) {
+        out.push_str("Program\n");
+        let inner = self.indented();
+        for decl in &program.declarations {
+            if self.no_tests && matches!(decl, Decl::Tests(_)) {
+                continue;
+            }
+            inner.write_decl(out, decl);
+        }
+    }
+
+    fn write_decl(&self, out: &mut String, decl: &Decl) {
+        match decl {
+            Decl::Function(f) => self.write_func_decl(out, f),
+            Decl::Tests(t) => self.write_tests_decl(out, t),
+        }
+    }
+
+    fn write_func_decl(&self, out: &mut String, func: &FuncDecl) {
+        self.write_indent(out);
+        let name = self.interner.resolve(func.name);
+        writeln!(out, "FunctionDecl \"{}\"", name).unwrap();
+
+        let inner = self.indented();
+
+        // Params
+        if !func.params.is_empty() {
+            inner.write_indent(out);
+            out.push_str("params: [");
+            for (i, param) in func.params.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                inner.write_param_inline(out, param);
+            }
+            out.push_str("]\n");
+        }
+
+        // Return type
+        if let Some(ret) = &func.return_type {
+            inner.write_indent(out);
+            write!(out, "return_type: ").unwrap();
+            inner.write_type_inline(out, ret);
+            out.push('\n');
+        }
+
+        // Body
+        inner.write_indent(out);
+        out.push_str("body:\n");
+        inner.indented().write_block(out, &func.body);
+    }
+
+    fn write_tests_decl(&self, out: &mut String, tests: &TestsDecl) {
+        self.write_indent(out);
+        if let Some(label) = &tests.label {
+            writeln!(out, "Tests \"{}\"", label).unwrap();
+        } else {
+            out.push_str("Tests\n");
+        }
+
+        let inner = self.indented();
+        for test in &tests.tests {
+            inner.write_test_case(out, test);
+        }
+    }
+
+    fn write_test_case(&self, out: &mut String, test: &TestCase) {
+        self.write_indent(out);
+        writeln!(out, "Test \"{}\"", test.name).unwrap();
+        self.indented().write_block(out, &test.body);
+    }
+
+    fn write_param_inline(&self, out: &mut String, param: &Param) {
+        let name = self.interner.resolve(param.name);
+        write!(out, "({}: ", name).unwrap();
+        self.write_type_inline(out, &param.ty);
+        out.push(')');
+    }
+
+    fn write_type_inline(&self, out: &mut String, ty: &TypeExpr) {
+        match ty {
+            TypeExpr::Primitive(p) => {
+                let s = match p {
+                    PrimitiveType::I32 => "i32",
+                    PrimitiveType::I64 => "i64",
+                    PrimitiveType::F64 => "f64",
+                    PrimitiveType::Bool => "bool",
+                    PrimitiveType::String => "string",
+                };
+                out.push_str(s);
+            }
+            TypeExpr::Named(sym) => {
+                let name = self.interner.resolve(*sym);
+                out.push_str(name);
+            }
+        }
+    }
+
+    fn write_block(&self, out: &mut String, block: &Block) {
+        for stmt in &block.stmts {
+            self.write_stmt(out, stmt);
+        }
+    }
+
+    fn write_stmt(&self, out: &mut String, stmt: &Stmt) {
+        match stmt {
+            Stmt::Let(l) => self.write_let(out, l),
+            Stmt::Expr(e) => self.write_expr_stmt(out, &e.expr),
+            Stmt::Return(r) => {
+                self.write_indent(out);
+                out.push_str("Return\n");
+                if let Some(val) = &r.value {
+                    self.indented().write_expr(out, val);
+                }
+            }
+            Stmt::While(w) => {
+                self.write_indent(out);
+                out.push_str("While\n");
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("condition:\n");
+                inner.indented().write_expr(out, &w.condition);
+                inner.write_indent(out);
+                out.push_str("body:\n");
+                inner.indented().write_block(out, &w.body);
+            }
+            Stmt::If(i) => {
+                self.write_indent(out);
+                out.push_str("If\n");
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("condition:\n");
+                inner.indented().write_expr(out, &i.condition);
+                inner.write_indent(out);
+                out.push_str("then:\n");
+                inner.indented().write_block(out, &i.then_branch);
+                if let Some(else_branch) = &i.else_branch {
+                    inner.write_indent(out);
+                    out.push_str("else:\n");
+                    inner.indented().write_block(out, else_branch);
+                }
+            }
+            Stmt::Break(_) => {
+                self.write_indent(out);
+                out.push_str("Break\n");
+            }
+        }
+    }
+
+    fn write_let(&self, out: &mut String, l: &LetStmt) {
+        self.write_indent(out);
+        let name = self.interner.resolve(l.name);
+        if l.mutable {
+            writeln!(out, "LetMut \"{}\"", name).unwrap();
+        } else {
+            writeln!(out, "Let \"{}\"", name).unwrap();
+        }
+        let inner = self.indented();
+        if let Some(ty) = &l.ty {
+            inner.write_indent(out);
+            write!(out, "type: ").unwrap();
+            inner.write_type_inline(out, ty);
+            out.push('\n');
+        }
+        inner.write_indent(out);
+        out.push_str("init:\n");
+        inner.indented().write_expr(out, &l.init);
+    }
+
+    fn write_expr_stmt(&self, out: &mut String, expr: &Expr) {
+        self.write_expr(out, expr);
+    }
+
+    fn write_expr(&self, out: &mut String, expr: &Expr) {
+        match &expr.kind {
+            ExprKind::IntLiteral(n) => {
+                self.write_indent(out);
+                writeln!(out, "Int {}", n).unwrap();
+            }
+            ExprKind::FloatLiteral(n) => {
+                self.write_indent(out);
+                writeln!(out, "Float {}", n).unwrap();
+            }
+            ExprKind::BoolLiteral(b) => {
+                self.write_indent(out);
+                writeln!(out, "Bool {}", b).unwrap();
+            }
+            ExprKind::StringLiteral(s) => {
+                self.write_indent(out);
+                writeln!(out, "String {:?}", s).unwrap();
+            }
+            ExprKind::InterpolatedString(parts) => {
+                self.write_indent(out);
+                out.push_str("InterpolatedString\n");
+                let inner = self.indented();
+                for part in parts {
+                    match part {
+                        StringPart::Literal(s) => {
+                            inner.write_indent(out);
+                            writeln!(out, "Literal {:?}", s).unwrap();
+                        }
+                        StringPart::Expr(e) => {
+                            inner.write_indent(out);
+                            out.push_str("Expr:\n");
+                            inner.indented().write_expr(out, e);
+                        }
+                    }
+                }
+            }
+            ExprKind::Identifier(sym) => {
+                self.write_indent(out);
+                let name = self.interner.resolve(*sym);
+                writeln!(out, "Ident \"{}\"", name).unwrap();
+            }
+            ExprKind::Binary(b) => {
+                self.write_indent(out);
+                let op = match b.op {
+                    BinaryOp::Add => "Add",
+                    BinaryOp::Sub => "Sub",
+                    BinaryOp::Mul => "Mul",
+                    BinaryOp::Div => "Div",
+                    BinaryOp::Mod => "Mod",
+                    BinaryOp::Eq => "Eq",
+                    BinaryOp::Ne => "Ne",
+                    BinaryOp::Lt => "Lt",
+                    BinaryOp::Gt => "Gt",
+                    BinaryOp::Le => "Le",
+                    BinaryOp::Ge => "Ge",
+                    BinaryOp::And => "And",
+                    BinaryOp::Or => "Or",
+                };
+                writeln!(out, "BinaryOp {}", op).unwrap();
+                let inner = self.indented();
+                inner.write_expr(out, &b.left);
+                inner.write_expr(out, &b.right);
+            }
+            ExprKind::Unary(u) => {
+                self.write_indent(out);
+                let op = match u.op {
+                    UnaryOp::Neg => "Neg",
+                    UnaryOp::Not => "Not",
+                };
+                writeln!(out, "UnaryOp {}", op).unwrap();
+                self.indented().write_expr(out, &u.operand);
+            }
+            ExprKind::Call(c) => {
+                self.write_indent(out);
+                out.push_str("Call\n");
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("callee:\n");
+                inner.indented().write_expr(out, &c.callee);
+                if !c.args.is_empty() {
+                    inner.write_indent(out);
+                    out.push_str("args:\n");
+                    let args_inner = inner.indented();
+                    for arg in &c.args {
+                        args_inner.write_expr(out, arg);
+                    }
+                }
+            }
+            ExprKind::Assign(a) => {
+                self.write_indent(out);
+                let name = self.interner.resolve(a.target);
+                writeln!(out, "Assign \"{}\"", name).unwrap();
+                self.indented().write_expr(out, &a.value);
+            }
+            ExprKind::Grouping(inner) => {
+                // Skip grouping node, just print inner
+                self.write_expr(out, inner);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frontend::Parser;
+
+    #[test]
+    fn print_simple_function() {
+        let source = r#"
+func add(a: i64, b: i64) -> i64 {
+    return a + b
+}
+"#;
+        let mut parser = Parser::new(source);
+        let program = parser.parse_program().unwrap();
+        let interner = parser.into_interner();
+
+        let printer = AstPrinter::new(&interner, false);
+        let output = printer.print_program(&program);
+
+        assert!(output.contains("FunctionDecl \"add\""));
+        assert!(output.contains("params: [(a: i64), (b: i64)]"));
+        assert!(output.contains("return_type: i64"));
+        assert!(output.contains("BinaryOp Add"));
+    }
+
+    #[test]
+    fn print_filters_tests_when_no_tests() {
+        let source = r#"
+func main() { }
+
+tests {
+    test "example" {
+        assert(true)
+    }
+}
+"#;
+        let mut parser = Parser::new(source);
+        let program = parser.parse_program().unwrap();
+        let interner = parser.into_interner();
+
+        let with_tests = AstPrinter::new(&interner, false).print_program(&program);
+        let without_tests = AstPrinter::new(&interner, true).print_program(&program);
+
+        assert!(with_tests.contains("Tests"));
+        assert!(!without_tests.contains("Tests"));
+    }
+}
