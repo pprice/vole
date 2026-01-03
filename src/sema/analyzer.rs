@@ -87,11 +87,8 @@ impl Analyzer {
         for decl in &program.declarations {
             if let Decl::Let(let_stmt) = decl {
                 let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t));
-                let init_type = self.check_expr_expecting(
-                    &let_stmt.init,
-                    declared_type.as_ref(),
-                    interner,
-                )?;
+                let init_type =
+                    self.check_expr_expecting(&let_stmt.init, declared_type.as_ref(), interner)?;
 
                 let var_type = declared_type.unwrap_or(init_type.clone());
 
@@ -214,11 +211,8 @@ impl Analyzer {
         match stmt {
             Stmt::Let(let_stmt) => {
                 let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t));
-                let init_type = self.check_expr_expecting(
-                    &let_stmt.init,
-                    declared_type.as_ref(),
-                    interner,
-                )?;
+                let init_type =
+                    self.check_expr_expecting(&let_stmt.init, declared_type.as_ref(), interner)?;
 
                 let var_type = declared_type.unwrap_or(init_type);
 
@@ -316,52 +310,54 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
         match &expr.kind {
-            ExprKind::IntLiteral(value) => {
-                match expected {
-                    Some(ty) if Self::literal_fits(*value, ty) => Ok(ty.clone()),
-                    Some(ty) => {
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: ty.name().to_string(),
-                                found: "integer literal".to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                        Ok(ty.clone())
-                    }
-                    None => Ok(Type::I64),
+            ExprKind::IntLiteral(value) => match expected {
+                Some(ty) if Self::literal_fits(*value, ty) => Ok(ty.clone()),
+                Some(ty) => {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: ty.name().to_string(),
+                            found: "integer literal".to_string(),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    Ok(ty.clone())
                 }
-            }
-            ExprKind::FloatLiteral(_) => {
-                match expected {
-                    Some(ty) if ty == &Type::F64 => Ok(Type::F64),
-                    Some(ty) if ty.is_numeric() => Ok(ty.clone()),
-                    Some(ty) => {
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: ty.name().to_string(),
-                                found: "f64".to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                        Ok(Type::F64)
-                    }
-                    None => Ok(Type::F64),
+                None => Ok(Type::I64),
+            },
+            ExprKind::FloatLiteral(_) => match expected {
+                Some(ty) if ty == &Type::F64 => Ok(Type::F64),
+                Some(ty) if ty.is_numeric() => Ok(ty.clone()),
+                Some(ty) => {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: ty.name().to_string(),
+                            found: "f64".to_string(),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    Ok(Type::F64)
                 }
-            }
+                None => Ok(Type::F64),
+            },
             ExprKind::Binary(bin) => {
                 match bin.op {
                     // Arithmetic ops: propagate expected type to both operands
-                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                    BinaryOp::Add
+                    | BinaryOp::Sub
+                    | BinaryOp::Mul
+                    | BinaryOp::Div
+                    | BinaryOp::Mod => {
                         let left_ty = self.check_expr_expecting(&bin.left, expected, interner)?;
                         let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
 
                         if left_ty.is_numeric() && right_ty.is_numeric() {
                             // If we have an expected type and both sides match, use it
                             if let Some(exp) = expected {
-                                if self.types_compatible(&left_ty, exp) && self.types_compatible(&right_ty, exp) {
+                                if self.types_compatible(&left_ty, exp)
+                                    && self.types_compatible(&right_ty, exp)
+                                {
                                     return Ok(exp.clone());
                                 }
                             }
@@ -386,15 +382,22 @@ impl Analyzer {
                         }
                     }
                     // Comparison ops: infer left, check right against left
-                    BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
+                    BinaryOp::Eq
+                    | BinaryOp::Ne
+                    | BinaryOp::Lt
+                    | BinaryOp::Gt
+                    | BinaryOp::Le
+                    | BinaryOp::Ge => {
                         let left_ty = self.check_expr_expecting(&bin.left, None, interner)?;
                         self.check_expr_expecting(&bin.right, Some(&left_ty), interner)?;
                         Ok(Type::Bool)
                     }
                     // Logical ops: both sides must be bool
                     BinaryOp::And | BinaryOp::Or => {
-                        let left_ty = self.check_expr_expecting(&bin.left, Some(&Type::Bool), interner)?;
-                        let right_ty = self.check_expr_expecting(&bin.right, Some(&Type::Bool), interner)?;
+                        let left_ty =
+                            self.check_expr_expecting(&bin.left, Some(&Type::Bool), interner)?;
+                        let right_ty =
+                            self.check_expr_expecting(&bin.right, Some(&Type::Bool), interner)?;
                         if left_ty == Type::Bool && right_ty == Type::Bool {
                             Ok(Type::Bool)
                         } else {
@@ -410,13 +413,19 @@ impl Analyzer {
                         }
                     }
                     // Bitwise ops: both sides must be integer
-                    BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl | BinaryOp::Shr => {
+                    BinaryOp::BitAnd
+                    | BinaryOp::BitOr
+                    | BinaryOp::BitXor
+                    | BinaryOp::Shl
+                    | BinaryOp::Shr => {
                         let left_ty = self.check_expr_expecting(&bin.left, expected, interner)?;
                         let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
 
                         if left_ty.is_integer() && right_ty.is_integer() {
                             if let Some(exp) = expected {
-                                if self.types_compatible(&left_ty, exp) && self.types_compatible(&right_ty, exp) {
+                                if self.types_compatible(&left_ty, exp)
+                                    && self.types_compatible(&right_ty, exp)
+                                {
                                     return Ok(exp.clone());
                                 }
                             }
@@ -443,7 +452,8 @@ impl Analyzer {
                 match un.op {
                     UnaryOp::Neg => {
                         // Propagate expected type through negation
-                        let operand_ty = self.check_expr_expecting(&un.operand, expected, interner)?;
+                        let operand_ty =
+                            self.check_expr_expecting(&un.operand, expected, interner)?;
                         if operand_ty.is_numeric() {
                             Ok(operand_ty)
                         } else {
@@ -460,7 +470,8 @@ impl Analyzer {
                     }
                     UnaryOp::Not => {
                         // Not always expects and returns bool
-                        let operand_ty = self.check_expr_expecting(&un.operand, Some(&Type::Bool), interner)?;
+                        let operand_ty =
+                            self.check_expr_expecting(&un.operand, Some(&Type::Bool), interner)?;
                         if operand_ty == Type::Bool {
                             Ok(Type::Bool)
                         } else {
@@ -477,7 +488,8 @@ impl Analyzer {
                     }
                     UnaryOp::BitNot => {
                         // Bitwise not: propagate expected type, requires integer
-                        let operand_ty = self.check_expr_expecting(&un.operand, expected, interner)?;
+                        let operand_ty =
+                            self.check_expr_expecting(&un.operand, expected, interner)?;
                         if operand_ty.is_integer() {
                             Ok(operand_ty)
                         } else {
@@ -591,7 +603,11 @@ impl Analyzer {
                             Ok(Type::Error)
                         }
                     }
-                    BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl | BinaryOp::Shr => {
+                    BinaryOp::BitAnd
+                    | BinaryOp::BitOr
+                    | BinaryOp::BitXor
+                    | BinaryOp::Shl
+                    | BinaryOp::Shr => {
                         if left_ty.is_integer() && right_ty.is_integer() {
                             if left_ty == Type::I64 || right_ty == Type::I64 {
                                 Ok(Type::I64)
