@@ -538,6 +538,83 @@ fn compile_expr(
             }
         }
         ExprKind::Binary(bin) => {
+            // Handle short-circuit evaluation for And/Or before evaluating both sides
+            match bin.op {
+                BinaryOp::And => {
+                    // Short-circuit AND: if left is false, return false without evaluating right
+                    let left = compile_expr(builder, &bin.left, variables, ctx)?;
+
+                    let then_block = builder.create_block();
+                    let else_block = builder.create_block();
+                    let merge_block = builder.create_block();
+                    builder.append_block_param(merge_block, types::I8);
+
+                    builder
+                        .ins()
+                        .brif(left.value, then_block, &[], else_block, &[]);
+
+                    // Then block: left was true, evaluate right side
+                    builder.switch_to_block(then_block);
+                    builder.seal_block(then_block);
+                    let right = compile_expr(builder, &bin.right, variables, ctx)?;
+                    builder.ins().jump(merge_block, &[right.value]);
+
+                    // Else block: left was false, short-circuit with false
+                    builder.switch_to_block(else_block);
+                    builder.seal_block(else_block);
+                    let false_val = builder.ins().iconst(types::I8, 0);
+                    builder.ins().jump(merge_block, &[false_val]);
+
+                    // Merge block
+                    builder.switch_to_block(merge_block);
+                    builder.seal_block(merge_block);
+                    let result = builder.block_params(merge_block)[0];
+
+                    return Ok(CompiledValue {
+                        value: result,
+                        ty: types::I8,
+                        is_string: false,
+                    });
+                }
+                BinaryOp::Or => {
+                    // Short-circuit OR: if left is true, return true without evaluating right
+                    let left = compile_expr(builder, &bin.left, variables, ctx)?;
+
+                    let then_block = builder.create_block();
+                    let else_block = builder.create_block();
+                    let merge_block = builder.create_block();
+                    builder.append_block_param(merge_block, types::I8);
+
+                    builder
+                        .ins()
+                        .brif(left.value, then_block, &[], else_block, &[]);
+
+                    // Then block: left was true, short-circuit with true
+                    builder.switch_to_block(then_block);
+                    builder.seal_block(then_block);
+                    let true_val = builder.ins().iconst(types::I8, 1);
+                    builder.ins().jump(merge_block, &[true_val]);
+
+                    // Else block: left was false, evaluate right side
+                    builder.switch_to_block(else_block);
+                    builder.seal_block(else_block);
+                    let right = compile_expr(builder, &bin.right, variables, ctx)?;
+                    builder.ins().jump(merge_block, &[right.value]);
+
+                    // Merge block
+                    builder.switch_to_block(merge_block);
+                    builder.seal_block(merge_block);
+                    let result = builder.block_params(merge_block)[0];
+
+                    return Ok(CompiledValue {
+                        value: result,
+                        ty: types::I8,
+                        is_string: false,
+                    });
+                }
+                _ => {} // Fall through to regular binary handling
+            }
+
             let left = compile_expr(builder, &bin.left, variables, ctx)?;
             let right = compile_expr(builder, &bin.right, variables, ctx)?;
 
@@ -648,6 +725,8 @@ fn compile_expr(
                             .icmp(IntCC::SignedGreaterThanOrEqual, left_val, right_val)
                     }
                 }
+                // And/Or are handled above with short-circuit evaluation
+                BinaryOp::And | BinaryOp::Or => unreachable!(),
             };
 
             // Comparison operators return I8 (bool)
@@ -658,6 +737,8 @@ fn compile_expr(
                 | BinaryOp::Gt
                 | BinaryOp::Le
                 | BinaryOp::Ge => types::I8,
+                // And/Or are handled above with early return
+                BinaryOp::And | BinaryOp::Or => unreachable!(),
                 _ => result_ty,
             };
 
