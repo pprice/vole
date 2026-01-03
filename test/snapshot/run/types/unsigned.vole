@@ -1,0 +1,23 @@
+func main() {
+    let a: u8 = 255
+    let b: u16 = 65535
+    let c: u32 = 100
+    let d: u64 = 1000
+
+    println(a)
+    println(b)
+    println(c)
+    println(d)
+
+    // Unsigned division
+    let x: u32 = 10
+    let y: u32 = 3
+    println(x / y)
+
+    // Unsigned comparison
+    let big: u64 = 1000
+    let small: u64 = 1
+    if big > small {
+        println("big is greater")
+    }
+}

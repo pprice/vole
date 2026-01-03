@@ -1,0 +1,3 @@
+func main() {
+    let x: i8 = 200
+}
