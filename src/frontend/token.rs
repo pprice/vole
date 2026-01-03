@@ -66,6 +66,8 @@ pub enum TokenType {
     RParen,
     LBrace,
     RBrace,
+    LBracket,  // [
+    RBracket,  // ]
     Comma,
     Colon,
     Dot,
@@ -135,6 +137,8 @@ impl TokenType {
             Self::RParen => ")",
             Self::LBrace => "{",
             Self::RBrace => "}",
+            Self::LBracket => "[",
+            Self::RBracket => "]",
             Self::Comma => ",",
             Self::Colon => ":",
             Self::Dot => ".",

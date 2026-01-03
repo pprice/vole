@@ -81,6 +81,8 @@ impl<'src> Lexer<'src> {
                 }
                 self.make_token(TokenType::RBrace)
             }
+            '[' => self.make_token(TokenType::LBracket),
+            ']' => self.make_token(TokenType::RBracket),
             ',' => self.make_token(TokenType::Comma),
             ':' => self.make_token(TokenType::Colon),
             '+' => self.make_token(TokenType::Plus),
