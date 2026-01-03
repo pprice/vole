@@ -541,8 +541,12 @@ fn resolve_type_expr(ty: &TypeExpr) -> Type {
 
 fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::Type {
     match ty {
-        Type::I32 => types::I32,
-        Type::I64 => types::I64,
+        Type::I8 | Type::U8 => types::I8,
+        Type::I16 | Type::U16 => types::I16,
+        Type::I32 | Type::U32 => types::I32,
+        Type::I64 | Type::U64 => types::I64,
+        Type::I128 => types::I128,
+        Type::F32 => types::F32,
         Type::F64 => types::F64,
         Type::Bool => types::I8,
         Type::String => pointer_type,
