@@ -559,4 +559,82 @@ tests {
     fn test_grouping() {
         assert_eq!(fmt("let x = (1 + 2) * 3"), "let x = (1 + 2) * 3\n");
     }
+
+    // === Idempotency tests ===
+
+    /// Format twice and ensure same result (idempotent)
+    fn assert_idempotent(source: &str) {
+        let first = format(source, CANONICAL).unwrap();
+        let second = format(&first.output, CANONICAL).unwrap();
+        assert_eq!(
+            first.output, second.output,
+            "Formatting is not idempotent.\nFirst:\n{}\nSecond:\n{}",
+            first.output, second.output
+        );
+        assert!(
+            !second.changed,
+            "Second format should report no changes"
+        );
+    }
+
+    #[test]
+    fn test_idempotent_let() {
+        assert_idempotent("let x = 1\n");
+        assert_idempotent("let mut x: i32 = 42\n");
+    }
+
+    #[test]
+    fn test_idempotent_function() {
+        assert_idempotent("func add(a: i32, b: i32) -> i32 {\n    return a + b\n}\n");
+    }
+
+    #[test]
+    fn test_idempotent_class() {
+        assert_idempotent("class Point {\n    x: i64,\n    y: i64,\n}\n");
+    }
+
+    #[test]
+    fn test_idempotent_record() {
+        assert_idempotent("record User {\n    id: i64,\n    name: string,\n}\n");
+    }
+
+    #[test]
+    fn test_idempotent_interface() {
+        assert_idempotent("interface Hashable {\n    func hash() -> i64\n}\n");
+    }
+
+    #[test]
+    fn test_idempotent_tests_block() {
+        assert_idempotent("tests {\n    test \"example\" {\n        assert(true)\n    }\n}\n");
+    }
+
+    #[test]
+    fn test_idempotent_complex() {
+        let source = r#"func process(name: string, count: i64) -> bool {
+    let result = name.length > count
+    if result {
+        println("yes")
+    } else {
+        println("no")
+    }
+    return result
+}
+"#;
+        assert_idempotent(source);
+    }
+
+    #[test]
+    fn test_idempotent_lambda() {
+        assert_idempotent("let f = (x: i32) => x * 2\n");
+    }
+
+    #[test]
+    fn test_idempotent_match() {
+        let source = r#"let x = match n {
+    1 => "one"
+    _ => "other"
+}
+"#;
+        assert_idempotent(source);
+    }
 }
