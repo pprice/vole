@@ -6,6 +6,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use std::collections::HashMap;
 
+use super::lambda::{CaptureBinding, build_capture_bindings, infer_lambda_return_type};
 use super::structs::{
     convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type,
     get_method_return_type, get_type_name_symbol,
@@ -2227,15 +2228,6 @@ fn compile_expr(
     }
 }
 
-/// Information about a captured variable for lambda compilation
-#[derive(Clone)]
-struct CaptureBinding {
-    /// Index in the closure's captures array
-    index: usize,
-    /// Vole type of the captured variable
-    vole_type: Type,
-}
-
 /// Compile a lambda expression to a function pointer or closure.
 ///
 /// # Pure Lambda Optimization
@@ -2270,131 +2262,6 @@ fn compile_lambda(
         compile_lambda_with_captures(builder, lambda, variables, ctx)
     } else {
         compile_pure_lambda(builder, lambda, ctx)
-    }
-}
-
-/// Infer the return type of a lambda expression body.
-/// This is used when no explicit return type is provided.
-fn infer_lambda_return_type(
-    body: &LambdaBody,
-    param_types: &[(Symbol, Type)],
-    ctx: &CompileCtx,
-) -> Type {
-    match body {
-        LambdaBody::Expr(expr) => infer_expr_type(expr, param_types, ctx),
-        LambdaBody::Block(_) => {
-            // Block bodies should use explicit return or default to void
-            // For now, default to i64 for backwards compatibility
-            Type::I64
-        }
-    }
-}
-
-/// Infer the type of an expression given parameter types as context.
-/// Returns I64 as fallback for unknown cases.
-fn infer_expr_type(expr: &Expr, param_types: &[(Symbol, Type)], ctx: &CompileCtx) -> Type {
-    match &expr.kind {
-        ExprKind::IntLiteral(_) => Type::I64, // Int literals compile to i64
-        ExprKind::FloatLiteral(_) => Type::F64,
-        ExprKind::BoolLiteral(_) => Type::Bool,
-        ExprKind::StringLiteral(_) => Type::String,
-        ExprKind::InterpolatedString(_) => Type::String,
-        ExprKind::Nil => Type::Nil,
-
-        ExprKind::Identifier(sym) => {
-            // Look up in parameters first
-            for (name, ty) in param_types {
-                if name == sym {
-                    return ty.clone();
-                }
-            }
-            // Look up in globals
-            for global in ctx.globals {
-                if global.name == *sym
-                    && let Some(type_expr) = &global.ty
-                {
-                    return resolve_type_expr(type_expr, ctx.type_aliases);
-                }
-            }
-            Type::I64 // Fallback
-        }
-
-        ExprKind::Binary(bin) => {
-            let left_ty = infer_expr_type(&bin.left, param_types, ctx);
-            let right_ty = infer_expr_type(&bin.right, param_types, ctx);
-
-            match bin.op {
-                // Comparison operators always return bool
-                BinaryOp::Eq
-                | BinaryOp::Ne
-                | BinaryOp::Lt
-                | BinaryOp::Le
-                | BinaryOp::Gt
-                | BinaryOp::Ge => Type::Bool,
-
-                // Logical operators return bool
-                BinaryOp::And | BinaryOp::Or => Type::Bool,
-
-                // Arithmetic: use the "wider" type or left type
-                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                    // If both are the same, use that type
-                    if left_ty == right_ty {
-                        left_ty
-                    } else {
-                        // Simple widening logic
-                        match (&left_ty, &right_ty) {
-                            (Type::I64, _) | (_, Type::I64) => Type::I64,
-                            (Type::F64, _) | (_, Type::F64) => Type::F64,
-                            (Type::I32, _) | (_, Type::I32) => Type::I32,
-                            _ => left_ty,
-                        }
-                    }
-                }
-
-                // Bitwise operators preserve type
-                BinaryOp::BitAnd
-                | BinaryOp::BitOr
-                | BinaryOp::BitXor
-                | BinaryOp::Shl
-                | BinaryOp::Shr => left_ty,
-            }
-        }
-
-        ExprKind::Unary(un) => infer_expr_type(&un.operand, param_types, ctx),
-
-        ExprKind::Call(call) => {
-            // Infer the callee type to get the return type
-            let callee_ty = infer_expr_type(&call.callee, param_types, ctx);
-            match callee_ty {
-                Type::Function(ft) => *ft.return_type,
-                _ => Type::I64, // Fallback if callee isn't a function type
-            }
-        }
-
-        ExprKind::Lambda(lambda) => {
-            // For nested lambdas, construct the function type
-            let lambda_params: Vec<Type> = lambda
-                .params
-                .iter()
-                .map(|p| {
-                    p.ty.as_ref()
-                        .map(|t| resolve_type_expr(t, ctx.type_aliases))
-                        .unwrap_or(Type::I64)
-                })
-                .collect();
-            let return_ty = lambda
-                .return_type
-                .as_ref()
-                .map(|t| resolve_type_expr(t, ctx.type_aliases))
-                .unwrap_or(Type::I64);
-            Type::Function(FunctionType {
-                params: lambda_params,
-                return_type: Box::new(return_ty),
-                is_closure: !lambda.captures.borrow().is_empty(),
-            })
-        }
-
-        _ => Type::I64, // Fallback for complex expressions
     }
 }
 
@@ -2602,20 +2469,7 @@ fn compile_lambda_with_captures(
     ctx.func_ids.insert(lambda_name, func_id);
 
     // Build capture bindings - maps capture name to index and type
-    let mut capture_bindings: HashMap<Symbol, CaptureBinding> = HashMap::new();
-    for (i, capture) in captures.iter().enumerate() {
-        let vole_type = variables
-            .get(&capture.name)
-            .map(|(_, ty)| ty.clone())
-            .unwrap_or(Type::I64);
-        capture_bindings.insert(
-            capture.name,
-            CaptureBinding {
-                index: i,
-                vole_type,
-            },
-        );
-    }
+    let capture_bindings = build_capture_bindings(&captures, variables);
 
     // Create a new codegen context for the lambda
     let mut lambda_ctx = ctx.module.make_context();
