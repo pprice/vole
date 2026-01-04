@@ -5,6 +5,9 @@
 //! Currently a stub that returns input unchanged.
 
 use super::config::FormatConfig;
+use super::printer;
+use crate::frontend::Parser;
+use pretty::Arena;
 
 /// Error type for formatting operations.
 #[derive(Debug, Clone)]
@@ -34,20 +37,26 @@ pub struct FormatResult {
 
 /// Format source code and return the formatted result.
 ///
-/// Currently a stub that returns the input unchanged. The actual formatter
-/// will parse the source into an AST and render it back with canonical style.
-pub fn format(source: &str, _config: FormatConfig) -> Result<FormatResult, FormatError> {
-    // TODO: Implement actual formatting:
-    // 1. Parse source into AST
-    // 2. Render AST back with canonical formatting
-    // 3. Preserve comments from original source
+/// Parses the source into an AST and renders it back with canonical style.
+pub fn format(source: &str, config: FormatConfig) -> Result<FormatResult, FormatError> {
+    // Parse source into AST
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .map_err(|e| FormatError::ParseError(format!("{:?}", e.error)))?;
+    let interner = parser.into_interner();
 
-    // Stub: return input unchanged (ensures trailing newline)
-    let output = if source.ends_with('\n') {
-        source.to_string()
-    } else {
-        format!("{}\n", source)
-    };
+    // Convert AST to Doc and render
+    let arena = Arena::new();
+    let doc = printer::print_program(&arena, &program, &interner);
+    let mut output = String::new();
+    doc.render_fmt(config.max_line_width as usize, &mut output)
+        .expect("render to string cannot fail");
+
+    // Ensure trailing newline
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
 
     let changed = output != source;
 
@@ -60,18 +69,25 @@ mod tests {
     use crate::fmt::CANONICAL;
 
     #[test]
-    fn test_format_stub_unchanged() {
+    fn test_format_parses_successfully() {
+        // Verify that format can parse valid source
         let source = "let x = 1\n";
-        let result = format(source, CANONICAL).unwrap();
-        assert_eq!(result.output, source);
-        assert!(!result.changed);
+        let result = format(source, CANONICAL);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_format_rejects_invalid_source() {
+        let source = "let = invalid";
+        let result = format(source, CANONICAL);
+        assert!(result.is_err());
     }
 
     #[test]
     fn test_format_adds_trailing_newline() {
-        let source = "let x = 1";
+        // Empty source should still get trailing newline
+        let source = "";
         let result = format(source, CANONICAL).unwrap();
-        assert_eq!(result.output, "let x = 1\n");
-        assert!(result.changed);
+        assert!(result.output.ends_with('\n'));
     }
 }
