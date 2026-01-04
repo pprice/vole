@@ -74,6 +74,19 @@ pub struct CompiledValue {
     pub vole_type: Type,
 }
 
+impl CompiledValue {
+    /// Create a void return value (zero i64)
+    #[allow(dead_code)] // Will be used in subsequent refactor tasks
+    pub fn void(builder: &mut FunctionBuilder) -> Self {
+        let zero = builder.ins().iconst(types::I64, 0);
+        Self {
+            value: zero,
+            ty: types::I64,
+            vole_type: Type::Void,
+        }
+    }
+}
+
 /// Metadata about a class or record type for code generation
 #[derive(Debug, Clone)]
 struct TypeMetadata {
