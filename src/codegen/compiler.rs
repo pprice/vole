@@ -8,11 +8,11 @@ use std::collections::HashMap;
 
 use crate::codegen::JitContext;
 use crate::frontend::{
-    self, AssignTarget, BinaryOp, Decl, Expr, ExprKind, FuncDecl, Interner, LambdaBody,
-    LambdaExpr, LetStmt, Pattern, Program, Stmt, StringPart, Symbol, TestCase, TestsDecl,
-    TypeExpr, UnaryOp,
+    self, AssignTarget, BinaryOp, ClassDecl, Decl, Expr, ExprKind, FuncDecl, Interner, LambdaBody,
+    LambdaExpr, LetStmt, Pattern, Program, RecordDecl, Stmt, StringPart, Symbol, TestCase,
+    TestsDecl, TypeExpr, UnaryOp,
 };
-use crate::sema::{FunctionType, Type};
+use crate::sema::{ClassType, FunctionType, RecordType, StructField, Type};
 
 /// Metadata about a compiled test
 #[derive(Debug, Clone)]
@@ -73,6 +73,22 @@ pub struct CompiledValue {
     pub vole_type: Type,
 }
 
+/// Metadata about a class or record type for code generation
+#[derive(Debug, Clone)]
+struct TypeMetadata {
+    /// Unique type ID for runtime
+    type_id: u32,
+    /// Map from field name to slot index
+    field_slots: HashMap<Symbol, usize>,
+    /// Whether this is a class (true) or record (false)
+    #[allow(dead_code)]
+    is_class: bool,
+    /// The Vole type (Class or Record)
+    vole_type: Type,
+    /// Method return types: method name -> return type
+    method_return_types: HashMap<Symbol, Type>,
+}
+
 /// Compiler for generating Cranelift IR from AST
 pub struct Compiler<'a> {
     jit: &'a mut JitContext,
@@ -85,6 +101,10 @@ pub struct Compiler<'a> {
     lambda_counter: usize,
     /// Type aliases from semantic analysis
     type_aliases: HashMap<Symbol, Type>,
+    /// Class and record metadata: name -> TypeMetadata
+    type_metadata: HashMap<Symbol, TypeMetadata>,
+    /// Next type ID to assign
+    next_type_id: u32,
 }
 
 impl<'a> Compiler<'a> {
@@ -102,6 +122,8 @@ impl<'a> Compiler<'a> {
             globals: Vec::new(),
             lambda_counter: 0,
             type_aliases,
+            type_metadata: HashMap::new(),
+            next_type_id: 0,
         }
     }
 
@@ -159,8 +181,11 @@ impl<'a> Compiler<'a> {
                     // Collect global variable declarations
                     self.globals.push(let_stmt.clone());
                 }
-                Decl::Class(_) | Decl::Record(_) => {
-                    // TODO: implement class/record declarations
+                Decl::Class(class) => {
+                    self.register_class(class);
+                }
+                Decl::Record(record) => {
+                    self.register_record(record);
                 }
             }
         }
@@ -182,8 +207,11 @@ impl<'a> Compiler<'a> {
                 Decl::Let(_) => {
                     // Globals are handled during identifier lookup
                 }
-                Decl::Class(_) | Decl::Record(_) => {
-                    // TODO: implement class/record declarations
+                Decl::Class(class) => {
+                    self.compile_class_methods(class)?;
+                }
+                Decl::Record(record) => {
+                    self.compile_record_methods(record)?;
                 }
             }
         }
@@ -205,6 +233,291 @@ impl<'a> Compiler<'a> {
         });
 
         self.jit.create_signature(&params, ret)
+    }
+
+    /// Create a method signature (with self as first parameter)
+    fn create_method_signature(&self, method: &FuncDecl) -> Signature {
+        // Methods have `self` as implicit first parameter (pointer to instance)
+        let mut params = vec![self.pointer_type];
+        for param in &method.params {
+            params.push(type_to_cranelift(
+                &resolve_type_expr(&param.ty, &self.type_aliases),
+                self.pointer_type,
+            ));
+        }
+
+        let ret = method.return_type.as_ref().map(|t| {
+            type_to_cranelift(&resolve_type_expr(t, &self.type_aliases), self.pointer_type)
+        });
+
+        self.jit.create_signature(&params, ret)
+    }
+
+    /// Register a class type and declare its methods
+    fn register_class(&mut self, class: &ClassDecl) {
+        let type_id = self.next_type_id;
+        self.next_type_id += 1;
+
+        // Build field slots map and StructField list
+        let mut field_slots = HashMap::new();
+        let mut struct_fields = Vec::new();
+        for (i, field) in class.fields.iter().enumerate() {
+            field_slots.insert(field.name, i);
+            struct_fields.push(StructField {
+                name: field.name,
+                ty: resolve_type_expr(&field.ty, &self.type_aliases),
+                slot: i,
+            });
+        }
+
+        // Create the Vole type
+        let vole_type = Type::Class(ClassType {
+            name: class.name,
+            fields: struct_fields,
+        });
+
+        // Collect method return types
+        let mut method_return_types = HashMap::new();
+        for method in &class.methods {
+            let return_type = method
+                .return_type
+                .as_ref()
+                .map(|t| resolve_type_expr(t, &self.type_aliases))
+                .unwrap_or(Type::Void);
+            method_return_types.insert(method.name, return_type);
+        }
+
+        self.type_metadata.insert(
+            class.name,
+            TypeMetadata {
+                type_id,
+                field_slots,
+                is_class: true,
+                vole_type,
+                method_return_types,
+            },
+        );
+
+        // Declare methods as functions: ClassName_methodName
+        let type_name = self.interner.resolve(class.name);
+        for method in &class.methods {
+            let method_name_str = self.interner.resolve(method.name);
+            let full_name = format!("{}_{}", type_name, method_name_str);
+            let sig = self.create_method_signature(method);
+            self.jit.declare_function(&full_name, &sig);
+        }
+    }
+
+    /// Register a record type and declare its methods
+    fn register_record(&mut self, record: &RecordDecl) {
+        let type_id = self.next_type_id;
+        self.next_type_id += 1;
+
+        // Build field slots map and StructField list
+        let mut field_slots = HashMap::new();
+        let mut struct_fields = Vec::new();
+        for (i, field) in record.fields.iter().enumerate() {
+            field_slots.insert(field.name, i);
+            struct_fields.push(StructField {
+                name: field.name,
+                ty: resolve_type_expr(&field.ty, &self.type_aliases),
+                slot: i,
+            });
+        }
+
+        // Create the Vole type
+        let vole_type = Type::Record(RecordType {
+            name: record.name,
+            fields: struct_fields,
+        });
+
+        // Collect method return types
+        let mut method_return_types = HashMap::new();
+        for method in &record.methods {
+            let return_type = method
+                .return_type
+                .as_ref()
+                .map(|t| resolve_type_expr(t, &self.type_aliases))
+                .unwrap_or(Type::Void);
+            method_return_types.insert(method.name, return_type);
+        }
+
+        self.type_metadata.insert(
+            record.name,
+            TypeMetadata {
+                type_id,
+                field_slots,
+                is_class: false,
+                vole_type,
+                method_return_types,
+            },
+        );
+
+        // Declare methods as functions: RecordName_methodName
+        let type_name = self.interner.resolve(record.name);
+        for method in &record.methods {
+            let method_name_str = self.interner.resolve(method.name);
+            let full_name = format!("{}_{}", type_name, method_name_str);
+            let sig = self.create_method_signature(method);
+            self.jit.declare_function(&full_name, &sig);
+        }
+    }
+
+    /// Compile methods for a class
+    fn compile_class_methods(&mut self, class: &ClassDecl) -> Result<(), String> {
+        let metadata = self
+            .type_metadata
+            .get(&class.name)
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "Internal error: class {} not registered",
+                    self.interner.resolve(class.name)
+                )
+            })?;
+
+        for method in &class.methods {
+            self.compile_method(method, class.name, &metadata)?;
+        }
+        Ok(())
+    }
+
+    /// Compile methods for a record
+    fn compile_record_methods(&mut self, record: &RecordDecl) -> Result<(), String> {
+        let metadata = self
+            .type_metadata
+            .get(&record.name)
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "Internal error: record {} not registered",
+                    self.interner.resolve(record.name)
+                )
+            })?;
+
+        for method in &record.methods {
+            self.compile_method(method, record.name, &metadata)?;
+        }
+        Ok(())
+    }
+
+    /// Compile a single method
+    fn compile_method(
+        &mut self,
+        method: &FuncDecl,
+        type_name: Symbol,
+        metadata: &TypeMetadata,
+    ) -> Result<(), String> {
+        let type_name_str = self.interner.resolve(type_name);
+        let method_name_str = self.interner.resolve(method.name);
+        let full_name = format!("{}_{}", type_name_str, method_name_str);
+
+        let func_id = *self
+            .jit
+            .func_ids
+            .get(&full_name)
+            .ok_or_else(|| format!("Internal error: method {} not declared", full_name))?;
+
+        // Create method signature (self + params)
+        let sig = self.create_method_signature(method);
+        self.jit.ctx.func.signature = sig.clone();
+
+        // Collect param types (not including self)
+        let param_types: Vec<types::Type> = method
+            .params
+            .iter()
+            .map(|p| {
+                type_to_cranelift(
+                    &resolve_type_expr(&p.ty, &self.type_aliases),
+                    self.pointer_type,
+                )
+            })
+            .collect();
+        let param_vole_types: Vec<Type> = method
+            .params
+            .iter()
+            .map(|p| resolve_type_expr(&p.ty, &self.type_aliases))
+            .collect();
+        let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+
+        // Get source file pointer before borrowing ctx.func
+        let source_file_ptr = self.source_file_ptr();
+
+        // Clone metadata for the closure
+        let self_vole_type = metadata.vole_type.clone();
+
+        // Create function builder
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+            let entry_block = builder.create_block();
+            builder.append_block_params_for_function_params(entry_block);
+            builder.switch_to_block(entry_block);
+
+            // Build variables map
+            let mut variables = HashMap::new();
+
+            // Get entry block params (self + user params)
+            let params = builder.block_params(entry_block).to_vec();
+
+            // Bind `self` as the first parameter
+            // Note: "self" should already be interned during parsing of method bodies
+            let self_sym = self
+                .interner
+                .lookup("self")
+                .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
+            let self_var = builder.declare_var(self.pointer_type);
+            builder.def_var(self_var, params[0]);
+            variables.insert(self_sym, (self_var, self_vole_type));
+
+            // Bind remaining parameters
+            for (((name, ty), vole_ty), val) in param_names
+                .iter()
+                .zip(param_types.iter())
+                .zip(param_vole_types.iter())
+                .zip(params[1..].iter())
+            {
+                let var = builder.declare_var(*ty);
+                builder.def_var(var, *val);
+                variables.insert(*name, (var, vole_ty.clone()));
+            }
+
+            // Compile method body
+            let mut cf_ctx = ControlFlowCtx::new();
+            let mut ctx = CompileCtx {
+                interner: self.interner,
+                pointer_type: self.pointer_type,
+                module: &mut self.jit.module,
+                func_ids: &mut self.jit.func_ids,
+                source_file_ptr,
+                globals: &self.globals,
+                lambda_counter: &mut self.lambda_counter,
+                type_aliases: &self.type_aliases,
+                type_metadata: &self.type_metadata,
+            };
+            let terminated = compile_block(
+                &mut builder,
+                &method.body,
+                &mut variables,
+                &mut cf_ctx,
+                &mut ctx,
+            )?;
+
+            // Add implicit return if no explicit return
+            if !terminated {
+                builder.ins().return_(&[]);
+            }
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        // Define the function
+        self.jit.define_function(func_id)?;
+        self.jit.clear();
+
+        Ok(())
     }
 
     fn compile_function(&mut self, func: &FuncDecl) -> Result<(), String> {
@@ -272,6 +585,7 @@ impl<'a> Compiler<'a> {
                 globals: &self.globals,
                 lambda_counter: &mut self.lambda_counter,
                 type_aliases: &self.type_aliases,
+                type_metadata: &self.type_metadata,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -336,6 +650,7 @@ impl<'a> Compiler<'a> {
                     globals: &self.globals,
                     lambda_counter: &mut self.lambda_counter,
                     type_aliases: &self.type_aliases,
+                    type_metadata: &self.type_metadata,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -483,6 +798,7 @@ impl<'a> Compiler<'a> {
 
             // Compile function body
             let mut cf_ctx = ControlFlowCtx::new();
+            let empty_type_metadata = HashMap::new();
             let mut ctx = CompileCtx {
                 interner: self.interner,
                 pointer_type: self.pointer_type,
@@ -492,6 +808,7 @@ impl<'a> Compiler<'a> {
                 globals: &[],
                 lambda_counter: &mut self.lambda_counter,
                 type_aliases: &self.type_aliases,
+                type_metadata: &empty_type_metadata,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -539,6 +856,7 @@ impl<'a> Compiler<'a> {
 
             // Compile test body
             let mut cf_ctx = ControlFlowCtx::new();
+            let empty_type_metadata = HashMap::new();
             let mut ctx = CompileCtx {
                 interner: self.interner,
                 pointer_type: self.pointer_type,
@@ -548,6 +866,7 @@ impl<'a> Compiler<'a> {
                 globals: &[],
                 lambda_counter: &mut self.lambda_counter,
                 type_aliases: &self.type_aliases,
+                type_metadata: &empty_type_metadata,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -748,6 +1067,8 @@ struct CompileCtx<'a> {
     lambda_counter: &'a mut usize,
     /// Type aliases from semantic analysis
     type_aliases: &'a HashMap<Symbol, Type>,
+    /// Class and record metadata for struct literals, field access, and method calls
+    type_metadata: &'a HashMap<Symbol, TypeMetadata>,
 }
 
 /// Returns true if a terminating statement (return/break) was compiled
@@ -1455,16 +1776,20 @@ fn compile_expr(
             })
         }
         ExprKind::Assign(assign) => {
-            let value = compile_expr(builder, &assign.value, variables, ctx)?;
             match &assign.target {
                 AssignTarget::Variable(sym) => {
+                    let value = compile_expr(builder, &assign.value, variables, ctx)?;
                     if let Some((var, var_type)) = variables.get(sym) {
                         // If variable is a union and value is not, wrap the value
                         let final_value = if matches!(var_type, Type::Union(_))
                             && !matches!(&value.vole_type, Type::Union(_))
                         {
-                            let wrapped =
-                                construct_union(builder, value.clone(), var_type, ctx.pointer_type)?;
+                            let wrapped = construct_union(
+                                builder,
+                                value.clone(),
+                                var_type,
+                                ctx.pointer_type,
+                            )?;
                             wrapped.value
                         } else {
                             value.value
@@ -1478,11 +1803,11 @@ fn compile_expr(
                         ))
                     }
                 }
-                AssignTarget::Field { .. } => {
-                    Err("Field assignment codegen not implemented yet".to_string())
+                AssignTarget::Field { object, field, .. } => {
+                    compile_field_assign(builder, object, *field, &assign.value, variables, ctx)
                 }
-                AssignTarget::Index { .. } => {
-                    Err("Index assignment codegen not implemented yet".to_string())
+                AssignTarget::Index { object, index } => {
+                    compile_index_assign(builder, object, index, &assign.value, variables, ctx)
                 }
             }
         }
@@ -1902,20 +2227,11 @@ fn compile_expr(
             Err("type expressions cannot be used as runtime values".to_string())
         }
 
-        ExprKind::StructLiteral(_) => {
-            // TODO: implement struct literal compilation
-            Err("struct literals not yet implemented".to_string())
-        }
+        ExprKind::StructLiteral(sl) => compile_struct_literal(builder, sl, variables, ctx),
 
-        ExprKind::FieldAccess(_) => {
-            // TODO: implement field access compilation
-            Err("field access not yet implemented".to_string())
-        }
+        ExprKind::FieldAccess(fa) => compile_field_access(builder, fa, variables, ctx),
 
-        ExprKind::MethodCall(_) => {
-            // TODO: implement method call compilation
-            Err("method calls not yet implemented".to_string())
-        }
+        ExprKind::MethodCall(mc) => compile_method_call(builder, mc, variables, ctx),
     }
 }
 
@@ -2588,11 +2904,11 @@ fn compile_expr_with_captures(
                         ))
                     }
                 }
-                AssignTarget::Field { .. } => {
-                    Err("Field assignment codegen not implemented yet".to_string())
+                AssignTarget::Field { object, field, .. } => {
+                    compile_field_assign(builder, object, *field, &assign.value, variables, ctx)
                 }
-                AssignTarget::Index { .. } => {
-                    Err("Index assignment codegen not implemented yet".to_string())
+                AssignTarget::Index { object, index } => {
+                    compile_index_assign(builder, object, index, &assign.value, variables, ctx)
                 }
             }
         }
@@ -2925,8 +3241,55 @@ fn compile_compound_assign(
 
             Ok(result)
         }
-        AssignTarget::Field { .. } => {
-            Err("Field compound assignment codegen not implemented yet".to_string())
+        AssignTarget::Field { object, field, .. } => {
+            // 1. Compile object to get the instance pointer
+            let obj = compile_expr(builder, object, variables, ctx)?;
+
+            // 2. Get field slot and type from the object's type
+            let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, *field, ctx)?;
+
+            // 3. Load current field value
+            let get_field_id = ctx
+                .func_ids
+                .get("vole_instance_get_field")
+                .ok_or_else(|| "vole_instance_get_field not found".to_string())?;
+            let get_field_ref = ctx.module.declare_func_in_func(*get_field_id, builder.func);
+            let slot_val = builder.ins().iconst(types::I32, slot as i64);
+            let call = builder.ins().call(get_field_ref, &[obj.value, slot_val]);
+            let current_raw = builder.inst_results(call)[0];
+
+            // Convert value based on field type
+            let (current_val, cranelift_ty) =
+                convert_field_value(builder, current_raw, &field_type);
+
+            let current = CompiledValue {
+                value: current_val,
+                ty: cranelift_ty,
+                vole_type: field_type.clone(),
+            };
+
+            // 4. Compile RHS value
+            let rhs = compile_expr(builder, &compound.value, variables, ctx)?;
+
+            // 5. Apply the binary operation
+            let binary_op = compound.op.to_binary_op();
+            let result = compile_binary_op(builder, current, rhs, binary_op, ctx)?;
+
+            // 6. Store back to field
+            let set_field_id = ctx
+                .func_ids
+                .get("vole_instance_set_field")
+                .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
+            let set_field_ref = ctx.module.declare_func_in_func(*set_field_id, builder.func);
+
+            // Convert result to i64 for storage
+            let store_value = convert_to_i64_for_storage(builder, &result);
+
+            builder
+                .ins()
+                .call(set_field_ref, &[obj.value, slot_val, store_value]);
+
+            Ok(result)
         }
     }
 }
@@ -3559,6 +3922,380 @@ fn convert_to_type(
     }
 
     val.value
+}
+
+// ============================================================================
+// Struct literal, field access, and method call compilation
+// ============================================================================
+
+use crate::frontend::{FieldAccessExpr, MethodCallExpr, StructLiteralExpr};
+
+/// Compile a struct literal: Point { x: 10, y: 20 }
+fn compile_struct_literal(
+    builder: &mut FunctionBuilder,
+    sl: &StructLiteralExpr,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    // Look up class or record metadata
+    let metadata = ctx
+        .type_metadata
+        .get(&sl.name)
+        .ok_or_else(|| format!("Unknown type: {}", ctx.interner.resolve(sl.name)))?;
+
+    let type_id = metadata.type_id;
+    let field_count = metadata.field_slots.len() as u32;
+    let vole_type = metadata.vole_type.clone();
+    let field_slots = metadata.field_slots.clone();
+
+    // Call vole_instance_new(type_id, field_count, TYPE_INSTANCE)
+    let new_func_id = ctx
+        .func_ids
+        .get("vole_instance_new")
+        .ok_or_else(|| "vole_instance_new not found".to_string())?;
+    let new_func_ref = ctx.module.declare_func_in_func(*new_func_id, builder.func);
+
+    let type_id_val = builder.ins().iconst(types::I32, type_id as i64);
+    let field_count_val = builder.ins().iconst(types::I32, field_count as i64);
+    let runtime_type = builder.ins().iconst(types::I32, 7); // TYPE_INSTANCE
+
+    let call = builder
+        .ins()
+        .call(new_func_ref, &[type_id_val, field_count_val, runtime_type]);
+    let instance_ptr = builder.inst_results(call)[0];
+
+    // Initialize each field
+    let set_func_id = ctx
+        .func_ids
+        .get("vole_instance_set_field")
+        .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
+    let set_func_ref = ctx.module.declare_func_in_func(*set_func_id, builder.func);
+
+    for init in &sl.fields {
+        let slot = *field_slots.get(&init.name).ok_or_else(|| {
+            format!(
+                "Unknown field: {} in type {}",
+                ctx.interner.resolve(init.name),
+                ctx.interner.resolve(sl.name)
+            )
+        })?;
+
+        let value = compile_expr(builder, &init.value, variables, ctx)?;
+        let slot_val = builder.ins().iconst(types::I32, slot as i64);
+
+        // Convert value to i64 for storage
+        let store_value = convert_to_i64_for_storage(builder, &value);
+
+        builder
+            .ins()
+            .call(set_func_ref, &[instance_ptr, slot_val, store_value]);
+    }
+
+    Ok(CompiledValue {
+        value: instance_ptr,
+        ty: ctx.pointer_type,
+        vole_type,
+    })
+}
+
+/// Compile field access: point.x
+fn compile_field_access(
+    builder: &mut FunctionBuilder,
+    fa: &FieldAccessExpr,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    let obj = compile_expr(builder, &fa.object, variables, ctx)?;
+
+    // Get slot and type from object's type
+    let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, fa.field, ctx)?;
+
+    let get_func_id = ctx
+        .func_ids
+        .get("vole_instance_get_field")
+        .ok_or_else(|| "vole_instance_get_field not found".to_string())?;
+    let get_func_ref = ctx.module.declare_func_in_func(*get_func_id, builder.func);
+
+    let slot_val = builder.ins().iconst(types::I32, slot as i64);
+    let call = builder.ins().call(get_func_ref, &[obj.value, slot_val]);
+    let result_raw = builder.inst_results(call)[0];
+
+    // Convert the raw i64 value to the appropriate type
+    let (result_val, cranelift_ty) = convert_field_value(builder, result_raw, &field_type);
+
+    Ok(CompiledValue {
+        value: result_val,
+        ty: cranelift_ty,
+        vole_type: field_type,
+    })
+}
+
+/// Compile field assignment: obj.field = value
+fn compile_field_assign(
+    builder: &mut FunctionBuilder,
+    object: &Expr,
+    field: Symbol,
+    value_expr: &Expr,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    let obj = compile_expr(builder, object, variables, ctx)?;
+    let value = compile_expr(builder, value_expr, variables, ctx)?;
+
+    // Get slot from object's type
+    let (slot, _field_type) = get_field_slot_and_type(&obj.vole_type, field, ctx)?;
+
+    let set_func_id = ctx
+        .func_ids
+        .get("vole_instance_set_field")
+        .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
+    let set_func_ref = ctx.module.declare_func_in_func(*set_func_id, builder.func);
+
+    let slot_val = builder.ins().iconst(types::I32, slot as i64);
+
+    // Convert value to i64 for storage
+    let store_value = convert_to_i64_for_storage(builder, &value);
+
+    builder
+        .ins()
+        .call(set_func_ref, &[obj.value, slot_val, store_value]);
+
+    Ok(value)
+}
+
+/// Compile index assignment: arr[i] = value
+fn compile_index_assign(
+    builder: &mut FunctionBuilder,
+    object: &Expr,
+    index: &Expr,
+    value_expr: &Expr,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    let arr = compile_expr(builder, object, variables, ctx)?;
+    let idx = compile_expr(builder, index, variables, ctx)?;
+    let value = compile_expr(builder, value_expr, variables, ctx)?;
+
+    // Get element type from array type
+    let elem_type = match &arr.vole_type {
+        Type::Array(elem) => elem.as_ref().clone(),
+        _ => Type::I64,
+    };
+
+    // Call vole_array_set(arr, index, tag, value)
+    let array_set_id = ctx
+        .func_ids
+        .get("vole_array_set")
+        .ok_or_else(|| "vole_array_set not found".to_string())?;
+    let array_set_ref = ctx.module.declare_func_in_func(*array_set_id, builder.func);
+
+    // Convert value to i64 for storage
+    let store_value = convert_to_i64_for_storage(builder, &value);
+
+    // Determine tag based on type
+    let tag = match &elem_type {
+        Type::I64 | Type::I32 => 2i64, // TYPE_I64
+        Type::F64 => 3i64,             // TYPE_F64
+        Type::Bool => 4i64,            // TYPE_BOOL
+        Type::String => 1i64,          // TYPE_STRING
+        Type::Array(_) => 5i64,        // TYPE_ARRAY
+        _ => 2i64,                     // default to I64
+    };
+    let tag_val = builder.ins().iconst(types::I64, tag);
+
+    builder
+        .ins()
+        .call(array_set_ref, &[arr.value, idx.value, tag_val, store_value]);
+
+    Ok(value)
+}
+
+/// Compile a method call: point.distance()
+fn compile_method_call(
+    builder: &mut FunctionBuilder,
+    mc: &MethodCallExpr,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    let obj = compile_expr(builder, &mc.object, variables, ctx)?;
+
+    // Get the type name from the object's vole_type
+    let type_name = get_type_name_symbol(&obj.vole_type)?;
+
+    // Build the method function name: TypeName_methodName
+    let type_name_str = ctx.interner.resolve(type_name);
+    let method_name_str = ctx.interner.resolve(mc.method);
+    let full_name = format!("{}_{}", type_name_str, method_name_str);
+
+    let method_func_id = ctx
+        .func_ids
+        .get(&full_name)
+        .ok_or_else(|| format!("Unknown method: {}", full_name))?;
+    let method_func_ref = ctx
+        .module
+        .declare_func_in_func(*method_func_id, builder.func);
+
+    // Args: self first, then user args
+    let mut args = vec![obj.value];
+    for arg in &mc.args {
+        let compiled = compile_expr(builder, arg, variables, ctx)?;
+        args.push(compiled.value);
+    }
+
+    let call = builder.ins().call(method_func_ref, &args);
+    let results = builder.inst_results(call);
+
+    // Get return type from method signature
+    let return_type = get_method_return_type(&obj.vole_type, mc.method, ctx)?;
+
+    if results.is_empty() {
+        Ok(CompiledValue {
+            value: builder.ins().iconst(types::I64, 0),
+            ty: types::I64,
+            vole_type: Type::Void,
+        })
+    } else {
+        Ok(CompiledValue {
+            value: results[0],
+            ty: type_to_cranelift(&return_type, ctx.pointer_type),
+            vole_type: return_type,
+        })
+    }
+}
+
+/// Get field slot and type from a class/record type
+fn get_field_slot_and_type(
+    vole_type: &Type,
+    field: Symbol,
+    ctx: &CompileCtx,
+) -> Result<(usize, Type), String> {
+    match vole_type {
+        Type::Class(class_type) => {
+            for sf in &class_type.fields {
+                if sf.name == field {
+                    return Ok((sf.slot, sf.ty.clone()));
+                }
+            }
+            Err(format!(
+                "Field {} not found in class",
+                ctx.interner.resolve(field)
+            ))
+        }
+        Type::Record(record_type) => {
+            for sf in &record_type.fields {
+                if sf.name == field {
+                    return Ok((sf.slot, sf.ty.clone()));
+                }
+            }
+            Err(format!(
+                "Field {} not found in record",
+                ctx.interner.resolve(field)
+            ))
+        }
+        _ => Err(format!(
+            "Cannot access field {} on non-class/record type {:?}",
+            ctx.interner.resolve(field),
+            vole_type
+        )),
+    }
+}
+
+/// Get the type name symbol from a class/record type
+fn get_type_name_symbol(vole_type: &Type) -> Result<Symbol, String> {
+    match vole_type {
+        Type::Class(class_type) => Ok(class_type.name),
+        Type::Record(record_type) => Ok(record_type.name),
+        _ => Err(format!(
+            "Cannot get type name from non-class/record type {:?}",
+            vole_type
+        )),
+    }
+}
+
+/// Get the return type of a method
+fn get_method_return_type(
+    vole_type: &Type,
+    method: Symbol,
+    ctx: &CompileCtx,
+) -> Result<Type, String> {
+    let type_name = get_type_name_symbol(vole_type)?;
+    let metadata = ctx
+        .type_metadata
+        .get(&type_name)
+        .ok_or_else(|| "Type metadata not found".to_string())?;
+
+    // Look up the method return type from metadata
+    metadata
+        .method_return_types
+        .get(&method)
+        .cloned()
+        .ok_or_else(|| format!("Method {} not found in type", ctx.interner.resolve(method)))
+}
+
+/// Convert a raw i64 field value to the appropriate Cranelift type
+fn convert_field_value(
+    builder: &mut FunctionBuilder,
+    raw_value: cranelift_codegen::ir::Value,
+    field_type: &Type,
+) -> (cranelift_codegen::ir::Value, types::Type) {
+    match field_type {
+        Type::F64 => {
+            let fval = builder
+                .ins()
+                .bitcast(types::F64, MemFlags::new(), raw_value);
+            (fval, types::F64)
+        }
+        Type::F32 => {
+            // Truncate to i32 first, then bitcast
+            let i32_val = builder.ins().ireduce(types::I32, raw_value);
+            let fval = builder.ins().bitcast(types::F32, MemFlags::new(), i32_val);
+            (fval, types::F32)
+        }
+        Type::Bool => {
+            let bval = builder.ins().ireduce(types::I8, raw_value);
+            (bval, types::I8)
+        }
+        Type::I8 | Type::U8 => {
+            let val = builder.ins().ireduce(types::I8, raw_value);
+            (val, types::I8)
+        }
+        Type::I16 | Type::U16 => {
+            let val = builder.ins().ireduce(types::I16, raw_value);
+            (val, types::I16)
+        }
+        Type::I32 | Type::U32 => {
+            let val = builder.ins().ireduce(types::I32, raw_value);
+            (val, types::I32)
+        }
+        Type::String | Type::Array(_) | Type::Class(_) | Type::Record(_) => {
+            // Pointers stay as i64
+            (raw_value, types::I64)
+        }
+        _ => (raw_value, types::I64),
+    }
+}
+
+/// Convert a CompiledValue to i64 for storage in instance fields
+fn convert_to_i64_for_storage(
+    builder: &mut FunctionBuilder,
+    value: &CompiledValue,
+) -> cranelift_codegen::ir::Value {
+    match value.ty {
+        types::F64 => builder
+            .ins()
+            .bitcast(types::I64, MemFlags::new(), value.value),
+        types::F32 => {
+            let i32_val = builder
+                .ins()
+                .bitcast(types::I32, MemFlags::new(), value.value);
+            builder.ins().uextend(types::I64, i32_val)
+        }
+        types::I8 => builder.ins().uextend(types::I64, value.value),
+        types::I16 => builder.ins().uextend(types::I64, value.value),
+        types::I32 => builder.ins().uextend(types::I64, value.value),
+        types::I64 => value.value,
+        _ => value.value,
+    }
 }
 
 #[cfg(test)]

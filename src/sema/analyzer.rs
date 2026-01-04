@@ -437,7 +437,9 @@ impl Analyzer {
 
         // Add 'self' to scope
         // Note: "self" should already be interned by the parser when it parses method bodies
-        let self_sym = interner.lookup("self").expect("'self' should be interned during parsing");
+        let self_sym = interner
+            .lookup("self")
+            .expect("'self' should be interned during parsing");
         let self_type = if let Some(class_type) = self.classes.get(&type_name) {
             Type::Class(class_type.clone())
         } else {
@@ -1408,8 +1410,7 @@ impl Analyzer {
 
                         match &obj_ty {
                             Type::Class(c) => {
-                                if let Some(field_def) =
-                                    c.fields.iter().find(|f| f.name == *field)
+                                if let Some(field_def) = c.fields.iter().find(|f| f.name == *field)
                                 {
                                     if !self.types_compatible(&value_ty, &field_def.ty) {
                                         self.add_error(
@@ -1599,8 +1600,7 @@ impl Analyzer {
 
                         match &obj_ty {
                             Type::Class(c) => {
-                                if let Some(field_def) =
-                                    c.fields.iter().find(|f| f.name == *field)
+                                if let Some(field_def) = c.fields.iter().find(|f| f.name == *field)
                                 {
                                     field_def.ty.clone()
                                 } else {
@@ -1947,9 +1947,13 @@ impl Analyzer {
 
                 // Return the appropriate type
                 if is_class {
-                    Ok(Type::Class(self.classes.get(&struct_lit.name).unwrap().clone()))
+                    Ok(Type::Class(
+                        self.classes.get(&struct_lit.name).unwrap().clone(),
+                    ))
                 } else {
-                    Ok(Type::Record(self.records.get(&struct_lit.name).unwrap().clone()))
+                    Ok(Type::Record(
+                        self.records.get(&struct_lit.name).unwrap().clone(),
+                    ))
                 }
             }
 

@@ -36,8 +36,9 @@ tests "classes" {
 
     test "field mutation" {
         let p = Point { x: 1, y: 2 }
-        p.x = 100
-        assert(p.x == 100)
+        let new_x: i32 = 100
+        p.x = new_x
+        assert(p.x == new_x)
         assert(p.y == 2)
     }
 
