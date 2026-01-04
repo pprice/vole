@@ -231,6 +231,29 @@ impl<'src> Parser<'src> {
     fn parse_base_type(&mut self) -> Result<TypeExpr, ParseError> {
         let token = self.current.clone();
         match token.ty {
+            TokenType::LParen => {
+                // Function type: (T, T) -> R
+                self.advance(); // consume '('
+
+                let mut param_types = Vec::new();
+                if !self.check(TokenType::RParen) {
+                    param_types.push(self.parse_type()?);
+                    while self.match_token(TokenType::Comma) {
+                        param_types.push(self.parse_type()?);
+                    }
+                }
+                self.consume(
+                    TokenType::RParen,
+                    "expected ')' after function parameter types",
+                )?;
+                self.consume(TokenType::Arrow, "expected '->' after function parameters")?;
+                let return_type = self.parse_type()?;
+
+                Ok(TypeExpr::Function {
+                    params: param_types,
+                    return_type: Box::new(return_type),
+                })
+            }
             TokenType::LBracket => {
                 self.advance(); // consume '['
                 let elem_type = self.parse_type()?;
@@ -810,11 +833,132 @@ impl<'src> Parser<'src> {
                 })
             }
             TokenType::LParen => {
-                self.advance();
+                let start_span = token.span;
+                self.advance(); // consume '('
+
+                // Case 1: () - empty parens, must be lambda
+                if self.check(TokenType::RParen) {
+                    // Zero-param lambda: () => body
+                    return self.lambda_expr(start_span);
+                }
+
+                // Case 2: Check if first token after '(' is an identifier
+                if self.check(TokenType::Identifier) {
+                    // Save the identifier token and consume it
+                    let ident_token = self.current.clone();
+                    self.advance();
+
+                    // Check what follows the identifier
+                    match self.current.ty {
+                        // (ident: ...) - type annotation means lambda
+                        TokenType::Colon => {
+                            // Definitely a lambda with typed parameter - parse all params
+                            return self.lambda_expr_after_first_ident(
+                                start_span,
+                                ident_token,
+                                true,
+                            );
+                        }
+                        // (ident, ...) - comma means multi-param lambda
+                        TokenType::Comma => {
+                            // Definitely a lambda with multiple params
+                            return self.lambda_expr_after_first_ident(
+                                start_span,
+                                ident_token,
+                                false,
+                            );
+                        }
+                        // (ident) - could be grouping or single-param lambda
+                        TokenType::RParen => {
+                            let ident_span = ident_token.span;
+                            // Consume the ')'
+                            self.advance();
+
+                            // Now check for => or -> to determine if lambda
+                            if self.check(TokenType::FatArrow) || self.check(TokenType::Arrow) {
+                                // It's a lambda: (x) => body or (x) -> T => body
+                                let name = self.interner.intern(&ident_token.lexeme);
+
+                                // Optional return type
+                                let return_type = if self.match_token(TokenType::Arrow) {
+                                    Some(self.parse_type()?)
+                                } else {
+                                    None
+                                };
+
+                                self.consume(
+                                    TokenType::FatArrow,
+                                    "expected '=>' after lambda parameters",
+                                )?;
+
+                                // Parse body - block or expression
+                                let body = if self.check(TokenType::LBrace) {
+                                    LambdaBody::Block(self.block()?)
+                                } else {
+                                    LambdaBody::Expr(Box::new(self.expression(0)?))
+                                };
+
+                                let end_span = match &body {
+                                    LambdaBody::Block(b) => b.span,
+                                    LambdaBody::Expr(e) => e.span,
+                                };
+
+                                return Ok(Expr {
+                                    kind: ExprKind::Lambda(Box::new(LambdaExpr {
+                                        params: vec![LambdaParam {
+                                            name,
+                                            ty: None,
+                                            span: ident_span,
+                                        }],
+                                        return_type,
+                                        body,
+                                        span: start_span.merge(end_span),
+                                        captures: std::cell::RefCell::new(Vec::new()),
+                                        has_side_effects: std::cell::Cell::new(false),
+                                    })),
+                                    span: start_span.merge(end_span),
+                                });
+                            } else {
+                                // It's grouping: (identifier)
+                                let name = self.interner.intern(&ident_token.lexeme);
+                                let inner_expr = Expr {
+                                    kind: ExprKind::Identifier(name),
+                                    span: ident_span,
+                                };
+                                let span = start_span.merge(ident_span);
+                                return Ok(Expr {
+                                    kind: ExprKind::Grouping(Box::new(inner_expr)),
+                                    span,
+                                });
+                            }
+                        }
+                        // Anything else after identifier means it's part of an expression
+                        // We already consumed the identifier, need to handle this
+                        _ => {
+                            // Build the identifier expression and continue parsing
+                            let name = self.interner.intern(&ident_token.lexeme);
+                            let left = Expr {
+                                kind: ExprKind::Identifier(name),
+                                span: ident_token.span,
+                            };
+                            // Parse the rest of the expression with the identifier as left side
+                            let expr = self.continue_expression(left, 0)?;
+                            let end_span = self.current.span;
+                            self.consume(TokenType::RParen, "expected ')' after expression")?;
+                            let span = start_span.merge(end_span);
+                            return Ok(Expr {
+                                kind: ExprKind::Grouping(Box::new(expr)),
+                                span,
+                            });
+                        }
+                    }
+                }
+
+                // Case 3: Expression that doesn't start with identifier (e.g., (1 + 2))
                 let expr = self.expression(0)?;
                 let end_span = self.current.span;
                 self.consume(TokenType::RParen, "expected ')' after expression")?;
-                let span = token.span.merge(end_span);
+                let span = start_span.merge(end_span);
                 Ok(Expr {
                     kind: ExprKind::Grouping(Box::new(expr)),
                     span,
@@ -893,6 +1037,292 @@ impl<'src> Parser<'src> {
             })),
             span: start_span.merge(end_span),
         })
+    }
+
+    /// Parse a lambda expression: (params) => body
+    fn lambda_expr(&mut self, start_span: Span) -> Result<Expr, ParseError> {
+        // We've already consumed '(' - parse parameters
+        let mut params = Vec::new();
+
+        if !self.check(TokenType::RParen) {
+            loop {
+                let param_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected parameter name")?;
+                let name = self.interner.intern(&param_token.lexeme);
+
+                let ty = if self.match_token(TokenType::Colon) {
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+
+                params.push(LambdaParam {
+                    name,
+                    ty,
+                    span: param_token.span,
+                });
+
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RParen, "expected ')' after lambda parameters")?;
+
+        // Optional return type
+        let return_type = if self.match_token(TokenType::Arrow) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        self.consume(TokenType::FatArrow, "expected '=>' after lambda parameters")?;
+
+        // Parse body - block or expression
+        let body = if self.check(TokenType::LBrace) {
+            LambdaBody::Block(self.block()?)
+        } else {
+            LambdaBody::Expr(Box::new(self.expression(0)?))
+        };
+
+        let end_span = match &body {
+            LambdaBody::Block(b) => b.span,
+            LambdaBody::Expr(e) => e.span,
+        };
+
+        Ok(Expr {
+            kind: ExprKind::Lambda(Box::new(LambdaExpr {
+                params,
+                return_type,
+                body,
+                span: start_span.merge(end_span),
+                captures: std::cell::RefCell::new(Vec::new()),
+                has_side_effects: std::cell::Cell::new(false),
+            })),
+            span: start_span.merge(end_span),
+        })
+    }
+
+    /// Parse a lambda expression when we've already consumed the first identifier
+    /// has_colon: true if current token is Colon (first param has type)
+    ///            false if current token is Comma (multiple untyped params)
+    fn lambda_expr_after_first_ident(
+        &mut self,
+        start_span: Span,
+        first_ident: Token,
+        has_colon: bool,
+    ) -> Result<Expr, ParseError> {
+        let mut params = Vec::new();
+
+        // Parse the first parameter's type if present
+        let first_name = self.interner.intern(&first_ident.lexeme);
+        let first_ty = if has_colon {
+            self.consume(TokenType::Colon, "expected ':'")
+                .expect("colon should be present");
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        params.push(LambdaParam {
+            name: first_name,
+            ty: first_ty,
+            span: first_ident.span,
+        });
+
+        // Parse remaining parameters if comma-separated
+        while self.match_token(TokenType::Comma) {
+            let param_token = self.current.clone();
+            self.consume(TokenType::Identifier, "expected parameter name")?;
+            let name = self.interner.intern(&param_token.lexeme);
+
+            let ty = if self.match_token(TokenType::Colon) {
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+
+            params.push(LambdaParam {
+                name,
+                ty,
+                span: param_token.span,
+            });
+        }
+
+        self.consume(TokenType::RParen, "expected ')' after lambda parameters")?;
+
+        // Optional return type
+        let return_type = if self.match_token(TokenType::Arrow) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        self.consume(TokenType::FatArrow, "expected '=>' after lambda parameters")?;
+
+        // Parse body - block or expression
+        let body = if self.check(TokenType::LBrace) {
+            LambdaBody::Block(self.block()?)
+        } else {
+            LambdaBody::Expr(Box::new(self.expression(0)?))
+        };
+
+        let end_span = match &body {
+            LambdaBody::Block(b) => b.span,
+            LambdaBody::Expr(e) => e.span,
+        };
+
+        Ok(Expr {
+            kind: ExprKind::Lambda(Box::new(LambdaExpr {
+                params,
+                return_type,
+                body,
+                span: start_span.merge(end_span),
+                captures: std::cell::RefCell::new(Vec::new()),
+                has_side_effects: std::cell::Cell::new(false),
+            })),
+            span: start_span.merge(end_span),
+        })
+    }
+
+    /// Continue parsing an expression after we've already parsed the prefix/left side
+    /// This is used when we've parsed an identifier and need to continue with binary ops, calls, etc.
+    fn continue_expression(&mut self, left: Expr, min_prec: u8) -> Result<Expr, ParseError> {
+        // First handle call/index (postfix)
+        let mut expr = self.continue_call(left)?;
+
+        // Then handle binary operators
+        while self.current.ty.precedence() > min_prec {
+            let op_token = self.current.clone();
+            let op = match op_token.ty {
+                TokenType::Plus => BinaryOp::Add,
+                TokenType::Minus => BinaryOp::Sub,
+                TokenType::Star => BinaryOp::Mul,
+                TokenType::Slash => BinaryOp::Div,
+                TokenType::Percent => BinaryOp::Mod,
+                TokenType::EqEq => BinaryOp::Eq,
+                TokenType::BangEq => BinaryOp::Ne,
+                TokenType::Lt => BinaryOp::Lt,
+                TokenType::Gt => BinaryOp::Gt,
+                TokenType::LtEq => BinaryOp::Le,
+                TokenType::GtEq => BinaryOp::Ge,
+                TokenType::AmpAmp => BinaryOp::And,
+                TokenType::PipePipe => BinaryOp::Or,
+                TokenType::Ampersand => BinaryOp::BitAnd,
+                TokenType::Pipe => BinaryOp::BitOr,
+                TokenType::Caret => BinaryOp::BitXor,
+                TokenType::LessLess => BinaryOp::Shl,
+                TokenType::GreaterGreater => BinaryOp::Shr,
+                TokenType::Eq => {
+                    // Assignment
+                    if let ExprKind::Identifier(sym) = expr.kind {
+                        self.advance();
+                        let value = self.expression(0)?;
+                        let span = expr.span.merge(value.span);
+                        return Ok(Expr {
+                            kind: ExprKind::Assign(Box::new(AssignExpr { target: sym, value })),
+                            span,
+                        });
+                    } else {
+                        return Err(ParseError::new(
+                            ParserError::UnexpectedToken {
+                                token: "invalid assignment target".to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        ));
+                    }
+                }
+                TokenType::QuestionQuestion => {
+                    // Null coalescing
+                    self.advance();
+                    let default = self.expression(1)?;
+                    let span = expr.span.merge(default.span);
+                    return Ok(Expr {
+                        kind: ExprKind::NullCoalesce(Box::new(NullCoalesceExpr {
+                            value: expr,
+                            default,
+                        })),
+                        span,
+                    });
+                }
+                TokenType::KwIs => {
+                    // Type test
+                    self.advance();
+                    let type_span_start = self.current.span;
+                    let type_expr = self.parse_type()?;
+                    let type_span = type_span_start.merge(self.previous.span);
+                    let span = expr.span.merge(type_span);
+                    return Ok(Expr {
+                        kind: ExprKind::Is(Box::new(IsExpr {
+                            value: expr,
+                            type_expr,
+                            type_span,
+                        })),
+                        span,
+                    });
+                }
+                _ => break,
+            };
+
+            let prec = op_token.ty.precedence();
+            self.advance();
+            let right = self.expression(prec)?;
+            let span = expr.span.merge(right.span);
+
+            expr = Expr {
+                kind: ExprKind::Binary(Box::new(BinaryExpr {
+                    left: expr,
+                    op,
+                    right,
+                })),
+                span,
+            };
+        }
+
+        // Check for range operators
+        if self.check(TokenType::DotDot) || self.check(TokenType::DotDotEqual) {
+            let inclusive = self.check(TokenType::DotDotEqual);
+            self.advance();
+            let right = self.expression(0)?;
+            let span = expr.span.merge(right.span);
+            return Ok(Expr {
+                kind: ExprKind::Range(Box::new(RangeExpr {
+                    start: expr,
+                    end: right,
+                    inclusive,
+                })),
+                span,
+            });
+        }
+
+        Ok(expr)
+    }
+
+    /// Continue parsing calls and indexes after we have the base expression
+    fn continue_call(&mut self, mut expr: Expr) -> Result<Expr, ParseError> {
+        loop {
+            if self.match_token(TokenType::LParen) {
+                expr = self.finish_call(expr)?;
+            } else if self.match_token(TokenType::LBracket) {
+                let index = self.expression(0)?;
+                let end_span = self.current.span;
+                self.consume(TokenType::RBracket, "expected ']' after index")?;
+
+                let span = expr.span.merge(end_span);
+                expr = Expr {
+                    kind: ExprKind::Index(Box::new(IndexExpr {
+                        object: expr,
+                        index,
+                    })),
+                    span,
+                };
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
     }
 
     /// Parse a single match arm
@@ -1776,6 +2206,150 @@ tests {
                 assert!(matches!(&is_expr.type_expr, TypeExpr::Union(v) if v.len() == 2));
             }
             _ => panic!("expected Is expression"),
+        }
+    }
+
+    #[test]
+    fn parse_function_type() {
+        let mut parser = Parser::new("let f: (i64, i64) -> i64 = x");
+        let result = parser.parse_program();
+        assert!(result.is_ok());
+        let program = result.unwrap();
+        if let Decl::Let(let_stmt) = &program.declarations[0] {
+            assert!(let_stmt.ty.is_some());
+            if let Some(TypeExpr::Function {
+                params,
+                return_type: _,
+            }) = &let_stmt.ty
+            {
+                assert_eq!(params.len(), 2);
+            } else {
+                panic!("expected function type");
+            }
+        } else {
+            panic!("expected let declaration");
+        }
+    }
+
+    #[test]
+    fn parse_lambda_no_params() {
+        let mut parser = Parser::new("let f = () => 42");
+        let result = parser.parse_program();
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let program = result.unwrap();
+        if let Decl::Let(let_stmt) = &program.declarations[0] {
+            if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
+                assert_eq!(lambda.params.len(), 0);
+            } else {
+                panic!("expected lambda expression");
+            }
+        } else {
+            panic!("expected let declaration");
+        }
+    }
+
+    #[test]
+    fn parse_lambda_one_param() {
+        let mut parser = Parser::new("let f = (x) => x");
+        let result = parser.parse_program();
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let program = result.unwrap();
+        if let Decl::Let(let_stmt) = &program.declarations[0] {
+            if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
+                assert_eq!(lambda.params.len(), 1);
+                assert!(lambda.params[0].ty.is_none());
+            } else {
+                panic!("expected lambda expression");
+            }
+        } else {
+            panic!("expected let declaration");
+        }
+    }
+
+    #[test]
+    fn parse_lambda_typed_param() {
+        let mut parser = Parser::new("let f = (x: i64) => x + 1");
+        let result = parser.parse_program();
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let program = result.unwrap();
+        if let Decl::Let(let_stmt) = &program.declarations[0] {
+            if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
+                assert_eq!(lambda.params.len(), 1);
+                assert!(lambda.params[0].ty.is_some());
+            } else {
+                panic!("expected lambda expression");
+            }
+        } else {
+            panic!("expected let declaration");
+        }
+    }
+
+    #[test]
+    fn parse_lambda_multiple_params() {
+        let mut parser = Parser::new("let f = (a: i64, b: i64) => a + b");
+        let result = parser.parse_program();
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let program = result.unwrap();
+        if let Decl::Let(let_stmt) = &program.declarations[0] {
+            if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
+                assert_eq!(lambda.params.len(), 2);
+            } else {
+                panic!("expected lambda expression");
+            }
+        } else {
+            panic!("expected let declaration");
+        }
+    }
+
+    #[test]
+    fn parse_lambda_block_body() {
+        let mut parser = Parser::new("let f = (x: i64) => { return x + 1 }");
+        let result = parser.parse_program();
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let program = result.unwrap();
+        if let Decl::Let(let_stmt) = &program.declarations[0] {
+            if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
+                assert!(matches!(lambda.body, LambdaBody::Block(_)));
+            } else {
+                panic!("expected lambda expression");
+            }
+        } else {
+            panic!("expected let declaration");
+        }
+    }
+
+    #[test]
+    fn parse_grouping_not_lambda() {
+        let mut parser = Parser::new("let x = (1 + 2)");
+        let result = parser.parse_program();
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let program = result.unwrap();
+        if let Decl::Let(let_stmt) = &program.declarations[0] {
+            assert!(
+                matches!(&let_stmt.init.kind, ExprKind::Grouping(_)),
+                "expected Grouping, got {:?}",
+                let_stmt.init.kind
+            );
+        } else {
+            panic!("expected let declaration");
+        }
+    }
+
+    #[test]
+    fn parse_grouping_ident() {
+        let mut parser = Parser::new("let x = (y)");
+        let result = parser.parse_program();
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let program = result.unwrap();
+        if let Decl::Let(let_stmt) = &program.declarations[0] {
+            // (y) without => should be grouping
+            assert!(
+                matches!(&let_stmt.init.kind, ExprKind::Grouping(_)),
+                "expected Grouping, got {:?}",
+                let_stmt.init.kind
+            );
+        } else {
+            panic!("expected let declaration");
         }
     }
 }

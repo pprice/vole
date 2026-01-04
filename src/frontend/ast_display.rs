@@ -170,6 +170,20 @@ impl<'a> AstPrinter<'a> {
             TypeExpr::Nil => {
                 out.push_str("nil");
             }
+            TypeExpr::Function {
+                params,
+                return_type,
+            } => {
+                out.push('(');
+                for (i, param) in params.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    self.write_type_inline(out, param);
+                }
+                out.push_str(") -> ");
+                self.write_type_inline(out, return_type);
+            }
         }
     }
 
@@ -456,6 +470,37 @@ impl<'a> AstPrinter<'a> {
                 out.push_str("type: ");
                 self.write_type_inline(out, &is_expr.type_expr);
                 out.push('\n');
+            }
+
+            ExprKind::Lambda(lambda) => {
+                self.write_indent(out);
+                writeln!(out, "Lambda").unwrap();
+                let inner = self.indented();
+                for (i, param) in lambda.params.iter().enumerate() {
+                    inner.write_indent(out);
+                    write!(out, "param[{}]: {}", i, self.interner.resolve(param.name)).unwrap();
+                    if let Some(ty) = &param.ty {
+                        out.push_str(": ");
+                        self.write_type_inline(out, ty);
+                    }
+                    out.push('\n');
+                }
+                if let Some(ret_ty) = &lambda.return_type {
+                    inner.write_indent(out);
+                    out.push_str("return_type: ");
+                    self.write_type_inline(out, ret_ty);
+                    out.push('\n');
+                }
+                inner.write_indent(out);
+                out.push_str("body:\n");
+                match &lambda.body {
+                    crate::frontend::LambdaBody::Expr(e) => {
+                        inner.indented().write_expr(out, e);
+                    }
+                    crate::frontend::LambdaBody::Block(block) => {
+                        inner.indented().write_block(out, block);
+                    }
+                }
             }
         }
     }

@@ -43,10 +43,22 @@ pub enum Type {
     Error,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct FunctionType {
     pub params: Vec<Type>,
     pub return_type: Box<Type>,
+    /// If true, this function is a closure (has captures) and needs
+    /// to be called with the closure pointer as the first argument.
+    /// The closure pointer is passed implicitly and is not included in `params`.
+    pub is_closure: bool,
+}
+
+impl PartialEq for FunctionType {
+    fn eq(&self, other: &Self) -> bool {
+        // is_closure is not part of type equality - a closure () -> i64 is
+        // compatible with a function type () -> i64 for type checking purposes
+        self.params == other.params && self.return_type == other.return_type
+    }
 }
 
 impl Type {
@@ -239,12 +251,36 @@ impl Type {
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Type::Function(ft) => {
+                write!(f, "(")?;
+                for (i, param) in ft.params.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", param)?;
+                }
+                write!(f, ") -> {}", ft.return_type)
+            }
             Type::Union(types) => {
-                let parts: Vec<_> = types.iter().map(|t| t.name()).collect();
+                let parts: Vec<String> = types.iter().map(|t| format!("{}", t)).collect();
                 write!(f, "{}", parts.join(" | "))
             }
+            Type::Array(elem) => write!(f, "[{}]", elem),
             _ => write!(f, "{}", self.name()),
         }
+    }
+}
+
+impl std::fmt::Display for FunctionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(")?;
+        for (i, param) in self.params.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", param)?;
+        }
+        write!(f, ") -> {}", self.return_type)
     }
 }
 

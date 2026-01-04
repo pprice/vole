@@ -6,7 +6,15 @@ use crate::sema::{
     FunctionType, Type,
     scope::{Scope, Variable},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// Information about a captured variable during lambda analysis
+#[derive(Debug, Clone)]
+struct CaptureInfo {
+    name: Symbol,
+    is_mutable: bool, // Was the captured variable declared with `let mut`
+    is_mutated: bool, // Does the lambda assign to this variable
+}
 
 /// A type error wrapping a miette-enabled SemanticError
 #[derive(Debug, Clone)]
@@ -30,6 +38,14 @@ pub struct Analyzer {
     errors: Vec<TypeError>,
     /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
     type_overrides: HashMap<Symbol, Type>,
+    /// Stack of lambda scopes for capture analysis. Each entry is a HashMap
+    /// mapping captured variable names to their capture info.
+    lambda_captures: Vec<HashMap<Symbol, CaptureInfo>>,
+    /// Stack of sets tracking variables defined locally in each lambda
+    /// (parameters and let bindings inside the lambda body)
+    lambda_locals: Vec<HashSet<Symbol>>,
+    /// Stack of side effect flags for currently analyzed lambdas
+    lambda_side_effects: Vec<bool>,
 }
 
 impl Analyzer {
@@ -41,12 +57,64 @@ impl Analyzer {
             current_function_return: None,
             errors: Vec::new(),
             type_overrides: HashMap::new(),
+            lambda_captures: Vec::new(),
+            lambda_locals: Vec::new(),
+            lambda_side_effects: Vec::new(),
         }
     }
 
     /// Helper to add a type error
     fn add_error(&mut self, error: SemanticError, span: Span) {
         self.errors.push(TypeError::new(error, span));
+    }
+
+    /// Check if we're currently inside a lambda
+    fn in_lambda(&self) -> bool {
+        !self.lambda_captures.is_empty()
+    }
+
+    /// Check if a symbol is a local variable in the current lambda
+    fn is_lambda_local(&self, sym: Symbol) -> bool {
+        if let Some(locals) = self.lambda_locals.last() {
+            locals.contains(&sym)
+        } else {
+            false
+        }
+    }
+
+    /// Add a local variable to the current lambda's locals set
+    fn add_lambda_local(&mut self, sym: Symbol) {
+        if let Some(locals) = self.lambda_locals.last_mut() {
+            locals.insert(sym);
+        }
+    }
+
+    /// Record a captured variable in the current lambda
+    fn record_capture(&mut self, sym: Symbol, is_mutable: bool) {
+        if let Some(captures) = self.lambda_captures.last_mut() {
+            // Only add if not already captured
+            captures.entry(sym).or_insert(CaptureInfo {
+                name: sym,
+                is_mutable,
+                is_mutated: false,
+            });
+        }
+    }
+
+    /// Mark a captured variable as mutated
+    fn mark_capture_mutated(&mut self, sym: Symbol) {
+        if let Some(captures) = self.lambda_captures.last_mut()
+            && let Some(info) = captures.get_mut(&sym)
+        {
+            info.is_mutated = true;
+        }
+    }
+
+    /// Mark the current lambda as having side effects
+    fn mark_lambda_has_side_effects(&mut self) {
+        if let Some(flag) = self.lambda_side_effects.last_mut() {
+            *flag = true;
+        }
     }
 
     /// Get variable type with flow-sensitive overrides
@@ -84,6 +152,7 @@ impl Analyzer {
                         FunctionType {
                             params,
                             return_type: Box::new(return_type),
+                            is_closure: false, // Named functions are never closures
                         },
                     );
                 }
@@ -164,6 +233,18 @@ impl Analyzer {
             TypeExpr::Union(variants) => {
                 let types: Vec<Type> = variants.iter().map(|t| self.resolve_type(t)).collect();
                 Type::normalize_union(types)
+            }
+            TypeExpr::Function {
+                params,
+                return_type,
+            } => {
+                let param_types: Vec<Type> = params.iter().map(|p| self.resolve_type(p)).collect();
+                let ret = self.resolve_type(return_type);
+                Type::Function(FunctionType {
+                    params: param_types,
+                    return_type: Box::new(ret),
+                    is_closure: false, // Type annotations don't know if it's a closure
+                })
             }
         }
     }
@@ -269,6 +350,9 @@ impl Analyzer {
                         mutable: let_stmt.mutable,
                     },
                 );
+
+                // Track as a local if inside a lambda
+                self.add_lambda_local(let_stmt.name);
             }
             Stmt::Expr(expr_stmt) => {
                 self.check_expr(&expr_stmt.expr, interner)?;
@@ -639,6 +723,17 @@ impl Analyzer {
                 // Index expressions just delegate to check_expr
                 self.check_expr(expr, interner)
             }
+            ExprKind::Lambda(lambda) => {
+                // Extract expected function type if available
+                let expected_fn = expected.and_then(|t| {
+                    if let Type::Function(ft) = t {
+                        Some(ft)
+                    } else {
+                        None
+                    }
+                });
+                Ok(self.analyze_lambda(lambda, expected_fn, interner))
+            }
             // All other cases: infer type, then check compatibility
             _ => {
                 let inferred = self.check_expr(expr, interner)?;
@@ -670,6 +765,13 @@ impl Analyzer {
             ExprKind::Identifier(sym) => {
                 // Use get_variable_type to respect flow-sensitive narrowing
                 if let Some(ty) = self.get_variable_type(*sym) {
+                    // Check if this is a capture (inside lambda, not a local)
+                    if self.in_lambda() && !self.is_lambda_local(*sym) {
+                        // Look up variable info to get mutability
+                        if let Some(var) = self.scope.get(*sym) {
+                            self.record_capture(*sym, var.mutable);
+                        }
+                    }
                     Ok(ty)
                 } else {
                     let name = interner.resolve(*sym);
@@ -816,6 +918,11 @@ impl Analyzer {
             ExprKind::Call(call) => {
                 // Handle assert specially
                 if self.is_assert_call(&call.callee, interner) {
+                    // Assert is an impure builtin - mark side effects if inside lambda
+                    if self.in_lambda() {
+                        self.mark_lambda_has_side_effects();
+                    }
+
                     if call.args.len() != 1 {
                         self.add_error(
                             SemanticError::WrongArgumentCount {
@@ -844,8 +951,12 @@ impl Analyzer {
                 }
 
                 if let ExprKind::Identifier(sym) = &call.callee.kind {
-                    if let Some(func_type) = self.functions.get(sym) {
-                        let func_type = func_type.clone();
+                    // First check if it's a top-level function
+                    if let Some(func_type) = self.functions.get(sym).cloned() {
+                        // Calling a user-defined function - conservatively mark side effects
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                        }
                         if call.args.len() != func_type.params.len() {
                             self.add_error(
                                 SemanticError::WrongArgumentCount {
@@ -858,7 +969,18 @@ impl Analyzer {
                         }
 
                         for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
-                            let arg_ty = self.check_expr(arg, interner)?;
+                            // For lambda arguments, pass expected type for inference
+                            let arg_ty = if let ExprKind::Lambda(lambda) = &arg.kind {
+                                let expected_fn = if let Type::Function(ft) = param_ty {
+                                    Some(ft)
+                                } else {
+                                    None
+                                };
+                                self.analyze_lambda(lambda, expected_fn, interner)
+                            } else {
+                                self.check_expr(arg, interner)?
+                            };
+
                             if !self.types_compatible(&arg_ty, param_ty) {
                                 self.add_error(
                                     SemanticError::TypeMismatch {
@@ -872,23 +994,140 @@ impl Analyzer {
                         }
 
                         return Ok(*func_type.return_type);
-                    } else {
-                        // Builtin function - allow for now (e.g., println)
+                    }
+
+                    // Check if it's a variable with a function type
+                    if let Some(Type::Function(func_type)) = self.get_variable_type(*sym) {
+                        // Calling a function-typed variable - conservatively mark side effects
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                        }
+                        if call.args.len() != func_type.params.len() {
+                            self.add_error(
+                                SemanticError::WrongArgumentCount {
+                                    expected: func_type.params.len(),
+                                    found: call.args.len(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                        }
+
+                        for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
+                            // For lambda arguments, pass expected type for inference
+                            let arg_ty = if let ExprKind::Lambda(lambda) = &arg.kind {
+                                let expected_fn = if let Type::Function(ft) = param_ty {
+                                    Some(ft)
+                                } else {
+                                    None
+                                };
+                                self.analyze_lambda(lambda, expected_fn, interner)
+                            } else {
+                                self.check_expr(arg, interner)?
+                            };
+
+                            if !self.types_compatible(&arg_ty, param_ty) {
+                                self.add_error(
+                                    SemanticError::TypeMismatch {
+                                        expected: param_ty.name().to_string(),
+                                        found: arg_ty.name().to_string(),
+                                        span: arg.span.into(),
+                                    },
+                                    arg.span,
+                                );
+                            }
+                        }
+
+                        return Ok(*func_type.return_type);
+                    }
+
+                    // Check if it's a known builtin function
+                    let name = interner.resolve(*sym);
+                    if name == "println"
+                        || name == "print_char"
+                        || name == "flush"
+                        || name == "print"
+                    {
+                        // Impure builtins - mark side effects if inside lambda
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                        }
                         for arg in &call.args {
                             self.check_expr(arg, interner)?;
                         }
                         return Ok(Type::Void);
                     }
+
+                    // Check if it's a variable with a non-function type
+                    if let Some(var_ty) = self.get_variable_type(*sym) {
+                        self.add_error(
+                            SemanticError::NotCallable {
+                                ty: var_ty.name().to_string(),
+                                span: call.callee.span.into(),
+                            },
+                            call.callee.span,
+                        );
+                        // Still check args for more errors
+                        for arg in &call.args {
+                            self.check_expr(arg, interner)?;
+                        }
+                        return Ok(Type::Error);
+                    }
+
+                    // Unknown identifier - might be an undefined function
+                    // (will be caught by codegen or other checks)
+                    for arg in &call.args {
+                        self.check_expr(arg, interner)?;
+                    }
+                    return Ok(Type::Void);
                 }
 
-                self.add_error(
-                    SemanticError::TypeMismatch {
-                        expected: "function".to_string(),
-                        found: "expression".to_string(),
-                        span: call.callee.span.into(),
-                    },
-                    call.callee.span,
-                );
+                // Non-identifier callee (e.g., a lambda expression being called directly)
+                let callee_ty = self.check_expr(&call.callee, interner)?;
+                if let Type::Function(func_type) = callee_ty {
+                    // Calling a function-typed expression - conservatively mark side effects
+                    if self.in_lambda() {
+                        self.mark_lambda_has_side_effects();
+                    }
+                    // Calling a function-typed expression
+                    if call.args.len() != func_type.params.len() {
+                        self.add_error(
+                            SemanticError::WrongArgumentCount {
+                                expected: func_type.params.len(),
+                                found: call.args.len(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
+
+                    for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
+                        let arg_ty = self.check_expr(arg, interner)?;
+                        if !self.types_compatible(&arg_ty, param_ty) {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: param_ty.name().to_string(),
+                                    found: arg_ty.name().to_string(),
+                                    span: arg.span.into(),
+                                },
+                                arg.span,
+                            );
+                        }
+                    }
+
+                    return Ok(*func_type.return_type);
+                }
+
+                // Non-callable type
+                if callee_ty != Type::Error {
+                    self.add_error(
+                        SemanticError::NotCallable {
+                            ty: callee_ty.name().to_string(),
+                            span: call.callee.span.into(),
+                        },
+                        call.callee.span,
+                    );
+                }
                 Ok(Type::Error)
             }
 
@@ -898,6 +1137,13 @@ impl Analyzer {
                 if let Some(var) = self.scope.get(assign.target) {
                     let is_mutable = var.mutable;
                     let var_ty = var.ty.clone();
+
+                    // Check if this is a mutation of a captured variable
+                    if self.in_lambda() && !self.is_lambda_local(assign.target) {
+                        // Record as capture and mark as mutated
+                        self.record_capture(assign.target, is_mutable);
+                        self.mark_capture_mutated(assign.target);
+                    }
 
                     if !is_mutable {
                         let name = interner.resolve(assign.target);
@@ -1139,6 +1385,12 @@ impl Analyzer {
                 // Result is always bool
                 Ok(Type::Bool)
             }
+
+            ExprKind::Lambda(lambda) => {
+                // For now, analyze without expected type context
+                // (Context will be passed when we have assignment/call context)
+                Ok(self.analyze_lambda(lambda, None, interner))
+            }
         }
     }
 
@@ -1175,6 +1427,132 @@ impl Analyzer {
                 );
             }
         }
+    }
+
+    /// Analyze a lambda expression, optionally with an expected function type for inference
+    fn analyze_lambda(
+        &mut self,
+        lambda: &LambdaExpr,
+        expected_type: Option<&FunctionType>,
+        interner: &Interner,
+    ) -> Type {
+        // Push capture analysis stacks and side effects flag
+        self.lambda_captures.push(HashMap::new());
+        self.lambda_locals.push(HashSet::new());
+        self.lambda_side_effects.push(false);
+
+        // Resolve parameter types
+        let mut param_types = Vec::new();
+
+        for (i, param) in lambda.params.iter().enumerate() {
+            let ty = if let Some(type_expr) = &param.ty {
+                // Explicit type annotation
+                self.resolve_type(type_expr)
+            } else if let Some(expected) = expected_type {
+                // Infer from expected type
+                if i < expected.params.len() {
+                    expected.params[i].clone()
+                } else {
+                    self.add_error(
+                        SemanticError::CannotInferLambdaParam {
+                            name: interner.resolve(param.name).to_string(),
+                            span: param.span.into(),
+                        },
+                        param.span,
+                    );
+                    Type::Error
+                }
+            } else {
+                // No type info available
+                self.add_error(
+                    SemanticError::CannotInferLambdaParam {
+                        name: interner.resolve(param.name).to_string(),
+                        span: param.span.into(),
+                    },
+                    param.span,
+                );
+                Type::Error
+            };
+            param_types.push(ty);
+        }
+
+        // Push new scope for lambda body
+        let outer_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(outer_scope);
+
+        // Define parameters in scope and track as locals
+        for (param, ty) in lambda.params.iter().zip(param_types.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty.clone(),
+                    mutable: false,
+                },
+            );
+            // Parameters are locals, not captures
+            self.add_lambda_local(param.name);
+        }
+
+        // Determine return type
+        let declared_return = lambda.return_type.as_ref().map(|t| self.resolve_type(t));
+        let expected_return = expected_type.map(|ft| (*ft.return_type).clone());
+
+        // Analyze body and infer return type
+        let body_type = match &lambda.body {
+            LambdaBody::Expr(expr) => {
+                // For expression body, analyze and use as return type
+                match self.check_expr(expr, interner) {
+                    Ok(ty) => ty,
+                    Err(_) => Type::Error,
+                }
+            }
+            LambdaBody::Block(block) => {
+                // For blocks, set up return type context
+                let old_return = self.current_function_return.take();
+                self.current_function_return = declared_return.clone().or(expected_return.clone());
+
+                let _ = self.check_block(block, interner);
+
+                let ret = self.current_function_return.take().unwrap_or(Type::Void);
+                self.current_function_return = old_return;
+                ret
+            }
+        };
+
+        // Restore outer scope
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+
+        // Pop capture stacks, side effects flag, and store results in the lambda
+        self.lambda_locals.pop();
+        let has_side_effects = self.lambda_side_effects.pop().unwrap_or(false);
+        lambda.has_side_effects.set(has_side_effects);
+
+        let has_captures = if let Some(captures) = self.lambda_captures.pop() {
+            let capture_list: Vec<Capture> = captures
+                .into_values()
+                .map(|info| Capture {
+                    name: info.name,
+                    is_mutable: info.is_mutable,
+                    is_mutated: info.is_mutated,
+                })
+                .collect();
+            let has_captures = !capture_list.is_empty();
+            *lambda.captures.borrow_mut() = capture_list;
+            has_captures
+        } else {
+            false
+        };
+
+        // Determine final return type
+        let return_type = declared_return.or(expected_return).unwrap_or(body_type);
+
+        Type::Function(FunctionType {
+            params: param_types,
+            return_type: Box::new(return_type),
+            is_closure: has_captures,
+        })
     }
 
     /// Check if an integer literal value fits in the target type
@@ -1248,6 +1626,7 @@ impl Analyzer {
 mod tests {
     use super::*;
     use crate::frontend::Parser;
+    use crate::frontend::ast::LambdaPurity;
 
     fn check(source: &str) -> Result<(), Vec<TypeError>> {
         let mut parser = Parser::new(source);
@@ -1448,5 +1827,317 @@ mod tests {
         let source = "func main() { let x: i64 = 42\n let y: i32 = x }";
         let result = check(source);
         assert!(result.is_err());
+    }
+
+    // Helper to parse and analyze, returning the AST for capture inspection
+    fn parse_and_analyze(source: &str) -> (Program, Interner) {
+        let mut parser = Parser::new(source);
+        let program = parser.parse_program().unwrap();
+        let interner = parser.into_interner();
+        let mut analyzer = Analyzer::new("test.vole", source);
+        analyzer.analyze(&program, &interner).unwrap();
+        (program, interner)
+    }
+
+    // Helper to extract lambda from first statement of main function
+    fn get_first_lambda(program: &Program) -> &LambdaExpr {
+        for decl in &program.declarations {
+            if let Decl::Function(func) = decl {
+                for stmt in &func.body.stmts {
+                    if let Stmt::Let(let_stmt) = stmt {
+                        if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
+                            return lambda;
+                        }
+                    }
+                }
+            }
+        }
+        panic!("No lambda found in program");
+    }
+
+    #[test]
+    fn lambda_no_captures_when_only_params() {
+        let source = r#"
+            func apply(f: (i64) -> i64, x: i64) -> i64 { return f(x) }
+            func main() {
+                let f = (x: i64) => x + 1
+                apply(f, 10)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.captures.borrow().is_empty());
+    }
+
+    #[test]
+    fn lambda_captures_outer_variable() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let x = 10
+                let f = () => x + 1
+                apply(f)
+            }
+        "#;
+        let (program, interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        let captures = lambda.captures.borrow();
+        assert_eq!(captures.len(), 1);
+        let name = interner.resolve(captures[0].name);
+        assert_eq!(name, "x");
+        assert!(!captures[0].is_mutable);
+        assert!(!captures[0].is_mutated);
+    }
+
+    #[test]
+    fn lambda_captures_mutable_variable() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let mut x = 10
+                let f = () => x + 1
+                apply(f)
+            }
+        "#;
+        let (program, interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        let captures = lambda.captures.borrow();
+        assert_eq!(captures.len(), 1);
+        let name = interner.resolve(captures[0].name);
+        assert_eq!(name, "x");
+        assert!(captures[0].is_mutable);
+        assert!(!captures[0].is_mutated);
+    }
+
+    #[test]
+    fn lambda_captures_and_mutates_variable() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let mut x = 10
+                let f: () -> i64 = () => {
+                    x = x + 1
+                    return x
+                }
+                apply(f)
+            }
+        "#;
+        let (program, interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        let captures = lambda.captures.borrow();
+        assert_eq!(captures.len(), 1);
+        let name = interner.resolve(captures[0].name);
+        assert_eq!(name, "x");
+        assert!(captures[0].is_mutable);
+        assert!(captures[0].is_mutated);
+    }
+
+    #[test]
+    fn lambda_does_not_capture_its_own_params() {
+        let source = r#"
+            func apply(f: (i64) -> i64, v: i64) -> i64 { return f(v) }
+            func main() {
+                let f = (x: i64) => x * 2
+                apply(f, 5)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.captures.borrow().is_empty());
+    }
+
+    #[test]
+    fn lambda_does_not_capture_its_own_locals() {
+        // Test with expression body that uses a local-like pattern
+        // Note: this test verifies that locals defined in lambdas are not treated as captures
+        let source = r#"
+            func apply(f: (i64) -> i64, v: i64) -> i64 { return f(v) }
+            func main() {
+                let f = (y: i64) => y * 2
+                apply(f, 5)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        // Parameters should not be treated as captures
+        assert!(lambda.captures.borrow().is_empty());
+    }
+
+    #[test]
+    fn lambda_block_body_with_local() {
+        // Test block body with local let binding
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let f: () -> i64 = () => {
+                    let y = 5
+                    return y * 2
+                }
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        // Local y should not be captured
+        assert!(lambda.captures.borrow().is_empty());
+    }
+
+    // Tests for side effect tracking and purity
+
+    #[test]
+    fn lambda_pure_no_captures_no_side_effects() {
+        let source = r#"
+            func apply(f: (i64) -> i64, v: i64) -> i64 { return f(v) }
+            func main() {
+                let f = (x: i64) => x + 1
+                apply(f, 10)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(!lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::Pure);
+    }
+
+    #[test]
+    fn lambda_has_side_effects_println() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let f: () -> i64 = () => {
+                    println("hello")
+                    return 42
+                }
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    }
+
+    #[test]
+    fn lambda_has_side_effects_print() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let f: () -> i64 = () => {
+                    print("hello")
+                    return 42
+                }
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    }
+
+    #[test]
+    fn lambda_has_side_effects_assert() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let f: () -> i64 = () => {
+                    assert(true)
+                    return 42
+                }
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    }
+
+    #[test]
+    fn lambda_has_side_effects_calling_user_function() {
+        let source = r#"
+            func helper() -> i64 { return 42 }
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let f = () => helper()
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    }
+
+    #[test]
+    fn lambda_purity_captures_immutable() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let x = 10
+                let f = () => x + 1
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(!lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::CapturesImmutable);
+    }
+
+    #[test]
+    fn lambda_purity_captures_mutable() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let mut x = 10
+                let f = () => x + 1
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(!lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::CapturesMutable);
+    }
+
+    #[test]
+    fn lambda_purity_mutates_captures() {
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let mut x = 10
+                let f: () -> i64 = () => {
+                    x = x + 1
+                    return x
+                }
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(!lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::MutatesCaptures);
+    }
+
+    #[test]
+    fn lambda_side_effects_take_precedence_over_captures() {
+        // Even though we capture and mutate, side effects take precedence
+        let source = r#"
+            func apply(f: () -> i64) -> i64 { return f() }
+            func main() {
+                let mut x = 10
+                let f: () -> i64 = () => {
+                    println("hello")
+                    x = x + 1
+                    return x
+                }
+                apply(f)
+            }
+        "#;
+        let (program, _interner) = parse_and_analyze(source);
+        let lambda = get_first_lambda(&program);
+        assert!(lambda.has_side_effects.get());
+        assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
     }
 }

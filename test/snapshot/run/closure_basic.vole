@@ -1,0 +1,6 @@
+// Basic closure test - captures an immutable variable
+func main() {
+    let x = 10
+    let f = () => x + 1
+    println(f())
+}
