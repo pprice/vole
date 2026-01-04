@@ -1,0 +1,455 @@
+// src/codegen/stmt.rs
+//
+// Statement and block compilation - impl Cg methods.
+
+use std::collections::HashMap;
+
+use cranelift::prelude::*;
+
+use crate::frontend::{self, ExprKind, Stmt, Symbol};
+use crate::sema::Type;
+
+use super::compiler::ControlFlowCtx;
+use super::context::{Cg, ControlFlow};
+use super::types::{CompileCtx, CompiledValue, resolve_type_expr, type_size, type_to_cranelift};
+
+/// Compile a block of statements (wrapper for compatibility)
+pub(super) fn compile_block(
+    builder: &mut FunctionBuilder,
+    block: &frontend::Block,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    _cf_ctx: &mut ControlFlowCtx,
+    ctx: &mut CompileCtx,
+) -> Result<bool, String> {
+    // Note: cf_ctx is ignored as top-level blocks don't have loops yet
+    let mut cf = ControlFlow::new();
+    let mut cg = Cg::new(builder, variables, ctx, &mut cf);
+    cg.block(block)
+}
+
+/// Wrap a value in a union representation (wrapper for compatibility)
+#[allow(dead_code)] // Used by compiler.rs during migration
+pub(super) fn construct_union(
+    builder: &mut FunctionBuilder,
+    value: CompiledValue,
+    union_type: &Type,
+    pointer_type: types::Type,
+) -> Result<CompiledValue, String> {
+    let Type::Union(variants) = union_type else {
+        return Err("Expected union type".to_string());
+    };
+
+    let (tag, actual_value, actual_type) =
+        if let Some(pos) = variants.iter().position(|v| v == &value.vole_type) {
+            (pos, value.value, value.vole_type.clone())
+        } else {
+            let compatible = variants.iter().enumerate().find(|(_, v)| {
+                value.vole_type.is_integer() && v.is_integer() && value.vole_type.can_widen_to(v)
+                    || v.is_integer() && value.vole_type.is_integer()
+            });
+
+            match compatible {
+                Some((pos, variant_type)) => {
+                    let target_ty = type_to_cranelift(variant_type, pointer_type);
+                    let narrowed = if target_ty.bytes() < value.ty.bytes() {
+                        builder.ins().ireduce(target_ty, value.value)
+                    } else if target_ty.bytes() > value.ty.bytes() {
+                        builder.ins().sextend(target_ty, value.value)
+                    } else {
+                        value.value
+                    };
+                    (pos, narrowed, variant_type.clone())
+                }
+                None => {
+                    return Err(format!(
+                        "Type {:?} not in union {:?}",
+                        value.vole_type, variants
+                    ));
+                }
+            }
+        };
+
+    let union_size = type_size(union_type, pointer_type);
+    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        union_size,
+        0,
+    ));
+
+    let tag_val = builder.ins().iconst(types::I8, tag as i64);
+    builder.ins().stack_store(tag_val, slot, 0);
+
+    if actual_type != Type::Nil {
+        builder.ins().stack_store(actual_value, slot, 8);
+    }
+
+    let ptr = builder.ins().stack_addr(pointer_type, slot, 0);
+    Ok(CompiledValue {
+        value: ptr,
+        ty: pointer_type,
+        vole_type: union_type.clone(),
+    })
+}
+
+impl Cg<'_, '_, '_> {
+    /// Compile a block of statements. Returns true if terminated (return/break).
+    pub fn block(&mut self, block: &frontend::Block) -> Result<bool, String> {
+        let mut terminated = false;
+        for stmt in &block.stmts {
+            if terminated {
+                break;
+            }
+            terminated = self.stmt(stmt)?;
+        }
+        Ok(terminated)
+    }
+
+    /// Compile a statement. Returns true if terminated (return/break).
+    pub fn stmt(&mut self, stmt: &Stmt) -> Result<bool, String> {
+        match stmt {
+            Stmt::Let(let_stmt) => {
+                let init = self.expr(&let_stmt.init)?;
+
+                let (final_value, final_type) = if let Some(ty_expr) = &let_stmt.ty {
+                    let declared_type = resolve_type_expr(ty_expr, self.ctx.type_aliases);
+
+                    if matches!(&declared_type, Type::Union(_))
+                        && !matches!(&init.vole_type, Type::Union(_))
+                    {
+                        let wrapped = self.construct_union(init, &declared_type)?;
+                        (wrapped.value, wrapped.vole_type)
+                    } else if declared_type.is_integer() && init.vole_type.is_integer() {
+                        let declared_cty = type_to_cranelift(&declared_type, self.ctx.pointer_type);
+                        let init_cty = init.ty;
+                        if declared_cty.bits() < init_cty.bits() {
+                            let narrowed = self.builder.ins().ireduce(declared_cty, init.value);
+                            (narrowed, declared_type)
+                        } else if declared_cty.bits() > init_cty.bits() {
+                            let widened = self.builder.ins().sextend(declared_cty, init.value);
+                            (widened, declared_type)
+                        } else {
+                            (init.value, declared_type)
+                        }
+                    } else if declared_type == Type::F32 && init.vole_type == Type::F64 {
+                        let narrowed = self.builder.ins().fdemote(types::F32, init.value);
+                        (narrowed, declared_type)
+                    } else if declared_type == Type::F64 && init.vole_type == Type::F32 {
+                        let widened = self.builder.ins().fpromote(types::F64, init.value);
+                        (widened, declared_type)
+                    } else {
+                        (init.value, declared_type)
+                    }
+                } else {
+                    (init.value, init.vole_type)
+                };
+
+                let cranelift_ty = type_to_cranelift(&final_type, self.ctx.pointer_type);
+                let var = self.builder.declare_var(cranelift_ty);
+                self.builder.def_var(var, final_value);
+                self.vars.insert(let_stmt.name, (var, final_type));
+                Ok(false)
+            }
+
+            Stmt::Expr(expr_stmt) => {
+                self.expr(&expr_stmt.expr)?;
+                Ok(false)
+            }
+
+            Stmt::Return(ret) => {
+                if let Some(value) = &ret.value {
+                    let compiled = self.expr(value)?;
+                    self.builder.ins().return_(&[compiled.value]);
+                } else {
+                    self.builder.ins().return_(&[]);
+                }
+                Ok(true)
+            }
+
+            Stmt::While(while_stmt) => {
+                let header_block = self.builder.create_block();
+                let body_block = self.builder.create_block();
+                let exit_block = self.builder.create_block();
+
+                self.builder.ins().jump(header_block, &[]);
+
+                self.builder.switch_to_block(header_block);
+                let cond = self.expr(&while_stmt.condition)?;
+                let cond_i32 = self.cond_to_i32(cond.value);
+                self.builder
+                    .ins()
+                    .brif(cond_i32, body_block, &[], exit_block, &[]);
+
+                self.builder.switch_to_block(body_block);
+                self.cf.push_loop(exit_block, header_block);
+                let body_terminated = self.block(&while_stmt.body)?;
+                self.cf.pop_loop();
+
+                if !body_terminated {
+                    self.builder.ins().jump(header_block, &[]);
+                }
+
+                self.builder.switch_to_block(exit_block);
+
+                self.builder.seal_block(header_block);
+                self.builder.seal_block(body_block);
+                self.builder.seal_block(exit_block);
+
+                Ok(false)
+            }
+
+            Stmt::If(if_stmt) => {
+                let cond = self.expr(&if_stmt.condition)?;
+                let cond_i32 = self.cond_to_i32(cond.value);
+
+                let then_block = self.builder.create_block();
+                let else_block = self.builder.create_block();
+                let merge_block = self.builder.create_block();
+
+                self.builder
+                    .ins()
+                    .brif(cond_i32, then_block, &[], else_block, &[]);
+
+                self.builder.switch_to_block(then_block);
+                let then_terminated = self.block(&if_stmt.then_branch)?;
+                if !then_terminated {
+                    self.builder.ins().jump(merge_block, &[]);
+                }
+
+                self.builder.switch_to_block(else_block);
+                let else_terminated = if let Some(else_branch) = &if_stmt.else_branch {
+                    self.block(else_branch)?
+                } else {
+                    false
+                };
+                if !else_terminated {
+                    self.builder.ins().jump(merge_block, &[]);
+                }
+
+                self.builder.switch_to_block(merge_block);
+
+                self.builder.seal_block(then_block);
+                self.builder.seal_block(else_block);
+                self.builder.seal_block(merge_block);
+
+                Ok(then_terminated && else_terminated)
+            }
+
+            Stmt::For(for_stmt) => {
+                if let ExprKind::Range(range) = &for_stmt.iterable.kind {
+                    self.for_range(for_stmt, range)
+                } else {
+                    self.for_array(for_stmt)
+                }
+            }
+
+            Stmt::Break(_) => {
+                if let Some(exit_block) = self.cf.loop_exit() {
+                    self.builder.ins().jump(exit_block, &[]);
+                }
+                Ok(true)
+            }
+
+            Stmt::Continue(_) => {
+                if let Some(continue_block) = self.cf.loop_continue() {
+                    self.builder.ins().jump(continue_block, &[]);
+                    let unreachable = self.builder.create_block();
+                    self.builder.switch_to_block(unreachable);
+                    self.builder.seal_block(unreachable);
+                }
+                Ok(true)
+            }
+        }
+    }
+
+    /// Compile a for loop over a range
+    fn for_range(
+        &mut self,
+        for_stmt: &frontend::ForStmt,
+        range: &frontend::RangeExpr,
+    ) -> Result<bool, String> {
+        let start_val = self.expr(&range.start)?;
+        let end_val = self.expr(&range.end)?;
+
+        let var = self.builder.declare_var(types::I64);
+        self.builder.def_var(var, start_val.value);
+        self.vars.insert(for_stmt.var_name, (var, Type::I64));
+
+        let header = self.builder.create_block();
+        let body_block = self.builder.create_block();
+        let continue_block = self.builder.create_block();
+        let exit_block = self.builder.create_block();
+
+        self.builder.ins().jump(header, &[]);
+
+        self.builder.switch_to_block(header);
+        let current = self.builder.use_var(var);
+        let cmp = if range.inclusive {
+            self.builder
+                .ins()
+                .icmp(IntCC::SignedLessThanOrEqual, current, end_val.value)
+        } else {
+            self.builder
+                .ins()
+                .icmp(IntCC::SignedLessThan, current, end_val.value)
+        };
+        self.builder
+            .ins()
+            .brif(cmp, body_block, &[], exit_block, &[]);
+
+        self.builder.switch_to_block(body_block);
+        self.cf.push_loop(exit_block, continue_block);
+        let body_terminated = self.block(&for_stmt.body)?;
+        self.cf.pop_loop();
+
+        if !body_terminated {
+            self.builder.ins().jump(continue_block, &[]);
+        }
+
+        self.builder.switch_to_block(continue_block);
+        let current = self.builder.use_var(var);
+        let next = self.builder.ins().iadd_imm(current, 1);
+        self.builder.def_var(var, next);
+        self.builder.ins().jump(header, &[]);
+
+        self.builder.switch_to_block(exit_block);
+
+        self.builder.seal_block(header);
+        self.builder.seal_block(body_block);
+        self.builder.seal_block(continue_block);
+        self.builder.seal_block(exit_block);
+
+        Ok(false)
+    }
+
+    /// Compile a for loop over an array
+    fn for_array(&mut self, for_stmt: &frontend::ForStmt) -> Result<bool, String> {
+        let arr = self.expr(&for_stmt.iterable)?;
+
+        let len_val = self.call_runtime("vole_array_len", &[arr.value])?;
+
+        let idx_var = self.builder.declare_var(types::I64);
+        let zero = self.builder.ins().iconst(types::I64, 0);
+        self.builder.def_var(idx_var, zero);
+
+        let elem_type = match &arr.vole_type {
+            Type::Array(elem) => elem.as_ref().clone(),
+            _ => Type::I64,
+        };
+
+        let elem_var = self.builder.declare_var(types::I64);
+        self.builder.def_var(elem_var, zero);
+        self.vars.insert(for_stmt.var_name, (elem_var, elem_type));
+
+        let header = self.builder.create_block();
+        let body_block = self.builder.create_block();
+        let continue_block = self.builder.create_block();
+        let exit_block = self.builder.create_block();
+
+        self.builder.ins().jump(header, &[]);
+
+        self.builder.switch_to_block(header);
+        let current_idx = self.builder.use_var(idx_var);
+        let cmp = self
+            .builder
+            .ins()
+            .icmp(IntCC::SignedLessThan, current_idx, len_val);
+        self.builder
+            .ins()
+            .brif(cmp, body_block, &[], exit_block, &[]);
+
+        self.builder.switch_to_block(body_block);
+
+        let current_idx = self.builder.use_var(idx_var);
+        let elem_val = self.call_runtime("vole_array_get_value", &[arr.value, current_idx])?;
+        self.builder.def_var(elem_var, elem_val);
+
+        self.cf.push_loop(exit_block, continue_block);
+        let body_terminated = self.block(&for_stmt.body)?;
+        self.cf.pop_loop();
+
+        if !body_terminated {
+            self.builder.ins().jump(continue_block, &[]);
+        }
+
+        self.builder.switch_to_block(continue_block);
+        let current_idx = self.builder.use_var(idx_var);
+        let next_idx = self.builder.ins().iadd_imm(current_idx, 1);
+        self.builder.def_var(idx_var, next_idx);
+        self.builder.ins().jump(header, &[]);
+
+        self.builder.switch_to_block(exit_block);
+
+        self.builder.seal_block(header);
+        self.builder.seal_block(body_block);
+        self.builder.seal_block(continue_block);
+        self.builder.seal_block(exit_block);
+
+        Ok(false)
+    }
+
+    /// Wrap a value in a union representation (stack slot with tag + payload)
+    pub fn construct_union(
+        &mut self,
+        value: CompiledValue,
+        union_type: &Type,
+    ) -> Result<CompiledValue, String> {
+        let Type::Union(variants) = union_type else {
+            return Err("Expected union type".to_string());
+        };
+
+        let (tag, actual_value, actual_type) = if let Some(pos) =
+            variants.iter().position(|v| v == &value.vole_type)
+        {
+            (pos, value.value, value.vole_type.clone())
+        } else {
+            let compatible = variants.iter().enumerate().find(|(_, v)| {
+                value.vole_type.is_integer() && v.is_integer() && value.vole_type.can_widen_to(v)
+                    || v.is_integer() && value.vole_type.is_integer()
+            });
+
+            match compatible {
+                Some((pos, variant_type)) => {
+                    let target_ty = type_to_cranelift(variant_type, self.ctx.pointer_type);
+                    let narrowed = if target_ty.bytes() < value.ty.bytes() {
+                        self.builder.ins().ireduce(target_ty, value.value)
+                    } else if target_ty.bytes() > value.ty.bytes() {
+                        self.builder.ins().sextend(target_ty, value.value)
+                    } else {
+                        value.value
+                    };
+                    (pos, narrowed, variant_type.clone())
+                }
+                None => {
+                    return Err(format!(
+                        "Type {:?} not in union {:?}",
+                        value.vole_type, variants
+                    ));
+                }
+            }
+        };
+
+        let union_size = type_size(union_type, self.ctx.pointer_type);
+        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            union_size,
+            0,
+        ));
+
+        let tag_val = self.builder.ins().iconst(types::I8, tag as i64);
+        self.builder.ins().stack_store(tag_val, slot, 0);
+
+        if actual_type != Type::Nil {
+            self.builder.ins().stack_store(actual_value, slot, 8);
+        }
+
+        let ptr = self
+            .builder
+            .ins()
+            .stack_addr(self.ctx.pointer_type, slot, 0);
+        Ok(CompiledValue {
+            value: ptr,
+            ty: self.ctx.pointer_type,
+            vole_type: union_type.clone(),
+        })
+    }
+}

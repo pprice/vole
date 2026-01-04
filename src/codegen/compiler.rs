@@ -1,16 +1,32 @@
 // src/codegen/compiler.rs
+//
+// NOTE: This file contains legacy code being migrated to split impl blocks.
+// The new code is in expr.rs, stmt.rs, calls.rs, ops.rs, structs.rs, lambda.rs.
+// Functions here are kept for backward compatibility during migration.
+
+#![allow(dead_code)]
 
 use cranelift::codegen::ir::{BlockArg, TrapCode};
 use cranelift::prelude::*;
-use cranelift_jit::JITModule;
-use cranelift_module::{FuncId, Module};
+use cranelift_module::Module;
 use std::collections::HashMap;
 
-use crate::codegen::JitContext;
+use super::calls::{compile_string_literal, value_to_string};
+use super::lambda::{CaptureBinding, compile_lambda};
+use super::stmt::{compile_block, construct_union};
+use super::structs::{
+    convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type,
+    get_method_return_type, get_type_name_symbol,
+};
+use super::types::{
+    CompileCtx, TypeMetadata, convert_to_type, cranelift_to_vole_type, resolve_type_expr,
+    type_to_cranelift,
+};
+use crate::codegen::{CompiledValue, JitContext};
 use crate::frontend::{
     self, AssignTarget, BinaryOp, ClassDecl, Decl, Expr, ExprKind, FuncDecl, ImplementBlock,
-    Interner, LambdaBody, LambdaExpr, LetStmt, NodeId, Pattern, Program, RecordDecl, Stmt,
-    StringPart, Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
+    Interner, LetStmt, NodeId, Pattern, Program, RecordDecl, StringPart, Symbol, TestCase,
+    TestsDecl, TypeExpr, UnaryOp,
 };
 use crate::sema::resolution::MethodResolutions;
 use crate::sema::{ClassType, FunctionType, RecordType, StructField, Type};
@@ -65,31 +81,6 @@ impl Default for ControlFlowCtx {
     }
 }
 
-/// Compiled value with its type
-#[derive(Clone)]
-pub struct CompiledValue {
-    pub value: Value,
-    pub ty: types::Type,
-    /// The Vole type of this value (needed to distinguish strings/arrays from regular I64)
-    pub vole_type: Type,
-}
-
-/// Metadata about a class or record type for code generation
-#[derive(Debug, Clone)]
-struct TypeMetadata {
-    /// Unique type ID for runtime
-    type_id: u32,
-    /// Map from field name to slot index
-    field_slots: HashMap<Symbol, usize>,
-    /// Whether this is a class (true) or record (false)
-    #[allow(dead_code)]
-    is_class: bool,
-    /// The Vole type (Class or Record)
-    vole_type: Type,
-    /// Method return types: method name -> return type
-    method_return_types: HashMap<Symbol, Type>,
-}
-
 /// Compiler for generating Cranelift IR from AST
 pub struct Compiler<'a> {
     jit: &'a mut JitContext,
@@ -111,6 +102,8 @@ pub struct Compiler<'a> {
     /// Resolved method calls from semantic analysis
     #[allow(dead_code)] // Will be used in future refactoring
     method_resolutions: MethodResolutions,
+    /// Return types of compiled functions
+    func_return_types: HashMap<String, Type>,
 }
 
 impl<'a> Compiler<'a> {
@@ -134,6 +127,7 @@ impl<'a> Compiler<'a> {
             next_type_id: 0,
             expr_types,
             method_resolutions,
+            func_return_types: HashMap::new(),
         }
     }
 
@@ -177,6 +171,13 @@ impl<'a> Compiler<'a> {
                     let sig = self.create_function_signature(func);
                     let name = self.interner.resolve(func.name);
                     self.jit.declare_function(name, &sig);
+                    // Record return type for use in call expressions
+                    let return_type = func
+                        .return_type
+                        .as_ref()
+                        .map(|t| resolve_type_expr(t, &self.type_aliases))
+                        .unwrap_or(Type::Void);
+                    self.func_return_types.insert(name.to_string(), return_type);
                 }
                 Decl::Tests(tests_decl) => {
                     // Declare each test as __test_N with signature () -> i64
@@ -578,6 +579,7 @@ impl<'a> Compiler<'a> {
                 type_metadata: &self.type_metadata,
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -671,6 +673,7 @@ impl<'a> Compiler<'a> {
                 type_metadata: &self.type_metadata,
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -738,6 +741,7 @@ impl<'a> Compiler<'a> {
                     type_metadata: &self.type_metadata,
                     expr_types: &self.expr_types,
                     method_resolutions: &self.method_resolutions,
+                    func_return_types: &self.func_return_types,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -792,6 +796,13 @@ impl<'a> Compiler<'a> {
                     let sig = self.create_function_signature(func);
                     let name = self.interner.resolve(func.name);
                     self.jit.declare_function(name, &sig);
+                    // Record return type for use in call expressions
+                    let return_type = func
+                        .return_type
+                        .as_ref()
+                        .map(|t| resolve_type_expr(t, &self.type_aliases))
+                        .unwrap_or(Type::Void);
+                    self.func_return_types.insert(name.to_string(), return_type);
                 }
                 Decl::Tests(tests_decl) if include_tests => {
                     for _ in &tests_decl.tests {
@@ -898,6 +909,7 @@ impl<'a> Compiler<'a> {
                 type_metadata: &empty_type_metadata,
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -958,6 +970,7 @@ impl<'a> Compiler<'a> {
                 type_metadata: &empty_type_metadata,
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -983,535 +996,7 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 }
-
-fn resolve_type_expr(ty: &TypeExpr, type_aliases: &HashMap<Symbol, Type>) -> Type {
-    match ty {
-        TypeExpr::Primitive(p) => Type::from_primitive(*p),
-        TypeExpr::Named(sym) => {
-            // Look up type alias
-            type_aliases.get(sym).cloned().unwrap_or(Type::Error)
-        }
-        TypeExpr::Array(elem) => {
-            let elem_ty = resolve_type_expr(elem, type_aliases);
-            Type::Array(Box::new(elem_ty))
-        }
-        TypeExpr::Optional(inner) => {
-            // T? desugars to T | nil
-            let inner_ty = resolve_type_expr(inner, type_aliases);
-            Type::Union(vec![inner_ty, Type::Nil])
-        }
-        TypeExpr::Union(variants) => {
-            let variant_types: Vec<Type> = variants
-                .iter()
-                .map(|v| resolve_type_expr(v, type_aliases))
-                .collect();
-            Type::normalize_union(variant_types)
-        }
-        TypeExpr::Nil => Type::Nil,
-        TypeExpr::Function {
-            params,
-            return_type,
-        } => {
-            let param_types: Vec<Type> = params
-                .iter()
-                .map(|p| resolve_type_expr(p, type_aliases))
-                .collect();
-            let ret_type = resolve_type_expr(return_type, type_aliases);
-            Type::Function(FunctionType {
-                params: param_types,
-                return_type: Box::new(ret_type),
-                is_closure: false, // Type expressions don't know if closure
-            })
-        }
-        TypeExpr::SelfType => {
-            // Self type is resolved during interface/implement compilation
-            Type::Error
-        }
-    }
-}
-
-fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::Type {
-    match ty {
-        Type::I8 | Type::U8 => types::I8,
-        Type::I16 | Type::U16 => types::I16,
-        Type::I32 | Type::U32 => types::I32,
-        Type::I64 | Type::U64 => types::I64,
-        Type::I128 => types::I128,
-        Type::F32 => types::F32,
-        Type::F64 => types::F64,
-        Type::Bool => types::I8,
-        Type::String => pointer_type,
-        Type::Nil => types::I8,            // Nil uses minimal representation
-        Type::Union(_) => pointer_type,    // Unions are passed by pointer
-        Type::Function(_) => pointer_type, // Function pointers
-        _ => types::I64,                   // Default
-    }
-}
-
-/// Get the size in bytes for a Vole type (used for union layout)
-fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
-    match ty {
-        Type::I8 | Type::U8 | Type::Bool => 1,
-        Type::I16 | Type::U16 => 2,
-        Type::I32 | Type::U32 | Type::F32 => 4,
-        Type::I64 | Type::U64 | Type::F64 => 8,
-        Type::I128 => 16,
-        Type::String | Type::Array(_) => pointer_type.bytes(), // pointer size
-        Type::Nil | Type::Void => 0,
-        Type::Union(variants) => {
-            // Tag (1 byte) + padding + max payload size, aligned to 8
-            let max_payload = variants
-                .iter()
-                .map(|t| type_size(t, pointer_type))
-                .max()
-                .unwrap_or(0);
-            // Layout: [tag:1][padding:7][payload:max_payload] aligned to 8
-            8 + max_payload.div_ceil(8) * 8
-        }
-        _ => 8, // default
-    }
-}
-
-/// Wrap a value in a union representation (stack slot with tag + payload)
-fn construct_union(
-    builder: &mut FunctionBuilder,
-    value: CompiledValue,
-    union_type: &Type,
-    pointer_type: types::Type,
-) -> Result<CompiledValue, String> {
-    use cranelift::prelude::StackSlotData;
-    use cranelift::prelude::StackSlotKind;
-
-    let Type::Union(variants) = union_type else {
-        return Err("Expected union type".to_string());
-    };
-
-    // Find the tag for this value's type (with coercion support for integer literals)
-    // First try exact match
-    let (tag, actual_value, actual_type) =
-        if let Some(pos) = variants.iter().position(|v| v == &value.vole_type) {
-            (pos, value.value, value.vole_type.clone())
-        } else {
-            // Try to find a compatible integer type (for literal coercion)
-            // When assigning I64 literal to i32?, we need to narrow to I32
-            let compatible = variants.iter().enumerate().find(|(_, v)| {
-                // Check if value type can narrow to this variant
-                value.vole_type.is_integer() && v.is_integer() && value.vole_type.can_widen_to(v)
-                    || v.is_integer() && value.vole_type.is_integer()
-            });
-
-            match compatible {
-                Some((pos, variant_type)) => {
-                    // Narrow the integer value to the variant type
-                    let target_ty = type_to_cranelift(variant_type, pointer_type);
-                    let narrowed = if target_ty.bytes() < value.ty.bytes() {
-                        builder.ins().ireduce(target_ty, value.value)
-                    } else if target_ty.bytes() > value.ty.bytes() {
-                        builder.ins().sextend(target_ty, value.value)
-                    } else {
-                        value.value
-                    };
-                    (pos, narrowed, variant_type.clone())
-                }
-                None => {
-                    return Err(format!(
-                        "Type {:?} not in union {:?}",
-                        value.vole_type, variants
-                    ));
-                }
-            }
-        };
-
-    // Allocate stack slot for the union
-    let union_size = type_size(union_type, pointer_type);
-    let slot = builder.create_sized_stack_slot(StackSlotData::new(
-        StackSlotKind::ExplicitSlot,
-        union_size,
-        0,
-    ));
-
-    // Store tag at offset 0
-    let tag_val = builder.ins().iconst(types::I8, tag as i64);
-    builder.ins().stack_store(tag_val, slot, 0);
-
-    // Store payload at offset 8 (after alignment padding)
-    if actual_type != Type::Nil {
-        builder.ins().stack_store(actual_value, slot, 8);
-    }
-
-    // Return pointer to the stack slot
-    let ptr = builder.ins().stack_addr(pointer_type, slot, 0);
-    Ok(CompiledValue {
-        value: ptr,
-        ty: pointer_type,
-        vole_type: union_type.clone(),
-    })
-}
-
-/// Context for compiling expressions and statements
-/// Bundles common parameters to reduce function argument count
-struct CompileCtx<'a> {
-    interner: &'a Interner,
-    pointer_type: types::Type,
-    module: &'a mut JITModule,
-    func_ids: &'a mut HashMap<String, FuncId>,
-    source_file_ptr: (*const u8, usize),
-    /// Global variable declarations for lookup when identifier not in local scope
-    globals: &'a [LetStmt],
-    /// Counter for generating unique lambda names
-    lambda_counter: &'a mut usize,
-    /// Type aliases from semantic analysis
-    type_aliases: &'a HashMap<Symbol, Type>,
-    /// Class and record metadata for struct literals, field access, and method calls
-    type_metadata: &'a HashMap<Symbol, TypeMetadata>,
-    /// Expression types from semantic analysis (includes narrowed types)
-    expr_types: &'a HashMap<NodeId, Type>,
-    /// Resolved method calls from semantic analysis
-    #[allow(dead_code)] // Will be used in future refactoring
-    method_resolutions: &'a MethodResolutions,
-}
-
-/// Returns true if a terminating statement (return/break) was compiled
-fn compile_block(
-    builder: &mut FunctionBuilder,
-    block: &frontend::Block,
-    variables: &mut HashMap<Symbol, (Variable, Type)>,
-    cf_ctx: &mut ControlFlowCtx,
-    ctx: &mut CompileCtx,
-) -> Result<bool, String> {
-    let mut terminated = false;
-    for stmt in &block.stmts {
-        if terminated {
-            break; // Don't compile unreachable code
-        }
-        terminated = compile_stmt(builder, stmt, variables, cf_ctx, ctx)?;
-    }
-    Ok(terminated)
-}
-
-/// Returns true if this statement terminates (return/break)
-fn compile_stmt(
-    builder: &mut FunctionBuilder,
-    stmt: &Stmt,
-    variables: &mut HashMap<Symbol, (Variable, Type)>,
-    cf_ctx: &mut ControlFlowCtx,
-    ctx: &mut CompileCtx,
-) -> Result<bool, String> {
-    match stmt {
-        Stmt::Let(let_stmt) => {
-            let init = compile_expr(builder, &let_stmt.init, variables, ctx)?;
-
-            // Check if there's a type annotation
-            let (final_value, final_type) = if let Some(ty_expr) = &let_stmt.ty {
-                let declared_type = resolve_type_expr(ty_expr, ctx.type_aliases);
-                // If declared type is a union and init is not, wrap init into the union
-                if matches!(&declared_type, Type::Union(_))
-                    && !matches!(&init.vole_type, Type::Union(_))
-                {
-                    let wrapped = construct_union(builder, init, &declared_type, ctx.pointer_type)?;
-                    (wrapped.value, wrapped.vole_type)
-                } else if declared_type.is_integer() && init.vole_type.is_integer() {
-                    // Handle integer type narrowing (e.g., i64 literal to i32 variable)
-                    let declared_cty = type_to_cranelift(&declared_type, ctx.pointer_type);
-                    let init_cty = init.ty;
-                    if declared_cty.bits() < init_cty.bits() {
-                        // Truncate to narrower type
-                        let narrowed = builder.ins().ireduce(declared_cty, init.value);
-                        (narrowed, declared_type)
-                    } else if declared_cty.bits() > init_cty.bits() {
-                        // Extend to wider type (sign extend)
-                        let widened = builder.ins().sextend(declared_cty, init.value);
-                        (widened, declared_type)
-                    } else {
-                        (init.value, declared_type)
-                    }
-                } else if declared_type == Type::F32 && init.vole_type == Type::F64 {
-                    // Handle f64 to f32 narrowing
-                    let narrowed = builder.ins().fdemote(types::F32, init.value);
-                    (narrowed, declared_type)
-                } else if declared_type == Type::F64 && init.vole_type == Type::F32 {
-                    // Handle f32 to f64 promotion
-                    let widened = builder.ins().fpromote(types::F64, init.value);
-                    (widened, declared_type)
-                } else {
-                    // Use declared type but keep the value
-                    (init.value, declared_type)
-                }
-            } else {
-                (init.value, init.vole_type)
-            };
-
-            let cranelift_ty = type_to_cranelift(&final_type, ctx.pointer_type);
-            let var = builder.declare_var(cranelift_ty);
-            builder.def_var(var, final_value);
-            variables.insert(let_stmt.name, (var, final_type));
-            Ok(false)
-        }
-        Stmt::Expr(expr_stmt) => {
-            compile_expr(builder, &expr_stmt.expr, variables, ctx)?;
-            Ok(false)
-        }
-        Stmt::Return(ret) => {
-            if let Some(value) = &ret.value {
-                let compiled = compile_expr(builder, value, variables, ctx)?;
-                builder.ins().return_(&[compiled.value]);
-            } else {
-                builder.ins().return_(&[]);
-            }
-            Ok(true)
-        }
-        Stmt::While(while_stmt) => {
-            // Create blocks
-            let header_block = builder.create_block(); // Condition check
-            let body_block = builder.create_block(); // Loop body
-            let exit_block = builder.create_block(); // After loop
-
-            // Jump to header
-            builder.ins().jump(header_block, &[]);
-
-            // Header block - check condition
-            builder.switch_to_block(header_block);
-            let cond = compile_expr(builder, &while_stmt.condition, variables, ctx)?;
-            // Extend bool to i32 for comparison if needed
-            let cond_i32 = builder.ins().uextend(types::I32, cond.value);
-            builder
-                .ins()
-                .brif(cond_i32, body_block, &[], exit_block, &[]);
-
-            // Body block
-            builder.switch_to_block(body_block);
-            // For while loops, continue jumps to the header (condition check)
-            cf_ctx.push_loop(exit_block, header_block);
-            let body_terminated = compile_block(builder, &while_stmt.body, variables, cf_ctx, ctx)?;
-            cf_ctx.pop_loop();
-
-            // Jump back to header (if not already terminated by break/return)
-            if !body_terminated {
-                builder.ins().jump(header_block, &[]);
-            }
-
-            // Continue in exit block
-            builder.switch_to_block(exit_block);
-
-            // Seal blocks
-            builder.seal_block(header_block);
-            builder.seal_block(body_block);
-            builder.seal_block(exit_block);
-
-            Ok(false)
-        }
-        Stmt::If(if_stmt) => {
-            let cond = compile_expr(builder, &if_stmt.condition, variables, ctx)?;
-            let cond_i32 = builder.ins().uextend(types::I32, cond.value);
-
-            let then_block = builder.create_block();
-            let else_block = builder.create_block();
-            let merge_block = builder.create_block();
-
-            builder
-                .ins()
-                .brif(cond_i32, then_block, &[], else_block, &[]);
-
-            // Then branch
-            builder.switch_to_block(then_block);
-            let then_terminated =
-                compile_block(builder, &if_stmt.then_branch, variables, cf_ctx, ctx)?;
-            if !then_terminated {
-                builder.ins().jump(merge_block, &[]);
-            }
-
-            // Else branch
-            builder.switch_to_block(else_block);
-            let else_terminated = if let Some(else_branch) = &if_stmt.else_branch {
-                compile_block(builder, else_branch, variables, cf_ctx, ctx)?
-            } else {
-                false
-            };
-            if !else_terminated {
-                builder.ins().jump(merge_block, &[]);
-            }
-
-            // Continue after if
-            builder.switch_to_block(merge_block);
-
-            builder.seal_block(then_block);
-            builder.seal_block(else_block);
-            builder.seal_block(merge_block);
-
-            // If both branches terminate, the if statement terminates
-            Ok(then_terminated && else_terminated)
-        }
-        Stmt::For(for_stmt) => {
-            if let ExprKind::Range(range) = &for_stmt.iterable.kind {
-                // Compile range bounds
-                let start_val = compile_expr(builder, &range.start, variables, ctx)?;
-                let end_val = compile_expr(builder, &range.end, variables, ctx)?;
-
-                // Create loop variable as Cranelift variable
-                let var = builder.declare_var(types::I64);
-                builder.def_var(var, start_val.value);
-                variables.insert(for_stmt.var_name, (var, Type::I64));
-
-                // Create blocks
-                let header = builder.create_block();
-                let body_block = builder.create_block();
-                let continue_block = builder.create_block();
-                let exit_block = builder.create_block();
-
-                builder.ins().jump(header, &[]);
-
-                // Header: load current, compare to end
-                builder.switch_to_block(header);
-                let current = builder.use_var(var);
-                let cmp = if range.inclusive {
-                    builder
-                        .ins()
-                        .icmp(IntCC::SignedLessThanOrEqual, current, end_val.value)
-                } else {
-                    builder
-                        .ins()
-                        .icmp(IntCC::SignedLessThan, current, end_val.value)
-                };
-                builder.ins().brif(cmp, body_block, &[], exit_block, &[]);
-
-                // Body
-                builder.switch_to_block(body_block);
-                cf_ctx.push_loop(exit_block, continue_block);
-                let body_terminated =
-                    compile_block(builder, &for_stmt.body, variables, cf_ctx, ctx)?;
-                cf_ctx.pop_loop();
-
-                if !body_terminated {
-                    builder.ins().jump(continue_block, &[]);
-                }
-
-                // Continue: increment and jump to header
-                builder.switch_to_block(continue_block);
-                let current = builder.use_var(var);
-                let next = builder.ins().iadd_imm(current, 1);
-                builder.def_var(var, next);
-                builder.ins().jump(header, &[]);
-
-                // Exit
-                builder.switch_to_block(exit_block);
-
-                // Seal blocks
-                builder.seal_block(header);
-                builder.seal_block(body_block);
-                builder.seal_block(continue_block);
-                builder.seal_block(exit_block);
-
-                Ok(false)
-            } else {
-                // Array iteration
-                let arr = compile_expr(builder, &for_stmt.iterable, variables, ctx)?;
-
-                // Get array length
-                let len_id = ctx
-                    .func_ids
-                    .get("vole_array_len")
-                    .ok_or_else(|| "vole_array_len not found".to_string())?;
-                let len_ref = ctx.module.declare_func_in_func(*len_id, builder.func);
-                let len_call = builder.ins().call(len_ref, &[arr.value]);
-                let len_val = builder.inst_results(len_call)[0];
-
-                // Create index variable (i = 0)
-                let idx_var = builder.declare_var(types::I64);
-                let zero = builder.ins().iconst(types::I64, 0);
-                builder.def_var(idx_var, zero);
-
-                // Determine element type from array type
-                let elem_type = match &arr.vole_type {
-                    Type::Array(elem) => elem.as_ref().clone(),
-                    _ => Type::I64,
-                };
-
-                // Create element variable
-                let elem_var = builder.declare_var(types::I64);
-                builder.def_var(elem_var, zero); // Initial value doesn't matter
-                variables.insert(for_stmt.var_name, (elem_var, elem_type));
-
-                // Loop blocks
-                let header = builder.create_block();
-                let body_block = builder.create_block();
-                let continue_block = builder.create_block();
-                let exit_block = builder.create_block();
-
-                builder.ins().jump(header, &[]);
-
-                // Header: check i < len
-                builder.switch_to_block(header);
-                let current_idx = builder.use_var(idx_var);
-                let cmp = builder
-                    .ins()
-                    .icmp(IntCC::SignedLessThan, current_idx, len_val);
-                builder.ins().brif(cmp, body_block, &[], exit_block, &[]);
-
-                // Body: load element, execute body
-                builder.switch_to_block(body_block);
-
-                // Get element: arr[i]
-                let get_value_id = ctx
-                    .func_ids
-                    .get("vole_array_get_value")
-                    .ok_or_else(|| "vole_array_get_value not found".to_string())?;
-                let get_value_ref = ctx.module.declare_func_in_func(*get_value_id, builder.func);
-                let current_idx = builder.use_var(idx_var);
-                let get_call = builder.ins().call(get_value_ref, &[arr.value, current_idx]);
-                let elem_val = builder.inst_results(get_call)[0];
-                builder.def_var(elem_var, elem_val);
-
-                // Execute loop body
-                cf_ctx.push_loop(exit_block, continue_block);
-                let body_terminated =
-                    compile_block(builder, &for_stmt.body, variables, cf_ctx, ctx)?;
-                cf_ctx.pop_loop();
-
-                // Jump to continue block if not already terminated
-                if !body_terminated {
-                    builder.ins().jump(continue_block, &[]);
-                }
-
-                // Continue: increment and loop
-                builder.switch_to_block(continue_block);
-                let current_idx = builder.use_var(idx_var);
-                let next_idx = builder.ins().iadd_imm(current_idx, 1);
-                builder.def_var(idx_var, next_idx);
-                builder.ins().jump(header, &[]);
-
-                // Exit
-                builder.switch_to_block(exit_block);
-
-                // Seal blocks
-                builder.seal_block(header);
-                builder.seal_block(body_block);
-                builder.seal_block(continue_block);
-                builder.seal_block(exit_block);
-
-                Ok(false)
-            }
-        }
-        Stmt::Break(_) => {
-            if let Some(exit_block) = cf_ctx.current_loop_exit() {
-                builder.ins().jump(exit_block, &[]);
-            }
-            Ok(true)
-        }
-        Stmt::Continue(_) => {
-            if let Some(continue_block) = cf_ctx.current_loop_continue() {
-                builder.ins().jump(continue_block, &[]);
-                // Create an unreachable block to continue building
-                // (the code after continue is dead but Cranelift still needs a current block)
-                let unreachable = builder.create_block();
-                builder.switch_to_block(unreachable);
-                builder.seal_block(unreachable);
-            }
-            Ok(true)
-        }
-    }
-}
-
-fn compile_expr(
+pub(super) fn compile_expr(
     builder: &mut FunctionBuilder,
     expr: &Expr,
     variables: &mut HashMap<Symbol, (Variable, Type)>,
@@ -2355,676 +1840,8 @@ fn compile_expr(
     }
 }
 
-/// Information about a captured variable for lambda compilation
-#[derive(Clone)]
-struct CaptureBinding {
-    /// Index in the closure's captures array
-    index: usize,
-    /// Vole type of the captured variable
-    vole_type: Type,
-}
-
-/// Compile a lambda expression to a function pointer or closure.
-///
-/// # Pure Lambda Optimization
-///
-/// Lambdas without captures are compiled as simple function pointers, avoiding
-/// the overhead of closure allocation. This optimization is based on the purity
-/// analysis performed during semantic analysis:
-///
-/// - **Pure lambdas** (no captures): Compiled to a raw function pointer.
-///   No heap allocation needed. Example: `(x: i64) => x * 2`
-///
-/// - **Closures** (with captures): Require a closure struct that holds the
-///   function pointer plus captured values. Example: `let y = 10; (x) => x + y`
-///
-/// Note: Side effects (like calling print) don't affect this optimization since
-/// they don't require capturing any state. A lambda with side effects but no
-/// captures is still compiled as a pure function pointer.
-fn compile_lambda(
-    builder: &mut FunctionBuilder,
-    lambda: &LambdaExpr,
-    variables: &HashMap<Symbol, (Variable, Type)>,
-    ctx: &mut CompileCtx,
-) -> Result<CompiledValue, String> {
-    // Pure lambda optimization: if no captures, just return a function pointer.
-    // This avoids heap allocation for the closure struct.
-    // Note: We check captures directly rather than using purity() because
-    // side effects don't require closure allocation - only captures do.
-    let captures = lambda.captures.borrow();
-    let has_captures = !captures.is_empty();
-
-    if has_captures {
-        compile_lambda_with_captures(builder, lambda, variables, ctx)
-    } else {
-        compile_pure_lambda(builder, lambda, ctx)
-    }
-}
-
-/// Infer the return type of a lambda expression body.
-/// This is used when no explicit return type is provided.
-fn infer_lambda_return_type(
-    body: &LambdaBody,
-    param_types: &[(Symbol, Type)],
-    ctx: &CompileCtx,
-) -> Type {
-    match body {
-        LambdaBody::Expr(expr) => infer_expr_type(expr, param_types, ctx),
-        LambdaBody::Block(_) => {
-            // Block bodies should use explicit return or default to void
-            // For now, default to i64 for backwards compatibility
-            Type::I64
-        }
-    }
-}
-
-/// Infer the type of an expression given parameter types as context.
-/// Returns I64 as fallback for unknown cases.
-fn infer_expr_type(expr: &Expr, param_types: &[(Symbol, Type)], ctx: &CompileCtx) -> Type {
-    match &expr.kind {
-        ExprKind::IntLiteral(_) => Type::I64, // Int literals compile to i64
-        ExprKind::FloatLiteral(_) => Type::F64,
-        ExprKind::BoolLiteral(_) => Type::Bool,
-        ExprKind::StringLiteral(_) => Type::String,
-        ExprKind::InterpolatedString(_) => Type::String,
-        ExprKind::Nil => Type::Nil,
-
-        ExprKind::Identifier(sym) => {
-            // Look up in parameters first
-            for (name, ty) in param_types {
-                if name == sym {
-                    return ty.clone();
-                }
-            }
-            // Look up in globals
-            for global in ctx.globals {
-                if global.name == *sym
-                    && let Some(type_expr) = &global.ty
-                {
-                    return resolve_type_expr(type_expr, ctx.type_aliases);
-                }
-            }
-            Type::I64 // Fallback
-        }
-
-        ExprKind::Binary(bin) => {
-            let left_ty = infer_expr_type(&bin.left, param_types, ctx);
-            let right_ty = infer_expr_type(&bin.right, param_types, ctx);
-
-            match bin.op {
-                // Comparison operators always return bool
-                BinaryOp::Eq
-                | BinaryOp::Ne
-                | BinaryOp::Lt
-                | BinaryOp::Le
-                | BinaryOp::Gt
-                | BinaryOp::Ge => Type::Bool,
-
-                // Logical operators return bool
-                BinaryOp::And | BinaryOp::Or => Type::Bool,
-
-                // Arithmetic: use the "wider" type or left type
-                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                    // If both are the same, use that type
-                    if left_ty == right_ty {
-                        left_ty
-                    } else {
-                        // Simple widening logic
-                        match (&left_ty, &right_ty) {
-                            (Type::I64, _) | (_, Type::I64) => Type::I64,
-                            (Type::F64, _) | (_, Type::F64) => Type::F64,
-                            (Type::I32, _) | (_, Type::I32) => Type::I32,
-                            _ => left_ty,
-                        }
-                    }
-                }
-
-                // Bitwise operators preserve type
-                BinaryOp::BitAnd
-                | BinaryOp::BitOr
-                | BinaryOp::BitXor
-                | BinaryOp::Shl
-                | BinaryOp::Shr => left_ty,
-            }
-        }
-
-        ExprKind::Unary(un) => infer_expr_type(&un.operand, param_types, ctx),
-
-        ExprKind::Call(call) => {
-            // Infer the callee type to get the return type
-            let callee_ty = infer_expr_type(&call.callee, param_types, ctx);
-            match callee_ty {
-                Type::Function(ft) => *ft.return_type,
-                _ => Type::I64, // Fallback if callee isn't a function type
-            }
-        }
-
-        ExprKind::Lambda(lambda) => {
-            // For nested lambdas, construct the function type
-            let lambda_params: Vec<Type> = lambda
-                .params
-                .iter()
-                .map(|p| {
-                    p.ty.as_ref()
-                        .map(|t| resolve_type_expr(t, ctx.type_aliases))
-                        .unwrap_or(Type::I64)
-                })
-                .collect();
-            let return_ty = lambda
-                .return_type
-                .as_ref()
-                .map(|t| resolve_type_expr(t, ctx.type_aliases))
-                .unwrap_or(Type::I64);
-            Type::Function(FunctionType {
-                params: lambda_params,
-                return_type: Box::new(return_ty),
-                is_closure: !lambda.captures.borrow().is_empty(),
-            })
-        }
-
-        _ => Type::I64, // Fallback for complex expressions
-    }
-}
-
-/// Compile a pure lambda (no captures) - returns a function pointer
-fn compile_pure_lambda(
-    builder: &mut FunctionBuilder,
-    lambda: &LambdaExpr,
-    ctx: &mut CompileCtx,
-) -> Result<CompiledValue, String> {
-    // Generate unique name for the lambda
-    let lambda_name = format!("__lambda_{}", *ctx.lambda_counter);
-    *ctx.lambda_counter += 1;
-
-    // Build parameter types from lambda params
-    let param_types: Vec<types::Type> = lambda
-        .params
-        .iter()
-        .map(|p| {
-            p.ty.as_ref()
-                .map(|t| {
-                    type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type)
-                })
-                .unwrap_or(types::I64)
-        })
-        .collect();
-
-    let param_vole_types: Vec<Type> = lambda
-        .params
-        .iter()
-        .map(|p| {
-            p.ty.as_ref()
-                .map(|t| resolve_type_expr(t, ctx.type_aliases))
-                .unwrap_or(Type::I64)
-        })
-        .collect();
-
-    // Build param context for type inference
-    let param_context: Vec<(Symbol, Type)> = lambda
-        .params
-        .iter()
-        .zip(param_vole_types.iter())
-        .map(|(p, ty)| (p.name, ty.clone()))
-        .collect();
-
-    // Determine return type - use explicit if provided, otherwise infer from body
-    let return_vole_type = lambda
-        .return_type
-        .as_ref()
-        .map(|t| resolve_type_expr(t, ctx.type_aliases))
-        .unwrap_or_else(|| infer_lambda_return_type(&lambda.body, &param_context, ctx));
-
-    let return_type = type_to_cranelift(&return_vole_type, ctx.pointer_type);
-
-    // Create signature for the lambda
-    let mut sig = ctx.module.make_signature();
-    for &param_ty in &param_types {
-        sig.params.push(AbiParam::new(param_ty));
-    }
-    sig.returns.push(AbiParam::new(return_type));
-
-    // Declare the lambda function
-    let func_id = ctx
-        .module
-        .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
-        .map_err(|e| e.to_string())?;
-
-    // Store the func_id so it can be looked up later
-    ctx.func_ids.insert(lambda_name, func_id);
-
-    // Create a new codegen context for the lambda
-    let mut lambda_ctx = ctx.module.make_context();
-    lambda_ctx.func.signature = sig.clone();
-
-    // Build the lambda function body
-    {
-        let mut lambda_builder_ctx = FunctionBuilderContext::new();
-        let mut lambda_builder =
-            FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
-
-        let entry_block = lambda_builder.create_block();
-        lambda_builder.append_block_params_for_function_params(entry_block);
-        lambda_builder.switch_to_block(entry_block);
-
-        // Map parameters to variables
-        let mut lambda_variables: HashMap<Symbol, (Variable, Type)> = HashMap::new();
-        let block_params = lambda_builder.block_params(entry_block).to_vec();
-        for (i, param) in lambda.params.iter().enumerate() {
-            let var = lambda_builder.declare_var(param_types[i]);
-            lambda_builder.def_var(var, block_params[i]);
-            lambda_variables.insert(param.name, (var, param_vole_types[i].clone()));
-        }
-
-        // No captures for pure lambdas
-        let capture_bindings: HashMap<Symbol, CaptureBinding> = HashMap::new();
-
-        // Compile the body
-        let mut lambda_cf_ctx = ControlFlowCtx::new();
-        let result = compile_lambda_body(
-            &mut lambda_builder,
-            &lambda.body,
-            &mut lambda_variables,
-            &capture_bindings,
-            None, // No closure pointer for pure lambdas
-            &mut lambda_cf_ctx,
-            ctx,
-        )?;
-
-        if let Some(result_val) = result {
-            // Return the result
-            lambda_builder.ins().return_(&[result_val.value]);
-        }
-        lambda_builder.seal_all_blocks();
-        lambda_builder.finalize();
-    }
-
-    // Define the lambda function
-    ctx.module
-        .define_function(func_id, &mut lambda_ctx)
-        .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
-
-    // Get function reference and its address in the parent function
-    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
-    let func_addr = builder.ins().func_addr(ctx.pointer_type, func_ref);
-
-    Ok(CompiledValue {
-        value: func_addr,
-        ty: ctx.pointer_type,
-        vole_type: Type::Function(FunctionType {
-            params: param_vole_types,
-            return_type: Box::new(return_vole_type),
-            is_closure: false, // Pure lambda, no closure
-        }),
-    })
-}
-
-/// Compile a lambda with captures - returns a closure pointer
-fn compile_lambda_with_captures(
-    builder: &mut FunctionBuilder,
-    lambda: &LambdaExpr,
-    variables: &HashMap<Symbol, (Variable, Type)>,
-    ctx: &mut CompileCtx,
-) -> Result<CompiledValue, String> {
-    let captures = lambda.captures.borrow();
-    let num_captures = captures.len();
-
-    // Generate unique name for the lambda
-    let lambda_name = format!("__lambda_{}", *ctx.lambda_counter);
-    *ctx.lambda_counter += 1;
-
-    // Build parameter types from lambda params
-    let param_types: Vec<types::Type> = lambda
-        .params
-        .iter()
-        .map(|p| {
-            p.ty.as_ref()
-                .map(|t| {
-                    type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type)
-                })
-                .unwrap_or(types::I64)
-        })
-        .collect();
-
-    let param_vole_types: Vec<Type> = lambda
-        .params
-        .iter()
-        .map(|p| {
-            p.ty.as_ref()
-                .map(|t| resolve_type_expr(t, ctx.type_aliases))
-                .unwrap_or(Type::I64)
-        })
-        .collect();
-
-    // Build param context for type inference
-    let param_context: Vec<(Symbol, Type)> = lambda
-        .params
-        .iter()
-        .zip(param_vole_types.iter())
-        .map(|(p, ty)| (p.name, ty.clone()))
-        .collect();
-
-    // Determine return type - use explicit if provided, otherwise infer from body
-    let return_vole_type = lambda
-        .return_type
-        .as_ref()
-        .map(|t| resolve_type_expr(t, ctx.type_aliases))
-        .unwrap_or_else(|| infer_lambda_return_type(&lambda.body, &param_context, ctx));
-
-    let return_type = type_to_cranelift(&return_vole_type, ctx.pointer_type);
-
-    // Create signature for the lambda - first param is the closure pointer
-    let mut sig = ctx.module.make_signature();
-    sig.params.push(AbiParam::new(ctx.pointer_type)); // Closure pointer
-    for &param_ty in &param_types {
-        sig.params.push(AbiParam::new(param_ty));
-    }
-    sig.returns.push(AbiParam::new(return_type));
-
-    // Declare the lambda function
-    let func_id = ctx
-        .module
-        .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
-        .map_err(|e| e.to_string())?;
-
-    // Store the func_id so it can be looked up later
-    ctx.func_ids.insert(lambda_name, func_id);
-
-    // Build capture bindings - maps capture name to index and type
-    let mut capture_bindings: HashMap<Symbol, CaptureBinding> = HashMap::new();
-    for (i, capture) in captures.iter().enumerate() {
-        let vole_type = variables
-            .get(&capture.name)
-            .map(|(_, ty)| ty.clone())
-            .unwrap_or(Type::I64);
-        capture_bindings.insert(
-            capture.name,
-            CaptureBinding {
-                index: i,
-                vole_type,
-            },
-        );
-    }
-
-    // Create a new codegen context for the lambda
-    let mut lambda_ctx = ctx.module.make_context();
-    lambda_ctx.func.signature = sig.clone();
-
-    // Build the lambda function body
-    {
-        let mut lambda_builder_ctx = FunctionBuilderContext::new();
-        let mut lambda_builder =
-            FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
-
-        let entry_block = lambda_builder.create_block();
-        lambda_builder.append_block_params_for_function_params(entry_block);
-        lambda_builder.switch_to_block(entry_block);
-
-        // Get block params - first is closure pointer, rest are user params
-        let block_params = lambda_builder.block_params(entry_block).to_vec();
-        let closure_ptr = block_params[0];
-
-        // Map parameters to variables (skip the closure pointer)
-        let mut lambda_variables: HashMap<Symbol, (Variable, Type)> = HashMap::new();
-        for (i, param) in lambda.params.iter().enumerate() {
-            let var = lambda_builder.declare_var(param_types[i]);
-            lambda_builder.def_var(var, block_params[i + 1]); // +1 to skip closure ptr
-            lambda_variables.insert(param.name, (var, param_vole_types[i].clone()));
-        }
-
-        // Store closure pointer in a variable so it can be accessed during body compilation
-        let closure_var = lambda_builder.declare_var(ctx.pointer_type);
-        lambda_builder.def_var(closure_var, closure_ptr);
-
-        // Compile the body
-        let mut lambda_cf_ctx = ControlFlowCtx::new();
-        let result = compile_lambda_body(
-            &mut lambda_builder,
-            &lambda.body,
-            &mut lambda_variables,
-            &capture_bindings,
-            Some(closure_var),
-            &mut lambda_cf_ctx,
-            ctx,
-        )?;
-
-        if let Some(result_val) = result {
-            // Return the result
-            lambda_builder.ins().return_(&[result_val.value]);
-        }
-        lambda_builder.seal_all_blocks();
-        lambda_builder.finalize();
-    }
-
-    // Define the lambda function
-    ctx.module
-        .define_function(func_id, &mut lambda_ctx)
-        .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
-
-    // Now in the parent function, allocate the closure and set up captures
-    // Get function address
-    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
-    let func_addr = builder.ins().func_addr(ctx.pointer_type, func_ref);
-
-    // Allocate closure: vole_closure_alloc(func_ptr, num_captures)
-    let alloc_id = ctx
-        .func_ids
-        .get("vole_closure_alloc")
-        .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-    let alloc_ref = ctx.module.declare_func_in_func(*alloc_id, builder.func);
-    let num_captures_val = builder.ins().iconst(types::I64, num_captures as i64);
-    let alloc_call = builder
-        .ins()
-        .call(alloc_ref, &[func_addr, num_captures_val]);
-    let closure_ptr = builder.inst_results(alloc_call)[0];
-
-    // Set up each capture
-    let set_capture_id = ctx
-        .func_ids
-        .get("vole_closure_set_capture")
-        .ok_or_else(|| "vole_closure_set_capture not found".to_string())?;
-    let set_capture_ref = ctx
-        .module
-        .declare_func_in_func(*set_capture_id, builder.func);
-
-    // Allocate heap for each capture
-    let heap_alloc_id = ctx
-        .func_ids
-        .get("vole_heap_alloc")
-        .ok_or_else(|| "vole_heap_alloc not found".to_string())?;
-    let heap_alloc_ref = ctx
-        .module
-        .declare_func_in_func(*heap_alloc_id, builder.func);
-
-    for (i, capture) in captures.iter().enumerate() {
-        // Get the current value of the captured variable
-        let (var, vole_type) = variables
-            .get(&capture.name)
-            .ok_or_else(|| format!("Captured variable not found: {:?}", capture.name))?;
-        let current_value = builder.use_var(*var);
-
-        // Determine the size of the variable
-        let size = type_size(vole_type, ctx.pointer_type);
-        let size_val = builder.ins().iconst(types::I64, size as i64);
-
-        // Allocate heap space for this capture
-        let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
-        let heap_ptr = builder.inst_results(alloc_call)[0];
-
-        // Store the current value into the heap
-        let _cranelift_ty = type_to_cranelift(vole_type, ctx.pointer_type);
-        builder
-            .ins()
-            .store(MemFlags::new(), current_value, heap_ptr, 0);
-
-        // Set the capture in the closure
-        let index_val = builder.ins().iconst(types::I64, i as i64);
-        builder
-            .ins()
-            .call(set_capture_ref, &[closure_ptr, index_val, heap_ptr]);
-
-        // IMPORTANT: Update the original variable to use the heap location
-        // This ensures that if the variable is modified after the lambda is created,
-        // the lambda sees the updated value (and vice versa for mutable captures)
-        // We do this by redefining the variable to load from the heap each time
-        // Actually, we need a different approach - the variable should become a pointer
-        // For now, we'll handle this by NOT updating the parent variable
-        // This means closures will capture by value, not by reference
-        // TODO: Full by-reference capture requires changing how variables are stored
-    }
-
-    // Return the closure pointer
-    // Note: The type is still Function, but the value is a Closure pointer
-    // The calling convention will detect this and handle it appropriately
-    Ok(CompiledValue {
-        value: closure_ptr,
-        ty: ctx.pointer_type,
-        vole_type: Type::Function(FunctionType {
-            params: param_vole_types,
-            return_type: Box::new(return_vole_type),
-            is_closure: true, // This is a closure with captures
-        }),
-    })
-}
-
-/// Compile a lambda body (either expression or block)
-/// Returns Some(result) if the body produces a value, None if it terminated with return
-fn compile_lambda_body(
-    builder: &mut FunctionBuilder,
-    body: &LambdaBody,
-    variables: &mut HashMap<Symbol, (Variable, Type)>,
-    capture_bindings: &HashMap<Symbol, CaptureBinding>,
-    closure_var: Option<Variable>,
-    cf_ctx: &mut ControlFlowCtx,
-    ctx: &mut CompileCtx,
-) -> Result<Option<CompiledValue>, String> {
-    match body {
-        LambdaBody::Expr(expr) => {
-            // For expression body, compile the expression with capture awareness
-            let result = compile_expr_with_captures(
-                builder,
-                expr,
-                variables,
-                capture_bindings,
-                closure_var,
-                ctx,
-            )?;
-            Ok(Some(result))
-        }
-        LambdaBody::Block(block) => {
-            // For block body, compile with capture awareness
-            let terminated = compile_block_with_captures(
-                builder,
-                block,
-                variables,
-                capture_bindings,
-                closure_var,
-                cf_ctx,
-                ctx,
-            )?;
-            if terminated {
-                Ok(None) // Block ended with return
-            } else {
-                // Block didn't return - return a default value
-                let zero = builder.ins().iconst(types::I64, 0);
-                Ok(Some(CompiledValue {
-                    value: zero,
-                    ty: types::I64,
-                    vole_type: Type::I64,
-                }))
-            }
-        }
-    }
-}
-
-/// Compile a block with capture awareness
-fn compile_block_with_captures(
-    builder: &mut FunctionBuilder,
-    block: &frontend::Block,
-    variables: &mut HashMap<Symbol, (Variable, Type)>,
-    capture_bindings: &HashMap<Symbol, CaptureBinding>,
-    closure_var: Option<Variable>,
-    cf_ctx: &mut ControlFlowCtx,
-    ctx: &mut CompileCtx,
-) -> Result<bool, String> {
-    let mut terminated = false;
-    for stmt in &block.stmts {
-        if terminated {
-            break;
-        }
-        terminated = compile_stmt_with_captures(
-            builder,
-            stmt,
-            variables,
-            capture_bindings,
-            closure_var,
-            cf_ctx,
-            ctx,
-        )?;
-    }
-    Ok(terminated)
-}
-
-/// Compile a statement with capture awareness
-fn compile_stmt_with_captures(
-    builder: &mut FunctionBuilder,
-    stmt: &Stmt,
-    variables: &mut HashMap<Symbol, (Variable, Type)>,
-    capture_bindings: &HashMap<Symbol, CaptureBinding>,
-    closure_var: Option<Variable>,
-    cf_ctx: &mut ControlFlowCtx,
-    ctx: &mut CompileCtx,
-) -> Result<bool, String> {
-    match stmt {
-        Stmt::Let(let_stmt) => {
-            let init = compile_expr_with_captures(
-                builder,
-                &let_stmt.init,
-                variables,
-                capture_bindings,
-                closure_var,
-                ctx,
-            )?;
-            let cranelift_ty = type_to_cranelift(&init.vole_type, ctx.pointer_type);
-            let var = builder.declare_var(cranelift_ty);
-            builder.def_var(var, init.value);
-            variables.insert(let_stmt.name, (var, init.vole_type));
-            Ok(false)
-        }
-        Stmt::Expr(expr_stmt) => {
-            compile_expr_with_captures(
-                builder,
-                &expr_stmt.expr,
-                variables,
-                capture_bindings,
-                closure_var,
-                ctx,
-            )?;
-            Ok(false)
-        }
-        Stmt::Return(ret) => {
-            if let Some(value) = &ret.value {
-                let compiled = compile_expr_with_captures(
-                    builder,
-                    value,
-                    variables,
-                    capture_bindings,
-                    closure_var,
-                    ctx,
-                )?;
-                builder.ins().return_(&[compiled.value]);
-            } else {
-                builder.ins().return_(&[]);
-            }
-            Ok(true)
-        }
-        // For other statements, delegate to regular compilation
-        // They don't directly reference captures, only through expressions
-        _ => compile_stmt(builder, stmt, variables, cf_ctx, ctx),
-    }
-}
-
 /// Compile an expression with capture awareness
-fn compile_expr_with_captures(
+pub(super) fn compile_expr_with_captures(
     builder: &mut FunctionBuilder,
     expr: &Expr,
     variables: &mut HashMap<Symbol, (Variable, Type)>,
@@ -3562,39 +2379,6 @@ fn compile_call_with_captures(
     compile_call(builder, call, call_line, variables, ctx)
 }
 
-/// Compile a string literal by calling vole_string_new
-fn compile_string_literal(
-    builder: &mut FunctionBuilder,
-    s: &str,
-    pointer_type: types::Type,
-    module: &mut JITModule,
-    func_ids: &HashMap<String, FuncId>,
-) -> Result<CompiledValue, String> {
-    // Get the vole_string_new function
-    let func_id = func_ids
-        .get("vole_string_new")
-        .ok_or_else(|| "vole_string_new not found".to_string())?;
-    let func_ref = module.declare_func_in_func(*func_id, builder.func);
-
-    // Pass the string data pointer and length as constants
-    // The string is a Rust &str, so we can get its pointer and length
-    let data_ptr = s.as_ptr() as i64;
-    let len = s.len() as i64;
-
-    let data_val = builder.ins().iconst(pointer_type, data_ptr);
-    let len_val = builder.ins().iconst(pointer_type, len);
-
-    // Call vole_string_new(data, len) -> *mut RcString
-    let call = builder.ins().call(func_ref, &[data_val, len_val]);
-    let result = builder.inst_results(call)[0];
-
-    Ok(CompiledValue {
-        value: result,
-        ty: pointer_type,
-        vole_type: Type::String,
-    })
-}
-
 /// Compile a function call expression
 fn compile_call(
     builder: &mut FunctionBuilder,
@@ -4023,20 +2807,6 @@ fn compile_user_function_call(
     }
 }
 
-/// Convert a Cranelift type back to a Vole type (for return value inference)
-fn cranelift_to_vole_type(ty: types::Type) -> Type {
-    match ty {
-        types::I8 => Type::I8,
-        types::I16 => Type::I16,
-        types::I32 => Type::I32,
-        types::I64 => Type::I64,
-        types::I128 => Type::I128,
-        types::F32 => Type::F32,
-        types::F64 => Type::F64,
-        _ => Type::Unknown, // Pointer types, etc. stay Unknown for now
-    }
-}
-
 /// Compile an interpolated string by converting parts and concatenating
 fn compile_interpolated_string(
     builder: &mut FunctionBuilder,
@@ -4099,82 +2869,6 @@ fn compile_interpolated_string(
         ty: ctx.pointer_type,
         vole_type: Type::String,
     })
-}
-
-/// Convert a compiled value to a string by calling the appropriate vole_*_to_string function
-fn value_to_string(
-    builder: &mut FunctionBuilder,
-    val: CompiledValue,
-    _pointer_type: types::Type,
-    module: &mut JITModule,
-    func_ids: &HashMap<String, FuncId>,
-) -> Result<Value, String> {
-    // If already a string, return as-is
-    if matches!(val.vole_type, Type::String) {
-        return Ok(val.value);
-    }
-
-    let (func_name, call_val) = if val.ty == types::F64 {
-        ("vole_f64_to_string", val.value)
-    } else if val.ty == types::I8 {
-        ("vole_bool_to_string", val.value)
-    } else {
-        // Extend smaller integer types to I64
-        let extended = if val.ty.is_int() && val.ty != types::I64 {
-            builder.ins().sextend(types::I64, val.value)
-        } else {
-            val.value
-        };
-        ("vole_i64_to_string", extended)
-    };
-
-    let func_id = func_ids
-        .get(func_name)
-        .ok_or_else(|| format!("{} not found", func_name))?;
-    let func_ref = module.declare_func_in_func(*func_id, builder.func);
-
-    let call = builder.ins().call(func_ref, &[call_val]);
-    Ok(builder.inst_results(call)[0])
-}
-
-fn convert_to_type(
-    builder: &mut FunctionBuilder,
-    val: CompiledValue,
-    target: types::Type,
-) -> Value {
-    if val.ty == target {
-        return val.value;
-    }
-
-    if target == types::F64 {
-        // Convert int to float
-        if val.ty == types::I64 || val.ty == types::I32 {
-            return builder.ins().fcvt_from_sint(types::F64, val.value);
-        }
-        // Convert f32 to f64
-        if val.ty == types::F32 {
-            return builder.ins().fpromote(types::F64, val.value);
-        }
-    }
-
-    if target == types::F32 {
-        // Convert f64 to f32
-        if val.ty == types::F64 {
-            return builder.ins().fdemote(types::F32, val.value);
-        }
-    }
-
-    // Integer widening
-    if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
-        return builder.ins().sextend(target, val.value);
-    }
-
-    // Integer narrowing
-    if target.is_int() && val.ty.is_int() && target.bits() < val.ty.bits() {
-        return builder.ins().ireduce(target, val.value);
-    }
-
-    val.value
 }
 
 // ============================================================================
@@ -4461,138 +3155,6 @@ fn compile_builtin_method(
             }))
         }
         _ => Ok(None),
-    }
-}
-
-/// Get field slot and type from a class/record type
-fn get_field_slot_and_type(
-    vole_type: &Type,
-    field: Symbol,
-    ctx: &CompileCtx,
-) -> Result<(usize, Type), String> {
-    match vole_type {
-        Type::Class(class_type) => {
-            for sf in &class_type.fields {
-                if sf.name == field {
-                    return Ok((sf.slot, sf.ty.clone()));
-                }
-            }
-            Err(format!(
-                "Field {} not found in class",
-                ctx.interner.resolve(field)
-            ))
-        }
-        Type::Record(record_type) => {
-            for sf in &record_type.fields {
-                if sf.name == field {
-                    return Ok((sf.slot, sf.ty.clone()));
-                }
-            }
-            Err(format!(
-                "Field {} not found in record",
-                ctx.interner.resolve(field)
-            ))
-        }
-        _ => Err(format!(
-            "Cannot access field {} on non-class/record type {:?}",
-            ctx.interner.resolve(field),
-            vole_type
-        )),
-    }
-}
-
-/// Get the type name symbol from a class/record type
-fn get_type_name_symbol(vole_type: &Type) -> Result<Symbol, String> {
-    match vole_type {
-        Type::Class(class_type) => Ok(class_type.name),
-        Type::Record(record_type) => Ok(record_type.name),
-        _ => Err(format!(
-            "Cannot get type name from non-class/record type {:?}",
-            vole_type
-        )),
-    }
-}
-
-/// Get the return type of a method
-fn get_method_return_type(
-    vole_type: &Type,
-    method: Symbol,
-    ctx: &CompileCtx,
-) -> Result<Type, String> {
-    let type_name = get_type_name_symbol(vole_type)?;
-    let metadata = ctx
-        .type_metadata
-        .get(&type_name)
-        .ok_or_else(|| "Type metadata not found".to_string())?;
-
-    // Look up the method return type from metadata
-    metadata
-        .method_return_types
-        .get(&method)
-        .cloned()
-        .ok_or_else(|| format!("Method {} not found in type", ctx.interner.resolve(method)))
-}
-
-/// Convert a raw i64 field value to the appropriate Cranelift type
-fn convert_field_value(
-    builder: &mut FunctionBuilder,
-    raw_value: Value,
-    field_type: &Type,
-) -> (Value, types::Type) {
-    match field_type {
-        Type::F64 => {
-            let fval = builder
-                .ins()
-                .bitcast(types::F64, MemFlags::new(), raw_value);
-            (fval, types::F64)
-        }
-        Type::F32 => {
-            // Truncate to i32 first, then bitcast
-            let i32_val = builder.ins().ireduce(types::I32, raw_value);
-            let fval = builder.ins().bitcast(types::F32, MemFlags::new(), i32_val);
-            (fval, types::F32)
-        }
-        Type::Bool => {
-            let bval = builder.ins().ireduce(types::I8, raw_value);
-            (bval, types::I8)
-        }
-        Type::I8 | Type::U8 => {
-            let val = builder.ins().ireduce(types::I8, raw_value);
-            (val, types::I8)
-        }
-        Type::I16 | Type::U16 => {
-            let val = builder.ins().ireduce(types::I16, raw_value);
-            (val, types::I16)
-        }
-        Type::I32 | Type::U32 => {
-            let val = builder.ins().ireduce(types::I32, raw_value);
-            (val, types::I32)
-        }
-        Type::String | Type::Array(_) | Type::Class(_) | Type::Record(_) => {
-            // Pointers stay as i64
-            (raw_value, types::I64)
-        }
-        _ => (raw_value, types::I64),
-    }
-}
-
-/// Convert a CompiledValue to i64 for storage in instance fields
-fn convert_to_i64_for_storage(builder: &mut FunctionBuilder, value: &CompiledValue) -> Value {
-    match value.ty {
-        types::F64 => builder
-            .ins()
-            .bitcast(types::I64, MemFlags::new(), value.value),
-        types::F32 => {
-            let i32_val = builder
-                .ins()
-                .bitcast(types::I32, MemFlags::new(), value.value);
-            builder.ins().uextend(types::I64, i32_val)
-        }
-        types::I8 => builder.ins().uextend(types::I64, value.value),
-        types::I16 => builder.ins().uextend(types::I64, value.value),
-        types::I32 => builder.ins().uextend(types::I64, value.value),
-        types::I64 => value.value,
-        _ => value.value,
     }
 }
 

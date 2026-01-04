@@ -9,8 +9,9 @@ use crate::sema::interface_registry::{
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::{
     ClassType, FunctionType, RecordType, StructField, Type,
+    compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
+    resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
-    types::{InterfaceMethodType, InterfaceType},
 };
 use std::collections::{HashMap, HashSet};
 
@@ -110,6 +111,19 @@ impl Analyzer {
     /// Helper to add a type error
     fn add_error(&mut self, error: SemanticError, span: Span) {
         self.errors.push(TypeError::new(error, span));
+    }
+
+    /// Helper to add a type mismatch error
+    #[allow(dead_code)] // Will be used in subsequent refactor tasks
+    fn type_mismatch(&mut self, expected: &str, found: &str, span: Span) {
+        self.add_error(
+            SemanticError::TypeMismatch {
+                expected: expected.to_string(),
+                found: found.to_string(),
+                span: span.into(),
+            },
+            span,
+        );
     }
 
     /// Get the collected type aliases (for use by codegen)
@@ -484,66 +498,13 @@ impl Analyzer {
     }
 
     fn resolve_type(&self, ty: &TypeExpr) -> Type {
-        match ty {
-            TypeExpr::Primitive(p) => Type::from_primitive(*p),
-            TypeExpr::Named(sym) => {
-                // Look up type alias first
-                if let Some(aliased) = self.type_aliases.get(sym) {
-                    aliased.clone()
-                } else if let Some(record) = self.records.get(sym) {
-                    Type::Record(record.clone())
-                } else if let Some(class) = self.classes.get(sym) {
-                    Type::Class(class.clone())
-                } else if let Some(iface) = self.interface_registry.get(*sym) {
-                    Type::Interface(InterfaceType {
-                        name: *sym,
-                        methods: iface
-                            .methods
-                            .iter()
-                            .map(|m| InterfaceMethodType {
-                                name: m.name,
-                                params: m.params.clone(),
-                                return_type: Box::new(m.return_type.clone()),
-                                has_default: m.has_default,
-                            })
-                            .collect(),
-                        extends: iface.extends.clone(),
-                    })
-                } else {
-                    Type::Error // Unknown type name
-                }
-            }
-            TypeExpr::Array(elem) => {
-                let elem_ty = self.resolve_type(elem);
-                Type::Array(Box::new(elem_ty))
-            }
-            TypeExpr::Nil => Type::Nil,
-            TypeExpr::Optional(inner) => {
-                let inner_ty = self.resolve_type(inner);
-                Type::optional(inner_ty)
-            }
-            TypeExpr::Union(variants) => {
-                let types: Vec<Type> = variants.iter().map(|t| self.resolve_type(t)).collect();
-                Type::normalize_union(types)
-            }
-            TypeExpr::Function {
-                params,
-                return_type,
-            } => {
-                let param_types: Vec<Type> = params.iter().map(|p| self.resolve_type(p)).collect();
-                let ret = self.resolve_type(return_type);
-                Type::Function(FunctionType {
-                    params: param_types,
-                    return_type: Box::new(ret),
-                    is_closure: false, // Type annotations don't know if it's a closure
-                })
-            }
-            TypeExpr::SelfType => {
-                // Self is resolved during interface/implement checking
-                // For now, return Error to indicate it can't be used outside that context
-                Type::Error
-            }
-        }
+        let ctx = TypeResolutionContext::new(
+            &self.type_aliases,
+            &self.classes,
+            &self.records,
+            &self.interface_registry,
+        );
+        resolve_type(ty, &ctx)
     }
 
     fn check_function(
@@ -875,7 +836,7 @@ impl Analyzer {
     ) -> Result<Type, Vec<TypeError>> {
         match &expr.kind {
             ExprKind::IntLiteral(value) => match expected {
-                Some(ty) if Self::literal_fits(*value, ty) => Ok(ty.clone()),
+                Some(ty) if literal_fits(*value, ty) => Ok(ty.clone()),
                 Some(ty) => {
                     self.add_error(
                         SemanticError::TypeMismatch {
@@ -1359,43 +1320,13 @@ impl Analyzer {
                         if self.in_lambda() {
                             self.mark_lambda_has_side_effects();
                         }
-                        if call.args.len() != func_type.params.len() {
-                            self.add_error(
-                                SemanticError::WrongArgumentCount {
-                                    expected: func_type.params.len(),
-                                    found: call.args.len(),
-                                    span: expr.span.into(),
-                                },
-                                expr.span,
-                            );
-                        }
-
-                        for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
-                            // For lambda arguments, pass expected type for inference
-                            let arg_ty = if let ExprKind::Lambda(lambda) = &arg.kind {
-                                let expected_fn = if let Type::Function(ft) = param_ty {
-                                    Some(ft)
-                                } else {
-                                    None
-                                };
-                                self.analyze_lambda(lambda, expected_fn, interner)
-                            } else {
-                                // Pass expected type to allow integer literal inference
-                                self.check_expr_expecting(arg, Some(param_ty), interner)?
-                            };
-
-                            if !self.types_compatible(&arg_ty, param_ty) {
-                                self.add_error(
-                                    SemanticError::TypeMismatch {
-                                        expected: param_ty.name().to_string(),
-                                        found: arg_ty.name().to_string(),
-                                        span: arg.span.into(),
-                                    },
-                                    arg.span,
-                                );
-                            }
-                        }
-
+                        self.check_call_args(
+                            &call.args,
+                            &func_type.params,
+                            expr.span,
+                            true, // with_inference
+                            interner,
+                        )?;
                         return Ok(*func_type.return_type);
                     }
 
@@ -1405,43 +1336,13 @@ impl Analyzer {
                         if self.in_lambda() {
                             self.mark_lambda_has_side_effects();
                         }
-                        if call.args.len() != func_type.params.len() {
-                            self.add_error(
-                                SemanticError::WrongArgumentCount {
-                                    expected: func_type.params.len(),
-                                    found: call.args.len(),
-                                    span: expr.span.into(),
-                                },
-                                expr.span,
-                            );
-                        }
-
-                        for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
-                            // For lambda arguments, pass expected type for inference
-                            let arg_ty = if let ExprKind::Lambda(lambda) = &arg.kind {
-                                let expected_fn = if let Type::Function(ft) = param_ty {
-                                    Some(ft)
-                                } else {
-                                    None
-                                };
-                                self.analyze_lambda(lambda, expected_fn, interner)
-                            } else {
-                                // Pass expected type to allow integer literal inference
-                                self.check_expr_expecting(arg, Some(param_ty), interner)?
-                            };
-
-                            if !self.types_compatible(&arg_ty, param_ty) {
-                                self.add_error(
-                                    SemanticError::TypeMismatch {
-                                        expected: param_ty.name().to_string(),
-                                        found: arg_ty.name().to_string(),
-                                        span: arg.span.into(),
-                                    },
-                                    arg.span,
-                                );
-                            }
-                        }
-
+                        self.check_call_args(
+                            &call.args,
+                            &func_type.params,
+                            expr.span,
+                            true, // with_inference
+                            interner,
+                        )?;
                         return Ok(*func_type.return_type);
                     }
 
@@ -1493,32 +1394,13 @@ impl Analyzer {
                     if self.in_lambda() {
                         self.mark_lambda_has_side_effects();
                     }
-                    // Calling a function-typed expression
-                    if call.args.len() != func_type.params.len() {
-                        self.add_error(
-                            SemanticError::WrongArgumentCount {
-                                expected: func_type.params.len(),
-                                found: call.args.len(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                    }
-
-                    for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
-                        let arg_ty = self.check_expr(arg, interner)?;
-                        if !self.types_compatible(&arg_ty, param_ty) {
-                            self.add_error(
-                                SemanticError::TypeMismatch {
-                                    expected: param_ty.name().to_string(),
-                                    found: arg_ty.name().to_string(),
-                                    span: arg.span.into(),
-                                },
-                                arg.span,
-                            );
-                        }
-                    }
-
+                    self.check_call_args(
+                        &call.args,
+                        &func_type.params,
+                        expr.span,
+                        false, // without inference (callee was just an expression)
+                        interner,
+                    )?;
                     return Ok(*func_type.return_type);
                 }
 
@@ -2521,64 +2403,9 @@ impl Analyzer {
         })
     }
 
-    /// Check if an integer literal value fits in the target type
-    fn literal_fits(value: i64, target: &Type) -> bool {
-        match target {
-            Type::I8 => value >= i8::MIN as i64 && value <= i8::MAX as i64,
-            Type::I16 => value >= i16::MIN as i64 && value <= i16::MAX as i64,
-            Type::I32 => value >= i32::MIN as i64 && value <= i32::MAX as i64,
-            Type::I64 => true,
-            Type::I128 => true, // i64 always fits in i128
-            Type::U8 => value >= 0 && value <= u8::MAX as i64,
-            Type::U16 => value >= 0 && value <= u16::MAX as i64,
-            Type::U32 => value >= 0 && value <= u32::MAX as i64,
-            Type::U64 => value >= 0,       // i64 positive values fit
-            Type::F32 | Type::F64 => true, // Integers can become floats
-            // For unions, check if literal fits any numeric variant
-            Type::Union(variants) => variants.iter().any(|v| Self::literal_fits(value, v)),
-            _ => false,
-        }
-    }
-
     fn types_compatible(&self, from: &Type, to: &Type) -> bool {
-        if from == to {
-            return true;
-        }
-
-        // Check if from can widen to to
-        if from.can_widen_to(to) {
-            return true;
-        }
-
-        // Allow numeric coercion (kept for backwards compatibility)
-        if from.is_integer() && to == &Type::I64 {
-            return true;
-        }
-        if from.is_numeric() && to == &Type::F64 {
-            return true;
-        }
-
-        // Check if assigning to a union that contains the from type
-        if let Type::Union(variants) = to {
-            // Direct containment
-            if variants.contains(from) {
-                return true;
-            }
-            // Also check if from can widen into a union variant
-            for variant in variants {
-                if from.can_widen_to(variant) {
-                    return true;
-                }
-            }
-        }
-
-        // Nil is compatible with any optional (union containing Nil)
-        if *from == Type::Nil && to.is_optional() {
-            return true;
-        }
-
-        // Error type is compatible with anything (for error recovery)
-        if from == &Type::Error || to == &Type::Error {
+        // Use the core compatibility check for most cases
+        if types_compatible_core(from, to) {
             return true;
         }
 
@@ -2586,20 +2413,76 @@ impl Analyzer {
         if let Type::Function(fn_type) = from
             && let Type::Interface(iface) = to
             && let Some(iface_fn) = self.get_functional_interface_type(iface.name)
-            && fn_type.params.len() == iface_fn.params.len()
+            && function_compatible_with_interface(fn_type, &iface_fn)
         {
-            let params_match = fn_type
-                .params
-                .iter()
-                .zip(iface_fn.params.iter())
-                .all(|(fp, ip)| self.types_compatible(fp, ip));
-            let return_matches = self.types_compatible(&fn_type.return_type, &iface_fn.return_type);
-            if params_match && return_matches {
-                return true;
-            }
+            return true;
         }
 
         false
+    }
+
+    /// Check call arguments against expected parameter types.
+    ///
+    /// This helper unifies the argument checking logic used for:
+    /// - Named function calls
+    /// - Function-typed variable calls
+    /// - Expression calls (e.g., immediately invoked lambdas)
+    ///
+    /// If `with_inference` is true, uses `check_expr_expecting` for argument type checking,
+    /// enabling integer literal inference and lambda parameter inference. Otherwise uses
+    /// plain `check_expr` (for cases where type inference context isn't available).
+    fn check_call_args(
+        &mut self,
+        args: &[Expr],
+        param_types: &[Type],
+        call_span: Span,
+        with_inference: bool,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        // Check argument count
+        if args.len() != param_types.len() {
+            self.add_error(
+                SemanticError::WrongArgumentCount {
+                    expected: param_types.len(),
+                    found: args.len(),
+                    span: call_span.into(),
+                },
+                call_span,
+            );
+        }
+
+        // Check each argument against its expected parameter type
+        for (arg, param_ty) in args.iter().zip(param_types.iter()) {
+            let arg_ty = if with_inference {
+                // For lambda arguments, pass expected function type for inference
+                if let ExprKind::Lambda(lambda) = &arg.kind {
+                    let expected_fn = if let Type::Function(ft) = param_ty {
+                        Some(ft)
+                    } else {
+                        None
+                    };
+                    self.analyze_lambda(lambda, expected_fn, interner)
+                } else {
+                    // Pass expected type to allow integer literal inference
+                    self.check_expr_expecting(arg, Some(param_ty), interner)?
+                }
+            } else {
+                self.check_expr(arg, interner)?
+            };
+
+            if !self.types_compatible(&arg_ty, param_ty) {
+                self.add_error(
+                    SemanticError::TypeMismatch {
+                        expected: param_ty.name().to_string(),
+                        found: arg_ty.name().to_string(),
+                        span: arg.span.into(),
+                    },
+                    arg.span,
+                );
+            }
+        }
+
+        Ok(())
     }
 
     /// Check if a method call is a built-in method on a primitive type
