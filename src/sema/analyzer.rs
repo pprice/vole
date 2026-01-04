@@ -112,6 +112,19 @@ impl Analyzer {
         self.errors.push(TypeError::new(error, span));
     }
 
+    /// Helper to add a type mismatch error
+    #[allow(dead_code)] // Will be used in subsequent refactor tasks
+    fn type_mismatch(&mut self, expected: &str, found: &str, span: Span) {
+        self.add_error(
+            SemanticError::TypeMismatch {
+                expected: expected.to_string(),
+                found: found.to_string(),
+                span: span.into(),
+            },
+            span,
+        );
+    }
+
     /// Get the collected type aliases (for use by codegen)
     pub fn type_aliases(&self) -> &HashMap<Symbol, Type> {
         &self.type_aliases
