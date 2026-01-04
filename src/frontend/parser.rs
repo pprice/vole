@@ -648,6 +648,47 @@ impl<'src> Parser<'src> {
         }
     }
 
+    /// Check if the current position looks like a struct literal.
+    /// This uses lookahead to distinguish `Name { field: value }` from `Name { statement }`.
+    /// Returns true if:
+    /// - Content after `{` is `}` (empty struct literal: `Name { }`)
+    /// - Content after `{` is `Identifier :` (field initialization)
+    ///
+    /// We create a temporary lexer to peek without consuming tokens.
+    fn looks_like_struct_literal(&self) -> bool {
+        // We're at `{` which is in self.current
+        // Create a temporary lexer starting from position after `{`
+        let brace_end = self.current.span.end;
+        let remaining_source = &self.lexer.source()[brace_end..];
+
+        let mut peek_lexer = Lexer::new(remaining_source);
+
+        // Get first token after `{`
+        let mut first = peek_lexer.next_token();
+
+        // Skip newlines
+        while first.ty == TokenType::Newline {
+            first = peek_lexer.next_token();
+        }
+
+        if first.ty == TokenType::RBrace {
+            // Empty struct: `Name { }`
+            return true;
+        }
+
+        if first.ty == TokenType::Identifier {
+            // Check what follows the identifier
+            let second = peek_lexer.next_token();
+            if second.ty == TokenType::Colon {
+                // It's `Name { identifier: ...` - struct literal
+                return true;
+            }
+        }
+
+        // Anything else: keyword, literal, operator, etc. - it's a block
+        false
+    }
+
     /// Parse an expression with Pratt parsing
     fn expression(&mut self, min_prec: u8) -> Result<Expr, ParseError> {
         let mut left = self.unary()?;
@@ -844,7 +885,7 @@ impl<'src> Parser<'src> {
         self.call()
     }
 
-    /// Parse a call expression (function call) and index expressions
+    /// Parse a call expression (function call), index expressions, field access, and method calls
     fn call(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.primary()?;
 
@@ -865,6 +906,50 @@ impl<'src> Parser<'src> {
                     })),
                     span,
                 };
+            } else if self.match_token(TokenType::Dot) {
+                // Field access or method call: expr.field or expr.method()
+                let field_span = self.current.span;
+                let field_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected field name after '.'")?;
+                let field = self.interner.intern(&field_token.lexeme);
+
+                if self.check(TokenType::LParen) {
+                    // Method call: expr.method(args)
+                    self.advance(); // consume '('
+                    let mut args = Vec::new();
+                    if !self.check(TokenType::RParen) {
+                        loop {
+                            args.push(self.expression(0)?);
+                            if !self.match_token(TokenType::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    let end_span = self.current.span;
+                    self.consume(TokenType::RParen, "expected ')' after arguments")?;
+
+                    let span = expr.span.merge(end_span);
+                    expr = Expr {
+                        kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
+                            object: expr,
+                            method: field,
+                            args,
+                            method_span: field_span,
+                        })),
+                        span,
+                    };
+                } else {
+                    // Field access: expr.field
+                    let span = expr.span.merge(field_span);
+                    expr = Expr {
+                        kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
+                            object: expr,
+                            field,
+                            field_span,
+                        })),
+                        span,
+                    };
+                }
             } else {
                 break;
             }
@@ -967,6 +1052,15 @@ impl<'src> Parser<'src> {
             TokenType::Identifier => {
                 self.advance();
                 let sym = self.interner.intern(&token.lexeme);
+
+                // Check for struct literal: Name { field: value }
+                // We need lookahead to distinguish from a block: `size { let x = ... }`
+                // A struct literal looks like `Name { identifier: value }` or `Name { }`
+                // A block starts with statements, keywords, or expressions without `:` after ident
+                if self.check(TokenType::LBrace) && self.looks_like_struct_literal() {
+                    return self.struct_literal(sym, token.span);
+                }
+
                 Ok(Expr {
                     kind: ExprKind::Identifier(sym),
                     span: token.span,
@@ -1167,6 +1261,46 @@ impl<'src> Parser<'src> {
                 token.span,
             )),
         }
+    }
+
+    /// Parse a struct literal: Name { field: value, ... }
+    fn struct_literal(&mut self, name: Symbol, start_span: Span) -> Result<Expr, ParseError> {
+        self.consume(TokenType::LBrace, "expected '{'")?;
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            let field_span = self.current.span;
+            let field_name_token = self.current.clone();
+            self.consume(TokenType::Identifier, "expected field name")?;
+            let field_name = self.interner.intern(&field_name_token.lexeme);
+
+            self.consume(TokenType::Colon, "expected ':' after field name")?;
+            let value = self.expression(0)?;
+
+            fields.push(StructFieldInit {
+                name: field_name,
+                value,
+                span: field_span.merge(self.previous.span),
+            });
+
+            if self.check(TokenType::Comma) {
+                self.advance();
+                self.skip_newlines();
+            } else {
+                break;
+            }
+            self.skip_newlines();
+        }
+
+        let end_span = self.current.span;
+        self.consume(TokenType::RBrace, "expected '}'")?;
+
+        Ok(Expr {
+            kind: ExprKind::StructLiteral(Box::new(StructLiteralExpr { name, fields })),
+            span: start_span.merge(end_span),
+        })
     }
 
     /// Parse a match expression
@@ -1462,7 +1596,7 @@ impl<'src> Parser<'src> {
         Ok(expr)
     }
 
-    /// Continue parsing calls and indexes after we have the base expression
+    /// Continue parsing calls, indexes, field access, and method calls after we have the base expression
     fn continue_call(&mut self, mut expr: Expr) -> Result<Expr, ParseError> {
         loop {
             if self.match_token(TokenType::LParen) {
@@ -1480,6 +1614,50 @@ impl<'src> Parser<'src> {
                     })),
                     span,
                 };
+            } else if self.match_token(TokenType::Dot) {
+                // Field access or method call: expr.field or expr.method()
+                let field_span = self.current.span;
+                let field_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected field name after '.'")?;
+                let field = self.interner.intern(&field_token.lexeme);
+
+                if self.check(TokenType::LParen) {
+                    // Method call: expr.method(args)
+                    self.advance(); // consume '('
+                    let mut args = Vec::new();
+                    if !self.check(TokenType::RParen) {
+                        loop {
+                            args.push(self.expression(0)?);
+                            if !self.match_token(TokenType::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    let end_span = self.current.span;
+                    self.consume(TokenType::RParen, "expected ')' after arguments")?;
+
+                    let span = expr.span.merge(end_span);
+                    expr = Expr {
+                        kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
+                            object: expr,
+                            method: field,
+                            args,
+                            method_span: field_span,
+                        })),
+                        span,
+                    };
+                } else {
+                    // Field access: expr.field
+                    let span = expr.span.merge(field_span);
+                    expr = Expr {
+                        kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
+                            object: expr,
+                            field,
+                            field_span,
+                        })),
+                        span,
+                    };
+                }
             } else {
                 break;
             }
@@ -2556,6 +2734,82 @@ record Point {
                 assert_eq!(record.methods.len(), 0);
             }
             _ => panic!("expected record declaration"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_literal() {
+        let mut parser = Parser::new("Point { x: 10, y: 20 }");
+        let expr = parser.parse_expression().unwrap();
+        match expr.kind {
+            ExprKind::StructLiteral(sl) => {
+                assert_eq!(sl.fields.len(), 2);
+            }
+            _ => panic!("expected struct literal"),
+        }
+    }
+
+    #[test]
+    fn parse_field_access() {
+        let mut parser = Parser::new("p.x");
+        let expr = parser.parse_expression().unwrap();
+        assert!(matches!(expr.kind, ExprKind::FieldAccess(_)));
+    }
+
+    #[test]
+    fn parse_method_call() {
+        let mut parser = Parser::new("p.sum()");
+        let expr = parser.parse_expression().unwrap();
+        assert!(matches!(expr.kind, ExprKind::MethodCall(_)));
+    }
+
+    #[test]
+    fn parse_method_call_with_args() {
+        let mut parser = Parser::new("p.distance(other)");
+        let expr = parser.parse_expression().unwrap();
+        match expr.kind {
+            ExprKind::MethodCall(mc) => {
+                assert_eq!(mc.args.len(), 1);
+            }
+            _ => panic!("expected method call"),
+        }
+    }
+
+    #[test]
+    fn parse_chained_field_access() {
+        let mut parser = Parser::new("a.b.c");
+        let expr = parser.parse_expression().unwrap();
+        // Should parse as ((a.b).c)
+        match expr.kind {
+            ExprKind::FieldAccess(fa) => {
+                // The outermost is .c
+                assert!(matches!(fa.object.kind, ExprKind::FieldAccess(_)));
+            }
+            _ => panic!("expected field access"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_literal_empty() {
+        let mut parser = Parser::new("Empty { }");
+        let expr = parser.parse_expression().unwrap();
+        match expr.kind {
+            ExprKind::StructLiteral(sl) => {
+                assert_eq!(sl.fields.len(), 0);
+            }
+            _ => panic!("expected struct literal"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_literal_trailing_comma() {
+        let mut parser = Parser::new("Point { x: 10, y: 20, }");
+        let expr = parser.parse_expression().unwrap();
+        match expr.kind {
+            ExprKind::StructLiteral(sl) => {
+                assert_eq!(sl.fields.len(), 2);
+            }
+            _ => panic!("expected struct literal"),
         }
     }
 }

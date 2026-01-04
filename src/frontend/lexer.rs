@@ -50,6 +50,11 @@ impl<'src> Lexer<'src> {
         !self.errors.is_empty()
     }
 
+    /// Get the source string being lexed.
+    pub fn source(&self) -> &'src str {
+        self.source
+    }
+
     /// Get the next token from the source
     pub fn next_token(&mut self) -> Token {
         self.skip_whitespace();
