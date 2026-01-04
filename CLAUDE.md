@@ -109,3 +109,16 @@ Lambdas: `(x: i64) => x * 2`, `() => { return 42 }` (with type inference from co
 Function types: `(i64) -> i64`, `(i64, i64) -> bool`, `() -> nil`
 
 Supported: functions, let/let mut bindings, if/else, while, break, string interpolation (`"x is {x}"`), comparison and arithmetic operators, `&&` and `||`.
+
+## Documentation
+
+Language documentation lives in `docs/language/`. When adding or modifying language features:
+
+1. **Update the relevant doc** - Each feature area has its own file (e.g., `types.md`, `functions.md`, `control-flow.md`)
+2. **Update the cheatsheet** - `cheatsheet.md` is a single-page syntax reference
+3. **Update the README** - `docs/language/README.md` has a feature status table showing what's implemented vs WIP
+
+Key docs:
+- `docs/language/README.md` - Index with feature status table
+- `docs/language/cheatsheet.md` - Quick syntax reference
+- `docs/language/*.md` - Detailed docs for each feature area
