@@ -3,6 +3,7 @@ pub mod ast;
 pub mod ast_display;
 pub mod intern;
 pub mod lexer;
+mod parse_decl;
 mod parse_lambda;
 mod parse_stmt;
 mod parse_string;
