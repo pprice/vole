@@ -325,17 +325,23 @@ pub struct IndexExpr {
 /// Assignment
 #[derive(Debug, Clone)]
 pub struct AssignExpr {
-    pub target: Symbol,
+    pub target: AssignTarget,
     pub value: Expr,
 }
 
-/// Target for compound assignment
+/// Target for assignment (compound or regular)
 #[derive(Debug, Clone)]
 pub enum AssignTarget {
     /// Simple variable: x
     Variable(Symbol),
     /// Array index: arr[i]
     Index { object: Box<Expr>, index: Box<Expr> },
+    /// Field access: obj.field
+    Field {
+        object: Box<Expr>,
+        field: Symbol,
+        field_span: Span,
+    },
 }
 
 /// Compound assignment operator

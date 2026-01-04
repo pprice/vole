@@ -722,23 +722,36 @@ impl<'src> Parser<'src> {
                 TokenType::GreaterGreater => BinaryOp::Shr,
                 TokenType::Eq => {
                     // Assignment - special handling
-                    if let ExprKind::Identifier(sym) = left.kind {
-                        self.advance();
-                        let value = self.expression(0)?;
-                        let span = left.span.merge(value.span);
-                        return Ok(Expr {
-                            kind: ExprKind::Assign(Box::new(AssignExpr { target: sym, value })),
-                            span,
-                        });
-                    } else {
-                        return Err(ParseError::new(
-                            ParserError::UnexpectedToken {
-                                token: "invalid assignment target".to_string(),
-                                span: left.span.into(),
-                            },
-                            left.span,
-                        ));
-                    }
+                    self.advance();
+                    let value = self.expression(0)?;
+                    let span = left.span.merge(value.span);
+
+                    let target = match left.kind {
+                        ExprKind::Identifier(sym) => AssignTarget::Variable(sym),
+                        ExprKind::FieldAccess(fa) => AssignTarget::Field {
+                            object: Box::new(fa.object),
+                            field: fa.field,
+                            field_span: fa.field_span,
+                        },
+                        ExprKind::Index(idx) => AssignTarget::Index {
+                            object: Box::new(idx.object),
+                            index: Box::new(idx.index),
+                        },
+                        _ => {
+                            return Err(ParseError::new(
+                                ParserError::UnexpectedToken {
+                                    token: "invalid assignment target".to_string(),
+                                    span: left.span.into(),
+                                },
+                                left.span,
+                            ));
+                        }
+                    };
+
+                    return Ok(Expr {
+                        kind: ExprKind::Assign(Box::new(AssignExpr { target, value })),
+                        span,
+                    });
                 }
                 TokenType::PlusEq
                 | TokenType::MinusEq
@@ -762,6 +775,11 @@ impl<'src> Parser<'src> {
                         ExprKind::Index(idx) => AssignTarget::Index {
                             object: Box::new(idx.object),
                             index: Box::new(idx.index),
+                        },
+                        ExprKind::FieldAccess(fa) => AssignTarget::Field {
+                            object: Box::new(fa.object),
+                            field: fa.field,
+                            field_span: fa.field_span,
                         },
                         _ => {
                             return Err(ParseError::new(
@@ -1518,23 +1536,36 @@ impl<'src> Parser<'src> {
                 TokenType::GreaterGreater => BinaryOp::Shr,
                 TokenType::Eq => {
                     // Assignment
-                    if let ExprKind::Identifier(sym) = expr.kind {
-                        self.advance();
-                        let value = self.expression(0)?;
-                        let span = expr.span.merge(value.span);
-                        return Ok(Expr {
-                            kind: ExprKind::Assign(Box::new(AssignExpr { target: sym, value })),
-                            span,
-                        });
-                    } else {
-                        return Err(ParseError::new(
-                            ParserError::UnexpectedToken {
-                                token: "invalid assignment target".to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        ));
-                    }
+                    self.advance();
+                    let value = self.expression(0)?;
+                    let span = expr.span.merge(value.span);
+
+                    let target = match expr.kind {
+                        ExprKind::Identifier(sym) => AssignTarget::Variable(sym),
+                        ExprKind::FieldAccess(fa) => AssignTarget::Field {
+                            object: Box::new(fa.object),
+                            field: fa.field,
+                            field_span: fa.field_span,
+                        },
+                        ExprKind::Index(idx) => AssignTarget::Index {
+                            object: Box::new(idx.object),
+                            index: Box::new(idx.index),
+                        },
+                        _ => {
+                            return Err(ParseError::new(
+                                ParserError::UnexpectedToken {
+                                    token: "invalid assignment target".to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            ));
+                        }
+                    };
+
+                    return Ok(Expr {
+                        kind: ExprKind::Assign(Box::new(AssignExpr { target, value })),
+                        span,
+                    });
                 }
                 TokenType::QuestionQuestion => {
                     // Null coalescing

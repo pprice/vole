@@ -8,8 +8,9 @@ use std::collections::HashMap;
 
 use crate::codegen::JitContext;
 use crate::frontend::{
-    self, BinaryOp, Decl, Expr, ExprKind, FuncDecl, Interner, LambdaBody, LambdaExpr, LetStmt,
-    Pattern, Program, Stmt, StringPart, Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
+    self, AssignTarget, BinaryOp, Decl, Expr, ExprKind, FuncDecl, Interner, LambdaBody,
+    LambdaExpr, LetStmt, Pattern, Program, Stmt, StringPart, Symbol, TestCase, TestsDecl,
+    TypeExpr, UnaryOp,
 };
 use crate::sema::{FunctionType, Type};
 
@@ -1455,24 +1456,34 @@ fn compile_expr(
         }
         ExprKind::Assign(assign) => {
             let value = compile_expr(builder, &assign.value, variables, ctx)?;
-            if let Some((var, var_type)) = variables.get(&assign.target) {
-                // If variable is a union and value is not, wrap the value
-                let final_value = if matches!(var_type, Type::Union(_))
-                    && !matches!(&value.vole_type, Type::Union(_))
-                {
-                    let wrapped =
-                        construct_union(builder, value.clone(), var_type, ctx.pointer_type)?;
-                    wrapped.value
-                } else {
-                    value.value
-                };
-                builder.def_var(*var, final_value);
-                Ok(value)
-            } else {
-                Err(format!(
-                    "undefined variable: {}",
-                    ctx.interner.resolve(assign.target)
-                ))
+            match &assign.target {
+                AssignTarget::Variable(sym) => {
+                    if let Some((var, var_type)) = variables.get(sym) {
+                        // If variable is a union and value is not, wrap the value
+                        let final_value = if matches!(var_type, Type::Union(_))
+                            && !matches!(&value.vole_type, Type::Union(_))
+                        {
+                            let wrapped =
+                                construct_union(builder, value.clone(), var_type, ctx.pointer_type)?;
+                            wrapped.value
+                        } else {
+                            value.value
+                        };
+                        builder.def_var(*var, final_value);
+                        Ok(value)
+                    } else {
+                        Err(format!(
+                            "undefined variable: {}",
+                            ctx.interner.resolve(*sym)
+                        ))
+                    }
+                }
+                AssignTarget::Field { .. } => {
+                    Err("Field assignment codegen not implemented yet".to_string())
+                }
+                AssignTarget::Index { .. } => {
+                    Err("Index assignment codegen not implemented yet".to_string())
+                }
             }
         }
         ExprKind::CompoundAssign(compound) => {
@@ -2518,61 +2529,71 @@ fn compile_expr_with_captures(
             }
         }
         ExprKind::Assign(assign) => {
-            // Check if assigning to a captured variable
-            if let Some(binding) = capture_bindings.get(&assign.target) {
-                let value = compile_expr_with_captures(
-                    builder,
-                    &assign.value,
-                    variables,
-                    capture_bindings,
-                    closure_var,
-                    ctx,
-                )?;
+            match &assign.target {
+                AssignTarget::Variable(sym) => {
+                    // Check if assigning to a captured variable
+                    if let Some(binding) = capture_bindings.get(sym) {
+                        let value = compile_expr_with_captures(
+                            builder,
+                            &assign.value,
+                            variables,
+                            capture_bindings,
+                            closure_var,
+                            ctx,
+                        )?;
 
-                // Get the capture pointer
-                let closure_var = closure_var.ok_or_else(|| {
-                    "Closure variable not available for capture access".to_string()
-                })?;
-                let closure_ptr = builder.use_var(closure_var);
+                        // Get the capture pointer
+                        let closure_var = closure_var.ok_or_else(|| {
+                            "Closure variable not available for capture access".to_string()
+                        })?;
+                        let closure_ptr = builder.use_var(closure_var);
 
-                let get_capture_id = ctx
-                    .func_ids
-                    .get("vole_closure_get_capture")
-                    .ok_or_else(|| "vole_closure_get_capture not found".to_string())?;
-                let get_capture_ref = ctx
-                    .module
-                    .declare_func_in_func(*get_capture_id, builder.func);
-                let index_val = builder.ins().iconst(types::I64, binding.index as i64);
-                let call = builder
-                    .ins()
-                    .call(get_capture_ref, &[closure_ptr, index_val]);
-                let heap_ptr = builder.inst_results(call)[0];
+                        let get_capture_id = ctx
+                            .func_ids
+                            .get("vole_closure_get_capture")
+                            .ok_or_else(|| "vole_closure_get_capture not found".to_string())?;
+                        let get_capture_ref = ctx
+                            .module
+                            .declare_func_in_func(*get_capture_id, builder.func);
+                        let index_val = builder.ins().iconst(types::I64, binding.index as i64);
+                        let call = builder
+                            .ins()
+                            .call(get_capture_ref, &[closure_ptr, index_val]);
+                        let heap_ptr = builder.inst_results(call)[0];
 
-                // Store the new value
-                builder
-                    .ins()
-                    .store(MemFlags::new(), value.value, heap_ptr, 0);
+                        // Store the new value
+                        builder
+                            .ins()
+                            .store(MemFlags::new(), value.value, heap_ptr, 0);
 
-                return Ok(value);
-            }
+                        return Ok(value);
+                    }
 
-            // Otherwise, regular assignment
-            let value = compile_expr_with_captures(
-                builder,
-                &assign.value,
-                variables,
-                capture_bindings,
-                closure_var,
-                ctx,
-            )?;
-            if let Some((var, _)) = variables.get(&assign.target) {
-                builder.def_var(*var, value.value);
-                Ok(value)
-            } else {
-                Err(format!(
-                    "undefined variable: {}",
-                    ctx.interner.resolve(assign.target)
-                ))
+                    // Otherwise, regular assignment
+                    let value = compile_expr_with_captures(
+                        builder,
+                        &assign.value,
+                        variables,
+                        capture_bindings,
+                        closure_var,
+                        ctx,
+                    )?;
+                    if let Some((var, _)) = variables.get(sym) {
+                        builder.def_var(*var, value.value);
+                        Ok(value)
+                    } else {
+                        Err(format!(
+                            "undefined variable: {}",
+                            ctx.interner.resolve(*sym)
+                        ))
+                    }
+                }
+                AssignTarget::Field { .. } => {
+                    Err("Field assignment codegen not implemented yet".to_string())
+                }
+                AssignTarget::Index { .. } => {
+                    Err("Index assignment codegen not implemented yet".to_string())
+                }
             }
         }
         ExprKind::Binary(bin) => {
@@ -2903,6 +2924,9 @@ fn compile_compound_assign(
                 .call(array_set_ref, &[arr.value, idx.value, tag_val, store_value]);
 
             Ok(result)
+        }
+        AssignTarget::Field { .. } => {
+            Err("Field compound assignment codegen not implemented yet".to_string())
         }
     }
 }

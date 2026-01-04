@@ -174,4 +174,13 @@ pub enum SemanticError {
         #[label("no such method")]
         span: SourceSpan,
     },
+
+    #[error("cannot assign to field '{field}' of immutable record '{record}'")]
+    #[diagnostic(code(E2024))]
+    RecordFieldMutation {
+        record: String,
+        field: String,
+        #[label("record fields are immutable")]
+        span: SourceSpan,
+    },
 }
