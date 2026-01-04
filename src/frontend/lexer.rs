@@ -85,14 +85,34 @@ impl<'src> Lexer<'src> {
             ']' => self.make_token(TokenType::RBracket),
             ',' => self.make_token(TokenType::Comma),
             ':' => self.make_token(TokenType::Colon),
-            '+' => self.make_token(TokenType::Plus),
-            '*' => self.make_token(TokenType::Star),
-            '%' => self.make_token(TokenType::Percent),
+            '+' => {
+                if self.match_char('=') {
+                    self.make_token(TokenType::PlusEq)
+                } else {
+                    self.make_token(TokenType::Plus)
+                }
+            }
+            '*' => {
+                if self.match_char('=') {
+                    self.make_token(TokenType::StarEq)
+                } else {
+                    self.make_token(TokenType::Star)
+                }
+            }
+            '%' => {
+                if self.match_char('=') {
+                    self.make_token(TokenType::PercentEq)
+                } else {
+                    self.make_token(TokenType::Percent)
+                }
+            }
 
             // Single or double character tokens
             '-' => {
                 if self.match_char('>') {
                     self.make_token(TokenType::Arrow)
+                } else if self.match_char('=') {
+                    self.make_token(TokenType::MinusEq)
                 } else {
                     self.make_token(TokenType::Minus)
                 }
@@ -164,6 +184,8 @@ impl<'src> Lexer<'src> {
                     }
                     // Don't consume the newline, let next_token handle it
                     self.next_token()
+                } else if self.match_char('=') {
+                    self.make_token(TokenType::SlashEq)
                 } else {
                     self.make_token(TokenType::Slash)
                 }
@@ -712,5 +734,15 @@ mod tests {
         assert_eq!(lexer.next_token().ty, TokenType::Question);
         assert_eq!(lexer.next_token().ty, TokenType::QuestionQuestion);
         assert_eq!(lexer.next_token().ty, TokenType::IntLiteral);
+    }
+
+    #[test]
+    fn lex_compound_assignment() {
+        let mut lexer = Lexer::new("+= -= *= /= %=");
+        assert_eq!(lexer.next_token().ty, TokenType::PlusEq);
+        assert_eq!(lexer.next_token().ty, TokenType::MinusEq);
+        assert_eq!(lexer.next_token().ty, TokenType::StarEq);
+        assert_eq!(lexer.next_token().ty, TokenType::SlashEq);
+        assert_eq!(lexer.next_token().ty, TokenType::PercentEq);
     }
 }

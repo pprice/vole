@@ -1180,6 +1180,106 @@ impl Analyzer {
                 }
             }
 
+            ExprKind::CompoundAssign(compound) => {
+                // Get target type and check mutability
+                let target_type = match &compound.target {
+                    ast::AssignTarget::Variable(sym) => {
+                        if let Some(var) = self.scope.get(*sym) {
+                            let is_mutable = var.mutable;
+                            let var_ty = var.ty.clone();
+
+                            // Check if this is a mutation of a captured variable
+                            if self.in_lambda() && !self.is_lambda_local(*sym) {
+                                self.record_capture(*sym, is_mutable);
+                                self.mark_capture_mutated(*sym);
+                            }
+
+                            if !is_mutable {
+                                let name = interner.resolve(*sym);
+                                self.add_error(
+                                    SemanticError::ImmutableAssignment {
+                                        name: name.to_string(),
+                                        span: expr.span.into(),
+                                        declaration: expr.span.into(),
+                                    },
+                                    expr.span,
+                                );
+                            }
+                            var_ty
+                        } else {
+                            let name = interner.resolve(*sym);
+                            self.add_error(
+                                SemanticError::UndefinedVariable {
+                                    name: name.to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            return Ok(Type::Error);
+                        }
+                    }
+                    ast::AssignTarget::Index { object, index } => {
+                        // Type-check object as array
+                        let obj_type = self.check_expr(object, interner)?;
+                        let idx_type = self.check_expr(index, interner)?;
+
+                        // Check index is integer
+                        if !matches!(
+                            idx_type,
+                            Type::I32 | Type::I64 | Type::U8 | Type::U16 | Type::U32 | Type::U64
+                        ) {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "integer".to_string(),
+                                    found: idx_type.name().to_string(),
+                                    span: index.span.into(),
+                                },
+                                index.span,
+                            );
+                        }
+
+                        // Get element type
+                        match obj_type {
+                            Type::Array(elem_ty) => *elem_ty,
+                            _ => {
+                                if obj_type != Type::Error {
+                                    self.add_error(
+                                        SemanticError::TypeMismatch {
+                                            expected: "array".to_string(),
+                                            found: obj_type.name().to_string(),
+                                            span: object.span.into(),
+                                        },
+                                        object.span,
+                                    );
+                                }
+                                Type::Error
+                            }
+                        }
+                    }
+                };
+
+                // Type-check the value expression
+                let value_type = self.check_expr(&compound.value, interner)?;
+
+                // Check operator compatibility - compound assignment operators are arithmetic
+                // For +=, -=, *=, /=, %= both operands must be numeric
+                if target_type != Type::Error
+                    && value_type != Type::Error
+                    && (!target_type.is_numeric() || !value_type.is_numeric())
+                {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "numeric".to_string(),
+                            found: format!("{} and {}", target_type.name(), value_type.name()),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                }
+
+                Ok(target_type)
+            }
+
             ExprKind::Grouping(inner) => self.check_expr(inner, interner),
 
             ExprKind::ArrayLiteral(elements) => {

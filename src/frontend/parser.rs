@@ -598,6 +598,51 @@ impl<'src> Parser<'src> {
                         ));
                     }
                 }
+                TokenType::PlusEq
+                | TokenType::MinusEq
+                | TokenType::StarEq
+                | TokenType::SlashEq
+                | TokenType::PercentEq => {
+                    // Compound assignment: x += 1, arr[i] -= 2
+                    let op = match self.current.ty {
+                        TokenType::PlusEq => CompoundOp::Add,
+                        TokenType::MinusEq => CompoundOp::Sub,
+                        TokenType::StarEq => CompoundOp::Mul,
+                        TokenType::SlashEq => CompoundOp::Div,
+                        TokenType::PercentEq => CompoundOp::Mod,
+                        _ => unreachable!(),
+                    };
+                    self.advance();
+
+                    // Convert left expression to AssignTarget
+                    let target = match left.kind {
+                        ExprKind::Identifier(sym) => AssignTarget::Variable(sym),
+                        ExprKind::Index(idx) => AssignTarget::Index {
+                            object: Box::new(idx.object),
+                            index: Box::new(idx.index),
+                        },
+                        _ => {
+                            return Err(ParseError::new(
+                                ParserError::UnexpectedToken {
+                                    token: "invalid compound assignment target".to_string(),
+                                    span: left.span.into(),
+                                },
+                                left.span,
+                            ));
+                        }
+                    };
+
+                    let value = self.expression(0)?;
+                    let span = left.span.merge(value.span);
+                    return Ok(Expr {
+                        kind: ExprKind::CompoundAssign(Box::new(CompoundAssignExpr {
+                            target,
+                            op,
+                            value,
+                        })),
+                        span,
+                    });
+                }
                 TokenType::QuestionQuestion => {
                     // Null coalescing: x ?? default (right-associative)
                     self.advance();
