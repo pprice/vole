@@ -3,6 +3,7 @@ pub mod analyzer;
 pub mod implement_registry;
 pub mod interface_registry;
 pub mod resolution;
+pub mod resolve;
 pub mod scope;
 pub mod types;
 

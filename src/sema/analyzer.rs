@@ -9,8 +9,8 @@ use crate::sema::interface_registry::{
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::{
     ClassType, FunctionType, RecordType, StructField, Type,
+    resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
-    types::{InterfaceMethodType, InterfaceType},
 };
 use std::collections::{HashMap, HashSet};
 
@@ -497,66 +497,13 @@ impl Analyzer {
     }
 
     fn resolve_type(&self, ty: &TypeExpr) -> Type {
-        match ty {
-            TypeExpr::Primitive(p) => Type::from_primitive(*p),
-            TypeExpr::Named(sym) => {
-                // Look up type alias first
-                if let Some(aliased) = self.type_aliases.get(sym) {
-                    aliased.clone()
-                } else if let Some(record) = self.records.get(sym) {
-                    Type::Record(record.clone())
-                } else if let Some(class) = self.classes.get(sym) {
-                    Type::Class(class.clone())
-                } else if let Some(iface) = self.interface_registry.get(*sym) {
-                    Type::Interface(InterfaceType {
-                        name: *sym,
-                        methods: iface
-                            .methods
-                            .iter()
-                            .map(|m| InterfaceMethodType {
-                                name: m.name,
-                                params: m.params.clone(),
-                                return_type: Box::new(m.return_type.clone()),
-                                has_default: m.has_default,
-                            })
-                            .collect(),
-                        extends: iface.extends.clone(),
-                    })
-                } else {
-                    Type::Error // Unknown type name
-                }
-            }
-            TypeExpr::Array(elem) => {
-                let elem_ty = self.resolve_type(elem);
-                Type::Array(Box::new(elem_ty))
-            }
-            TypeExpr::Nil => Type::Nil,
-            TypeExpr::Optional(inner) => {
-                let inner_ty = self.resolve_type(inner);
-                Type::optional(inner_ty)
-            }
-            TypeExpr::Union(variants) => {
-                let types: Vec<Type> = variants.iter().map(|t| self.resolve_type(t)).collect();
-                Type::normalize_union(types)
-            }
-            TypeExpr::Function {
-                params,
-                return_type,
-            } => {
-                let param_types: Vec<Type> = params.iter().map(|p| self.resolve_type(p)).collect();
-                let ret = self.resolve_type(return_type);
-                Type::Function(FunctionType {
-                    params: param_types,
-                    return_type: Box::new(ret),
-                    is_closure: false, // Type annotations don't know if it's a closure
-                })
-            }
-            TypeExpr::SelfType => {
-                // Self is resolved during interface/implement checking
-                // For now, return Error to indicate it can't be used outside that context
-                Type::Error
-            }
-        }
+        let ctx = TypeResolutionContext::new(
+            &self.type_aliases,
+            &self.classes,
+            &self.records,
+            &self.interface_registry,
+        );
+        resolve_type(ty, &ctx)
     }
 
     fn check_function(

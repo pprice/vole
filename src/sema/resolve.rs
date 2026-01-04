@@ -1,0 +1,201 @@
+// src/sema/resolve.rs
+//
+// Type resolution: converts TypeExpr (AST representation) to Type (semantic representation)
+
+use crate::frontend::{Symbol, TypeExpr};
+use crate::sema::interface_registry::InterfaceRegistry;
+use crate::sema::types::{
+    ClassType, FunctionType, InterfaceMethodType, InterfaceType, RecordType, Type,
+};
+use std::collections::HashMap;
+
+/// Context needed for type resolution
+pub struct TypeResolutionContext<'a> {
+    pub type_aliases: &'a HashMap<Symbol, Type>,
+    pub classes: &'a HashMap<Symbol, ClassType>,
+    pub records: &'a HashMap<Symbol, RecordType>,
+    pub interface_registry: &'a InterfaceRegistry,
+}
+
+impl<'a> TypeResolutionContext<'a> {
+    pub fn new(
+        type_aliases: &'a HashMap<Symbol, Type>,
+        classes: &'a HashMap<Symbol, ClassType>,
+        records: &'a HashMap<Symbol, RecordType>,
+        interface_registry: &'a InterfaceRegistry,
+    ) -> Self {
+        Self {
+            type_aliases,
+            classes,
+            records,
+            interface_registry,
+        }
+    }
+}
+
+/// Resolve a TypeExpr to a Type
+///
+/// This converts AST type expressions (from parsing) to semantic types (for type checking).
+/// It handles primitives, named types (aliases, classes, records, interfaces), arrays,
+/// optionals, unions, and function types.
+pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
+    match ty {
+        TypeExpr::Primitive(p) => Type::from_primitive(*p),
+        TypeExpr::Named(sym) => {
+            // Look up type alias first
+            if let Some(aliased) = ctx.type_aliases.get(sym) {
+                aliased.clone()
+            } else if let Some(record) = ctx.records.get(sym) {
+                Type::Record(record.clone())
+            } else if let Some(class) = ctx.classes.get(sym) {
+                Type::Class(class.clone())
+            } else if let Some(iface) = ctx.interface_registry.get(*sym) {
+                Type::Interface(InterfaceType {
+                    name: *sym,
+                    methods: iface
+                        .methods
+                        .iter()
+                        .map(|m| InterfaceMethodType {
+                            name: m.name,
+                            params: m.params.clone(),
+                            return_type: Box::new(m.return_type.clone()),
+                            has_default: m.has_default,
+                        })
+                        .collect(),
+                    extends: iface.extends.clone(),
+                })
+            } else {
+                Type::Error // Unknown type name
+            }
+        }
+        TypeExpr::Array(elem) => {
+            let elem_ty = resolve_type(elem, ctx);
+            Type::Array(Box::new(elem_ty))
+        }
+        TypeExpr::Nil => Type::Nil,
+        TypeExpr::Optional(inner) => {
+            let inner_ty = resolve_type(inner, ctx);
+            Type::optional(inner_ty)
+        }
+        TypeExpr::Union(variants) => {
+            let types: Vec<Type> = variants.iter().map(|t| resolve_type(t, ctx)).collect();
+            Type::normalize_union(types)
+        }
+        TypeExpr::Function {
+            params,
+            return_type,
+        } => {
+            let param_types: Vec<Type> = params.iter().map(|p| resolve_type(p, ctx)).collect();
+            let ret = resolve_type(return_type, ctx);
+            Type::Function(FunctionType {
+                params: param_types,
+                return_type: Box::new(ret),
+                is_closure: false, // Type annotations don't know if it's a closure
+            })
+        }
+        TypeExpr::SelfType => {
+            // Self is resolved during interface/implement checking
+            // For now, return Error to indicate it can't be used outside that context
+            Type::Error
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frontend::PrimitiveType;
+
+    fn empty_context() -> TypeResolutionContext<'static> {
+        static EMPTY_ALIASES: std::sync::LazyLock<HashMap<Symbol, Type>> =
+            std::sync::LazyLock::new(HashMap::new);
+        static EMPTY_CLASSES: std::sync::LazyLock<HashMap<Symbol, ClassType>> =
+            std::sync::LazyLock::new(HashMap::new);
+        static EMPTY_RECORDS: std::sync::LazyLock<HashMap<Symbol, RecordType>> =
+            std::sync::LazyLock::new(HashMap::new);
+        static EMPTY_INTERFACES: std::sync::LazyLock<InterfaceRegistry> =
+            std::sync::LazyLock::new(InterfaceRegistry::new);
+
+        TypeResolutionContext::new(
+            &EMPTY_ALIASES,
+            &EMPTY_CLASSES,
+            &EMPTY_RECORDS,
+            &EMPTY_INTERFACES,
+        )
+    }
+
+    #[test]
+    fn resolve_primitive_types() {
+        let ctx = empty_context();
+        assert_eq!(
+            resolve_type(&TypeExpr::Primitive(PrimitiveType::I32), &ctx),
+            Type::I32
+        );
+        assert_eq!(
+            resolve_type(&TypeExpr::Primitive(PrimitiveType::Bool), &ctx),
+            Type::Bool
+        );
+        assert_eq!(
+            resolve_type(&TypeExpr::Primitive(PrimitiveType::String), &ctx),
+            Type::String
+        );
+    }
+
+    #[test]
+    fn resolve_nil_type() {
+        let ctx = empty_context();
+        assert_eq!(resolve_type(&TypeExpr::Nil, &ctx), Type::Nil);
+    }
+
+    #[test]
+    fn resolve_array_type() {
+        let ctx = empty_context();
+        let array_expr = TypeExpr::Array(Box::new(TypeExpr::Primitive(PrimitiveType::I64)));
+        let resolved = resolve_type(&array_expr, &ctx);
+        assert_eq!(resolved, Type::Array(Box::new(Type::I64)));
+    }
+
+    #[test]
+    fn resolve_optional_type() {
+        let ctx = empty_context();
+        let opt_expr = TypeExpr::Optional(Box::new(TypeExpr::Primitive(PrimitiveType::I32)));
+        let resolved = resolve_type(&opt_expr, &ctx);
+        assert!(resolved.is_optional());
+    }
+
+    #[test]
+    fn resolve_function_type() {
+        let ctx = empty_context();
+        let func_expr = TypeExpr::Function {
+            params: vec![
+                TypeExpr::Primitive(PrimitiveType::I32),
+                TypeExpr::Primitive(PrimitiveType::I32),
+            ],
+            return_type: Box::new(TypeExpr::Primitive(PrimitiveType::Bool)),
+        };
+        let resolved = resolve_type(&func_expr, &ctx);
+        if let Type::Function(ft) = resolved {
+            assert_eq!(ft.params.len(), 2);
+            assert_eq!(ft.params[0], Type::I32);
+            assert_eq!(ft.params[1], Type::I32);
+            assert_eq!(*ft.return_type, Type::Bool);
+            assert!(!ft.is_closure);
+        } else {
+            panic!("Expected function type");
+        }
+    }
+
+    #[test]
+    fn resolve_unknown_named_type() {
+        let ctx = empty_context();
+        let named = TypeExpr::Named(Symbol(999));
+        assert_eq!(resolve_type(&named, &ctx), Type::Error);
+    }
+
+    #[test]
+    fn resolve_self_type() {
+        let ctx = empty_context();
+        // Self type is only valid in interface/implement context
+        assert_eq!(resolve_type(&TypeExpr::SelfType, &ctx), Type::Error);
+    }
+}
