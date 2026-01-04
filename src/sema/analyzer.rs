@@ -2,11 +2,11 @@
 
 use crate::errors::SemanticError;
 use crate::frontend::*;
-use crate::sema::implement_registry::ImplementRegistry;
+use crate::sema::implement_registry::{ImplementRegistry, TypeId};
 use crate::sema::interface_registry::{
     InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
 };
-use crate::sema::resolution::MethodResolutions;
+use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::{
     ClassType, FunctionType, RecordType, StructField, Type,
     scope::{Scope, Variable},
@@ -2133,6 +2133,17 @@ impl Analyzer {
                     &method_call.args,
                     interner,
                 ) {
+                    // Record the resolution for codegen
+                    let resolved = ResolvedMethod::Implemented {
+                        trait_name: None,
+                        func_type: FunctionType {
+                            params: vec![],
+                            return_type: Box::new(return_type.clone()),
+                            is_closure: false,
+                        },
+                        is_builtin: true,
+                    };
+                    self.method_resolutions.insert(expr.id, resolved);
                     return Ok(return_type);
                 }
 
@@ -2474,6 +2485,77 @@ impl Analyzer {
                 }
                 Some(Type::I64)
             }
+            _ => None,
+        }
+    }
+
+    /// Resolve a method call and record the resolution for codegen
+    #[allow(dead_code)] // Will be used in future tasks
+    fn resolve_method_call(
+        &mut self,
+        object_type: &Type,
+        method_name: Symbol,
+        call_node_id: NodeId,
+        interner: &Interner,
+    ) -> Option<ResolvedMethod> {
+        let method_str = interner.resolve(method_name);
+
+        // 1. Check built-in methods (array/string.length)
+        if let Some(return_type) = self.check_builtin_method_for_resolution(object_type, method_str)
+        {
+            let resolved = ResolvedMethod::Implemented {
+                trait_name: None, // Will be Sized eventually
+                func_type: FunctionType {
+                    params: vec![],
+                    return_type: Box::new(return_type),
+                    is_closure: false,
+                },
+                is_builtin: true,
+            };
+            self.method_resolutions.insert(call_node_id, resolved.clone());
+            return Some(resolved);
+        }
+
+        // 2. Check direct methods on type (classes/records)
+        let type_sym = match object_type {
+            Type::Class(c) => Some(c.name),
+            Type::Record(r) => Some(r.name),
+            _ => None,
+        };
+
+        if let Some(ts) = type_sym
+            && let Some(func_type) = self.methods.get(&(ts, method_name)).cloned()
+        {
+            let resolved = ResolvedMethod::Direct { func_type };
+            self.method_resolutions.insert(call_node_id, resolved.clone());
+            return Some(resolved);
+        }
+
+        // 3. Check implement registry
+        if let Some(type_id) = TypeId::from_type(object_type)
+            && let Some(impl_) = self.implement_registry.get_method(&type_id, method_name)
+        {
+            let resolved = ResolvedMethod::Implemented {
+                trait_name: impl_.trait_name,
+                func_type: impl_.func_type.clone(),
+                is_builtin: impl_.is_builtin,
+            };
+            self.method_resolutions.insert(call_node_id, resolved.clone());
+            return Some(resolved);
+        }
+
+        None
+    }
+
+    /// Simple check for builtin methods, returns return type if found
+    fn check_builtin_method_for_resolution(
+        &self,
+        object_type: &Type,
+        method_name: &str,
+    ) -> Option<Type> {
+        match (object_type, method_name) {
+            (Type::Array(_), "length") => Some(Type::I64),
+            (Type::String, "length") => Some(Type::I64),
             _ => None,
         }
     }
