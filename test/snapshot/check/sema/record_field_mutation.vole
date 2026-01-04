@@ -1,0 +1,11 @@
+// Error: Cannot mutate record field
+
+record Point {
+    x: i32,
+    y: i32,
+}
+
+func main() {
+    let p = Point { x: 10, y: 20 }
+    p.x = 99  // Error: records are immutable
+}

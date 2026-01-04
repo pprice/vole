@@ -28,11 +28,14 @@ impl<'src> Parser<'src> {
     pub fn new(source: &'src str) -> Self {
         let mut lexer = Lexer::new(source);
         let current = lexer.next_token();
+        let mut interner = Interner::new();
+        // Pre-intern "self" so it's always available for method bodies
+        interner.intern("self");
         Self {
             lexer,
             current,
             previous: Token::new(TokenType::Eof, "", Span::default()),
-            interner: Interner::new(),
+            interner,
         }
     }
 
@@ -40,11 +43,14 @@ impl<'src> Parser<'src> {
     pub fn with_file(source: &'src str, file: &str) -> Self {
         let mut lexer = Lexer::new_with_file(source, file);
         let current = lexer.next_token();
+        let mut interner = Interner::new();
+        // Pre-intern "self" so it's always available for method bodies
+        interner.intern("self");
         Self {
             lexer,
             current,
             previous: Token::new(TokenType::Eof, "", Span::default()),
-            interner: Interner::new(),
+            interner,
         }
     }
 
@@ -75,6 +81,8 @@ impl<'src> Parser<'src> {
             TokenType::KwFunc => self.function_decl(),
             TokenType::KwTests => self.tests_decl(),
             TokenType::KwLet => self.let_decl(),
+            TokenType::KwClass => self.class_decl(),
+            TokenType::KwRecord => self.record_decl(),
             _ => Err(ParseError::new(
                 ParserError::UnexpectedToken {
                     token: self.current.ty.as_str().to_string(),
@@ -157,6 +165,99 @@ impl<'src> Parser<'src> {
     fn let_decl(&mut self) -> Result<Decl, ParseError> {
         let stmt = self.let_statement()?;
         Ok(Decl::Let(stmt))
+    }
+
+    fn class_decl(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'class'
+
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected class name")?;
+        let name = self.interner.intern(&name_token.lexeme);
+
+        self.consume(TokenType::LBrace, "expected '{' after class name")?;
+        self.skip_newlines();
+
+        let (fields, methods) = self.parse_class_body()?;
+
+        self.consume(TokenType::RBrace, "expected '}' to close class")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(Decl::Class(ClassDecl {
+            name,
+            fields,
+            methods,
+            span,
+        }))
+    }
+
+    fn record_decl(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'record'
+
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected record name")?;
+        let name = self.interner.intern(&name_token.lexeme);
+
+        self.consume(TokenType::LBrace, "expected '{' after record name")?;
+        self.skip_newlines();
+
+        let (fields, methods) = self.parse_class_body()?;
+
+        self.consume(TokenType::RBrace, "expected '}' to close record")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(Decl::Record(RecordDecl {
+            name,
+            fields,
+            methods,
+            span,
+        }))
+    }
+
+    fn parse_class_body(&mut self) -> Result<(Vec<FieldDef>, Vec<FuncDecl>), ParseError> {
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            if self.check(TokenType::KwFunc) {
+                // Parse method
+                if let Decl::Function(func) = self.function_decl()? {
+                    methods.push(func);
+                }
+            } else if self.check(TokenType::Identifier) {
+                // Parse field: name: Type,
+                let field_span = self.current.span;
+                let name_token = self.current.clone();
+                self.advance();
+                let name = self.interner.intern(&name_token.lexeme);
+
+                self.consume(TokenType::Colon, "expected ':' after field name")?;
+                let ty = self.parse_type()?;
+
+                // Expect comma (required, trailing allowed)
+                if self.check(TokenType::Comma) {
+                    self.advance();
+                }
+
+                fields.push(FieldDef {
+                    name,
+                    ty,
+                    span: field_span.merge(self.previous.span),
+                });
+            } else {
+                return Err(ParseError::new(
+                    ParserError::UnexpectedToken {
+                        token: self.current.ty.as_str().to_string(),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            }
+            self.skip_newlines();
+        }
+
+        Ok((fields, methods))
     }
 
     fn test_case(&mut self) -> Result<TestCase, ParseError> {
@@ -553,6 +654,47 @@ impl<'src> Parser<'src> {
         }
     }
 
+    /// Check if the current position looks like a struct literal.
+    /// This uses lookahead to distinguish `Name { field: value }` from `Name { statement }`.
+    /// Returns true if:
+    /// - Content after `{` is `}` (empty struct literal: `Name { }`)
+    /// - Content after `{` is `Identifier :` (field initialization)
+    ///
+    /// We create a temporary lexer to peek without consuming tokens.
+    fn looks_like_struct_literal(&self) -> bool {
+        // We're at `{` which is in self.current
+        // Create a temporary lexer starting from position after `{`
+        let brace_end = self.current.span.end;
+        let remaining_source = &self.lexer.source()[brace_end..];
+
+        let mut peek_lexer = Lexer::new(remaining_source);
+
+        // Get first token after `{`
+        let mut first = peek_lexer.next_token();
+
+        // Skip newlines
+        while first.ty == TokenType::Newline {
+            first = peek_lexer.next_token();
+        }
+
+        if first.ty == TokenType::RBrace {
+            // Empty struct: `Name { }`
+            return true;
+        }
+
+        if first.ty == TokenType::Identifier {
+            // Check what follows the identifier
+            let second = peek_lexer.next_token();
+            if second.ty == TokenType::Colon {
+                // It's `Name { identifier: ...` - struct literal
+                return true;
+            }
+        }
+
+        // Anything else: keyword, literal, operator, etc. - it's a block
+        false
+    }
+
     /// Parse an expression with Pratt parsing
     fn expression(&mut self, min_prec: u8) -> Result<Expr, ParseError> {
         let mut left = self.unary()?;
@@ -580,23 +722,36 @@ impl<'src> Parser<'src> {
                 TokenType::GreaterGreater => BinaryOp::Shr,
                 TokenType::Eq => {
                     // Assignment - special handling
-                    if let ExprKind::Identifier(sym) = left.kind {
-                        self.advance();
-                        let value = self.expression(0)?;
-                        let span = left.span.merge(value.span);
-                        return Ok(Expr {
-                            kind: ExprKind::Assign(Box::new(AssignExpr { target: sym, value })),
-                            span,
-                        });
-                    } else {
-                        return Err(ParseError::new(
-                            ParserError::UnexpectedToken {
-                                token: "invalid assignment target".to_string(),
-                                span: left.span.into(),
-                            },
-                            left.span,
-                        ));
-                    }
+                    self.advance();
+                    let value = self.expression(0)?;
+                    let span = left.span.merge(value.span);
+
+                    let target = match left.kind {
+                        ExprKind::Identifier(sym) => AssignTarget::Variable(sym),
+                        ExprKind::FieldAccess(fa) => AssignTarget::Field {
+                            object: Box::new(fa.object),
+                            field: fa.field,
+                            field_span: fa.field_span,
+                        },
+                        ExprKind::Index(idx) => AssignTarget::Index {
+                            object: Box::new(idx.object),
+                            index: Box::new(idx.index),
+                        },
+                        _ => {
+                            return Err(ParseError::new(
+                                ParserError::UnexpectedToken {
+                                    token: "invalid assignment target".to_string(),
+                                    span: left.span.into(),
+                                },
+                                left.span,
+                            ));
+                        }
+                    };
+
+                    return Ok(Expr {
+                        kind: ExprKind::Assign(Box::new(AssignExpr { target, value })),
+                        span,
+                    });
                 }
                 TokenType::PlusEq
                 | TokenType::MinusEq
@@ -620,6 +775,11 @@ impl<'src> Parser<'src> {
                         ExprKind::Index(idx) => AssignTarget::Index {
                             object: Box::new(idx.object),
                             index: Box::new(idx.index),
+                        },
+                        ExprKind::FieldAccess(fa) => AssignTarget::Field {
+                            object: Box::new(fa.object),
+                            field: fa.field,
+                            field_span: fa.field_span,
                         },
                         _ => {
                             return Err(ParseError::new(
@@ -749,7 +909,7 @@ impl<'src> Parser<'src> {
         self.call()
     }
 
-    /// Parse a call expression (function call) and index expressions
+    /// Parse a call expression (function call), index expressions, field access, and method calls
     fn call(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.primary()?;
 
@@ -770,6 +930,50 @@ impl<'src> Parser<'src> {
                     })),
                     span,
                 };
+            } else if self.match_token(TokenType::Dot) {
+                // Field access or method call: expr.field or expr.method()
+                let field_span = self.current.span;
+                let field_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected field name after '.'")?;
+                let field = self.interner.intern(&field_token.lexeme);
+
+                if self.check(TokenType::LParen) {
+                    // Method call: expr.method(args)
+                    self.advance(); // consume '('
+                    let mut args = Vec::new();
+                    if !self.check(TokenType::RParen) {
+                        loop {
+                            args.push(self.expression(0)?);
+                            if !self.match_token(TokenType::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    let end_span = self.current.span;
+                    self.consume(TokenType::RParen, "expected ')' after arguments")?;
+
+                    let span = expr.span.merge(end_span);
+                    expr = Expr {
+                        kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
+                            object: expr,
+                            method: field,
+                            args,
+                            method_span: field_span,
+                        })),
+                        span,
+                    };
+                } else {
+                    // Field access: expr.field
+                    let span = expr.span.merge(field_span);
+                    expr = Expr {
+                        kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
+                            object: expr,
+                            field,
+                            field_span,
+                        })),
+                        span,
+                    };
+                }
             } else {
                 break;
             }
@@ -872,6 +1076,15 @@ impl<'src> Parser<'src> {
             TokenType::Identifier => {
                 self.advance();
                 let sym = self.interner.intern(&token.lexeme);
+
+                // Check for struct literal: Name { field: value }
+                // We need lookahead to distinguish from a block: `size { let x = ... }`
+                // A struct literal looks like `Name { identifier: value }` or `Name { }`
+                // A block starts with statements, keywords, or expressions without `:` after ident
+                if self.check(TokenType::LBrace) && self.looks_like_struct_literal() {
+                    return self.struct_literal(sym, token.span);
+                }
+
                 Ok(Expr {
                     kind: ExprKind::Identifier(sym),
                     span: token.span,
@@ -1072,6 +1285,46 @@ impl<'src> Parser<'src> {
                 token.span,
             )),
         }
+    }
+
+    /// Parse a struct literal: Name { field: value, ... }
+    fn struct_literal(&mut self, name: Symbol, start_span: Span) -> Result<Expr, ParseError> {
+        self.consume(TokenType::LBrace, "expected '{'")?;
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            let field_span = self.current.span;
+            let field_name_token = self.current.clone();
+            self.consume(TokenType::Identifier, "expected field name")?;
+            let field_name = self.interner.intern(&field_name_token.lexeme);
+
+            self.consume(TokenType::Colon, "expected ':' after field name")?;
+            let value = self.expression(0)?;
+
+            fields.push(StructFieldInit {
+                name: field_name,
+                value,
+                span: field_span.merge(self.previous.span),
+            });
+
+            if self.check(TokenType::Comma) {
+                self.advance();
+                self.skip_newlines();
+            } else {
+                break;
+            }
+            self.skip_newlines();
+        }
+
+        let end_span = self.current.span;
+        self.consume(TokenType::RBrace, "expected '}'")?;
+
+        Ok(Expr {
+            kind: ExprKind::StructLiteral(Box::new(StructLiteralExpr { name, fields })),
+            span: start_span.merge(end_span),
+        })
     }
 
     /// Parse a match expression
@@ -1283,23 +1536,36 @@ impl<'src> Parser<'src> {
                 TokenType::GreaterGreater => BinaryOp::Shr,
                 TokenType::Eq => {
                     // Assignment
-                    if let ExprKind::Identifier(sym) = expr.kind {
-                        self.advance();
-                        let value = self.expression(0)?;
-                        let span = expr.span.merge(value.span);
-                        return Ok(Expr {
-                            kind: ExprKind::Assign(Box::new(AssignExpr { target: sym, value })),
-                            span,
-                        });
-                    } else {
-                        return Err(ParseError::new(
-                            ParserError::UnexpectedToken {
-                                token: "invalid assignment target".to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        ));
-                    }
+                    self.advance();
+                    let value = self.expression(0)?;
+                    let span = expr.span.merge(value.span);
+
+                    let target = match expr.kind {
+                        ExprKind::Identifier(sym) => AssignTarget::Variable(sym),
+                        ExprKind::FieldAccess(fa) => AssignTarget::Field {
+                            object: Box::new(fa.object),
+                            field: fa.field,
+                            field_span: fa.field_span,
+                        },
+                        ExprKind::Index(idx) => AssignTarget::Index {
+                            object: Box::new(idx.object),
+                            index: Box::new(idx.index),
+                        },
+                        _ => {
+                            return Err(ParseError::new(
+                                ParserError::UnexpectedToken {
+                                    token: "invalid assignment target".to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            ));
+                        }
+                    };
+
+                    return Ok(Expr {
+                        kind: ExprKind::Assign(Box::new(AssignExpr { target, value })),
+                        span,
+                    });
                 }
                 TokenType::QuestionQuestion => {
                     // Null coalescing
@@ -1367,7 +1633,7 @@ impl<'src> Parser<'src> {
         Ok(expr)
     }
 
-    /// Continue parsing calls and indexes after we have the base expression
+    /// Continue parsing calls, indexes, field access, and method calls after we have the base expression
     fn continue_call(&mut self, mut expr: Expr) -> Result<Expr, ParseError> {
         loop {
             if self.match_token(TokenType::LParen) {
@@ -1385,6 +1651,50 @@ impl<'src> Parser<'src> {
                     })),
                     span,
                 };
+            } else if self.match_token(TokenType::Dot) {
+                // Field access or method call: expr.field or expr.method()
+                let field_span = self.current.span;
+                let field_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected field name after '.'")?;
+                let field = self.interner.intern(&field_token.lexeme);
+
+                if self.check(TokenType::LParen) {
+                    // Method call: expr.method(args)
+                    self.advance(); // consume '('
+                    let mut args = Vec::new();
+                    if !self.check(TokenType::RParen) {
+                        loop {
+                            args.push(self.expression(0)?);
+                            if !self.match_token(TokenType::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    let end_span = self.current.span;
+                    self.consume(TokenType::RParen, "expected ')' after arguments")?;
+
+                    let span = expr.span.merge(end_span);
+                    expr = Expr {
+                        kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
+                            object: expr,
+                            method: field,
+                            args,
+                            method_span: field_span,
+                        })),
+                        span,
+                    };
+                } else {
+                    // Field access: expr.field
+                    let span = expr.span.merge(field_span);
+                    expr = Expr {
+                        kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
+                            object: expr,
+                            field,
+                            field_span,
+                        })),
+                        span,
+                    };
+                }
             } else {
                 break;
             }
@@ -2417,6 +2727,126 @@ tests {
             );
         } else {
             panic!("expected let declaration");
+        }
+    }
+
+    #[test]
+    fn parse_class_declaration() {
+        let source = r#"
+class Point {
+    x: i32,
+    y: i32,
+
+    func sum() -> i32 {
+        return 42
+    }
+}
+"#;
+        let mut parser = Parser::new(source);
+        let program = parser.parse_program().unwrap();
+        assert_eq!(program.declarations.len(), 1);
+        match &program.declarations[0] {
+            Decl::Class(class) => {
+                assert_eq!(class.fields.len(), 2);
+                assert_eq!(class.methods.len(), 1);
+            }
+            _ => panic!("expected class declaration"),
+        }
+    }
+
+    #[test]
+    fn parse_record_declaration() {
+        let source = r#"
+record Point {
+    x: i32,
+    y: i32,
+}
+"#;
+        let mut parser = Parser::new(source);
+        let program = parser.parse_program().unwrap();
+        assert_eq!(program.declarations.len(), 1);
+        match &program.declarations[0] {
+            Decl::Record(record) => {
+                assert_eq!(record.fields.len(), 2);
+                assert_eq!(record.methods.len(), 0);
+            }
+            _ => panic!("expected record declaration"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_literal() {
+        let mut parser = Parser::new("Point { x: 10, y: 20 }");
+        let expr = parser.parse_expression().unwrap();
+        match expr.kind {
+            ExprKind::StructLiteral(sl) => {
+                assert_eq!(sl.fields.len(), 2);
+            }
+            _ => panic!("expected struct literal"),
+        }
+    }
+
+    #[test]
+    fn parse_field_access() {
+        let mut parser = Parser::new("p.x");
+        let expr = parser.parse_expression().unwrap();
+        assert!(matches!(expr.kind, ExprKind::FieldAccess(_)));
+    }
+
+    #[test]
+    fn parse_method_call() {
+        let mut parser = Parser::new("p.sum()");
+        let expr = parser.parse_expression().unwrap();
+        assert!(matches!(expr.kind, ExprKind::MethodCall(_)));
+    }
+
+    #[test]
+    fn parse_method_call_with_args() {
+        let mut parser = Parser::new("p.distance(other)");
+        let expr = parser.parse_expression().unwrap();
+        match expr.kind {
+            ExprKind::MethodCall(mc) => {
+                assert_eq!(mc.args.len(), 1);
+            }
+            _ => panic!("expected method call"),
+        }
+    }
+
+    #[test]
+    fn parse_chained_field_access() {
+        let mut parser = Parser::new("a.b.c");
+        let expr = parser.parse_expression().unwrap();
+        // Should parse as ((a.b).c)
+        match expr.kind {
+            ExprKind::FieldAccess(fa) => {
+                // The outermost is .c
+                assert!(matches!(fa.object.kind, ExprKind::FieldAccess(_)));
+            }
+            _ => panic!("expected field access"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_literal_empty() {
+        let mut parser = Parser::new("Empty { }");
+        let expr = parser.parse_expression().unwrap();
+        match expr.kind {
+            ExprKind::StructLiteral(sl) => {
+                assert_eq!(sl.fields.len(), 0);
+            }
+            _ => panic!("expected struct literal"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_literal_trailing_comma() {
+        let mut parser = Parser::new("Point { x: 10, y: 20, }");
+        let expr = parser.parse_expression().unwrap();
+        match expr.kind {
+            ExprKind::StructLiteral(sl) => {
+                assert_eq!(sl.fields.len(), 2);
+            }
+            _ => panic!("expected struct literal"),
         }
     }
 }

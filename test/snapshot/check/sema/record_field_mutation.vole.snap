@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2024]: cannot assign to field 'x' of immutable record 'Point'
+    ,-[<path>/record_field_mutation.vole:10:7]
+  9 |     let p = Point { x: 10, y: 20 }
+ 10 |     p.x = 99  // Error: records are immutable
+    :       |
+    :       `-- record fields are immutable
+ 11 | }
+    `----

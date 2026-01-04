@@ -33,6 +33,7 @@ pub const TYPE_F64: u32 = 3;
 pub const TYPE_BOOL: u32 = 4;
 pub const TYPE_ARRAY: u32 = 5;
 pub const TYPE_CLOSURE: u32 = 6;
+pub const TYPE_INSTANCE: u32 = 7;
 
 /// Tagged value for boxed/heterogeneous storage
 /// Used in arrays, union types, and fallible returns

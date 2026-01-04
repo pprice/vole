@@ -4,4 +4,4 @@ pub mod scope;
 pub mod types;
 
 pub use analyzer::{Analyzer, TypeError};
-pub use types::{FunctionType, Type};
+pub use types::{ClassType, FunctionType, RecordType, StructField, Type};
