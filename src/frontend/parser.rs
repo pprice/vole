@@ -868,6 +868,18 @@ impl<'src> Parser<'src> {
         }
     }
 
+    /// Create an unexpected token error at the current position
+    #[allow(dead_code)] // Will be used in subsequent refactor tasks
+    fn unexpected_token_error(&self) -> ParseError {
+        ParseError::new(
+            ParserError::UnexpectedToken {
+                token: self.current.ty.as_str().to_string(),
+                span: self.current.span.into(),
+            },
+            self.current.span,
+        )
+    }
+
     /// Check if the current position looks like a struct literal.
     /// This uses lookahead to distinguish `Name { field: value }` from `Name { statement }`.
     /// Returns true if:
