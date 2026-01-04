@@ -1,19 +1,19 @@
 // src/codegen/lambda.rs
 //
 // Lambda/closure compilation support for code generation.
-// This module contains type inference and helper functions for lambda compilation.
-//
-// Note: The main compilation functions (compile_lambda, compile_pure_lambda,
-// compile_lambda_with_captures, etc.) remain in compiler.rs due to circular
-// dependencies with compile_expr and compile_stmt. This module extracts the
-// standalone helpers that don't have such dependencies.
 
 use std::collections::HashMap;
 
-use crate::frontend::{BinaryOp, Expr, ExprKind, LambdaBody, Symbol};
+use cranelift::prelude::*;
+use cranelift_module::Module;
+
+use crate::frontend::{BinaryOp, Expr, ExprKind, LambdaBody, LambdaExpr, Symbol};
 use crate::sema::{FunctionType, Type};
 
-use super::types::{CompileCtx, resolve_type_expr};
+use super::compiler::compile_expr_with_captures;
+use super::stmt::compile_block_with_captures;
+use super::types::{resolve_type_expr, type_size, type_to_cranelift, CompileCtx, CompiledValue};
+use super::ControlFlowCtx;
 
 /// Information about a captured variable for lambda compilation
 #[derive(Clone)]
@@ -24,8 +24,29 @@ pub(crate) struct CaptureBinding {
     pub vole_type: Type,
 }
 
+impl CaptureBinding {
+    pub fn new(index: usize, vole_type: Type) -> Self {
+        Self { index, vole_type }
+    }
+}
+
+/// Build capture bindings from a list of captures and variable types
+pub(crate) fn build_capture_bindings(
+    captures: &[crate::frontend::Capture],
+    variables: &HashMap<Symbol, (Variable, Type)>,
+) -> HashMap<Symbol, CaptureBinding> {
+    let mut bindings = HashMap::new();
+    for (i, capture) in captures.iter().enumerate() {
+        let vole_type = variables
+            .get(&capture.name)
+            .map(|(_, ty)| ty.clone())
+            .unwrap_or(Type::I64);
+        bindings.insert(capture.name, CaptureBinding::new(i, vole_type));
+    }
+    bindings
+}
+
 /// Infer the return type of a lambda expression body.
-/// This is used when no explicit return type is provided.
 pub(crate) fn infer_lambda_return_type(
     body: &LambdaBody,
     param_types: &[(Symbol, Type)],
@@ -33,23 +54,18 @@ pub(crate) fn infer_lambda_return_type(
 ) -> Type {
     match body {
         LambdaBody::Expr(expr) => infer_expr_type(expr, param_types, ctx),
-        LambdaBody::Block(_) => {
-            // Block bodies should use explicit return or default to void
-            // For now, default to i64 for backwards compatibility
-            Type::I64
-        }
+        LambdaBody::Block(_) => Type::I64,
     }
 }
 
 /// Infer the type of an expression given parameter types as context.
-/// Returns I64 as fallback for unknown cases.
 pub(crate) fn infer_expr_type(
     expr: &Expr,
     param_types: &[(Symbol, Type)],
     ctx: &CompileCtx,
 ) -> Type {
     match &expr.kind {
-        ExprKind::IntLiteral(_) => Type::I64, // Int literals compile to i64
+        ExprKind::IntLiteral(_) => Type::I64,
         ExprKind::FloatLiteral(_) => Type::F64,
         ExprKind::BoolLiteral(_) => Type::Bool,
         ExprKind::StringLiteral(_) => Type::String,
@@ -57,13 +73,11 @@ pub(crate) fn infer_expr_type(
         ExprKind::Nil => Type::Nil,
 
         ExprKind::Identifier(sym) => {
-            // Look up in parameters first
             for (name, ty) in param_types {
                 if name == sym {
                     return ty.clone();
                 }
             }
-            // Look up in globals
             for global in ctx.globals {
                 if global.name == *sym
                     && let Some(type_expr) = &global.ty
@@ -71,7 +85,7 @@ pub(crate) fn infer_expr_type(
                     return resolve_type_expr(type_expr, ctx.type_aliases);
                 }
             }
-            Type::I64 // Fallback
+            Type::I64
         }
 
         ExprKind::Binary(bin) => {
@@ -79,24 +93,19 @@ pub(crate) fn infer_expr_type(
             let right_ty = infer_expr_type(&bin.right, param_types, ctx);
 
             match bin.op {
-                // Comparison operators always return bool
                 BinaryOp::Eq
                 | BinaryOp::Ne
                 | BinaryOp::Lt
                 | BinaryOp::Le
                 | BinaryOp::Gt
-                | BinaryOp::Ge => Type::Bool,
+                | BinaryOp::Ge
+                | BinaryOp::And
+                | BinaryOp::Or => Type::Bool,
 
-                // Logical operators return bool
-                BinaryOp::And | BinaryOp::Or => Type::Bool,
-
-                // Arithmetic: use the "wider" type or left type
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                    // If both are the same, use that type
                     if left_ty == right_ty {
                         left_ty
                     } else {
-                        // Simple widening logic
                         match (&left_ty, &right_ty) {
                             (Type::I64, _) | (_, Type::I64) => Type::I64,
                             (Type::F64, _) | (_, Type::F64) => Type::F64,
@@ -106,7 +115,6 @@ pub(crate) fn infer_expr_type(
                     }
                 }
 
-                // Bitwise operators preserve type
                 BinaryOp::BitAnd
                 | BinaryOp::BitOr
                 | BinaryOp::BitXor
@@ -118,16 +126,14 @@ pub(crate) fn infer_expr_type(
         ExprKind::Unary(un) => infer_expr_type(&un.operand, param_types, ctx),
 
         ExprKind::Call(call) => {
-            // Infer the callee type to get the return type
             let callee_ty = infer_expr_type(&call.callee, param_types, ctx);
             match callee_ty {
                 Type::Function(ft) => *ft.return_type,
-                _ => Type::I64, // Fallback if callee isn't a function type
+                _ => Type::I64,
             }
         }
 
         ExprKind::Lambda(lambda) => {
-            // For nested lambdas, construct the function type
             let lambda_params: Vec<Type> = lambda
                 .params
                 .iter()
@@ -149,29 +155,361 @@ pub(crate) fn infer_expr_type(
             })
         }
 
-        _ => Type::I64, // Fallback for complex expressions
+        _ => Type::I64,
     }
 }
 
-/// Create a new CaptureBinding
-impl CaptureBinding {
-    pub fn new(index: usize, vole_type: Type) -> Self {
-        Self { index, vole_type }
+/// Compile a lambda expression - dispatches to pure or capturing version
+pub(super) fn compile_lambda(
+    builder: &mut FunctionBuilder,
+    lambda: &LambdaExpr,
+    variables: &HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    let captures = lambda.captures.borrow();
+    let has_captures = !captures.is_empty();
+
+    if has_captures {
+        compile_lambda_with_captures(builder, lambda, variables, ctx)
+    } else {
+        compile_pure_lambda(builder, lambda, ctx)
     }
 }
 
-/// Build capture bindings from a list of captures and variable types
-pub(crate) fn build_capture_bindings(
-    captures: &[crate::frontend::Capture],
-    variables: &HashMap<Symbol, (cranelift::prelude::Variable, Type)>,
-) -> HashMap<Symbol, CaptureBinding> {
-    let mut bindings = HashMap::new();
+/// Compile a pure lambda (no captures) - returns a function pointer
+fn compile_pure_lambda(
+    builder: &mut FunctionBuilder,
+    lambda: &LambdaExpr,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    let lambda_name = format!("__lambda_{}", *ctx.lambda_counter);
+    *ctx.lambda_counter += 1;
+
+    let param_types: Vec<types::Type> = lambda
+        .params
+        .iter()
+        .map(|p| {
+            p.ty.as_ref()
+                .map(|t| type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type))
+                .unwrap_or(types::I64)
+        })
+        .collect();
+
+    let param_vole_types: Vec<Type> = lambda
+        .params
+        .iter()
+        .map(|p| {
+            p.ty.as_ref()
+                .map(|t| resolve_type_expr(t, ctx.type_aliases))
+                .unwrap_or(Type::I64)
+        })
+        .collect();
+
+    let param_context: Vec<(Symbol, Type)> = lambda
+        .params
+        .iter()
+        .zip(param_vole_types.iter())
+        .map(|(p, ty)| (p.name, ty.clone()))
+        .collect();
+
+    let return_vole_type = lambda
+        .return_type
+        .as_ref()
+        .map(|t| resolve_type_expr(t, ctx.type_aliases))
+        .unwrap_or_else(|| infer_lambda_return_type(&lambda.body, &param_context, ctx));
+
+    let return_type = type_to_cranelift(&return_vole_type, ctx.pointer_type);
+
+    let mut sig = ctx.module.make_signature();
+    for &param_ty in &param_types {
+        sig.params.push(AbiParam::new(param_ty));
+    }
+    sig.returns.push(AbiParam::new(return_type));
+
+    let func_id = ctx
+        .module
+        .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
+        .map_err(|e| e.to_string())?;
+
+    ctx.func_ids.insert(lambda_name, func_id);
+
+    let mut lambda_ctx = ctx.module.make_context();
+    lambda_ctx.func.signature = sig.clone();
+
+    {
+        let mut lambda_builder_ctx = FunctionBuilderContext::new();
+        let mut lambda_builder =
+            FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
+
+        let entry_block = lambda_builder.create_block();
+        lambda_builder.append_block_params_for_function_params(entry_block);
+        lambda_builder.switch_to_block(entry_block);
+
+        let mut lambda_variables: HashMap<Symbol, (Variable, Type)> = HashMap::new();
+        let block_params = lambda_builder.block_params(entry_block).to_vec();
+        for (i, param) in lambda.params.iter().enumerate() {
+            let var = lambda_builder.declare_var(param_types[i]);
+            lambda_builder.def_var(var, block_params[i]);
+            lambda_variables.insert(param.name, (var, param_vole_types[i].clone()));
+        }
+
+        let capture_bindings: HashMap<Symbol, CaptureBinding> = HashMap::new();
+
+        let mut lambda_cf_ctx = ControlFlowCtx::new();
+        let result = compile_lambda_body(
+            &mut lambda_builder,
+            &lambda.body,
+            &mut lambda_variables,
+            &capture_bindings,
+            None,
+            &mut lambda_cf_ctx,
+            ctx,
+        )?;
+
+        if let Some(result_val) = result {
+            lambda_builder.ins().return_(&[result_val.value]);
+        }
+        lambda_builder.seal_all_blocks();
+        lambda_builder.finalize();
+    }
+
+    ctx.module
+        .define_function(func_id, &mut lambda_ctx)
+        .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
+
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
+    let func_addr = builder.ins().func_addr(ctx.pointer_type, func_ref);
+
+    Ok(CompiledValue {
+        value: func_addr,
+        ty: ctx.pointer_type,
+        vole_type: Type::Function(FunctionType {
+            params: param_vole_types,
+            return_type: Box::new(return_vole_type),
+            is_closure: false,
+        }),
+    })
+}
+
+/// Compile a lambda with captures - returns a closure pointer
+fn compile_lambda_with_captures(
+    builder: &mut FunctionBuilder,
+    lambda: &LambdaExpr,
+    variables: &HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    let captures = lambda.captures.borrow();
+    let num_captures = captures.len();
+
+    let lambda_name = format!("__lambda_{}", *ctx.lambda_counter);
+    *ctx.lambda_counter += 1;
+
+    let param_types: Vec<types::Type> = lambda
+        .params
+        .iter()
+        .map(|p| {
+            p.ty.as_ref()
+                .map(|t| type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type))
+                .unwrap_or(types::I64)
+        })
+        .collect();
+
+    let param_vole_types: Vec<Type> = lambda
+        .params
+        .iter()
+        .map(|p| {
+            p.ty.as_ref()
+                .map(|t| resolve_type_expr(t, ctx.type_aliases))
+                .unwrap_or(Type::I64)
+        })
+        .collect();
+
+    let param_context: Vec<(Symbol, Type)> = lambda
+        .params
+        .iter()
+        .zip(param_vole_types.iter())
+        .map(|(p, ty)| (p.name, ty.clone()))
+        .collect();
+
+    let return_vole_type = lambda
+        .return_type
+        .as_ref()
+        .map(|t| resolve_type_expr(t, ctx.type_aliases))
+        .unwrap_or_else(|| infer_lambda_return_type(&lambda.body, &param_context, ctx));
+
+    let return_type = type_to_cranelift(&return_vole_type, ctx.pointer_type);
+
+    // First param is the closure pointer
+    let mut sig = ctx.module.make_signature();
+    sig.params.push(AbiParam::new(ctx.pointer_type));
+    for &param_ty in &param_types {
+        sig.params.push(AbiParam::new(param_ty));
+    }
+    sig.returns.push(AbiParam::new(return_type));
+
+    let func_id = ctx
+        .module
+        .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
+        .map_err(|e| e.to_string())?;
+
+    ctx.func_ids.insert(lambda_name, func_id);
+
+    let capture_bindings = build_capture_bindings(&captures, variables);
+
+    let mut lambda_ctx = ctx.module.make_context();
+    lambda_ctx.func.signature = sig.clone();
+
+    {
+        let mut lambda_builder_ctx = FunctionBuilderContext::new();
+        let mut lambda_builder =
+            FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
+
+        let entry_block = lambda_builder.create_block();
+        lambda_builder.append_block_params_for_function_params(entry_block);
+        lambda_builder.switch_to_block(entry_block);
+
+        let block_params = lambda_builder.block_params(entry_block).to_vec();
+        let closure_ptr = block_params[0];
+
+        let mut lambda_variables: HashMap<Symbol, (Variable, Type)> = HashMap::new();
+        for (i, param) in lambda.params.iter().enumerate() {
+            let var = lambda_builder.declare_var(param_types[i]);
+            lambda_builder.def_var(var, block_params[i + 1]);
+            lambda_variables.insert(param.name, (var, param_vole_types[i].clone()));
+        }
+
+        let closure_var = lambda_builder.declare_var(ctx.pointer_type);
+        lambda_builder.def_var(closure_var, closure_ptr);
+
+        let mut lambda_cf_ctx = ControlFlowCtx::new();
+        let result = compile_lambda_body(
+            &mut lambda_builder,
+            &lambda.body,
+            &mut lambda_variables,
+            &capture_bindings,
+            Some(closure_var),
+            &mut lambda_cf_ctx,
+            ctx,
+        )?;
+
+        if let Some(result_val) = result {
+            lambda_builder.ins().return_(&[result_val.value]);
+        }
+        lambda_builder.seal_all_blocks();
+        lambda_builder.finalize();
+    }
+
+    ctx.module
+        .define_function(func_id, &mut lambda_ctx)
+        .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
+
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
+    let func_addr = builder.ins().func_addr(ctx.pointer_type, func_ref);
+
+    // Allocate closure
+    let alloc_id = ctx
+        .func_ids
+        .get("vole_closure_alloc")
+        .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
+    let alloc_ref = ctx.module.declare_func_in_func(*alloc_id, builder.func);
+    let num_captures_val = builder.ins().iconst(types::I64, num_captures as i64);
+    let alloc_call = builder
+        .ins()
+        .call(alloc_ref, &[func_addr, num_captures_val]);
+    let closure_ptr = builder.inst_results(alloc_call)[0];
+
+    // Set up each capture
+    let set_capture_id = ctx
+        .func_ids
+        .get("vole_closure_set_capture")
+        .ok_or_else(|| "vole_closure_set_capture not found".to_string())?;
+    let set_capture_ref = ctx
+        .module
+        .declare_func_in_func(*set_capture_id, builder.func);
+
+    let heap_alloc_id = ctx
+        .func_ids
+        .get("vole_heap_alloc")
+        .ok_or_else(|| "vole_heap_alloc not found".to_string())?;
+    let heap_alloc_ref = ctx
+        .module
+        .declare_func_in_func(*heap_alloc_id, builder.func);
+
     for (i, capture) in captures.iter().enumerate() {
-        let vole_type = variables
+        let (var, vole_type) = variables
             .get(&capture.name)
-            .map(|(_, ty)| ty.clone())
-            .unwrap_or(Type::I64);
-        bindings.insert(capture.name, CaptureBinding::new(i, vole_type));
+            .ok_or_else(|| format!("Captured variable not found: {:?}", capture.name))?;
+        let current_value = builder.use_var(*var);
+
+        let size = type_size(vole_type, ctx.pointer_type);
+        let size_val = builder.ins().iconst(types::I64, size as i64);
+
+        let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
+        let heap_ptr = builder.inst_results(alloc_call)[0];
+
+        builder
+            .ins()
+            .store(MemFlags::new(), current_value, heap_ptr, 0);
+
+        let index_val = builder.ins().iconst(types::I64, i as i64);
+        builder
+            .ins()
+            .call(set_capture_ref, &[closure_ptr, index_val, heap_ptr]);
     }
-    bindings
+
+    Ok(CompiledValue {
+        value: closure_ptr,
+        ty: ctx.pointer_type,
+        vole_type: Type::Function(FunctionType {
+            params: param_vole_types,
+            return_type: Box::new(return_vole_type),
+            is_closure: true,
+        }),
+    })
+}
+
+/// Compile a lambda body (either expression or block)
+fn compile_lambda_body(
+    builder: &mut FunctionBuilder,
+    body: &LambdaBody,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    capture_bindings: &HashMap<Symbol, CaptureBinding>,
+    closure_var: Option<Variable>,
+    cf_ctx: &mut ControlFlowCtx,
+    ctx: &mut CompileCtx,
+) -> Result<Option<CompiledValue>, String> {
+    match body {
+        LambdaBody::Expr(expr) => {
+            let result = compile_expr_with_captures(
+                builder,
+                expr,
+                variables,
+                capture_bindings,
+                closure_var,
+                ctx,
+            )?;
+            Ok(Some(result))
+        }
+        LambdaBody::Block(block) => {
+            let terminated = compile_block_with_captures(
+                builder,
+                block,
+                variables,
+                capture_bindings,
+                closure_var,
+                cf_ctx,
+                ctx,
+            )?;
+            if terminated {
+                Ok(None)
+            } else {
+                let zero = builder.ins().iconst(types::I64, 0);
+                Ok(Some(CompiledValue {
+                    value: zero,
+                    ty: types::I64,
+                    vole_type: Type::I64,
+                }))
+            }
+        }
+    }
 }
