@@ -1320,43 +1320,13 @@ impl Analyzer {
                         if self.in_lambda() {
                             self.mark_lambda_has_side_effects();
                         }
-                        if call.args.len() != func_type.params.len() {
-                            self.add_error(
-                                SemanticError::WrongArgumentCount {
-                                    expected: func_type.params.len(),
-                                    found: call.args.len(),
-                                    span: expr.span.into(),
-                                },
-                                expr.span,
-                            );
-                        }
-
-                        for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
-                            // For lambda arguments, pass expected type for inference
-                            let arg_ty = if let ExprKind::Lambda(lambda) = &arg.kind {
-                                let expected_fn = if let Type::Function(ft) = param_ty {
-                                    Some(ft)
-                                } else {
-                                    None
-                                };
-                                self.analyze_lambda(lambda, expected_fn, interner)
-                            } else {
-                                // Pass expected type to allow integer literal inference
-                                self.check_expr_expecting(arg, Some(param_ty), interner)?
-                            };
-
-                            if !self.types_compatible(&arg_ty, param_ty) {
-                                self.add_error(
-                                    SemanticError::TypeMismatch {
-                                        expected: param_ty.name().to_string(),
-                                        found: arg_ty.name().to_string(),
-                                        span: arg.span.into(),
-                                    },
-                                    arg.span,
-                                );
-                            }
-                        }
-
+                        self.check_call_args(
+                            &call.args,
+                            &func_type.params,
+                            expr.span,
+                            true, // with_inference
+                            interner,
+                        )?;
                         return Ok(*func_type.return_type);
                     }
 
@@ -1366,43 +1336,13 @@ impl Analyzer {
                         if self.in_lambda() {
                             self.mark_lambda_has_side_effects();
                         }
-                        if call.args.len() != func_type.params.len() {
-                            self.add_error(
-                                SemanticError::WrongArgumentCount {
-                                    expected: func_type.params.len(),
-                                    found: call.args.len(),
-                                    span: expr.span.into(),
-                                },
-                                expr.span,
-                            );
-                        }
-
-                        for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
-                            // For lambda arguments, pass expected type for inference
-                            let arg_ty = if let ExprKind::Lambda(lambda) = &arg.kind {
-                                let expected_fn = if let Type::Function(ft) = param_ty {
-                                    Some(ft)
-                                } else {
-                                    None
-                                };
-                                self.analyze_lambda(lambda, expected_fn, interner)
-                            } else {
-                                // Pass expected type to allow integer literal inference
-                                self.check_expr_expecting(arg, Some(param_ty), interner)?
-                            };
-
-                            if !self.types_compatible(&arg_ty, param_ty) {
-                                self.add_error(
-                                    SemanticError::TypeMismatch {
-                                        expected: param_ty.name().to_string(),
-                                        found: arg_ty.name().to_string(),
-                                        span: arg.span.into(),
-                                    },
-                                    arg.span,
-                                );
-                            }
-                        }
-
+                        self.check_call_args(
+                            &call.args,
+                            &func_type.params,
+                            expr.span,
+                            true, // with_inference
+                            interner,
+                        )?;
                         return Ok(*func_type.return_type);
                     }
 
@@ -1454,32 +1394,13 @@ impl Analyzer {
                     if self.in_lambda() {
                         self.mark_lambda_has_side_effects();
                     }
-                    // Calling a function-typed expression
-                    if call.args.len() != func_type.params.len() {
-                        self.add_error(
-                            SemanticError::WrongArgumentCount {
-                                expected: func_type.params.len(),
-                                found: call.args.len(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                    }
-
-                    for (arg, param_ty) in call.args.iter().zip(func_type.params.iter()) {
-                        let arg_ty = self.check_expr(arg, interner)?;
-                        if !self.types_compatible(&arg_ty, param_ty) {
-                            self.add_error(
-                                SemanticError::TypeMismatch {
-                                    expected: param_ty.name().to_string(),
-                                    found: arg_ty.name().to_string(),
-                                    span: arg.span.into(),
-                                },
-                                arg.span,
-                            );
-                        }
-                    }
-
+                    self.check_call_args(
+                        &call.args,
+                        &func_type.params,
+                        expr.span,
+                        false, // without inference (callee was just an expression)
+                        interner,
+                    )?;
                     return Ok(*func_type.return_type);
                 }
 
@@ -2498,6 +2419,70 @@ impl Analyzer {
         }
 
         false
+    }
+
+    /// Check call arguments against expected parameter types.
+    ///
+    /// This helper unifies the argument checking logic used for:
+    /// - Named function calls
+    /// - Function-typed variable calls
+    /// - Expression calls (e.g., immediately invoked lambdas)
+    ///
+    /// If `with_inference` is true, uses `check_expr_expecting` for argument type checking,
+    /// enabling integer literal inference and lambda parameter inference. Otherwise uses
+    /// plain `check_expr` (for cases where type inference context isn't available).
+    fn check_call_args(
+        &mut self,
+        args: &[Expr],
+        param_types: &[Type],
+        call_span: Span,
+        with_inference: bool,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        // Check argument count
+        if args.len() != param_types.len() {
+            self.add_error(
+                SemanticError::WrongArgumentCount {
+                    expected: param_types.len(),
+                    found: args.len(),
+                    span: call_span.into(),
+                },
+                call_span,
+            );
+        }
+
+        // Check each argument against its expected parameter type
+        for (arg, param_ty) in args.iter().zip(param_types.iter()) {
+            let arg_ty = if with_inference {
+                // For lambda arguments, pass expected function type for inference
+                if let ExprKind::Lambda(lambda) = &arg.kind {
+                    let expected_fn = if let Type::Function(ft) = param_ty {
+                        Some(ft)
+                    } else {
+                        None
+                    };
+                    self.analyze_lambda(lambda, expected_fn, interner)
+                } else {
+                    // Pass expected type to allow integer literal inference
+                    self.check_expr_expecting(arg, Some(param_ty), interner)?
+                }
+            } else {
+                self.check_expr(arg, interner)?
+            };
+
+            if !self.types_compatible(&arg_ty, param_ty) {
+                self.add_error(
+                    SemanticError::TypeMismatch {
+                        expected: param_ty.name().to_string(),
+                        found: arg_ty.name().to_string(),
+                        span: arg.span.into(),
+                    },
+                    arg.span,
+                );
+            }
+        }
+
+        Ok(())
     }
 
     /// Check if a method call is a built-in method on a primitive type
