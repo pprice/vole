@@ -25,14 +25,14 @@ pub struct Closure {
 impl Closure {
     /// Calculate the layout for a closure with the given number of captures
     fn layout(num_captures: usize) -> Layout {
-        let ptr_size = std::mem::size_of::<*mut u8>();
+        let ptr_size = size_of::<*mut u8>();
         let captures_size = num_captures
             .checked_mul(ptr_size)
             .expect("closure captures size overflow");
-        let total_size = std::mem::size_of::<Closure>()
+        let total_size = size_of::<Closure>()
             .checked_add(captures_size)
             .expect("closure total size overflow");
-        Layout::from_size_align(total_size, std::mem::align_of::<Closure>()).unwrap()
+        Layout::from_size_align(total_size, align_of::<Closure>()).unwrap()
     }
 
     /// Get pointer to the captures array
@@ -40,7 +40,7 @@ impl Closure {
     /// # Safety
     /// The closure pointer must be valid and properly initialized.
     unsafe fn captures_ptr(closure: *mut Closure) -> *mut *mut u8 {
-        unsafe { (closure as *mut u8).add(std::mem::size_of::<Closure>()) as *mut *mut u8 }
+        unsafe { (closure as *mut u8).add(size_of::<Closure>()) as *mut *mut u8 }
     }
 
     /// Allocate a new closure with space for captures
@@ -167,7 +167,7 @@ pub extern "C" fn vole_closure_free(closure: *mut Closure) {
 pub extern "C" fn vole_heap_alloc(size: usize) -> *mut u8 {
     use std::alloc::{Layout, alloc};
     if size == 0 {
-        return std::ptr::NonNull::dangling().as_ptr();
+        return ptr::NonNull::dangling().as_ptr();
     }
     let layout = Layout::from_size_align(size, 8).expect("invalid layout");
     // Safety: layout is valid and non-zero size

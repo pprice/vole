@@ -2,6 +2,12 @@
 name = "vole"
 version = "0.1.0"
 edition = "2024"
+description = "A compiled programming language with JIT compilation via Cranelift"
+repository = "https://github.com/pprice/vole"
+license = "NONE"
+keywords = ["compiler", "programming-language", "jit", "cranelift"]
+categories = ["compilers"]
+readme = "README.md"
 
 [lib]
 name = "vole"
@@ -58,3 +64,32 @@ vergen-gitcl = { version = "1", features = ["build"] }
 [profile.release]
 lto = true
 codegen-units = 1
+
+[lints.clippy]
+# Lint groups - errors for critical issues (lower priority so individual lints can override)
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+
+# Lint groups - warnings for code quality
+perf = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+
+# Allow multiple crate versions - caused by transitive dependencies we don't control
+multiple_crate_versions = "allow"
+
+# Additional useful lints
+redundant_clone = "warn"
+derive_partial_eq_without_eq = "warn"
+unused_peekable = "warn"
+collection_is_never_read = "warn"
+needless_for_each = "warn"
+manual_string_new = "warn"
+cloned_instead_of_copied = "warn"
+flat_map_option = "warn"
+
+[lints.rust]
+# Standard Rust lints
+unsafe_op_in_unsafe_fn = "warn"
+unused_qualifications = "warn"
