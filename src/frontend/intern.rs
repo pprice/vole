@@ -29,6 +29,12 @@ impl Interner {
     pub fn resolve(&self, sym: Symbol) -> &str {
         &self.strings[sym.0 as usize]
     }
+
+    /// Look up a string to get its symbol, if it has been interned.
+    /// Returns None if the string hasn't been interned.
+    pub fn lookup(&self, s: &str) -> Option<Symbol> {
+        self.map.get(s).copied()
+    }
 }
 
 #[cfg(test)]

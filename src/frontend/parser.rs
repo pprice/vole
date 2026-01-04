@@ -28,11 +28,14 @@ impl<'src> Parser<'src> {
     pub fn new(source: &'src str) -> Self {
         let mut lexer = Lexer::new(source);
         let current = lexer.next_token();
+        let mut interner = Interner::new();
+        // Pre-intern "self" so it's always available for method bodies
+        interner.intern("self");
         Self {
             lexer,
             current,
             previous: Token::new(TokenType::Eof, "", Span::default()),
-            interner: Interner::new(),
+            interner,
         }
     }
 
@@ -40,11 +43,14 @@ impl<'src> Parser<'src> {
     pub fn with_file(source: &'src str, file: &str) -> Self {
         let mut lexer = Lexer::new_with_file(source, file);
         let current = lexer.next_token();
+        let mut interner = Interner::new();
+        // Pre-intern "self" so it's always available for method bodies
+        interner.intern("self");
         Self {
             lexer,
             current,
             previous: Token::new(TokenType::Eof, "", Span::default()),
-            interner: Interner::new(),
+            interner,
         }
     }
 
