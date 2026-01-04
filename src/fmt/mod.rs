@@ -5,6 +5,7 @@
 
 mod config;
 mod formatter;
+mod printer;
 
 pub use config::{CANONICAL, FormatConfig};
 pub use formatter::{FormatError, FormatResult, format};
