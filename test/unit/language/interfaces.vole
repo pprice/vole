@@ -65,3 +65,55 @@ tests "functional interfaces" {
         assert(true)
     }
 }
+
+// Test interface extends
+interface Base {
+    func base_method() -> i64
+}
+
+interface Extended extends Base {
+    func extended_method() -> i64
+}
+
+record ExtendedImpl implements Extended {
+    value: i64,
+
+    func base_method() -> i64 {
+        return self.value
+    }
+
+    func extended_method() -> i64 {
+        return self.value * 2
+    }
+}
+
+tests "interface extends" {
+    test "record implements extended interface with both methods" {
+        let e = ExtendedImpl { value: 10 }
+        assert(e.base_method() == 10)
+        assert(e.extended_method() == 20)
+    }
+}
+
+// Test built-in methods
+tests "built-in interface methods" {
+    test "array.length returns correct size" {
+        let arr = [1, 2, 3, 4, 5]
+        assert(arr.length() == 5)
+    }
+
+    test "string.length returns correct size" {
+        let s = "hello"
+        assert(s.length() == 5)
+    }
+
+    test "empty array length" {
+        let arr: [i64] = []
+        assert(arr.length() == 0)
+    }
+
+    test "empty string length" {
+        let s = ""
+        assert(s.length() == 0)
+    }
+}
