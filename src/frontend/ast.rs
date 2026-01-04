@@ -206,6 +206,10 @@ pub enum ExprKind {
 
     /// Lambda expression: (x) => x + 1
     Lambda(Box<LambdaExpr>),
+
+    /// Type value expression: i32, f64, string, etc.
+    /// Types are first-class values with type `type`
+    TypeLiteral(TypeExpr),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)

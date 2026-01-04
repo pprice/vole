@@ -82,10 +82,16 @@ pub struct Compiler<'a> {
     globals: Vec<LetStmt>,
     /// Counter for generating unique lambda names
     lambda_counter: usize,
+    /// Type aliases from semantic analysis
+    type_aliases: HashMap<Symbol, Type>,
 }
 
 impl<'a> Compiler<'a> {
-    pub fn new(jit: &'a mut JitContext, interner: &'a Interner) -> Self {
+    pub fn new(
+        jit: &'a mut JitContext,
+        interner: &'a Interner,
+        type_aliases: HashMap<Symbol, Type>,
+    ) -> Self {
         let pointer_type = jit.pointer_type();
         Self {
             jit,
@@ -94,6 +100,7 @@ impl<'a> Compiler<'a> {
             tests: Vec::new(),
             globals: Vec::new(),
             lambda_counter: 0,
+            type_aliases,
         }
     }
 
@@ -181,15 +188,14 @@ impl<'a> Compiler<'a> {
         let mut params = Vec::new();
         for param in &func.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr(&param.ty),
+                &resolve_type_expr(&param.ty, &self.type_aliases),
                 self.pointer_type,
             ));
         }
 
-        let ret = func
-            .return_type
-            .as_ref()
-            .map(|t| type_to_cranelift(&resolve_type_expr(t), self.pointer_type));
+        let ret = func.return_type.as_ref().map(|t| {
+            type_to_cranelift(&resolve_type_expr(t, &self.type_aliases), self.pointer_type)
+        });
 
         self.jit.create_signature(&params, ret)
     }
@@ -206,12 +212,17 @@ impl<'a> Compiler<'a> {
         let param_types: Vec<types::Type> = func
             .params
             .iter()
-            .map(|p| type_to_cranelift(&resolve_type_expr(&p.ty), self.pointer_type))
+            .map(|p| {
+                type_to_cranelift(
+                    &resolve_type_expr(&p.ty, &self.type_aliases),
+                    self.pointer_type,
+                )
+            })
             .collect();
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| resolve_type_expr(&p.ty))
+            .map(|p| resolve_type_expr(&p.ty, &self.type_aliases))
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
@@ -253,6 +264,7 @@ impl<'a> Compiler<'a> {
                 source_file_ptr,
                 globals: &self.globals,
                 lambda_counter: &mut self.lambda_counter,
+                type_aliases: &self.type_aliases,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -316,6 +328,7 @@ impl<'a> Compiler<'a> {
                     source_file_ptr,
                     globals: &self.globals,
                     lambda_counter: &mut self.lambda_counter,
+                    type_aliases: &self.type_aliases,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -419,12 +432,17 @@ impl<'a> Compiler<'a> {
         let param_types: Vec<types::Type> = func
             .params
             .iter()
-            .map(|p| type_to_cranelift(&resolve_type_expr(&p.ty), self.pointer_type))
+            .map(|p| {
+                type_to_cranelift(
+                    &resolve_type_expr(&p.ty, &self.type_aliases),
+                    self.pointer_type,
+                )
+            })
             .collect();
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| resolve_type_expr(&p.ty))
+            .map(|p| resolve_type_expr(&p.ty, &self.type_aliases))
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
@@ -466,6 +484,7 @@ impl<'a> Compiler<'a> {
                 source_file_ptr,
                 globals: &[],
                 lambda_counter: &mut self.lambda_counter,
+                type_aliases: &self.type_aliases,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -521,6 +540,7 @@ impl<'a> Compiler<'a> {
                 source_file_ptr,
                 globals: &[],
                 lambda_counter: &mut self.lambda_counter,
+                type_aliases: &self.type_aliases,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -547,21 +567,27 @@ impl<'a> Compiler<'a> {
     }
 }
 
-fn resolve_type_expr(ty: &TypeExpr) -> Type {
+fn resolve_type_expr(ty: &TypeExpr, type_aliases: &HashMap<Symbol, Type>) -> Type {
     match ty {
         TypeExpr::Primitive(p) => Type::from_primitive(*p),
-        TypeExpr::Named(_) => Type::Error,
+        TypeExpr::Named(sym) => {
+            // Look up type alias
+            type_aliases.get(sym).cloned().unwrap_or(Type::Error)
+        }
         TypeExpr::Array(elem) => {
-            let elem_ty = resolve_type_expr(elem);
+            let elem_ty = resolve_type_expr(elem, type_aliases);
             Type::Array(Box::new(elem_ty))
         }
         TypeExpr::Optional(inner) => {
             // T? desugars to T | nil
-            let inner_ty = resolve_type_expr(inner);
+            let inner_ty = resolve_type_expr(inner, type_aliases);
             Type::Union(vec![inner_ty, Type::Nil])
         }
         TypeExpr::Union(variants) => {
-            let variant_types: Vec<Type> = variants.iter().map(resolve_type_expr).collect();
+            let variant_types: Vec<Type> = variants
+                .iter()
+                .map(|v| resolve_type_expr(v, type_aliases))
+                .collect();
             Type::normalize_union(variant_types)
         }
         TypeExpr::Nil => Type::Nil,
@@ -569,8 +595,11 @@ fn resolve_type_expr(ty: &TypeExpr) -> Type {
             params,
             return_type,
         } => {
-            let param_types: Vec<Type> = params.iter().map(resolve_type_expr).collect();
-            let ret_type = resolve_type_expr(return_type);
+            let param_types: Vec<Type> = params
+                .iter()
+                .map(|p| resolve_type_expr(p, type_aliases))
+                .collect();
+            let ret_type = resolve_type_expr(return_type, type_aliases);
             Type::Function(FunctionType {
                 params: param_types,
                 return_type: Box::new(ret_type),
@@ -710,6 +739,8 @@ struct CompileCtx<'a> {
     globals: &'a [LetStmt],
     /// Counter for generating unique lambda names
     lambda_counter: &'a mut usize,
+    /// Type aliases from semantic analysis
+    type_aliases: &'a HashMap<Symbol, Type>,
 }
 
 /// Returns true if a terminating statement (return/break) was compiled
@@ -742,17 +773,41 @@ fn compile_stmt(
         Stmt::Let(let_stmt) => {
             let init = compile_expr(builder, &let_stmt.init, variables, ctx)?;
 
-            // Check if there's a type annotation that is a union type
+            // Check if there's a type annotation
             let (final_value, final_type) = if let Some(ty_expr) = &let_stmt.ty {
-                let declared_type = resolve_type_expr(ty_expr);
+                let declared_type = resolve_type_expr(ty_expr, ctx.type_aliases);
                 // If declared type is a union and init is not, wrap init into the union
                 if matches!(&declared_type, Type::Union(_))
                     && !matches!(&init.vole_type, Type::Union(_))
                 {
                     let wrapped = construct_union(builder, init, &declared_type, ctx.pointer_type)?;
                     (wrapped.value, wrapped.vole_type)
+                } else if declared_type.is_integer() && init.vole_type.is_integer() {
+                    // Handle integer type narrowing (e.g., i64 literal to i32 variable)
+                    let declared_cty = type_to_cranelift(&declared_type, ctx.pointer_type);
+                    let init_cty = init.ty;
+                    if declared_cty.bits() < init_cty.bits() {
+                        // Truncate to narrower type
+                        let narrowed = builder.ins().ireduce(declared_cty, init.value);
+                        (narrowed, declared_type)
+                    } else if declared_cty.bits() > init_cty.bits() {
+                        // Extend to wider type (sign extend)
+                        let widened = builder.ins().sextend(declared_cty, init.value);
+                        (widened, declared_type)
+                    } else {
+                        (init.value, declared_type)
+                    }
+                } else if declared_type == Type::F32 && init.vole_type == Type::F64 {
+                    // Handle f64 to f32 narrowing
+                    let narrowed = builder.ins().fdemote(types::F32, init.value);
+                    (narrowed, declared_type)
+                } else if declared_type == Type::F64 && init.vole_type == Type::F32 {
+                    // Handle f32 to f64 promotion
+                    let widened = builder.ins().fpromote(types::F64, init.value);
+                    (widened, declared_type)
                 } else {
-                    (init.value, init.vole_type)
+                    // Use declared type but keep the value
+                    (init.value, declared_type)
                 }
             } else {
                 (init.value, init.vole_type)
@@ -1187,21 +1242,21 @@ fn compile_expr(
 
             let result = match bin.op {
                 BinaryOp::Add => {
-                    if result_ty == types::F64 {
+                    if result_ty == types::F64 || result_ty == types::F32 {
                         builder.ins().fadd(left_val, right_val)
                     } else {
                         builder.ins().iadd(left_val, right_val)
                     }
                 }
                 BinaryOp::Sub => {
-                    if result_ty == types::F64 {
+                    if result_ty == types::F64 || result_ty == types::F32 {
                         builder.ins().fsub(left_val, right_val)
                     } else {
                         builder.ins().isub(left_val, right_val)
                     }
                 }
                 BinaryOp::Mul => {
-                    if result_ty == types::F64 {
+                    if result_ty == types::F64 || result_ty == types::F32 {
                         builder.ins().fmul(left_val, right_val)
                     } else {
                         builder.ins().imul(left_val, right_val)
@@ -1239,7 +1294,7 @@ fn compile_expr(
                         } else {
                             builder.ins().icmp(IntCC::Equal, left_val, right_val)
                         }
-                    } else if result_ty == types::F64 {
+                    } else if result_ty == types::F64 || result_ty == types::F32 {
                         builder.ins().fcmp(FloatCC::Equal, left_val, right_val)
                     } else {
                         builder.ins().icmp(IntCC::Equal, left_val, right_val)
@@ -1258,7 +1313,7 @@ fn compile_expr(
                         } else {
                             builder.ins().icmp(IntCC::NotEqual, left_val, right_val)
                         }
-                    } else if result_ty == types::F64 {
+                    } else if result_ty == types::F64 || result_ty == types::F32 {
                         builder.ins().fcmp(FloatCC::NotEqual, left_val, right_val)
                     } else {
                         builder.ins().icmp(IntCC::NotEqual, left_val, right_val)
@@ -1710,7 +1765,7 @@ fn compile_expr(
 
         ExprKind::Is(is_expr) => {
             let value = compile_expr(builder, &is_expr.value, variables, ctx)?;
-            let tested_type = resolve_type_expr(&is_expr.type_expr);
+            let tested_type = resolve_type_expr(&is_expr.type_expr, ctx.type_aliases);
 
             // If value is a union, check the tag
             if let Type::Union(variants) = &value.vole_type {
@@ -1823,6 +1878,12 @@ fn compile_expr(
         }
 
         ExprKind::Lambda(lambda) => compile_lambda(builder, lambda, variables, ctx),
+
+        ExprKind::TypeLiteral(_) => {
+            // Type values are compile-time only and have no runtime representation.
+            // If we reach here, the semantic analyzer should have caught this.
+            Err("type expressions cannot be used as runtime values".to_string())
+        }
     }
 }
 
@@ -1888,7 +1949,9 @@ fn compile_pure_lambda(
         .iter()
         .map(|p| {
             p.ty.as_ref()
-                .map(|t| type_to_cranelift(&resolve_type_expr(t), ctx.pointer_type))
+                .map(|t| {
+                    type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type)
+                })
                 .unwrap_or(types::I64)
         })
         .collect();
@@ -1896,20 +1959,24 @@ fn compile_pure_lambda(
     let param_vole_types: Vec<Type> = lambda
         .params
         .iter()
-        .map(|p| p.ty.as_ref().map(resolve_type_expr).unwrap_or(Type::I64))
+        .map(|p| {
+            p.ty.as_ref()
+                .map(|t| resolve_type_expr(t, ctx.type_aliases))
+                .unwrap_or(Type::I64)
+        })
         .collect();
 
     // Determine return type
     let return_type = lambda
         .return_type
         .as_ref()
-        .map(|t| type_to_cranelift(&resolve_type_expr(t), ctx.pointer_type))
+        .map(|t| type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type))
         .unwrap_or(types::I64);
 
     let return_vole_type = lambda
         .return_type
         .as_ref()
-        .map(resolve_type_expr)
+        .map(|t| resolve_type_expr(t, ctx.type_aliases))
         .unwrap_or(Type::I64);
 
     // Create signature for the lambda
@@ -2014,7 +2081,9 @@ fn compile_lambda_with_captures(
         .iter()
         .map(|p| {
             p.ty.as_ref()
-                .map(|t| type_to_cranelift(&resolve_type_expr(t), ctx.pointer_type))
+                .map(|t| {
+                    type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type)
+                })
                 .unwrap_or(types::I64)
         })
         .collect();
@@ -2022,20 +2091,24 @@ fn compile_lambda_with_captures(
     let param_vole_types: Vec<Type> = lambda
         .params
         .iter()
-        .map(|p| p.ty.as_ref().map(resolve_type_expr).unwrap_or(Type::I64))
+        .map(|p| {
+            p.ty.as_ref()
+                .map(|t| resolve_type_expr(t, ctx.type_aliases))
+                .unwrap_or(Type::I64)
+        })
         .collect();
 
     // Determine return type
     let return_type = lambda
         .return_type
         .as_ref()
-        .map(|t| type_to_cranelift(&resolve_type_expr(t), ctx.pointer_type))
+        .map(|t| type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type))
         .unwrap_or(types::I64);
 
     let return_vole_type = lambda
         .return_type
         .as_ref()
-        .map(resolve_type_expr)
+        .map(|t| resolve_type_expr(t, ctx.type_aliases))
         .unwrap_or(Type::I64);
 
     // Create signature for the lambda - first param is the closure pointer
@@ -3234,11 +3307,35 @@ fn compile_user_function_call(
         .ok_or_else(|| format!("undefined function: {}", name))?;
     let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
 
-    // Compile arguments
+    // Get expected parameter types from the function's signature
+    let sig_ref = builder.func.dfg.ext_funcs[func_ref].signature;
+    let sig = &builder.func.dfg.signatures[sig_ref];
+    let expected_types: Vec<types::Type> = sig.params.iter().map(|p| p.value_type).collect();
+
+    // Compile arguments with type narrowing
     let mut arg_values = Vec::new();
-    for arg in args {
+    for (i, arg) in args.iter().enumerate() {
         let compiled = compile_expr(builder, arg, variables, ctx)?;
-        arg_values.push(compiled.value);
+        let expected_ty = expected_types.get(i).copied();
+
+        // Narrow integer types if needed
+        let arg_value = if let Some(expected) = expected_ty {
+            if compiled.ty.is_int() && expected.is_int() && expected.bits() < compiled.ty.bits() {
+                // Truncate to narrower type
+                builder.ins().ireduce(expected, compiled.value)
+            } else if compiled.ty.is_int()
+                && expected.is_int()
+                && expected.bits() > compiled.ty.bits()
+            {
+                // Extend to wider type
+                builder.ins().sextend(expected, compiled.value)
+            } else {
+                compiled.value
+            }
+        } else {
+            compiled.value
+        };
+        arg_values.push(arg_value);
     }
 
     let call = builder.ins().call(func_ref, &arg_values);
@@ -3255,12 +3352,27 @@ fn compile_user_function_call(
     } else {
         let result = results[0];
         let ty = builder.func.dfg.value_type(result);
-        // TODO: Track vole_type for function return types properly
+        // Infer vole_type from Cranelift type
+        let vole_type = cranelift_to_vole_type(ty);
         Ok(CompiledValue {
             value: result,
             ty,
-            vole_type: Type::Unknown,
+            vole_type,
         })
+    }
+}
+
+/// Convert a Cranelift type back to a Vole type (for return value inference)
+fn cranelift_to_vole_type(ty: types::Type) -> Type {
+    match ty {
+        types::I8 => Type::I8,
+        types::I16 => Type::I16,
+        types::I32 => Type::I32,
+        types::I64 => Type::I64,
+        types::I128 => Type::I128,
+        types::F32 => Type::F32,
+        types::F64 => Type::F64,
+        _ => Type::Unknown, // Pointer types, etc. stay Unknown for now
     }
 }
 
@@ -3378,10 +3490,27 @@ fn convert_to_type(
         if val.ty == types::I64 || val.ty == types::I32 {
             return builder.ins().fcvt_from_sint(types::F64, val.value);
         }
+        // Convert f32 to f64
+        if val.ty == types::F32 {
+            return builder.ins().fpromote(types::F64, val.value);
+        }
     }
 
-    if target == types::I64 && val.ty == types::I32 {
-        return builder.ins().sextend(types::I64, val.value);
+    if target == types::F32 {
+        // Convert f64 to f32
+        if val.ty == types::F64 {
+            return builder.ins().fdemote(types::F32, val.value);
+        }
+    }
+
+    // Integer widening
+    if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
+        return builder.ins().sextend(target, val.value);
+    }
+
+    // Integer narrowing
+    if target.is_int() && val.ty.is_int() && target.bits() < val.ty.bits() {
+        return builder.ins().ireduce(target, val.value);
     }
 
     val.value
@@ -3399,7 +3528,7 @@ mod tests {
 
         let mut jit = JitContext::new();
         {
-            let mut compiler = Compiler::new(&mut jit, &interner);
+            let mut compiler = Compiler::new(&mut jit, &interner, HashMap::new());
             compiler.compile_program(&program).unwrap();
         }
         jit.finalize();

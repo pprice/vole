@@ -101,10 +101,11 @@ pub fn inspect_files(
                     had_error = true;
                     continue;
                 }
+                let type_aliases = analyzer.into_type_aliases();
 
                 // Generate IR
                 let mut jit = JitContext::new();
-                let mut compiler = Compiler::new(&mut jit, &interner);
+                let mut compiler = Compiler::new(&mut jit, &interner, type_aliases);
                 let include_tests = !no_tests;
 
                 if let Err(e) =

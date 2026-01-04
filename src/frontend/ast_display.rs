@@ -518,6 +518,13 @@ impl<'a> AstPrinter<'a> {
                     }
                 }
             }
+
+            ExprKind::TypeLiteral(ty) => {
+                self.write_indent(out);
+                out.push_str("TypeLiteral ");
+                self.write_type_inline(out, ty);
+                out.push('\n');
+            }
         }
     }
 
