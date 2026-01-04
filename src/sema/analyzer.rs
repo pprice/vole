@@ -6,6 +6,9 @@ use crate::sema::{
     ClassType, FunctionType, RecordType, StructField, Type,
     scope::{Scope, Variable},
 };
+use crate::sema::interface_registry::InterfaceRegistry;
+use crate::sema::implement_registry::ImplementRegistry;
+use crate::sema::resolution::MethodResolutions;
 use std::collections::{HashMap, HashSet};
 
 /// Information about a captured variable during lambda analysis
@@ -57,11 +60,17 @@ pub struct Analyzer {
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their resolved types, including narrowed types
     expr_types: HashMap<NodeId, Type>,
+    /// Interface definitions registry
+    pub interface_registry: InterfaceRegistry,
+    /// Methods added via implement blocks
+    pub implement_registry: ImplementRegistry,
+    /// Resolved method calls for codegen
+    pub method_resolutions: MethodResolutions,
 }
 
 impl Analyzer {
     pub fn new(_file: &str, _source: &str) -> Self {
-        Self {
+        let mut analyzer = Self {
             scope: Scope::new(),
             functions: HashMap::new(),
             globals: HashMap::new(),
@@ -76,7 +85,23 @@ impl Analyzer {
             records: HashMap::new(),
             methods: HashMap::new(),
             expr_types: HashMap::new(),
-        }
+            interface_registry: InterfaceRegistry::new(),
+            implement_registry: ImplementRegistry::new(),
+            method_resolutions: MethodResolutions::new(),
+        };
+
+        // Register built-in interfaces and implementations
+        // NOTE: This is temporary - will eventually come from stdlib/traits.void
+        analyzer.register_builtins();
+
+        analyzer
+    }
+
+    /// Register built-in interfaces and their implementations
+    /// NOTE: This is temporary - will eventually come from stdlib/traits.void
+    fn register_builtins(&mut self) {
+        // For now, just set up the registries - actual builtin methods
+        // will be registered when we have the interner available in a later task
     }
 
     /// Helper to add a type error
