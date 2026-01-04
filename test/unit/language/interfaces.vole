@@ -21,6 +21,24 @@ record User implements Hashable {
     }
 }
 
+// Multiple interface implementation
+interface Serializable {
+    func toJson() -> string
+}
+
+record Entity implements Hashable, Serializable {
+    id: i64,
+    name: string,
+
+    func hash() -> i64 {
+        return self.id
+    }
+
+    func toJson() -> string {
+        return self.name
+    }
+}
+
 interface Describable {
     func describe() -> string
 }
@@ -41,6 +59,12 @@ tests "interfaces" {
     test "explicit implements with method" {
         let u = User { id: 42 }
         assert(u.hash() == 42)
+    }
+
+    test "multiple interface implementation" {
+        let e = Entity { id: 123, name: "entity123" }
+        assert(e.hash() == 123)
+        assert(e.toJson() == "entity123")
     }
 }
 
