@@ -1012,7 +1012,11 @@ impl Analyzer {
         Ok(ty)
     }
 
-    fn check_expr_inner(&mut self, expr: &Expr, interner: &Interner) -> Result<Type, Vec<TypeError>> {
+    fn check_expr_inner(
+        &mut self,
+        expr: &Expr,
+        interner: &Interner,
+    ) -> Result<Type, Vec<TypeError>> {
         match &expr.kind {
             ExprKind::IntLiteral(_) => Ok(Type::I64), // Default to i64 for now
             ExprKind::FloatLiteral(_) => Ok(Type::F64),

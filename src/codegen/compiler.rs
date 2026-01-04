@@ -657,8 +657,8 @@ impl<'a> Compiler<'a> {
                     lambda_counter: &mut self.lambda_counter,
                     type_aliases: &self.type_aliases,
                     type_metadata: &self.type_metadata,
-                expr_types: &self.expr_types,
-            };
+                    expr_types: &self.expr_types,
+                };
                 let terminated = compile_block(
                     &mut builder,
                     &test.body,
@@ -1463,7 +1463,8 @@ fn compile_expr(
                 // (e.g., inside `if x is i64 { ... }`, x's type is narrowed from i64|nil to i64)
                 if let Some(narrowed_type) = ctx.expr_types.get(&expr.id) {
                     // If variable is a union but narrowed type is not, extract the payload
-                    if matches!(vole_type, Type::Union(_)) && !matches!(narrowed_type, Type::Union(_))
+                    if matches!(vole_type, Type::Union(_))
+                        && !matches!(narrowed_type, Type::Union(_))
                     {
                         // Union layout: [tag:1][padding:7][payload]
                         // Load the payload at offset 8
@@ -2363,8 +2364,12 @@ fn infer_expr_type(expr: &Expr, param_types: &[(Symbol, Type)], ctx: &CompileCtx
 
             match bin.op {
                 // Comparison operators always return bool
-                BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le |
-                BinaryOp::Gt | BinaryOp::Ge => Type::Bool,
+                BinaryOp::Eq
+                | BinaryOp::Ne
+                | BinaryOp::Lt
+                | BinaryOp::Le
+                | BinaryOp::Gt
+                | BinaryOp::Ge => Type::Bool,
 
                 // Logical operators return bool
                 BinaryOp::And | BinaryOp::Or => Type::Bool,
@@ -2380,22 +2385,23 @@ fn infer_expr_type(expr: &Expr, param_types: &[(Symbol, Type)], ctx: &CompileCtx
                             (Type::I64, _) | (_, Type::I64) => Type::I64,
                             (Type::F64, _) | (_, Type::F64) => Type::F64,
                             (Type::I32, _) | (_, Type::I32) => Type::I32,
-                            _ => left_ty
+                            _ => left_ty,
                         }
                     }
                 }
 
                 // Bitwise operators preserve type
-                BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor |
-                BinaryOp::Shl | BinaryOp::Shr => left_ty,
+                BinaryOp::BitAnd
+                | BinaryOp::BitOr
+                | BinaryOp::BitXor
+                | BinaryOp::Shl
+                | BinaryOp::Shr => left_ty,
 
                 _ => Type::I64, // Fallback
             }
         }
 
-        ExprKind::Unary(un) => {
-            infer_expr_type(&un.operand, param_types, ctx)
-        }
+        ExprKind::Unary(un) => infer_expr_type(&un.operand, param_types, ctx),
 
         ExprKind::Call(call) => {
             // Infer the callee type to get the return type
