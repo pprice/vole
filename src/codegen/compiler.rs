@@ -6,8 +6,8 @@ use cranelift_module::Module;
 use std::collections::HashMap;
 
 use super::calls::{compile_string_literal, value_to_string};
-use super::stmt::{compile_block, construct_union};
 use super::lambda::{compile_lambda, CaptureBinding};
+use super::stmt::{compile_block, construct_union};
 use super::structs::{
     convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type,
     get_method_return_type, get_type_name_symbol,
@@ -96,6 +96,8 @@ pub struct Compiler<'a> {
     /// Resolved method calls from semantic analysis
     #[allow(dead_code)] // Will be used in future refactoring
     method_resolutions: MethodResolutions,
+    /// Return types of compiled functions
+    func_return_types: HashMap<String, Type>,
 }
 
 impl<'a> Compiler<'a> {
@@ -119,6 +121,7 @@ impl<'a> Compiler<'a> {
             next_type_id: 0,
             expr_types,
             method_resolutions,
+            func_return_types: HashMap::new(),
         }
     }
 
@@ -162,6 +165,13 @@ impl<'a> Compiler<'a> {
                     let sig = self.create_function_signature(func);
                     let name = self.interner.resolve(func.name);
                     self.jit.declare_function(name, &sig);
+                    // Record return type for use in call expressions
+                    let return_type = func
+                        .return_type
+                        .as_ref()
+                        .map(|t| resolve_type_expr(t, &self.type_aliases))
+                        .unwrap_or(Type::Void);
+                    self.func_return_types.insert(name.to_string(), return_type);
                 }
                 Decl::Tests(tests_decl) => {
                     // Declare each test as __test_N with signature () -> i64
@@ -563,6 +573,7 @@ impl<'a> Compiler<'a> {
                 type_metadata: &self.type_metadata,
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -656,6 +667,7 @@ impl<'a> Compiler<'a> {
                 type_metadata: &self.type_metadata,
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -723,6 +735,7 @@ impl<'a> Compiler<'a> {
                     type_metadata: &self.type_metadata,
                     expr_types: &self.expr_types,
                     method_resolutions: &self.method_resolutions,
+                    func_return_types: &self.func_return_types,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -777,6 +790,13 @@ impl<'a> Compiler<'a> {
                     let sig = self.create_function_signature(func);
                     let name = self.interner.resolve(func.name);
                     self.jit.declare_function(name, &sig);
+                    // Record return type for use in call expressions
+                    let return_type = func
+                        .return_type
+                        .as_ref()
+                        .map(|t| resolve_type_expr(t, &self.type_aliases))
+                        .unwrap_or(Type::Void);
+                    self.func_return_types.insert(name.to_string(), return_type);
                 }
                 Decl::Tests(tests_decl) if include_tests => {
                     for _ in &tests_decl.tests {
@@ -883,6 +903,7 @@ impl<'a> Compiler<'a> {
                 type_metadata: &empty_type_metadata,
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -943,6 +964,7 @@ impl<'a> Compiler<'a> {
                 type_metadata: &empty_type_metadata,
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
             };
             let terminated = compile_block(
                 &mut builder,

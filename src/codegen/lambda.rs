@@ -10,10 +10,8 @@ use cranelift_module::Module;
 use crate::frontend::{BinaryOp, Expr, ExprKind, LambdaBody, LambdaExpr, Symbol};
 use crate::sema::{FunctionType, Type};
 
-use super::compiler::compile_expr_with_captures;
-use super::stmt::compile_block_with_captures;
+use super::context::{Captures, Cg, ControlFlow};
 use super::types::{resolve_type_expr, type_size, type_to_cranelift, CompileCtx, CompiledValue};
-use super::ControlFlowCtx;
 
 /// Information about a captured variable for lambda compilation
 #[derive(Clone)]
@@ -255,14 +253,14 @@ fn compile_pure_lambda(
 
         let capture_bindings: HashMap<Symbol, CaptureBinding> = HashMap::new();
 
-        let mut lambda_cf_ctx = ControlFlowCtx::new();
+        let mut lambda_cf = ControlFlow::new();
         let result = compile_lambda_body(
             &mut lambda_builder,
             &lambda.body,
             &mut lambda_variables,
             &capture_bindings,
             None,
-            &mut lambda_cf_ctx,
+            &mut lambda_cf,
             ctx,
         )?;
 
@@ -381,14 +379,14 @@ fn compile_lambda_with_captures(
         let closure_var = lambda_builder.declare_var(ctx.pointer_type);
         lambda_builder.def_var(closure_var, closure_ptr);
 
-        let mut lambda_cf_ctx = ControlFlowCtx::new();
+        let mut lambda_cf = ControlFlow::new();
         let result = compile_lambda_body(
             &mut lambda_builder,
             &lambda.body,
             &mut lambda_variables,
             &capture_bindings,
             Some(closure_var),
-            &mut lambda_cf_ctx,
+            &mut lambda_cf,
             ctx,
         )?;
 
@@ -475,31 +473,36 @@ fn compile_lambda_body(
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     capture_bindings: &HashMap<Symbol, CaptureBinding>,
     closure_var: Option<Variable>,
-    cf_ctx: &mut ControlFlowCtx,
+    cf: &mut ControlFlow,
     ctx: &mut CompileCtx,
 ) -> Result<Option<CompiledValue>, String> {
     match body {
         LambdaBody::Expr(expr) => {
-            let result = compile_expr_with_captures(
-                builder,
-                expr,
-                variables,
-                capture_bindings,
-                closure_var,
-                ctx,
-            )?;
+            let result = if capture_bindings.is_empty() {
+                let mut cg = Cg::new(builder, variables, ctx, cf);
+                cg.expr(expr)?
+            } else {
+                let captures = Captures {
+                    bindings: capture_bindings,
+                    closure_var: closure_var.expect("closure_var required for captures"),
+                };
+                let mut cg = Cg::with_captures(builder, variables, ctx, cf, captures);
+                cg.expr(expr)?
+            };
             Ok(Some(result))
         }
         LambdaBody::Block(block) => {
-            let terminated = compile_block_with_captures(
-                builder,
-                block,
-                variables,
-                capture_bindings,
-                closure_var,
-                cf_ctx,
-                ctx,
-            )?;
+            let terminated = if capture_bindings.is_empty() {
+                let mut cg = Cg::new(builder, variables, ctx, cf);
+                cg.block(block)?
+            } else {
+                let captures = Captures {
+                    bindings: capture_bindings,
+                    closure_var: closure_var.expect("closure_var required for captures"),
+                };
+                let mut cg = Cg::with_captures(builder, variables, ctx, cf, captures);
+                cg.block(block)?
+            };
             if terminated {
                 Ok(None)
             } else {
@@ -511,5 +514,12 @@ fn compile_lambda_body(
                 }))
             }
         }
+    }
+}
+
+impl Cg<'_, '_, '_> {
+    /// Compile a lambda expression
+    pub fn lambda(&mut self, lambda: &LambdaExpr) -> Result<CompiledValue, String> {
+        compile_lambda(self.builder, lambda, self.vars, self.ctx)
     }
 }

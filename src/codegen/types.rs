@@ -71,6 +71,8 @@ pub(crate) struct CompileCtx<'a> {
     /// Resolved method calls from semantic analysis
     #[allow(dead_code)] // Will be used in future refactoring
     pub method_resolutions: &'a MethodResolutions,
+    /// Return types of compiled functions
+    pub func_return_types: &'a HashMap<String, Type>,
 }
 
 /// Resolve a type expression to a Vole Type
@@ -205,9 +207,13 @@ pub(crate) fn convert_to_type(
         }
     }
 
-    // Integer widening
+    // Integer widening - use uextend for unsigned types, sextend for signed
     if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
-        return builder.ins().sextend(target, val.value);
+        if val.vole_type.is_unsigned() {
+            return builder.ins().uextend(target, val.value);
+        } else {
+            return builder.ins().sextend(target, val.value);
+        }
     }
 
     // Integer narrowing
