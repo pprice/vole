@@ -921,6 +921,30 @@ impl<'src> Parser<'src> {
         false
     }
 
+    /// Convert an expression to an assignment target
+    #[allow(dead_code)] // Will be used in subsequent refactor tasks
+    fn expr_to_assign_target(&self, expr: Expr) -> Result<AssignTarget, ParseError> {
+        match expr.kind {
+            ExprKind::Identifier(sym) => Ok(AssignTarget::Variable(sym)),
+            ExprKind::FieldAccess(fa) => Ok(AssignTarget::Field {
+                object: Box::new(fa.object),
+                field: fa.field,
+                field_span: fa.field_span,
+            }),
+            ExprKind::Index(idx) => Ok(AssignTarget::Index {
+                object: Box::new(idx.object),
+                index: Box::new(idx.index),
+            }),
+            _ => Err(ParseError::new(
+                ParserError::UnexpectedToken {
+                    token: "invalid assignment target".to_string(),
+                    span: expr.span.into(),
+                },
+                expr.span,
+            )),
+        }
+    }
+
     /// Parse an expression with Pratt parsing
     fn expression(&mut self, min_prec: u8) -> Result<Expr, ParseError> {
         let mut left = self.unary()?;
