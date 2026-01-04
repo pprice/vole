@@ -9,6 +9,7 @@ use crate::sema::interface_registry::{
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::{
     ClassType, FunctionType, RecordType, StructField, Type,
+    compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
 };
@@ -835,7 +836,7 @@ impl Analyzer {
     ) -> Result<Type, Vec<TypeError>> {
         match &expr.kind {
             ExprKind::IntLiteral(value) => match expected {
-                Some(ty) if Self::literal_fits(*value, ty) => Ok(ty.clone()),
+                Some(ty) if literal_fits(*value, ty) => Ok(ty.clone()),
                 Some(ty) => {
                     self.add_error(
                         SemanticError::TypeMismatch {
@@ -2481,64 +2482,9 @@ impl Analyzer {
         })
     }
 
-    /// Check if an integer literal value fits in the target type
-    fn literal_fits(value: i64, target: &Type) -> bool {
-        match target {
-            Type::I8 => value >= i8::MIN as i64 && value <= i8::MAX as i64,
-            Type::I16 => value >= i16::MIN as i64 && value <= i16::MAX as i64,
-            Type::I32 => value >= i32::MIN as i64 && value <= i32::MAX as i64,
-            Type::I64 => true,
-            Type::I128 => true, // i64 always fits in i128
-            Type::U8 => value >= 0 && value <= u8::MAX as i64,
-            Type::U16 => value >= 0 && value <= u16::MAX as i64,
-            Type::U32 => value >= 0 && value <= u32::MAX as i64,
-            Type::U64 => value >= 0,       // i64 positive values fit
-            Type::F32 | Type::F64 => true, // Integers can become floats
-            // For unions, check if literal fits any numeric variant
-            Type::Union(variants) => variants.iter().any(|v| Self::literal_fits(value, v)),
-            _ => false,
-        }
-    }
-
     fn types_compatible(&self, from: &Type, to: &Type) -> bool {
-        if from == to {
-            return true;
-        }
-
-        // Check if from can widen to to
-        if from.can_widen_to(to) {
-            return true;
-        }
-
-        // Allow numeric coercion (kept for backwards compatibility)
-        if from.is_integer() && to == &Type::I64 {
-            return true;
-        }
-        if from.is_numeric() && to == &Type::F64 {
-            return true;
-        }
-
-        // Check if assigning to a union that contains the from type
-        if let Type::Union(variants) = to {
-            // Direct containment
-            if variants.contains(from) {
-                return true;
-            }
-            // Also check if from can widen into a union variant
-            for variant in variants {
-                if from.can_widen_to(variant) {
-                    return true;
-                }
-            }
-        }
-
-        // Nil is compatible with any optional (union containing Nil)
-        if *from == Type::Nil && to.is_optional() {
-            return true;
-        }
-
-        // Error type is compatible with anything (for error recovery)
-        if from == &Type::Error || to == &Type::Error {
+        // Use the core compatibility check for most cases
+        if types_compatible_core(from, to) {
             return true;
         }
 
@@ -2546,17 +2492,9 @@ impl Analyzer {
         if let Type::Function(fn_type) = from
             && let Type::Interface(iface) = to
             && let Some(iface_fn) = self.get_functional_interface_type(iface.name)
-            && fn_type.params.len() == iface_fn.params.len()
+            && function_compatible_with_interface(fn_type, &iface_fn)
         {
-            let params_match = fn_type
-                .params
-                .iter()
-                .zip(iface_fn.params.iter())
-                .all(|(fp, ip)| self.types_compatible(fp, ip));
-            let return_matches = self.types_compatible(&fn_type.return_type, &iface_fn.return_type);
-            if params_match && return_matches {
-                return true;
-            }
+            return true;
         }
 
         false
