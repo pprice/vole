@@ -186,6 +186,9 @@ impl Analyzer {
                 Decl::Let(_) => {
                     // Let declarations are processed before the second pass
                 }
+                Decl::Class(_) | Decl::Record(_) => {
+                    // TODO: implement class/record type collection
+                }
             }
         }
 
@@ -238,6 +241,9 @@ impl Analyzer {
                 }
                 Decl::Let(_) => {
                     // Already processed above
+                }
+                Decl::Class(_) | Decl::Record(_) => {
+                    // TODO: implement class/record type checking
                 }
             }
         }
@@ -1556,6 +1562,21 @@ impl Analyzer {
                 // For now, analyze without expected type context
                 // (Context will be passed when we have assignment/call context)
                 Ok(self.analyze_lambda(lambda, None, interner))
+            }
+
+            ExprKind::StructLiteral(_) => {
+                // TODO: implement struct literal type checking
+                Err(vec![])
+            }
+
+            ExprKind::FieldAccess(_) => {
+                // TODO: implement field access type checking
+                Err(vec![])
+            }
+
+            ExprKind::MethodCall(_) => {
+                // TODO: implement method call type checking
+                Err(vec![])
             }
         }
     }

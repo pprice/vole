@@ -158,6 +158,9 @@ impl<'a> Compiler<'a> {
                     // Collect global variable declarations
                     self.globals.push(let_stmt.clone());
                 }
+                Decl::Class(_) | Decl::Record(_) => {
+                    // TODO: implement class/record declarations
+                }
             }
         }
 
@@ -177,6 +180,9 @@ impl<'a> Compiler<'a> {
                 }
                 Decl::Let(_) => {
                     // Globals are handled during identifier lookup
+                }
+                Decl::Class(_) | Decl::Record(_) => {
+                    // TODO: implement class/record declarations
                 }
             }
         }
@@ -1883,6 +1889,21 @@ fn compile_expr(
             // Type values are compile-time only and have no runtime representation.
             // If we reach here, the semantic analyzer should have caught this.
             Err("type expressions cannot be used as runtime values".to_string())
+        }
+
+        ExprKind::StructLiteral(_) => {
+            // TODO: implement struct literal compilation
+            Err("struct literals not yet implemented".to_string())
+        }
+
+        ExprKind::FieldAccess(_) => {
+            // TODO: implement field access compilation
+            Err("field access not yet implemented".to_string())
+        }
+
+        ExprKind::MethodCall(_) => {
+            // TODO: implement method call compilation
+            Err("method calls not yet implemented".to_string())
         }
     }
 }

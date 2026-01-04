@@ -18,6 +18,8 @@ pub enum Decl {
     Function(FuncDecl),
     Tests(TestsDecl),
     Let(LetStmt),
+    Class(ClassDecl),
+    Record(RecordDecl),
 }
 
 /// Function declaration
@@ -51,6 +53,32 @@ pub struct TestCase {
 pub struct Param {
     pub name: Symbol,
     pub ty: TypeExpr,
+    pub span: Span,
+}
+
+/// Field definition in a class or record
+#[derive(Debug, Clone)]
+pub struct FieldDef {
+    pub name: Symbol,
+    pub ty: TypeExpr,
+    pub span: Span,
+}
+
+/// Class declaration
+#[derive(Debug)]
+pub struct ClassDecl {
+    pub name: Symbol,
+    pub fields: Vec<FieldDef>,
+    pub methods: Vec<FuncDecl>,
+    pub span: Span,
+}
+
+/// Record declaration (immutable class)
+#[derive(Debug)]
+pub struct RecordDecl {
+    pub name: Symbol,
+    pub fields: Vec<FieldDef>,
+    pub methods: Vec<FuncDecl>,
     pub span: Span,
 }
 
@@ -210,6 +238,15 @@ pub enum ExprKind {
     /// Type value expression: i32, f64, string, etc.
     /// Types are first-class values with type `type`
     TypeLiteral(TypeExpr),
+
+    /// Struct literal: Point { x: 10, y: 20 }
+    StructLiteral(Box<StructLiteralExpr>),
+
+    /// Field access: point.x
+    FieldAccess(Box<FieldAccessExpr>),
+
+    /// Method call: point.distance()
+    MethodCall(Box<MethodCallExpr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
@@ -362,6 +399,38 @@ pub struct IsExpr {
     pub value: Expr,
     pub type_expr: TypeExpr,
     pub type_span: Span,
+}
+
+/// Struct literal expression: Name { field: value, ... }
+#[derive(Debug, Clone)]
+pub struct StructLiteralExpr {
+    pub name: Symbol,
+    pub fields: Vec<StructFieldInit>,
+}
+
+/// Field initializer in struct literal
+#[derive(Debug, Clone)]
+pub struct StructFieldInit {
+    pub name: Symbol,
+    pub value: Expr,
+    pub span: Span,
+}
+
+/// Field access expression: expr.field
+#[derive(Debug, Clone)]
+pub struct FieldAccessExpr {
+    pub object: Expr,
+    pub field: Symbol,
+    pub field_span: Span,
+}
+
+/// Method call expression: expr.method(args)
+#[derive(Debug, Clone)]
+pub struct MethodCallExpr {
+    pub object: Expr,
+    pub method: Symbol,
+    pub args: Vec<Expr>,
+    pub method_span: Span,
 }
 
 /// Lambda expression: (params) => body
