@@ -148,7 +148,17 @@ fn write_json(run: &BenchmarkRun, path: &PathBuf) -> Result<(), String> {
 }
 
 /// Compare current benchmark results against a baseline
-pub fn run_compare(baseline: &PathBuf, output: Option<&PathBuf>) -> ExitCode {
+pub fn run_compare(baseline: &PathBuf, output: Option<&PathBuf>, force: bool) -> ExitCode {
+    // Check for debug build
+    let vole_info = VoleInfo::current();
+    if vole_info.is_debug() && !force {
+        eprintln!("Error: Refusing to benchmark on debug build\n");
+        eprintln!("Results from debug builds are misleading. Build with:");
+        eprintln!("    cargo build --release\n");
+        eprintln!("To run anyway, use --force");
+        return ExitCode::FAILURE;
+    }
+
     // Load baseline
     let baseline_json = match fs::read_to_string(baseline) {
         Ok(s) => s,

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::codegen::JitContext;
 use crate::frontend::{
     self, AssignTarget, BinaryOp, ClassDecl, Decl, Expr, ExprKind, FuncDecl, Interner, LambdaBody,
-    LambdaExpr, LetStmt, Pattern, Program, RecordDecl, Stmt, StringPart, Symbol, TestCase,
+    LambdaExpr, LetStmt, NodeId, Pattern, Program, RecordDecl, Stmt, StringPart, Symbol, TestCase,
     TestsDecl, TypeExpr, UnaryOp,
 };
 use crate::sema::{ClassType, FunctionType, RecordType, StructField, Type};
@@ -105,6 +105,8 @@ pub struct Compiler<'a> {
     type_metadata: HashMap<Symbol, TypeMetadata>,
     /// Next type ID to assign
     next_type_id: u32,
+    /// Expression types from semantic analysis (includes narrowed types)
+    expr_types: HashMap<NodeId, Type>,
 }
 
 impl<'a> Compiler<'a> {
@@ -112,6 +114,7 @@ impl<'a> Compiler<'a> {
         jit: &'a mut JitContext,
         interner: &'a Interner,
         type_aliases: HashMap<Symbol, Type>,
+        expr_types: HashMap<NodeId, Type>,
     ) -> Self {
         let pointer_type = jit.pointer_type();
         Self {
@@ -124,6 +127,7 @@ impl<'a> Compiler<'a> {
             type_aliases,
             type_metadata: HashMap::new(),
             next_type_id: 0,
+            expr_types,
         }
     }
 
@@ -495,6 +499,7 @@ impl<'a> Compiler<'a> {
                 lambda_counter: &mut self.lambda_counter,
                 type_aliases: &self.type_aliases,
                 type_metadata: &self.type_metadata,
+                expr_types: &self.expr_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -586,6 +591,7 @@ impl<'a> Compiler<'a> {
                 lambda_counter: &mut self.lambda_counter,
                 type_aliases: &self.type_aliases,
                 type_metadata: &self.type_metadata,
+                expr_types: &self.expr_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -651,6 +657,7 @@ impl<'a> Compiler<'a> {
                     lambda_counter: &mut self.lambda_counter,
                     type_aliases: &self.type_aliases,
                     type_metadata: &self.type_metadata,
+                    expr_types: &self.expr_types,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -809,6 +816,7 @@ impl<'a> Compiler<'a> {
                 lambda_counter: &mut self.lambda_counter,
                 type_aliases: &self.type_aliases,
                 type_metadata: &empty_type_metadata,
+                expr_types: &self.expr_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -867,6 +875,7 @@ impl<'a> Compiler<'a> {
                 lambda_counter: &mut self.lambda_counter,
                 type_aliases: &self.type_aliases,
                 type_metadata: &empty_type_metadata,
+                expr_types: &self.expr_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1069,6 +1078,8 @@ struct CompileCtx<'a> {
     type_aliases: &'a HashMap<Symbol, Type>,
     /// Class and record metadata for struct literals, field access, and method calls
     type_metadata: &'a HashMap<Symbol, TypeMetadata>,
+    /// Expression types from semantic analysis (includes narrowed types)
+    expr_types: &'a HashMap<NodeId, Type>,
 }
 
 /// Returns true if a terminating statement (return/break) was compiled
@@ -1447,6 +1458,26 @@ fn compile_expr(
                 let val = builder.use_var(*var);
                 // Get the type from the variable declaration
                 let ty = builder.func.dfg.value_type(val);
+
+                // Check if this expression has a narrowed type from semantic analysis
+                // (e.g., inside `if x is i64 { ... }`, x's type is narrowed from i64|nil to i64)
+                if let Some(narrowed_type) = ctx.expr_types.get(&expr.id) {
+                    // If variable is a union but narrowed type is not, extract the payload
+                    if matches!(vole_type, Type::Union(_))
+                        && !matches!(narrowed_type, Type::Union(_))
+                    {
+                        // Union layout: [tag:1][padding:7][payload]
+                        // Load the payload at offset 8
+                        let payload_ty = type_to_cranelift(narrowed_type, ctx.pointer_type);
+                        let payload = builder.ins().load(payload_ty, MemFlags::new(), val, 8);
+                        return Ok(CompiledValue {
+                            value: payload,
+                            ty: payload_ty,
+                            vole_type: narrowed_type.clone(),
+                        });
+                    }
+                }
+
                 Ok(CompiledValue {
                     value: val,
                     ty,
@@ -2281,6 +2312,131 @@ fn compile_lambda(
     }
 }
 
+/// Infer the return type of a lambda expression body.
+/// This is used when no explicit return type is provided.
+fn infer_lambda_return_type(
+    body: &LambdaBody,
+    param_types: &[(Symbol, Type)],
+    ctx: &CompileCtx,
+) -> Type {
+    match body {
+        LambdaBody::Expr(expr) => infer_expr_type(expr, param_types, ctx),
+        LambdaBody::Block(_) => {
+            // Block bodies should use explicit return or default to void
+            // For now, default to i64 for backwards compatibility
+            Type::I64
+        }
+    }
+}
+
+/// Infer the type of an expression given parameter types as context.
+/// Returns I64 as fallback for unknown cases.
+fn infer_expr_type(expr: &Expr, param_types: &[(Symbol, Type)], ctx: &CompileCtx) -> Type {
+    match &expr.kind {
+        ExprKind::IntLiteral(_) => Type::I64, // Int literals compile to i64
+        ExprKind::FloatLiteral(_) => Type::F64,
+        ExprKind::BoolLiteral(_) => Type::Bool,
+        ExprKind::StringLiteral(_) => Type::String,
+        ExprKind::InterpolatedString(_) => Type::String,
+        ExprKind::Nil => Type::Nil,
+
+        ExprKind::Identifier(sym) => {
+            // Look up in parameters first
+            for (name, ty) in param_types {
+                if name == sym {
+                    return ty.clone();
+                }
+            }
+            // Look up in globals
+            for global in ctx.globals {
+                if global.name == *sym
+                    && let Some(type_expr) = &global.ty
+                {
+                    return resolve_type_expr(type_expr, ctx.type_aliases);
+                }
+            }
+            Type::I64 // Fallback
+        }
+
+        ExprKind::Binary(bin) => {
+            let left_ty = infer_expr_type(&bin.left, param_types, ctx);
+            let right_ty = infer_expr_type(&bin.right, param_types, ctx);
+
+            match bin.op {
+                // Comparison operators always return bool
+                BinaryOp::Eq
+                | BinaryOp::Ne
+                | BinaryOp::Lt
+                | BinaryOp::Le
+                | BinaryOp::Gt
+                | BinaryOp::Ge => Type::Bool,
+
+                // Logical operators return bool
+                BinaryOp::And | BinaryOp::Or => Type::Bool,
+
+                // Arithmetic: use the "wider" type or left type
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                    // If both are the same, use that type
+                    if left_ty == right_ty {
+                        left_ty
+                    } else {
+                        // Simple widening logic
+                        match (&left_ty, &right_ty) {
+                            (Type::I64, _) | (_, Type::I64) => Type::I64,
+                            (Type::F64, _) | (_, Type::F64) => Type::F64,
+                            (Type::I32, _) | (_, Type::I32) => Type::I32,
+                            _ => left_ty,
+                        }
+                    }
+                }
+
+                // Bitwise operators preserve type
+                BinaryOp::BitAnd
+                | BinaryOp::BitOr
+                | BinaryOp::BitXor
+                | BinaryOp::Shl
+                | BinaryOp::Shr => left_ty,
+            }
+        }
+
+        ExprKind::Unary(un) => infer_expr_type(&un.operand, param_types, ctx),
+
+        ExprKind::Call(call) => {
+            // Infer the callee type to get the return type
+            let callee_ty = infer_expr_type(&call.callee, param_types, ctx);
+            match callee_ty {
+                Type::Function(ft) => *ft.return_type,
+                _ => Type::I64, // Fallback if callee isn't a function type
+            }
+        }
+
+        ExprKind::Lambda(lambda) => {
+            // For nested lambdas, construct the function type
+            let lambda_params: Vec<Type> = lambda
+                .params
+                .iter()
+                .map(|p| {
+                    p.ty.as_ref()
+                        .map(|t| resolve_type_expr(t, ctx.type_aliases))
+                        .unwrap_or(Type::I64)
+                })
+                .collect();
+            let return_ty = lambda
+                .return_type
+                .as_ref()
+                .map(|t| resolve_type_expr(t, ctx.type_aliases))
+                .unwrap_or(Type::I64);
+            Type::Function(FunctionType {
+                params: lambda_params,
+                return_type: Box::new(return_ty),
+                is_closure: !lambda.captures.borrow().is_empty(),
+            })
+        }
+
+        _ => Type::I64, // Fallback for complex expressions
+    }
+}
+
 /// Compile a pure lambda (no captures) - returns a function pointer
 fn compile_pure_lambda(
     builder: &mut FunctionBuilder,
@@ -2314,18 +2470,22 @@ fn compile_pure_lambda(
         })
         .collect();
 
-    // Determine return type
-    let return_type = lambda
-        .return_type
-        .as_ref()
-        .map(|t| type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type))
-        .unwrap_or(types::I64);
+    // Build param context for type inference
+    let param_context: Vec<(Symbol, Type)> = lambda
+        .params
+        .iter()
+        .zip(param_vole_types.iter())
+        .map(|(p, ty)| (p.name, ty.clone()))
+        .collect();
 
+    // Determine return type - use explicit if provided, otherwise infer from body
     let return_vole_type = lambda
         .return_type
         .as_ref()
         .map(|t| resolve_type_expr(t, ctx.type_aliases))
-        .unwrap_or(Type::I64);
+        .unwrap_or_else(|| infer_lambda_return_type(&lambda.body, &param_context, ctx));
+
+    let return_type = type_to_cranelift(&return_vole_type, ctx.pointer_type);
 
     // Create signature for the lambda
     let mut sig = ctx.module.make_signature();
@@ -2446,18 +2606,22 @@ fn compile_lambda_with_captures(
         })
         .collect();
 
-    // Determine return type
-    let return_type = lambda
-        .return_type
-        .as_ref()
-        .map(|t| type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type))
-        .unwrap_or(types::I64);
+    // Build param context for type inference
+    let param_context: Vec<(Symbol, Type)> = lambda
+        .params
+        .iter()
+        .zip(param_vole_types.iter())
+        .map(|(p, ty)| (p.name, ty.clone()))
+        .collect();
 
+    // Determine return type - use explicit if provided, otherwise infer from body
     let return_vole_type = lambda
         .return_type
         .as_ref()
         .map(|t| resolve_type_expr(t, ctx.type_aliases))
-        .unwrap_or(Type::I64);
+        .unwrap_or_else(|| infer_lambda_return_type(&lambda.body, &param_context, ctx));
+
+    let return_type = type_to_cranelift(&return_vole_type, ctx.pointer_type);
 
     // Create signature for the lambda - first param is the closure pointer
     let mut sig = ctx.module.make_signature();
@@ -4310,7 +4474,7 @@ mod tests {
 
         let mut jit = JitContext::new();
         {
-            let mut compiler = Compiler::new(&mut jit, &interner, HashMap::new());
+            let mut compiler = Compiler::new(&mut jit, &interner, HashMap::new(), HashMap::new());
             compiler.compile_program(&program).unwrap();
         }
         jit.finalize();

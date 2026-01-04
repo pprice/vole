@@ -54,6 +54,9 @@ pub struct Analyzer {
     records: HashMap<Symbol, RecordType>,
     /// Methods for classes/records: (type_symbol, method_name) -> FunctionType
     methods: HashMap<(Symbol, Symbol), FunctionType>,
+    /// Resolved types for each expression node (for codegen)
+    /// Maps expression node IDs to their resolved types, including narrowed types
+    expr_types: HashMap<NodeId, Type>,
 }
 
 impl Analyzer {
@@ -72,6 +75,7 @@ impl Analyzer {
             classes: HashMap::new(),
             records: HashMap::new(),
             methods: HashMap::new(),
+            expr_types: HashMap::new(),
         }
     }
 
@@ -88,6 +92,26 @@ impl Analyzer {
     /// Take ownership of the type aliases (consuming self)
     pub fn into_type_aliases(self) -> HashMap<Symbol, Type> {
         self.type_aliases
+    }
+
+    /// Get the resolved expression types (for use by codegen)
+    pub fn expr_types(&self) -> &HashMap<NodeId, Type> {
+        &self.expr_types
+    }
+
+    /// Take ownership of the expression types (consuming self)
+    pub fn into_expr_types(self) -> HashMap<NodeId, Type> {
+        self.expr_types
+    }
+
+    /// Take ownership of both type aliases and expression types (consuming self)
+    pub fn into_analysis_results(self) -> (HashMap<Symbol, Type>, HashMap<NodeId, Type>) {
+        (self.type_aliases, self.expr_types)
+    }
+
+    /// Record the resolved type for an expression
+    fn record_expr_type(&mut self, expr: &Expr, ty: Type) {
+        self.expr_types.insert(expr.id, ty);
     }
 
     /// Check if we're currently inside a lambda
@@ -703,6 +727,17 @@ impl Analyzer {
         expected: Option<&Type>,
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
+        let ty = self.check_expr_expecting_inner(expr, expected, interner)?;
+        self.record_expr_type(expr, ty.clone());
+        Ok(ty)
+    }
+
+    fn check_expr_expecting_inner(
+        &mut self,
+        expr: &Expr,
+        expected: Option<&Type>,
+        interner: &Interner,
+    ) -> Result<Type, Vec<TypeError>> {
         match &expr.kind {
             ExprKind::IntLiteral(value) => match expected {
                 Some(ty) if Self::literal_fits(*value, ty) => Ok(ty.clone()),
@@ -972,6 +1007,16 @@ impl Analyzer {
     }
 
     fn check_expr(&mut self, expr: &Expr, interner: &Interner) -> Result<Type, Vec<TypeError>> {
+        let ty = self.check_expr_inner(expr, interner)?;
+        self.record_expr_type(expr, ty.clone());
+        Ok(ty)
+    }
+
+    fn check_expr_inner(
+        &mut self,
+        expr: &Expr,
+        interner: &Interner,
+    ) -> Result<Type, Vec<TypeError>> {
         match &expr.kind {
             ExprKind::IntLiteral(_) => Ok(Type::I64), // Default to i64 for now
             ExprKind::FloatLiteral(_) => Ok(Type::F64),
