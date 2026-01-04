@@ -1,6 +1,7 @@
 // src/codegen/mod.rs
 pub mod compiler;
 pub mod jit;
+mod structs;
 mod types;
 
 pub use compiler::{Compiler, TestInfo};
