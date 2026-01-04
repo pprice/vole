@@ -8,9 +8,9 @@ use std::collections::HashMap;
 
 use crate::codegen::JitContext;
 use crate::frontend::{
-    self, AssignTarget, BinaryOp, ClassDecl, Decl, Expr, ExprKind, FuncDecl, Interner, LambdaBody,
-    LambdaExpr, LetStmt, NodeId, Pattern, Program, RecordDecl, Stmt, StringPart, Symbol, TestCase,
-    TestsDecl, TypeExpr, UnaryOp,
+    self, AssignTarget, BinaryOp, ClassDecl, Decl, Expr, ExprKind, FuncDecl, ImplementBlock,
+    Interner, LambdaBody, LambdaExpr, LetStmt, NodeId, Pattern, Program, RecordDecl, Stmt,
+    StringPart, Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
 };
 use crate::sema::resolution::MethodResolutions;
 use crate::sema::{ClassType, FunctionType, RecordType, StructField, Type};
@@ -200,8 +200,8 @@ impl<'a> Compiler<'a> {
                 Decl::Interface(_) => {
                     // Interface declarations don't generate code directly
                 }
-                Decl::Implement(_) => {
-                    // TODO: Register implement block methods
+                Decl::Implement(impl_block) => {
+                    self.register_implement_block(impl_block);
                 }
             }
         }
@@ -232,8 +232,8 @@ impl<'a> Compiler<'a> {
                 Decl::Interface(_) => {
                     // Interface methods are compiled when used via implement blocks
                 }
-                Decl::Implement(_) => {
-                    // TODO: Compile implement block methods
+                Decl::Implement(impl_block) => {
+                    self.compile_implement_block(impl_block)?;
                 }
             }
         }
@@ -419,6 +419,65 @@ impl<'a> Compiler<'a> {
 
         for method in &record.methods {
             self.compile_method(method, record.name, &metadata)?;
+        }
+        Ok(())
+    }
+
+    /// Get the type name symbol from a TypeExpr (for implement blocks)
+    fn get_type_name_symbol(&self, ty: &TypeExpr) -> Option<Symbol> {
+        match ty {
+            TypeExpr::Named(sym) => Some(*sym),
+            _ => None,
+        }
+    }
+
+    /// Register implement block methods (first pass)
+    fn register_implement_block(&mut self, impl_block: &ImplementBlock) {
+        let Some(type_sym) = self.get_type_name_symbol(&impl_block.target_type) else {
+            return; // Can only implement for named types
+        };
+
+        // Get existing type metadata (must exist from record/class registration)
+        let Some(metadata) = self.type_metadata.get_mut(&type_sym) else {
+            return; // Type not found
+        };
+
+        // Add method return types to metadata
+        for method in &impl_block.methods {
+            let return_type = method
+                .return_type
+                .as_ref()
+                .map(|t| resolve_type_expr(t, &self.type_aliases))
+                .unwrap_or(Type::Void);
+            metadata
+                .method_return_types
+                .insert(method.name, return_type);
+        }
+
+        // Declare methods as functions: TypeName_methodName
+        let type_name = self.interner.resolve(type_sym);
+        for method in &impl_block.methods {
+            let method_name_str = self.interner.resolve(method.name);
+            let full_name = format!("{}_{}", type_name, method_name_str);
+            let sig = self.create_method_signature(method);
+            self.jit.declare_function(&full_name, &sig);
+        }
+    }
+
+    /// Compile implement block methods (second pass)
+    fn compile_implement_block(&mut self, impl_block: &ImplementBlock) -> Result<(), String> {
+        let Some(type_sym) = self.get_type_name_symbol(&impl_block.target_type) else {
+            return Ok(()); // Can only implement for named types
+        };
+
+        let metadata = self
+            .type_metadata
+            .get(&type_sym)
+            .cloned()
+            .ok_or("Internal error: type not registered for implement block")?;
+
+        for method in &impl_block.methods {
+            self.compile_method(method, type_sym, &metadata)?;
         }
         Ok(())
     }

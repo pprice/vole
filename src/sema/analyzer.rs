@@ -486,9 +486,13 @@ impl Analyzer {
         match ty {
             TypeExpr::Primitive(p) => Type::from_primitive(*p),
             TypeExpr::Named(sym) => {
-                // Look up type alias
+                // Look up type alias first
                 if let Some(aliased) = self.type_aliases.get(sym) {
                     aliased.clone()
+                } else if let Some(record) = self.records.get(sym) {
+                    Type::Record(record.clone())
+                } else if let Some(class) = self.classes.get(sym) {
+                    Type::Class(class.clone())
                 } else {
                     Type::Error // Unknown type name
                 }
@@ -2240,7 +2244,83 @@ impl Analyzer {
                         }
                     }
 
+                    // Record resolution for direct method
+                    self.method_resolutions.insert(
+                        expr.id,
+                        ResolvedMethod::Direct {
+                            func_type: method_type.clone(),
+                        },
+                    );
+
                     Ok(*method_type.return_type)
+                } else if let Some(type_id) = TypeId::from_type(&object_type) {
+                    // Check implement registry for methods added via implement blocks
+                    if let Some(impl_) = self
+                        .implement_registry
+                        .get_method(&type_id, method_call.method)
+                    {
+                        let func_type = impl_.func_type.clone();
+
+                        // Record resolution
+                        self.method_resolutions.insert(
+                            expr.id,
+                            ResolvedMethod::Implemented {
+                                trait_name: impl_.trait_name,
+                                func_type: func_type.clone(),
+                                is_builtin: impl_.is_builtin,
+                            },
+                        );
+
+                        // Mark side effects if inside lambda
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                        }
+
+                        // Check argument count
+                        if method_call.args.len() != func_type.params.len() {
+                            self.add_error(
+                                SemanticError::WrongArgumentCount {
+                                    expected: func_type.params.len(),
+                                    found: method_call.args.len(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                        }
+
+                        // Check argument types
+                        for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter())
+                        {
+                            let arg_ty =
+                                self.check_expr_expecting(arg, Some(param_ty), interner)?;
+                            if !self.types_compatible(&arg_ty, param_ty) {
+                                self.add_error(
+                                    SemanticError::TypeMismatch {
+                                        expected: param_ty.name().to_string(),
+                                        found: arg_ty.name().to_string(),
+                                        span: arg.span.into(),
+                                    },
+                                    arg.span,
+                                );
+                            }
+                        }
+
+                        Ok(*func_type.return_type)
+                    } else {
+                        self.add_error(
+                            SemanticError::UnknownMethod {
+                                ty: type_name,
+                                method: interner.resolve(method_call.method).to_string(),
+                                span: method_call.method_span.into(),
+                            },
+                            method_call.method_span,
+                        );
+                        // Still check args for more errors
+                        for arg in &method_call.args {
+                            self.check_expr(arg, interner)?;
+                        }
+                        Ok(Type::Error)
+                    }
                 } else {
                     self.add_error(
                         SemanticError::UnknownMethod {
@@ -2550,7 +2630,8 @@ impl Analyzer {
                 },
                 is_builtin: true,
             };
-            self.method_resolutions.insert(call_node_id, resolved.clone());
+            self.method_resolutions
+                .insert(call_node_id, resolved.clone());
             return Some(resolved);
         }
 
@@ -2565,7 +2646,8 @@ impl Analyzer {
             && let Some(func_type) = self.methods.get(&(ts, method_name)).cloned()
         {
             let resolved = ResolvedMethod::Direct { func_type };
-            self.method_resolutions.insert(call_node_id, resolved.clone());
+            self.method_resolutions
+                .insert(call_node_id, resolved.clone());
             return Some(resolved);
         }
 
@@ -2578,7 +2660,8 @@ impl Analyzer {
                 func_type: impl_.func_type.clone(),
                 is_builtin: impl_.is_builtin,
             };
-            self.method_resolutions.insert(call_node_id, resolved.clone());
+            self.method_resolutions
+                .insert(call_node_id, resolved.clone());
             return Some(resolved);
         }
 

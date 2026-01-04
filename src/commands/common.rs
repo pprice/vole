@@ -283,8 +283,13 @@ pub fn run_captured<W: Write + Send + 'static>(
     // Compile
     let mut jit = JitContext::new();
     {
-        let mut compiler =
-            Compiler::new(&mut jit, &interner, type_aliases, expr_types, method_resolutions);
+        let mut compiler = Compiler::new(
+            &mut jit,
+            &interner,
+            type_aliases,
+            expr_types,
+            method_resolutions,
+        );
         if let Err(e) = compiler.compile_program(&program) {
             let _ = writeln!(stderr, "compilation error: {}", e);
             return Err(());

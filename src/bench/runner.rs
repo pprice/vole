@@ -156,8 +156,13 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
     let codegen_start = Instant::now();
     let mut jit = JitContext::new();
     {
-        let mut compiler =
-            Compiler::new(&mut jit, &interner, type_aliases, expr_types, method_resolutions);
+        let mut compiler = Compiler::new(
+            &mut jit,
+            &interner,
+            type_aliases,
+            expr_types,
+            method_resolutions,
+        );
         compiler
             .compile_program(&program)
             .map_err(|e| format!("codegen error: {}", e))?;
@@ -206,8 +211,13 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     // Compile
     let mut jit = JitContext::new();
     {
-        let mut compiler =
-            Compiler::new(&mut jit, &interner, type_aliases, expr_types, method_resolutions);
+        let mut compiler = Compiler::new(
+            &mut jit,
+            &interner,
+            type_aliases,
+            expr_types,
+            method_resolutions,
+        );
         compiler
             .compile_program(&program)
             .map_err(|e| format!("codegen error: {}", e))?;

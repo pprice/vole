@@ -106,8 +106,13 @@ pub fn inspect_files(
 
                 // Generate IR
                 let mut jit = JitContext::new();
-                let mut compiler =
-                    Compiler::new(&mut jit, &interner, type_aliases, expr_types, method_resolutions);
+                let mut compiler = Compiler::new(
+                    &mut jit,
+                    &interner,
+                    type_aliases,
+                    expr_types,
+                    method_resolutions,
+                );
                 let include_tests = !no_tests;
 
                 if let Err(e) =
