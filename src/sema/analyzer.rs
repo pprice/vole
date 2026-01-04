@@ -131,9 +131,15 @@ impl Analyzer {
         self.expr_types
     }
 
-    /// Take ownership of both type aliases and expression types (consuming self)
-    pub fn into_analysis_results(self) -> (HashMap<Symbol, Type>, HashMap<NodeId, Type>) {
-        (self.type_aliases, self.expr_types)
+    /// Take ownership of type aliases, expression types, and method resolutions (consuming self)
+    pub fn into_analysis_results(
+        self,
+    ) -> (
+        HashMap<Symbol, Type>,
+        HashMap<NodeId, Type>,
+        MethodResolutions,
+    ) {
+        (self.type_aliases, self.expr_types, self.method_resolutions)
     }
 
     /// Record the resolved type for an expression

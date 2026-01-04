@@ -12,6 +12,7 @@ use crate::frontend::{
     LambdaExpr, LetStmt, NodeId, Pattern, Program, RecordDecl, Stmt, StringPart, Symbol, TestCase,
     TestsDecl, TypeExpr, UnaryOp,
 };
+use crate::sema::resolution::MethodResolutions;
 use crate::sema::{ClassType, FunctionType, RecordType, StructField, Type};
 
 /// Metadata about a compiled test
@@ -107,6 +108,9 @@ pub struct Compiler<'a> {
     next_type_id: u32,
     /// Expression types from semantic analysis (includes narrowed types)
     expr_types: HashMap<NodeId, Type>,
+    /// Resolved method calls from semantic analysis
+    #[allow(dead_code)] // Will be used in future refactoring
+    method_resolutions: MethodResolutions,
 }
 
 impl<'a> Compiler<'a> {
@@ -115,6 +119,7 @@ impl<'a> Compiler<'a> {
         interner: &'a Interner,
         type_aliases: HashMap<Symbol, Type>,
         expr_types: HashMap<NodeId, Type>,
+        method_resolutions: MethodResolutions,
     ) -> Self {
         let pointer_type = jit.pointer_type();
         Self {
@@ -128,6 +133,7 @@ impl<'a> Compiler<'a> {
             type_metadata: HashMap::new(),
             next_type_id: 0,
             expr_types,
+            method_resolutions,
         }
     }
 
@@ -512,6 +518,7 @@ impl<'a> Compiler<'a> {
                 type_aliases: &self.type_aliases,
                 type_metadata: &self.type_metadata,
                 expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -604,6 +611,7 @@ impl<'a> Compiler<'a> {
                 type_aliases: &self.type_aliases,
                 type_metadata: &self.type_metadata,
                 expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -670,6 +678,7 @@ impl<'a> Compiler<'a> {
                     type_aliases: &self.type_aliases,
                     type_metadata: &self.type_metadata,
                     expr_types: &self.expr_types,
+                    method_resolutions: &self.method_resolutions,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -829,6 +838,7 @@ impl<'a> Compiler<'a> {
                 type_aliases: &self.type_aliases,
                 type_metadata: &empty_type_metadata,
                 expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -888,6 +898,7 @@ impl<'a> Compiler<'a> {
                 type_aliases: &self.type_aliases,
                 type_metadata: &empty_type_metadata,
                 expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1096,6 +1107,9 @@ struct CompileCtx<'a> {
     type_metadata: &'a HashMap<Symbol, TypeMetadata>,
     /// Expression types from semantic analysis (includes narrowed types)
     expr_types: &'a HashMap<NodeId, Type>,
+    /// Resolved method calls from semantic analysis
+    #[allow(dead_code)] // Will be used in future refactoring
+    method_resolutions: &'a MethodResolutions,
 }
 
 /// Returns true if a terminating statement (return/break) was compiled
@@ -4538,7 +4552,13 @@ mod tests {
 
         let mut jit = JitContext::new();
         {
-            let mut compiler = Compiler::new(&mut jit, &interner, HashMap::new(), HashMap::new());
+            let mut compiler = Compiler::new(
+                &mut jit,
+                &interner,
+                HashMap::new(),
+                HashMap::new(),
+                MethodResolutions::new(),
+            );
             compiler.compile_program(&program).unwrap();
         }
         jit.finalize();

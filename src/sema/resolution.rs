@@ -44,7 +44,7 @@ impl ResolvedMethod {
 }
 
 /// Storage for all method resolutions in a program
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MethodResolutions {
     resolutions: HashMap<NodeId, ResolvedMethod>,
 }
