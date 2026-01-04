@@ -370,6 +370,8 @@ impl<'src> Lexer<'src> {
             "match" => Some(TokenType::KwMatch),
             "nil" => Some(TokenType::KwNil),
             "is" => Some(TokenType::KwIs),
+            "class" => Some(TokenType::KwClass),
+            "record" => Some(TokenType::KwRecord),
             "i8" => Some(TokenType::KwI8),
             "i16" => Some(TokenType::KwI16),
             "i32" => Some(TokenType::KwI32),
@@ -744,5 +746,12 @@ mod tests {
         assert_eq!(lexer.next_token().ty, TokenType::StarEq);
         assert_eq!(lexer.next_token().ty, TokenType::SlashEq);
         assert_eq!(lexer.next_token().ty, TokenType::PercentEq);
+    }
+
+    #[test]
+    fn lex_class_record_keywords() {
+        let mut lexer = Lexer::new("class record");
+        assert_eq!(lexer.next_token().ty, TokenType::KwClass);
+        assert_eq!(lexer.next_token().ty, TokenType::KwRecord);
     }
 }
