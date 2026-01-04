@@ -1035,6 +1035,28 @@ impl<'src> Parser<'src> {
                 })
             }
             TokenType::KwMatch => self.match_expr(),
+            // Type keywords in expression position: `let X = i32`
+            TokenType::KwI8
+            | TokenType::KwI16
+            | TokenType::KwI32
+            | TokenType::KwI64
+            | TokenType::KwI128
+            | TokenType::KwU8
+            | TokenType::KwU16
+            | TokenType::KwU32
+            | TokenType::KwU64
+            | TokenType::KwF32
+            | TokenType::KwF64
+            | TokenType::KwBool
+            | TokenType::KwString => {
+                let start_span = token.span;
+                // Parse full type expression (handles unions and optionals)
+                let type_expr = self.parse_type()?;
+                Ok(Expr {
+                    kind: ExprKind::TypeLiteral(type_expr),
+                    span: start_span.merge(self.previous.span),
+                })
+            }
             TokenType::Error => Err(ParseError::new(
                 ParserError::UnexpectedToken {
                     token: token.lexeme.clone(),

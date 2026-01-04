@@ -5,17 +5,20 @@ use std::io::{self, IsTerminal, Read, Write};
 
 use miette::NamedSource;
 
+use std::collections::HashMap;
+
 use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext};
 use crate::errors::{LexerError, render_to_stderr, render_to_writer};
-use crate::frontend::{AstPrinter, Interner, ParseError, Parser, ast::Program};
+use crate::frontend::{AstPrinter, Interner, ParseError, Parser, Symbol, ast::Program};
 use crate::runtime::set_stdout_capture;
-use crate::sema::{Analyzer, TypeError};
+use crate::sema::{Analyzer, Type, TypeError};
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
     pub program: Program,
     pub interner: Interner,
+    pub type_aliases: HashMap<Symbol, Type>,
 }
 
 /// Render a lexer error to stderr with source context
@@ -114,7 +117,12 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         return Err(());
     }
 
-    Ok(AnalyzedProgram { program, interner })
+    let type_aliases = analyzer.into_type_aliases();
+    Ok(AnalyzedProgram {
+        program,
+        interner,
+        type_aliases,
+    })
 }
 
 /// Check if stdout supports color output.
@@ -266,11 +274,12 @@ pub fn run_captured<W: Write + Send + 'static>(
         }
         return Err(());
     }
+    let type_aliases = analyzer.into_type_aliases();
 
     // Compile
     let mut jit = JitContext::new();
     {
-        let mut compiler = Compiler::new(&mut jit, &interner);
+        let mut compiler = Compiler::new(&mut jit, &interner, type_aliases);
         if let Err(e) = compiler.compile_program(&program) {
             let _ = writeln!(stderr, "compilation error: {}", e);
             return Err(());

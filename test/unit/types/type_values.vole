@@ -1,0 +1,64 @@
+// Test type values (types as first-class values)
+
+// Basic type aliases
+let Int = i32
+let Float = f64
+let Str = string
+let Boolean = bool
+
+// Union type alias
+let NumericUnion = i32 | f64
+
+// Optional type alias
+let MaybeInt = i32?
+
+func use_alias(x: Int) -> Int {
+    let one: i32 = 1
+    return x + one
+}
+
+func use_optional(x: MaybeInt) -> i32 {
+    return x ?? 0
+}
+
+tests {
+    test "simple type alias" {
+        let x: Int = 42
+        assert(x == 42)
+    }
+
+    test "alias in function param and return" {
+        let ten: i32 = 10
+        let eleven: i32 = 11
+        assert(use_alias(ten) == eleven)
+    }
+
+    test "optional type alias" {
+        let a: MaybeInt = 5
+        let b: MaybeInt = nil
+        assert(use_optional(a) == 5)
+        assert(use_optional(b) == 0)
+    }
+
+    test "union type alias" {
+        let a: NumericUnion = 42
+        let b: NumericUnion = 3.14
+        assert(a is i32)
+        assert(b is f64)
+    }
+
+    test "float type alias" {
+        let f: Float = 3.14
+        assert(f > 3.0)
+    }
+
+    test "string type alias" {
+        let s: Str = "hello"
+        assert(s == "hello")
+    }
+
+    test "bool type alias" {
+        let b: Boolean = true
+        assert(b == true)
+    }
+}

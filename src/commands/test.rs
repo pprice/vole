@@ -218,7 +218,8 @@ fn run_source_tests(
     // Compile
     let mut jit = JitContext::new();
     let tests = {
-        let mut compiler = Compiler::new(&mut jit, &analyzed.interner);
+        let mut compiler =
+            Compiler::new(&mut jit, &analyzed.interner, analyzed.type_aliases.clone());
         compiler.set_source_file(file_path);
         compiler
             .compile_program(&analyzed.program)
