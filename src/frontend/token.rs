@@ -29,8 +29,10 @@ pub enum TokenType {
     KwIn,
     KwContinue,
     KwMatch,
-    KwNil, // nil keyword (literal and type)
-    KwIs,  // is keyword (type test)
+    KwNil,    // nil keyword (literal and type)
+    KwIs,     // is keyword (type test)
+    KwClass,  // class keyword
+    KwRecord, // record keyword
 
     // Type keywords
     KwI8,
@@ -129,6 +131,8 @@ impl TokenType {
             Self::KwMatch => "match",
             Self::KwNil => "nil",
             Self::KwIs => "is",
+            Self::KwClass => "class",
+            Self::KwRecord => "record",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",

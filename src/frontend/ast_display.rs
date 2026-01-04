@@ -62,6 +62,9 @@ impl<'a> AstPrinter<'a> {
             Decl::Function(f) => self.write_func_decl(out, f),
             Decl::Tests(t) => self.write_tests_decl(out, t),
             Decl::Let(l) => self.write_let(out, l),
+            Decl::Class(_) | Decl::Record(_) => {
+                // TODO: implement class/record display
+            }
         }
     }
 
@@ -374,8 +377,14 @@ impl<'a> AstPrinter<'a> {
             }
             ExprKind::Assign(a) => {
                 self.write_indent(out);
-                let name = self.interner.resolve(a.target);
-                writeln!(out, "Assign \"{}\"", name).unwrap();
+                let target_str = match &a.target {
+                    AssignTarget::Variable(sym) => self.interner.resolve(*sym).to_string(),
+                    AssignTarget::Index { .. } => "<index>".to_string(),
+                    AssignTarget::Field { field, .. } => {
+                        format!("<field>.{}", self.interner.resolve(*field))
+                    }
+                };
+                writeln!(out, "Assign \"{}\"", target_str).unwrap();
                 self.indented().write_expr(out, &a.value);
             }
             ExprKind::CompoundAssign(c) => {
@@ -390,6 +399,9 @@ impl<'a> AstPrinter<'a> {
                 let target_str = match &c.target {
                     AssignTarget::Variable(sym) => self.interner.resolve(*sym).to_string(),
                     AssignTarget::Index { .. } => "<index>".to_string(),
+                    AssignTarget::Field { field, .. } => {
+                        format!("<field>.{}", self.interner.resolve(*field))
+                    }
                 };
                 writeln!(out, "CompoundAssign {} {}", target_str, op_str).unwrap();
                 self.indented().write_expr(out, &c.value);
@@ -524,6 +536,24 @@ impl<'a> AstPrinter<'a> {
                 out.push_str("TypeLiteral ");
                 self.write_type_inline(out, ty);
                 out.push('\n');
+            }
+
+            ExprKind::StructLiteral(_) => {
+                self.write_indent(out);
+                out.push_str("StructLiteral\n");
+                // TODO: implement struct literal display
+            }
+
+            ExprKind::FieldAccess(_) => {
+                self.write_indent(out);
+                out.push_str("FieldAccess\n");
+                // TODO: implement field access display
+            }
+
+            ExprKind::MethodCall(_) => {
+                self.write_indent(out);
+                out.push_str("MethodCall\n");
+                // TODO: implement method call display
             }
         }
     }

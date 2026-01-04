@@ -3,6 +3,7 @@ pub mod array;
 pub mod assert;
 pub mod builtins;
 pub mod closure;
+pub mod instance;
 pub mod string;
 pub mod value;
 
@@ -11,5 +12,6 @@ pub use assert::{
     vole_assert_fail,
 };
 pub use builtins::set_stdout_capture;
+pub use instance::RcInstance;
 pub use string::RcString;
 pub use value::{Context, RcHeader, TYPE_STRING};

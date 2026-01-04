@@ -147,6 +147,27 @@ impl JitContext {
         // vole_heap_alloc(size: usize) -> *mut u8
         let sig = self.create_signature(&[types::I64], Some(ptr_ty));
         self.import_function("vole_heap_alloc", &sig);
+
+        // Instance functions (classes and records)
+        // vole_instance_new(type_id: u32, field_count: u32, runtime_type_id: u32) -> *mut RcInstance
+        let sig = self.create_signature(&[types::I32, types::I32, types::I32], Some(ptr_ty));
+        self.import_function("vole_instance_new", &sig);
+
+        // vole_instance_inc(ptr: *mut RcInstance)
+        let sig = self.create_signature(&[ptr_ty], None);
+        self.import_function("vole_instance_inc", &sig);
+
+        // vole_instance_dec(ptr: *mut RcInstance)
+        let sig = self.create_signature(&[ptr_ty], None);
+        self.import_function("vole_instance_dec", &sig);
+
+        // vole_instance_get_field(ptr: *const RcInstance, slot: u32) -> u64
+        let sig = self.create_signature(&[ptr_ty, types::I32], Some(types::I64));
+        self.import_function("vole_instance_get_field", &sig);
+
+        // vole_instance_set_field(ptr: *mut RcInstance, slot: u32, value: u64)
+        let sig = self.create_signature(&[ptr_ty, types::I32, types::I64], None);
+        self.import_function("vole_instance_set_field", &sig);
     }
 
     fn register_runtime_symbols(builder: &mut JITBuilder) {
@@ -268,6 +289,28 @@ impl JitContext {
         builder.symbol(
             "vole_heap_alloc",
             crate::runtime::closure::vole_heap_alloc as *const u8,
+        );
+
+        // Instance functions (classes and records)
+        builder.symbol(
+            "vole_instance_new",
+            crate::runtime::instance::vole_instance_new as *const u8,
+        );
+        builder.symbol(
+            "vole_instance_inc",
+            crate::runtime::instance::vole_instance_inc as *const u8,
+        );
+        builder.symbol(
+            "vole_instance_dec",
+            crate::runtime::instance::vole_instance_dec as *const u8,
+        );
+        builder.symbol(
+            "vole_instance_get_field",
+            crate::runtime::instance::vole_instance_get_field as *const u8,
+        );
+        builder.symbol(
+            "vole_instance_set_field",
+            crate::runtime::instance::vole_instance_set_field as *const u8,
         );
     }
 

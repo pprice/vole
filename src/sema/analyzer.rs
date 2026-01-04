@@ -3,7 +3,7 @@
 use crate::errors::SemanticError;
 use crate::frontend::*;
 use crate::sema::{
-    FunctionType, Type,
+    ClassType, FunctionType, RecordType, StructField, Type,
     scope::{Scope, Variable},
 };
 use std::collections::{HashMap, HashSet};
@@ -48,6 +48,12 @@ pub struct Analyzer {
     lambda_side_effects: Vec<bool>,
     /// Type aliases: `let MyType = i32` stores MyType -> i32
     type_aliases: HashMap<Symbol, Type>,
+    /// Registered class types
+    classes: HashMap<Symbol, ClassType>,
+    /// Registered record types
+    records: HashMap<Symbol, RecordType>,
+    /// Methods for classes/records: (type_symbol, method_name) -> FunctionType
+    methods: HashMap<(Symbol, Symbol), FunctionType>,
 }
 
 impl Analyzer {
@@ -63,6 +69,9 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             type_aliases: HashMap::new(),
+            classes: HashMap::new(),
+            records: HashMap::new(),
+            methods: HashMap::new(),
         }
     }
 
@@ -186,6 +195,86 @@ impl Analyzer {
                 Decl::Let(_) => {
                     // Let declarations are processed before the second pass
                 }
+                Decl::Class(class) => {
+                    let fields: Vec<StructField> = class
+                        .fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, f)| StructField {
+                            name: f.name,
+                            ty: self.resolve_type(&f.ty),
+                            slot: i,
+                        })
+                        .collect();
+                    self.classes.insert(
+                        class.name,
+                        ClassType {
+                            name: class.name,
+                            fields,
+                        },
+                    );
+                    // Register methods
+                    for method in &class.methods {
+                        let params: Vec<Type> = method
+                            .params
+                            .iter()
+                            .map(|p| self.resolve_type(&p.ty))
+                            .collect();
+                        let return_type = method
+                            .return_type
+                            .as_ref()
+                            .map(|t| self.resolve_type(t))
+                            .unwrap_or(Type::Void);
+                        self.methods.insert(
+                            (class.name, method.name),
+                            FunctionType {
+                                params,
+                                return_type: Box::new(return_type),
+                                is_closure: false,
+                            },
+                        );
+                    }
+                }
+                Decl::Record(record) => {
+                    let fields: Vec<StructField> = record
+                        .fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, f)| StructField {
+                            name: f.name,
+                            ty: self.resolve_type(&f.ty),
+                            slot: i,
+                        })
+                        .collect();
+                    self.records.insert(
+                        record.name,
+                        RecordType {
+                            name: record.name,
+                            fields,
+                        },
+                    );
+                    // Register methods
+                    for method in &record.methods {
+                        let params: Vec<Type> = method
+                            .params
+                            .iter()
+                            .map(|p| self.resolve_type(&p.ty))
+                            .collect();
+                        let return_type = method
+                            .return_type
+                            .as_ref()
+                            .map(|t| self.resolve_type(t))
+                            .unwrap_or(Type::Void);
+                        self.methods.insert(
+                            (record.name, method.name),
+                            FunctionType {
+                                params,
+                                return_type: Box::new(return_type),
+                                is_closure: false,
+                            },
+                        );
+                    }
+                }
             }
         }
 
@@ -238,6 +327,16 @@ impl Analyzer {
                 }
                 Decl::Let(_) => {
                     // Already processed above
+                }
+                Decl::Class(class) => {
+                    for method in &class.methods {
+                        self.check_method(method, class.name, interner)?;
+                    }
+                }
+                Decl::Record(record) => {
+                    for method in &record.methods {
+                        self.check_method(method, record.name, interner)?;
+                    }
                 }
             }
         }
@@ -312,6 +411,61 @@ impl Analyzer {
 
         // Check body
         self.check_block(&func.body, interner)?;
+
+        // Restore scope
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+        self.current_function_return = None;
+
+        Ok(())
+    }
+
+    fn check_method(
+        &mut self,
+        method: &FuncDecl,
+        type_name: Symbol,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        let method_key = (type_name, method.name);
+        let method_type = self.methods.get(&method_key).cloned().unwrap();
+        self.current_function_return = Some(*method_type.return_type.clone());
+
+        // Create scope with 'self' and parameters
+        let parent_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(parent_scope);
+
+        // Add 'self' to scope
+        // Note: "self" should already be interned by the parser when it parses method bodies
+        let self_sym = interner
+            .lookup("self")
+            .expect("'self' should be interned during parsing");
+        let self_type = if let Some(class_type) = self.classes.get(&type_name) {
+            Type::Class(class_type.clone())
+        } else {
+            Type::Record(self.records.get(&type_name).unwrap().clone())
+        };
+        self.scope.define(
+            self_sym,
+            Variable {
+                ty: self_type,
+                mutable: false,
+            },
+        );
+
+        // Add parameters
+        for (param, ty) in method.params.iter().zip(method_type.params.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty.clone(),
+                    mutable: false,
+                },
+            );
+        }
+
+        // Check body
+        self.check_block(&method.body, interner)?;
 
         // Restore scope
         if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
@@ -1200,49 +1354,164 @@ impl Analyzer {
             ExprKind::Assign(assign) => {
                 let value_ty = self.check_expr(&assign.value, interner)?;
 
-                if let Some(var) = self.scope.get(assign.target) {
-                    let is_mutable = var.mutable;
-                    let var_ty = var.ty.clone();
+                match &assign.target {
+                    ast::AssignTarget::Variable(sym) => {
+                        if let Some(var) = self.scope.get(*sym) {
+                            let is_mutable = var.mutable;
+                            let var_ty = var.ty.clone();
 
-                    // Check if this is a mutation of a captured variable
-                    if self.in_lambda() && !self.is_lambda_local(assign.target) {
-                        // Record as capture and mark as mutated
-                        self.record_capture(assign.target, is_mutable);
-                        self.mark_capture_mutated(assign.target);
-                    }
+                            // Check if this is a mutation of a captured variable
+                            if self.in_lambda() && !self.is_lambda_local(*sym) {
+                                // Record as capture and mark as mutated
+                                self.record_capture(*sym, is_mutable);
+                                self.mark_capture_mutated(*sym);
+                            }
 
-                    if !is_mutable {
-                        let name = interner.resolve(assign.target);
-                        self.add_error(
-                            SemanticError::ImmutableAssignment {
-                                name: name.to_string(),
-                                span: expr.span.into(),
-                                declaration: expr.span.into(), // TODO: track declaration span
-                            },
-                            expr.span,
-                        );
+                            if !is_mutable {
+                                let name = interner.resolve(*sym);
+                                self.add_error(
+                                    SemanticError::ImmutableAssignment {
+                                        name: name.to_string(),
+                                        span: expr.span.into(),
+                                        declaration: expr.span.into(), // TODO: track declaration span
+                                    },
+                                    expr.span,
+                                );
+                            }
+                            if !self.types_compatible(&value_ty, &var_ty) {
+                                self.add_error(
+                                    SemanticError::TypeMismatch {
+                                        expected: var_ty.name().to_string(),
+                                        found: value_ty.name().to_string(),
+                                        span: expr.span.into(),
+                                    },
+                                    expr.span,
+                                );
+                            }
+                            Ok(var_ty)
+                        } else {
+                            let name = interner.resolve(*sym);
+                            self.add_error(
+                                SemanticError::UndefinedVariable {
+                                    name: name.to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
                     }
-                    if !self.types_compatible(&value_ty, &var_ty) {
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: var_ty.name().to_string(),
-                                found: value_ty.name().to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
+                    ast::AssignTarget::Field {
+                        object,
+                        field,
+                        field_span,
+                    } => {
+                        let obj_ty = self.check_expr(object, interner)?;
+
+                        match &obj_ty {
+                            Type::Class(c) => {
+                                if let Some(field_def) = c.fields.iter().find(|f| f.name == *field)
+                                {
+                                    if !self.types_compatible(&value_ty, &field_def.ty) {
+                                        self.add_error(
+                                            SemanticError::TypeMismatch {
+                                                expected: field_def.ty.name().to_string(),
+                                                found: value_ty.name().to_string(),
+                                                span: assign.value.span.into(),
+                                            },
+                                            assign.value.span,
+                                        );
+                                    }
+                                    Ok(field_def.ty.clone())
+                                } else {
+                                    self.add_error(
+                                        SemanticError::UnknownField {
+                                            ty: interner.resolve(c.name).to_string(),
+                                            field: interner.resolve(*field).to_string(),
+                                            span: (*field_span).into(),
+                                        },
+                                        *field_span,
+                                    );
+                                    Ok(Type::Error)
+                                }
+                            }
+                            Type::Record(r) => {
+                                // Records are immutable - reject field assignment
+                                self.add_error(
+                                    SemanticError::RecordFieldMutation {
+                                        record: interner.resolve(r.name).to_string(),
+                                        field: interner.resolve(*field).to_string(),
+                                        span: (*field_span).into(),
+                                    },
+                                    *field_span,
+                                );
+                                Ok(Type::Error)
+                            }
+                            _ => {
+                                if obj_ty != Type::Error {
+                                    self.add_error(
+                                        SemanticError::UnknownField {
+                                            ty: obj_ty.name().to_string(),
+                                            field: interner.resolve(*field).to_string(),
+                                            span: (*field_span).into(),
+                                        },
+                                        *field_span,
+                                    );
+                                }
+                                Ok(Type::Error)
+                            }
+                        }
                     }
-                    Ok(var_ty)
-                } else {
-                    let name = interner.resolve(assign.target);
-                    self.add_error(
-                        SemanticError::UndefinedVariable {
-                            name: name.to_string(),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
-                    Ok(Type::Error)
+                    ast::AssignTarget::Index { object, index } => {
+                        // Type-check object as array
+                        let obj_type = self.check_expr(object, interner)?;
+                        let idx_type = self.check_expr(index, interner)?;
+
+                        // Check index is integer
+                        if !matches!(
+                            idx_type,
+                            Type::I32 | Type::I64 | Type::U8 | Type::U16 | Type::U32 | Type::U64
+                        ) {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "integer".to_string(),
+                                    found: idx_type.name().to_string(),
+                                    span: index.span.into(),
+                                },
+                                index.span,
+                            );
+                        }
+
+                        // Get element type and check assignment compatibility
+                        match obj_type {
+                            Type::Array(elem_ty) => {
+                                if !self.types_compatible(&value_ty, &elem_ty) {
+                                    self.add_error(
+                                        SemanticError::TypeMismatch {
+                                            expected: elem_ty.name().to_string(),
+                                            found: value_ty.name().to_string(),
+                                            span: assign.value.span.into(),
+                                        },
+                                        assign.value.span,
+                                    );
+                                }
+                                Ok(*elem_ty)
+                            }
+                            _ => {
+                                if obj_type != Type::Error {
+                                    self.add_error(
+                                        SemanticError::TypeMismatch {
+                                            expected: "array".to_string(),
+                                            found: obj_type.name().to_string(),
+                                            span: object.span.into(),
+                                        },
+                                        object.span,
+                                    );
+                                }
+                                Ok(Type::Error)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1316,6 +1585,57 @@ impl Analyzer {
                                             span: object.span.into(),
                                         },
                                         object.span,
+                                    );
+                                }
+                                Type::Error
+                            }
+                        }
+                    }
+                    ast::AssignTarget::Field {
+                        object,
+                        field,
+                        field_span,
+                    } => {
+                        let obj_ty = self.check_expr(object, interner)?;
+
+                        match &obj_ty {
+                            Type::Class(c) => {
+                                if let Some(field_def) = c.fields.iter().find(|f| f.name == *field)
+                                {
+                                    field_def.ty.clone()
+                                } else {
+                                    self.add_error(
+                                        SemanticError::UnknownField {
+                                            ty: interner.resolve(c.name).to_string(),
+                                            field: interner.resolve(*field).to_string(),
+                                            span: (*field_span).into(),
+                                        },
+                                        *field_span,
+                                    );
+                                    Type::Error
+                                }
+                            }
+                            Type::Record(r) => {
+                                // Records are immutable - reject field assignment
+                                self.add_error(
+                                    SemanticError::RecordFieldMutation {
+                                        record: interner.resolve(r.name).to_string(),
+                                        field: interner.resolve(*field).to_string(),
+                                        span: (*field_span).into(),
+                                    },
+                                    *field_span,
+                                );
+                                Type::Error
+                            }
+                            _ => {
+                                if obj_ty != Type::Error {
+                                    self.add_error(
+                                        SemanticError::UnknownField {
+                                            ty: obj_ty.name().to_string(),
+                                            field: interner.resolve(*field).to_string(),
+                                            span: (*field_span).into(),
+                                        },
+                                        *field_span,
                                     );
                                 }
                                 Type::Error
@@ -1556,6 +1876,204 @@ impl Analyzer {
                 // For now, analyze without expected type context
                 // (Context will be passed when we have assignment/call context)
                 Ok(self.analyze_lambda(lambda, None, interner))
+            }
+
+            ExprKind::StructLiteral(struct_lit) => {
+                // Look up the type (class or record)
+                let (type_name, fields, is_class) =
+                    if let Some(class_type) = self.classes.get(&struct_lit.name).cloned() {
+                        (
+                            interner.resolve(struct_lit.name).to_string(),
+                            class_type.fields.clone(),
+                            true,
+                        )
+                    } else if let Some(record_type) = self.records.get(&struct_lit.name).cloned() {
+                        (
+                            interner.resolve(struct_lit.name).to_string(),
+                            record_type.fields.clone(),
+                            false,
+                        )
+                    } else {
+                        self.add_error(
+                            SemanticError::UnknownType {
+                                name: interner.resolve(struct_lit.name).to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        return Ok(Type::Error);
+                    };
+
+                // Check that all required fields are present
+                let provided_fields: std::collections::HashSet<Symbol> =
+                    struct_lit.fields.iter().map(|f| f.name).collect();
+
+                for field in &fields {
+                    if !provided_fields.contains(&field.name) {
+                        self.add_error(
+                            SemanticError::MissingField {
+                                ty: type_name.clone(),
+                                field: interner.resolve(field.name).to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
+                }
+
+                // Check each provided field
+                for field_init in &struct_lit.fields {
+                    if let Some(expected_field) = fields.iter().find(|f| f.name == field_init.name)
+                    {
+                        // check_expr_expecting will report errors if types don't match
+                        self.check_expr_expecting(
+                            &field_init.value,
+                            Some(&expected_field.ty),
+                            interner,
+                        )?;
+                    } else {
+                        self.add_error(
+                            SemanticError::UnknownField {
+                                ty: type_name.clone(),
+                                field: interner.resolve(field_init.name).to_string(),
+                                span: field_init.span.into(),
+                            },
+                            field_init.span,
+                        );
+                        // Still check the value for more errors
+                        self.check_expr(&field_init.value, interner)?;
+                    }
+                }
+
+                // Return the appropriate type
+                if is_class {
+                    Ok(Type::Class(
+                        self.classes.get(&struct_lit.name).unwrap().clone(),
+                    ))
+                } else {
+                    Ok(Type::Record(
+                        self.records.get(&struct_lit.name).unwrap().clone(),
+                    ))
+                }
+            }
+
+            ExprKind::FieldAccess(field_access) => {
+                let object_type = self.check_expr(&field_access.object, interner)?;
+
+                // Get fields from object type
+                let (type_name, fields) = match &object_type {
+                    Type::Class(class_type) => (
+                        interner.resolve(class_type.name).to_string(),
+                        &class_type.fields,
+                    ),
+                    Type::Record(record_type) => (
+                        interner.resolve(record_type.name).to_string(),
+                        &record_type.fields,
+                    ),
+                    Type::Error => return Ok(Type::Error),
+                    _ => {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "class or record".to_string(),
+                                found: object_type.name().to_string(),
+                                span: field_access.object.span.into(),
+                            },
+                            field_access.object.span,
+                        );
+                        return Ok(Type::Error);
+                    }
+                };
+
+                // Find the field
+                if let Some(field) = fields.iter().find(|f| f.name == field_access.field) {
+                    Ok(field.ty.clone())
+                } else {
+                    self.add_error(
+                        SemanticError::UnknownField {
+                            ty: type_name,
+                            field: interner.resolve(field_access.field).to_string(),
+                            span: field_access.field_span.into(),
+                        },
+                        field_access.field_span,
+                    );
+                    Ok(Type::Error)
+                }
+            }
+
+            ExprKind::MethodCall(method_call) => {
+                let object_type = self.check_expr(&method_call.object, interner)?;
+
+                // Get type symbol from object type
+                let type_sym = match &object_type {
+                    Type::Class(class_type) => class_type.name,
+                    Type::Record(record_type) => record_type.name,
+                    Type::Error => return Ok(Type::Error),
+                    _ => {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "class or record".to_string(),
+                                found: object_type.name().to_string(),
+                                span: method_call.object.span.into(),
+                            },
+                            method_call.object.span,
+                        );
+                        return Ok(Type::Error);
+                    }
+                };
+
+                let type_name = interner.resolve(type_sym).to_string();
+
+                // Look up the method
+                let method_key = (type_sym, method_call.method);
+                if let Some(method_type) = self.methods.get(&method_key).cloned() {
+                    // Mark side effects if inside lambda
+                    if self.in_lambda() {
+                        self.mark_lambda_has_side_effects();
+                    }
+
+                    // Check argument count
+                    if method_call.args.len() != method_type.params.len() {
+                        self.add_error(
+                            SemanticError::WrongArgumentCount {
+                                expected: method_type.params.len(),
+                                found: method_call.args.len(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
+
+                    // Check argument types
+                    for (arg, param_ty) in method_call.args.iter().zip(method_type.params.iter()) {
+                        let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
+                        if !self.types_compatible(&arg_ty, param_ty) {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: param_ty.name().to_string(),
+                                    found: arg_ty.name().to_string(),
+                                    span: arg.span.into(),
+                                },
+                                arg.span,
+                            );
+                        }
+                    }
+
+                    Ok(*method_type.return_type)
+                } else {
+                    self.add_error(
+                        SemanticError::UnknownMethod {
+                            ty: type_name,
+                            method: interner.resolve(method_call.method).to_string(),
+                            span: method_call.method_span.into(),
+                        },
+                        method_call.method_span,
+                    );
+                    // Still check args for more errors
+                    for arg in &method_call.args {
+                        self.check_expr(arg, interner)?;
+                    }
+                    Ok(Type::Error)
+                }
             }
         }
     }

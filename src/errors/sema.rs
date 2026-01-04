@@ -139,4 +139,48 @@ pub enum SemanticError {
         #[label("not a function")]
         span: SourceSpan,
     },
+
+    #[error("unknown type '{name}'")]
+    #[diagnostic(code(E2020))]
+    UnknownType {
+        name: String,
+        #[label("not a known class or record")]
+        span: SourceSpan,
+    },
+
+    #[error("missing field '{field}' in struct literal for '{ty}'")]
+    #[diagnostic(code(E2021))]
+    MissingField {
+        ty: String,
+        field: String,
+        #[label("this field is required")]
+        span: SourceSpan,
+    },
+
+    #[error("unknown field '{field}' in type '{ty}'")]
+    #[diagnostic(code(E2022))]
+    UnknownField {
+        ty: String,
+        field: String,
+        #[label("no such field")]
+        span: SourceSpan,
+    },
+
+    #[error("unknown method '{method}' on type '{ty}'")]
+    #[diagnostic(code(E2023))]
+    UnknownMethod {
+        ty: String,
+        method: String,
+        #[label("no such method")]
+        span: SourceSpan,
+    },
+
+    #[error("cannot assign to field '{field}' of immutable record '{record}'")]
+    #[diagnostic(code(E2024))]
+    RecordFieldMutation {
+        record: String,
+        field: String,
+        #[label("record fields are immutable")]
+        span: SourceSpan,
+    },
 }
