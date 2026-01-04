@@ -1,4 +1,5 @@
 // src/codegen/mod.rs
+mod calls;
 pub mod compiler;
 pub mod jit;
 mod lambda;
