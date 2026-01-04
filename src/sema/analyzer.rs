@@ -2,7 +2,7 @@
 
 use crate::errors::SemanticError;
 use crate::frontend::*;
-use crate::sema::implement_registry::{ImplementRegistry, TypeId};
+use crate::sema::implement_registry::{ImplementRegistry, MethodImpl, TypeId};
 use crate::sema::interface_registry::{
     InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
 };
@@ -368,8 +368,38 @@ impl Analyzer {
 
                     self.interface_registry.register(def);
                 }
-                Decl::Implement(_) => {
-                    // TODO: Register implement block methods
+                Decl::Implement(impl_block) => {
+                    let target_type = self.resolve_type(&impl_block.target_type);
+
+                    if let Some(type_id) = TypeId::from_type(&target_type) {
+                        for method in &impl_block.methods {
+                            let func_type = FunctionType {
+                                params: method
+                                    .params
+                                    .iter()
+                                    .map(|p| self.resolve_type(&p.ty))
+                                    .collect(),
+                                return_type: Box::new(
+                                    method
+                                        .return_type
+                                        .as_ref()
+                                        .map(|t| self.resolve_type(t))
+                                        .unwrap_or(Type::Void),
+                                ),
+                                is_closure: false,
+                            };
+
+                            self.implement_registry.register_method(
+                                type_id.clone(),
+                                method.name,
+                                MethodImpl {
+                                    trait_name: impl_block.trait_name,
+                                    func_type,
+                                    is_builtin: false,
+                                },
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -437,8 +467,10 @@ impl Analyzer {
                 Decl::Interface(_) => {
                     // TODO: Type check interface method signatures
                 }
-                Decl::Implement(_) => {
-                    // TODO: Type check implement block methods
+                Decl::Implement(impl_block) => {
+                    // Methods will be type-checked when called
+                    // Could add validation here later (e.g., verify trait satisfaction)
+                    let _ = impl_block; // suppress warning
                 }
             }
         }
