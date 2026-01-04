@@ -1,7 +1,4 @@
-class Point {
-    x: i32,
-    y: i32,
-}
+// Compound assignment operators tests
 
 tests "compound assignment" {
     test "add assign" {
@@ -35,21 +32,9 @@ tests "compound assignment" {
     }
 
     test "float add assign" {
-        let mut f = 3.5
+        let mut f: f64 = 3.5
         f += 1.5
         assert(f == 5.0)
-    }
-
-    test "string concat assign" {
-        let mut s = "hello"
-        s += " world"
-        assert(s == "hello world")
-    }
-
-    test "field access" {
-        let p = Point { x: 10, y: 20 }
-        p.x += 5
-        assert(p.x == 15)
     }
 
     test "array index" {

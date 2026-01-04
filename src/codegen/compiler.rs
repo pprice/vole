@@ -1414,6 +1414,9 @@ fn compile_expr(
                 ))
             }
         }
+        ExprKind::CompoundAssign(compound) => {
+            compile_compound_assign(builder, compound, variables, ctx)
+        }
         ExprKind::Grouping(inner) => compile_expr(builder, inner, variables, ctx),
         ExprKind::StringLiteral(s) => {
             compile_string_literal(builder, s, ctx.pointer_type, ctx.module, ctx.func_ids)
@@ -2689,6 +2692,125 @@ fn compile_binary_op(
         ty: final_ty,
         vole_type,
     })
+}
+
+/// Compile compound assignment expression: x += 1, arr[i] -= 2
+fn compile_compound_assign(
+    builder: &mut FunctionBuilder,
+    compound: &crate::frontend::CompoundAssignExpr,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    use crate::frontend::AssignTarget;
+
+    match &compound.target {
+        AssignTarget::Variable(sym) => {
+            // 1. Get current value
+            let (var, var_type) = variables
+                .get(sym)
+                .ok_or_else(|| format!("undefined variable: {}", ctx.interner.resolve(*sym)))?;
+            let var = *var;
+            let var_type = var_type.clone();
+            let current_val = builder.use_var(var);
+
+            let current = CompiledValue {
+                value: current_val,
+                ty: type_to_cranelift(&var_type, ctx.pointer_type),
+                vole_type: var_type.clone(),
+            };
+
+            // 2. Compile RHS value
+            let rhs = compile_expr(builder, &compound.value, variables, ctx)?;
+
+            // 3. Apply the binary operation
+            let binary_op = compound.op.to_binary_op();
+            let result = compile_binary_op(builder, current, rhs, binary_op, ctx)?;
+
+            // 4. Store back to variable
+            builder.def_var(var, result.value);
+
+            Ok(result)
+        }
+        AssignTarget::Index { object, index } => {
+            // 1. Compile array and index ONCE
+            let arr = compile_expr(builder, object, variables, ctx)?;
+            let idx = compile_expr(builder, index, variables, ctx)?;
+
+            // Get element type from array type
+            let elem_type = match &arr.vole_type {
+                Type::Array(elem) => elem.as_ref().clone(),
+                _ => Type::I64,
+            };
+
+            // 2. Load current element value
+            let get_value_id = ctx
+                .func_ids
+                .get("vole_array_get_value")
+                .ok_or_else(|| "vole_array_get_value not found".to_string())?;
+            let get_value_ref = ctx.module.declare_func_in_func(*get_value_id, builder.func);
+            let call = builder.ins().call(get_value_ref, &[arr.value, idx.value]);
+            let raw_value = builder.inst_results(call)[0];
+
+            // Convert to proper type
+            let (current_val, current_ty) = match &elem_type {
+                Type::F64 => {
+                    let fval = builder
+                        .ins()
+                        .bitcast(types::F64, MemFlags::new(), raw_value);
+                    (fval, types::F64)
+                }
+                Type::Bool => {
+                    let bval = builder.ins().ireduce(types::I8, raw_value);
+                    (bval, types::I8)
+                }
+                _ => (raw_value, types::I64),
+            };
+
+            let current = CompiledValue {
+                value: current_val,
+                ty: current_ty,
+                vole_type: elem_type.clone(),
+            };
+
+            // 3. Compile RHS and apply operation
+            let rhs = compile_expr(builder, &compound.value, variables, ctx)?;
+            let binary_op = compound.op.to_binary_op();
+            let result = compile_binary_op(builder, current, rhs, binary_op, ctx)?;
+
+            // 4. Store back to array
+            let array_set_id = ctx
+                .func_ids
+                .get("vole_array_set")
+                .ok_or_else(|| "vole_array_set not found".to_string())?;
+            let array_set_ref = ctx.module.declare_func_in_func(*array_set_id, builder.func);
+
+            // Convert result to i64 for storage
+            let store_value = match result.ty {
+                types::F64 => builder
+                    .ins()
+                    .bitcast(types::I64, MemFlags::new(), result.value),
+                types::I8 => builder.ins().uextend(types::I64, result.value),
+                _ => result.value,
+            };
+
+            // Compute tag based on element type
+            let tag = match &elem_type {
+                Type::I64 | Type::I32 => 2i64, // TYPE_I64
+                Type::F64 => 3i64,             // TYPE_F64
+                Type::Bool => 4i64,            // TYPE_BOOL
+                Type::String => 1i64,          // TYPE_STRING
+                Type::Array(_) => 5i64,        // TYPE_ARRAY
+                _ => 2i64,                     // default to I64
+            };
+            let tag_val = builder.ins().iconst(types::I64, tag);
+
+            builder
+                .ins()
+                .call(array_set_ref, &[arr.value, idx.value, tag_val, store_value]);
+
+            Ok(result)
+        }
+    }
 }
 
 /// Compile a function call with capture awareness

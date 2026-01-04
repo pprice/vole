@@ -180,6 +180,7 @@ pub enum ExprKind {
     Unary(Box<UnaryExpr>),
     Call(Box<CallExpr>),
     Assign(Box<AssignExpr>),
+    CompoundAssign(Box<CompoundAssignExpr>),
     Range(Box<RangeExpr>),
 
     // Grouping
@@ -284,6 +285,46 @@ pub struct IndexExpr {
 #[derive(Debug, Clone)]
 pub struct AssignExpr {
     pub target: Symbol,
+    pub value: Expr,
+}
+
+/// Target for compound assignment
+#[derive(Debug, Clone)]
+pub enum AssignTarget {
+    /// Simple variable: x
+    Variable(Symbol),
+    /// Array index: arr[i]
+    Index { object: Box<Expr>, index: Box<Expr> },
+}
+
+/// Compound assignment operator
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompoundOp {
+    Add, // +=
+    Sub, // -=
+    Mul, // *=
+    Div, // /=
+    Mod, // %=
+}
+
+impl CompoundOp {
+    /// Convert to the corresponding binary operator
+    pub fn to_binary_op(self) -> BinaryOp {
+        match self {
+            CompoundOp::Add => BinaryOp::Add,
+            CompoundOp::Sub => BinaryOp::Sub,
+            CompoundOp::Mul => BinaryOp::Mul,
+            CompoundOp::Div => BinaryOp::Div,
+            CompoundOp::Mod => BinaryOp::Mod,
+        }
+    }
+}
+
+/// Compound assignment expression: x += 1, arr[i] -= 2
+#[derive(Debug, Clone)]
+pub struct CompoundAssignExpr {
+    pub target: AssignTarget,
+    pub op: CompoundOp,
     pub value: Expr,
 }
 
