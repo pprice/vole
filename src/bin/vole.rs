@@ -57,7 +57,14 @@ fn main() -> ExitCode {
                 warmup,
                 output,
                 detailed,
-            } => run_bench(&paths, iterations, warmup, output.as_ref(), detailed, args.force),
+            } => run_bench(
+                &paths,
+                iterations,
+                warmup,
+                output.as_ref(),
+                detailed,
+                args.force,
+            ),
             BenchCommands::Compare { baseline, output } => {
                 run_compare(&baseline, output.as_ref(), args.force)
             }
