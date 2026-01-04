@@ -93,6 +93,8 @@ impl<'src> Parser<'src> {
             TokenType::KwLet => self.let_decl(),
             TokenType::KwClass => self.class_decl(),
             TokenType::KwRecord => self.record_decl(),
+            TokenType::KwInterface => self.interface_decl(),
+            TokenType::KwImplement => self.implement_block(),
             _ => Err(ParseError::new(
                 ParserError::UnexpectedToken {
                     token: self.current.ty.as_str().to_string(),
@@ -185,6 +187,9 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::Identifier, "expected class name")?;
         let name = self.interner.intern(&name_token.lexeme);
 
+        // Parse optional implements clause
+        let implements = self.parse_implements_clause()?;
+
         self.consume(TokenType::LBrace, "expected '{' after class name")?;
         self.skip_newlines();
 
@@ -195,6 +200,7 @@ impl<'src> Parser<'src> {
 
         Ok(Decl::Class(ClassDecl {
             name,
+            implements,
             fields,
             methods,
             span,
@@ -209,6 +215,9 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::Identifier, "expected record name")?;
         let name = self.interner.intern(&name_token.lexeme);
 
+        // Parse optional implements clause
+        let implements = self.parse_implements_clause()?;
+
         self.consume(TokenType::LBrace, "expected '{' after record name")?;
         self.skip_newlines();
 
@@ -219,7 +228,198 @@ impl<'src> Parser<'src> {
 
         Ok(Decl::Record(RecordDecl {
             name,
+            implements,
             fields,
+            methods,
+            span,
+        }))
+    }
+
+    /// Parse: implements Interface1, Interface2, ...
+    fn parse_implements_clause(&mut self) -> Result<Vec<Symbol>, ParseError> {
+        let mut implements = Vec::new();
+        if self.match_token(TokenType::KwImplements) {
+            loop {
+                let iface_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected interface name")?;
+                implements.push(self.interner.intern(&iface_token.lexeme));
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        Ok(implements)
+    }
+
+    /// Parse interface declaration: interface Name [extends Parent] { methods }
+    fn interface_decl(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'interface'
+
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected interface name")?;
+        let name = self.interner.intern(&name_token.lexeme);
+
+        // Parse optional extends clause
+        let mut extends = Vec::new();
+        if self.match_token(TokenType::KwExtends) {
+            loop {
+                let parent_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected parent interface name")?;
+                extends.push(self.interner.intern(&parent_token.lexeme));
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::LBrace, "expected '{' after interface name")?;
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            if self.check(TokenType::KwFunc) {
+                methods.push(self.interface_method()?);
+            } else if self.check(TokenType::Identifier) {
+                // Field: name: type
+                let field_span = self.current.span;
+                let name_token = self.current.clone();
+                self.advance();
+                let field_name = self.interner.intern(&name_token.lexeme);
+
+                self.consume(TokenType::Colon, "expected ':' after field name")?;
+                let ty = self.parse_type()?;
+
+                // Allow optional comma
+                if self.check(TokenType::Comma) {
+                    self.advance();
+                }
+
+                fields.push(FieldDef {
+                    name: field_name,
+                    ty,
+                    span: field_span.merge(self.previous.span),
+                });
+            } else {
+                return Err(ParseError::new(
+                    ParserError::UnexpectedToken {
+                        token: self.current.ty.as_str().to_string(),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            }
+            self.skip_newlines();
+        }
+
+        self.consume(TokenType::RBrace, "expected '}' to close interface")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(Decl::Interface(InterfaceDecl {
+            name,
+            extends,
+            fields,
+            methods,
+            span,
+        }))
+    }
+
+    /// Parse interface method: func name(params) -> Type or func name(params) -> Type { body }
+    fn interface_method(&mut self) -> Result<InterfaceMethod, ParseError> {
+        let start_span = self.current.span;
+        self.consume(TokenType::KwFunc, "expected 'func' in interface method")?;
+
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected method name")?;
+        let name = self.interner.intern(&name_token.lexeme);
+
+        self.consume(TokenType::LParen, "expected '(' after method name")?;
+
+        let mut params = Vec::new();
+        if !self.check(TokenType::RParen) {
+            loop {
+                let param = self.parse_param()?;
+                params.push(param);
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RParen, "expected ')' after parameters")?;
+
+        let return_type = if self.match_token(TokenType::Arrow) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        // Optional body (default implementation)
+        let body = if self.check(TokenType::LBrace) {
+            Some(self.block()?)
+        } else {
+            None
+        };
+
+        let span = start_span.merge(self.previous.span);
+
+        Ok(InterfaceMethod {
+            name,
+            params,
+            return_type,
+            body,
+            span,
+        })
+    }
+
+    /// Parse implement block: implement [Trait for] Type { methods }
+    fn implement_block(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'implement'
+
+        // Parse: Trait for Type  OR  just Type
+        let first_type = self.parse_type()?;
+
+        let (trait_name, target_type) = if self.match_token(TokenType::KwFor) {
+            // implement Trait for Type
+            let trait_sym = match &first_type {
+                TypeExpr::Named(sym) => *sym,
+                _ => {
+                    return Err(ParseError::new(
+                        ParserError::UnexpectedToken {
+                            token: "expected interface name".to_string(),
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
+                }
+            };
+            let target = self.parse_type()?;
+            (Some(trait_sym), target)
+        } else {
+            // implement Type { ... } (type extension)
+            (None, first_type)
+        };
+
+        self.consume(TokenType::LBrace, "expected '{' in implement block")?;
+        self.skip_newlines();
+
+        let mut methods = Vec::new();
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            if let Decl::Function(func) = self.function_decl()? {
+                methods.push(func);
+            }
+            self.skip_newlines();
+        }
+
+        self.consume(TokenType::RBrace, "expected '}' to close implement block")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(Decl::Implement(ImplementBlock {
+            trait_name,
+            target_type,
             methods,
             span,
         }))
@@ -426,6 +626,10 @@ impl<'src> Parser<'src> {
             TokenType::KwString => {
                 self.advance();
                 Ok(TypeExpr::Primitive(PrimitiveType::String))
+            }
+            TokenType::KwSelfType => {
+                self.advance();
+                Ok(TypeExpr::SelfType)
             }
             TokenType::Identifier => {
                 self.advance();

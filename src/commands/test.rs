@@ -223,6 +223,7 @@ fn run_source_tests(
             &analyzed.interner,
             analyzed.type_aliases.clone(),
             analyzed.expr_types.clone(),
+            analyzed.method_resolutions.clone(),
         );
         compiler.set_source_file(file_path);
         compiler

@@ -8,10 +8,11 @@ use std::collections::HashMap;
 
 use crate::codegen::JitContext;
 use crate::frontend::{
-    self, AssignTarget, BinaryOp, ClassDecl, Decl, Expr, ExprKind, FuncDecl, Interner, LambdaBody,
-    LambdaExpr, LetStmt, NodeId, Pattern, Program, RecordDecl, Stmt, StringPart, Symbol, TestCase,
-    TestsDecl, TypeExpr, UnaryOp,
+    self, AssignTarget, BinaryOp, ClassDecl, Decl, Expr, ExprKind, FuncDecl, ImplementBlock,
+    Interner, LambdaBody, LambdaExpr, LetStmt, NodeId, Pattern, Program, RecordDecl, Stmt,
+    StringPart, Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
 };
+use crate::sema::resolution::MethodResolutions;
 use crate::sema::{ClassType, FunctionType, RecordType, StructField, Type};
 
 /// Metadata about a compiled test
@@ -107,6 +108,9 @@ pub struct Compiler<'a> {
     next_type_id: u32,
     /// Expression types from semantic analysis (includes narrowed types)
     expr_types: HashMap<NodeId, Type>,
+    /// Resolved method calls from semantic analysis
+    #[allow(dead_code)] // Will be used in future refactoring
+    method_resolutions: MethodResolutions,
 }
 
 impl<'a> Compiler<'a> {
@@ -115,6 +119,7 @@ impl<'a> Compiler<'a> {
         interner: &'a Interner,
         type_aliases: HashMap<Symbol, Type>,
         expr_types: HashMap<NodeId, Type>,
+        method_resolutions: MethodResolutions,
     ) -> Self {
         let pointer_type = jit.pointer_type();
         Self {
@@ -128,6 +133,7 @@ impl<'a> Compiler<'a> {
             type_metadata: HashMap::new(),
             next_type_id: 0,
             expr_types,
+            method_resolutions,
         }
     }
 
@@ -191,6 +197,12 @@ impl<'a> Compiler<'a> {
                 Decl::Record(record) => {
                     self.register_record(record);
                 }
+                Decl::Interface(_) => {
+                    // Interface declarations don't generate code directly
+                }
+                Decl::Implement(impl_block) => {
+                    self.register_implement_block(impl_block);
+                }
             }
         }
 
@@ -216,6 +228,12 @@ impl<'a> Compiler<'a> {
                 }
                 Decl::Record(record) => {
                     self.compile_record_methods(record)?;
+                }
+                Decl::Interface(_) => {
+                    // Interface methods are compiled when used via implement blocks
+                }
+                Decl::Implement(impl_block) => {
+                    self.compile_implement_block(impl_block)?;
                 }
             }
         }
@@ -405,6 +423,65 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
+    /// Get the type name symbol from a TypeExpr (for implement blocks)
+    fn get_type_name_symbol(&self, ty: &TypeExpr) -> Option<Symbol> {
+        match ty {
+            TypeExpr::Named(sym) => Some(*sym),
+            _ => None,
+        }
+    }
+
+    /// Register implement block methods (first pass)
+    fn register_implement_block(&mut self, impl_block: &ImplementBlock) {
+        let Some(type_sym) = self.get_type_name_symbol(&impl_block.target_type) else {
+            return; // Can only implement for named types
+        };
+
+        // Get existing type metadata (must exist from record/class registration)
+        let Some(metadata) = self.type_metadata.get_mut(&type_sym) else {
+            return; // Type not found
+        };
+
+        // Add method return types to metadata
+        for method in &impl_block.methods {
+            let return_type = method
+                .return_type
+                .as_ref()
+                .map(|t| resolve_type_expr(t, &self.type_aliases))
+                .unwrap_or(Type::Void);
+            metadata
+                .method_return_types
+                .insert(method.name, return_type);
+        }
+
+        // Declare methods as functions: TypeName_methodName
+        let type_name = self.interner.resolve(type_sym);
+        for method in &impl_block.methods {
+            let method_name_str = self.interner.resolve(method.name);
+            let full_name = format!("{}_{}", type_name, method_name_str);
+            let sig = self.create_method_signature(method);
+            self.jit.declare_function(&full_name, &sig);
+        }
+    }
+
+    /// Compile implement block methods (second pass)
+    fn compile_implement_block(&mut self, impl_block: &ImplementBlock) -> Result<(), String> {
+        let Some(type_sym) = self.get_type_name_symbol(&impl_block.target_type) else {
+            return Ok(()); // Can only implement for named types
+        };
+
+        let metadata = self
+            .type_metadata
+            .get(&type_sym)
+            .cloned()
+            .ok_or("Internal error: type not registered for implement block")?;
+
+        for method in &impl_block.methods {
+            self.compile_method(method, type_sym, &metadata)?;
+        }
+        Ok(())
+    }
+
     /// Compile a single method
     fn compile_method(
         &mut self,
@@ -500,6 +577,7 @@ impl<'a> Compiler<'a> {
                 type_aliases: &self.type_aliases,
                 type_metadata: &self.type_metadata,
                 expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -592,6 +670,7 @@ impl<'a> Compiler<'a> {
                 type_aliases: &self.type_aliases,
                 type_metadata: &self.type_metadata,
                 expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -658,6 +737,7 @@ impl<'a> Compiler<'a> {
                     type_aliases: &self.type_aliases,
                     type_metadata: &self.type_metadata,
                     expr_types: &self.expr_types,
+                    method_resolutions: &self.method_resolutions,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -817,6 +897,7 @@ impl<'a> Compiler<'a> {
                 type_aliases: &self.type_aliases,
                 type_metadata: &empty_type_metadata,
                 expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -876,6 +957,7 @@ impl<'a> Compiler<'a> {
                 type_aliases: &self.type_aliases,
                 type_metadata: &empty_type_metadata,
                 expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -940,6 +1022,10 @@ fn resolve_type_expr(ty: &TypeExpr, type_aliases: &HashMap<Symbol, Type>) -> Typ
                 return_type: Box::new(ret_type),
                 is_closure: false, // Type expressions don't know if closure
             })
+        }
+        TypeExpr::SelfType => {
+            // Self type is resolved during interface/implement compilation
+            Type::Error
         }
     }
 }
@@ -1080,6 +1166,9 @@ struct CompileCtx<'a> {
     type_metadata: &'a HashMap<Symbol, TypeMetadata>,
     /// Expression types from semantic analysis (includes narrowed types)
     expr_types: &'a HashMap<NodeId, Type>,
+    /// Resolved method calls from semantic analysis
+    #[allow(dead_code)] // Will be used in future refactoring
+    method_resolutions: &'a MethodResolutions,
 }
 
 /// Returns true if a terminating statement (return/break) was compiled
@@ -4282,13 +4371,18 @@ fn compile_method_call(
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     let obj = compile_expr(builder, &mc.object, variables, ctx)?;
+    let method_name_str = ctx.interner.resolve(mc.method);
+
+    // Handle built-in methods for primitive types
+    if let Some(result) = compile_builtin_method(builder, &obj, method_name_str, ctx)? {
+        return Ok(result);
+    }
 
     // Get the type name from the object's vole_type
     let type_name = get_type_name_symbol(&obj.vole_type)?;
 
     // Build the method function name: TypeName_methodName
     let type_name_str = ctx.interner.resolve(type_name);
-    let method_name_str = ctx.interner.resolve(mc.method);
     let full_name = format!("{}_{}", type_name_str, method_name_str);
 
     let method_func_id = ctx
@@ -4324,6 +4418,49 @@ fn compile_method_call(
             ty: type_to_cranelift(&return_type, ctx.pointer_type),
             vole_type: return_type,
         })
+    }
+}
+
+/// Compile a built-in method call for primitive types
+/// Returns Some(CompiledValue) if handled, None if not a built-in
+fn compile_builtin_method(
+    builder: &mut FunctionBuilder,
+    obj: &CompiledValue,
+    method_name: &str,
+    ctx: &mut CompileCtx,
+) -> Result<Option<CompiledValue>, String> {
+    match (&obj.vole_type, method_name) {
+        // Array.length() -> i64
+        (Type::Array(_), "length") => {
+            let func_id = ctx
+                .func_ids
+                .get("vole_array_len")
+                .ok_or_else(|| "vole_array_len not found".to_string())?;
+            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let call = builder.ins().call(func_ref, &[obj.value]);
+            let result = builder.inst_results(call)[0];
+            Ok(Some(CompiledValue {
+                value: result,
+                ty: types::I64,
+                vole_type: Type::I64,
+            }))
+        }
+        // String.length() -> i64
+        (Type::String, "length") => {
+            let func_id = ctx
+                .func_ids
+                .get("vole_string_len")
+                .ok_or_else(|| "vole_string_len not found".to_string())?;
+            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let call = builder.ins().call(func_ref, &[obj.value]);
+            let result = builder.inst_results(call)[0];
+            Ok(Some(CompiledValue {
+                value: result,
+                ty: types::I64,
+                vole_type: Type::I64,
+            }))
+        }
+        _ => Ok(None),
     }
 }
 
@@ -4474,7 +4611,13 @@ mod tests {
 
         let mut jit = JitContext::new();
         {
-            let mut compiler = Compiler::new(&mut jit, &interner, HashMap::new(), HashMap::new());
+            let mut compiler = Compiler::new(
+                &mut jit,
+                &interner,
+                HashMap::new(),
+                HashMap::new(),
+                MethodResolutions::new(),
+            );
             compiler.compile_program(&program).unwrap();
         }
         jit.finalize();
