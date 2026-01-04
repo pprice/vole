@@ -1,6 +1,6 @@
 // src/sema/types.rs
 
-use crate::frontend::PrimitiveType;
+use crate::frontend::{PrimitiveType, Symbol};
 
 /// Resolved types in the type system
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +44,10 @@ pub enum Type {
     /// The metatype - the type of types themselves
     /// e.g., `i32` has type `Type`, `let MyInt = i32` assigns a type value
     Type,
+    /// Class instance type
+    Class(ClassType),
+    /// Record instance type
+    Record(RecordType),
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -54,6 +58,28 @@ pub struct FunctionType {
     /// to be called with the closure pointer as the first argument.
     /// The closure pointer is passed implicitly and is not included in `params`.
     pub is_closure: bool,
+}
+
+/// Field information for a class/record
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructField {
+    pub name: Symbol,
+    pub ty: Type,
+    pub slot: usize, // Compile-time slot index
+}
+
+/// Class type information
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassType {
+    pub name: Symbol,
+    pub fields: Vec<StructField>,
+}
+
+/// Record type information
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordType {
+    pub name: Symbol,
+    pub fields: Vec<StructField>,
 }
 
 impl PartialEq for FunctionType {
@@ -198,6 +224,8 @@ impl Type {
             Type::Unknown => "unknown",
             Type::Error => "error",
             Type::Type => "type",
+            Type::Class(_) => "class",
+            Type::Record(_) => "record",
         }
     }
 
@@ -270,6 +298,8 @@ impl std::fmt::Display for Type {
                 write!(f, "{}", parts.join(" | "))
             }
             Type::Array(elem) => write!(f, "[{}]", elem),
+            Type::Class(_) => write!(f, "class"),
+            Type::Record(_) => write!(f, "record"),
             _ => write!(f, "{}", self.name()),
         }
     }
