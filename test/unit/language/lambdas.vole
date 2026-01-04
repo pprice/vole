@@ -64,6 +64,21 @@ tests "lambdas" {
         assert(inc() == 2)
         assert(inc() == 3)
     }
+
+    test "closure with params and capture" {
+        let base = 100
+        let add = (x: i64) => base + x
+        assert(add(5) == 105)
+        assert(add(50) == 150)
+    }
+
+    test "multiple captures" {
+        let a = 10
+        let b = 20
+        let c = 5
+        let f = () => a + b + c
+        assert(f() == 35)
+    }
 }
 
 tests "type annotations" {
@@ -83,11 +98,12 @@ tests "type annotations" {
     }
 }
 
+func applyFn(fn: (i32) -> i32, x: i32) -> i32 {
+    return fn(x)
+}
+
 tests "lambda inference" {
     test "bidirectional inference" {
-        func applyFn(fn: (i32) -> i32, x: i32) -> i32 {
-            return fn(x)
-        }
         // Lambda infers x is i32 from function parameter type
         let result = applyFn((x) => x * 2, 5)
         assert(result == 10)

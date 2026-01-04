@@ -1,8 +1,0 @@
-// Closure that captures multiple variables
-func main() {
-    let a = 10
-    let b = 20
-    let c = 5
-    let f = () => a + b + c
-    println(f())
-}

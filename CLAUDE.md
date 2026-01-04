@@ -66,9 +66,13 @@ Source code flows through these stages in order:
 
 Two testing systems:
 
-1. **Unit tests** (`vole test`) - Vole files with `tests { }` blocks containing `test "name" { }` cases. Uses setjmp/longjmp for assertion failure recovery.
+1. **Unit tests** (`just unit`) - Vole files in `test/unit/` with `tests { }` blocks containing `test "name" { }` cases. Uses setjmp/longjmp for assertion failure recovery.
 
-2. **Snapshot tests** (`vole-snap`) - Compares program output against `.snap` files. Located in `test/snapshot/`. Files prefixed with `_` are skipped by default.
+2. **Snapshot tests** (`just snap`) - Compares program output against `.snap` files. Located in `test/snapshot/`. Files prefixed with `_` are skipped by default.
+
+**When to use which:**
+- **Unit tests (`test/unit/`)**: Preferred for testing language features that compile and run correctly. Use assertions to verify behavior. Tests are organized by feature (e.g., `language/lambdas.vole`, `types/numeric_types.vole`).
+- **Snapshot tests (`test/snapshot/`)**: Use for testing error messages (parse errors, type errors) in `check/` subdirectory, or for simple smoke tests in `run/`. Prefer unit tests over snapshot/run tests when the code compiles successfully.
 
 Snapshot format:
 ```
