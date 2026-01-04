@@ -149,13 +149,14 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
     analyzer
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
+    let type_aliases = analyzer.into_type_aliases();
     let sema_ns = sema_start.elapsed().as_nanos() as u64;
 
     // Codegen phase
     let codegen_start = Instant::now();
     let mut jit = JitContext::new();
     {
-        let mut compiler = Compiler::new(&mut jit, &interner);
+        let mut compiler = Compiler::new(&mut jit, &interner, type_aliases);
         compiler
             .compile_program(&program)
             .map_err(|e| format!("codegen error: {}", e))?;
@@ -199,11 +200,12 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     analyzer
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
+    let type_aliases = analyzer.into_type_aliases();
 
     // Compile
     let mut jit = JitContext::new();
     {
-        let mut compiler = Compiler::new(&mut jit, &interner);
+        let mut compiler = Compiler::new(&mut jit, &interner, type_aliases);
         compiler
             .compile_program(&program)
             .map_err(|e| format!("codegen error: {}", e))?;

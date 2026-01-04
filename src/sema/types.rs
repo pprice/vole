@@ -41,6 +41,9 @@ pub enum Type {
     Unknown,
     /// Error type (for error recovery)
     Error,
+    /// The metatype - the type of types themselves
+    /// e.g., `i32` has type `Type`, `let MyInt = i32` assigns a type value
+    Type,
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -194,6 +197,7 @@ impl Type {
             Type::Function(_) => "function",
             Type::Unknown => "unknown",
             Type::Error => "error",
+            Type::Type => "type",
         }
     }
 

@@ -46,6 +46,8 @@ pub struct Analyzer {
     lambda_locals: Vec<HashSet<Symbol>>,
     /// Stack of side effect flags for currently analyzed lambdas
     lambda_side_effects: Vec<bool>,
+    /// Type aliases: `let MyType = i32` stores MyType -> i32
+    type_aliases: HashMap<Symbol, Type>,
 }
 
 impl Analyzer {
@@ -60,12 +62,23 @@ impl Analyzer {
             lambda_captures: Vec::new(),
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
+            type_aliases: HashMap::new(),
         }
     }
 
     /// Helper to add a type error
     fn add_error(&mut self, error: SemanticError, span: Span) {
         self.errors.push(TypeError::new(error, span));
+    }
+
+    /// Get the collected type aliases (for use by codegen)
+    pub fn type_aliases(&self) -> &HashMap<Symbol, Type> {
+        &self.type_aliases
+    }
+
+    /// Take ownership of the type aliases (consuming self)
+    pub fn into_type_aliases(self) -> HashMap<Symbol, Type> {
+        self.type_aliases
     }
 
     /// Check if we're currently inside a lambda
@@ -132,6 +145,17 @@ impl Analyzer {
         program: &Program,
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
+        // Pass 0: Collect type aliases first (so they're available for function signatures)
+        // Type aliases are `let` statements where the RHS is a TypeLiteral
+        for decl in &program.declarations {
+            if let Decl::Let(let_stmt) = decl
+                && let ExprKind::TypeLiteral(type_expr) = &let_stmt.init.kind
+            {
+                let aliased_type = self.resolve_type(type_expr);
+                self.type_aliases.insert(let_stmt.name, aliased_type);
+            }
+        }
+
         // First pass: collect function signatures
         for decl in &program.declarations {
             match decl {
@@ -165,7 +189,7 @@ impl Analyzer {
             }
         }
 
-        // Process global let declarations first (type check and add to scope)
+        // Process global let declarations (type check and add to scope)
         for decl in &program.declarations {
             if let Decl::Let(let_stmt) = decl {
                 let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t));
@@ -183,6 +207,14 @@ impl Analyzer {
                 }
 
                 let var_type = declared_type.unwrap_or(init_type.clone());
+
+                // If this is a type alias (RHS is a type expression), store it
+                if var_type == Type::Type
+                    && let ExprKind::TypeLiteral(type_expr) = &let_stmt.init.kind
+                {
+                    let aliased_type = self.resolve_type(type_expr);
+                    self.type_aliases.insert(let_stmt.name, aliased_type);
+                }
 
                 self.globals.insert(let_stmt.name, var_type.clone());
                 self.scope.define(
@@ -220,7 +252,14 @@ impl Analyzer {
     fn resolve_type(&self, ty: &TypeExpr) -> Type {
         match ty {
             TypeExpr::Primitive(p) => Type::from_primitive(*p),
-            TypeExpr::Named(_) => Type::Error, // Not handling named types in Phase 1
+            TypeExpr::Named(sym) => {
+                // Look up type alias
+                if let Some(aliased) = self.type_aliases.get(sym) {
+                    aliased.clone()
+                } else {
+                    Type::Error // Unknown type name
+                }
+            }
             TypeExpr::Array(elem) => {
                 let elem_ty = self.resolve_type(elem);
                 Type::Array(Box::new(elem_ty))
@@ -341,7 +380,15 @@ impl Analyzer {
                     );
                 }
 
-                let var_type = declared_type.unwrap_or(init_type);
+                let var_type = declared_type.unwrap_or(init_type.clone());
+
+                // If this is a type alias (RHS is a type expression), store it
+                if var_type == Type::Type
+                    && let ExprKind::TypeLiteral(type_expr) = &let_stmt.init.kind
+                {
+                    let aliased_type = self.resolve_type(type_expr);
+                    self.type_aliases.insert(let_stmt.name, aliased_type);
+                }
 
                 self.scope.define(
                     let_stmt.name,
@@ -518,9 +565,25 @@ impl Analyzer {
                 }
                 None => Ok(Type::I64),
             },
+            ExprKind::TypeLiteral(_) => match expected {
+                Some(Type::Type) | None => Ok(Type::Type),
+                Some(ty) => {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: ty.name().to_string(),
+                            found: "type".to_string(),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    Ok(Type::Type)
+                }
+            },
             ExprKind::FloatLiteral(_) => match expected {
                 Some(ty) if ty == &Type::F64 => Ok(Type::F64),
                 Some(ty) if ty.is_numeric() => Ok(ty.clone()),
+                // Float literals can be assigned to unions containing f64
+                Some(Type::Union(variants)) if variants.contains(&Type::F64) => Ok(Type::F64),
                 Some(ty) => {
                     self.add_error(
                         SemanticError::TypeMismatch {
@@ -761,6 +824,7 @@ impl Analyzer {
             ExprKind::BoolLiteral(_) => Ok(Type::Bool),
             ExprKind::StringLiteral(_) => Ok(Type::String),
             ExprKind::InterpolatedString(_) => Ok(Type::String),
+            ExprKind::TypeLiteral(_) => Ok(Type::Type), // Type values have metatype `type`
 
             ExprKind::Identifier(sym) => {
                 // Use get_variable_type to respect flow-sensitive narrowing
@@ -978,7 +1042,8 @@ impl Analyzer {
                                 };
                                 self.analyze_lambda(lambda, expected_fn, interner)
                             } else {
-                                self.check_expr(arg, interner)?
+                                // Pass expected type to allow integer literal inference
+                                self.check_expr_expecting(arg, Some(param_ty), interner)?
                             };
 
                             if !self.types_compatible(&arg_ty, param_ty) {
@@ -1023,7 +1088,8 @@ impl Analyzer {
                                 };
                                 self.analyze_lambda(lambda, expected_fn, interner)
                             } else {
-                                self.check_expr(arg, interner)?
+                                // Pass expected type to allow integer literal inference
+                                self.check_expr_expecting(arg, Some(param_ty), interner)?
                             };
 
                             if !self.types_compatible(&arg_ty, param_ty) {
