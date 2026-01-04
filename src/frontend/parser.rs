@@ -276,9 +276,41 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::LBrace, "expected '{' after interface name")?;
         self.skip_newlines();
 
+        let mut fields = Vec::new();
         let mut methods = Vec::new();
+
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
-            methods.push(self.interface_method()?);
+            if self.check(TokenType::KwFunc) {
+                methods.push(self.interface_method()?);
+            } else if self.check(TokenType::Identifier) {
+                // Field: name: type
+                let field_span = self.current.span;
+                let name_token = self.current.clone();
+                self.advance();
+                let field_name = self.interner.intern(&name_token.lexeme);
+
+                self.consume(TokenType::Colon, "expected ':' after field name")?;
+                let ty = self.parse_type()?;
+
+                // Allow optional comma
+                if self.check(TokenType::Comma) {
+                    self.advance();
+                }
+
+                fields.push(FieldDef {
+                    name: field_name,
+                    ty,
+                    span: field_span.merge(self.previous.span),
+                });
+            } else {
+                return Err(ParseError::new(
+                    ParserError::UnexpectedToken {
+                        token: self.current.ty.as_str().to_string(),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            }
             self.skip_newlines();
         }
 
@@ -288,6 +320,7 @@ impl<'src> Parser<'src> {
         Ok(Decl::Interface(InterfaceDecl {
             name,
             extends,
+            fields,
             methods,
             span,
         }))
