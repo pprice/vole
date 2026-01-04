@@ -8,6 +8,7 @@ pub struct Parser<'src> {
     current: Token,
     previous: Token,
     interner: Interner,
+    next_node_id: u32,
 }
 
 /// A parse error wrapping a miette-enabled ParserError
@@ -36,6 +37,7 @@ impl<'src> Parser<'src> {
             current,
             previous: Token::new(TokenType::Eof, "", Span::default()),
             interner,
+            next_node_id: 0,
         }
     }
 
@@ -51,7 +53,15 @@ impl<'src> Parser<'src> {
             current,
             previous: Token::new(TokenType::Eof, "", Span::default()),
             interner,
+            next_node_id: 0,
         }
+    }
+
+    /// Generate a unique node ID
+    fn next_id(&mut self) -> NodeId {
+        let id = NodeId(self.next_node_id);
+        self.next_node_id += 1;
+        id
     }
 
     pub fn parse_expression(&mut self) -> Result<Expr, ParseError> {
@@ -749,6 +759,7 @@ impl<'src> Parser<'src> {
                     };
 
                     return Ok(Expr {
+                        id: self.next_id(),
                         kind: ExprKind::Assign(Box::new(AssignExpr { target, value })),
                         span,
                     });
@@ -795,6 +806,7 @@ impl<'src> Parser<'src> {
                     let value = self.expression(0)?;
                     let span = left.span.merge(value.span);
                     return Ok(Expr {
+                        id: self.next_id(),
                         kind: ExprKind::CompoundAssign(Box::new(CompoundAssignExpr {
                             target,
                             op,
@@ -809,6 +821,7 @@ impl<'src> Parser<'src> {
                     let default = self.expression(1)?; // precedence 1 for right-associativity
                     let span = left.span.merge(default.span);
                     return Ok(Expr {
+                        id: self.next_id(),
                         kind: ExprKind::NullCoalesce(Box::new(NullCoalesceExpr {
                             value: left,
                             default,
@@ -824,6 +837,7 @@ impl<'src> Parser<'src> {
                     let type_span = type_span_start.merge(self.previous.span);
                     let span = left.span.merge(type_span);
                     return Ok(Expr {
+                        id: self.next_id(),
                         kind: ExprKind::Is(Box::new(IsExpr {
                             value: left,
                             type_expr,
@@ -841,6 +855,7 @@ impl<'src> Parser<'src> {
             let span = left.span.merge(right.span);
 
             left = Expr {
+                id: self.next_id(),
                 kind: ExprKind::Binary(Box::new(BinaryExpr { left, op, right })),
                 span,
             };
@@ -853,6 +868,7 @@ impl<'src> Parser<'src> {
             let right = self.expression(0)?;
             let span = left.span.merge(right.span);
             return Ok(Expr {
+                id: self.next_id(),
                 kind: ExprKind::Range(Box::new(RangeExpr {
                     start: left,
                     end: right,
@@ -872,6 +888,7 @@ impl<'src> Parser<'src> {
             let operand = self.unary()?;
             let span = op_span.merge(operand.span);
             return Ok(Expr {
+                id: self.next_id(),
                 kind: ExprKind::Unary(Box::new(UnaryExpr {
                     op: UnaryOp::Neg,
                     operand,
@@ -885,6 +902,7 @@ impl<'src> Parser<'src> {
             let operand = self.unary()?;
             let span = op_span.merge(operand.span);
             return Ok(Expr {
+                id: self.next_id(),
                 kind: ExprKind::Unary(Box::new(UnaryExpr {
                     op: UnaryOp::Not,
                     operand,
@@ -898,6 +916,7 @@ impl<'src> Parser<'src> {
             let operand = self.unary()?;
             let span = op_span.merge(operand.span);
             return Ok(Expr {
+                id: self.next_id(),
                 kind: ExprKind::Unary(Box::new(UnaryExpr {
                     op: UnaryOp::BitNot,
                     operand,
@@ -924,6 +943,7 @@ impl<'src> Parser<'src> {
 
                 let span = expr.span.merge(end_span);
                 expr = Expr {
+                    id: self.next_id(),
                     kind: ExprKind::Index(Box::new(IndexExpr {
                         object: expr,
                         index,
@@ -954,6 +974,7 @@ impl<'src> Parser<'src> {
 
                     let span = expr.span.merge(end_span);
                     expr = Expr {
+                        id: self.next_id(),
                         kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
                             object: expr,
                             method: field,
@@ -966,6 +987,7 @@ impl<'src> Parser<'src> {
                     // Field access: expr.field
                     let span = expr.span.merge(field_span);
                     expr = Expr {
+                        id: self.next_id(),
                         kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
                             object: expr,
                             field,
@@ -1000,6 +1022,7 @@ impl<'src> Parser<'src> {
 
         let span = callee.span.merge(end_span);
         Ok(Expr {
+            id: self.next_id(),
             kind: ExprKind::Call(Box::new(CallExpr { callee, args })),
             span,
         })
@@ -1022,6 +1045,7 @@ impl<'src> Parser<'src> {
                     )
                 })?;
                 Ok(Expr {
+                    id: self.next_id(),
                     kind: ExprKind::IntLiteral(value),
                     span: token.span,
                 })
@@ -1038,6 +1062,7 @@ impl<'src> Parser<'src> {
                     )
                 })?;
                 Ok(Expr {
+                    id: self.next_id(),
                     kind: ExprKind::FloatLiteral(value),
                     span: token.span,
                 })
@@ -1045,6 +1070,7 @@ impl<'src> Parser<'src> {
             TokenType::KwTrue => {
                 self.advance();
                 Ok(Expr {
+                    id: self.next_id(),
                     kind: ExprKind::BoolLiteral(true),
                     span: token.span,
                 })
@@ -1052,6 +1078,7 @@ impl<'src> Parser<'src> {
             TokenType::KwFalse => {
                 self.advance();
                 Ok(Expr {
+                    id: self.next_id(),
                     kind: ExprKind::BoolLiteral(false),
                     span: token.span,
                 })
@@ -1059,6 +1086,7 @@ impl<'src> Parser<'src> {
             TokenType::KwNil => {
                 self.advance();
                 Ok(Expr {
+                    id: self.next_id(),
                     kind: ExprKind::Nil,
                     span: token.span,
                 })
@@ -1068,6 +1096,7 @@ impl<'src> Parser<'src> {
                 // Remove surrounding quotes and process escape sequences
                 let content = self.process_string_content(&token.lexeme);
                 Ok(Expr {
+                    id: self.next_id(),
                     kind: ExprKind::StringLiteral(content),
                     span: token.span,
                 })
@@ -1086,6 +1115,7 @@ impl<'src> Parser<'src> {
                 }
 
                 Ok(Expr {
+                    id: self.next_id(),
                     kind: ExprKind::Identifier(sym),
                     span: token.span,
                 })
@@ -1162,6 +1192,7 @@ impl<'src> Parser<'src> {
                                 };
 
                                 return Ok(Expr {
+                                    id: self.next_id(),
                                     kind: ExprKind::Lambda(Box::new(LambdaExpr {
                                         params: vec![LambdaParam {
                                             name,
@@ -1180,11 +1211,13 @@ impl<'src> Parser<'src> {
                                 // It's grouping: (identifier)
                                 let name = self.interner.intern(&ident_token.lexeme);
                                 let inner_expr = Expr {
+                                    id: self.next_id(),
                                     kind: ExprKind::Identifier(name),
                                     span: ident_span,
                                 };
                                 let span = start_span.merge(ident_span);
                                 return Ok(Expr {
+                                    id: self.next_id(),
                                     kind: ExprKind::Grouping(Box::new(inner_expr)),
                                     span,
                                 });
@@ -1196,6 +1229,7 @@ impl<'src> Parser<'src> {
                             // Build the identifier expression and continue parsing
                             let name = self.interner.intern(&ident_token.lexeme);
                             let left = Expr {
+                                id: self.next_id(),
                                 kind: ExprKind::Identifier(name),
                                 span: ident_token.span,
                             };
@@ -1205,6 +1239,7 @@ impl<'src> Parser<'src> {
                             self.consume(TokenType::RParen, "expected ')' after expression")?;
                             let span = start_span.merge(end_span);
                             return Ok(Expr {
+                                id: self.next_id(),
                                 kind: ExprKind::Grouping(Box::new(expr)),
                                 span,
                             });
@@ -1218,6 +1253,7 @@ impl<'src> Parser<'src> {
                 self.consume(TokenType::RParen, "expected ')' after expression")?;
                 let span = start_span.merge(end_span);
                 Ok(Expr {
+                    id: self.next_id(),
                     kind: ExprKind::Grouping(Box::new(expr)),
                     span,
                 })
@@ -1243,6 +1279,7 @@ impl<'src> Parser<'src> {
                 self.consume(TokenType::RBracket, "expected ']' after array elements")?;
 
                 Ok(Expr {
+                    id: self.next_id(),
                     kind: ExprKind::ArrayLiteral(elements),
                     span: start_span.merge(end_span),
                 })
@@ -1266,6 +1303,7 @@ impl<'src> Parser<'src> {
                 // Parse full type expression (handles unions and optionals)
                 let type_expr = self.parse_type()?;
                 Ok(Expr {
+                    id: self.next_id(),
                     kind: ExprKind::TypeLiteral(type_expr),
                     span: start_span.merge(self.previous.span),
                 })
@@ -1322,6 +1360,7 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::RBrace, "expected '}'")?;
 
         Ok(Expr {
+            id: self.next_id(),
             kind: ExprKind::StructLiteral(Box::new(StructLiteralExpr { name, fields })),
             span: start_span.merge(end_span),
         })
@@ -1350,6 +1389,7 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::RBrace, "expected '}' after match arms")?;
 
         Ok(Expr {
+            id: self.next_id(),
             kind: ExprKind::Match(Box::new(MatchExpr {
                 scrutinee,
                 arms,
@@ -1412,6 +1452,7 @@ impl<'src> Parser<'src> {
         };
 
         Ok(Expr {
+            id: self.next_id(),
             kind: ExprKind::Lambda(Box::new(LambdaExpr {
                 params,
                 return_type,
@@ -1494,6 +1535,7 @@ impl<'src> Parser<'src> {
         };
 
         Ok(Expr {
+            id: self.next_id(),
             kind: ExprKind::Lambda(Box::new(LambdaExpr {
                 params,
                 return_type,
@@ -1563,6 +1605,7 @@ impl<'src> Parser<'src> {
                     };
 
                     return Ok(Expr {
+                        id: self.next_id(),
                         kind: ExprKind::Assign(Box::new(AssignExpr { target, value })),
                         span,
                     });
@@ -1573,6 +1616,7 @@ impl<'src> Parser<'src> {
                     let default = self.expression(1)?;
                     let span = expr.span.merge(default.span);
                     return Ok(Expr {
+                        id: self.next_id(),
                         kind: ExprKind::NullCoalesce(Box::new(NullCoalesceExpr {
                             value: expr,
                             default,
@@ -1588,6 +1632,7 @@ impl<'src> Parser<'src> {
                     let type_span = type_span_start.merge(self.previous.span);
                     let span = expr.span.merge(type_span);
                     return Ok(Expr {
+                        id: self.next_id(),
                         kind: ExprKind::Is(Box::new(IsExpr {
                             value: expr,
                             type_expr,
@@ -1605,6 +1650,7 @@ impl<'src> Parser<'src> {
             let span = expr.span.merge(right.span);
 
             expr = Expr {
+                id: self.next_id(),
                 kind: ExprKind::Binary(Box::new(BinaryExpr {
                     left: expr,
                     op,
@@ -1621,6 +1667,7 @@ impl<'src> Parser<'src> {
             let right = self.expression(0)?;
             let span = expr.span.merge(right.span);
             return Ok(Expr {
+                id: self.next_id(),
                 kind: ExprKind::Range(Box::new(RangeExpr {
                     start: expr,
                     end: right,
@@ -1645,6 +1692,7 @@ impl<'src> Parser<'src> {
 
                 let span = expr.span.merge(end_span);
                 expr = Expr {
+                    id: self.next_id(),
                     kind: ExprKind::Index(Box::new(IndexExpr {
                         object: expr,
                         index,
@@ -1675,6 +1723,7 @@ impl<'src> Parser<'src> {
 
                     let span = expr.span.merge(end_span);
                     expr = Expr {
+                        id: self.next_id(),
                         kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
                             object: expr,
                             method: field,
@@ -1687,6 +1736,7 @@ impl<'src> Parser<'src> {
                     // Field access: expr.field
                     let span = expr.span.merge(field_span);
                     expr = Expr {
+                        id: self.next_id(),
                         kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
                             object: expr,
                             field,
@@ -1762,6 +1812,7 @@ impl<'src> Parser<'src> {
                 let operand = self.primary()?;
                 let span = start_span.merge(operand.span);
                 Ok(Pattern::Literal(Expr {
+                    id: self.next_id(),
                     kind: ExprKind::Unary(Box::new(UnaryExpr {
                         op: UnaryOp::Neg,
                         operand,
@@ -1830,6 +1881,7 @@ impl<'src> Parser<'src> {
                     self.advance();
                     let span = start_span.merge(end_span);
                     return Ok(Expr {
+                        id: self.next_id(),
                         kind: ExprKind::InterpolatedString(parts),
                         span,
                     });

@@ -6,6 +6,13 @@ use crate::frontend::Span;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Symbol(pub u32);
 
+/// Unique identifier for AST nodes (expressions, statements, declarations)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct NodeId(pub u32);
+
+/// For backwards compatibility and clarity in type maps
+pub type ExprId = NodeId;
+
 /// A complete program
 #[derive(Debug)]
 pub struct Program {
@@ -187,6 +194,7 @@ pub struct ReturnStmt {
 /// Expressions
 #[derive(Debug, Clone)]
 pub struct Expr {
+    pub id: NodeId,
     pub kind: ExprKind,
     pub span: Span,
 }
