@@ -1,8 +1,10 @@
 // src/sema/mod.rs
 pub mod analyzer;
+pub mod compatibility;
 pub mod implement_registry;
 pub mod interface_registry;
 pub mod resolution;
+pub mod resolve;
 pub mod scope;
 pub mod types;
 
