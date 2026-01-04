@@ -2349,10 +2349,10 @@ fn infer_expr_type(expr: &Expr, param_types: &[(Symbol, Type)], ctx: &CompileCtx
             }
             // Look up in globals
             for global in ctx.globals {
-                if global.name == *sym {
-                    if let Some(type_expr) = &global.ty {
-                        return resolve_type_expr(type_expr, ctx.type_aliases);
-                    }
+                if global.name == *sym
+                    && let Some(type_expr) = &global.ty
+                {
+                    return resolve_type_expr(type_expr, ctx.type_aliases);
                 }
             }
             Type::I64 // Fallback
@@ -2396,8 +2396,6 @@ fn infer_expr_type(expr: &Expr, param_types: &[(Symbol, Type)], ctx: &CompileCtx
                 | BinaryOp::BitXor
                 | BinaryOp::Shl
                 | BinaryOp::Shr => left_ty,
-
-                _ => Type::I64, // Fallback
             }
         }
 

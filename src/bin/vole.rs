@@ -83,10 +83,10 @@ fn get_color_choice_from_args() -> ColorChoice {
             return parse_color_choice(value);
         }
         // Handle --color value
-        if arg == "--color" {
-            if let Some(value) = args.get(i + 1) {
-                return parse_color_choice(value);
-            }
+        if arg == "--color"
+            && let Some(value) = args.get(i + 1)
+        {
+            return parse_color_choice(value);
         }
     }
 
