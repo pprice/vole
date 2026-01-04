@@ -4,6 +4,7 @@ use clap::Parser;
 use std::process::ExitCode;
 
 use vole::cli::{Cli, Commands};
+use vole::commands::bench::{run_bench, run_compare};
 use vole::commands::check::check_files;
 use vole::commands::inspect::inspect_files;
 use vole::commands::run::run_file;
@@ -33,5 +34,14 @@ fn main() -> ExitCode {
             imports,
         } => inspect_files(&files, inspect_type, no_tests, imports.as_deref()),
         Commands::Version => print_version(),
+        Commands::Bench {
+            paths,
+            iterations,
+            warmup,
+            output,
+            detailed,
+            force,
+        } => run_bench(&paths, iterations, warmup, output.as_ref(), detailed, force),
+        Commands::BenchCompare { baseline, output } => run_compare(&baseline, output.as_ref()),
     }
 }

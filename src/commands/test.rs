@@ -15,6 +15,7 @@ use crate::codegen::{Compiler, JitContext, TestInfo};
 use crate::runtime::{
     AssertFailure, JmpBuf, call_setjmp, clear_test_jmp_buf, set_test_jmp_buf, take_assert_failure,
 };
+use crate::util::format_duration;
 
 /// Status of an individual test
 #[derive(Debug, Clone)]
@@ -334,20 +335,6 @@ fn print_file_results(
         }
 
         print_test_result(result, colors);
-    }
-}
-
-/// Format a duration with appropriate units (ns, µs, ms, s)
-fn format_duration(d: Duration) -> String {
-    let nanos = d.as_nanos();
-    if nanos < 1_000 {
-        format!("{}ns", nanos)
-    } else if nanos < 1_000_000 {
-        format!("{:.2}µs", nanos as f64 / 1_000.0)
-    } else if nanos < 1_000_000_000 {
-        format!("{:.2}ms", nanos as f64 / 1_000_000.0)
-    } else {
-        format!("{:.2}s", d.as_secs_f64())
     }
 }
 
