@@ -91,6 +91,12 @@ impl RcInstance {
     ///
     /// # Safety
     /// The pointer must be null or point to a valid, properly initialized `RcInstance`.
+    ///
+    /// # Known Limitation
+    /// This does not decrement reference counts of nested reference-typed fields
+    /// (strings, other instances). For Phase 1 with simple numeric types this is
+    /// acceptable, but adding string or nested instance fields will leak memory
+    /// until field cleanup is implemented.
     pub unsafe fn dec_ref(ptr: *mut Self) {
         if ptr.is_null() {
             return;
@@ -99,6 +105,7 @@ impl RcInstance {
         unsafe {
             let prev = (*ptr).header.dec();
             if prev == 1 {
+                // TODO: Walk fields and dec_ref any reference-typed values
                 let field_count = (*ptr).field_count as usize;
                 let layout = Self::layout_for_fields(field_count);
                 dealloc(ptr as *mut u8, layout);

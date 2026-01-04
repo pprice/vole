@@ -68,4 +68,13 @@ tests "classes" {
         assert(c1.get() == 11)
         assert(c2.get() == 101)
     }
+
+    test "shared mutation" {
+        // Classes use reference semantics - aliases see mutations
+        let p1 = Point { x: 10, y: 20 }
+        let p2 = p1  // p2 is an alias to same instance
+        let new_x: i32 = 99
+        p1.x = new_x
+        assert(p2.x == 99)  // p2 sees p1's mutation
+    }
 }
