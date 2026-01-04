@@ -122,6 +122,27 @@ impl JitContext {
         // vole_array_len(arr: *const RcArray) -> usize
         let sig = self.create_signature(&[ptr_ty], Some(types::I64));
         self.import_function("vole_array_len", &sig);
+
+        // Closure functions
+        // vole_closure_alloc(func_ptr: *const u8, num_captures: usize) -> *mut Closure
+        let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
+        self.import_function("vole_closure_alloc", &sig);
+
+        // vole_closure_get_capture(closure: *const Closure, index: usize) -> *mut u8
+        let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
+        self.import_function("vole_closure_get_capture", &sig);
+
+        // vole_closure_set_capture(closure: *mut Closure, index: usize, ptr: *mut u8)
+        let sig = self.create_signature(&[ptr_ty, types::I64, ptr_ty], None);
+        self.import_function("vole_closure_set_capture", &sig);
+
+        // vole_closure_get_func(closure: *const Closure) -> *const u8
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_closure_get_func", &sig);
+
+        // vole_heap_alloc(size: usize) -> *mut u8
+        let sig = self.create_signature(&[types::I64], Some(ptr_ty));
+        self.import_function("vole_heap_alloc", &sig);
     }
 
     fn register_runtime_symbols(builder: &mut JITBuilder) {
@@ -217,6 +238,28 @@ impl JitContext {
         builder.symbol(
             "vole_array_len",
             crate::runtime::builtins::vole_array_len as *const u8,
+        );
+
+        // Closure functions
+        builder.symbol(
+            "vole_closure_alloc",
+            crate::runtime::closure::vole_closure_alloc as *const u8,
+        );
+        builder.symbol(
+            "vole_closure_get_capture",
+            crate::runtime::closure::vole_closure_get_capture as *const u8,
+        );
+        builder.symbol(
+            "vole_closure_set_capture",
+            crate::runtime::closure::vole_closure_set_capture as *const u8,
+        );
+        builder.symbol(
+            "vole_closure_get_func",
+            crate::runtime::closure::vole_closure_get_func as *const u8,
+        );
+        builder.symbol(
+            "vole_heap_alloc",
+            crate::runtime::closure::vole_heap_alloc as *const u8,
         );
     }
 

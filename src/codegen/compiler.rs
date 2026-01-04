@@ -8,10 +8,10 @@ use std::collections::HashMap;
 
 use crate::codegen::JitContext;
 use crate::frontend::{
-    self, BinaryOp, Decl, Expr, ExprKind, FuncDecl, Interner, LetStmt, Pattern, Program, Stmt,
-    StringPart, Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
+    self, BinaryOp, Decl, Expr, ExprKind, FuncDecl, Interner, LambdaBody, LambdaExpr, LetStmt,
+    Pattern, Program, Stmt, StringPart, Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
 };
-use crate::sema::Type;
+use crate::sema::{FunctionType, Type};
 
 /// Metadata about a compiled test
 #[derive(Debug, Clone)]
@@ -80,6 +80,8 @@ pub struct Compiler<'a> {
     tests: Vec<TestInfo>,
     /// Global variable declarations (let statements at module level)
     globals: Vec<LetStmt>,
+    /// Counter for generating unique lambda names
+    lambda_counter: usize,
 }
 
 impl<'a> Compiler<'a> {
@@ -91,6 +93,7 @@ impl<'a> Compiler<'a> {
             pointer_type,
             tests: Vec::new(),
             globals: Vec::new(),
+            lambda_counter: 0,
         }
     }
 
@@ -246,9 +249,10 @@ impl<'a> Compiler<'a> {
                 interner: self.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &self.jit.func_ids,
+                func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &self.globals,
+                lambda_counter: &mut self.lambda_counter,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -308,9 +312,10 @@ impl<'a> Compiler<'a> {
                     interner: self.interner,
                     pointer_type: self.pointer_type,
                     module: &mut self.jit.module,
-                    func_ids: &self.jit.func_ids,
+                    func_ids: &mut self.jit.func_ids,
                     source_file_ptr,
                     globals: &self.globals,
+                    lambda_counter: &mut self.lambda_counter,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -457,9 +462,10 @@ impl<'a> Compiler<'a> {
                 interner: self.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &self.jit.func_ids,
+                func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &[],
+                lambda_counter: &mut self.lambda_counter,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -511,9 +517,10 @@ impl<'a> Compiler<'a> {
                 interner: self.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &self.jit.func_ids,
+                func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &[],
+                lambda_counter: &mut self.lambda_counter,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -558,6 +565,18 @@ fn resolve_type_expr(ty: &TypeExpr) -> Type {
             Type::normalize_union(variant_types)
         }
         TypeExpr::Nil => Type::Nil,
+        TypeExpr::Function {
+            params,
+            return_type,
+        } => {
+            let param_types: Vec<Type> = params.iter().map(resolve_type_expr).collect();
+            let ret_type = resolve_type_expr(return_type);
+            Type::Function(FunctionType {
+                params: param_types,
+                return_type: Box::new(ret_type),
+                is_closure: false, // Type expressions don't know if closure
+            })
+        }
     }
 }
 
@@ -572,9 +591,10 @@ fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::Type {
         Type::F64 => types::F64,
         Type::Bool => types::I8,
         Type::String => pointer_type,
-        Type::Nil => types::I8,         // Nil uses minimal representation
-        Type::Union(_) => pointer_type, // Unions are passed by pointer
-        _ => types::I64,                // Default
+        Type::Nil => types::I8,            // Nil uses minimal representation
+        Type::Union(_) => pointer_type,    // Unions are passed by pointer
+        Type::Function(_) => pointer_type, // Function pointers
+        _ => types::I64,                   // Default
     }
 }
 
@@ -684,10 +704,12 @@ struct CompileCtx<'a> {
     interner: &'a Interner,
     pointer_type: types::Type,
     module: &'a mut JITModule,
-    func_ids: &'a HashMap<String, FuncId>,
+    func_ids: &'a mut HashMap<String, FuncId>,
     source_file_ptr: (*const u8, usize),
     /// Global variable declarations for lookup when identifier not in local scope
     globals: &'a [LetStmt],
+    /// Counter for generating unique lambda names
+    lambda_counter: &'a mut usize,
 }
 
 /// Returns true if a terminating statement (return/break) was compiled
@@ -1796,7 +1818,892 @@ fn compile_expr(
                 vole_type: result_vole_type,
             })
         }
+
+        ExprKind::Lambda(lambda) => compile_lambda(builder, lambda, variables, ctx),
     }
+}
+
+/// Information about a captured variable for lambda compilation
+#[derive(Clone)]
+struct CaptureBinding {
+    /// Index in the closure's captures array
+    index: usize,
+    /// Vole type of the captured variable
+    vole_type: Type,
+}
+
+/// Compile a lambda expression to a function pointer or closure.
+///
+/// # Pure Lambda Optimization
+///
+/// Lambdas without captures are compiled as simple function pointers, avoiding
+/// the overhead of closure allocation. This optimization is based on the purity
+/// analysis performed during semantic analysis:
+///
+/// - **Pure lambdas** (no captures): Compiled to a raw function pointer.
+///   No heap allocation needed. Example: `(x: i64) => x * 2`
+///
+/// - **Closures** (with captures): Require a closure struct that holds the
+///   function pointer plus captured values. Example: `let y = 10; (x) => x + y`
+///
+/// Note: Side effects (like calling print) don't affect this optimization since
+/// they don't require capturing any state. A lambda with side effects but no
+/// captures is still compiled as a pure function pointer.
+fn compile_lambda(
+    builder: &mut FunctionBuilder,
+    lambda: &LambdaExpr,
+    variables: &HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    // Pure lambda optimization: if no captures, just return a function pointer.
+    // This avoids heap allocation for the closure struct.
+    // Note: We check captures directly rather than using purity() because
+    // side effects don't require closure allocation - only captures do.
+    let captures = lambda.captures.borrow();
+    let has_captures = !captures.is_empty();
+
+    if has_captures {
+        compile_lambda_with_captures(builder, lambda, variables, ctx)
+    } else {
+        compile_pure_lambda(builder, lambda, ctx)
+    }
+}
+
+/// Compile a pure lambda (no captures) - returns a function pointer
+fn compile_pure_lambda(
+    builder: &mut FunctionBuilder,
+    lambda: &LambdaExpr,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    // Generate unique name for the lambda
+    let lambda_name = format!("__lambda_{}", *ctx.lambda_counter);
+    *ctx.lambda_counter += 1;
+
+    // Build parameter types from lambda params
+    let param_types: Vec<types::Type> = lambda
+        .params
+        .iter()
+        .map(|p| {
+            p.ty.as_ref()
+                .map(|t| type_to_cranelift(&resolve_type_expr(t), ctx.pointer_type))
+                .unwrap_or(types::I64)
+        })
+        .collect();
+
+    let param_vole_types: Vec<Type> = lambda
+        .params
+        .iter()
+        .map(|p| p.ty.as_ref().map(resolve_type_expr).unwrap_or(Type::I64))
+        .collect();
+
+    // Determine return type
+    let return_type = lambda
+        .return_type
+        .as_ref()
+        .map(|t| type_to_cranelift(&resolve_type_expr(t), ctx.pointer_type))
+        .unwrap_or(types::I64);
+
+    let return_vole_type = lambda
+        .return_type
+        .as_ref()
+        .map(resolve_type_expr)
+        .unwrap_or(Type::I64);
+
+    // Create signature for the lambda
+    let mut sig = ctx.module.make_signature();
+    for &param_ty in &param_types {
+        sig.params.push(AbiParam::new(param_ty));
+    }
+    sig.returns.push(AbiParam::new(return_type));
+
+    // Declare the lambda function
+    let func_id = ctx
+        .module
+        .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
+        .map_err(|e| e.to_string())?;
+
+    // Store the func_id so it can be looked up later
+    ctx.func_ids.insert(lambda_name.clone(), func_id);
+
+    // Create a new codegen context for the lambda
+    let mut lambda_ctx = ctx.module.make_context();
+    lambda_ctx.func.signature = sig.clone();
+
+    // Build the lambda function body
+    {
+        let mut lambda_builder_ctx = FunctionBuilderContext::new();
+        let mut lambda_builder =
+            FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
+
+        let entry_block = lambda_builder.create_block();
+        lambda_builder.append_block_params_for_function_params(entry_block);
+        lambda_builder.switch_to_block(entry_block);
+
+        // Map parameters to variables
+        let mut lambda_variables: HashMap<Symbol, (Variable, Type)> = HashMap::new();
+        let block_params = lambda_builder.block_params(entry_block).to_vec();
+        for (i, param) in lambda.params.iter().enumerate() {
+            let var = lambda_builder.declare_var(param_types[i]);
+            lambda_builder.def_var(var, block_params[i]);
+            lambda_variables.insert(param.name, (var, param_vole_types[i].clone()));
+        }
+
+        // No captures for pure lambdas
+        let capture_bindings: HashMap<Symbol, CaptureBinding> = HashMap::new();
+
+        // Compile the body
+        let mut lambda_cf_ctx = ControlFlowCtx::new();
+        let result = compile_lambda_body(
+            &mut lambda_builder,
+            &lambda.body,
+            &mut lambda_variables,
+            &capture_bindings,
+            None, // No closure pointer for pure lambdas
+            &mut lambda_cf_ctx,
+            ctx,
+        )?;
+
+        if let Some(result_val) = result {
+            // Return the result
+            lambda_builder.ins().return_(&[result_val.value]);
+        }
+        lambda_builder.seal_all_blocks();
+        lambda_builder.finalize();
+    }
+
+    // Define the lambda function
+    ctx.module
+        .define_function(func_id, &mut lambda_ctx)
+        .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
+
+    // Get function reference and its address in the parent function
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
+    let func_addr = builder.ins().func_addr(ctx.pointer_type, func_ref);
+
+    Ok(CompiledValue {
+        value: func_addr,
+        ty: ctx.pointer_type,
+        vole_type: Type::Function(FunctionType {
+            params: param_vole_types,
+            return_type: Box::new(return_vole_type),
+            is_closure: false, // Pure lambda, no closure
+        }),
+    })
+}
+
+/// Compile a lambda with captures - returns a closure pointer
+fn compile_lambda_with_captures(
+    builder: &mut FunctionBuilder,
+    lambda: &LambdaExpr,
+    variables: &HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    let captures = lambda.captures.borrow();
+    let num_captures = captures.len();
+
+    // Generate unique name for the lambda
+    let lambda_name = format!("__lambda_{}", *ctx.lambda_counter);
+    *ctx.lambda_counter += 1;
+
+    // Build parameter types from lambda params
+    let param_types: Vec<types::Type> = lambda
+        .params
+        .iter()
+        .map(|p| {
+            p.ty.as_ref()
+                .map(|t| type_to_cranelift(&resolve_type_expr(t), ctx.pointer_type))
+                .unwrap_or(types::I64)
+        })
+        .collect();
+
+    let param_vole_types: Vec<Type> = lambda
+        .params
+        .iter()
+        .map(|p| p.ty.as_ref().map(resolve_type_expr).unwrap_or(Type::I64))
+        .collect();
+
+    // Determine return type
+    let return_type = lambda
+        .return_type
+        .as_ref()
+        .map(|t| type_to_cranelift(&resolve_type_expr(t), ctx.pointer_type))
+        .unwrap_or(types::I64);
+
+    let return_vole_type = lambda
+        .return_type
+        .as_ref()
+        .map(resolve_type_expr)
+        .unwrap_or(Type::I64);
+
+    // Create signature for the lambda - first param is the closure pointer
+    let mut sig = ctx.module.make_signature();
+    sig.params.push(AbiParam::new(ctx.pointer_type)); // Closure pointer
+    for &param_ty in &param_types {
+        sig.params.push(AbiParam::new(param_ty));
+    }
+    sig.returns.push(AbiParam::new(return_type));
+
+    // Declare the lambda function
+    let func_id = ctx
+        .module
+        .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
+        .map_err(|e| e.to_string())?;
+
+    // Store the func_id so it can be looked up later
+    ctx.func_ids.insert(lambda_name.clone(), func_id);
+
+    // Build capture bindings - maps capture name to index and type
+    let mut capture_bindings: HashMap<Symbol, CaptureBinding> = HashMap::new();
+    for (i, capture) in captures.iter().enumerate() {
+        let vole_type = variables
+            .get(&capture.name)
+            .map(|(_, ty)| ty.clone())
+            .unwrap_or(Type::I64);
+        capture_bindings.insert(
+            capture.name,
+            CaptureBinding {
+                index: i,
+                vole_type,
+            },
+        );
+    }
+
+    // Create a new codegen context for the lambda
+    let mut lambda_ctx = ctx.module.make_context();
+    lambda_ctx.func.signature = sig.clone();
+
+    // Build the lambda function body
+    {
+        let mut lambda_builder_ctx = FunctionBuilderContext::new();
+        let mut lambda_builder =
+            FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
+
+        let entry_block = lambda_builder.create_block();
+        lambda_builder.append_block_params_for_function_params(entry_block);
+        lambda_builder.switch_to_block(entry_block);
+
+        // Get block params - first is closure pointer, rest are user params
+        let block_params = lambda_builder.block_params(entry_block).to_vec();
+        let closure_ptr = block_params[0];
+
+        // Map parameters to variables (skip the closure pointer)
+        let mut lambda_variables: HashMap<Symbol, (Variable, Type)> = HashMap::new();
+        for (i, param) in lambda.params.iter().enumerate() {
+            let var = lambda_builder.declare_var(param_types[i]);
+            lambda_builder.def_var(var, block_params[i + 1]); // +1 to skip closure ptr
+            lambda_variables.insert(param.name, (var, param_vole_types[i].clone()));
+        }
+
+        // Store closure pointer in a variable so it can be accessed during body compilation
+        let closure_var = lambda_builder.declare_var(ctx.pointer_type);
+        lambda_builder.def_var(closure_var, closure_ptr);
+
+        // Compile the body
+        let mut lambda_cf_ctx = ControlFlowCtx::new();
+        let result = compile_lambda_body(
+            &mut lambda_builder,
+            &lambda.body,
+            &mut lambda_variables,
+            &capture_bindings,
+            Some(closure_var),
+            &mut lambda_cf_ctx,
+            ctx,
+        )?;
+
+        if let Some(result_val) = result {
+            // Return the result
+            lambda_builder.ins().return_(&[result_val.value]);
+        }
+        lambda_builder.seal_all_blocks();
+        lambda_builder.finalize();
+    }
+
+    // Define the lambda function
+    ctx.module
+        .define_function(func_id, &mut lambda_ctx)
+        .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
+
+    // Now in the parent function, allocate the closure and set up captures
+    // Get function address
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
+    let func_addr = builder.ins().func_addr(ctx.pointer_type, func_ref);
+
+    // Allocate closure: vole_closure_alloc(func_ptr, num_captures)
+    let alloc_id = ctx
+        .func_ids
+        .get("vole_closure_alloc")
+        .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
+    let alloc_ref = ctx.module.declare_func_in_func(*alloc_id, builder.func);
+    let num_captures_val = builder.ins().iconst(types::I64, num_captures as i64);
+    let alloc_call = builder
+        .ins()
+        .call(alloc_ref, &[func_addr, num_captures_val]);
+    let closure_ptr = builder.inst_results(alloc_call)[0];
+
+    // Set up each capture
+    let set_capture_id = ctx
+        .func_ids
+        .get("vole_closure_set_capture")
+        .ok_or_else(|| "vole_closure_set_capture not found".to_string())?;
+    let set_capture_ref = ctx
+        .module
+        .declare_func_in_func(*set_capture_id, builder.func);
+
+    // Allocate heap for each capture
+    let heap_alloc_id = ctx
+        .func_ids
+        .get("vole_heap_alloc")
+        .ok_or_else(|| "vole_heap_alloc not found".to_string())?;
+    let heap_alloc_ref = ctx
+        .module
+        .declare_func_in_func(*heap_alloc_id, builder.func);
+
+    for (i, capture) in captures.iter().enumerate() {
+        // Get the current value of the captured variable
+        let (var, vole_type) = variables
+            .get(&capture.name)
+            .ok_or_else(|| format!("Captured variable not found: {:?}", capture.name))?;
+        let current_value = builder.use_var(*var);
+
+        // Determine the size of the variable
+        let size = type_size(vole_type, ctx.pointer_type);
+        let size_val = builder.ins().iconst(types::I64, size as i64);
+
+        // Allocate heap space for this capture
+        let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
+        let heap_ptr = builder.inst_results(alloc_call)[0];
+
+        // Store the current value into the heap
+        let _cranelift_ty = type_to_cranelift(vole_type, ctx.pointer_type);
+        builder
+            .ins()
+            .store(MemFlags::new(), current_value, heap_ptr, 0);
+
+        // Set the capture in the closure
+        let index_val = builder.ins().iconst(types::I64, i as i64);
+        builder
+            .ins()
+            .call(set_capture_ref, &[closure_ptr, index_val, heap_ptr]);
+
+        // IMPORTANT: Update the original variable to use the heap location
+        // This ensures that if the variable is modified after the lambda is created,
+        // the lambda sees the updated value (and vice versa for mutable captures)
+        // We do this by redefining the variable to load from the heap each time
+        // Actually, we need a different approach - the variable should become a pointer
+        // For now, we'll handle this by NOT updating the parent variable
+        // This means closures will capture by value, not by reference
+        // TODO: Full by-reference capture requires changing how variables are stored
+    }
+
+    // Return the closure pointer
+    // Note: The type is still Function, but the value is a Closure pointer
+    // The calling convention will detect this and handle it appropriately
+    Ok(CompiledValue {
+        value: closure_ptr,
+        ty: ctx.pointer_type,
+        vole_type: Type::Function(FunctionType {
+            params: param_vole_types,
+            return_type: Box::new(return_vole_type),
+            is_closure: true, // This is a closure with captures
+        }),
+    })
+}
+
+/// Compile a lambda body (either expression or block)
+/// Returns Some(result) if the body produces a value, None if it terminated with return
+fn compile_lambda_body(
+    builder: &mut FunctionBuilder,
+    body: &LambdaBody,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    capture_bindings: &HashMap<Symbol, CaptureBinding>,
+    closure_var: Option<Variable>,
+    cf_ctx: &mut ControlFlowCtx,
+    ctx: &mut CompileCtx,
+) -> Result<Option<CompiledValue>, String> {
+    match body {
+        LambdaBody::Expr(expr) => {
+            // For expression body, compile the expression with capture awareness
+            let result = compile_expr_with_captures(
+                builder,
+                expr,
+                variables,
+                capture_bindings,
+                closure_var,
+                ctx,
+            )?;
+            Ok(Some(result))
+        }
+        LambdaBody::Block(block) => {
+            // For block body, compile with capture awareness
+            let terminated = compile_block_with_captures(
+                builder,
+                block,
+                variables,
+                capture_bindings,
+                closure_var,
+                cf_ctx,
+                ctx,
+            )?;
+            if terminated {
+                Ok(None) // Block ended with return
+            } else {
+                // Block didn't return - return a default value
+                let zero = builder.ins().iconst(types::I64, 0);
+                Ok(Some(CompiledValue {
+                    value: zero,
+                    ty: types::I64,
+                    vole_type: Type::I64,
+                }))
+            }
+        }
+    }
+}
+
+/// Compile a block with capture awareness
+fn compile_block_with_captures(
+    builder: &mut FunctionBuilder,
+    block: &frontend::Block,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    capture_bindings: &HashMap<Symbol, CaptureBinding>,
+    closure_var: Option<Variable>,
+    cf_ctx: &mut ControlFlowCtx,
+    ctx: &mut CompileCtx,
+) -> Result<bool, String> {
+    let mut terminated = false;
+    for stmt in &block.stmts {
+        if terminated {
+            break;
+        }
+        terminated = compile_stmt_with_captures(
+            builder,
+            stmt,
+            variables,
+            capture_bindings,
+            closure_var,
+            cf_ctx,
+            ctx,
+        )?;
+    }
+    Ok(terminated)
+}
+
+/// Compile a statement with capture awareness
+fn compile_stmt_with_captures(
+    builder: &mut FunctionBuilder,
+    stmt: &Stmt,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    capture_bindings: &HashMap<Symbol, CaptureBinding>,
+    closure_var: Option<Variable>,
+    cf_ctx: &mut ControlFlowCtx,
+    ctx: &mut CompileCtx,
+) -> Result<bool, String> {
+    match stmt {
+        Stmt::Let(let_stmt) => {
+            let init = compile_expr_with_captures(
+                builder,
+                &let_stmt.init,
+                variables,
+                capture_bindings,
+                closure_var,
+                ctx,
+            )?;
+            let cranelift_ty = type_to_cranelift(&init.vole_type, ctx.pointer_type);
+            let var = builder.declare_var(cranelift_ty);
+            builder.def_var(var, init.value);
+            variables.insert(let_stmt.name, (var, init.vole_type));
+            Ok(false)
+        }
+        Stmt::Expr(expr_stmt) => {
+            compile_expr_with_captures(
+                builder,
+                &expr_stmt.expr,
+                variables,
+                capture_bindings,
+                closure_var,
+                ctx,
+            )?;
+            Ok(false)
+        }
+        Stmt::Return(ret) => {
+            if let Some(value) = &ret.value {
+                let compiled = compile_expr_with_captures(
+                    builder,
+                    value,
+                    variables,
+                    capture_bindings,
+                    closure_var,
+                    ctx,
+                )?;
+                builder.ins().return_(&[compiled.value]);
+            } else {
+                builder.ins().return_(&[]);
+            }
+            Ok(true)
+        }
+        // For other statements, delegate to regular compilation
+        // They don't directly reference captures, only through expressions
+        _ => compile_stmt(builder, stmt, variables, cf_ctx, ctx),
+    }
+}
+
+/// Compile an expression with capture awareness
+fn compile_expr_with_captures(
+    builder: &mut FunctionBuilder,
+    expr: &Expr,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    capture_bindings: &HashMap<Symbol, CaptureBinding>,
+    closure_var: Option<Variable>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    match &expr.kind {
+        ExprKind::Identifier(sym) => {
+            // First check if this is a captured variable
+            if let Some(binding) = capture_bindings.get(sym) {
+                // Access via closure
+                let closure_var = closure_var.ok_or_else(|| {
+                    "Closure variable not available for capture access".to_string()
+                })?;
+                let closure_ptr = builder.use_var(closure_var);
+
+                // Call vole_closure_get_capture(closure, index) -> *mut u8
+                let get_capture_id = ctx
+                    .func_ids
+                    .get("vole_closure_get_capture")
+                    .ok_or_else(|| "vole_closure_get_capture not found".to_string())?;
+                let get_capture_ref = ctx
+                    .module
+                    .declare_func_in_func(*get_capture_id, builder.func);
+                let index_val = builder.ins().iconst(types::I64, binding.index as i64);
+                let call = builder
+                    .ins()
+                    .call(get_capture_ref, &[closure_ptr, index_val]);
+                let heap_ptr = builder.inst_results(call)[0];
+
+                // Load value from heap pointer
+                let cranelift_ty = type_to_cranelift(&binding.vole_type, ctx.pointer_type);
+                let value = builder
+                    .ins()
+                    .load(cranelift_ty, MemFlags::new(), heap_ptr, 0);
+
+                return Ok(CompiledValue {
+                    value,
+                    ty: cranelift_ty,
+                    vole_type: binding.vole_type.clone(),
+                });
+            }
+
+            // Otherwise, regular variable lookup
+            if let Some((var, vole_type)) = variables.get(sym) {
+                let val = builder.use_var(*var);
+                let ty = builder.func.dfg.value_type(val);
+                Ok(CompiledValue {
+                    value: val,
+                    ty,
+                    vole_type: vole_type.clone(),
+                })
+            } else {
+                // Check globals
+                if let Some(global) = ctx.globals.iter().find(|g| g.name == *sym) {
+                    compile_expr_with_captures(
+                        builder,
+                        &global.init,
+                        variables,
+                        capture_bindings,
+                        closure_var,
+                        ctx,
+                    )
+                } else {
+                    Err(format!(
+                        "undefined variable: {}",
+                        ctx.interner.resolve(*sym)
+                    ))
+                }
+            }
+        }
+        ExprKind::Assign(assign) => {
+            // Check if assigning to a captured variable
+            if let Some(binding) = capture_bindings.get(&assign.target) {
+                let value = compile_expr_with_captures(
+                    builder,
+                    &assign.value,
+                    variables,
+                    capture_bindings,
+                    closure_var,
+                    ctx,
+                )?;
+
+                // Get the capture pointer
+                let closure_var = closure_var.ok_or_else(|| {
+                    "Closure variable not available for capture access".to_string()
+                })?;
+                let closure_ptr = builder.use_var(closure_var);
+
+                let get_capture_id = ctx
+                    .func_ids
+                    .get("vole_closure_get_capture")
+                    .ok_or_else(|| "vole_closure_get_capture not found".to_string())?;
+                let get_capture_ref = ctx
+                    .module
+                    .declare_func_in_func(*get_capture_id, builder.func);
+                let index_val = builder.ins().iconst(types::I64, binding.index as i64);
+                let call = builder
+                    .ins()
+                    .call(get_capture_ref, &[closure_ptr, index_val]);
+                let heap_ptr = builder.inst_results(call)[0];
+
+                // Store the new value
+                builder
+                    .ins()
+                    .store(MemFlags::new(), value.value, heap_ptr, 0);
+
+                return Ok(value);
+            }
+
+            // Otherwise, regular assignment
+            let value = compile_expr_with_captures(
+                builder,
+                &assign.value,
+                variables,
+                capture_bindings,
+                closure_var,
+                ctx,
+            )?;
+            if let Some((var, _)) = variables.get(&assign.target) {
+                builder.def_var(*var, value.value);
+                Ok(value)
+            } else {
+                Err(format!(
+                    "undefined variable: {}",
+                    ctx.interner.resolve(assign.target)
+                ))
+            }
+        }
+        ExprKind::Binary(bin) => {
+            // Compile left and right with capture awareness
+            let left = compile_expr_with_captures(
+                builder,
+                &bin.left,
+                variables,
+                capture_bindings,
+                closure_var,
+                ctx,
+            )?;
+            let right = compile_expr_with_captures(
+                builder,
+                &bin.right,
+                variables,
+                capture_bindings,
+                closure_var,
+                ctx,
+            )?;
+
+            // Use the existing binary operation logic
+            compile_binary_op(builder, left, right, bin.op, ctx)
+        }
+        ExprKind::Call(call) => {
+            // For calls, we need to compile with capture awareness
+            compile_call_with_captures(
+                builder,
+                call,
+                expr.span.line,
+                variables,
+                capture_bindings,
+                closure_var,
+                ctx,
+            )
+        }
+        // For other expression types, delegate to regular compilation
+        // They may contain nested expressions that need capture handling
+        _ => compile_expr(builder, expr, variables, ctx),
+    }
+}
+
+/// Helper to compile binary operations (extracted from compile_expr)
+fn compile_binary_op(
+    builder: &mut FunctionBuilder,
+    left: CompiledValue,
+    right: CompiledValue,
+    op: BinaryOp,
+    _ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    // Determine result type (promote to wider type)
+    let result_ty = if left.ty == types::F64 || right.ty == types::F64 {
+        types::F64
+    } else if left.ty == types::F32 || right.ty == types::F32 {
+        types::F32
+    } else {
+        left.ty
+    };
+
+    let left_vole_type = left.vole_type.clone();
+    let left_val = convert_to_type(builder, left, result_ty);
+    let right_val = convert_to_type(builder, right, result_ty);
+
+    let result = match op {
+        BinaryOp::Add => {
+            if result_ty == types::F64 {
+                builder.ins().fadd(left_val, right_val)
+            } else {
+                builder.ins().iadd(left_val, right_val)
+            }
+        }
+        BinaryOp::Sub => {
+            if result_ty == types::F64 {
+                builder.ins().fsub(left_val, right_val)
+            } else {
+                builder.ins().isub(left_val, right_val)
+            }
+        }
+        BinaryOp::Mul => {
+            if result_ty == types::F64 {
+                builder.ins().fmul(left_val, right_val)
+            } else {
+                builder.ins().imul(left_val, right_val)
+            }
+        }
+        BinaryOp::Div => {
+            if result_ty == types::F64 || result_ty == types::F32 {
+                builder.ins().fdiv(left_val, right_val)
+            } else if left_vole_type.is_unsigned() {
+                builder.ins().udiv(left_val, right_val)
+            } else {
+                builder.ins().sdiv(left_val, right_val)
+            }
+        }
+        BinaryOp::Mod => {
+            if result_ty == types::F64 || result_ty == types::F32 {
+                let div = builder.ins().fdiv(left_val, right_val);
+                let floor = builder.ins().floor(div);
+                let mul = builder.ins().fmul(floor, right_val);
+                builder.ins().fsub(left_val, mul)
+            } else if left_vole_type.is_unsigned() {
+                builder.ins().urem(left_val, right_val)
+            } else {
+                builder.ins().srem(left_val, right_val)
+            }
+        }
+        BinaryOp::Eq => {
+            if result_ty == types::F64 {
+                builder.ins().fcmp(FloatCC::Equal, left_val, right_val)
+            } else {
+                builder.ins().icmp(IntCC::Equal, left_val, right_val)
+            }
+        }
+        BinaryOp::Ne => {
+            if result_ty == types::F64 {
+                builder.ins().fcmp(FloatCC::NotEqual, left_val, right_val)
+            } else {
+                builder.ins().icmp(IntCC::NotEqual, left_val, right_val)
+            }
+        }
+        BinaryOp::Lt => {
+            if result_ty == types::F64 || result_ty == types::F32 {
+                builder.ins().fcmp(FloatCC::LessThan, left_val, right_val)
+            } else if left_vole_type.is_unsigned() {
+                builder
+                    .ins()
+                    .icmp(IntCC::UnsignedLessThan, left_val, right_val)
+            } else {
+                builder
+                    .ins()
+                    .icmp(IntCC::SignedLessThan, left_val, right_val)
+            }
+        }
+        BinaryOp::Gt => {
+            if result_ty == types::F64 || result_ty == types::F32 {
+                builder
+                    .ins()
+                    .fcmp(FloatCC::GreaterThan, left_val, right_val)
+            } else if left_vole_type.is_unsigned() {
+                builder
+                    .ins()
+                    .icmp(IntCC::UnsignedGreaterThan, left_val, right_val)
+            } else {
+                builder
+                    .ins()
+                    .icmp(IntCC::SignedGreaterThan, left_val, right_val)
+            }
+        }
+        BinaryOp::Le => {
+            if result_ty == types::F64 || result_ty == types::F32 {
+                builder
+                    .ins()
+                    .fcmp(FloatCC::LessThanOrEqual, left_val, right_val)
+            } else if left_vole_type.is_unsigned() {
+                builder
+                    .ins()
+                    .icmp(IntCC::UnsignedLessThanOrEqual, left_val, right_val)
+            } else {
+                builder
+                    .ins()
+                    .icmp(IntCC::SignedLessThanOrEqual, left_val, right_val)
+            }
+        }
+        BinaryOp::Ge => {
+            if result_ty == types::F64 || result_ty == types::F32 {
+                builder
+                    .ins()
+                    .fcmp(FloatCC::GreaterThanOrEqual, left_val, right_val)
+            } else if left_vole_type.is_unsigned() {
+                builder
+                    .ins()
+                    .icmp(IntCC::UnsignedGreaterThanOrEqual, left_val, right_val)
+            } else {
+                builder
+                    .ins()
+                    .icmp(IntCC::SignedGreaterThanOrEqual, left_val, right_val)
+            }
+        }
+        BinaryOp::And | BinaryOp::Or => {
+            return Err("And/Or should be handled with short-circuit evaluation".to_string());
+        }
+        BinaryOp::BitAnd => builder.ins().band(left_val, right_val),
+        BinaryOp::BitOr => builder.ins().bor(left_val, right_val),
+        BinaryOp::BitXor => builder.ins().bxor(left_val, right_val),
+        BinaryOp::Shl => builder.ins().ishl(left_val, right_val),
+        BinaryOp::Shr => {
+            if left_vole_type.is_unsigned() {
+                builder.ins().ushr(left_val, right_val)
+            } else {
+                builder.ins().sshr(left_val, right_val)
+            }
+        }
+    };
+
+    let final_ty = match op {
+        BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
+            types::I8
+        }
+        _ => result_ty,
+    };
+
+    let vole_type = match op {
+        BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
+            Type::Bool
+        }
+        _ => left_vole_type,
+    };
+
+    Ok(CompiledValue {
+        value: result,
+        ty: final_ty,
+        vole_type,
+    })
+}
+
+/// Compile a function call with capture awareness
+fn compile_call_with_captures(
+    builder: &mut FunctionBuilder,
+    call: &crate::frontend::CallExpr,
+    call_line: u32,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    _capture_bindings: &HashMap<Symbol, CaptureBinding>,
+    _closure_var: Option<Variable>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    // For now, delegate to regular call compilation
+    // The callee might be a closure, but we handle that in compile_indirect_call_value
+    compile_call(builder, call, call_line, variables, ctx)
 }
 
 /// Compile a string literal by calling vole_string_new
@@ -1840,18 +2747,197 @@ fn compile_call(
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
-    // Get the callee name - must be an identifier for now
-    let callee_name = match &call.callee.kind {
-        ExprKind::Identifier(sym) => ctx.interner.resolve(*sym),
+    // Get the callee symbol - must be an identifier for now
+    let callee_sym = match &call.callee.kind {
+        ExprKind::Identifier(sym) => *sym,
         _ => return Err("only simple function calls are supported".to_string()),
     };
 
-    // Handle builtin functions
+    let callee_name = ctx.interner.resolve(callee_sym);
+
+    // Handle builtin functions first
     match callee_name {
-        "println" => compile_println(builder, &call.args, variables, ctx),
-        "print_char" => compile_print_char(builder, &call.args, variables, ctx),
-        "assert" => compile_assert(builder, &call.args, call_line, variables, ctx),
-        _ => compile_user_function_call(builder, callee_name, &call.args, variables, ctx),
+        "println" => return compile_println(builder, &call.args, variables, ctx),
+        "print_char" => return compile_print_char(builder, &call.args, variables, ctx),
+        "assert" => return compile_assert(builder, &call.args, call_line, variables, ctx),
+        _ => {}
+    }
+
+    // Check if callee is a variable with function type (for indirect calls)
+    if let Some((var, Type::Function(ft))) = variables.get(&callee_sym) {
+        // Clone what we need to avoid borrow conflicts
+        let var = *var;
+        let ft = ft.clone();
+        return compile_indirect_call(builder, var, &ft, &call.args, variables, ctx);
+    }
+
+    // Check if callee is a global variable with function type
+    if let Some(global) = ctx.globals.iter().find(|g| g.name == callee_sym) {
+        // Compile the global's initializer to get the function pointer
+        let callee_value = compile_expr(builder, &global.init, variables, ctx)?;
+        if let Type::Function(ft) = &callee_value.vole_type {
+            return compile_indirect_call_value(
+                builder,
+                callee_value.value,
+                ft,
+                &call.args,
+                variables,
+                ctx,
+            );
+        }
+    }
+
+    // Fall back to named function call
+    compile_user_function_call(builder, callee_name, &call.args, variables, ctx)
+}
+
+/// Compile an indirect call through a function pointer variable
+fn compile_indirect_call(
+    builder: &mut FunctionBuilder,
+    var: Variable,
+    ft: &FunctionType,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    let func_ptr_or_closure = builder.use_var(var);
+    compile_indirect_call_value(builder, func_ptr_or_closure, ft, args, variables, ctx)
+}
+
+/// Compile an indirect call through a function pointer value or closure pointer
+fn compile_indirect_call_value(
+    builder: &mut FunctionBuilder,
+    func_ptr_or_closure: cranelift_codegen::ir::Value,
+    ft: &FunctionType,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    if ft.is_closure {
+        // This is a closure - we need to extract the function pointer and pass the closure
+        compile_closure_call(builder, func_ptr_or_closure, ft, args, variables, ctx)
+    } else {
+        // Pure function pointer - call directly
+        compile_pure_function_call(builder, func_ptr_or_closure, ft, args, variables, ctx)
+    }
+}
+
+/// Compile a call to a pure function (no closure)
+fn compile_pure_function_call(
+    builder: &mut FunctionBuilder,
+    func_ptr: cranelift_codegen::ir::Value,
+    ft: &FunctionType,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    // Build the Cranelift signature for the indirect call
+    let mut sig = ctx.module.make_signature();
+    for param_type in &ft.params {
+        sig.params.push(AbiParam::new(type_to_cranelift(
+            param_type,
+            ctx.pointer_type,
+        )));
+    }
+    sig.returns.push(AbiParam::new(type_to_cranelift(
+        &ft.return_type,
+        ctx.pointer_type,
+    )));
+
+    let sig_ref = builder.import_signature(sig);
+
+    // Compile arguments
+    let mut arg_values = Vec::new();
+    for arg in args {
+        let compiled = compile_expr(builder, arg, variables, ctx)?;
+        arg_values.push(compiled.value);
+    }
+
+    // Perform the indirect call
+    let call_inst = builder.ins().call_indirect(sig_ref, func_ptr, &arg_values);
+    let results = builder.inst_results(call_inst);
+
+    if results.is_empty() {
+        // Void function
+        let zero = builder.ins().iconst(types::I64, 0);
+        Ok(CompiledValue {
+            value: zero,
+            ty: types::I64,
+            vole_type: Type::Void,
+        })
+    } else {
+        let result = results[0];
+        let ty = builder.func.dfg.value_type(result);
+        Ok(CompiledValue {
+            value: result,
+            ty,
+            vole_type: (*ft.return_type).clone(),
+        })
+    }
+}
+
+/// Compile a call to a closure (lambda with captures)
+fn compile_closure_call(
+    builder: &mut FunctionBuilder,
+    closure_ptr: cranelift_codegen::ir::Value,
+    ft: &FunctionType,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    // Extract the function pointer from the closure
+    let get_func_id = ctx
+        .func_ids
+        .get("vole_closure_get_func")
+        .ok_or_else(|| "vole_closure_get_func not found".to_string())?;
+    let get_func_ref = ctx.module.declare_func_in_func(*get_func_id, builder.func);
+    let get_func_call = builder.ins().call(get_func_ref, &[closure_ptr]);
+    let func_ptr = builder.inst_results(get_func_call)[0];
+
+    // Build the Cranelift signature for the closure call
+    // First param is the closure pointer, then the user params
+    let mut sig = ctx.module.make_signature();
+    sig.params.push(AbiParam::new(ctx.pointer_type)); // Closure pointer
+    for param_type in &ft.params {
+        sig.params.push(AbiParam::new(type_to_cranelift(
+            param_type,
+            ctx.pointer_type,
+        )));
+    }
+    sig.returns.push(AbiParam::new(type_to_cranelift(
+        &ft.return_type,
+        ctx.pointer_type,
+    )));
+
+    let sig_ref = builder.import_signature(sig);
+
+    // Compile arguments - closure pointer first, then user args
+    let mut arg_values = vec![closure_ptr];
+    for arg in args {
+        let compiled = compile_expr(builder, arg, variables, ctx)?;
+        arg_values.push(compiled.value);
+    }
+
+    // Perform the indirect call
+    let call_inst = builder.ins().call_indirect(sig_ref, func_ptr, &arg_values);
+    let results = builder.inst_results(call_inst);
+
+    if results.is_empty() {
+        // Void function
+        let zero = builder.ins().iconst(types::I64, 0);
+        Ok(CompiledValue {
+            value: zero,
+            ty: types::I64,
+            vole_type: Type::Void,
+        })
+    } else {
+        let result = results[0];
+        let ty = builder.func.dfg.value_type(result);
+        Ok(CompiledValue {
+            value: result,
+            ty,
+            vole_type: (*ft.return_type).clone(),
+        })
     }
 }
 

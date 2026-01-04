@@ -63,6 +63,10 @@ pub enum TypeExpr {
     Optional(Box<TypeExpr>), // T? syntax (desugars to Union with Nil)
     Union(Vec<TypeExpr>),    // A | B | C
     Nil,                     // nil type
+    Function {
+        params: Vec<TypeExpr>,
+        return_type: Box<TypeExpr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,6 +202,9 @@ pub enum ExprKind {
 
     /// Type test: value is Type
     Is(Box<IsExpr>),
+
+    /// Lambda expression: (x) => x + 1
+    Lambda(Box<LambdaExpr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
@@ -310,6 +317,79 @@ pub struct IsExpr {
     pub value: Expr,
     pub type_expr: TypeExpr,
     pub type_span: Span,
+}
+
+/// Lambda expression: (params) => body
+#[derive(Debug, Clone)]
+pub struct LambdaExpr {
+    pub params: Vec<LambdaParam>,
+    pub return_type: Option<TypeExpr>,
+    pub body: LambdaBody,
+    pub span: Span,
+    /// Captured variables from enclosing scopes (populated during semantic analysis)
+    pub captures: std::cell::RefCell<Vec<Capture>>,
+    /// Whether the lambda has side effects (populated during semantic analysis)
+    pub has_side_effects: std::cell::Cell<bool>,
+}
+
+/// Lambda parameter (may have inferred type)
+#[derive(Debug, Clone)]
+pub struct LambdaParam {
+    pub name: Symbol,
+    pub ty: Option<TypeExpr>,
+    pub span: Span,
+}
+
+/// Lambda body - expression or block
+#[derive(Debug, Clone)]
+pub enum LambdaBody {
+    Expr(Box<Expr>),
+    Block(Block),
+}
+
+/// Captured variable from enclosing scope
+#[derive(Debug, Clone)]
+pub struct Capture {
+    pub name: Symbol,
+    pub is_mutable: bool,
+    pub is_mutated: bool,
+}
+
+/// Purity classification for optimization
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LambdaPurity {
+    Pure,
+    CapturesImmutable,
+    CapturesMutable,
+    MutatesCaptures,
+    HasSideEffects,
+}
+
+impl LambdaExpr {
+    /// Compute the purity level of this lambda based on its captures and side effects.
+    ///
+    /// Returns the most restrictive purity classification:
+    /// - `HasSideEffects`: Calls print/println/assert or user functions
+    /// - `MutatesCaptures`: Assigns to captured variables
+    /// - `CapturesMutable`: Captures mutable variables (may observe external changes)
+    /// - `CapturesImmutable`: Captures exist, but none are mutable
+    /// - `Pure`: No captures, no side effects
+    pub fn purity(&self) -> LambdaPurity {
+        if self.has_side_effects.get() {
+            return LambdaPurity::HasSideEffects;
+        }
+        let captures = self.captures.borrow();
+        if captures.iter().any(|c| c.is_mutated) {
+            return LambdaPurity::MutatesCaptures;
+        }
+        if captures.iter().any(|c| c.is_mutable) {
+            return LambdaPurity::CapturesMutable;
+        }
+        if !captures.is_empty() {
+            return LambdaPurity::CapturesImmutable;
+        }
+        LambdaPurity::Pure
+    }
 }
 
 /// Pattern for matching

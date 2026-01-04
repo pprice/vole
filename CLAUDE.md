@@ -98,6 +98,10 @@ tests {
 }
 ```
 
-Types: `i32`, `i64`, `f64`, `bool`, `string`
+Types: `i32`, `i64`, `f64`, `bool`, `string`, `nil`, `T?` (optional)
+
+Lambdas: `(x: i64) => x * 2`, `() => { return 42 }` (with type inference from context)
+
+Function types: `(i64) -> i64`, `(i64, i64) -> bool`, `() -> nil`
 
 Supported: functions, let/let mut bindings, if/else, while, break, string interpolation (`"x is {x}"`), comparison and arithmetic operators, `&&` and `||`.

@@ -2,6 +2,7 @@
 pub mod array;
 pub mod assert;
 pub mod builtins;
+pub mod closure;
 pub mod string;
 pub mod value;
 
