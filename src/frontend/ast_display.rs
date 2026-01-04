@@ -65,6 +65,9 @@ impl<'a> AstPrinter<'a> {
             Decl::Class(_) | Decl::Record(_) => {
                 // TODO: implement class/record display
             }
+            Decl::Interface(_) | Decl::Implement(_) => {
+                // TODO: implement interface/implement display
+            }
         }
     }
 
@@ -186,6 +189,9 @@ impl<'a> AstPrinter<'a> {
                 }
                 out.push_str(") -> ");
                 self.write_type_inline(out, return_type);
+            }
+            TypeExpr::SelfType => {
+                out.push_str("Self");
             }
         }
     }

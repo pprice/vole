@@ -10,12 +10,12 @@ tests "arrays" {
 
     test "length" {
         let arr = [1, 2, 3, 4, 5]
-        assert(arr.length == 5)
+        assert(arr.length() == 5)
     }
 
     test "empty array length" {
-        let arr = []
-        assert(arr.length == 0)
+        let arr: [i64] = []
+        assert(arr.length() == 0)
     }
 
     test "for iteration" {

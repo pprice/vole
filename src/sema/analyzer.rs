@@ -299,6 +299,12 @@ impl Analyzer {
                         );
                     }
                 }
+                Decl::Interface(_) => {
+                    // TODO: Register interface definitions
+                }
+                Decl::Implement(_) => {
+                    // TODO: Register implement block methods
+                }
             }
         }
 
@@ -362,6 +368,12 @@ impl Analyzer {
                         self.check_method(method, record.name, interner)?;
                     }
                 }
+                Decl::Interface(_) => {
+                    // TODO: Type check interface method signatures
+                }
+                Decl::Implement(_) => {
+                    // TODO: Type check implement block methods
+                }
             }
         }
 
@@ -407,6 +419,11 @@ impl Analyzer {
                     return_type: Box::new(ret),
                     is_closure: false, // Type annotations don't know if it's a closure
                 })
+            }
+            TypeExpr::SelfType => {
+                // Self is resolved during interface/implement checking
+                // For now, return Error to indicate it can't be used outside that context
+                Type::Error
             }
         }
     }
@@ -2047,6 +2064,17 @@ impl Analyzer {
 
             ExprKind::MethodCall(method_call) => {
                 let object_type = self.check_expr(&method_call.object, interner)?;
+                let method_name = interner.resolve(method_call.method);
+
+                // Handle built-in methods for primitive types
+                if let Some(return_type) = self.check_builtin_method(
+                    &object_type,
+                    method_name,
+                    &method_call.args,
+                    interner,
+                ) {
+                    return Ok(return_type);
+                }
 
                 // Get type symbol from object type
                 let type_sym = match &object_type {
@@ -2346,6 +2374,48 @@ impl Analyzer {
         }
 
         false
+    }
+
+    /// Check if a method call is a built-in method on a primitive type
+    /// Returns Some(return_type) if handled, None if not a built-in
+    fn check_builtin_method(
+        &mut self,
+        object_type: &Type,
+        method_name: &str,
+        args: &[Expr],
+        _interner: &Interner,
+    ) -> Option<Type> {
+        match (object_type, method_name) {
+            // Array.length() -> i64
+            (Type::Array(_), "length") => {
+                if !args.is_empty() {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 0,
+                            found: args.len(),
+                            span: args[0].span.into(),
+                        },
+                        args[0].span,
+                    );
+                }
+                Some(Type::I64)
+            }
+            // String.length() -> i64
+            (Type::String, "length") => {
+                if !args.is_empty() {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 0,
+                            found: args.len(),
+                            span: args[0].span.into(),
+                        },
+                        args[0].span,
+                    );
+                }
+                Some(Type::I64)
+            }
+            _ => None,
+        }
     }
 }
 

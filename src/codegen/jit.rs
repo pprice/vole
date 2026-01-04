@@ -67,6 +67,10 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I8));
         self.import_function("vole_string_eq", &sig);
 
+        // vole_string_len(ptr: *const RcString) -> usize
+        let sig = self.create_signature(&[ptr_ty], Some(types::I64));
+        self.import_function("vole_string_len", &sig);
+
         // vole_println_string(ptr: *const RcString)
         let sig = self.create_signature(&[ptr_ty], None);
         self.import_function("vole_println_string", &sig);

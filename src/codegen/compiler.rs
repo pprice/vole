@@ -191,6 +191,12 @@ impl<'a> Compiler<'a> {
                 Decl::Record(record) => {
                     self.register_record(record);
                 }
+                Decl::Interface(_) => {
+                    // Interface declarations don't generate code directly
+                }
+                Decl::Implement(_) => {
+                    // TODO: Register implement block methods
+                }
             }
         }
 
@@ -216,6 +222,12 @@ impl<'a> Compiler<'a> {
                 }
                 Decl::Record(record) => {
                     self.compile_record_methods(record)?;
+                }
+                Decl::Interface(_) => {
+                    // Interface methods are compiled when used via implement blocks
+                }
+                Decl::Implement(_) => {
+                    // TODO: Compile implement block methods
                 }
             }
         }
@@ -940,6 +952,10 @@ fn resolve_type_expr(ty: &TypeExpr, type_aliases: &HashMap<Symbol, Type>) -> Typ
                 return_type: Box::new(ret_type),
                 is_closure: false, // Type expressions don't know if closure
             })
+        }
+        TypeExpr::SelfType => {
+            // Self type is resolved during interface/implement compilation
+            Type::Error
         }
     }
 }
@@ -4282,13 +4298,18 @@ fn compile_method_call(
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     let obj = compile_expr(builder, &mc.object, variables, ctx)?;
+    let method_name_str = ctx.interner.resolve(mc.method);
+
+    // Handle built-in methods for primitive types
+    if let Some(result) = compile_builtin_method(builder, &obj, method_name_str, ctx)? {
+        return Ok(result);
+    }
 
     // Get the type name from the object's vole_type
     let type_name = get_type_name_symbol(&obj.vole_type)?;
 
     // Build the method function name: TypeName_methodName
     let type_name_str = ctx.interner.resolve(type_name);
-    let method_name_str = ctx.interner.resolve(mc.method);
     let full_name = format!("{}_{}", type_name_str, method_name_str);
 
     let method_func_id = ctx
@@ -4324,6 +4345,49 @@ fn compile_method_call(
             ty: type_to_cranelift(&return_type, ctx.pointer_type),
             vole_type: return_type,
         })
+    }
+}
+
+/// Compile a built-in method call for primitive types
+/// Returns Some(CompiledValue) if handled, None if not a built-in
+fn compile_builtin_method(
+    builder: &mut FunctionBuilder,
+    obj: &CompiledValue,
+    method_name: &str,
+    ctx: &mut CompileCtx,
+) -> Result<Option<CompiledValue>, String> {
+    match (&obj.vole_type, method_name) {
+        // Array.length() -> i64
+        (Type::Array(_), "length") => {
+            let func_id = ctx
+                .func_ids
+                .get("vole_array_len")
+                .ok_or_else(|| "vole_array_len not found".to_string())?;
+            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let call = builder.ins().call(func_ref, &[obj.value]);
+            let result = builder.inst_results(call)[0];
+            Ok(Some(CompiledValue {
+                value: result,
+                ty: types::I64,
+                vole_type: Type::I64,
+            }))
+        }
+        // String.length() -> i64
+        (Type::String, "length") => {
+            let func_id = ctx
+                .func_ids
+                .get("vole_string_len")
+                .ok_or_else(|| "vole_string_len not found".to_string())?;
+            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let call = builder.ins().call(func_ref, &[obj.value]);
+            let result = builder.inst_results(call)[0];
+            Ok(Some(CompiledValue {
+                value: result,
+                ty: types::I64,
+                vole_type: Type::I64,
+            }))
+        }
+        _ => Ok(None),
     }
 }
 

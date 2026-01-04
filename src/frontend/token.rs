@@ -29,10 +29,15 @@ pub enum TokenType {
     KwIn,
     KwContinue,
     KwMatch,
-    KwNil,    // nil keyword (literal and type)
-    KwIs,     // is keyword (type test)
-    KwClass,  // class keyword
-    KwRecord, // record keyword
+    KwNil,        // nil keyword (literal and type)
+    KwIs,         // is keyword (type test)
+    KwClass,      // class keyword
+    KwRecord,     // record keyword
+    KwInterface,  // interface keyword
+    KwImplements, // implements keyword (record implements Trait)
+    KwImplement,  // implement keyword (implement Trait for Type)
+    KwExtends,    // extends keyword (interface inheritance)
+    KwSelfType,   // Self keyword (implementing type in interface)
 
     // Type keywords
     KwI8,
@@ -133,6 +138,11 @@ impl TokenType {
             Self::KwIs => "is",
             Self::KwClass => "class",
             Self::KwRecord => "record",
+            Self::KwInterface => "interface",
+            Self::KwImplements => "implements",
+            Self::KwImplement => "implement",
+            Self::KwExtends => "extends",
+            Self::KwSelfType => "Self",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",

@@ -27,6 +27,8 @@ pub enum Decl {
     Let(LetStmt),
     Class(ClassDecl),
     Record(RecordDecl),
+    Interface(InterfaceDecl),
+    Implement(ImplementBlock),
 }
 
 /// Function declaration
@@ -75,6 +77,7 @@ pub struct FieldDef {
 #[derive(Debug)]
 pub struct ClassDecl {
     pub name: Symbol,
+    pub implements: Vec<Symbol>, // Interfaces this class implements
     pub fields: Vec<FieldDef>,
     pub methods: Vec<FuncDecl>,
     pub span: Span,
@@ -84,7 +87,36 @@ pub struct ClassDecl {
 #[derive(Debug)]
 pub struct RecordDecl {
     pub name: Symbol,
+    pub implements: Vec<Symbol>, // Interfaces this record implements
     pub fields: Vec<FieldDef>,
+    pub methods: Vec<FuncDecl>,
+    pub span: Span,
+}
+
+/// Interface declaration
+#[derive(Debug)]
+pub struct InterfaceDecl {
+    pub name: Symbol,
+    pub extends: Vec<Symbol>, // Parent interfaces
+    pub methods: Vec<InterfaceMethod>,
+    pub span: Span,
+}
+
+/// Method in an interface (may be abstract or have default implementation)
+#[derive(Debug)]
+pub struct InterfaceMethod {
+    pub name: Symbol,
+    pub params: Vec<Param>,
+    pub return_type: Option<TypeExpr>,
+    pub body: Option<Block>, // None = abstract, Some = default implementation
+    pub span: Span,
+}
+
+/// Standalone implement block: implement Trait for Type { ... }
+#[derive(Debug)]
+pub struct ImplementBlock {
+    pub trait_name: Option<Symbol>, // None for type extension (implement Type { ... })
+    pub target_type: TypeExpr,      // The type being extended
     pub methods: Vec<FuncDecl>,
     pub span: Span,
 }
@@ -102,6 +134,7 @@ pub enum TypeExpr {
         params: Vec<TypeExpr>,
         return_type: Box<TypeExpr>,
     },
+    SelfType, // Self keyword (implementing type in interface)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
