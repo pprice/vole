@@ -26,7 +26,7 @@ pub enum PrimitiveTypeId {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum TypeId {
     Primitive(PrimitiveTypeId),
-    Array,  // All array types share methods
+    Array, // All array types share methods
     Class(Symbol),
     Record(Symbol),
 }
@@ -66,9 +66,9 @@ pub struct MethodKey {
 /// Implementation of a method
 #[derive(Debug, Clone)]
 pub struct MethodImpl {
-    pub trait_name: Option<Symbol>,  // Which interface this implements
-    pub func_type: FunctionType,     // Method signature
-    pub is_builtin: bool,            // True for array.length(), etc.
+    pub trait_name: Option<Symbol>, // Which interface this implements
+    pub func_type: FunctionType,    // Method signature
+    pub is_builtin: bool,           // True for array.length(), etc.
 }
 
 /// Registry of methods added to types via `implement` blocks
@@ -83,13 +83,11 @@ impl ImplementRegistry {
     }
 
     /// Register a method for a type
-    pub fn register_method(
-        &mut self,
-        type_id: TypeId,
-        method_name: Symbol,
-        impl_: MethodImpl,
-    ) {
-        let key = MethodKey { type_id, method_name };
+    pub fn register_method(&mut self, type_id: TypeId, method_name: Symbol, impl_: MethodImpl) {
+        let key = MethodKey {
+            type_id,
+            method_name,
+        };
         self.methods.insert(key, impl_);
     }
 

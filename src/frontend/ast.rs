@@ -97,8 +97,8 @@ pub struct RecordDecl {
 #[derive(Debug)]
 pub struct InterfaceDecl {
     pub name: Symbol,
-    pub extends: Vec<Symbol>,        // Parent interfaces
-    pub fields: Vec<FieldDef>,       // Required fields
+    pub extends: Vec<Symbol>,  // Parent interfaces
+    pub fields: Vec<FieldDef>, // Required fields
     pub methods: Vec<InterfaceMethod>,
     pub span: Span,
 }

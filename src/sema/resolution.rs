@@ -8,9 +8,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub enum ResolvedMethod {
     /// Direct method on class/record
-    Direct {
-        func_type: FunctionType,
-    },
+    Direct { func_type: FunctionType },
 
     /// Method from implement registry
     Implemented {
@@ -20,9 +18,7 @@ pub enum ResolvedMethod {
     },
 
     /// Functional interface - call the underlying lambda
-    FunctionalInterface {
-        func_type: FunctionType,
-    },
+    FunctionalInterface { func_type: FunctionType },
 }
 
 impl ResolvedMethod {
@@ -39,7 +35,10 @@ impl ResolvedMethod {
     pub fn is_builtin(&self) -> bool {
         matches!(
             self,
-            ResolvedMethod::Implemented { is_builtin: true, .. }
+            ResolvedMethod::Implemented {
+                is_builtin: true,
+                ..
+            }
         )
     }
 }
@@ -79,7 +78,9 @@ mod tests {
             is_closure: false,
         };
 
-        let direct = ResolvedMethod::Direct { func_type: ft.clone() };
+        let direct = ResolvedMethod::Direct {
+            func_type: ft.clone(),
+        };
         assert_eq!(direct.func_type().params.len(), 1);
 
         let implemented = ResolvedMethod::Implemented {

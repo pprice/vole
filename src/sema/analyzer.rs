@@ -2,13 +2,15 @@
 
 use crate::errors::SemanticError;
 use crate::frontend::*;
+use crate::sema::implement_registry::ImplementRegistry;
+use crate::sema::interface_registry::{
+    InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
+};
+use crate::sema::resolution::MethodResolutions;
 use crate::sema::{
     ClassType, FunctionType, RecordType, StructField, Type,
     scope::{Scope, Variable},
 };
-use crate::sema::interface_registry::InterfaceRegistry;
-use crate::sema::implement_registry::ImplementRegistry;
-use crate::sema::resolution::MethodResolutions;
 use std::collections::{HashMap, HashSet};
 
 /// Information about a captured variable during lambda analysis
@@ -324,8 +326,41 @@ impl Analyzer {
                         );
                     }
                 }
-                Decl::Interface(_) => {
-                    // TODO: Register interface definitions
+                Decl::Interface(interface_decl) => {
+                    // Convert AST fields to InterfaceFieldDef
+                    let fields: Vec<InterfaceFieldDef> = interface_decl
+                        .fields
+                        .iter()
+                        .map(|f| InterfaceFieldDef {
+                            name: f.name,
+                            ty: self.resolve_type(&f.ty),
+                        })
+                        .collect();
+
+                    // Convert AST methods to InterfaceMethodDef
+                    let methods: Vec<InterfaceMethodDef> = interface_decl
+                        .methods
+                        .iter()
+                        .map(|m| InterfaceMethodDef {
+                            name: m.name,
+                            params: m.params.iter().map(|p| self.resolve_type(&p.ty)).collect(),
+                            return_type: m
+                                .return_type
+                                .as_ref()
+                                .map(|t| self.resolve_type(t))
+                                .unwrap_or(Type::Void),
+                            has_default: m.body.is_some(),
+                        })
+                        .collect();
+
+                    let def = InterfaceDef {
+                        name: interface_decl.name,
+                        extends: interface_decl.extends.clone(),
+                        fields,
+                        methods,
+                    };
+
+                    self.interface_registry.register(def);
                 }
                 Decl::Implement(_) => {
                     // TODO: Register implement block methods
