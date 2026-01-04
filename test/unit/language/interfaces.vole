@@ -50,3 +50,18 @@ tests "implement blocks" {
         assert(p.describe() == "Bob")
     }
 }
+
+// Functional interface - single abstract method, no fields
+interface Predicate {
+    func check(value: i64) -> bool
+}
+
+tests "functional interfaces" {
+    test "lambda can be assigned to functional interface" {
+        // Lambda gets type-checked against interface method signature
+        let isEven: Predicate = (x: i64) => x % 2 == 0
+        // For now, just verify this type-checks
+        // TODO: Test calling via the interface once that's supported
+        assert(true)
+    }
+}

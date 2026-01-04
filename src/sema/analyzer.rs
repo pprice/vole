@@ -10,6 +10,7 @@ use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::{
     ClassType, FunctionType, RecordType, StructField, Type,
     scope::{Scope, Variable},
+    types::{InterfaceMethodType, InterfaceType},
 };
 use std::collections::{HashMap, HashSet};
 
@@ -493,6 +494,21 @@ impl Analyzer {
                     Type::Record(record.clone())
                 } else if let Some(class) = self.classes.get(sym) {
                     Type::Class(class.clone())
+                } else if let Some(iface) = self.interface_registry.get(*sym) {
+                    Type::Interface(InterfaceType {
+                        name: *sym,
+                        methods: iface
+                            .methods
+                            .iter()
+                            .map(|m| InterfaceMethodType {
+                                name: m.name,
+                                params: m.params.clone(),
+                                return_type: Box::new(m.return_type.clone()),
+                                has_default: m.has_default,
+                            })
+                            .collect(),
+                        extends: iface.extends.clone(),
+                    })
                 } else {
                     Type::Error // Unknown type name
                 }
@@ -1096,14 +1112,18 @@ impl Analyzer {
             }
             ExprKind::Lambda(lambda) => {
                 // Extract expected function type if available
+                // Support both direct function types and functional interfaces
                 let expected_fn = expected.and_then(|t| {
                     if let Type::Function(ft) = t {
-                        Some(ft)
+                        Some(ft.clone())
+                    } else if let Type::Interface(iface) = t {
+                        // Check if it's a functional interface (single abstract method, no fields)
+                        self.get_functional_interface_type(iface.name)
                     } else {
                         None
                     }
                 });
-                Ok(self.analyze_lambda(lambda, expected_fn, interner))
+                Ok(self.analyze_lambda(lambda, expected_fn.as_ref(), interner))
             }
             // All other cases: infer type, then check compatibility
             _ => {
@@ -2562,6 +2582,23 @@ impl Analyzer {
             return true;
         }
 
+        // Function type is compatible with functional interface if signatures match
+        if let Type::Function(fn_type) = from
+            && let Type::Interface(iface) = to
+            && let Some(iface_fn) = self.get_functional_interface_type(iface.name)
+            && fn_type.params.len() == iface_fn.params.len()
+        {
+            let params_match = fn_type
+                .params
+                .iter()
+                .zip(iface_fn.params.iter())
+                .all(|(fp, ip)| self.types_compatible(fp, ip));
+            let return_matches = self.types_compatible(&fn_type.return_type, &iface_fn.return_type);
+            if params_match && return_matches {
+                return true;
+            }
+        }
+
         false
     }
 
@@ -2679,6 +2716,16 @@ impl Analyzer {
             (Type::String, "length") => Some(Type::I64),
             _ => None,
         }
+    }
+
+    /// Get the function type for a functional interface (single abstract method, no fields)
+    fn get_functional_interface_type(&self, interface_name: Symbol) -> Option<FunctionType> {
+        let method = self.interface_registry.is_functional(interface_name)?;
+        Some(FunctionType {
+            params: method.params.clone(),
+            return_type: Box::new(method.return_type.clone()),
+            is_closure: true,
+        })
     }
 
     /// Check if a type structurally satisfies an interface
