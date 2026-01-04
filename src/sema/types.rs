@@ -307,6 +307,17 @@ impl Type {
             _ => None,
         }
     }
+
+    /// Promote two numeric types to their common supertype
+    pub fn promote(left: &Type, right: &Type) -> Type {
+        match (left, right) {
+            (Type::F64, _) | (_, Type::F64) => Type::F64,
+            (Type::F32, _) | (_, Type::F32) => Type::F32,
+            (Type::I64, _) | (_, Type::I64) => Type::I64,
+            (Type::I32, _) | (_, Type::I32) => Type::I32,
+            _ => left.clone(),
+        }
+    }
 }
 
 impl std::fmt::Display for Type {
