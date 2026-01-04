@@ -75,6 +75,8 @@ impl<'src> Parser<'src> {
             TokenType::KwFunc => self.function_decl(),
             TokenType::KwTests => self.tests_decl(),
             TokenType::KwLet => self.let_decl(),
+            TokenType::KwClass => self.class_decl(),
+            TokenType::KwRecord => self.record_decl(),
             _ => Err(ParseError::new(
                 ParserError::UnexpectedToken {
                     token: self.current.ty.as_str().to_string(),
@@ -157,6 +159,99 @@ impl<'src> Parser<'src> {
     fn let_decl(&mut self) -> Result<Decl, ParseError> {
         let stmt = self.let_statement()?;
         Ok(Decl::Let(stmt))
+    }
+
+    fn class_decl(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'class'
+
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected class name")?;
+        let name = self.interner.intern(&name_token.lexeme);
+
+        self.consume(TokenType::LBrace, "expected '{' after class name")?;
+        self.skip_newlines();
+
+        let (fields, methods) = self.parse_class_body()?;
+
+        self.consume(TokenType::RBrace, "expected '}' to close class")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(Decl::Class(ClassDecl {
+            name,
+            fields,
+            methods,
+            span,
+        }))
+    }
+
+    fn record_decl(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'record'
+
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected record name")?;
+        let name = self.interner.intern(&name_token.lexeme);
+
+        self.consume(TokenType::LBrace, "expected '{' after record name")?;
+        self.skip_newlines();
+
+        let (fields, methods) = self.parse_class_body()?;
+
+        self.consume(TokenType::RBrace, "expected '}' to close record")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(Decl::Record(RecordDecl {
+            name,
+            fields,
+            methods,
+            span,
+        }))
+    }
+
+    fn parse_class_body(&mut self) -> Result<(Vec<FieldDef>, Vec<FuncDecl>), ParseError> {
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            if self.check(TokenType::KwFunc) {
+                // Parse method
+                if let Decl::Function(func) = self.function_decl()? {
+                    methods.push(func);
+                }
+            } else if self.check(TokenType::Identifier) {
+                // Parse field: name: Type,
+                let field_span = self.current.span;
+                let name_token = self.current.clone();
+                self.advance();
+                let name = self.interner.intern(&name_token.lexeme);
+
+                self.consume(TokenType::Colon, "expected ':' after field name")?;
+                let ty = self.parse_type()?;
+
+                // Expect comma (required, trailing allowed)
+                if self.check(TokenType::Comma) {
+                    self.advance();
+                }
+
+                fields.push(FieldDef {
+                    name,
+                    ty,
+                    span: field_span.merge(self.previous.span),
+                });
+            } else {
+                return Err(ParseError::new(
+                    ParserError::UnexpectedToken {
+                        token: self.current.ty.as_str().to_string(),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            }
+            self.skip_newlines();
+        }
+
+        Ok((fields, methods))
     }
 
     fn test_case(&mut self) -> Result<TestCase, ParseError> {
@@ -2417,6 +2512,50 @@ tests {
             );
         } else {
             panic!("expected let declaration");
+        }
+    }
+
+    #[test]
+    fn parse_class_declaration() {
+        let source = r#"
+class Point {
+    x: i32,
+    y: i32,
+
+    func sum() -> i32 {
+        return 42
+    }
+}
+"#;
+        let mut parser = Parser::new(source);
+        let program = parser.parse_program().unwrap();
+        assert_eq!(program.declarations.len(), 1);
+        match &program.declarations[0] {
+            Decl::Class(class) => {
+                assert_eq!(class.fields.len(), 2);
+                assert_eq!(class.methods.len(), 1);
+            }
+            _ => panic!("expected class declaration"),
+        }
+    }
+
+    #[test]
+    fn parse_record_declaration() {
+        let source = r#"
+record Point {
+    x: i32,
+    y: i32,
+}
+"#;
+        let mut parser = Parser::new(source);
+        let program = parser.parse_program().unwrap();
+        assert_eq!(program.declarations.len(), 1);
+        match &program.declarations[0] {
+            Decl::Record(record) => {
+                assert_eq!(record.fields.len(), 2);
+                assert_eq!(record.methods.len(), 0);
+            }
+            _ => panic!("expected record declaration"),
         }
     }
 }
