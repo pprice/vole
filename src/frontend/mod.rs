@@ -4,6 +4,7 @@ pub mod ast_display;
 pub mod intern;
 pub mod lexer;
 mod parse_string;
+mod parse_type;
 pub mod parser;
 pub mod token;
 
