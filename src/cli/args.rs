@@ -101,6 +101,21 @@ pub enum Commands {
     Version,
     /// Benchmark commands
     Bench(BenchArgs),
+    /// Format Vole source files
+    #[command(visible_alias = "f")]
+    Fmt {
+        /// Paths to format (files, directories, or glob patterns). Use "-" for stdin.
+        #[arg(value_name = "PATHS", required = true)]
+        paths: Vec<String>,
+
+        /// Check if files are formatted (exit 1 if not, don't modify)
+        #[arg(long)]
+        check: bool,
+
+        /// Write to stdout instead of modifying files in-place
+        #[arg(long)]
+        stdout: bool,
+    },
 }
 
 #[derive(Args)]
