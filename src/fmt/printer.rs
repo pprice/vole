@@ -2,8 +2,11 @@
 
 use pretty::{Arena, DocAllocator, DocBuilder};
 
-use crate::frontend::ast::*;
 use crate::frontend::Interner;
+use crate::frontend::ast::*;
+
+/// Indent width for formatting (4 spaces)
+const INDENT: isize = 4;
 
 /// Pretty-print a program to a Doc.
 pub fn print_program<'a>(
@@ -11,7 +14,1166 @@ pub fn print_program<'a>(
     program: &Program,
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
-    // TODO: implement
-    let _ = (program, interner);
-    arena.nil()
+    if program.declarations.is_empty() {
+        return arena.nil();
+    }
+
+    // Join declarations with blank lines
+    let docs: Vec<_> = program
+        .declarations
+        .iter()
+        .map(|decl| print_decl(arena, decl, interner))
+        .collect();
+
+    arena.intersperse(docs, arena.hardline().append(arena.hardline()))
+}
+
+/// Print a top-level declaration.
+fn print_decl<'a>(
+    arena: &'a Arena<'a>,
+    decl: &Decl,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    match decl {
+        Decl::Function(func) => print_func_decl(arena, func, interner),
+        Decl::Let(let_stmt) => print_let_stmt(arena, let_stmt, interner),
+        Decl::Tests(tests) => print_tests_decl(arena, tests, interner),
+        Decl::Class(class) => print_class_decl(arena, class, interner),
+        Decl::Record(record) => print_record_decl(arena, record, interner),
+        Decl::Interface(iface) => print_interface_decl(arena, iface, interner),
+        Decl::Implement(impl_block) => print_implement_block(arena, impl_block, interner),
+    }
+}
+
+/// Print a let statement.
+fn print_let_stmt<'a>(
+    arena: &'a Arena<'a>,
+    stmt: &LetStmt,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let keyword = if stmt.mutable {
+        arena.text("let mut ")
+    } else {
+        arena.text("let ")
+    };
+
+    let name = arena.text(interner.resolve(stmt.name).to_string());
+
+    let type_annotation = if let Some(ty) = &stmt.ty {
+        arena
+            .text(": ")
+            .append(print_type_expr(arena, ty, interner))
+    } else {
+        arena.nil()
+    };
+
+    keyword
+        .append(name)
+        .append(type_annotation)
+        .append(arena.text(" = "))
+        .append(print_expr(arena, &stmt.init, interner))
+}
+
+/// Print a function declaration.
+fn print_func_decl<'a>(
+    arena: &'a Arena<'a>,
+    func: &FuncDecl,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = interner.resolve(func.name).to_string();
+
+    // Build parameter list
+    let params = print_params(arena, &func.params, interner);
+
+    // Return type
+    let return_type = if let Some(ty) = &func.return_type {
+        arena
+            .text(" -> ")
+            .append(print_type_expr(arena, ty, interner))
+    } else {
+        arena.nil()
+    };
+
+    arena
+        .text("func ")
+        .append(arena.text(name))
+        .append(params)
+        .append(return_type)
+        .append(arena.text(" "))
+        .append(print_block(arena, &func.body, interner))
+}
+
+/// Print function parameters with grouping for line breaking.
+fn print_params<'a>(
+    arena: &'a Arena<'a>,
+    params: &[Param],
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    if params.is_empty() {
+        return arena.text("()");
+    }
+
+    let param_docs: Vec<_> = params
+        .iter()
+        .map(|p| print_param(arena, p, interner))
+        .collect();
+
+    // Multi-line format: each param on its own line with trailing comma
+    let multi_line = arena
+        .hardline()
+        .append(arena.intersperse(
+            param_docs.iter().cloned(),
+            arena.text(",").append(arena.hardline()),
+        ))
+        .append(arena.text(","))
+        .nest(INDENT)
+        .append(arena.hardline());
+
+    // Single line format: params separated by ", "
+    let single_line = arena.intersperse(param_docs, arena.text(", "));
+
+    arena
+        .text("(")
+        .append(multi_line.flat_alt(single_line).group())
+        .append(arena.text(")"))
+}
+
+/// Print a single parameter.
+fn print_param<'a>(
+    arena: &'a Arena<'a>,
+    param: &Param,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    arena
+        .text(interner.resolve(param.name).to_string())
+        .append(arena.text(": "))
+        .append(print_type_expr(arena, &param.ty, interner))
+}
+
+/// Print a block of statements.
+fn print_block<'a>(
+    arena: &'a Arena<'a>,
+    block: &Block,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    if block.stmts.is_empty() {
+        return arena.text("{}");
+    }
+
+    let stmts = arena.intersperse(
+        block
+            .stmts
+            .iter()
+            .map(|stmt| print_stmt(arena, stmt, interner)),
+        arena.hardline(),
+    );
+
+    arena
+        .text("{")
+        .append(arena.hardline().append(stmts).nest(INDENT))
+        .append(arena.hardline())
+        .append(arena.text("}"))
+}
+
+/// Print a statement.
+fn print_stmt<'a>(
+    arena: &'a Arena<'a>,
+    stmt: &Stmt,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    match stmt {
+        Stmt::Let(let_stmt) => print_let_stmt(arena, let_stmt, interner),
+        Stmt::Expr(expr_stmt) => print_expr(arena, &expr_stmt.expr, interner),
+        Stmt::While(while_stmt) => print_while_stmt(arena, while_stmt, interner),
+        Stmt::For(for_stmt) => print_for_stmt(arena, for_stmt, interner),
+        Stmt::If(if_stmt) => print_if_stmt(arena, if_stmt, interner),
+        Stmt::Break(_) => arena.text("break"),
+        Stmt::Continue(_) => arena.text("continue"),
+        Stmt::Return(return_stmt) => print_return_stmt(arena, return_stmt, interner),
+    }
+}
+
+/// Print a while statement.
+fn print_while_stmt<'a>(
+    arena: &'a Arena<'a>,
+    stmt: &WhileStmt,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    arena
+        .text("while ")
+        .append(print_expr(arena, &stmt.condition, interner))
+        .append(arena.text(" "))
+        .append(print_block(arena, &stmt.body, interner))
+}
+
+/// Print a for statement.
+fn print_for_stmt<'a>(
+    arena: &'a Arena<'a>,
+    stmt: &ForStmt,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    arena
+        .text("for ")
+        .append(arena.text(interner.resolve(stmt.var_name).to_string()))
+        .append(arena.text(" in "))
+        .append(print_expr(arena, &stmt.iterable, interner))
+        .append(arena.text(" "))
+        .append(print_block(arena, &stmt.body, interner))
+}
+
+/// Print an if statement.
+fn print_if_stmt<'a>(
+    arena: &'a Arena<'a>,
+    stmt: &IfStmt,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let if_part = arena
+        .text("if ")
+        .append(print_expr(arena, &stmt.condition, interner))
+        .append(arena.text(" "))
+        .append(print_block(arena, &stmt.then_branch, interner));
+
+    if let Some(else_branch) = &stmt.else_branch {
+        // K&R style: } else { on same line
+        if_part
+            .append(arena.text(" else "))
+            .append(print_block(arena, else_branch, interner))
+    } else {
+        if_part
+    }
+}
+
+/// Print a return statement.
+fn print_return_stmt<'a>(
+    arena: &'a Arena<'a>,
+    stmt: &ReturnStmt,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    if let Some(value) = &stmt.value {
+        arena
+            .text("return ")
+            .append(print_expr(arena, value, interner))
+    } else {
+        arena.text("return")
+    }
+}
+
+/// Print an expression.
+fn print_expr<'a>(
+    arena: &'a Arena<'a>,
+    expr: &Expr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    match &expr.kind {
+        ExprKind::IntLiteral(n) => arena.text(n.to_string()),
+        ExprKind::FloatLiteral(f) => print_float_literal(arena, *f),
+        ExprKind::BoolLiteral(b) => arena.text(if *b { "true" } else { "false" }),
+        ExprKind::StringLiteral(s) => print_string_literal(arena, s),
+        ExprKind::InterpolatedString(parts) => print_interpolated_string(arena, parts, interner),
+        ExprKind::Identifier(sym) => arena.text(interner.resolve(*sym).to_string()),
+        ExprKind::Binary(bin) => print_binary_expr(arena, bin, interner),
+        ExprKind::Unary(unary) => print_unary_expr(arena, unary, interner),
+        ExprKind::Call(call) => print_call_expr(arena, call, interner),
+        ExprKind::Assign(assign) => print_assign_expr(arena, assign, interner),
+        ExprKind::CompoundAssign(compound) => print_compound_assign_expr(arena, compound, interner),
+        ExprKind::Range(range) => print_range_expr(arena, range, interner),
+        ExprKind::Grouping(inner) => arena
+            .text("(")
+            .append(print_expr(arena, inner, interner))
+            .append(arena.text(")")),
+        ExprKind::ArrayLiteral(elements) => print_array_literal(arena, elements, interner),
+        ExprKind::Index(index) => print_index_expr(arena, index, interner),
+        ExprKind::Match(match_expr) => print_match_expr(arena, match_expr, interner),
+        ExprKind::Nil => arena.text("nil"),
+        ExprKind::NullCoalesce(nc) => print_null_coalesce_expr(arena, nc, interner),
+        ExprKind::Is(is_expr) => print_is_expr(arena, is_expr, interner),
+        ExprKind::Lambda(lambda) => print_lambda_expr(arena, lambda, interner),
+        ExprKind::TypeLiteral(ty) => print_type_expr(arena, ty, interner),
+        ExprKind::StructLiteral(struct_lit) => print_struct_literal(arena, struct_lit, interner),
+        ExprKind::FieldAccess(field) => print_field_access(arena, field, interner),
+        ExprKind::MethodCall(method) => print_method_call(arena, method, interner),
+    }
+}
+
+/// Print a float literal, ensuring it has a decimal point.
+fn print_float_literal<'a>(arena: &'a Arena<'a>, f: f64) -> DocBuilder<'a, Arena<'a>> {
+    let s = f.to_string();
+    // Ensure we have a decimal point
+    if s.contains('.') || s.contains('e') || s.contains('E') {
+        arena.text(s)
+    } else {
+        arena.text(format!("{}.0", s))
+    }
+}
+
+/// Print a string literal with proper escaping.
+fn print_string_literal<'a>(arena: &'a Arena<'a>, s: &str) -> DocBuilder<'a, Arena<'a>> {
+    // Check if it's a raw string (contains unescaped backslashes that would need escaping)
+    // For now, just use regular string literals
+    let mut result = String::with_capacity(s.len() + 2);
+    result.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => result.push_str("\\\""),
+            '\\' => result.push_str("\\\\"),
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\t' => result.push_str("\\t"),
+            c => result.push(c),
+        }
+    }
+    result.push('"');
+    arena.text(result)
+}
+
+/// Print an interpolated string.
+fn print_interpolated_string<'a>(
+    arena: &'a Arena<'a>,
+    parts: &[StringPart],
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let mut result = arena.text("\"");
+    for part in parts {
+        result = match part {
+            StringPart::Literal(s) => {
+                // Escape the literal part (but don't double-escape { and })
+                let mut escaped = String::new();
+                for c in s.chars() {
+                    match c {
+                        '"' => escaped.push_str("\\\""),
+                        '\\' => escaped.push_str("\\\\"),
+                        '\n' => escaped.push_str("\\n"),
+                        '\r' => escaped.push_str("\\r"),
+                        '\t' => escaped.push_str("\\t"),
+                        c => escaped.push(c),
+                    }
+                }
+                result.append(arena.text(escaped))
+            }
+            StringPart::Expr(expr) => {
+                // Render the expression inside {expr}
+                result
+                    .append(arena.text("{"))
+                    .append(print_expr(arena, expr, interner))
+                    .append(arena.text("}"))
+            }
+        };
+    }
+    result.append(arena.text("\""))
+}
+
+/// Print a binary expression.
+fn print_binary_expr<'a>(
+    arena: &'a Arena<'a>,
+    bin: &BinaryExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let op_str = match bin.op {
+        BinaryOp::Add => "+",
+        BinaryOp::Sub => "-",
+        BinaryOp::Mul => "*",
+        BinaryOp::Div => "/",
+        BinaryOp::Mod => "%",
+        BinaryOp::Eq => "==",
+        BinaryOp::Ne => "!=",
+        BinaryOp::Lt => "<",
+        BinaryOp::Gt => ">",
+        BinaryOp::Le => "<=",
+        BinaryOp::Ge => ">=",
+        BinaryOp::And => "&&",
+        BinaryOp::Or => "||",
+        BinaryOp::BitAnd => "&",
+        BinaryOp::BitOr => "|",
+        BinaryOp::BitXor => "^",
+        BinaryOp::Shl => "<<",
+        BinaryOp::Shr => ">>",
+    };
+
+    // For long expressions, break before the operator
+    let left = print_expr(arena, &bin.left, interner);
+    let right = print_expr(arena, &bin.right, interner);
+
+    // Single line: left op right
+    // Multi-line: left\n    op right (break before operator)
+    left.append(arena.text(" "))
+        .append(arena.text(op_str))
+        .append(arena.text(" "))
+        .append(right)
+        .group()
+}
+
+/// Print a unary expression.
+fn print_unary_expr<'a>(
+    arena: &'a Arena<'a>,
+    unary: &UnaryExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let op_str = match unary.op {
+        UnaryOp::Neg => "-",
+        UnaryOp::Not => "!",
+        UnaryOp::BitNot => "~",
+    };
+
+    arena
+        .text(op_str)
+        .append(print_expr(arena, &unary.operand, interner))
+}
+
+/// Print a call expression.
+fn print_call_expr<'a>(
+    arena: &'a Arena<'a>,
+    call: &CallExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let callee = print_expr(arena, &call.callee, interner);
+    let args = print_call_args(arena, &call.args, interner);
+
+    callee.append(args)
+}
+
+/// Print call arguments with grouping for line breaking.
+fn print_call_args<'a>(
+    arena: &'a Arena<'a>,
+    args: &[Expr],
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    if args.is_empty() {
+        return arena.text("()");
+    }
+
+    let arg_docs: Vec<_> = args
+        .iter()
+        .map(|a| print_expr(arena, a, interner))
+        .collect();
+
+    // Multi-line format: each arg on its own line with trailing comma
+    let multi_line = arena
+        .hardline()
+        .append(arena.intersperse(
+            arg_docs.iter().cloned(),
+            arena.text(",").append(arena.hardline()),
+        ))
+        .append(arena.text(","))
+        .nest(INDENT)
+        .append(arena.hardline());
+
+    // Single line format: args separated by ", "
+    let single_line = arena.intersperse(arg_docs, arena.text(", "));
+
+    arena
+        .text("(")
+        .append(multi_line.flat_alt(single_line).group())
+        .append(arena.text(")"))
+}
+
+/// Print an assignment expression.
+fn print_assign_expr<'a>(
+    arena: &'a Arena<'a>,
+    assign: &AssignExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let target = print_assign_target(arena, &assign.target, interner);
+    let value = print_expr(arena, &assign.value, interner);
+
+    target.append(arena.text(" = ")).append(value)
+}
+
+/// Print an assignment target.
+fn print_assign_target<'a>(
+    arena: &'a Arena<'a>,
+    target: &AssignTarget,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    match target {
+        AssignTarget::Variable(sym) => arena.text(interner.resolve(*sym).to_string()),
+        AssignTarget::Index { object, index } => print_expr(arena, object, interner)
+            .append(arena.text("["))
+            .append(print_expr(arena, index, interner))
+            .append(arena.text("]")),
+        AssignTarget::Field { object, field, .. } => print_expr(arena, object, interner)
+            .append(arena.text("."))
+            .append(arena.text(interner.resolve(*field).to_string())),
+    }
+}
+
+/// Print a compound assignment expression.
+fn print_compound_assign_expr<'a>(
+    arena: &'a Arena<'a>,
+    compound: &CompoundAssignExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let op_str = match compound.op {
+        CompoundOp::Add => "+=",
+        CompoundOp::Sub => "-=",
+        CompoundOp::Mul => "*=",
+        CompoundOp::Div => "/=",
+        CompoundOp::Mod => "%=",
+    };
+
+    let target = print_assign_target(arena, &compound.target, interner);
+    let value = print_expr(arena, &compound.value, interner);
+
+    target
+        .append(arena.text(" "))
+        .append(arena.text(op_str))
+        .append(arena.text(" "))
+        .append(value)
+}
+
+/// Print a range expression.
+fn print_range_expr<'a>(
+    arena: &'a Arena<'a>,
+    range: &RangeExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let op = if range.inclusive { "..=" } else { ".." };
+
+    print_expr(arena, &range.start, interner)
+        .append(arena.text(op))
+        .append(print_expr(arena, &range.end, interner))
+}
+
+/// Print an array literal.
+fn print_array_literal<'a>(
+    arena: &'a Arena<'a>,
+    elements: &[Expr],
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    if elements.is_empty() {
+        return arena.text("[]");
+    }
+
+    let elem_docs: Vec<_> = elements
+        .iter()
+        .map(|e| print_expr(arena, e, interner))
+        .collect();
+
+    // Multi-line format with trailing comma
+    let multi_line = arena
+        .hardline()
+        .append(arena.intersperse(
+            elem_docs.iter().cloned(),
+            arena.text(",").append(arena.hardline()),
+        ))
+        .append(arena.text(","))
+        .nest(INDENT)
+        .append(arena.hardline());
+
+    // Single line format with spaces inside brackets: [ 1, 2, 3 ]
+    let single_line = arena
+        .text(" ")
+        .append(arena.intersperse(elem_docs, arena.text(", ")))
+        .append(arena.text(" "));
+
+    arena
+        .text("[")
+        .append(multi_line.flat_alt(single_line).group())
+        .append(arena.text("]"))
+}
+
+/// Print an index expression.
+fn print_index_expr<'a>(
+    arena: &'a Arena<'a>,
+    index: &IndexExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    print_expr(arena, &index.object, interner)
+        .append(arena.text("["))
+        .append(print_expr(arena, &index.index, interner))
+        .append(arena.text("]"))
+}
+
+/// Print a match expression.
+fn print_match_expr<'a>(
+    arena: &'a Arena<'a>,
+    match_expr: &MatchExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let scrutinee = print_expr(arena, &match_expr.scrutinee, interner);
+
+    let arms: Vec<_> = match_expr
+        .arms
+        .iter()
+        .map(|arm| print_match_arm(arena, arm, interner))
+        .collect();
+
+    let arms_doc = arena.intersperse(arms, arena.hardline());
+
+    arena
+        .text("match ")
+        .append(scrutinee)
+        .append(arena.text(" {"))
+        .append(arena.hardline().append(arms_doc).nest(INDENT))
+        .append(arena.hardline())
+        .append(arena.text("}"))
+}
+
+/// Print a match arm.
+fn print_match_arm<'a>(
+    arena: &'a Arena<'a>,
+    arm: &MatchArm,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let pattern = print_pattern(arena, &arm.pattern, interner);
+
+    let guard = if let Some(guard_expr) = &arm.guard {
+        arena
+            .text(" if ")
+            .append(print_expr(arena, guard_expr, interner))
+    } else {
+        arena.nil()
+    };
+
+    let body = print_expr(arena, &arm.body, interner);
+
+    pattern
+        .append(guard)
+        .append(arena.text(" => "))
+        .append(body)
+}
+
+/// Print a pattern.
+fn print_pattern<'a>(
+    arena: &'a Arena<'a>,
+    pattern: &Pattern,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    match pattern {
+        Pattern::Wildcard(_) => arena.text("_"),
+        Pattern::Literal(expr) => print_expr(arena, expr, interner),
+        Pattern::Identifier { name, .. } => arena.text(interner.resolve(*name).to_string()),
+    }
+}
+
+/// Print a null coalescing expression.
+fn print_null_coalesce_expr<'a>(
+    arena: &'a Arena<'a>,
+    nc: &NullCoalesceExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    print_expr(arena, &nc.value, interner)
+        .append(arena.text(" ?? "))
+        .append(print_expr(arena, &nc.default, interner))
+}
+
+/// Print an is expression.
+fn print_is_expr<'a>(
+    arena: &'a Arena<'a>,
+    is_expr: &IsExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    print_expr(arena, &is_expr.value, interner)
+        .append(arena.text(" is "))
+        .append(print_type_expr(arena, &is_expr.type_expr, interner))
+}
+
+/// Print a lambda expression.
+fn print_lambda_expr<'a>(
+    arena: &'a Arena<'a>,
+    lambda: &LambdaExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    // Print parameters
+    let params = print_lambda_params(arena, &lambda.params, interner);
+
+    // Print return type if present
+    let return_type = if let Some(ty) = &lambda.return_type {
+        arena
+            .text(" -> ")
+            .append(print_type_expr(arena, ty, interner))
+    } else {
+        arena.nil()
+    };
+
+    // Print body
+    let body = match &lambda.body {
+        LambdaBody::Expr(expr) => arena.text(" ").append(print_expr(arena, expr, interner)),
+        LambdaBody::Block(block) => arena.text(" ").append(print_block(arena, block, interner)),
+    };
+
+    params
+        .append(return_type)
+        .append(arena.text(" =>"))
+        .append(body)
+}
+
+/// Print lambda parameters.
+fn print_lambda_params<'a>(
+    arena: &'a Arena<'a>,
+    params: &[LambdaParam],
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    if params.is_empty() {
+        return arena.text("()");
+    }
+
+    let param_docs: Vec<_> = params
+        .iter()
+        .map(|p| print_lambda_param(arena, p, interner))
+        .collect();
+
+    arena
+        .text("(")
+        .append(arena.intersperse(param_docs, arena.text(", ")))
+        .append(arena.text(")"))
+}
+
+/// Print a single lambda parameter.
+fn print_lambda_param<'a>(
+    arena: &'a Arena<'a>,
+    param: &LambdaParam,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = arena.text(interner.resolve(param.name).to_string());
+    if let Some(ty) = &param.ty {
+        name.append(arena.text(": "))
+            .append(print_type_expr(arena, ty, interner))
+    } else {
+        name
+    }
+}
+
+/// Print a struct literal.
+fn print_struct_literal<'a>(
+    arena: &'a Arena<'a>,
+    struct_lit: &StructLiteralExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = interner.resolve(struct_lit.name).to_string();
+
+    if struct_lit.fields.is_empty() {
+        return arena.text(name).append(arena.text(" {}"));
+    }
+
+    let field_docs: Vec<_> = struct_lit
+        .fields
+        .iter()
+        .map(|f| {
+            arena
+                .text(interner.resolve(f.name).to_string())
+                .append(arena.text(": "))
+                .append(print_expr(arena, &f.value, interner))
+        })
+        .collect();
+
+    // Multi-line format with trailing comma
+    let multi_line = arena
+        .hardline()
+        .append(arena.intersperse(
+            field_docs.iter().cloned(),
+            arena.text(",").append(arena.hardline()),
+        ))
+        .append(arena.text(","))
+        .nest(INDENT)
+        .append(arena.hardline());
+
+    // Single line format with spaces inside braces: { x: 1, y: 2 }
+    let single_line = arena
+        .text(" ")
+        .append(arena.intersperse(field_docs, arena.text(", ")))
+        .append(arena.text(" "));
+
+    arena
+        .text(name)
+        .append(arena.text(" {"))
+        .append(multi_line.flat_alt(single_line).group())
+        .append(arena.text("}"))
+}
+
+/// Print a field access expression.
+fn print_field_access<'a>(
+    arena: &'a Arena<'a>,
+    field: &FieldAccessExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    print_expr(arena, &field.object, interner)
+        .append(arena.text("."))
+        .append(arena.text(interner.resolve(field.field).to_string()))
+}
+
+/// Print a method call expression.
+fn print_method_call<'a>(
+    arena: &'a Arena<'a>,
+    method: &MethodCallExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let object = print_expr(arena, &method.object, interner);
+    let method_name = interner.resolve(method.method).to_string();
+    let args = print_call_args(arena, &method.args, interner);
+
+    object
+        .append(arena.text("."))
+        .append(arena.text(method_name))
+        .append(args)
+}
+
+/// Print a type expression.
+fn print_type_expr<'a>(
+    arena: &'a Arena<'a>,
+    ty: &TypeExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    match ty {
+        TypeExpr::Primitive(prim) => arena.text(primitive_type_str(*prim)),
+        TypeExpr::Named(sym) => arena.text(interner.resolve(*sym).to_string()),
+        TypeExpr::Array(inner) => arena
+            .text("[")
+            .append(print_type_expr(arena, inner, interner))
+            .append(arena.text("]")),
+        TypeExpr::Optional(inner) => {
+            print_type_expr(arena, inner, interner).append(arena.text("?"))
+        }
+        TypeExpr::Union(types) => {
+            let type_docs: Vec<_> = types
+                .iter()
+                .map(|t| print_type_expr(arena, t, interner))
+                .collect();
+            arena.intersperse(type_docs, arena.text(" | "))
+        }
+        TypeExpr::Nil => arena.text("nil"),
+        TypeExpr::Function {
+            params,
+            return_type,
+        } => {
+            let param_docs: Vec<_> = params
+                .iter()
+                .map(|t| print_type_expr(arena, t, interner))
+                .collect();
+            arena
+                .text("(")
+                .append(arena.intersperse(param_docs, arena.text(", ")))
+                .append(arena.text(") -> "))
+                .append(print_type_expr(arena, return_type, interner))
+        }
+        TypeExpr::SelfType => arena.text("Self"),
+    }
+}
+
+/// Get the string representation of a primitive type.
+fn primitive_type_str(prim: PrimitiveType) -> &'static str {
+    match prim {
+        PrimitiveType::I8 => "i8",
+        PrimitiveType::I16 => "i16",
+        PrimitiveType::I32 => "i32",
+        PrimitiveType::I64 => "i64",
+        PrimitiveType::I128 => "i128",
+        PrimitiveType::U8 => "u8",
+        PrimitiveType::U16 => "u16",
+        PrimitiveType::U32 => "u32",
+        PrimitiveType::U64 => "u64",
+        PrimitiveType::F32 => "f32",
+        PrimitiveType::F64 => "f64",
+        PrimitiveType::Bool => "bool",
+        PrimitiveType::String => "string",
+    }
+}
+
+/// Print a tests declaration.
+fn print_tests_decl<'a>(
+    arena: &'a Arena<'a>,
+    tests: &TestsDecl,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let label = if let Some(label) = &tests.label {
+        arena
+            .text("tests ")
+            .append(print_string_literal(arena, label))
+    } else {
+        arena.text("tests")
+    };
+
+    if tests.tests.is_empty() {
+        return label.append(arena.text(" {}"));
+    }
+
+    let test_docs: Vec<_> = tests
+        .tests
+        .iter()
+        .map(|test| print_test_case(arena, test, interner))
+        .collect();
+
+    // Separate test cases with blank lines
+    let tests_body = arena.intersperse(test_docs, arena.hardline().append(arena.hardline()));
+
+    label
+        .append(arena.text(" {"))
+        .append(arena.hardline().append(tests_body).nest(INDENT))
+        .append(arena.hardline())
+        .append(arena.text("}"))
+}
+
+/// Print a test case.
+fn print_test_case<'a>(
+    arena: &'a Arena<'a>,
+    test: &TestCase,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    arena
+        .text("test ")
+        .append(print_string_literal(arena, &test.name))
+        .append(arena.text(" "))
+        .append(print_block(arena, &test.body, interner))
+}
+
+/// Print a class declaration.
+fn print_class_decl<'a>(
+    arena: &'a Arena<'a>,
+    class: &ClassDecl,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = interner.resolve(class.name).to_string();
+
+    let implements = if class.implements.is_empty() {
+        arena.nil()
+    } else {
+        let impl_names: Vec<_> = class
+            .implements
+            .iter()
+            .map(|s| arena.text(interner.resolve(*s).to_string()))
+            .collect();
+        arena
+            .text(" implements ")
+            .append(arena.intersperse(impl_names, arena.text(", ")))
+    };
+
+    print_class_like_body(
+        arena,
+        &name,
+        implements,
+        &class.fields,
+        &class.methods,
+        interner,
+        "class",
+    )
+}
+
+/// Print a record declaration.
+fn print_record_decl<'a>(
+    arena: &'a Arena<'a>,
+    record: &RecordDecl,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = interner.resolve(record.name).to_string();
+
+    let implements = if record.implements.is_empty() {
+        arena.nil()
+    } else {
+        let impl_names: Vec<_> = record
+            .implements
+            .iter()
+            .map(|s| arena.text(interner.resolve(*s).to_string()))
+            .collect();
+        arena
+            .text(" implements ")
+            .append(arena.intersperse(impl_names, arena.text(", ")))
+    };
+
+    print_class_like_body(
+        arena,
+        &name,
+        implements,
+        &record.fields,
+        &record.methods,
+        interner,
+        "record",
+    )
+}
+
+/// Print the body of a class-like declaration (class or record).
+fn print_class_like_body<'a>(
+    arena: &'a Arena<'a>,
+    name: &str,
+    implements: DocBuilder<'a, Arena<'a>>,
+    fields: &[FieldDef],
+    methods: &[FuncDecl],
+    interner: &Interner,
+    keyword: &str,
+) -> DocBuilder<'a, Arena<'a>> {
+    if fields.is_empty() && methods.is_empty() {
+        return arena
+            .text(keyword.to_string())
+            .append(arena.text(" "))
+            .append(arena.text(name.to_string()))
+            .append(implements)
+            .append(arena.text(" {}"));
+    }
+
+    // Build the body content
+    let body = if !fields.is_empty() && !methods.is_empty() {
+        // Fields separated by single lines, then blank line, then methods
+        let field_docs: Vec<_> = fields
+            .iter()
+            .map(|f| print_field_def(arena, f, interner))
+            .collect();
+        let method_docs: Vec<_> = methods
+            .iter()
+            .map(|m| print_func_decl(arena, m, interner))
+            .collect();
+
+        let fields_section = arena.intersperse(field_docs, arena.hardline());
+        let methods_section =
+            arena.intersperse(method_docs, arena.hardline().append(arena.hardline()));
+
+        fields_section
+            .append(arena.hardline())
+            .append(arena.hardline())
+            .append(methods_section)
+    } else if !fields.is_empty() {
+        let field_docs: Vec<_> = fields
+            .iter()
+            .map(|f| print_field_def(arena, f, interner))
+            .collect();
+        arena.intersperse(field_docs, arena.hardline())
+    } else {
+        let method_docs: Vec<_> = methods
+            .iter()
+            .map(|m| print_func_decl(arena, m, interner))
+            .collect();
+        arena.intersperse(method_docs, arena.hardline().append(arena.hardline()))
+    };
+
+    arena
+        .text(keyword.to_string())
+        .append(arena.text(" "))
+        .append(arena.text(name.to_string()))
+        .append(implements)
+        .append(arena.text(" {"))
+        .append(arena.hardline().append(body).nest(INDENT))
+        .append(arena.hardline())
+        .append(arena.text("}"))
+}
+
+/// Print a field definition.
+fn print_field_def<'a>(
+    arena: &'a Arena<'a>,
+    field: &FieldDef,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    arena
+        .text(interner.resolve(field.name).to_string())
+        .append(arena.text(": "))
+        .append(print_type_expr(arena, &field.ty, interner))
+        .append(arena.text(","))
+}
+
+/// Print an interface declaration.
+fn print_interface_decl<'a>(
+    arena: &'a Arena<'a>,
+    iface: &InterfaceDecl,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = interner.resolve(iface.name).to_string();
+
+    let extends = if iface.extends.is_empty() {
+        arena.nil()
+    } else {
+        let extend_names: Vec<_> = iface
+            .extends
+            .iter()
+            .map(|s| arena.text(interner.resolve(*s).to_string()))
+            .collect();
+        arena
+            .text(" extends ")
+            .append(arena.intersperse(extend_names, arena.text(", ")))
+    };
+
+    if iface.fields.is_empty() && iface.methods.is_empty() {
+        return arena
+            .text("interface ")
+            .append(arena.text(name))
+            .append(extends)
+            .append(arena.text(" {}"));
+    }
+
+    let mut body_parts: Vec<DocBuilder<'a, Arena<'a>>> = Vec::new();
+
+    // Fields
+    for field in &iface.fields {
+        body_parts.push(print_field_def(arena, field, interner));
+    }
+
+    // Methods
+    for method in &iface.methods {
+        body_parts.push(print_interface_method(arena, method, interner));
+    }
+
+    let body = arena.intersperse(body_parts, arena.hardline());
+
+    arena
+        .text("interface ")
+        .append(arena.text(name))
+        .append(extends)
+        .append(arena.text(" {"))
+        .append(arena.hardline().append(body).nest(INDENT))
+        .append(arena.hardline())
+        .append(arena.text("}"))
+}
+
+/// Print an interface method.
+fn print_interface_method<'a>(
+    arena: &'a Arena<'a>,
+    method: &InterfaceMethod,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = interner.resolve(method.name).to_string();
+    let params = print_params(arena, &method.params, interner);
+
+    let return_type = if let Some(ty) = &method.return_type {
+        arena
+            .text(" -> ")
+            .append(print_type_expr(arena, ty, interner))
+    } else {
+        arena.nil()
+    };
+
+    let signature = arena
+        .text("func ")
+        .append(arena.text(name))
+        .append(params)
+        .append(return_type);
+
+    if let Some(body) = &method.body {
+        signature
+            .append(arena.text(" "))
+            .append(print_block(arena, body, interner))
+    } else {
+        signature
+    }
+}
+
+/// Print an implement block.
+fn print_implement_block<'a>(
+    arena: &'a Arena<'a>,
+    impl_block: &ImplementBlock,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let header = if let Some(trait_name) = impl_block.trait_name {
+        arena
+            .text("implement ")
+            .append(arena.text(interner.resolve(trait_name).to_string()))
+            .append(arena.text(" for "))
+            .append(print_type_expr(arena, &impl_block.target_type, interner))
+    } else {
+        arena
+            .text("implement ")
+            .append(print_type_expr(arena, &impl_block.target_type, interner))
+    };
+
+    if impl_block.methods.is_empty() {
+        return header.append(arena.text(" {}"));
+    }
+
+    let method_docs: Vec<_> = impl_block
+        .methods
+        .iter()
+        .map(|m| print_func_decl(arena, m, interner))
+        .collect();
+
+    let body = arena.intersperse(method_docs, arena.hardline().append(arena.hardline()));
+
+    header
+        .append(arena.text(" {"))
+        .append(arena.hardline().append(body).nest(INDENT))
+        .append(arena.hardline())
+        .append(arena.text("}"))
 }
