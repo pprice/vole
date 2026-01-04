@@ -4,8 +4,8 @@
 use std::fmt::Write;
 
 use crate::frontend::{
-    BinaryOp, Block, Decl, Expr, ExprKind, FuncDecl, Interner, LetStmt, Param, PrimitiveType,
-    Program, Stmt, StringPart, TestCase, TestsDecl, TypeExpr, UnaryOp,
+    AssignTarget, BinaryOp, Block, CompoundOp, Decl, Expr, ExprKind, FuncDecl, Interner, LetStmt,
+    Param, PrimitiveType, Program, Stmt, StringPart, TestCase, TestsDecl, TypeExpr, UnaryOp,
 };
 
 /// Pretty-printer for AST nodes that resolves symbols via an Interner.
@@ -377,6 +377,22 @@ impl<'a> AstPrinter<'a> {
                 let name = self.interner.resolve(a.target);
                 writeln!(out, "Assign \"{}\"", name).unwrap();
                 self.indented().write_expr(out, &a.value);
+            }
+            ExprKind::CompoundAssign(c) => {
+                self.write_indent(out);
+                let op_str = match c.op {
+                    CompoundOp::Add => "+=",
+                    CompoundOp::Sub => "-=",
+                    CompoundOp::Mul => "*=",
+                    CompoundOp::Div => "/=",
+                    CompoundOp::Mod => "%=",
+                };
+                let target_str = match &c.target {
+                    AssignTarget::Variable(sym) => self.interner.resolve(*sym).to_string(),
+                    AssignTarget::Index { .. } => "<index>".to_string(),
+                };
+                writeln!(out, "CompoundAssign {} {}", target_str, op_str).unwrap();
+                self.indented().write_expr(out, &c.value);
             }
             ExprKind::Grouping(inner) => {
                 // Skip grouping node, just print inner
