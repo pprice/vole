@@ -1,6 +1,6 @@
 // src/cli/args.rs
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 use crate::commands::version::version_string;
@@ -46,18 +46,21 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Run a Vole source file
+    #[command(visible_alias = "r")]
     Run {
         /// Path to the .vole file to execute
         #[arg(value_name = "FILE")]
         file: PathBuf,
     },
     /// Check Vole source files for errors without running them
+    #[command(visible_alias = "c")]
     Check {
         /// Paths to check (files, directories, or glob patterns)
         #[arg(value_name = "PATHS", required = true)]
         paths: Vec<String>,
     },
     /// Run tests in Vole source files
+    #[command(visible_alias = "t")]
     Test {
         /// Paths to test (files, directories, or glob patterns)
         #[arg(value_name = "PATHS", required = true)]
@@ -76,6 +79,7 @@ pub enum Commands {
         max_failures: u32,
     },
     /// Inspect compilation output (AST, IR)
+    #[command(visible_alias = "i")]
     Inspect {
         /// What to inspect: ast, ir
         #[arg(value_name = "TYPE")]
@@ -95,8 +99,24 @@ pub enum Commands {
     },
     /// Show version information
     Version,
+    /// Benchmark commands
+    Bench(BenchArgs),
+}
+
+#[derive(Args)]
+pub struct BenchArgs {
+    /// Run even on debug builds
+    #[arg(long)]
+    pub force: bool,
+
+    #[command(subcommand)]
+    pub command: BenchCommands,
+}
+
+#[derive(Subcommand)]
+pub enum BenchCommands {
     /// Run benchmarks with timing statistics
-    Bench {
+    Run {
         /// Paths to benchmark (files, directories, or glob patterns)
         #[arg(value_name = "PATHS", required = true)]
         paths: Vec<String>,
@@ -116,13 +136,9 @@ pub enum Commands {
         /// Show per-phase compile timing
         #[arg(long)]
         detailed: bool,
-
-        /// Run even on debug builds
-        #[arg(long)]
-        force: bool,
     },
     /// Compare benchmark results against a baseline
-    BenchCompare {
+    Compare {
         /// Baseline JSON file to compare against
         #[arg(value_name = "BASELINE")]
         baseline: PathBuf,
