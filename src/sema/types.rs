@@ -298,6 +298,15 @@ impl Type {
             Type::Union(flattened)
         }
     }
+
+    /// Get a field from a class or record type by name
+    pub fn get_field(&self, field: Symbol) -> Option<&StructField> {
+        match self {
+            Type::Class(c) => c.fields.iter().find(|f| f.name == field),
+            Type::Record(r) => r.fields.iter().find(|f| f.name == field),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for Type {
