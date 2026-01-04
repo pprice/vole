@@ -21,6 +21,17 @@ record User implements Hashable {
     }
 }
 
+interface Describable {
+    func describe() -> string
+}
+
+// Implement for existing record
+implement Describable for Person {
+    func describe() -> string {
+        return self.name
+    }
+}
+
 tests "interfaces" {
     test "record with matching field satisfies interface structurally" {
         let p = Person { name: "Alice", age: 30 }
@@ -30,5 +41,12 @@ tests "interfaces" {
     test "explicit implements with method" {
         let u = User { id: 42 }
         assert(u.hash() == 42)
+    }
+}
+
+tests "implement blocks" {
+    test "implement block adds method to type" {
+        let p = Person { name: "Bob", age: 25 }
+        assert(p.describe() == "Bob")
     }
 }
