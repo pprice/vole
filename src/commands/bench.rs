@@ -6,9 +6,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use comfy_table::{presets::UTF8_FULL, Cell, Color, Table};
+use comfy_table::{Cell, Color, Table, presets::UTF8_FULL};
 
-use crate::bench::{run_files, BenchConfig, BenchmarkRun, Stats, VoleInfo};
+use crate::bench::{BenchConfig, BenchmarkRun, Stats, VoleInfo, run_files};
 use crate::cli::expand_paths;
 use crate::util::{format_bytes, format_duration};
 
@@ -61,7 +61,11 @@ pub fn run_bench(
     println!(
         "Vole:   {} ({})\n",
         run.vole.version,
-        if force { "debug (forced)" } else { &run.vole.build }
+        if force {
+            "debug (forced)"
+        } else {
+            &run.vole.build
+        }
     );
 
     // Print results table
@@ -167,7 +171,11 @@ pub fn run_compare(baseline: &PathBuf, output: Option<&PathBuf>) -> ExitCode {
     };
 
     // Extract file list from baseline
-    let files: Vec<PathBuf> = baseline_run.results.iter().map(|r| r.file.clone()).collect();
+    let files: Vec<PathBuf> = baseline_run
+        .results
+        .iter()
+        .map(|r| r.file.clone())
+        .collect();
 
     if files.is_empty() {
         eprintln!("Error: Baseline contains no results");
