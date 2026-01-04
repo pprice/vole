@@ -48,6 +48,8 @@ pub enum Type {
     Class(ClassType),
     /// Record instance type
     Record(RecordType),
+    /// Interface type
+    Interface(InterfaceType),
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -80,6 +82,23 @@ pub struct ClassType {
 pub struct RecordType {
     pub name: Symbol,
     pub fields: Vec<StructField>,
+}
+
+/// Interface type information
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterfaceType {
+    pub name: Symbol,
+    pub methods: Vec<InterfaceMethodType>,
+    pub extends: Vec<Symbol>, // Parent interfaces
+}
+
+/// Method signature in an interface
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterfaceMethodType {
+    pub name: Symbol,
+    pub params: Vec<Type>,
+    pub return_type: Box<Type>,
+    pub has_default: bool, // True if interface provides default implementation
 }
 
 impl PartialEq for FunctionType {
@@ -226,6 +245,7 @@ impl Type {
             Type::Type => "type",
             Type::Class(_) => "class",
             Type::Record(_) => "record",
+            Type::Interface(_) => "interface",
         }
     }
 

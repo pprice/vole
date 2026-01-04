@@ -2,9 +2,15 @@
 
 use crate::errors::SemanticError;
 use crate::frontend::*;
+use crate::sema::implement_registry::{ImplementRegistry, MethodImpl, TypeId};
+use crate::sema::interface_registry::{
+    InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
+};
+use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::{
     ClassType, FunctionType, RecordType, StructField, Type,
     scope::{Scope, Variable},
+    types::{InterfaceMethodType, InterfaceType},
 };
 use std::collections::{HashMap, HashSet};
 
@@ -57,11 +63,17 @@ pub struct Analyzer {
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their resolved types, including narrowed types
     expr_types: HashMap<NodeId, Type>,
+    /// Interface definitions registry
+    pub interface_registry: InterfaceRegistry,
+    /// Methods added via implement blocks
+    pub implement_registry: ImplementRegistry,
+    /// Resolved method calls for codegen
+    pub method_resolutions: MethodResolutions,
 }
 
 impl Analyzer {
     pub fn new(_file: &str, _source: &str) -> Self {
-        Self {
+        let mut analyzer = Self {
             scope: Scope::new(),
             functions: HashMap::new(),
             globals: HashMap::new(),
@@ -76,7 +88,23 @@ impl Analyzer {
             records: HashMap::new(),
             methods: HashMap::new(),
             expr_types: HashMap::new(),
-        }
+            interface_registry: InterfaceRegistry::new(),
+            implement_registry: ImplementRegistry::new(),
+            method_resolutions: MethodResolutions::new(),
+        };
+
+        // Register built-in interfaces and implementations
+        // NOTE: This is temporary - will eventually come from stdlib/traits.void
+        analyzer.register_builtins();
+
+        analyzer
+    }
+
+    /// Register built-in interfaces and their implementations
+    /// NOTE: This is temporary - will eventually come from stdlib/traits.void
+    fn register_builtins(&mut self) {
+        // For now, just set up the registries - actual builtin methods
+        // will be registered when we have the interner available in a later task
     }
 
     /// Helper to add a type error
@@ -104,9 +132,15 @@ impl Analyzer {
         self.expr_types
     }
 
-    /// Take ownership of both type aliases and expression types (consuming self)
-    pub fn into_analysis_results(self) -> (HashMap<Symbol, Type>, HashMap<NodeId, Type>) {
-        (self.type_aliases, self.expr_types)
+    /// Take ownership of type aliases, expression types, and method resolutions (consuming self)
+    pub fn into_analysis_results(
+        self,
+    ) -> (
+        HashMap<Symbol, Type>,
+        HashMap<NodeId, Type>,
+        MethodResolutions,
+    ) {
+        (self.type_aliases, self.expr_types, self.method_resolutions)
     }
 
     /// Record the resolved type for an expression
@@ -299,6 +333,75 @@ impl Analyzer {
                         );
                     }
                 }
+                Decl::Interface(interface_decl) => {
+                    // Convert AST fields to InterfaceFieldDef
+                    let fields: Vec<InterfaceFieldDef> = interface_decl
+                        .fields
+                        .iter()
+                        .map(|f| InterfaceFieldDef {
+                            name: f.name,
+                            ty: self.resolve_type(&f.ty),
+                        })
+                        .collect();
+
+                    // Convert AST methods to InterfaceMethodDef
+                    let methods: Vec<InterfaceMethodDef> = interface_decl
+                        .methods
+                        .iter()
+                        .map(|m| InterfaceMethodDef {
+                            name: m.name,
+                            params: m.params.iter().map(|p| self.resolve_type(&p.ty)).collect(),
+                            return_type: m
+                                .return_type
+                                .as_ref()
+                                .map(|t| self.resolve_type(t))
+                                .unwrap_or(Type::Void),
+                            has_default: m.body.is_some(),
+                        })
+                        .collect();
+
+                    let def = InterfaceDef {
+                        name: interface_decl.name,
+                        extends: interface_decl.extends.clone(),
+                        fields,
+                        methods,
+                    };
+
+                    self.interface_registry.register(def);
+                }
+                Decl::Implement(impl_block) => {
+                    let target_type = self.resolve_type(&impl_block.target_type);
+
+                    if let Some(type_id) = TypeId::from_type(&target_type) {
+                        for method in &impl_block.methods {
+                            let func_type = FunctionType {
+                                params: method
+                                    .params
+                                    .iter()
+                                    .map(|p| self.resolve_type(&p.ty))
+                                    .collect(),
+                                return_type: Box::new(
+                                    method
+                                        .return_type
+                                        .as_ref()
+                                        .map(|t| self.resolve_type(t))
+                                        .unwrap_or(Type::Void),
+                                ),
+                                is_closure: false,
+                            };
+
+                            self.implement_registry.register_method(
+                                type_id.clone(),
+                                method.name,
+                                MethodImpl {
+                                    trait_name: impl_block.trait_name,
+                                    func_type,
+                                    is_builtin: false,
+                                },
+                            );
+                        }
+                    }
+                }
             }
         }
 
@@ -362,6 +465,14 @@ impl Analyzer {
                         self.check_method(method, record.name, interner)?;
                     }
                 }
+                Decl::Interface(_) => {
+                    // TODO: Type check interface method signatures
+                }
+                Decl::Implement(impl_block) => {
+                    // Methods will be type-checked when called
+                    // Could add validation here later (e.g., verify trait satisfaction)
+                    let _ = impl_block; // suppress warning
+                }
             }
         }
 
@@ -376,9 +487,28 @@ impl Analyzer {
         match ty {
             TypeExpr::Primitive(p) => Type::from_primitive(*p),
             TypeExpr::Named(sym) => {
-                // Look up type alias
+                // Look up type alias first
                 if let Some(aliased) = self.type_aliases.get(sym) {
                     aliased.clone()
+                } else if let Some(record) = self.records.get(sym) {
+                    Type::Record(record.clone())
+                } else if let Some(class) = self.classes.get(sym) {
+                    Type::Class(class.clone())
+                } else if let Some(iface) = self.interface_registry.get(*sym) {
+                    Type::Interface(InterfaceType {
+                        name: *sym,
+                        methods: iface
+                            .methods
+                            .iter()
+                            .map(|m| InterfaceMethodType {
+                                name: m.name,
+                                params: m.params.clone(),
+                                return_type: Box::new(m.return_type.clone()),
+                                has_default: m.has_default,
+                            })
+                            .collect(),
+                        extends: iface.extends.clone(),
+                    })
                 } else {
                     Type::Error // Unknown type name
                 }
@@ -407,6 +537,11 @@ impl Analyzer {
                     return_type: Box::new(ret),
                     is_closure: false, // Type annotations don't know if it's a closure
                 })
+            }
+            TypeExpr::SelfType => {
+                // Self is resolved during interface/implement checking
+                // For now, return Error to indicate it can't be used outside that context
+                Type::Error
             }
         }
     }
@@ -977,14 +1112,18 @@ impl Analyzer {
             }
             ExprKind::Lambda(lambda) => {
                 // Extract expected function type if available
+                // Support both direct function types and functional interfaces
                 let expected_fn = expected.and_then(|t| {
                     if let Type::Function(ft) = t {
-                        Some(ft)
+                        Some(ft.clone())
+                    } else if let Type::Interface(iface) = t {
+                        // Check if it's a functional interface (single abstract method, no fields)
+                        self.get_functional_interface_type(iface.name)
                     } else {
                         None
                     }
                 });
-                Ok(self.analyze_lambda(lambda, expected_fn, interner))
+                Ok(self.analyze_lambda(lambda, expected_fn.as_ref(), interner))
             }
             // All other cases: infer type, then check compatibility
             _ => {
@@ -2047,6 +2186,28 @@ impl Analyzer {
 
             ExprKind::MethodCall(method_call) => {
                 let object_type = self.check_expr(&method_call.object, interner)?;
+                let method_name = interner.resolve(method_call.method);
+
+                // Handle built-in methods for primitive types
+                if let Some(return_type) = self.check_builtin_method(
+                    &object_type,
+                    method_name,
+                    &method_call.args,
+                    interner,
+                ) {
+                    // Record the resolution for codegen
+                    let resolved = ResolvedMethod::Implemented {
+                        trait_name: None,
+                        func_type: FunctionType {
+                            params: vec![],
+                            return_type: Box::new(return_type.clone()),
+                            is_closure: false,
+                        },
+                        is_builtin: true,
+                    };
+                    self.method_resolutions.insert(expr.id, resolved);
+                    return Ok(return_type);
+                }
 
                 // Get type symbol from object type
                 let type_sym = match &object_type {
@@ -2103,7 +2264,83 @@ impl Analyzer {
                         }
                     }
 
+                    // Record resolution for direct method
+                    self.method_resolutions.insert(
+                        expr.id,
+                        ResolvedMethod::Direct {
+                            func_type: method_type.clone(),
+                        },
+                    );
+
                     Ok(*method_type.return_type)
+                } else if let Some(type_id) = TypeId::from_type(&object_type) {
+                    // Check implement registry for methods added via implement blocks
+                    if let Some(impl_) = self
+                        .implement_registry
+                        .get_method(&type_id, method_call.method)
+                    {
+                        let func_type = impl_.func_type.clone();
+
+                        // Record resolution
+                        self.method_resolutions.insert(
+                            expr.id,
+                            ResolvedMethod::Implemented {
+                                trait_name: impl_.trait_name,
+                                func_type: func_type.clone(),
+                                is_builtin: impl_.is_builtin,
+                            },
+                        );
+
+                        // Mark side effects if inside lambda
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                        }
+
+                        // Check argument count
+                        if method_call.args.len() != func_type.params.len() {
+                            self.add_error(
+                                SemanticError::WrongArgumentCount {
+                                    expected: func_type.params.len(),
+                                    found: method_call.args.len(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                        }
+
+                        // Check argument types
+                        for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter())
+                        {
+                            let arg_ty =
+                                self.check_expr_expecting(arg, Some(param_ty), interner)?;
+                            if !self.types_compatible(&arg_ty, param_ty) {
+                                self.add_error(
+                                    SemanticError::TypeMismatch {
+                                        expected: param_ty.name().to_string(),
+                                        found: arg_ty.name().to_string(),
+                                        span: arg.span.into(),
+                                    },
+                                    arg.span,
+                                );
+                            }
+                        }
+
+                        Ok(*func_type.return_type)
+                    } else {
+                        self.add_error(
+                            SemanticError::UnknownMethod {
+                                ty: type_name,
+                                method: interner.resolve(method_call.method).to_string(),
+                                span: method_call.method_span.into(),
+                            },
+                            method_call.method_span,
+                        );
+                        // Still check args for more errors
+                        for arg in &method_call.args {
+                            self.check_expr(arg, interner)?;
+                        }
+                        Ok(Type::Error)
+                    }
                 } else {
                     self.add_error(
                         SemanticError::UnknownMethod {
@@ -2342,6 +2579,242 @@ impl Analyzer {
 
         // Error type is compatible with anything (for error recovery)
         if from == &Type::Error || to == &Type::Error {
+            return true;
+        }
+
+        // Function type is compatible with functional interface if signatures match
+        if let Type::Function(fn_type) = from
+            && let Type::Interface(iface) = to
+            && let Some(iface_fn) = self.get_functional_interface_type(iface.name)
+            && fn_type.params.len() == iface_fn.params.len()
+        {
+            let params_match = fn_type
+                .params
+                .iter()
+                .zip(iface_fn.params.iter())
+                .all(|(fp, ip)| self.types_compatible(fp, ip));
+            let return_matches = self.types_compatible(&fn_type.return_type, &iface_fn.return_type);
+            if params_match && return_matches {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Check if a method call is a built-in method on a primitive type
+    /// Returns Some(return_type) if handled, None if not a built-in
+    fn check_builtin_method(
+        &mut self,
+        object_type: &Type,
+        method_name: &str,
+        args: &[Expr],
+        _interner: &Interner,
+    ) -> Option<Type> {
+        match (object_type, method_name) {
+            // Array.length() -> i64
+            (Type::Array(_), "length") => {
+                if !args.is_empty() {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 0,
+                            found: args.len(),
+                            span: args[0].span.into(),
+                        },
+                        args[0].span,
+                    );
+                }
+                Some(Type::I64)
+            }
+            // String.length() -> i64
+            (Type::String, "length") => {
+                if !args.is_empty() {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 0,
+                            found: args.len(),
+                            span: args[0].span.into(),
+                        },
+                        args[0].span,
+                    );
+                }
+                Some(Type::I64)
+            }
+            _ => None,
+        }
+    }
+
+    /// Resolve a method call and record the resolution for codegen
+    #[allow(dead_code)] // Will be used in future tasks
+    fn resolve_method_call(
+        &mut self,
+        object_type: &Type,
+        method_name: Symbol,
+        call_node_id: NodeId,
+        interner: &Interner,
+    ) -> Option<ResolvedMethod> {
+        let method_str = interner.resolve(method_name);
+
+        // 1. Check built-in methods (array/string.length)
+        if let Some(return_type) = self.check_builtin_method_for_resolution(object_type, method_str)
+        {
+            let resolved = ResolvedMethod::Implemented {
+                trait_name: None, // Will be Sized eventually
+                func_type: FunctionType {
+                    params: vec![],
+                    return_type: Box::new(return_type),
+                    is_closure: false,
+                },
+                is_builtin: true,
+            };
+            self.method_resolutions
+                .insert(call_node_id, resolved.clone());
+            return Some(resolved);
+        }
+
+        // 2. Check direct methods on type (classes/records)
+        let type_sym = match object_type {
+            Type::Class(c) => Some(c.name),
+            Type::Record(r) => Some(r.name),
+            _ => None,
+        };
+
+        if let Some(ts) = type_sym
+            && let Some(func_type) = self.methods.get(&(ts, method_name)).cloned()
+        {
+            let resolved = ResolvedMethod::Direct { func_type };
+            self.method_resolutions
+                .insert(call_node_id, resolved.clone());
+            return Some(resolved);
+        }
+
+        // 3. Check implement registry
+        if let Some(type_id) = TypeId::from_type(object_type)
+            && let Some(impl_) = self.implement_registry.get_method(&type_id, method_name)
+        {
+            let resolved = ResolvedMethod::Implemented {
+                trait_name: impl_.trait_name,
+                func_type: impl_.func_type.clone(),
+                is_builtin: impl_.is_builtin,
+            };
+            self.method_resolutions
+                .insert(call_node_id, resolved.clone());
+            return Some(resolved);
+        }
+
+        None
+    }
+
+    /// Simple check for builtin methods, returns return type if found
+    fn check_builtin_method_for_resolution(
+        &self,
+        object_type: &Type,
+        method_name: &str,
+    ) -> Option<Type> {
+        match (object_type, method_name) {
+            (Type::Array(_), "length") => Some(Type::I64),
+            (Type::String, "length") => Some(Type::I64),
+            _ => None,
+        }
+    }
+
+    /// Get the function type for a functional interface (single abstract method, no fields)
+    fn get_functional_interface_type(&self, interface_name: Symbol) -> Option<FunctionType> {
+        let method = self.interface_registry.is_functional(interface_name)?;
+        Some(FunctionType {
+            params: method.params.clone(),
+            return_type: Box::new(method.return_type.clone()),
+            is_closure: true,
+        })
+    }
+
+    /// Check if a type structurally satisfies an interface
+    ///
+    /// This implements duck typing: a type satisfies an interface if it has
+    /// all required fields and methods, regardless of explicit `implements`.
+    pub fn satisfies_interface(&self, ty: &Type, interface_name: Symbol) -> bool {
+        let Some(interface) = self.interface_registry.get(interface_name) else {
+            return false;
+        };
+
+        // Check required fields
+        for field in &interface.fields {
+            if !self.type_has_field(ty, field.name, &field.ty) {
+                return false;
+            }
+        }
+
+        // Check required methods (skip those with defaults)
+        for method in &interface.methods {
+            if method.has_default {
+                continue;
+            }
+
+            if !self.type_has_method(ty, method) {
+                return false;
+            }
+        }
+
+        // Check parent interfaces (extends)
+        for parent in &interface.extends {
+            if !self.satisfies_interface(ty, *parent) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if a type has a field with the given name and compatible type
+    fn type_has_field(&self, ty: &Type, field_name: Symbol, expected_type: &Type) -> bool {
+        match ty {
+            Type::Record(r) => r
+                .fields
+                .iter()
+                .any(|f| f.name == field_name && self.types_compatible(&f.ty, expected_type)),
+            Type::Class(c) => c
+                .fields
+                .iter()
+                .any(|f| f.name == field_name && self.types_compatible(&f.ty, expected_type)),
+            _ => false,
+        }
+    }
+
+    /// Check if a type has a method that matches the interface method signature
+    fn type_has_method(
+        &self,
+        ty: &Type,
+        interface_method: &crate::sema::interface_registry::InterfaceMethodDef,
+    ) -> bool {
+        // Get type symbol for method lookup
+        let type_sym = match ty {
+            Type::Record(r) => r.name,
+            Type::Class(c) => c.name,
+            _ => {
+                // For primitives/arrays, check implement registry
+                if let Some(type_id) = TypeId::from_type(ty) {
+                    return self
+                        .implement_registry
+                        .get_method(&type_id, interface_method.name)
+                        .is_some();
+                }
+                return false;
+            }
+        };
+
+        // Check direct methods on the type
+        let method_key = (type_sym, interface_method.name);
+        if self.methods.contains_key(&method_key) {
+            return true;
+        }
+
+        // Check implement registry
+        if let Some(type_id) = TypeId::from_type(ty)
+            && self
+                .implement_registry
+                .get_method(&type_id, interface_method.name)
+                .is_some()
+        {
             return true;
         }
 
@@ -2868,5 +3341,99 @@ mod tests {
         let lambda = get_first_lambda(&program);
         assert!(lambda.has_side_effects.get());
         assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    }
+
+    // Helper for satisfies_interface tests
+    fn analyze_and_check_interface(source: &str) -> Analyzer {
+        let mut parser = Parser::new(source);
+        let program = parser.parse_program().unwrap();
+        let interner = parser.into_interner();
+        let mut analyzer = Analyzer::new("test.vole", source);
+        let _ = analyzer.analyze(&program, &interner);
+        analyzer
+    }
+
+    #[test]
+    fn satisfies_interface_with_field() {
+        let source = r#"
+            interface Named {
+                name: string
+            }
+
+            record Person {
+                name: string,
+                age: i64,
+            }
+        "#;
+        let analyzer = analyze_and_check_interface(source);
+
+        // Get the symbols for Person and Named
+        let mut parser = Parser::new(source);
+        let _ = parser.parse_program().unwrap();
+        let mut interner = parser.into_interner();
+        let person_sym = interner.intern("Person");
+        let named_sym = interner.intern("Named");
+
+        // Get the Person type
+        let person_type = analyzer.records.get(&person_sym).unwrap();
+        let ty = Type::Record(person_type.clone());
+
+        // Check if Person satisfies Named
+        assert!(analyzer.satisfies_interface(&ty, named_sym));
+    }
+
+    #[test]
+    fn satisfies_interface_missing_field() {
+        let source = r#"
+            interface Named {
+                name: string
+            }
+
+            record Point {
+                x: i64,
+                y: i64,
+            }
+        "#;
+        let analyzer = analyze_and_check_interface(source);
+
+        let mut parser = Parser::new(source);
+        let _ = parser.parse_program().unwrap();
+        let mut interner = parser.into_interner();
+        let point_sym = interner.intern("Point");
+        let named_sym = interner.intern("Named");
+
+        let point_type = analyzer.records.get(&point_sym).unwrap();
+        let ty = Type::Record(point_type.clone());
+
+        // Point does NOT satisfy Named (missing name field)
+        assert!(!analyzer.satisfies_interface(&ty, named_sym));
+    }
+
+    #[test]
+    fn satisfies_interface_with_method() {
+        let source = r#"
+            interface Hashable {
+                func hash() -> i64
+            }
+
+            record User {
+                id: i64,
+                func hash() -> i64 {
+                    return self.id
+                }
+            }
+        "#;
+        let analyzer = analyze_and_check_interface(source);
+
+        let mut parser = Parser::new(source);
+        let _ = parser.parse_program().unwrap();
+        let mut interner = parser.into_interner();
+        let user_sym = interner.intern("User");
+        let hashable_sym = interner.intern("Hashable");
+
+        let user_type = analyzer.records.get(&user_sym).unwrap();
+        let ty = Type::Record(user_type.clone());
+
+        assert!(analyzer.satisfies_interface(&ty, hashable_sym));
     }
 }

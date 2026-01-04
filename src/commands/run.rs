@@ -43,6 +43,7 @@ fn execute(path: &Path) -> Result<(), String> {
             &analyzed.interner,
             analyzed.type_aliases.clone(),
             analyzed.expr_types.clone(),
+            analyzed.method_resolutions.clone(),
         );
         compiler
             .compile_program(&analyzed.program)
