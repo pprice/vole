@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use vole::cli::{BenchCommands, Cli, Commands};
 use vole::commands::bench::{run_bench, run_compare};
 use vole::commands::check::check_files;
-use vole::commands::fmt::{format_files, FmtOptions};
+use vole::commands::fmt::{FmtOptions, format_files};
 use vole::commands::inspect::inspect_files;
 use vole::commands::run::run_file;
 use vole::commands::test::run_tests;

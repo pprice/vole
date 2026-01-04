@@ -6,5 +6,5 @@
 mod config;
 mod formatter;
 
-pub use config::{FormatConfig, CANONICAL};
-pub use formatter::{format, FormatError, FormatResult};
+pub use config::{CANONICAL, FormatConfig};
+pub use formatter::{FormatError, FormatResult, format};
