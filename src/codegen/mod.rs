@@ -11,6 +11,5 @@ mod structs;
 mod types;
 
 pub use compiler::{Compiler, ControlFlowCtx, TestInfo};
-pub(crate) use context::{Cg, ControlFlow};
 pub use jit::JitContext;
 pub use types::CompiledValue;

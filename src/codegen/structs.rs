@@ -4,10 +4,9 @@
 // This module contains helper functions and impl Cg methods for field access, method lookups.
 
 use cranelift::prelude::*;
-use cranelift_module::Module;
 
 use super::context::Cg;
-use super::types::{type_to_cranelift, CompileCtx, CompiledValue};
+use super::types::{CompileCtx, CompiledValue};
 use crate::frontend::{FieldAccessExpr, MethodCallExpr, StructLiteralExpr, Symbol};
 use crate::sema::Type;
 
@@ -160,35 +159,16 @@ impl Cg<'_, '_, '_> {
         let vole_type = metadata.vole_type.clone();
         let field_slots = metadata.field_slots.clone();
 
-        let new_func_id = self
-            .ctx
-            .func_ids
-            .get("vole_instance_new")
-            .ok_or_else(|| "vole_instance_new not found".to_string())?;
-        let new_func_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*new_func_id, self.builder.func);
-
         let type_id_val = self.builder.ins().iconst(types::I32, type_id as i64);
         let field_count_val = self.builder.ins().iconst(types::I32, field_count as i64);
         let runtime_type = self.builder.ins().iconst(types::I32, 7); // TYPE_INSTANCE
 
-        let call = self.builder.ins().call(
-            new_func_ref,
+        let instance_ptr = self.call_runtime(
+            "vole_instance_new",
             &[type_id_val, field_count_val, runtime_type],
-        );
-        let instance_ptr = self.builder.inst_results(call)[0];
+        )?;
 
-        let set_func_id = self
-            .ctx
-            .func_ids
-            .get("vole_instance_set_field")
-            .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
-        let set_func_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*set_func_id, self.builder.func);
+        let set_func_ref = self.func_ref("vole_instance_set_field")?;
 
         for init in &sl.fields {
             let slot = *field_slots.get(&init.name).ok_or_else(|| {
@@ -220,19 +200,8 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(&fa.object)?;
         let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, fa.field, self.ctx)?;
 
-        let get_func_id = self
-            .ctx
-            .func_ids
-            .get("vole_instance_get_field")
-            .ok_or_else(|| "vole_instance_get_field not found".to_string())?;
-        let get_func_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*get_func_id, self.builder.func);
-
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-        let call = self.builder.ins().call(get_func_ref, &[obj.value, slot_val]);
-        let result_raw = self.builder.inst_results(call)[0];
+        let result_raw = self.call_runtime("vole_instance_get_field", &[obj.value, slot_val])?;
 
         let (result_val, cranelift_ty) = convert_field_value(self.builder, result_raw, &field_type);
 
@@ -255,22 +224,13 @@ impl Cg<'_, '_, '_> {
 
         let (slot, _field_type) = get_field_slot_and_type(&obj.vole_type, field, self.ctx)?;
 
-        let set_func_id = self
-            .ctx
-            .func_ids
-            .get("vole_instance_set_field")
-            .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
-        let set_func_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*set_func_id, self.builder.func);
-
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
         let store_value = convert_to_i64_for_storage(self.builder, &value);
 
-        self.builder
-            .ins()
-            .call(set_func_ref, &[obj.value, slot_val, store_value]);
+        self.call_runtime_void(
+            "vole_instance_set_field",
+            &[obj.value, slot_val, store_value],
+        )?;
 
         Ok(value)
     }
@@ -289,15 +249,7 @@ impl Cg<'_, '_, '_> {
         let type_name_str = self.ctx.interner.resolve(type_name);
         let full_name = format!("{}_{}", type_name_str, method_name_str);
 
-        let method_func_id = self
-            .ctx
-            .func_ids
-            .get(&full_name)
-            .ok_or_else(|| format!("Unknown method: {}", full_name))?;
-        let method_func_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*method_func_id, self.builder.func);
+        let method_func_ref = self.func_ref(&full_name)?;
 
         let mut args = vec![obj.value];
         for arg in &mc.args {
@@ -311,17 +263,9 @@ impl Cg<'_, '_, '_> {
         let return_type = get_method_return_type(&obj.vole_type, mc.method, self.ctx)?;
 
         if results.is_empty() {
-            Ok(CompiledValue {
-                value: self.builder.ins().iconst(types::I64, 0),
-                ty: types::I64,
-                vole_type: Type::Void,
-            })
+            Ok(self.void_value())
         } else {
-            Ok(CompiledValue {
-                value: results[0],
-                ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
-                vole_type: return_type,
-            })
+            Ok(self.typed_value(results[0], return_type))
         }
     }
 
@@ -333,40 +277,12 @@ impl Cg<'_, '_, '_> {
     ) -> Result<Option<CompiledValue>, String> {
         match (&obj.vole_type, method_name) {
             (Type::Array(_), "length") => {
-                let func_id = self
-                    .ctx
-                    .func_ids
-                    .get("vole_array_len")
-                    .ok_or_else(|| "vole_array_len not found".to_string())?;
-                let func_ref = self
-                    .ctx
-                    .module
-                    .declare_func_in_func(*func_id, self.builder.func);
-                let call = self.builder.ins().call(func_ref, &[obj.value]);
-                let result = self.builder.inst_results(call)[0];
-                Ok(Some(CompiledValue {
-                    value: result,
-                    ty: types::I64,
-                    vole_type: Type::I64,
-                }))
+                let result = self.call_runtime("vole_array_len", &[obj.value])?;
+                Ok(Some(self.i64_value(result)))
             }
             (Type::String, "length") => {
-                let func_id = self
-                    .ctx
-                    .func_ids
-                    .get("vole_string_len")
-                    .ok_or_else(|| "vole_string_len not found".to_string())?;
-                let func_ref = self
-                    .ctx
-                    .module
-                    .declare_func_in_func(*func_id, self.builder.func);
-                let call = self.builder.ins().call(func_ref, &[obj.value]);
-                let result = self.builder.inst_results(call)[0];
-                Ok(Some(CompiledValue {
-                    value: result,
-                    ty: types::I64,
-                    vole_type: Type::I64,
-                }))
+                let result = self.call_runtime("vole_string_len", &[obj.value])?;
+                Ok(Some(self.i64_value(result)))
             }
             _ => Ok(None),
         }

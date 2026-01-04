@@ -5,13 +5,14 @@
 
 use std::collections::HashMap;
 
-use cranelift::prelude::{FunctionBuilder, Variable};
+use cranelift::prelude::{FunctionBuilder, InstBuilder, Value, Variable, types};
+use cranelift_module::{FuncId, Module};
 
 use crate::frontend::Symbol;
 use crate::sema::Type;
 
 use super::lambda::CaptureBinding;
-use super::types::CompileCtx;
+use super::types::{CompileCtx, CompiledValue, type_to_cranelift};
 
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
@@ -129,5 +130,136 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get the closure variable, if in a closure context
     pub fn closure_var(&self) -> Option<Variable> {
         self.captures.as_ref().map(|c| c.closure_var)
+    }
+
+    // ========== Runtime function helpers ==========
+
+    /// Get a runtime function ID by name
+    pub fn func_id(&self, name: &str) -> Result<FuncId, String> {
+        self.ctx
+            .func_ids
+            .get(name)
+            .copied()
+            .ok_or_else(|| format!("{} not found", name))
+    }
+
+    /// Get a runtime function reference for calling
+    pub fn func_ref(&mut self, name: &str) -> Result<cranelift::codegen::ir::FuncRef, String> {
+        let func_id = self.func_id(name)?;
+        Ok(self
+            .ctx
+            .module
+            .declare_func_in_func(func_id, self.builder.func))
+    }
+
+    /// Call a runtime function and return the first result (or error if no results)
+    pub fn call_runtime(&mut self, name: &str, args: &[Value]) -> Result<Value, String> {
+        let func_ref = self.func_ref(name)?;
+        let call = self.builder.ins().call(func_ref, args);
+        let results = self.builder.inst_results(call);
+        if results.is_empty() {
+            Err(format!("{} returned no value", name))
+        } else {
+            Ok(results[0])
+        }
+    }
+
+    /// Call a runtime function that returns void
+    pub fn call_runtime_void(&mut self, name: &str, args: &[Value]) -> Result<(), String> {
+        let func_ref = self.func_ref(name)?;
+        self.builder.ins().call(func_ref, args);
+        Ok(())
+    }
+
+    /// Create a void return value
+    pub fn void_value(&mut self) -> CompiledValue {
+        let zero = self.builder.ins().iconst(types::I64, 0);
+        CompiledValue {
+            value: zero,
+            ty: types::I64,
+            vole_type: Type::Void,
+        }
+    }
+
+    // ========== CompiledValue constructors ==========
+
+    /// Wrap a Cranelift value as a Bool CompiledValue
+    pub fn bool_value(&self, value: Value) -> CompiledValue {
+        CompiledValue {
+            value,
+            ty: types::I8,
+            vole_type: Type::Bool,
+        }
+    }
+
+    /// Create a boolean constant (true or false)
+    pub fn bool_const(&mut self, b: bool) -> CompiledValue {
+        let value = self.builder.ins().iconst(types::I8, if b { 1 } else { 0 });
+        self.bool_value(value)
+    }
+
+    /// Wrap a Cranelift value as an I64 CompiledValue
+    pub fn i64_value(&self, value: Value) -> CompiledValue {
+        CompiledValue {
+            value,
+            ty: types::I64,
+            vole_type: Type::I64,
+        }
+    }
+
+    /// Create an I64 constant
+    pub fn i64_const(&mut self, n: i64) -> CompiledValue {
+        let value = self.builder.ins().iconst(types::I64, n);
+        self.i64_value(value)
+    }
+
+    /// Wrap a Cranelift value as an F64 CompiledValue
+    pub fn f64_value(&self, value: Value) -> CompiledValue {
+        CompiledValue {
+            value,
+            ty: types::F64,
+            vole_type: Type::F64,
+        }
+    }
+
+    /// Create an F64 constant
+    pub fn f64_const(&mut self, n: f64) -> CompiledValue {
+        let value = self.builder.ins().f64const(n);
+        self.f64_value(value)
+    }
+
+    /// Create a nil value
+    pub fn nil_value(&mut self) -> CompiledValue {
+        let value = self.builder.ins().iconst(types::I8, 0);
+        CompiledValue {
+            value,
+            ty: types::I8,
+            vole_type: Type::Nil,
+        }
+    }
+
+    /// Wrap a Cranelift value as a String CompiledValue
+    pub fn string_value(&self, value: Value) -> CompiledValue {
+        CompiledValue {
+            value,
+            ty: self.ctx.pointer_type,
+            vole_type: Type::String,
+        }
+    }
+
+    /// Create a CompiledValue with a dynamic Vole type
+    pub fn typed_value(&self, value: Value, vole_type: Type) -> CompiledValue {
+        CompiledValue {
+            value,
+            ty: type_to_cranelift(&vole_type, self.ctx.pointer_type),
+            vole_type,
+        }
+    }
+
+    // ========== Control flow helpers ==========
+
+    /// Extend a boolean condition to I32 for use with brif
+    pub fn cond_to_i32(&mut self, cond: Value) -> Value {
+        self.builder.ins().uextend(types::I32, cond)
     }
 }

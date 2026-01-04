@@ -1,4 +1,10 @@
 // src/codegen/compiler.rs
+//
+// NOTE: This file contains legacy code being migrated to split impl blocks.
+// The new code is in expr.rs, stmt.rs, calls.rs, ops.rs, structs.rs, lambda.rs.
+// Functions here are kept for backward compatibility during migration.
+
+#![allow(dead_code)]
 
 use cranelift::codegen::ir::{BlockArg, TrapCode};
 use cranelift::prelude::*;
@@ -6,7 +12,7 @@ use cranelift_module::Module;
 use std::collections::HashMap;
 
 use super::calls::{compile_string_literal, value_to_string};
-use super::lambda::{compile_lambda, CaptureBinding};
+use super::lambda::{CaptureBinding, compile_lambda};
 use super::stmt::{compile_block, construct_union};
 use super::structs::{
     convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type,
@@ -1833,7 +1839,6 @@ pub(super) fn compile_expr(
         ExprKind::MethodCall(mc) => compile_method_call(builder, mc, variables, ctx),
     }
 }
-
 
 /// Compile an expression with capture awareness
 pub(super) fn compile_expr_with_captures(

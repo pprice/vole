@@ -11,7 +11,7 @@ use crate::frontend::{BinaryOp, Expr, ExprKind, LambdaBody, LambdaExpr, Symbol};
 use crate::sema::{FunctionType, Type};
 
 use super::context::{Captures, Cg, ControlFlow};
-use super::types::{resolve_type_expr, type_size, type_to_cranelift, CompileCtx, CompiledValue};
+use super::types::{CompileCtx, CompiledValue, resolve_type_expr, type_size, type_to_cranelift};
 
 /// Information about a captured variable for lambda compilation
 #[derive(Clone)]
@@ -188,7 +188,9 @@ fn compile_pure_lambda(
         .iter()
         .map(|p| {
             p.ty.as_ref()
-                .map(|t| type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type))
+                .map(|t| {
+                    type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type)
+                })
                 .unwrap_or(types::I64)
         })
         .collect();
@@ -307,7 +309,9 @@ fn compile_lambda_with_captures(
         .iter()
         .map(|p| {
             p.ty.as_ref()
-                .map(|t| type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type))
+                .map(|t| {
+                    type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type)
+                })
                 .unwrap_or(types::I64)
         })
         .collect();

@@ -5,14 +5,13 @@
 use std::collections::HashMap;
 
 use cranelift::prelude::*;
-use cranelift_module::Module;
 
 use crate::frontend::{self, ExprKind, Stmt, Symbol};
 use crate::sema::Type;
 
 use super::compiler::ControlFlowCtx;
 use super::context::{Cg, ControlFlow};
-use super::types::{resolve_type_expr, type_size, type_to_cranelift, CompileCtx, CompiledValue};
+use super::types::{CompileCtx, CompiledValue, resolve_type_expr, type_size, type_to_cranelift};
 
 /// Compile a block of statements (wrapper for compatibility)
 pub(super) fn compile_block(
@@ -29,6 +28,7 @@ pub(super) fn compile_block(
 }
 
 /// Wrap a value in a union representation (wrapper for compatibility)
+#[allow(dead_code)] // Used by compiler.rs during migration
 pub(super) fn construct_union(
     builder: &mut FunctionBuilder,
     value: CompiledValue,
@@ -174,7 +174,7 @@ impl Cg<'_, '_, '_> {
 
                 self.builder.switch_to_block(header_block);
                 let cond = self.expr(&while_stmt.condition)?;
-                let cond_i32 = self.builder.ins().uextend(types::I32, cond.value);
+                let cond_i32 = self.cond_to_i32(cond.value);
                 self.builder
                     .ins()
                     .brif(cond_i32, body_block, &[], exit_block, &[]);
@@ -199,7 +199,7 @@ impl Cg<'_, '_, '_> {
 
             Stmt::If(if_stmt) => {
                 let cond = self.expr(&if_stmt.condition)?;
-                let cond_i32 = self.builder.ins().uextend(types::I32, cond.value);
+                let cond_i32 = self.cond_to_i32(cond.value);
 
                 let then_block = self.builder.create_block();
                 let else_block = self.builder.create_block();
@@ -325,17 +325,7 @@ impl Cg<'_, '_, '_> {
     fn for_array(&mut self, for_stmt: &frontend::ForStmt) -> Result<bool, String> {
         let arr = self.expr(&for_stmt.iterable)?;
 
-        let len_id = self
-            .ctx
-            .func_ids
-            .get("vole_array_len")
-            .ok_or_else(|| "vole_array_len not found".to_string())?;
-        let len_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*len_id, self.builder.func);
-        let len_call = self.builder.ins().call(len_ref, &[arr.value]);
-        let len_val = self.builder.inst_results(len_call)[0];
+        let len_val = self.call_runtime("vole_array_len", &[arr.value])?;
 
         let idx_var = self.builder.declare_var(types::I64);
         let zero = self.builder.ins().iconst(types::I64, 0);
@@ -369,21 +359,8 @@ impl Cg<'_, '_, '_> {
 
         self.builder.switch_to_block(body_block);
 
-        let get_value_id = self
-            .ctx
-            .func_ids
-            .get("vole_array_get_value")
-            .ok_or_else(|| "vole_array_get_value not found".to_string())?;
-        let get_value_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*get_value_id, self.builder.func);
         let current_idx = self.builder.use_var(idx_var);
-        let get_call = self
-            .builder
-            .ins()
-            .call(get_value_ref, &[arr.value, current_idx]);
-        let elem_val = self.builder.inst_results(get_call)[0];
+        let elem_val = self.call_runtime("vole_array_get_value", &[arr.value, current_idx])?;
         self.builder.def_var(elem_var, elem_val);
 
         self.cf.push_loop(exit_block, continue_block);
@@ -420,36 +397,36 @@ impl Cg<'_, '_, '_> {
             return Err("Expected union type".to_string());
         };
 
-        let (tag, actual_value, actual_type) =
-            if let Some(pos) = variants.iter().position(|v| v == &value.vole_type) {
-                (pos, value.value, value.vole_type.clone())
-            } else {
-                let compatible = variants.iter().enumerate().find(|(_, v)| {
-                    value.vole_type.is_integer() && v.is_integer() && value.vole_type.can_widen_to(v)
-                        || v.is_integer() && value.vole_type.is_integer()
-                });
+        let (tag, actual_value, actual_type) = if let Some(pos) =
+            variants.iter().position(|v| v == &value.vole_type)
+        {
+            (pos, value.value, value.vole_type.clone())
+        } else {
+            let compatible = variants.iter().enumerate().find(|(_, v)| {
+                value.vole_type.is_integer() && v.is_integer() && value.vole_type.can_widen_to(v)
+                    || v.is_integer() && value.vole_type.is_integer()
+            });
 
-                match compatible {
-                    Some((pos, variant_type)) => {
-                        let target_ty =
-                            type_to_cranelift(variant_type, self.ctx.pointer_type);
-                        let narrowed = if target_ty.bytes() < value.ty.bytes() {
-                            self.builder.ins().ireduce(target_ty, value.value)
-                        } else if target_ty.bytes() > value.ty.bytes() {
-                            self.builder.ins().sextend(target_ty, value.value)
-                        } else {
-                            value.value
-                        };
-                        (pos, narrowed, variant_type.clone())
-                    }
-                    None => {
-                        return Err(format!(
-                            "Type {:?} not in union {:?}",
-                            value.vole_type, variants
-                        ));
-                    }
+            match compatible {
+                Some((pos, variant_type)) => {
+                    let target_ty = type_to_cranelift(variant_type, self.ctx.pointer_type);
+                    let narrowed = if target_ty.bytes() < value.ty.bytes() {
+                        self.builder.ins().ireduce(target_ty, value.value)
+                    } else if target_ty.bytes() > value.ty.bytes() {
+                        self.builder.ins().sextend(target_ty, value.value)
+                    } else {
+                        value.value
+                    };
+                    (pos, narrowed, variant_type.clone())
                 }
-            };
+                None => {
+                    return Err(format!(
+                        "Type {:?} not in union {:?}",
+                        value.vole_type, variants
+                    ));
+                }
+            }
+        };
 
         let union_size = type_size(union_type, self.ctx.pointer_type);
         let slot = self.builder.create_sized_stack_slot(StackSlotData::new(

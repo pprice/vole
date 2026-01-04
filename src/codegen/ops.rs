@@ -4,14 +4,13 @@
 
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
-use cranelift_module::Module;
 
 use crate::frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr};
 use crate::sema::Type;
 
 use super::context::Cg;
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
-use super::types::{convert_to_type, type_to_cranelift, CompiledValue};
+use super::types::{CompiledValue, array_element_tag, convert_to_type};
 
 impl Cg<'_, '_, '_> {
     /// Compile a binary expression
@@ -61,11 +60,7 @@ impl Cg<'_, '_, '_> {
         self.builder.seal_block(merge_block);
         let result = self.builder.block_params(merge_block)[0];
 
-        Ok(CompiledValue {
-            value: result,
-            ty: types::I8,
-            vole_type: Type::Bool,
-        })
+        Ok(self.bool_value(result))
     }
 
     /// Short-circuit OR evaluation
@@ -100,11 +95,7 @@ impl Cg<'_, '_, '_> {
         self.builder.seal_block(merge_block);
         let result = self.builder.block_params(merge_block)[0];
 
-        Ok(CompiledValue {
-            value: result,
-            ty: types::I8,
-            vole_type: Type::Bool,
-        })
+        Ok(self.bool_value(result))
     }
 
     /// Compile a binary operation on two values
@@ -127,7 +118,7 @@ impl Cg<'_, '_, '_> {
         let left_vole_type = left.vole_type.clone();
 
         // Convert operands
-        let left_val = convert_to_type(self.builder, left.clone(), result_ty);
+        let left_val = convert_to_type(self.builder, left, result_ty);
         let right_val = convert_to_type(self.builder, right, result_ty);
 
         let result = match op {
@@ -177,13 +168,9 @@ impl Cg<'_, '_, '_> {
                 if matches!(left_vole_type, Type::String) {
                     self.string_eq(left_val, right_val)?
                 } else if result_ty == types::F64 || result_ty == types::F32 {
-                    self.builder
-                        .ins()
-                        .fcmp(FloatCC::Equal, left_val, right_val)
+                    self.builder.ins().fcmp(FloatCC::Equal, left_val, right_val)
                 } else {
-                    self.builder
-                        .ins()
-                        .icmp(IntCC::Equal, left_val, right_val)
+                    self.builder.ins().icmp(IntCC::Equal, left_val, right_val)
                 }
             }
             BinaryOp::Ne => {
@@ -294,7 +281,7 @@ impl Cg<'_, '_, '_> {
             | BinaryOp::Le
             | BinaryOp::Ge => Type::Bool,
             BinaryOp::And | BinaryOp::Or => unreachable!(),
-            _ => left_vole_type.clone(),
+            _ => left_vole_type,
         };
 
         Ok(CompiledValue {
@@ -306,13 +293,8 @@ impl Cg<'_, '_, '_> {
 
     /// String equality comparison
     fn string_eq(&mut self, left: Value, right: Value) -> Result<Value, String> {
-        if let Some(cmp_id) = self.ctx.func_ids.get("vole_string_eq") {
-            let cmp_ref = self
-                .ctx
-                .module
-                .declare_func_in_func(*cmp_id, self.builder.func);
-            let call = self.builder.ins().call(cmp_ref, &[left, right]);
-            Ok(self.builder.inst_results(call)[0])
+        if self.ctx.func_ids.contains_key("vole_string_eq") {
+            self.call_runtime("vole_string_eq", &[left, right])
         } else {
             Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
         }
@@ -343,21 +325,12 @@ impl Cg<'_, '_, '_> {
         let (var, var_type) = self
             .vars
             .get(&sym)
-            .ok_or_else(|| {
-                format!(
-                    "undefined variable: {}",
-                    self.ctx.interner.resolve(sym)
-                )
-            })?;
+            .ok_or_else(|| format!("undefined variable: {}", self.ctx.interner.resolve(sym)))?;
         let var = *var;
         let var_type = var_type.clone();
         let current_val = self.builder.use_var(var);
 
-        let current = CompiledValue {
-            value: current_val,
-            ty: type_to_cranelift(&var_type, self.ctx.pointer_type),
-            vole_type: var_type,
-        };
+        let current = self.typed_value(current_val, var_type);
 
         let rhs = self.expr(&compound.value)?;
         let binary_op = compound.op.to_binary_op();
@@ -383,35 +356,8 @@ impl Cg<'_, '_, '_> {
         };
 
         // Load current element
-        let get_value_id = self
-            .ctx
-            .func_ids
-            .get("vole_array_get_value")
-            .ok_or_else(|| "vole_array_get_value not found".to_string())?;
-        let get_value_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*get_value_id, self.builder.func);
-        let call = self
-            .builder
-            .ins()
-            .call(get_value_ref, &[arr.value, idx.value]);
-        let raw_value = self.builder.inst_results(call)[0];
-
-        let (current_val, current_ty) = match &elem_type {
-            Type::F64 => {
-                let fval = self
-                    .builder
-                    .ins()
-                    .bitcast(types::F64, MemFlags::new(), raw_value);
-                (fval, types::F64)
-            }
-            Type::Bool => {
-                let bval = self.builder.ins().ireduce(types::I8, raw_value);
-                (bval, types::I8)
-            }
-            _ => (raw_value, types::I64),
-        };
+        let raw_value = self.call_runtime("vole_array_get_value", &[arr.value, idx.value])?;
+        let (current_val, current_ty) = convert_field_value(self.builder, raw_value, &elem_type);
 
         let current = CompiledValue {
             value: current_val,
@@ -424,39 +370,16 @@ impl Cg<'_, '_, '_> {
         let result = self.binary_op(current, rhs, binary_op)?;
 
         // Store back
-        let array_set_id = self
-            .ctx
-            .func_ids
-            .get("vole_array_set")
-            .ok_or_else(|| "vole_array_set not found".to_string())?;
-        let array_set_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*array_set_id, self.builder.func);
+        let array_set_ref = self.func_ref("vole_array_set")?;
+        let store_value = convert_to_i64_for_storage(self.builder, &result);
+        let tag_val = self
+            .builder
+            .ins()
+            .iconst(types::I64, array_element_tag(&elem_type));
 
-        let store_value = match result.ty {
-            types::F64 => self
-                .builder
-                .ins()
-                .bitcast(types::I64, MemFlags::new(), result.value),
-            types::I8 => self.builder.ins().uextend(types::I64, result.value),
-            _ => result.value,
-        };
-
-        let tag = match &elem_type {
-            Type::I64 | Type::I32 => 2i64,
-            Type::F64 => 3i64,
-            Type::Bool => 4i64,
-            Type::String => 1i64,
-            Type::Array(_) => 5i64,
-            _ => 2i64,
-        };
-        let tag_val = self.builder.ins().iconst(types::I64, tag);
-
-        self.builder.ins().call(
-            array_set_ref,
-            &[arr.value, idx.value, tag_val, store_value],
-        );
+        self.builder
+            .ins()
+            .call(array_set_ref, &[arr.value, idx.value, tag_val, store_value]);
 
         Ok(result)
     }
@@ -473,21 +396,8 @@ impl Cg<'_, '_, '_> {
         let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field, self.ctx)?;
 
         // Load current field
-        let get_field_id = self
-            .ctx
-            .func_ids
-            .get("vole_instance_get_field")
-            .ok_or_else(|| "vole_instance_get_field not found".to_string())?;
-        let get_field_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*get_field_id, self.builder.func);
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-        let call = self
-            .builder
-            .ins()
-            .call(get_field_ref, &[obj.value, slot_val]);
-        let current_raw = self.builder.inst_results(call)[0];
+        let current_raw = self.call_runtime("vole_instance_get_field", &[obj.value, slot_val])?;
 
         let (current_val, cranelift_ty) =
             convert_field_value(self.builder, current_raw, &field_type);
@@ -503,21 +413,12 @@ impl Cg<'_, '_, '_> {
         let result = self.binary_op(current, rhs, binary_op)?;
 
         // Store back
-        let set_field_id = self
-            .ctx
-            .func_ids
-            .get("vole_instance_set_field")
-            .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
-        let set_field_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*set_field_id, self.builder.func);
-
         let store_value = convert_to_i64_for_storage(self.builder, &result);
 
-        self.builder
-            .ins()
-            .call(set_field_ref, &[obj.value, slot_val, store_value]);
+        self.call_runtime_void(
+            "vole_instance_set_field",
+            &[obj.value, slot_val, store_value],
+        )?;
 
         Ok(result)
     }

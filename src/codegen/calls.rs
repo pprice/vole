@@ -12,7 +12,7 @@ use crate::frontend::{CallExpr, ExprKind, StringPart};
 use crate::sema::{FunctionType, Type};
 
 use super::context::Cg;
-use super::types::{type_to_cranelift, CompiledValue};
+use super::types::{CompiledValue, type_to_cranelift};
 
 /// Compile a string literal by calling vole_string_new
 pub(crate) fn compile_string_literal(
@@ -48,6 +48,7 @@ pub(crate) fn compile_string_literal(
 }
 
 /// Convert a compiled value to a string by calling the appropriate vole_*_to_string function
+#[allow(dead_code)] // Used by compiler.rs during migration
 pub(crate) fn value_to_string(
     builder: &mut FunctionBuilder,
     val: CompiledValue,
@@ -114,34 +115,17 @@ impl Cg<'_, '_, '_> {
         }
 
         if string_values.len() == 1 {
-            return Ok(CompiledValue {
-                value: string_values[0],
-                ty: self.ctx.pointer_type,
-                vole_type: Type::String,
-            });
+            return Ok(self.string_value(string_values[0]));
         }
 
-        let concat_func_id = self
-            .ctx
-            .func_ids
-            .get("vole_string_concat")
-            .ok_or_else(|| "vole_string_concat not found".to_string())?;
-        let concat_func_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*concat_func_id, self.builder.func);
-
+        let concat_func_ref = self.func_ref("vole_string_concat")?;
         let mut result = string_values[0];
         for &next in &string_values[1..] {
             let call = self.builder.ins().call(concat_func_ref, &[result, next]);
             result = self.builder.inst_results(call)[0];
         }
 
-        Ok(CompiledValue {
-            value: result,
-            ty: self.ctx.pointer_type,
-            vole_type: Type::String,
-        })
+        Ok(self.string_value(result))
     }
 
     /// Convert a value to a string
@@ -163,18 +147,7 @@ impl Cg<'_, '_, '_> {
             ("vole_i64_to_string", extended)
         };
 
-        let func_id = self
-            .ctx
-            .func_ids
-            .get(func_name)
-            .ok_or_else(|| format!("{} not found", func_name))?;
-        let func_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*func_id, self.builder.func);
-
-        let call = self.builder.ins().call(func_ref, &[call_val]);
-        Ok(self.builder.inst_results(call)[0])
+        self.call_runtime(func_name, &[call_val])
     }
 
     /// Compile a function call
@@ -195,31 +168,25 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if it's a closure variable
-        if let Some((var, vole_type)) = self.vars.get(&callee_sym) {
-            if let Type::Function(func_type) = vole_type {
-                return self.call_closure(*var, func_type.clone(), call);
-            }
+        if let Some((var, vole_type)) = self.vars.get(&callee_sym)
+            && let Type::Function(func_type) = vole_type
+        {
+            return self.call_closure(*var, func_type.clone(), call);
         }
 
         // Check if it's a global lambda
-        if let Some(global) = self.ctx.globals.iter().find(|g| g.name == callee_sym) {
-            if matches!(&global.init.kind, ExprKind::Lambda(_)) {
-                // Compile the lambda to get a function value and call it indirectly
-                let lambda_val = self.expr(&global.init)?;
-                if let Type::Function(func_type) = &lambda_val.vole_type {
-                    return self.call_closure_value(lambda_val.value, func_type.clone(), call);
-                }
+        if let Some(global) = self.ctx.globals.iter().find(|g| g.name == callee_sym)
+            && matches!(&global.init.kind, ExprKind::Lambda(_))
+        {
+            // Compile the lambda to get a function value and call it indirectly
+            let lambda_val = self.expr(&global.init)?;
+            if let Type::Function(func_type) = &lambda_val.vole_type {
+                return self.call_closure_value(lambda_val.value, func_type.clone(), call);
             }
         }
 
         // Regular function call
-        let func_id = self.ctx.func_ids.get(callee_name).ok_or_else(|| {
-            format!("undefined function: {}", callee_name)
-        })?;
-        let func_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*func_id, self.builder.func);
+        let func_ref = self.func_ref(callee_name)?;
 
         // Get expected parameter types from the function's signature
         let sig_ref = self.builder.func.dfg.ext_funcs[func_ref].signature;
@@ -264,17 +231,9 @@ impl Cg<'_, '_, '_> {
             .unwrap_or(Type::Void);
 
         if results.is_empty() {
-            Ok(CompiledValue {
-                value: self.builder.ins().iconst(types::I64, 0),
-                ty: types::I64,
-                vole_type: Type::Void,
-            })
+            Ok(self.void_value())
         } else {
-            Ok(CompiledValue {
-                value: results[0],
-                ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
-                vole_type: return_type,
-            })
+            Ok(self.typed_value(results[0], return_type))
         }
     }
 
@@ -291,7 +250,11 @@ impl Cg<'_, '_, '_> {
 
     /// Compile print/println - dispatches to correct vole_println_* based on argument type
     fn call_println(&mut self, call: &CallExpr, newline: bool) -> Result<CompiledValue, String> {
-        let prefix = if newline { "vole_println" } else { "vole_print" };
+        let prefix = if newline {
+            "vole_println"
+        } else {
+            "vole_print"
+        };
 
         if call.args.len() != 1 {
             return Err(format!(
@@ -319,23 +282,8 @@ impl Cg<'_, '_, '_> {
             (format!("{}_i64", prefix), extended)
         };
 
-        let func_id = self
-            .ctx
-            .func_ids
-            .get(&func_name)
-            .ok_or_else(|| format!("{} not found", func_name))?;
-        let func_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*func_id, self.builder.func);
-        self.builder.ins().call(func_ref, &[call_arg]);
-
-        // println returns void, but we need to return something
-        Ok(CompiledValue {
-            value: self.builder.ins().iconst(types::I64, 0),
-            ty: types::I64,
-            vole_type: Type::Void,
-        })
+        self.call_runtime_void(&func_name, &[call_arg])?;
+        Ok(self.void_value())
     }
 
     /// Compile print_char builtin for ASCII output
@@ -355,23 +303,8 @@ impl Cg<'_, '_, '_> {
             return Err("print_char expects an integer argument".to_string());
         };
 
-        let func_id = self
-            .ctx
-            .func_ids
-            .get("vole_print_char")
-            .ok_or_else(|| "vole_print_char not found".to_string())?;
-        let func_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*func_id, self.builder.func);
-        self.builder.ins().call(func_ref, &[char_val]);
-
-        // Return void (as i64 zero)
-        Ok(CompiledValue {
-            value: self.builder.ins().iconst(types::I64, 0),
-            ty: types::I64,
-            vole_type: Type::Void,
-        })
+        self.call_runtime_void("vole_print_char", &[char_val])?;
+        Ok(self.void_value())
     }
 
     /// Compile assert
@@ -381,7 +314,7 @@ impl Cg<'_, '_, '_> {
         }
 
         let cond = self.expr(&call.args[0])?;
-        let cond_i32 = self.builder.ins().uextend(types::I32, cond.value);
+        let cond_i32 = self.cond_to_i32(cond.value);
 
         let pass_block = self.builder.create_block();
         let fail_block = self.builder.create_block();
@@ -405,28 +338,13 @@ impl Cg<'_, '_, '_> {
             .iconst(self.ctx.pointer_type, file_len as i64);
         let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
 
-        let func_id = self
-            .ctx
-            .func_ids
-            .get("vole_assert_fail")
-            .ok_or_else(|| "vole_assert_fail not found".to_string())?;
-        let func_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*func_id, self.builder.func);
-        self.builder
-            .ins()
-            .call(func_ref, &[file_ptr_val, file_len_val, line_val]);
+        self.call_runtime_void("vole_assert_fail", &[file_ptr_val, file_len_val, line_val])?;
         self.builder.ins().jump(pass_block, &[]);
 
         self.builder.switch_to_block(pass_block);
         self.builder.seal_block(pass_block);
 
-        Ok(CompiledValue {
-            value: self.builder.ins().iconst(types::I64, 0),
-            ty: types::I64,
-            vole_type: Type::Void,
-        })
+        Ok(self.void_value())
     }
 
     /// Call a function via variable (dispatches to closure or pure function call)
@@ -464,8 +382,10 @@ impl Cg<'_, '_, '_> {
         // Build signature for pure function call
         let mut sig = self.ctx.module.make_signature();
         for param_type in &func_type.params {
-            sig.params
-                .push(AbiParam::new(type_to_cranelift(param_type, self.ctx.pointer_type)));
+            sig.params.push(AbiParam::new(type_to_cranelift(
+                param_type,
+                self.ctx.pointer_type,
+            )));
         }
         if func_type.return_type.as_ref() != &Type::Void {
             sig.returns.push(AbiParam::new(type_to_cranelift(
@@ -486,17 +406,9 @@ impl Cg<'_, '_, '_> {
         let results = self.builder.inst_results(call_inst);
 
         if results.is_empty() {
-            Ok(CompiledValue {
-                value: self.builder.ins().iconst(types::I64, 0),
-                ty: types::I64,
-                vole_type: Type::Void,
-            })
+            Ok(self.void_value())
         } else {
-            Ok(CompiledValue {
-                value: results[0],
-                ty: type_to_cranelift(&func_type.return_type, self.ctx.pointer_type),
-                vole_type: (*func_type.return_type).clone(),
-            })
+            Ok(self.typed_value(results[0], (*func_type.return_type).clone()))
         }
     }
 
@@ -507,24 +419,16 @@ impl Cg<'_, '_, '_> {
         func_type: FunctionType,
         call: &CallExpr,
     ) -> Result<CompiledValue, String> {
-        let get_func_id = self
-            .ctx
-            .func_ids
-            .get("vole_closure_get_func")
-            .ok_or_else(|| "vole_closure_get_func not found".to_string())?;
-        let get_func_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*get_func_id, self.builder.func);
-        let func_call = self.builder.ins().call(get_func_ref, &[closure_ptr]);
-        let func_ptr = self.builder.inst_results(func_call)[0];
+        let func_ptr = self.call_runtime("vole_closure_get_func", &[closure_ptr])?;
 
         // Build signature (closure ptr + params)
         let mut sig = self.ctx.module.make_signature();
         sig.params.push(AbiParam::new(self.ctx.pointer_type)); // closure ptr
         for param_type in &func_type.params {
-            sig.params
-                .push(AbiParam::new(type_to_cranelift(param_type, self.ctx.pointer_type)));
+            sig.params.push(AbiParam::new(type_to_cranelift(
+                param_type,
+                self.ctx.pointer_type,
+            )));
         }
         if func_type.return_type.as_ref() != &Type::Void {
             sig.returns.push(AbiParam::new(type_to_cranelift(
@@ -545,17 +449,9 @@ impl Cg<'_, '_, '_> {
         let results = self.builder.inst_results(call_inst);
 
         if results.is_empty() {
-            Ok(CompiledValue {
-                value: self.builder.ins().iconst(types::I64, 0),
-                ty: types::I64,
-                vole_type: Type::Void,
-            })
+            Ok(self.void_value())
         } else {
-            Ok(CompiledValue {
-                value: results[0],
-                ty: type_to_cranelift(&func_type.return_type, self.ctx.pointer_type),
-                vole_type: func_type.return_type.as_ref().clone(),
-            })
+            Ok(self.typed_value(results[0], func_type.return_type.as_ref().clone()))
         }
     }
 }

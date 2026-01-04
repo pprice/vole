@@ -4,51 +4,29 @@
 
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
-use cranelift_module::Module;
 
-use crate::frontend::{AssignTarget, BinaryOp, Expr, ExprKind, MatchExpr, Pattern, UnaryOp};
+use crate::frontend::{AssignTarget, Expr, ExprKind, MatchExpr, Pattern, UnaryOp};
 use crate::sema::Type;
 
 use super::context::Cg;
-use super::types::{convert_to_type, resolve_type_expr, type_to_cranelift, CompiledValue};
+use super::structs::{convert_field_value, convert_to_i64_for_storage};
+use super::types::{CompiledValue, array_element_tag, resolve_type_expr, type_to_cranelift};
 
 impl Cg<'_, '_, '_> {
     /// Compile an expression.
     pub fn expr(&mut self, expr: &Expr) -> Result<CompiledValue, String> {
         // Check for captures first if in closure context
-        if self.has_captures() {
-            if let ExprKind::Identifier(sym) = &expr.kind {
-                if let Some(binding) = self.get_capture(sym).cloned() {
-                    return self.load_capture(&binding);
-                }
-            }
+        if self.has_captures()
+            && let ExprKind::Identifier(sym) = &expr.kind
+            && let Some(binding) = self.get_capture(sym).cloned()
+        {
+            return self.load_capture(&binding);
         }
 
         match &expr.kind {
-            ExprKind::IntLiteral(n) => {
-                let val = self.builder.ins().iconst(types::I64, *n);
-                Ok(CompiledValue {
-                    value: val,
-                    ty: types::I64,
-                    vole_type: Type::I64,
-                })
-            }
-            ExprKind::FloatLiteral(n) => {
-                let val = self.builder.ins().f64const(*n);
-                Ok(CompiledValue {
-                    value: val,
-                    ty: types::F64,
-                    vole_type: Type::F64,
-                })
-            }
-            ExprKind::BoolLiteral(b) => {
-                let val = self.builder.ins().iconst(types::I8, if *b { 1 } else { 0 });
-                Ok(CompiledValue {
-                    value: val,
-                    ty: types::I8,
-                    vole_type: Type::Bool,
-                })
-            }
+            ExprKind::IntLiteral(n) => Ok(self.i64_const(*n)),
+            ExprKind::FloatLiteral(n) => Ok(self.f64_const(*n)),
+            ExprKind::BoolLiteral(b) => Ok(self.bool_const(*b)),
             ExprKind::Identifier(sym) => self.identifier(*sym, expr),
             ExprKind::Binary(bin) => self.binary(bin),
             ExprKind::Unary(un) => self.unary(un),
@@ -64,14 +42,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::ArrayLiteral(elements) => self.array_literal(elements),
             ExprKind::Index(idx) => self.index(&idx.object, &idx.index),
             ExprKind::Match(match_expr) => self.match_expr(match_expr),
-            ExprKind::Nil => {
-                let zero = self.builder.ins().iconst(types::I8, 0);
-                Ok(CompiledValue {
-                    value: zero,
-                    ty: types::I8,
-                    vole_type: Type::Nil,
-                })
-            }
+            ExprKind::Nil => Ok(self.nil_value()),
             ExprKind::Is(is_expr) => self.is_expr(is_expr),
             ExprKind::NullCoalesce(nc) => self.null_coalesce(nc),
             ExprKind::Lambda(lambda) => self.lambda(lambda),
@@ -95,17 +66,18 @@ impl Cg<'_, '_, '_> {
             let ty = self.builder.func.dfg.value_type(val);
 
             // Check for narrowed type from semantic analysis
-            if let Some(narrowed_type) = self.ctx.expr_types.get(&expr.id) {
-                if matches!(vole_type, Type::Union(_)) && !matches!(narrowed_type, Type::Union(_)) {
-                    // Union layout: [tag:1][padding:7][payload]
-                    let payload_ty = type_to_cranelift(narrowed_type, self.ctx.pointer_type);
-                    let payload = self.builder.ins().load(payload_ty, MemFlags::new(), val, 8);
-                    return Ok(CompiledValue {
-                        value: payload,
-                        ty: payload_ty,
-                        vole_type: narrowed_type.clone(),
-                    });
-                }
+            if let Some(narrowed_type) = self.ctx.expr_types.get(&expr.id)
+                && matches!(vole_type, Type::Union(_))
+                && !matches!(narrowed_type, Type::Union(_))
+            {
+                // Union layout: [tag:1][padding:7][payload]
+                let payload_ty = type_to_cranelift(narrowed_type, self.ctx.pointer_type);
+                let payload = self.builder.ins().load(payload_ty, MemFlags::new(), val, 8);
+                return Ok(CompiledValue {
+                    value: payload,
+                    ty: payload_ty,
+                    vole_type: narrowed_type.clone(),
+                });
             }
 
             Ok(CompiledValue {
@@ -142,11 +114,7 @@ impl Cg<'_, '_, '_> {
             }
             UnaryOp::BitNot => self.builder.ins().bnot(operand.value),
         };
-        Ok(CompiledValue {
-            value: result,
-            ty: operand.ty,
-            vole_type: operand.vole_type,
-        })
+        Ok(operand.with_value(result))
     }
 
     /// Compile an assignment expression
@@ -160,15 +128,9 @@ impl Cg<'_, '_, '_> {
                     return self.store_capture(&binding, value);
                 }
 
-                let (var, var_type) = self
-                    .vars
-                    .get(sym)
-                    .ok_or_else(|| {
-                        format!(
-                            "undefined variable: {}",
-                            self.ctx.interner.resolve(*sym)
-                        )
-                    })?;
+                let (var, var_type) = self.vars.get(sym).ok_or_else(|| {
+                    format!("undefined variable: {}", self.ctx.interner.resolve(*sym))
+                })?;
                 let var = *var;
                 let var_type = var_type.clone();
 
@@ -194,28 +156,8 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an array literal
     fn array_literal(&mut self, elements: &[Expr]) -> Result<CompiledValue, String> {
-        let array_new_id = self
-            .ctx
-            .func_ids
-            .get("vole_array_new")
-            .ok_or_else(|| "vole_array_new not found".to_string())?;
-        let array_new_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*array_new_id, self.builder.func);
-
-        let call = self.builder.ins().call(array_new_ref, &[]);
-        let arr_ptr = self.builder.inst_results(call)[0];
-
-        let array_push_id = self
-            .ctx
-            .func_ids
-            .get("vole_array_push")
-            .ok_or_else(|| "vole_array_push not found".to_string())?;
-        let array_push_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*array_push_id, self.builder.func);
+        let arr_ptr = self.call_runtime("vole_array_new", &[])?;
+        let array_push_ref = self.func_ref("vole_array_push")?;
 
         let mut elem_type = Type::Unknown;
 
@@ -226,26 +168,11 @@ impl Cg<'_, '_, '_> {
                 elem_type = compiled.vole_type.clone();
             }
 
-            let tag = match &compiled.vole_type {
-                Type::I64 | Type::I32 => 2i64,
-                Type::F64 => 3i64,
-                Type::Bool => 4i64,
-                Type::String => 1i64,
-                Type::Array(_) => 5i64,
-                _ => 2i64,
-            };
-
-            let tag_val = self.builder.ins().iconst(types::I64, tag);
-
-            let value_bits = if compiled.ty == types::F64 {
-                self.builder
-                    .ins()
-                    .bitcast(types::I64, MemFlags::new(), compiled.value)
-            } else if compiled.ty == types::I8 {
-                self.builder.ins().uextend(types::I64, compiled.value)
-            } else {
-                compiled.value
-            };
+            let tag_val = self
+                .builder
+                .ins()
+                .iconst(types::I64, array_element_tag(&compiled.vole_type));
+            let value_bits = convert_to_i64_for_storage(self.builder, &compiled);
 
             self.builder
                 .ins()
@@ -269,36 +196,8 @@ impl Cg<'_, '_, '_> {
             _ => Type::I64,
         };
 
-        let get_value_id = self
-            .ctx
-            .func_ids
-            .get("vole_array_get_value")
-            .ok_or_else(|| "vole_array_get_value not found".to_string())?;
-        let get_value_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*get_value_id, self.builder.func);
-
-        let call = self
-            .builder
-            .ins()
-            .call(get_value_ref, &[arr.value, idx.value]);
-        let value = self.builder.inst_results(call)[0];
-
-        let (result_value, result_ty) = match &elem_type {
-            Type::F64 => {
-                let fval = self
-                    .builder
-                    .ins()
-                    .bitcast(types::F64, MemFlags::new(), value);
-                (fval, types::F64)
-            }
-            Type::Bool => {
-                let bval = self.builder.ins().ireduce(types::I8, value);
-                (bval, types::I8)
-            }
-            _ => (value, types::I64),
-        };
+        let raw_value = self.call_runtime("vole_array_get_value", &[arr.value, idx.value])?;
+        let (result_value, result_ty) = convert_field_value(self.builder, raw_value, &elem_type);
 
         Ok(CompiledValue {
             value: result_value,
@@ -318,36 +217,12 @@ impl Cg<'_, '_, '_> {
         let idx = self.expr(index)?;
         let val = self.expr(value)?;
 
-        let set_value_id = self
-            .ctx
-            .func_ids
-            .get("vole_array_set_value")
-            .ok_or_else(|| "vole_array_set_value not found".to_string())?;
-        let set_value_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*set_value_id, self.builder.func);
-
-        let tag = match &val.vole_type {
-            Type::I64 | Type::I32 => 2i64,
-            Type::F64 => 3i64,
-            Type::Bool => 4i64,
-            Type::String => 1i64,
-            Type::Array(_) => 5i64,
-            _ => 2i64,
-        };
-
-        let tag_val = self.builder.ins().iconst(types::I64, tag);
-
-        let value_bits = if val.ty == types::F64 {
-            self.builder
-                .ins()
-                .bitcast(types::I64, MemFlags::new(), val.value)
-        } else if val.ty == types::I8 {
-            self.builder.ins().uextend(types::I64, val.value)
-        } else {
-            val.value
-        };
+        let set_value_ref = self.func_ref("vole_array_set_value")?;
+        let tag_val = self
+            .builder
+            .ins()
+            .iconst(types::I64, array_element_tag(&val.vole_type));
+        let value_bits = convert_to_i64_for_storage(self.builder, &val);
 
         self.builder
             .ins()
@@ -374,19 +249,9 @@ impl Cg<'_, '_, '_> {
             let expected = self.builder.ins().iconst(types::I8, expected_tag as i64);
             let result = self.builder.ins().icmp(IntCC::Equal, tag, expected);
 
-            Ok(CompiledValue {
-                value: result,
-                ty: types::I8,
-                vole_type: Type::Bool,
-            })
+            Ok(self.bool_value(result))
         } else {
-            let result = if value.vole_type == tested_type { 1i64 } else { 0i64 };
-            let result_val = self.builder.ins().iconst(types::I8, result);
-            Ok(CompiledValue {
-                value: result_val,
-                ty: types::I8,
-                vole_type: Type::Bool,
-            })
+            Ok(self.bool_const(value.vole_type == tested_type))
         }
     }
 
@@ -430,7 +295,9 @@ impl Cg<'_, '_, '_> {
         let default_coerced = if default_val.ty != cranelift_type {
             if default_val.ty.is_int() && cranelift_type.is_int() {
                 if cranelift_type.bytes() < default_val.ty.bytes() {
-                    self.builder.ins().ireduce(cranelift_type, default_val.value)
+                    self.builder
+                        .ins()
+                        .ireduce(cranelift_type, default_val.value)
                 } else {
                     self.builder
                         .ins()
@@ -475,21 +342,8 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| "Closure variable not available for capture access".to_string())?;
         let closure_ptr = self.builder.use_var(closure_var);
 
-        let get_capture_id = self
-            .ctx
-            .func_ids
-            .get("vole_closure_get_capture")
-            .ok_or_else(|| "vole_closure_get_capture not found".to_string())?;
-        let get_capture_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*get_capture_id, self.builder.func);
         let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);
-        let call = self
-            .builder
-            .ins()
-            .call(get_capture_ref, &[closure_ptr, index_val]);
-        let heap_ptr = self.builder.inst_results(call)[0];
+        let heap_ptr = self.call_runtime("vole_closure_get_capture", &[closure_ptr, index_val])?;
 
         let cranelift_ty = type_to_cranelift(&binding.vole_type, self.ctx.pointer_type);
         let value = self
@@ -515,21 +369,8 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| "Closure variable not available for capture access".to_string())?;
         let closure_ptr = self.builder.use_var(closure_var);
 
-        let get_capture_id = self
-            .ctx
-            .func_ids
-            .get("vole_closure_get_capture")
-            .ok_or_else(|| "vole_closure_get_capture not found".to_string())?;
-        let get_capture_ref = self
-            .ctx
-            .module
-            .declare_func_in_func(*get_capture_id, self.builder.func);
         let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);
-        let call = self
-            .builder
-            .ins()
-            .call(get_capture_ref, &[closure_ptr, index_val]);
-        let heap_ptr = self.builder.inst_results(call)[0];
+        let heap_ptr = self.call_runtime("vole_closure_get_capture", &[closure_ptr, index_val])?;
 
         let cranelift_ty = type_to_cranelift(&binding.vole_type, self.ctx.pointer_type);
         self.builder
@@ -589,29 +430,28 @@ impl Cg<'_, '_, '_> {
                     arm_variables = std::mem::replace(&mut *self.vars, saved_vars);
 
                     let cmp = match scrutinee.ty {
-                        types::I64 | types::I32 | types::I8 => self
-                            .builder
-                            .ins()
-                            .icmp(IntCC::Equal, scrutinee.value, lit_val.value),
-                        types::F64 => self
-                            .builder
-                            .ins()
-                            .fcmp(FloatCC::Equal, scrutinee.value, lit_val.value),
+                        types::I64 | types::I32 | types::I8 => {
+                            self.builder
+                                .ins()
+                                .icmp(IntCC::Equal, scrutinee.value, lit_val.value)
+                        }
+                        types::F64 => {
+                            self.builder
+                                .ins()
+                                .fcmp(FloatCC::Equal, scrutinee.value, lit_val.value)
+                        }
                         _ => {
-                            if let Some(cmp_id) = self.ctx.func_ids.get("vole_string_eq") {
-                                let cmp_ref = self
-                                    .ctx
-                                    .module
-                                    .declare_func_in_func(*cmp_id, self.builder.func);
-                                let call = self
-                                    .builder
-                                    .ins()
-                                    .call(cmp_ref, &[scrutinee.value, lit_val.value]);
-                                self.builder.inst_results(call)[0]
+                            if self.ctx.func_ids.contains_key("vole_string_eq") {
+                                self.call_runtime(
+                                    "vole_string_eq",
+                                    &[scrutinee.value, lit_val.value],
+                                )?
                             } else {
-                                self.builder
-                                    .ins()
-                                    .icmp(IntCC::Equal, scrutinee.value, lit_val.value)
+                                self.builder.ins().icmp(
+                                    IntCC::Equal,
+                                    scrutinee.value,
+                                    lit_val.value,
+                                )
                             }
                         }
                     };
@@ -639,7 +479,7 @@ impl Cg<'_, '_, '_> {
             let body_block = self.builder.create_block();
 
             if let Some(cond) = should_execute {
-                let cond_i32 = self.builder.ins().uextend(types::I32, cond);
+                let cond_i32 = self.cond_to_i32(cond);
                 self.builder
                     .ins()
                     .brif(cond_i32, body_block, &[], next_block, &[]);

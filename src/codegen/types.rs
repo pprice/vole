@@ -32,6 +32,15 @@ impl CompiledValue {
             vole_type: Type::Void,
         }
     }
+
+    /// Create a new CompiledValue with a different value but the same types
+    pub fn with_value(&self, value: Value) -> Self {
+        Self {
+            value,
+            ty: self.ty,
+            vole_type: self.vole_type.clone(),
+        }
+    }
 }
 
 /// Metadata about a class or record type for code generation
@@ -166,6 +175,7 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
 }
 
 /// Convert a Cranelift type back to a Vole type (for return value inference)
+#[allow(dead_code)] // Used by compiler.rs during migration
 pub(crate) fn cranelift_to_vole_type(ty: types::Type) -> Type {
     match ty {
         types::I8 => Type::I8,
@@ -222,4 +232,17 @@ pub(crate) fn convert_to_type(
     }
 
     val.value
+}
+
+/// Get the runtime tag value for an array element type.
+/// These tags are used by the runtime to distinguish element types.
+pub(crate) fn array_element_tag(ty: &Type) -> i64 {
+    match ty {
+        Type::String => 1,
+        Type::I64 | Type::I32 | Type::I16 | Type::I8 => 2,
+        Type::F64 | Type::F32 => 3,
+        Type::Bool => 4,
+        Type::Array(_) => 5,
+        _ => 2, // default to integer
+    }
 }
