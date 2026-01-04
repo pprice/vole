@@ -693,7 +693,7 @@ impl Analyzer {
                     );
                 }
 
-                let var_type = declared_type.unwrap_or(init_type.clone());
+                let var_type = declared_type.unwrap_or(init_type);
 
                 // If this is a type alias (RHS is a type expression), store it
                 if var_type == Type::Type
@@ -1539,7 +1539,7 @@ impl Analyzer {
                 let value_ty = self.check_expr(&assign.value, interner)?;
 
                 match &assign.target {
-                    ast::AssignTarget::Variable(sym) => {
+                    AssignTarget::Variable(sym) => {
                         if let Some(var) = self.scope.get(*sym) {
                             let is_mutable = var.mutable;
                             let var_ty = var.ty.clone();
@@ -1585,7 +1585,7 @@ impl Analyzer {
                             Ok(Type::Error)
                         }
                     }
-                    ast::AssignTarget::Field {
+                    AssignTarget::Field {
                         object,
                         field,
                         field_span,
@@ -1646,7 +1646,7 @@ impl Analyzer {
                             }
                         }
                     }
-                    ast::AssignTarget::Index { object, index } => {
+                    AssignTarget::Index { object, index } => {
                         // Type-check object as array
                         let obj_type = self.check_expr(object, interner)?;
                         let idx_type = self.check_expr(index, interner)?;
@@ -1702,7 +1702,7 @@ impl Analyzer {
             ExprKind::CompoundAssign(compound) => {
                 // Get target type and check mutability
                 let target_type = match &compound.target {
-                    ast::AssignTarget::Variable(sym) => {
+                    AssignTarget::Variable(sym) => {
                         if let Some(var) = self.scope.get(*sym) {
                             let is_mutable = var.mutable;
                             let var_ty = var.ty.clone();
@@ -1737,7 +1737,7 @@ impl Analyzer {
                             return Ok(Type::Error);
                         }
                     }
-                    ast::AssignTarget::Index { object, index } => {
+                    AssignTarget::Index { object, index } => {
                         // Type-check object as array
                         let obj_type = self.check_expr(object, interner)?;
                         let idx_type = self.check_expr(index, interner)?;
@@ -1775,7 +1775,7 @@ impl Analyzer {
                             }
                         }
                     }
-                    ast::AssignTarget::Field {
+                    AssignTarget::Field {
                         object,
                         field,
                         field_span,
@@ -2068,13 +2068,13 @@ impl Analyzer {
                     if let Some(class_type) = self.classes.get(&struct_lit.name).cloned() {
                         (
                             interner.resolve(struct_lit.name).to_string(),
-                            class_type.fields.clone(),
+                            class_type.fields,
                             true,
                         )
                     } else if let Some(record_type) = self.records.get(&struct_lit.name).cloned() {
                         (
                             interner.resolve(struct_lit.name).to_string(),
-                            record_type.fields.clone(),
+                            record_type.fields,
                             false,
                         )
                     } else {
@@ -2089,7 +2089,7 @@ impl Analyzer {
                     };
 
                 // Check that all required fields are present
-                let provided_fields: std::collections::HashSet<Symbol> =
+                let provided_fields: HashSet<Symbol> =
                     struct_lit.fields.iter().map(|f| f.name).collect();
 
                 for field in &fields {
@@ -2781,11 +2781,7 @@ impl Analyzer {
     }
 
     /// Check if a type has a method that matches the interface method signature
-    fn type_has_method(
-        &self,
-        ty: &Type,
-        interface_method: &crate::sema::interface_registry::InterfaceMethodDef,
-    ) -> bool {
+    fn type_has_method(&self, ty: &Type, interface_method: &InterfaceMethodDef) -> bool {
         // Get type symbol for method lookup
         let type_sym = match ty {
             Type::Record(r) => r.name,
@@ -3046,10 +3042,10 @@ mod tests {
         for decl in &program.declarations {
             if let Decl::Function(func) = decl {
                 for stmt in &func.body.stmts {
-                    if let Stmt::Let(let_stmt) = stmt {
-                        if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
-                            return lambda;
-                        }
+                    if let Stmt::Let(let_stmt) = stmt
+                        && let ExprKind::Lambda(lambda) = &let_stmt.init.kind
+                    {
+                        return lambda;
                     }
                 }
             }

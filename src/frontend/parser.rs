@@ -2134,7 +2134,7 @@ impl<'src> Parser<'src> {
     /// Process escape sequences in a string
     fn process_escapes(&self, s: &str) -> String {
         let mut result = String::new();
-        let mut chars = s.chars().peekable();
+        let mut chars = s.chars();
 
         while let Some(c) = chars.next() {
             if c == '\\' {

@@ -85,7 +85,7 @@ mod tests {
 
         let implemented = ResolvedMethod::Implemented {
             trait_name: None,
-            func_type: ft.clone(),
+            func_type: ft,
             is_builtin: true,
         };
         assert!(implemented.is_builtin());

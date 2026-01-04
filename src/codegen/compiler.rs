@@ -501,7 +501,7 @@ impl<'a> Compiler<'a> {
 
         // Create method signature (self + params)
         let sig = self.create_method_signature(method);
-        self.jit.ctx.func.signature = sig.clone();
+        self.jit.ctx.func.signature = sig;
 
         // Collect param types (not including self)
         let param_types: Vec<types::Type> = method
@@ -609,7 +609,7 @@ impl<'a> Compiler<'a> {
 
         // Create function signature
         let sig = self.create_function_signature(func);
-        self.jit.ctx.func.signature = sig.clone();
+        self.jit.ctx.func.signature = sig;
 
         // Collect param types before borrowing ctx.func
         let param_types: Vec<types::Type> = func
@@ -835,7 +835,7 @@ impl<'a> Compiler<'a> {
     fn build_function_ir(&mut self, func: &FuncDecl) -> Result<(), String> {
         // Create function signature
         let sig = self.create_function_signature(func);
-        self.jit.ctx.func.signature = sig.clone();
+        self.jit.ctx.func.signature = sig;
 
         // Collect param types before borrowing ctx.func
         let param_types: Vec<types::Type> = func
@@ -1892,7 +1892,7 @@ fn compile_expr(
             Ok(CompiledValue {
                 value: result,
                 ty: operand.ty,
-                vole_type: operand.vole_type.clone(),
+                vole_type: operand.vole_type,
             })
         }
         ExprKind::Assign(assign) => {
@@ -2590,7 +2590,7 @@ fn compile_pure_lambda(
         .map_err(|e| e.to_string())?;
 
     // Store the func_id so it can be looked up later
-    ctx.func_ids.insert(lambda_name.clone(), func_id);
+    ctx.func_ids.insert(lambda_name, func_id);
 
     // Create a new codegen context for the lambda
     let mut lambda_ctx = ctx.module.make_context();
@@ -2727,7 +2727,7 @@ fn compile_lambda_with_captures(
         .map_err(|e| e.to_string())?;
 
     // Store the func_id so it can be looked up later
-    ctx.func_ids.insert(lambda_name.clone(), func_id);
+    ctx.func_ids.insert(lambda_name, func_id);
 
     // Build capture bindings - maps capture name to index and type
     let mut capture_bindings: HashMap<Symbol, CaptureBinding> = HashMap::new();
@@ -3381,7 +3381,7 @@ fn compile_binary_op(
 /// Compile compound assignment expression: x += 1, arr[i] -= 2
 fn compile_compound_assign(
     builder: &mut FunctionBuilder,
-    compound: &crate::frontend::CompoundAssignExpr,
+    compound: &frontend::CompoundAssignExpr,
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
@@ -3550,7 +3550,7 @@ fn compile_compound_assign(
 /// Compile a function call with capture awareness
 fn compile_call_with_captures(
     builder: &mut FunctionBuilder,
-    call: &crate::frontend::CallExpr,
+    call: &frontend::CallExpr,
     call_line: u32,
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     _capture_bindings: &HashMap<Symbol, CaptureBinding>,
@@ -3598,7 +3598,7 @@ fn compile_string_literal(
 /// Compile a function call expression
 fn compile_call(
     builder: &mut FunctionBuilder,
-    call: &crate::frontend::CallExpr,
+    call: &frontend::CallExpr,
     call_line: u32,
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
@@ -3663,7 +3663,7 @@ fn compile_indirect_call(
 /// Compile an indirect call through a function pointer value or closure pointer
 fn compile_indirect_call_value(
     builder: &mut FunctionBuilder,
-    func_ptr_or_closure: cranelift_codegen::ir::Value,
+    func_ptr_or_closure: Value,
     ft: &FunctionType,
     args: &[Expr],
     variables: &mut HashMap<Symbol, (Variable, Type)>,
@@ -3681,7 +3681,7 @@ fn compile_indirect_call_value(
 /// Compile a call to a pure function (no closure)
 fn compile_pure_function_call(
     builder: &mut FunctionBuilder,
-    func_ptr: cranelift_codegen::ir::Value,
+    func_ptr: Value,
     ft: &FunctionType,
     args: &[Expr],
     variables: &mut HashMap<Symbol, (Variable, Type)>,
@@ -3735,7 +3735,7 @@ fn compile_pure_function_call(
 /// Compile a call to a closure (lambda with captures)
 fn compile_closure_call(
     builder: &mut FunctionBuilder,
-    closure_ptr: cranelift_codegen::ir::Value,
+    closure_ptr: Value,
     ft: &FunctionType,
     args: &[Expr],
     variables: &mut HashMap<Symbol, (Variable, Type)>,
@@ -4536,9 +4536,9 @@ fn get_method_return_type(
 /// Convert a raw i64 field value to the appropriate Cranelift type
 fn convert_field_value(
     builder: &mut FunctionBuilder,
-    raw_value: cranelift_codegen::ir::Value,
+    raw_value: Value,
     field_type: &Type,
-) -> (cranelift_codegen::ir::Value, types::Type) {
+) -> (Value, types::Type) {
     match field_type {
         Type::F64 => {
             let fval = builder
@@ -4577,10 +4577,7 @@ fn convert_field_value(
 }
 
 /// Convert a CompiledValue to i64 for storage in instance fields
-fn convert_to_i64_for_storage(
-    builder: &mut FunctionBuilder,
-    value: &CompiledValue,
-) -> cranelift_codegen::ir::Value {
+fn convert_to_i64_for_storage(builder: &mut FunctionBuilder, value: &CompiledValue) -> Value {
     match value.ty {
         types::F64 => builder
             .ins()

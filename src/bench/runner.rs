@@ -110,15 +110,16 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
     let lex_start = Instant::now();
     let mut lexer = Lexer::new_with_file(source, file_path);
     // Consume all tokens to measure lexing
-    let mut tokens = Vec::new();
+    let mut token_count = 0usize;
     loop {
         let token = lexer.next_token();
         let is_eof = token.ty == crate::frontend::TokenType::Eof;
-        tokens.push(token);
+        token_count += 1;
         if is_eof {
             break;
         }
     }
+    let _ = token_count; // Used for benchmarking - forces the loop to run
     let lex_ns = lex_start.elapsed().as_nanos() as u64;
 
     // Check for lexer errors

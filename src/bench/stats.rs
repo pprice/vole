@@ -31,8 +31,8 @@ impl Stats {
         let sum: f64 = samples.iter().sum();
         let mean = sum / count as f64;
 
-        let min = samples.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = samples.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let min = samples.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = samples.iter().copied().fold(f64::NEG_INFINITY, f64::max);
 
         // Sample standard deviation (n-1 denominator)
         let variance = if count > 1 {

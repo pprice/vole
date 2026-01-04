@@ -36,7 +36,7 @@ impl RcString {
             ptr::write(&mut (*ptr).hash, hash);
 
             // Copy string data
-            let data_ptr = (ptr as *mut u8).add(std::mem::size_of::<RcString>());
+            let data_ptr = (ptr as *mut u8).add(size_of::<RcString>());
             ptr::copy_nonoverlapping(s.as_ptr(), data_ptr, len);
 
             ptr
@@ -44,8 +44,8 @@ impl RcString {
     }
 
     fn layout_for_len(len: usize) -> Layout {
-        let size = std::mem::size_of::<RcString>() + len;
-        let align = std::mem::align_of::<RcString>();
+        let size = size_of::<RcString>() + len;
+        let align = align_of::<RcString>();
         Layout::from_size_align(size, align).unwrap()
     }
 
@@ -65,7 +65,7 @@ impl RcString {
     /// The caller must ensure `self` points to a valid, properly initialized `RcString`.
     pub unsafe fn data(&self) -> &[u8] {
         unsafe {
-            let data_ptr = (self as *const Self as *const u8).add(std::mem::size_of::<RcString>());
+            let data_ptr = (self as *const Self as *const u8).add(size_of::<RcString>());
             slice::from_raw_parts(data_ptr, self.len)
         }
     }
@@ -151,7 +151,7 @@ pub extern "C" fn vole_string_data(ptr: *const RcString) -> *const u8 {
     if ptr.is_null() {
         return ptr::null();
     }
-    unsafe { (ptr as *const u8).add(std::mem::size_of::<RcString>()) }
+    unsafe { (ptr as *const u8).add(size_of::<RcString>()) }
 }
 
 /// Compare two strings for equality, returns 1 if equal, 0 otherwise

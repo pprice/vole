@@ -299,7 +299,7 @@ impl From<&Span> for miette::SourceSpan {
 }
 
 /// A token with its location in source code
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub ty: TokenType,
     pub lexeme: String,

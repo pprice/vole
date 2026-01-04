@@ -135,7 +135,7 @@ pub fn stdout_supports_color() -> bool {
     if std::env::var_os("NO_COLOR").is_some() {
         return false;
     }
-    std::io::stdout().is_terminal()
+    io::stdout().is_terminal()
 }
 
 /// ANSI color codes for terminal output.

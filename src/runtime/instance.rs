@@ -40,8 +40,8 @@ impl RcInstance {
     }
 
     fn layout_for_fields(field_count: usize) -> Layout {
-        let size = std::mem::size_of::<RcInstance>() + field_count * 8;
-        let align = std::mem::align_of::<RcInstance>();
+        let size = size_of::<RcInstance>() + field_count * 8;
+        let align = align_of::<RcInstance>();
         Layout::from_size_align(size, align).unwrap()
     }
 
@@ -50,7 +50,7 @@ impl RcInstance {
     /// # Safety
     /// The pointer must point to a valid, properly initialized `RcInstance`.
     pub unsafe fn fields_ptr(ptr: *mut Self) -> *mut u64 {
-        unsafe { (ptr as *mut u8).add(std::mem::size_of::<RcInstance>()) as *mut u64 }
+        unsafe { (ptr as *mut u8).add(size_of::<RcInstance>()) as *mut u64 }
     }
 
     /// Get field value by slot index
