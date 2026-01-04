@@ -571,10 +571,7 @@ tests {
             "Formatting is not idempotent.\nFirst:\n{}\nSecond:\n{}",
             first.output, second.output
         );
-        assert!(
-            !second.changed,
-            "Second format should report no changes"
-        );
+        assert!(!second.changed, "Second format should report no changes");
     }
 
     #[test]
