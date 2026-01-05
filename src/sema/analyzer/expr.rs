@@ -1625,6 +1625,12 @@ impl Analyzer {
             }
 
             ExprKind::Try(inner) => self.analyze_try(inner, interner),
+
+            ExprKind::Import(_path) => {
+                // TODO: Implement module import resolution in a later task
+                // For now, return Error type - the parser doesn't produce Import nodes yet
+                Ok(Type::Error)
+            }
         }
     }
 }

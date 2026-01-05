@@ -327,6 +327,9 @@ pub enum ExprKind {
     /// Types are first-class values with type `type`
     TypeLiteral(TypeExpr),
 
+    /// Import expression: import "std:math"
+    Import(String),
+
     /// Struct literal: Point { x: 10, y: 20 }
     StructLiteral(Box<StructLiteralExpr>),
 

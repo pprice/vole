@@ -330,6 +330,10 @@ fn print_expr<'a>(
             .text("try")
             .append(arena.space())
             .append(print_expr(arena, inner, interner)),
+        ExprKind::Import(path) => arena
+            .text("import")
+            .append(arena.space())
+            .append(arena.text(format!("\"{}\"", path))),
     }
 }
 

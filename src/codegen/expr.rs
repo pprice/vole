@@ -56,6 +56,10 @@ impl Cg<'_, '_, '_> {
             ExprKind::FieldAccess(fa) => self.field_access(fa),
             ExprKind::MethodCall(mc) => self.method_call(mc, expr.id),
             ExprKind::Try(inner) => self.try_propagate(inner),
+            ExprKind::Import(_) => {
+                // Import expressions are resolved at semantic analysis time
+                Err("import expressions should be resolved before codegen".to_string())
+            }
         }
     }
 

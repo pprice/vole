@@ -1063,6 +1063,12 @@ pub(super) fn compile_expr(
         ExprKind::MethodCall(mc) => compile_method_call(builder, mc, expr.id, variables, ctx),
 
         ExprKind::Try(inner) => compile_try_propagate(builder, inner, variables, ctx),
+
+        ExprKind::Import(_) => {
+            // Import expressions are resolved at semantic analysis time
+            // and should not reach codegen
+            Err("import expressions should be resolved before codegen".to_string())
+        }
     }
 }
 

@@ -609,6 +609,11 @@ impl<'a> AstPrinter<'a> {
                 out.push_str("Try ");
                 self.write_expr(out, inner);
             }
+
+            ExprKind::Import(path) => {
+                self.write_indent(out);
+                out.push_str(&format!("Import \"{}\"\n", path));
+            }
         }
     }
 
