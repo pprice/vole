@@ -492,6 +492,7 @@ impl Analyzer {
                                     trait_name: impl_block.trait_name,
                                     func_type,
                                     is_builtin: false,
+                                    external_info: None,
                                 },
                             );
                         }

@@ -93,12 +93,20 @@ pub struct MethodKey {
     pub method_name: Symbol,
 }
 
+/// Info for external (native) methods
+#[derive(Debug, Clone)]
+pub struct ExternalMethodInfo {
+    pub module_path: String,
+    pub native_name: String,
+}
+
 /// Implementation of a method
 #[derive(Debug, Clone)]
 pub struct MethodImpl {
     pub trait_name: Option<Symbol>, // Which interface this implements
     pub func_type: FunctionType,    // Method signature
     pub is_builtin: bool,           // True for array.length(), etc.
+    pub external_info: Option<ExternalMethodInfo>, // External (native) method info
 }
 
 /// Registry of methods added to types via `implement` blocks
@@ -165,6 +173,7 @@ mod tests {
                     is_closure: false,
                 },
                 is_builtin: true,
+                external_info: None,
             },
         );
 
@@ -209,6 +218,7 @@ mod tests {
                     is_closure: false,
                 },
                 is_builtin: true,
+                external_info: None,
             },
         );
 
@@ -223,6 +233,7 @@ mod tests {
                     is_closure: false,
                 },
                 is_builtin: true,
+                external_info: None,
             },
         );
 
