@@ -191,7 +191,7 @@ fn print_stmt<'a>(
         Stmt::Break(_) => arena.text("break"),
         Stmt::Continue(_) => arena.text("continue"),
         Stmt::Return(return_stmt) => print_return_stmt(arena, return_stmt, interner),
-        Stmt::Raise(_) => todo!("raise statement printing"),
+        Stmt::Raise(raise_stmt) => print_raise_stmt(arena, raise_stmt, interner),
     }
 }
 
@@ -258,6 +258,37 @@ fn print_return_stmt<'a>(
     } else {
         arena.text("return")
     }
+}
+
+/// Print a raise statement.
+fn print_raise_stmt<'a>(
+    arena: &'a Arena<'a>,
+    stmt: &RaiseStmt,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = interner.resolve(stmt.error_name).to_string();
+
+    if stmt.fields.is_empty() {
+        return arena.text("raise ").append(name).append(" {}");
+    }
+
+    let field_docs: Vec<_> = stmt
+        .fields
+        .iter()
+        .map(|f| {
+            arena
+                .text(interner.resolve(f.name).to_string())
+                .append(": ")
+                .append(print_expr(arena, &f.value, interner))
+        })
+        .collect();
+
+    arena
+        .text("raise ")
+        .append(name)
+        .append(" { ")
+        .append(arena.intersperse(field_docs, arena.text(", ")))
+        .append(" }")
 }
 
 /// Print an expression.
