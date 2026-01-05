@@ -444,6 +444,21 @@ impl Analyzer {
 
                     let target_type = self.resolve_type(&impl_block.target_type);
 
+                    // Validate target type exists
+                    if matches!(target_type, Type::Error) {
+                        let type_name = match &impl_block.target_type {
+                            TypeExpr::Named(sym) => interner.resolve(*sym).to_string(),
+                            _ => "unknown".to_string(),
+                        };
+                        self.add_error(
+                            SemanticError::UnknownImplementType {
+                                name: type_name,
+                                span: impl_block.span.into(),
+                            },
+                            impl_block.span,
+                        );
+                    }
+
                     if let Some(type_id) = TypeId::from_type(&target_type) {
                         for method in &impl_block.methods {
                             let func_type = FunctionType {
