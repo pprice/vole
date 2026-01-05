@@ -1,0 +1,6 @@
+implement string {
+    external("std:string") {
+        func "string_length" as length() -> i64
+        func contains(needle: string) -> bool
+    }
+}

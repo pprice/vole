@@ -1,0 +1,5 @@
+implement string {
+    external("invalid") {
+        func length() -> i64
+    }
+}
