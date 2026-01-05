@@ -42,6 +42,8 @@ pub struct Analyzer {
     functions: HashMap<Symbol, FunctionType>,
     globals: HashMap<Symbol, Type>,
     current_function_return: Option<Type>,
+    /// Current function's error type (if fallible)
+    current_function_error_type: Option<Type>,
     errors: Vec<TypeError>,
     /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
     type_overrides: HashMap<Symbol, Type>,
@@ -83,6 +85,7 @@ impl Analyzer {
             functions: HashMap::new(),
             globals: HashMap::new(),
             current_function_return: None,
+            current_function_error_type: None,
             errors: Vec::new(),
             type_overrides: HashMap::new(),
             lambda_captures: Vec::new(),
@@ -574,7 +577,15 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
         let func_type = self.functions.get(&func.name).cloned().unwrap();
-        self.current_function_return = Some(*func_type.return_type.clone());
+        let return_type = *func_type.return_type.clone();
+        self.current_function_return = Some(return_type.clone());
+
+        // Set error type context if this is a fallible function
+        if let Type::Fallible(ref ft) = return_type {
+            self.current_function_error_type = Some((*ft.error_type).clone());
+        } else {
+            self.current_function_error_type = None;
+        }
 
         // Create new scope with parameters
         let parent_scope = std::mem::take(&mut self.scope);
@@ -598,6 +609,7 @@ impl Analyzer {
             self.scope = parent;
         }
         self.current_function_return = None;
+        self.current_function_error_type = None;
 
         Ok(())
     }
@@ -610,7 +622,15 @@ impl Analyzer {
     ) -> Result<(), Vec<TypeError>> {
         let method_key = (type_name, method.name);
         let method_type = self.methods.get(&method_key).cloned().unwrap();
-        self.current_function_return = Some(*method_type.return_type.clone());
+        let return_type = *method_type.return_type.clone();
+        self.current_function_return = Some(return_type.clone());
+
+        // Set error type context if this is a fallible method
+        if let Type::Fallible(ref ft) = return_type {
+            self.current_function_error_type = Some((*ft.error_type).clone());
+        } else {
+            self.current_function_error_type = None;
+        }
 
         // Create scope with 'self' and parameters
         let parent_scope = std::mem::take(&mut self.scope);
@@ -653,6 +673,7 @@ impl Analyzer {
             self.scope = parent;
         }
         self.current_function_return = None;
+        self.current_function_error_type = None;
 
         Ok(())
     }
@@ -872,11 +893,62 @@ impl Analyzer {
                     );
                 }
             }
-            Stmt::Raise(_) => {
-                todo!("raise statement type checking")
+            Stmt::Raise(raise_stmt) => {
+                self.analyze_raise_stmt(raise_stmt, interner);
             }
         }
         Ok(())
+    }
+
+    /// Analyze a raise statement
+    fn analyze_raise_stmt(&mut self, stmt: &RaiseStmt, interner: &Interner) -> Type {
+        // Check we're in a fallible function
+        let Some(error_type) = self.current_function_error_type.clone() else {
+            self.add_error(
+                SemanticError::RaiseOutsideFallible {
+                    span: stmt.span.into(),
+                },
+                stmt.span,
+            );
+            return Type::Error;
+        };
+
+        // Look up the error type
+        let Some(error_info) = self.error_types.get(&stmt.error_name).cloned() else {
+            self.add_error(
+                SemanticError::UndefinedError {
+                    name: interner.resolve(stmt.error_name).to_string(),
+                    span: stmt.span.into(),
+                },
+                stmt.span,
+            );
+            return Type::Error;
+        };
+
+        // Type check field initializers
+        for field_init in &stmt.fields {
+            let value_type = match self.check_expr(&field_init.value, interner) {
+                Ok(ty) => ty,
+                Err(_) => Type::Error,
+            };
+            if let Some(field) = error_info.fields.iter().find(|f| f.name == field_init.name)
+                && !types_compatible_core(&value_type, &field.ty)
+            {
+                self.add_error(
+                    SemanticError::TypeMismatch {
+                        expected: format!("{}", field.ty),
+                        found: format!("{}", value_type),
+                        span: field_init.span.into(),
+                    },
+                    field_init.span,
+                );
+            }
+        }
+
+        // TODO: Verify that raised error type is compatible with declared error type
+        let _ = error_type; // suppress unused warning for now
+
+        Type::Void // raise doesn't produce a value - it transfers control
     }
 
     /// Check expression against an expected type (bidirectional type checking)
