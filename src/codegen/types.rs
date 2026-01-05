@@ -9,6 +9,7 @@ use cranelift_module::FuncId;
 use std::collections::HashMap;
 
 use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
+use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::resolution::MethodResolutions;
 use crate::sema::{FunctionType, Type};
 
@@ -78,33 +79,64 @@ pub(crate) struct CompileCtx<'a> {
     /// Expression types from semantic analysis (includes narrowed types)
     pub expr_types: &'a HashMap<NodeId, Type>,
     /// Resolved method calls from semantic analysis
-    #[allow(dead_code)] // Will be used in future refactoring
     pub method_resolutions: &'a MethodResolutions,
     /// Return types of compiled functions
     pub func_return_types: &'a HashMap<String, Type>,
+    /// Interface definitions registry
+    pub interface_registry: &'a InterfaceRegistry,
 }
 
-/// Resolve a type expression to a Vole Type
-pub(crate) fn resolve_type_expr(ty: &TypeExpr, type_aliases: &HashMap<Symbol, Type>) -> Type {
+/// Resolve a type expression to a Vole Type (uses CompileCtx for full context)
+pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
+    resolve_type_expr_full(ty, ctx.type_aliases, ctx.interface_registry)
+}
+
+/// Resolve a type expression using aliases and interface registry
+/// This is used when CompileCtx is not available (e.g., during Compiler setup)
+pub(crate) fn resolve_type_expr_full(
+    ty: &TypeExpr,
+    type_aliases: &HashMap<Symbol, Type>,
+    interface_registry: &InterfaceRegistry,
+) -> Type {
     match ty {
         TypeExpr::Primitive(p) => Type::from_primitive(*p),
         TypeExpr::Named(sym) => {
-            // Look up type alias
-            type_aliases.get(sym).cloned().unwrap_or(Type::Error)
+            // Look up type alias first
+            if let Some(aliased) = type_aliases.get(sym) {
+                aliased.clone()
+            } else if let Some(iface) = interface_registry.get(*sym) {
+                // Check interface registry
+                Type::Interface(crate::sema::types::InterfaceType {
+                    name: *sym,
+                    methods: iface
+                        .methods
+                        .iter()
+                        .map(|m| crate::sema::types::InterfaceMethodType {
+                            name: m.name,
+                            params: m.params.clone(),
+                            return_type: Box::new(m.return_type.clone()),
+                            has_default: m.has_default,
+                        })
+                        .collect(),
+                    extends: iface.extends.clone(),
+                })
+            } else {
+                Type::Error
+            }
         }
         TypeExpr::Array(elem) => {
-            let elem_ty = resolve_type_expr(elem, type_aliases);
+            let elem_ty = resolve_type_expr_full(elem, type_aliases, interface_registry);
             Type::Array(Box::new(elem_ty))
         }
         TypeExpr::Optional(inner) => {
             // T? desugars to T | nil
-            let inner_ty = resolve_type_expr(inner, type_aliases);
+            let inner_ty = resolve_type_expr_full(inner, type_aliases, interface_registry);
             Type::Union(vec![inner_ty, Type::Nil])
         }
         TypeExpr::Union(variants) => {
             let variant_types: Vec<Type> = variants
                 .iter()
-                .map(|v| resolve_type_expr(v, type_aliases))
+                .map(|v| resolve_type_expr_full(v, type_aliases, interface_registry))
                 .collect();
             Type::normalize_union(variant_types)
         }
@@ -115,9 +147,9 @@ pub(crate) fn resolve_type_expr(ty: &TypeExpr, type_aliases: &HashMap<Symbol, Ty
         } => {
             let param_types: Vec<Type> = params
                 .iter()
-                .map(|p| resolve_type_expr(p, type_aliases))
+                .map(|p| resolve_type_expr_full(p, type_aliases, interface_registry))
                 .collect();
-            let ret_type = resolve_type_expr(return_type, type_aliases);
+            let ret_type = resolve_type_expr_full(return_type, type_aliases, interface_registry);
             Type::Function(FunctionType {
                 params: param_types,
                 return_type: Box::new(ret_type),

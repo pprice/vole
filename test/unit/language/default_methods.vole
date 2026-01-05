@@ -1,0 +1,62 @@
+// Test default methods on interfaces
+
+interface Comparable {
+    func compare(other: i64) -> i64
+
+    func lessThan(other: i64) -> bool {
+        return self.compare(other) < 0
+    }
+
+    func greaterThan(other: i64) -> bool {
+        return self.compare(other) > 0
+    }
+}
+
+record Score implements Comparable {
+    value: i64,
+
+    func compare(other: i64) -> i64 {
+        return self.value - other
+    }
+}
+
+// Override a default method with custom implementation
+record Rating implements Comparable {
+    stars: i64,
+
+    func compare(other: i64) -> i64 {
+        return self.stars - other
+    }
+
+    // Override the default lessThan
+    func lessThan(other: i64) -> bool {
+        // Always return false for ratings of 5 stars
+        if self.stars == 5 {
+            return false
+        }
+        return self.compare(other) < 0
+    }
+    // greaterThan is still inherited
+}
+
+tests "default methods" {
+    test "default method calls abstract method" {
+        let s = Score { value: 10 }
+        assert(s.compare(20) == -10)
+        assert(s.lessThan(20) == true)
+        assert(s.greaterThan(5) == true)
+        assert(s.lessThan(5) == false)
+    }
+
+    test "type can override default method" {
+        let r = Rating { stars: 5 }
+        // lessThan is overridden - 5 stars is never less than anything
+        assert(r.lessThan(10) == false)
+        // greaterThan is still the default
+        assert(r.greaterThan(3) == true)
+
+        // Normal rating uses overridden lessThan normally
+        let r2 = Rating { stars: 3 }
+        assert(r2.lessThan(5) == true)
+    }
+}

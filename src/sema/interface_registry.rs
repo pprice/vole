@@ -30,7 +30,7 @@ pub struct InterfaceDef {
 }
 
 /// Registry of all interface definitions
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct InterfaceRegistry {
     interfaces: HashMap<Symbol, InterfaceDef>,
 }

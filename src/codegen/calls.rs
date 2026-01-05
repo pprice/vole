@@ -12,7 +12,7 @@ use crate::frontend::{CallExpr, ExprKind, StringPart};
 use crate::sema::{FunctionType, Type};
 
 use super::context::Cg;
-use super::types::{CompiledValue, type_to_cranelift};
+use super::types::{CompiledValue, resolve_type_expr, type_to_cranelift};
 
 /// Compile a string literal by calling vole_string_new
 pub(crate) fn compile_string_literal(
@@ -174,14 +174,63 @@ impl Cg<'_, '_, '_> {
             return self.call_closure(*var, func_type.clone(), call);
         }
 
-        // Check if it's a global lambda
-        if let Some(global) = self.ctx.globals.iter().find(|g| g.name == callee_sym)
-            && matches!(&global.init.kind, ExprKind::Lambda(_))
+        // Check if it's a functional interface variable
+        if let Some((var, vole_type)) = self.vars.get(&callee_sym)
+            && let Type::Interface(iface) = vole_type
+            && let Some(method_def) = self.ctx.interface_registry.is_functional(iface.name)
         {
-            // Compile the lambda to get a function value and call it indirectly
+            let func_type = FunctionType {
+                params: method_def.params.clone(),
+                return_type: Box::new(method_def.return_type.clone()),
+                is_closure: true,
+            };
+            return self.call_closure(*var, func_type, call);
+        }
+
+        // Check if it's a global lambda or global functional interface
+        if let Some(global) = self.ctx.globals.iter().find(|g| g.name == callee_sym) {
+            // First, compile the global to get its value
             let lambda_val = self.expr(&global.init)?;
+
+            // Check if the global has a declared type (e.g., `let x: Predicate = ...`)
+            if let Some(ref ty_expr) = global.ty {
+                let declared_type = resolve_type_expr(ty_expr, self.ctx);
+
+                // If declared as functional interface, call using the lambda's actual type
+                // (the lambda might be a pure function or a closure depending on captures)
+                if let Type::Interface(iface) = &declared_type
+                    && let Some(method_def) = self.ctx.interface_registry.is_functional(iface.name)
+                {
+                    // Use the lambda's actual is_closure status from compilation
+                    let is_closure = if let Type::Function(ft) = &lambda_val.vole_type {
+                        ft.is_closure
+                    } else {
+                        true // Fallback to closure if unknown
+                    };
+                    let func_type = FunctionType {
+                        params: method_def.params.clone(),
+                        return_type: Box::new(method_def.return_type.clone()),
+                        is_closure,
+                    };
+                    return self.call_closure_value(lambda_val.value, func_type, call);
+                }
+            }
+
+            // If it's a function type, call as closure
             if let Type::Function(func_type) = &lambda_val.vole_type {
                 return self.call_closure_value(lambda_val.value, func_type.clone(), call);
+            }
+
+            // If it's an interface type (functional interface), call as closure
+            if let Type::Interface(iface) = &lambda_val.vole_type
+                && let Some(method_def) = self.ctx.interface_registry.is_functional(iface.name)
+            {
+                let func_type = FunctionType {
+                    params: method_def.params.clone(),
+                    return_type: Box::new(method_def.return_type.clone()),
+                    is_closure: true,
+                };
+                return self.call_closure_value(lambda_val.value, func_type, call);
             }
         }
 
