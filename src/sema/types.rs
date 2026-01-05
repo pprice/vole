@@ -125,7 +125,8 @@ pub struct FallibleType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleType {
     pub path: String,
-    pub exports: std::collections::HashMap<Symbol, Type>,
+    /// Exports keyed by name string (not Symbol, since modules have their own interners)
+    pub exports: std::collections::HashMap<String, Type>,
 }
 
 impl PartialEq for FunctionType {

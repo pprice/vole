@@ -1269,6 +1269,24 @@ impl Analyzer {
             ExprKind::FieldAccess(field_access) => {
                 let object_type = self.check_expr(&field_access.object, interner)?;
 
+                // Handle module field access
+                if let Type::Module(ref module_type) = object_type {
+                    let field_name = interner.resolve(field_access.field);
+                    if let Some(export_type) = module_type.exports.get(field_name) {
+                        return Ok(export_type.clone());
+                    } else {
+                        self.add_error(
+                            SemanticError::ModuleNoExport {
+                                module: module_type.path.clone(),
+                                name: field_name.to_string(),
+                                span: field_access.field_span.into(),
+                            },
+                            field_access.field_span,
+                        );
+                        return Ok(Type::Error);
+                    }
+                }
+
                 // Get fields from object type
                 let (type_name, fields) = match &object_type {
                     Type::Class(class_type) => (
@@ -1626,11 +1644,9 @@ impl Analyzer {
 
             ExprKind::Try(inner) => self.analyze_try(inner, interner),
 
-            ExprKind::Import(_path) => {
-                // TODO: Implement module import resolution in a later task
-                // For now, return Error type - the parser doesn't produce Import nodes yet
-                Ok(Type::Error)
-            }
+            ExprKind::Import(path) => self
+                .analyze_module(path, expr.span, interner)
+                .map_err(|_| self.errors.clone()),
         }
     }
 }

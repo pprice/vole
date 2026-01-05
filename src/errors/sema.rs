@@ -299,4 +299,31 @@ pub enum SemanticError {
         #[label("incompatible error type")]
         span: SourceSpan,
     },
+
+    #[error("module not found: {path}")]
+    #[diagnostic(code(E2066), help("{message}"))]
+    ModuleNotFound {
+        path: String,
+        message: String,
+        #[label("import here")]
+        span: SourceSpan,
+    },
+
+    #[error("module '{module}' has no export '{name}'")]
+    #[diagnostic(code(E2067))]
+    ModuleNoExport {
+        module: String,
+        name: String,
+        #[label("unknown export")]
+        span: SourceSpan,
+    },
+
+    #[error("failed to parse module: {path}")]
+    #[diagnostic(code(E2068), help("{message}"))]
+    ModuleParseError {
+        path: String,
+        message: String,
+        #[label("import here")]
+        span: SourceSpan,
+    },
 }

@@ -8,7 +8,9 @@ mod stmt;
 
 use crate::errors::SemanticError;
 use crate::frontend::*;
+use crate::module::ModuleLoader;
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry, MethodImpl, TypeId};
+use crate::sema::types::ModuleType;
 use crate::sema::interface_registry::{
     InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
 };
@@ -82,6 +84,10 @@ pub struct Analyzer {
     pub method_resolutions: MethodResolutions,
     /// Tracks which interfaces each type implements: type_name -> [interface_names]
     type_implements: HashMap<Symbol, Vec<Symbol>>,
+    /// Module loader for handling imports
+    module_loader: ModuleLoader,
+    /// Analyzed module types by import path
+    module_types: HashMap<String, ModuleType>,
 }
 
 impl Analyzer {
@@ -107,6 +113,8 @@ impl Analyzer {
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             type_implements: HashMap::new(),
+            module_loader: ModuleLoader::new(),
+            module_types: HashMap::new(),
         };
 
         // Register built-in interfaces and implementations
@@ -867,6 +875,140 @@ impl Analyzer {
         } else {
             false
         }
+    }
+
+    /// Analyze an imported module and return its type
+    #[allow(clippy::result_unit_err)] // Error is added to self.errors vector
+    pub fn analyze_module(
+        &mut self,
+        import_path: &str,
+        span: Span,
+        _interner: &Interner,
+    ) -> Result<Type, ()> {
+        // Check cache first
+        if let Some(module_type) = self.module_types.get(import_path) {
+            return Ok(Type::Module(module_type.clone()));
+        }
+
+        // Load the module
+        let module_info = match self.module_loader.load(import_path) {
+            Ok(info) => info,
+            Err(e) => {
+                self.add_error(
+                    SemanticError::ModuleNotFound {
+                        path: import_path.to_string(),
+                        message: e.to_string(),
+                        span: span.into(),
+                    },
+                    span,
+                );
+                return Err(());
+            }
+        };
+
+        // Parse the module
+        let mut parser = Parser::new(&module_info.source);
+        let program = match parser.parse_program() {
+            Ok(p) => p,
+            Err(e) => {
+                self.add_error(
+                    SemanticError::ModuleParseError {
+                        path: import_path.to_string(),
+                        message: format!("{:?}", e.error),
+                        span: span.into(),
+                    },
+                    span,
+                );
+                return Err(());
+            }
+        };
+
+        // Collect exports from declarations
+        let mut exports = HashMap::new();
+        let module_interner = parser.into_interner();
+
+        for decl in &program.declarations {
+            match decl {
+                Decl::Function(f) => {
+                    // Build function type from signature
+                    let ctx = TypeResolutionContext {
+                        type_aliases: &self.type_aliases,
+                        classes: &self.classes,
+                        records: &self.records,
+                        error_types: &self.error_types,
+                        interface_registry: &self.interface_registry,
+                    };
+                    let params: Vec<Type> =
+                        f.params.iter().map(|p| resolve_type(&p.ty, &ctx)).collect();
+                    let return_type = f
+                        .return_type
+                        .as_ref()
+                        .map(|rt| resolve_type(rt, &ctx))
+                        .unwrap_or(Type::Void);
+
+                    let func_type = Type::Function(FunctionType {
+                        params,
+                        return_type: Box::new(return_type),
+                        is_closure: false,
+                    });
+
+                    // Store export by name string
+                    let name_str = module_interner.resolve(f.name).to_string();
+                    exports.insert(name_str, func_type);
+                }
+                Decl::Let(l) if !l.mutable => {
+                    // Only export immutable let bindings
+                    // Infer type from literal for constants
+                    let ty = match &l.init.kind {
+                        ExprKind::FloatLiteral(_) => Type::F64,
+                        ExprKind::IntLiteral(_) => Type::I64,
+                        ExprKind::BoolLiteral(_) => Type::Bool,
+                        ExprKind::StringLiteral(_) => Type::String,
+                        _ => Type::Unknown, // Complex expressions need full analysis
+                    };
+                    let name_str = module_interner.resolve(l.name).to_string();
+                    exports.insert(name_str, ty);
+                }
+                Decl::External(ext) => {
+                    // External block functions become exports
+                    let ctx = TypeResolutionContext {
+                        type_aliases: &self.type_aliases,
+                        classes: &self.classes,
+                        records: &self.records,
+                        error_types: &self.error_types,
+                        interface_registry: &self.interface_registry,
+                    };
+                    for func in &ext.functions {
+                        let params: Vec<Type> =
+                            func.params.iter().map(|p| resolve_type(&p.ty, &ctx)).collect();
+                        let return_type = func
+                            .return_type
+                            .as_ref()
+                            .map(|rt| resolve_type(rt, &ctx))
+                            .unwrap_or(Type::Void);
+
+                        let func_type = Type::Function(FunctionType {
+                            params,
+                            return_type: Box::new(return_type),
+                            is_closure: false,
+                        });
+
+                        let name_str = module_interner.resolve(func.vole_name).to_string();
+                        exports.insert(name_str, func_type);
+                    }
+                }
+                _ => {} // Skip other declarations for now
+            }
+        }
+
+        let module_type = ModuleType {
+            path: import_path.to_string(),
+            exports,
+        };
+
+        self.module_types
+            .insert(import_path.to_string(), module_type.clone());
+        Ok(Type::Module(module_type))
     }
 }
 
