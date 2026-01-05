@@ -547,9 +547,123 @@ impl Cg<'_, '_, '_> {
                     };
                     Some(cmp)
                 }
-                Pattern::Success { .. } | Pattern::Error { .. } => {
-                    // TODO: Implement success/error pattern codegen in later task
-                    todo!("success/error pattern codegen not yet implemented")
+                Pattern::Success { inner, .. } => {
+                    // Check if tag == FALLIBLE_SUCCESS_TAG (0)
+                    let tag = self.builder.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        scrutinee.value,
+                        FALLIBLE_TAG_OFFSET,
+                    );
+                    let is_success =
+                        self.builder
+                            .ins()
+                            .icmp_imm(IntCC::Equal, tag, FALLIBLE_SUCCESS_TAG);
+
+                    // If there's an inner pattern, we need to extract payload and bind it
+                    if let Some(inner_pat) = inner {
+                        // Extract the success type from scrutinee's vole_type
+                        if let Type::Fallible(ft) = &scrutinee.vole_type {
+                            let success_type = &*ft.success_type;
+                            let payload_ty =
+                                type_to_cranelift(success_type, self.ctx.pointer_type);
+                            let payload = self.builder.ins().load(
+                                payload_ty,
+                                MemFlags::new(),
+                                scrutinee.value,
+                                FALLIBLE_PAYLOAD_OFFSET,
+                            );
+
+                            // Handle inner pattern (usually an identifier binding)
+                            if let Pattern::Identifier { name, .. } = inner_pat.as_ref() {
+                                let var = self.builder.declare_var(payload_ty);
+                                self.builder.def_var(var, payload);
+                                arm_variables.insert(*name, (var, success_type.clone()));
+                            }
+                        }
+                    }
+                    Some(is_success)
+                }
+                Pattern::Error { inner, .. } => {
+                    // Check if tag != FALLIBLE_SUCCESS_TAG (i.e., it's an error)
+                    let tag = self.builder.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        scrutinee.value,
+                        FALLIBLE_TAG_OFFSET,
+                    );
+
+                    if let Some(inner_pat) = inner {
+                        // Inner pattern could be identifier (catch-all) or type (specific error)
+                        match inner_pat.as_ref() {
+                            Pattern::Identifier { name, .. } => {
+                                // Check if this is an error type name
+                                if let Some(_error_info) = self.ctx.error_types.get(name) {
+                                    // Specific error type: error DivByZero => ...
+                                    // Get the fallible type to look up the tag
+                                    if let Type::Fallible(ft) = &scrutinee.vole_type {
+                                        let error_tag = fallible_error_tag(ft, *name);
+                                        if let Some(error_tag) = error_tag {
+                                            let is_this_error = self
+                                                .builder
+                                                .ins()
+                                                .icmp_imm(IntCC::Equal, tag, error_tag);
+                                            Some(is_this_error)
+                                        } else {
+                                            // Error type not found in fallible - will never match
+                                            let never_match =
+                                                self.builder.ins().iconst(types::I8, 0);
+                                            Some(never_match)
+                                        }
+                                    } else {
+                                        // Not matching on a fallible type
+                                        let never_match = self.builder.ins().iconst(types::I8, 0);
+                                        Some(never_match)
+                                    }
+                                } else {
+                                    // Catch-all error binding: error e => ...
+                                    let is_error = self.builder.ins().icmp_imm(
+                                        IntCC::NotEqual,
+                                        tag,
+                                        FALLIBLE_SUCCESS_TAG,
+                                    );
+
+                                    // Extract error type and bind
+                                    if let Type::Fallible(ft) = &scrutinee.vole_type {
+                                        let error_type = &*ft.error_type;
+                                        let payload_ty =
+                                            type_to_cranelift(error_type, self.ctx.pointer_type);
+                                        let payload = self.builder.ins().load(
+                                            payload_ty,
+                                            MemFlags::new(),
+                                            scrutinee.value,
+                                            FALLIBLE_PAYLOAD_OFFSET,
+                                        );
+                                        let var = self.builder.declare_var(payload_ty);
+                                        self.builder.def_var(var, payload);
+                                        arm_variables.insert(*name, (var, error_type.clone()));
+                                    }
+                                    Some(is_error)
+                                }
+                            }
+                            _ => {
+                                // Catch-all for other patterns (like wildcard)
+                                let is_error = self.builder.ins().icmp_imm(
+                                    IntCC::NotEqual,
+                                    tag,
+                                    FALLIBLE_SUCCESS_TAG,
+                                );
+                                Some(is_error)
+                            }
+                        }
+                    } else {
+                        // Bare error pattern: error => ...
+                        let is_error =
+                            self.builder
+                                .ins()
+                                .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
+                        Some(is_error)
+                    }
                 }
             };
 
