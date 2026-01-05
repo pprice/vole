@@ -298,8 +298,19 @@ impl Analyzer {
                             fields,
                         },
                     );
-                    // Register implements list
+                    // Register and validate implements list
                     if !class.implements.is_empty() {
+                        for iface_sym in &class.implements {
+                            if self.interface_registry.get(*iface_sym).is_none() {
+                                self.add_error(
+                                    SemanticError::UnknownInterface {
+                                        name: interner.resolve(*iface_sym).to_string(),
+                                        span: class.span.into(),
+                                    },
+                                    class.span,
+                                );
+                            }
+                        }
                         self.type_implements
                             .insert(class.name, class.implements.clone());
                     }
@@ -343,8 +354,19 @@ impl Analyzer {
                             fields,
                         },
                     );
-                    // Register implements list
+                    // Register and validate implements list
                     if !record.implements.is_empty() {
+                        for iface_sym in &record.implements {
+                            if self.interface_registry.get(*iface_sym).is_none() {
+                                self.add_error(
+                                    SemanticError::UnknownInterface {
+                                        name: interner.resolve(*iface_sym).to_string(),
+                                        span: record.span.into(),
+                                    },
+                                    record.span,
+                                );
+                            }
+                        }
                         self.type_implements
                             .insert(record.name, record.implements.clone());
                     }
