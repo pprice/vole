@@ -1,0 +1,7 @@
+// Error: error type mismatch - raising error not in function's error set
+error DeclaredError {}
+error UndeclaredError {}
+
+func onlyDeclared() -> fallible(i32, DeclaredError) {
+    raise UndeclaredError {}
+}

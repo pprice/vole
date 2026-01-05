@@ -18,19 +18,20 @@ use super::structs::{
     convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type, get_type_name_symbol,
 };
 use super::types::{
-    CompileCtx, TypeMetadata, convert_to_type, cranelift_to_vole_type, resolve_type_expr,
-    resolve_type_expr_full, type_to_cranelift,
+    CompileCtx, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET, TypeMetadata,
+    convert_to_type, cranelift_to_vole_type, fallible_error_tag, resolve_type_expr,
+    resolve_type_expr_full, resolve_type_expr_with_errors, type_to_cranelift,
 };
 use crate::codegen::{CompiledValue, JitContext};
 use crate::frontend::{
-    self, AssignTarget, BinaryOp, ClassDecl, Decl, Expr, ExprKind, FuncDecl, ImplementBlock,
-    InterfaceDecl, InterfaceMethod, Interner, LetStmt, NodeId, Pattern, Program, RecordDecl,
-    StringPart, Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
+    self, AssignTarget, BinaryOp, ClassDecl, Decl, ErrorPattern, Expr, ExprKind, FuncDecl,
+    ImplementBlock, InterfaceDecl, InterfaceMethod, Interner, LetStmt, NodeId, Pattern, Program,
+    RecordDecl, StringPart, Symbol, TestCase, TestsDecl, TryCatchExpr, TypeExpr, UnaryOp,
 };
 use crate::sema::implement_registry::TypeId;
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
-use crate::sema::{ClassType, FunctionType, RecordType, StructField, Type};
+use crate::sema::{ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type};
 
 /// Metadata about a compiled test
 #[derive(Debug, Clone)]
@@ -108,9 +109,12 @@ pub struct Compiler<'a> {
     interface_registry: InterfaceRegistry,
     /// Tracks which interfaces each type implements: type_name -> [interface_names]
     type_implements: HashMap<Symbol, Vec<Symbol>>,
+    /// Error type definitions from semantic analysis
+    error_types: HashMap<Symbol, ErrorTypeInfo>,
 }
 
 impl<'a> Compiler<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         jit: &'a mut JitContext,
         interner: &'a Interner,
@@ -119,6 +123,7 @@ impl<'a> Compiler<'a> {
         method_resolutions: MethodResolutions,
         interface_registry: InterfaceRegistry,
         type_implements: HashMap<Symbol, Vec<Symbol>>,
+        error_types: HashMap<Symbol, ErrorTypeInfo>,
     ) -> Self {
         let pointer_type = jit.pointer_type();
         Self {
@@ -136,6 +141,7 @@ impl<'a> Compiler<'a> {
             func_return_types: HashMap::new(),
             interface_registry,
             type_implements,
+            error_types,
         }
     }
 
@@ -184,7 +190,12 @@ impl<'a> Compiler<'a> {
                         .return_type
                         .as_ref()
                         .map(|t| {
-                            resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry)
+                            resolve_type_expr_with_errors(
+                                t,
+                                &self.type_aliases,
+                                &self.interface_registry,
+                                &self.error_types,
+                            )
                         })
                         .unwrap_or(Type::Void);
                     self.func_return_types.insert(name.to_string(), return_type);
@@ -262,14 +273,24 @@ impl<'a> Compiler<'a> {
         let mut params = Vec::new();
         for param in &func.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr_full(&param.ty, &self.type_aliases, &self.interface_registry),
+                &resolve_type_expr_with_errors(
+                    &param.ty,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    &self.error_types,
+                ),
                 self.pointer_type,
             ));
         }
 
         let ret = func.return_type.as_ref().map(|t| {
             type_to_cranelift(
-                &resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry),
+                &resolve_type_expr_with_errors(
+                    t,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    &self.error_types,
+                ),
                 self.pointer_type,
             )
         });
@@ -283,14 +304,24 @@ impl<'a> Compiler<'a> {
         let mut params = vec![self.pointer_type];
         for param in &method.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr_full(&param.ty, &self.type_aliases, &self.interface_registry),
+                &resolve_type_expr_with_errors(
+                    &param.ty,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    &self.error_types,
+                ),
                 self.pointer_type,
             ));
         }
 
         let ret = method.return_type.as_ref().map(|t| {
             type_to_cranelift(
-                &resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry),
+                &resolve_type_expr_with_errors(
+                    t,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    &self.error_types,
+                ),
                 self.pointer_type,
             )
         });
@@ -306,14 +337,24 @@ impl<'a> Compiler<'a> {
         let mut params = vec![self_cranelift_type];
         for param in &method.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr_full(&param.ty, &self.type_aliases, &self.interface_registry),
+                &resolve_type_expr_with_errors(
+                    &param.ty,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    &self.error_types,
+                ),
                 self.pointer_type,
             ));
         }
 
         let ret = method.return_type.as_ref().map(|t| {
             type_to_cranelift(
-                &resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry),
+                &resolve_type_expr_with_errors(
+                    t,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    &self.error_types,
+                ),
                 self.pointer_type,
             )
         });
@@ -327,14 +368,24 @@ impl<'a> Compiler<'a> {
         let mut params = vec![self.pointer_type];
         for param in &method.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr_full(&param.ty, &self.type_aliases, &self.interface_registry),
+                &resolve_type_expr_with_errors(
+                    &param.ty,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    &self.error_types,
+                ),
                 self.pointer_type,
             ));
         }
 
         let ret = method.return_type.as_ref().map(|t| {
             type_to_cranelift(
-                &resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry),
+                &resolve_type_expr_with_errors(
+                    t,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    &self.error_types,
+                ),
                 self.pointer_type,
             )
         });
@@ -827,6 +878,8 @@ impl<'a> Compiler<'a> {
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
                 interface_registry: &self.interface_registry,
+                current_function_return_type: None, // Methods don't use raise statements yet
+                error_types: &self.error_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -953,6 +1006,8 @@ impl<'a> Compiler<'a> {
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
                 interface_registry: &self.interface_registry,
+                current_function_return_type: None, // Methods don't use raise statements yet
+                error_types: &self.error_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1081,6 +1136,8 @@ impl<'a> Compiler<'a> {
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
                 interface_registry: &self.interface_registry,
+                current_function_return_type: None, // Default methods don't use raise statements yet
+                error_types: &self.error_types,
             };
             let terminated =
                 compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -1115,7 +1172,12 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
+                    &resolve_type_expr_with_errors(
+                        &p.ty,
+                        &self.type_aliases,
+                        &self.interface_registry,
+                        &self.error_types,
+                    ),
                     self.pointer_type,
                 )
             })
@@ -1123,9 +1185,26 @@ impl<'a> Compiler<'a> {
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
+            .map(|p| {
+                resolve_type_expr_with_errors(
+                    &p.ty,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    &self.error_types,
+                )
+            })
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
+
+        // Get function return type (needed for raise statements in fallible functions)
+        let return_type = func.return_type.as_ref().map(|t| {
+            resolve_type_expr_with_errors(
+                t,
+                &self.type_aliases,
+                &self.interface_registry,
+                &self.error_types,
+            )
+        });
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -1171,6 +1250,8 @@ impl<'a> Compiler<'a> {
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
                 interface_registry: &self.interface_registry,
+                current_function_return_type: return_type,
+                error_types: &self.error_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1240,6 +1321,8 @@ impl<'a> Compiler<'a> {
                     method_resolutions: &self.method_resolutions,
                     func_return_types: &self.func_return_types,
                     interface_registry: &self.interface_registry,
+                    current_function_return_type: None, // Tests don't have a declared return type
+                    error_types: &self.error_types,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -1299,7 +1382,12 @@ impl<'a> Compiler<'a> {
                         .return_type
                         .as_ref()
                         .map(|t| {
-                            resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry)
+                            resolve_type_expr_with_errors(
+                                t,
+                                &self.type_aliases,
+                                &self.interface_registry,
+                                &self.error_types,
+                            )
                         })
                         .unwrap_or(Type::Void);
                     self.func_return_types.insert(name.to_string(), return_type);
@@ -1354,7 +1442,12 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
+                    &resolve_type_expr_with_errors(
+                        &p.ty,
+                        &self.type_aliases,
+                        &self.interface_registry,
+                        &self.error_types,
+                    ),
                     self.pointer_type,
                 )
             })
@@ -1362,9 +1455,26 @@ impl<'a> Compiler<'a> {
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
+            .map(|p| {
+                resolve_type_expr_with_errors(
+                    &p.ty,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    &self.error_types,
+                )
+            })
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
+
+        // Get function return type (needed for raise statements in fallible functions)
+        let return_type = func.return_type.as_ref().map(|t| {
+            resolve_type_expr_with_errors(
+                t,
+                &self.type_aliases,
+                &self.interface_registry,
+                &self.error_types,
+            )
+        });
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -1411,6 +1521,8 @@ impl<'a> Compiler<'a> {
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
                 interface_registry: &self.interface_registry,
+                current_function_return_type: return_type,
+                error_types: &self.error_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1473,6 +1585,8 @@ impl<'a> Compiler<'a> {
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
                 interface_registry: &self.interface_registry,
+                current_function_return_type: None, // Tests don't have a declared return type
+                error_types: &self.error_types,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -2340,9 +2454,7 @@ pub(super) fn compile_expr(
 
         ExprKind::MethodCall(mc) => compile_method_call(builder, mc, expr.id, variables, ctx),
 
-        ExprKind::TryCatch(_) => {
-            todo!("try-catch expression codegen")
-        }
+        ExprKind::TryCatch(try_catch) => compile_try_catch(builder, try_catch, variables, ctx),
     }
 }
 
@@ -3595,6 +3707,279 @@ fn compile_index_assign(
     Ok(value)
 }
 
+/// Compile a try-catch expression
+///
+/// Layout of a fallible value (returned by the try_expr):
+/// - Offset 0: tag (i64) - 0 for success, 1+ for error types
+/// - Offset 8: payload - success value or error fields
+///
+/// Control flow:
+/// 1. Compile try_expr to get fallible pointer
+/// 2. Load tag
+/// 3. Branch: if tag == 0, go to success block
+/// 4. Otherwise, check each catch arm's pattern
+/// 5. Merge all paths with block parameter
+fn compile_try_catch(
+    builder: &mut FunctionBuilder,
+    try_catch: &TryCatchExpr,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    // Compile the try expression - should return a pointer to a fallible value
+    let try_result = compile_expr(builder, &try_catch.try_expr, variables, ctx)?;
+
+    // The try_result should be a Fallible type - get the inner types
+    let (success_type, error_type) = match &try_result.vole_type {
+        Type::Fallible(ft) => ((*ft.success_type).clone(), (*ft.error_type).clone()),
+        _ => {
+            return Err(format!(
+                "try expression must have fallible type, got {:?}",
+                try_result.vole_type
+            ));
+        }
+    };
+
+    // Extract the FallibleType for tag lookups
+    let fallible_type = match &try_result.vole_type {
+        Type::Fallible(ft) => ft.clone(),
+        _ => unreachable!(),
+    };
+
+    // Load the tag from the fallible value (at offset 0, i64)
+    let tag = builder.ins().load(
+        types::I64,
+        MemFlags::new(),
+        try_result.value,
+        FALLIBLE_TAG_OFFSET,
+    );
+
+    // Create blocks for control flow
+    let success_block = builder.create_block();
+    let first_catch_block = builder.create_block();
+    let merge_block = builder.create_block();
+
+    // Result type is the success type (after unwrapping fallible)
+    let result_cranelift_type = type_to_cranelift(&success_type, ctx.pointer_type);
+    builder.append_block_param(merge_block, result_cranelift_type);
+
+    // Branch: if tag == 0 (success), go to success_block, else to first catch
+    let success_tag = builder.ins().iconst(types::I64, FALLIBLE_SUCCESS_TAG);
+    let is_success = builder.ins().icmp(IntCC::Equal, tag, success_tag);
+    builder
+        .ins()
+        .brif(is_success, success_block, &[], first_catch_block, &[]);
+
+    // === Success block ===
+    builder.switch_to_block(success_block);
+    builder.seal_block(success_block);
+
+    // Load the success value from the payload (at offset 8)
+    let success_value = builder.ins().load(
+        result_cranelift_type,
+        MemFlags::new(),
+        try_result.value,
+        FALLIBLE_PAYLOAD_OFFSET,
+    );
+    let success_arg = BlockArg::from(success_value);
+    builder.ins().jump(merge_block, &[success_arg]);
+
+    // === Catch blocks ===
+    // Create blocks for each catch arm
+    let catch_blocks: Vec<Block> = try_catch
+        .catch_arms
+        .iter()
+        .map(|_| builder.create_block())
+        .collect();
+
+    // First catch block is where we jump from the initial branch
+    builder.switch_to_block(first_catch_block);
+
+    // Jump to the first catch arm's block
+    if !catch_blocks.is_empty() {
+        builder.ins().jump(catch_blocks[0], &[]);
+    } else {
+        // No catch arms - should not happen after sema, but handle gracefully
+        let default_val = builder.ins().iconst(result_cranelift_type, 0);
+        let default_arg = BlockArg::from(default_val);
+        builder.ins().jump(merge_block, &[default_arg]);
+    }
+    builder.seal_block(first_catch_block);
+
+    // Compile each catch arm
+    for (i, arm) in try_catch.catch_arms.iter().enumerate() {
+        let arm_block = catch_blocks[i];
+        let next_block = catch_blocks.get(i + 1).copied().unwrap_or(merge_block);
+
+        builder.switch_to_block(arm_block);
+
+        // Create a new variables scope for this arm's bindings
+        let mut arm_variables = variables.clone();
+
+        // Check pattern and bind variables
+        match &arm.pattern {
+            ErrorPattern::Wildcard(_) => {
+                // Wildcard always matches - go directly to body
+                let body_val = compile_expr(builder, &arm.body, &mut arm_variables, ctx)?;
+                let result_val = convert_to_result_type(builder, &body_val, result_cranelift_type);
+                let result_arg = BlockArg::from(result_val);
+                builder.ins().jump(merge_block, &[result_arg]);
+            }
+
+            ErrorPattern::NamedEmpty { name, .. } => {
+                // Get the error tag for this error type
+                let error_tag = fallible_error_tag(&fallible_type, *name).ok_or_else(|| {
+                    format!(
+                        "Error type not found in fallible: {}",
+                        ctx.interner.resolve(*name)
+                    )
+                })?;
+
+                // Compare tag
+                let expected_tag = builder.ins().iconst(types::I64, error_tag);
+                let matches = builder.ins().icmp(IntCC::Equal, tag, expected_tag);
+
+                // Create body block
+                let body_block = builder.create_block();
+
+                // Branch: if matches, go to body, else go to next arm
+                builder
+                    .ins()
+                    .brif(matches, body_block, &[], next_block, &[]);
+
+                // Compile body
+                builder.switch_to_block(body_block);
+                let body_val = compile_expr(builder, &arm.body, &mut arm_variables, ctx)?;
+                let result_val = convert_to_result_type(builder, &body_val, result_cranelift_type);
+                let result_arg = BlockArg::from(result_val);
+                builder.ins().jump(merge_block, &[result_arg]);
+                builder.seal_block(body_block);
+            }
+
+            ErrorPattern::Named { name, bindings, .. } => {
+                // Get the error tag for this error type
+                let error_tag = fallible_error_tag(&fallible_type, *name).ok_or_else(|| {
+                    format!(
+                        "Error type not found in fallible: {}",
+                        ctx.interner.resolve(*name)
+                    )
+                })?;
+
+                // Compare tag
+                let expected_tag = builder.ins().iconst(types::I64, error_tag);
+                let matches = builder.ins().icmp(IntCC::Equal, tag, expected_tag);
+
+                // Create body block
+                let body_block = builder.create_block();
+
+                // Branch: if matches, go to body, else go to next arm
+                builder
+                    .ins()
+                    .brif(matches, body_block, &[], next_block, &[]);
+
+                // Compile body with field bindings
+                builder.switch_to_block(body_block);
+
+                // Get the error type info to find field types and offsets
+                let error_info = get_error_type_info(&error_type, *name).ok_or_else(|| {
+                    format!(
+                        "Error type info not found for: {}",
+                        ctx.interner.resolve(*name)
+                    )
+                })?;
+
+                // Bind each destructured field
+                for (field_name, binding_name) in bindings {
+                    // Find the field in the error type
+                    let (field_idx, field_type) = error_info
+                        .fields
+                        .iter()
+                        .enumerate()
+                        .find(|(_, f)| f.name == *field_name)
+                        .map(|(idx, f)| (idx, f.ty.clone()))
+                        .ok_or_else(|| {
+                            format!(
+                                "Field {} not found in error type {}",
+                                ctx.interner.resolve(*field_name),
+                                ctx.interner.resolve(*name)
+                            )
+                        })?;
+
+                    // Calculate field offset: payload starts at offset 8, each field is 8 bytes
+                    let field_offset = FALLIBLE_PAYLOAD_OFFSET + (field_idx as i32 * 8);
+
+                    // Load the field value
+                    let field_cranelift_type = type_to_cranelift(&field_type, ctx.pointer_type);
+                    let field_value = builder.ins().load(
+                        field_cranelift_type,
+                        MemFlags::new(),
+                        try_result.value,
+                        field_offset,
+                    );
+
+                    // Bind to variable
+                    let var = builder.declare_var(field_cranelift_type);
+                    builder.def_var(var, field_value);
+                    arm_variables.insert(*binding_name, (var, field_type));
+                }
+
+                let body_val = compile_expr(builder, &arm.body, &mut arm_variables, ctx)?;
+                let result_val = convert_to_result_type(builder, &body_val, result_cranelift_type);
+                let result_arg = BlockArg::from(result_val);
+                builder.ins().jump(merge_block, &[result_arg]);
+                builder.seal_block(body_block);
+            }
+        }
+
+        builder.seal_block(arm_block);
+    }
+
+    // === Merge block ===
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+
+    let result = builder.block_params(merge_block)[0];
+    Ok(CompiledValue {
+        value: result,
+        ty: result_cranelift_type,
+        vole_type: success_type,
+    })
+}
+
+/// Convert a compiled value to the expected result type for merge block
+fn convert_to_result_type(
+    builder: &mut FunctionBuilder,
+    val: &CompiledValue,
+    target: types::Type,
+) -> Value {
+    if val.ty == target {
+        return val.value;
+    }
+
+    // Integer widening
+    if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
+        return builder.ins().sextend(target, val.value);
+    }
+
+    // Integer narrowing
+    if target.is_int() && val.ty.is_int() && target.bits() < val.ty.bits() {
+        return builder.ins().ireduce(target, val.value);
+    }
+
+    val.value
+}
+
+/// Get error type info from an error type or union of error types
+fn get_error_type_info(error_type: &Type, name: Symbol) -> Option<ErrorTypeInfo> {
+    match error_type {
+        Type::ErrorType(info) if info.name == name => Some(info.clone()),
+        Type::Union(variants) => variants.iter().find_map(|v| match v {
+            Type::ErrorType(info) if info.name == name => Some(info.clone()),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
 /// Compile a method call: point.distance()
 fn compile_method_call(
     builder: &mut FunctionBuilder,
@@ -3779,6 +4164,7 @@ mod tests {
                 MethodResolutions::new(),
                 InterfaceRegistry::new(),
                 HashMap::new(),
+                HashMap::new(), // error_types
             );
             compiler.compile_program(&program).unwrap();
         }

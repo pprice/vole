@@ -107,6 +107,7 @@ pub fn inspect_files(
                     method_resolutions,
                     interface_registry,
                     type_implements,
+                    error_types,
                 ) = analyzer.into_analysis_results();
 
                 // Generate IR
@@ -119,6 +120,7 @@ pub fn inspect_files(
                     method_resolutions,
                     interface_registry,
                     type_implements,
+                    error_types,
                 );
                 let include_tests = !no_tests;
 
