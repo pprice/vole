@@ -120,7 +120,7 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::LBrace, "expected '{' after class name")?;
         self.skip_newlines();
 
-        let (fields, methods) = self.parse_class_body()?;
+        let (fields, external, methods) = self.parse_class_body()?;
 
         self.consume(TokenType::RBrace, "expected '}' to close class")?;
         let span = start_span.merge(self.previous.span);
@@ -129,6 +129,7 @@ impl<'src> Parser<'src> {
             name,
             implements,
             fields,
+            external,
             methods,
             span,
         }))
@@ -148,7 +149,7 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::LBrace, "expected '{' after record name")?;
         self.skip_newlines();
 
-        let (fields, methods) = self.parse_class_body()?;
+        let (fields, external, methods) = self.parse_class_body()?;
 
         self.consume(TokenType::RBrace, "expected '}' to close record")?;
         let span = start_span.merge(self.previous.span);
@@ -157,6 +158,7 @@ impl<'src> Parser<'src> {
             name,
             implements,
             fields,
+            external,
             methods,
             span,
         }))
@@ -246,9 +248,12 @@ impl<'src> Parser<'src> {
 
         let mut fields = Vec::new();
         let mut methods = Vec::new();
+        let mut external = None;
 
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
-            if self.check(TokenType::KwFunc) {
+            if self.check(TokenType::KwExternal) {
+                external = Some(self.parse_external_block()?);
+            } else if self.check(TokenType::KwFunc) {
                 methods.push(self.interface_method()?);
             } else if self.check(TokenType::Identifier) {
                 // Field: name: type
@@ -289,6 +294,7 @@ impl<'src> Parser<'src> {
             name,
             extends,
             fields,
+            external,
             methods,
             span,
         }))
@@ -403,12 +409,18 @@ impl<'src> Parser<'src> {
         }))
     }
 
-    fn parse_class_body(&mut self) -> Result<(Vec<FieldDef>, Vec<FuncDecl>), ParseError> {
+    #[allow(clippy::type_complexity)]
+    fn parse_class_body(
+        &mut self,
+    ) -> Result<(Vec<FieldDef>, Option<ExternalBlock>, Vec<FuncDecl>), ParseError> {
         let mut fields = Vec::new();
         let mut methods = Vec::new();
+        let mut external = None;
 
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
-            if self.check(TokenType::KwFunc) {
+            if self.check(TokenType::KwExternal) {
+                external = Some(self.parse_external_block()?);
+            } else if self.check(TokenType::KwFunc) {
                 // Parse method
                 if let Decl::Function(func) = self.function_decl()? {
                     methods.push(func);
@@ -445,7 +457,7 @@ impl<'src> Parser<'src> {
             self.skip_newlines();
         }
 
-        Ok((fields, methods))
+        Ok((fields, external, methods))
     }
 
     fn test_case(&mut self) -> Result<TestCase, ParseError> {
