@@ -337,3 +337,103 @@ tests "nested fallible operations" {
         assert(second == 50)  // 100/2 = 50
     }
 }
+
+// Helper functions for control flow tests
+func checkPositive(x: i64) -> fallible(bool, DivByZero) {
+    let result = try divide(x, 2)
+    return result > 0
+}
+
+func sumDivisions(n: i64) -> fallible(i64, DivByZero) {
+    let mut sum = 0
+    let mut i = 1
+    while i <= n {
+        let result = try divide(100, i)
+        sum = sum + result
+        i = i + 1
+    }
+    return sum
+}
+
+func findFirstDivisible(divisor: i64) -> fallible(i64, DivByZero) {
+    let mut i = 0
+    while i < 10 {
+        let result = try divide(i * 10, divisor)
+        if result > 5 {
+            return result
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+func mayFail(x: i64) -> fallible(i64, Overflow) {
+    if x > 50 {
+        raise Overflow { value: x, max: 50 }
+    }
+    return x
+}
+
+tests "try in control flow" {
+    test "try in if condition succeeds" {
+        // checkPositive returns true for positive results
+        let succeeded = match checkPositive(10) {
+            success => 1
+            error => -1
+            _ => -888
+        }
+        assert(succeeded == 1)  // 10/2 = 5 > 0, so returns true (success)
+    }
+
+    test "try in loop" {
+        let result = match sumDivisions(4) {
+            success x => x
+            error => -1
+            _ => -888
+        }
+        // 100/1 + 100/2 + 100/3 + 100/4 = 100 + 50 + 33 + 25 = 208
+        assert(result == 208)
+    }
+
+    test "early return via try in loop" {
+        let r1 = match findFirstDivisible(5) {
+            success x => x
+            error => -1
+            _ => -888
+        }
+        // First i where i*10/5 > 5 is i=3: 30/5=6
+        assert(r1 == 6)
+
+        // Division by zero propagates
+        let r2 = match findFirstDivisible(0) {
+            success x => x
+            error DivByZero => -999
+            error => -1
+            _ => -888
+        }
+        assert(r2 == -999)
+    }
+}
+
+tests "guards on patterns" {
+    test "guard on success pattern" {
+        let result = match divide(100, 2) {
+            success x if x > 100 => 1
+            success x if x > 10 => 2
+            success x => 3
+            error => -1
+            _ => -888
+        }
+        assert(result == 2)  // 100/2 = 50, which is > 10 but not > 100
+    }
+
+    test "guard on error pattern" {
+        let result = match mayFail(100) {
+            success x => x
+            error Overflow => -1  // Matches any Overflow
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+}
