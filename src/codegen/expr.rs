@@ -563,8 +563,7 @@ impl Cg<'_, '_, '_> {
                         // Extract the success type from scrutinee's vole_type
                         if let Type::Fallible(ft) = &scrutinee.vole_type {
                             let success_type = &*ft.success_type;
-                            let payload_ty =
-                                type_to_cranelift(success_type, self.ctx.pointer_type);
+                            let payload_ty = type_to_cranelift(success_type, self.ctx.pointer_type);
                             let payload = self.builder.ins().load(
                                 payload_ty,
                                 MemFlags::new(),
@@ -602,10 +601,11 @@ impl Cg<'_, '_, '_> {
                                     if let Type::Fallible(ft) = &scrutinee.vole_type {
                                         let error_tag = fallible_error_tag(ft, *name);
                                         if let Some(error_tag) = error_tag {
-                                            let is_this_error = self
-                                                .builder
-                                                .ins()
-                                                .icmp_imm(IntCC::Equal, tag, error_tag);
+                                            let is_this_error = self.builder.ins().icmp_imm(
+                                                IntCC::Equal,
+                                                tag,
+                                                error_tag,
+                                            );
                                             Some(is_this_error)
                                         } else {
                                             // Error type not found in fallible - will never match

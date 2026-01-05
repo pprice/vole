@@ -1,0 +1,8 @@
+// Error: error pattern used on non-fallible type
+func check() {
+    let x: i32 = 42
+    let result = match x {
+        error => 0
+        _ => x
+    }
+}

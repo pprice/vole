@@ -294,12 +294,10 @@ fn print_expr<'a>(
         ExprKind::StructLiteral(struct_lit) => print_struct_literal(arena, struct_lit, interner),
         ExprKind::FieldAccess(field) => print_field_access(arena, field, interner),
         ExprKind::MethodCall(method) => print_method_call(arena, method, interner),
-        ExprKind::Try(inner) => {
-            arena
-                .text("try")
-                .append(arena.space())
-                .append(print_expr(arena, inner, interner))
-        }
+        ExprKind::Try(inner) => arena
+            .text("try")
+            .append(arena.space())
+            .append(print_expr(arena, inner, interner)),
     }
 }
 

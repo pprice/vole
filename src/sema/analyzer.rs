@@ -1109,7 +1109,11 @@ impl Analyzer {
     /// try unwraps a fallible type:
     /// - On success: returns the success value
     /// - On error: propagates the error to the caller (early return)
-    fn analyze_try(&mut self, inner_expr: &Expr, interner: &Interner) -> Result<Type, Vec<TypeError>> {
+    fn analyze_try(
+        &mut self,
+        inner_expr: &Expr,
+        interner: &Interner,
+    ) -> Result<Type, Vec<TypeError>> {
         // Check the inner expression - must be fallible
         let inner_type = self.check_expr(inner_expr, interner)?;
 

@@ -1,0 +1,11 @@
+// Error: try expression outside fallible function
+error MyError {}
+
+func mayFail() -> fallible(i32, MyError) {
+    let x: i32 = 42
+    return x
+}
+
+func normalFunc() {
+    let x = try mayFail()
+}

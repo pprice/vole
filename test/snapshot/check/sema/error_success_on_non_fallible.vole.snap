@@ -1,0 +1,30 @@
+[stdout]
+
+[stderr]
+  x [E2061]: success pattern used on non-fallible type 'i32'
+   ,-[<path>/error_success_on_non_fallible.vole:5:9]
+ 4 |     let result = match x {
+ 5 |         success v => v
+   :         ^^^^|^^^^
+   :             `-- expected fallible type
+ 6 |         _ => 0
+   `----
+  x [E2002]: undefined variable 'v'
+   ,-[<path>/error_success_on_non_fallible.vole:5:22]
+ 4 |     let result = match x {
+ 5 |         success v => v
+   :                      |
+   :                      `-- not found in scope
+ 6 |         _ => 0
+   `----
+  x [E2031]: match arms have incompatible types: expected error, found i64
+   ,-[<path>/error_success_on_non_fallible.vole:5:9]
+ 4 |     let result = match x {
+ 5 |         success v => v
+   :         ^^^^^^^|^^^^^^
+   :                `-- first arm has type error
+ 6 |         _ => 0
+   :              |
+   :              `-- this arm has type i64
+ 7 |     }
+   `----

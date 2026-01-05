@@ -1,0 +1,13 @@
+// Error: match on fallible type missing error arm
+error MyError {}
+
+func mayFail() -> fallible(i32, MyError) {
+    let x: i32 = 42
+    return x
+}
+
+func check() {
+    let result = match mayFail() {
+        success x => x
+    }
+}

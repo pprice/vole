@@ -1,0 +1,8 @@
+// Error: success pattern used on non-fallible type
+func check() {
+    let x: i32 = 42
+    let result = match x {
+        success v => v
+        _ => 0
+    }
+}
