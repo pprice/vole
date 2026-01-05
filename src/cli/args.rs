@@ -36,7 +36,7 @@ pub enum ReportMode {
 #[command(about = "Vole programming language", long_about = None)]
 pub struct Cli {
     /// Color output: auto, always, never
-    #[arg(long, global = true, value_enum, default_value_t = ColorMode::Auto)]
+    #[arg(long, global = true, hide = true, value_enum, default_value_t = ColorMode::Auto)]
     pub color: ColorMode,
 
     #[command(subcommand)]

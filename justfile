@@ -48,3 +48,6 @@ fmt-check:
 
 # Run all checks locally (mirrors CI)
 ci: fmt-check clippy build test snap
+
+# Pre-commit checks and fixes
+pre-commit: fmt clippy build test snap
