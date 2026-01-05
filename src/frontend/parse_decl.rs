@@ -17,6 +17,7 @@ impl<'src> Parser<'src> {
             TokenType::KwRecord => self.record_decl(),
             TokenType::KwInterface => self.interface_decl(),
             TokenType::KwImplement => self.implement_block(),
+            TokenType::KwError => self.error_decl(),
             _ => Err(ParseError::new(
                 ParserError::UnexpectedToken {
                     token: self.current.ty.as_str().to_string(),
@@ -155,6 +156,47 @@ impl<'src> Parser<'src> {
             methods,
             span,
         }))
+    }
+
+    fn error_decl(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'error'
+
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected error name")?;
+        let name = self.interner.intern(&name_token.lexeme);
+
+        self.consume(TokenType::LBrace, "expected '{' after error name")?;
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            // Parse field: name: Type
+            let field_span = self.current.span;
+            let field_name_token = self.current.clone();
+            self.consume(TokenType::Identifier, "expected field name")?;
+            let field_name = self.interner.intern(&field_name_token.lexeme);
+
+            self.consume(TokenType::Colon, "expected ':' after field name")?;
+            let ty = self.parse_type()?;
+
+            // Allow optional comma
+            if self.check(TokenType::Comma) {
+                self.advance();
+            }
+
+            fields.push(FieldDef {
+                name: field_name,
+                ty,
+                span: field_span.merge(self.previous.span),
+            });
+            self.skip_newlines();
+        }
+
+        self.consume(TokenType::RBrace, "expected '}' to close error")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(Decl::Error(ErrorDecl { name, fields, span }))
     }
 
     /// Parse: implements Interface1, Interface2, ...
