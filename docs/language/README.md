@@ -42,6 +42,7 @@ vole run hello.vole
 |-----|-------------|
 | [Error Handling](error-handling.md) | Typed errors, fallible functions, match patterns |
 | [Iterators](iterators.md) | Lazy sequences: map, filter, reduce, collect |
+| [Modules](modules.md) | Standard library imports (std:math) |
 | [Testing](testing.md) | Test blocks, assertions, test organization |
 
 ## Example
@@ -87,8 +88,8 @@ func main() {
 | Iterators (map, filter, reduce, etc.) | Implemented |
 | Testing (test blocks, assert) | Implemented |
 | Returned closures (currying) | WIP |
-| Modules / imports | Not yet |
-| Standard library (std:math, etc.) | Not yet |
+| Modules / imports | Implemented |
+| Standard library (std:math) | Implemented |
 | Coroutines / generators | Not yet |
 | Type aliases | Not yet |
 | Structural generic constraints | Not yet |

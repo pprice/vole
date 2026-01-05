@@ -249,6 +249,16 @@ implement string {
 "hello".contains("ell") // true
 ```
 
+## Modules
+
+```vole
+let math = import "std:math"
+
+math.sqrt(16.0)     // 4.0
+math.sin(math.PI)   // ~0.0
+math.pow(2.0, 10.0) // 1024.0
+```
+
 ## Built-in Functions
 
 ```vole
