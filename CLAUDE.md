@@ -50,17 +50,31 @@ Source code flows through these stages in order:
 
 1. **frontend/** - Lexing and parsing
    - `lexer.rs` → tokenizes source into `Token`s with `Span`s
-   - `parser.rs` → builds AST (`Program` containing `Decl`s)
+   - `parser/` → builds AST (`Program` containing `Decl`s)
    - `intern.rs` → string interning for identifiers (`Symbol`)
    - `ast.rs` → AST node definitions
 
 2. **sema/** - Semantic analysis
-   - `analyzer.rs` → type checking, scope resolution, produces `TypeError`s with structured diagnostics
+   - `analyzer/` → type checking, scope resolution (split into modules)
+     - `mod.rs` → main analyzer, declarations
+     - `expr.rs` → expression type checking
+     - `stmt.rs` → statement checking
+     - `patterns.rs` → pattern matching
+     - `lambda.rs` → lambda analysis
+     - `methods.rs` → method/interface resolution
    - `scope.rs` → lexical scoping for variables
    - `types.rs` → internal type representation (`Type`, `FunctionType`)
 
 3. **codegen/** - Code generation
-   - `compiler.rs` → translates typed AST to Cranelift IR
+   - `compiler/` → translates typed AST to Cranelift IR (split into modules)
+     - `mod.rs` → main compiler, declarations
+     - `patterns.rs` → pattern matching, `compile_expr`
+     - `calls.rs` → function calls, builtins
+     - `ops.rs` → binary/compound operations
+     - `methods.rs` → method calls, try propagation
+     - `fields.rs` → struct literals, field access
+     - `strings.rs` → string interpolation
+   - `expr.rs`, `stmt.rs` → Cg context methods
    - `jit.rs` → Cranelift JIT context management
 
 4. **runtime/** - Runtime support
@@ -80,16 +94,22 @@ Common tasks mapped to files:
 | Task | Files to Edit |
 |------|---------------|
 | **New keyword/token** | `frontend/lexer.rs` (add token), `frontend/token.rs` (Token enum) |
-| **New syntax/expression** | `frontend/parser.rs` or `parse_expr.rs`, `frontend/ast.rs` (AST node) |
-| **New statement** | `frontend/parse_stmt.rs`, `frontend/ast.rs` |
-| **New declaration** | `frontend/parse_decl.rs`, `frontend/ast.rs` |
-| **New type syntax** | `frontend/parse_type.rs` |
-| **New operator** | `frontend/lexer.rs` → `frontend/parser.rs` → `sema/analyzer.rs` → `codegen/ops.rs` |
-| **Type checking** | `sema/analyzer.rs` (main), `sema/types.rs` (type definitions) |
-| **New semantic error** | `errors/sema.rs` (add variant), `sema/analyzer.rs` (emit it) |
+| **New syntax/expression** | `frontend/parser/parse_expr.rs`, `frontend/ast.rs` (AST node) |
+| **New statement** | `frontend/parser/parse_stmt.rs`, `frontend/ast.rs` |
+| **New declaration** | `frontend/parser/parse_decl.rs`, `frontend/ast.rs` |
+| **New type syntax** | `frontend/parser/parse_type.rs` |
+| **New operator** | `frontend/lexer.rs` → `frontend/parser/` → `sema/analyzer/` → `codegen/compiler/ops.rs` |
+| **Type checking expressions** | `sema/analyzer/expr.rs` |
+| **Type checking statements** | `sema/analyzer/stmt.rs` |
+| **Type checking patterns** | `sema/analyzer/patterns.rs` |
+| **New semantic error** | `errors/sema.rs` (add variant), `sema/analyzer/` (emit it) |
 | **New parser error** | `errors/parser.rs` |
-| **Code generation** | `codegen/compiler.rs` (main), `codegen/expr.rs`, `codegen/stmt.rs` |
-| **New builtin function** | `runtime/builtins.rs`, register in `codegen/compiler.rs` |
+| **Expression codegen** | `codegen/compiler/patterns.rs` (compile_expr) |
+| **Function call codegen** | `codegen/compiler/calls.rs` |
+| **Binary/compound ops codegen** | `codegen/compiler/ops.rs` |
+| **Method call codegen** | `codegen/compiler/methods.rs` |
+| **Field/struct codegen** | `codegen/compiler/fields.rs` |
+| **New builtin function** | `runtime/builtins.rs`, register in `codegen/compiler/calls.rs` |
 | **Classes/records codegen** | `codegen/structs.rs` |
 | **Lambda codegen** | `codegen/lambda.rs` |
 
@@ -101,6 +121,33 @@ Test locations:
 | Type system tests | `test/unit/types/` |
 | Error message snapshots | `test/snapshot/check/` |
 | Smoke tests | `test/snapshot/run/` |
+
+### File Size Guidelines
+
+Keep files manageable to maintain readability and ease of navigation:
+
+- **Target:** ~1000 lines per file
+- **Hard limit:** Never exceed 2000 lines
+- **When to split:** If a file approaches 1500 lines, consider splitting by logical grouping
+
+**Splitting strategy:**
+- Extract tests into a separate `tests.rs` file using `#[cfg(test)] mod tests;`
+- Group related functions into submodules (e.g., `analyzer/expr.rs`, `compiler/calls.rs`)
+- Use Rust's split `impl` blocks pattern: same struct, methods in different files
+
+**Creating new files is encouraged** when:
+- Adding new functionality that doesn't fit existing modules
+- A logical grouping of functions exceeds ~500 lines
+- Tests for a module exceed ~300 lines
+
+Example module structure:
+```
+sema/analyzer/
+├── mod.rs      # Main struct, public API, declarations
+├── expr.rs     # Expression checking methods
+├── stmt.rs     # Statement checking methods
+└── tests.rs    # All tests for the module
+```
 
 ### Testing Infrastructure
 
