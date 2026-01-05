@@ -940,3 +940,20 @@ fn parse_struct_literal_trailing_comma() {
         _ => panic!("expected struct literal"),
     }
 }
+
+#[test]
+fn parse_import_expr() {
+    let mut parser = Parser::new(r#"let math = import "std:math""#);
+    let program = parser.parse_program().unwrap();
+    assert_eq!(program.declarations.len(), 1);
+
+    if let Decl::Let(let_stmt) = &program.declarations[0] {
+        if let ExprKind::Import(path) = &let_stmt.init.kind {
+            assert_eq!(path, "std:math");
+        } else {
+            panic!("Expected Import expression");
+        }
+    } else {
+        panic!("Expected Let declaration");
+    }
+}

@@ -438,6 +438,35 @@ impl<'src> Parser<'src> {
                     span: token.span,
                 })
             }
+            TokenType::KwImport => {
+                let start_span = token.span;
+                self.advance(); // consume 'import'
+
+                // Expect a string literal for the module path
+                if !self.check(TokenType::StringLiteral) {
+                    return Err(ParseError::new(
+                        ParserError::ExpectedToken {
+                            expected: "module path string".to_string(),
+                            found: self.current.ty.as_str().to_string(),
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
+                }
+
+                let path_token = self.current.clone();
+                self.advance();
+
+                // Remove surrounding quotes
+                let path = self.process_string_content(&path_token.lexeme);
+                let span = start_span.merge(path_token.span);
+
+                Ok(Expr {
+                    id: self.next_id(),
+                    kind: ExprKind::Import(path),
+                    span,
+                })
+            }
             TokenType::StringLiteral => {
                 self.advance();
                 // Remove surrounding quotes and process escape sequences
