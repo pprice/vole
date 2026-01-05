@@ -316,4 +316,20 @@ pub enum SemanticError {
         #[label("fallible type matched here")]
         span: SourceSpan,
     },
+
+    #[error("try expression outside fallible function")]
+    #[diagnostic(code(E2064))]
+    TryOutsideFallible {
+        #[label("try must be in a function with fallible return type")]
+        span: SourceSpan,
+    },
+
+    #[error("try propagates '{try_error}' but function error type is '{func_error}'")]
+    #[diagnostic(code(E2065))]
+    IncompatibleTryError {
+        try_error: String,
+        func_error: String,
+        #[label("incompatible error type")]
+        span: SourceSpan,
+    },
 }
