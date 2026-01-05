@@ -388,6 +388,8 @@ impl<'src> Lexer<'src> {
             "raise" => Some(TokenType::KwRaise),
             "try" => Some(TokenType::KwTry),
             "catch" => Some(TokenType::KwCatch),
+            "external" => Some(TokenType::KwExternal),
+            "as" => Some(TokenType::KwAs),
             "i8" => Some(TokenType::KwI8),
             "i16" => Some(TokenType::KwI16),
             "i32" => Some(TokenType::KwI32),

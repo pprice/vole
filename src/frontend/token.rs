@@ -44,6 +44,8 @@ pub enum TokenType {
     KwRaise,      // raise keyword
     KwTry,        // try keyword
     KwCatch,      // catch keyword
+    KwExternal,   // external keyword
+    KwAs,         // as keyword (for external func mapping)
 
     // Type keywords
     KwI8,
@@ -155,6 +157,8 @@ impl TokenType {
             Self::KwRaise => "raise",
             Self::KwTry => "try",
             Self::KwCatch => "catch",
+            Self::KwExternal => "external",
+            Self::KwAs => "as",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",
