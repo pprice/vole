@@ -8,8 +8,11 @@ use std::collections::HashMap;
 
 use super::patterns::compile_expr;
 use crate::codegen::lambda::CaptureBinding;
-use crate::codegen::types::{CompileCtx, CompiledValue, cranelift_to_vole_type, type_to_cranelift};
+use crate::codegen::types::{
+    CompileCtx, CompiledValue, cranelift_to_vole_type, native_type_to_cranelift, type_to_cranelift,
+};
 use crate::frontend::{CallExpr, Expr, ExprKind, Symbol};
+use crate::runtime::native_registry::{NativeFunction, NativeType};
 use crate::sema::{FunctionType, Type};
 
 pub(crate) fn compile_call_with_captures(
@@ -425,11 +428,31 @@ pub(crate) fn compile_user_function_call(
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
-    let func_id = ctx
-        .func_ids
-        .get(name)
-        .ok_or_else(|| format!("undefined function: {}", name))?;
-    let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+    // Try to find the function directly first
+    let func_id = if let Some(id) = ctx.func_ids.get(name) {
+        *id
+    } else if let Some(module_path) = ctx.current_module {
+        // We're compiling module code - try mangled name for module functions
+        let mangled_name = format!("{}::{}", module_path, name);
+        if let Some(id) = ctx.func_ids.get(&mangled_name) {
+            *id
+        } else {
+            // Try FFI call for external module functions
+            if let Some(native_func) = ctx.native_registry.lookup(module_path, name) {
+                // Compile arguments
+                let mut arg_values = Vec::new();
+                for arg in args {
+                    let compiled = compile_expr(builder, arg, variables, ctx)?;
+                    arg_values.push(compiled.value);
+                }
+                return compile_ffi_call(builder, ctx, native_func, &arg_values);
+            }
+            return Err(format!("{} not found", name));
+        }
+    } else {
+        return Err(format!("undefined function: {}", name));
+    };
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
 
     // Get expected parameter types from the function's signature
     let sig_ref = builder.func.dfg.ext_funcs[func_ref].signature;
@@ -483,5 +506,75 @@ pub(crate) fn compile_user_function_call(
             ty,
             vole_type,
         })
+    }
+}
+
+/// Compile an FFI call to a native function
+pub(crate) fn compile_ffi_call(
+    builder: &mut FunctionBuilder,
+    ctx: &mut CompileCtx,
+    native_func: &NativeFunction,
+    args: &[Value],
+) -> Result<CompiledValue, String> {
+    // Build the Cranelift signature from NativeSignature
+    let mut sig = ctx.module.make_signature();
+    for param_type in &native_func.signature.params {
+        sig.params.push(AbiParam::new(native_type_to_cranelift(
+            param_type,
+            ctx.pointer_type,
+        )));
+    }
+    if native_func.signature.return_type != NativeType::Nil {
+        sig.returns.push(AbiParam::new(native_type_to_cranelift(
+            &native_func.signature.return_type,
+            ctx.pointer_type,
+        )));
+    }
+
+    // Import the signature and emit an indirect call
+    let sig_ref = builder.import_signature(sig);
+    let func_ptr = native_func.ptr;
+
+    // Load the function pointer as a constant
+    let func_ptr_val = builder.ins().iconst(ctx.pointer_type, func_ptr as i64);
+
+    // Emit the indirect call
+    let call_inst = builder.ins().call_indirect(sig_ref, func_ptr_val, args);
+    let results = builder.inst_results(call_inst);
+
+    if results.is_empty() {
+        Ok(CompiledValue::void(builder))
+    } else {
+        // Infer vole_type from native return type
+        let vole_type = native_type_to_vole_type(&native_func.signature.return_type);
+        Ok(CompiledValue {
+            value: results[0],
+            ty: native_type_to_cranelift(&native_func.signature.return_type, ctx.pointer_type),
+            vole_type,
+        })
+    }
+}
+
+/// Convert NativeType to Vole Type
+fn native_type_to_vole_type(nt: &NativeType) -> Type {
+    match nt {
+        NativeType::I8 => Type::I8,
+        NativeType::I16 => Type::I16,
+        NativeType::I32 => Type::I32,
+        NativeType::I64 => Type::I64,
+        NativeType::I128 => Type::I128,
+        NativeType::U8 => Type::U8,
+        NativeType::U16 => Type::U16,
+        NativeType::U32 => Type::U32,
+        NativeType::U64 => Type::U64,
+        NativeType::F32 => Type::F32,
+        NativeType::F64 => Type::F64,
+        NativeType::Bool => Type::Bool,
+        NativeType::String => Type::String,
+        NativeType::Nil => Type::Nil,
+        NativeType::Optional(inner) => {
+            Type::Union(vec![native_type_to_vole_type(inner), Type::Nil])
+        }
+        NativeType::Array(inner) => Type::Array(Box::new(native_type_to_vole_type(inner))),
     }
 }

@@ -27,6 +27,8 @@ pub struct AnalyzedProgram {
     pub type_implements: HashMap<Symbol, Vec<Symbol>>,
     /// Error type definitions
     pub error_types: HashMap<Symbol, ErrorTypeInfo>,
+    /// Parsed module programs for compiling pure Vole functions
+    pub module_programs: HashMap<String, (Program, Interner)>,
 }
 
 /// Render a lexer error to stderr with source context
@@ -132,6 +134,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         interface_registry,
         type_implements,
         error_types,
+        module_programs,
     ) = analyzer.into_analysis_results();
     Ok(AnalyzedProgram {
         program,
@@ -142,6 +145,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         interface_registry,
         type_implements,
         error_types,
+        module_programs,
     })
 }
 
@@ -301,6 +305,7 @@ pub fn run_captured<W: Write + Send + 'static>(
         interface_registry,
         type_implements,
         error_types,
+        module_programs,
     ) = analyzer.into_analysis_results();
 
     // Compile
@@ -315,6 +320,7 @@ pub fn run_captured<W: Write + Send + 'static>(
             interface_registry,
             type_implements,
             error_types,
+            module_programs,
         );
         if let Err(e) = compiler.compile_program(&program) {
             let _ = writeln!(stderr, "compilation error: {}", e);

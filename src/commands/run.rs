@@ -47,6 +47,7 @@ fn execute(path: &Path) -> Result<(), String> {
             analyzed.interface_registry.clone(),
             analyzed.type_implements.clone(),
             analyzed.error_types.clone(),
+            analyzed.module_programs.clone(),
         );
         compiler
             .compile_program(&analyzed.program)

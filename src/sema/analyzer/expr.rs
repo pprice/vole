@@ -1396,10 +1396,16 @@ impl Analyzer {
                             }
 
                             // Record resolution for codegen
-                            let external_info = ExternalMethodInfo {
-                                module_path: module_type.path.clone(),
-                                native_name: method_name_str.to_string(),
-                            };
+                            // Only set external_info for functions in the external_funcs set
+                            let external_info =
+                                if module_type.external_funcs.contains(method_name_str) {
+                                    Some(ExternalMethodInfo {
+                                        module_path: module_type.path.clone(),
+                                        native_name: method_name_str.to_string(),
+                                    })
+                                } else {
+                                    None
+                                };
 
                             self.method_resolutions.insert(
                                 expr.id,
@@ -1407,7 +1413,7 @@ impl Analyzer {
                                     trait_name: None,
                                     func_type: func_type.clone(),
                                     is_builtin: false,
-                                    external_info: Some(external_info),
+                                    external_info,
                                 },
                             );
 

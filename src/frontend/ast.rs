@@ -14,13 +14,13 @@ pub struct NodeId(pub u32);
 pub type ExprId = NodeId;
 
 /// A complete program
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Program {
     pub declarations: Vec<Decl>,
 }
 
 /// Top-level declarations
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Decl {
     Function(FuncDecl),
     Tests(TestsDecl),
@@ -34,7 +34,7 @@ pub enum Decl {
 }
 
 /// Function declaration
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FuncDecl {
     pub name: Symbol,
     pub params: Vec<Param>,
@@ -44,7 +44,7 @@ pub struct FuncDecl {
 }
 
 /// Tests block declaration
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TestsDecl {
     pub label: Option<String>,
     pub tests: Vec<TestCase>,
@@ -52,7 +52,7 @@ pub struct TestsDecl {
 }
 
 /// Individual test case
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TestCase {
     pub name: String,
     pub body: Block,
@@ -60,7 +60,7 @@ pub struct TestCase {
 }
 
 /// Function parameter
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Param {
     pub name: Symbol,
     pub ty: TypeExpr,
@@ -76,7 +76,7 @@ pub struct FieldDef {
 }
 
 /// Class declaration
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ClassDecl {
     pub name: Symbol,
     pub implements: Vec<Symbol>, // Interfaces this class implements
@@ -87,7 +87,7 @@ pub struct ClassDecl {
 }
 
 /// Record declaration (immutable class)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RecordDecl {
     pub name: Symbol,
     pub implements: Vec<Symbol>, // Interfaces this record implements
@@ -98,7 +98,7 @@ pub struct RecordDecl {
 }
 
 /// Interface declaration
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InterfaceDecl {
     pub name: Symbol,
     pub extends: Vec<Symbol>,            // Parent interfaces
@@ -109,7 +109,7 @@ pub struct InterfaceDecl {
 }
 
 /// Method in an interface (may be abstract or have default implementation)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InterfaceMethod {
     pub name: Symbol,
     pub params: Vec<Param>,
@@ -119,7 +119,7 @@ pub struct InterfaceMethod {
 }
 
 /// Standalone implement block: implement Trait for Type { ... }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ImplementBlock {
     pub trait_name: Option<Symbol>, // None for type extension (implement Type { ... })
     pub target_type: TypeExpr,      // The type being extended
@@ -129,7 +129,7 @@ pub struct ImplementBlock {
 }
 
 /// External block: external("provider:module") { func declarations }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExternalBlock {
     pub module_path: String,
     pub functions: Vec<ExternalFunc>,
@@ -137,7 +137,7 @@ pub struct ExternalBlock {
 }
 
 /// External function declaration
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExternalFunc {
     pub native_name: Option<String>, // "string_length" or None
     pub vole_name: Symbol,
@@ -147,7 +147,7 @@ pub struct ExternalFunc {
 }
 
 /// Error type declaration: error Name { fields }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ErrorDecl {
     pub name: Symbol,
     pub fields: Vec<FieldDef>,

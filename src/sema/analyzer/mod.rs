@@ -88,6 +88,8 @@ pub struct Analyzer {
     module_loader: ModuleLoader,
     /// Analyzed module types by import path
     module_types: HashMap<String, ModuleType>,
+    /// Parsed module programs and their interners (for compiling pure Vole functions)
+    module_programs: HashMap<String, (Program, Interner)>,
 }
 
 impl Analyzer {
@@ -115,6 +117,7 @@ impl Analyzer {
             type_implements: HashMap::new(),
             module_loader: ModuleLoader::new(),
             module_types: HashMap::new(),
+            module_programs: HashMap::new(),
         };
 
         // Register built-in interfaces and implementations
@@ -170,7 +173,7 @@ impl Analyzer {
     }
 
     /// Take ownership of type aliases, expression types, method resolutions, interface registry,
-    /// type_implements, and error_types (consuming self)
+    /// type_implements, error_types, and module_programs (consuming self)
     #[allow(clippy::type_complexity)]
     pub fn into_analysis_results(
         self,
@@ -181,6 +184,7 @@ impl Analyzer {
         InterfaceRegistry,
         HashMap<Symbol, Vec<Symbol>>,
         HashMap<Symbol, ErrorTypeInfo>,
+        HashMap<String, (Program, Interner)>,
     ) {
         (
             self.type_aliases,
@@ -189,6 +193,7 @@ impl Analyzer {
             self.interface_registry,
             self.type_implements,
             self.error_types,
+            self.module_programs,
         )
     }
 
@@ -923,9 +928,10 @@ impl Analyzer {
             }
         };
 
-        // Collect exports and constants from declarations
+        // Collect exports, constants, and track external functions
         let mut exports = HashMap::new();
         let mut constants = HashMap::new();
+        let mut external_funcs = HashSet::new();
         let module_interner = parser.into_interner();
 
         for decl in &program.declarations {
@@ -976,7 +982,7 @@ impl Analyzer {
                     }
                 }
                 Decl::External(ext) => {
-                    // External block functions become exports
+                    // External block functions become exports and are marked as external
                     let ctx = TypeResolutionContext {
                         type_aliases: &self.type_aliases,
                         classes: &self.classes,
@@ -1003,7 +1009,9 @@ impl Analyzer {
                         });
 
                         let name_str = module_interner.resolve(func.vole_name).to_string();
-                        exports.insert(name_str, func_type);
+                        exports.insert(name_str.clone(), func_type);
+                        // Mark as external function (FFI)
+                        external_funcs.insert(name_str);
                     }
                 }
                 _ => {} // Skip other declarations for now
@@ -1014,10 +1022,16 @@ impl Analyzer {
             path: import_path.to_string(),
             exports,
             constants,
+            external_funcs,
         };
 
         self.module_types
             .insert(import_path.to_string(), module_type.clone());
+
+        // Store the program and interner for compiling pure Vole functions
+        self.module_programs
+            .insert(import_path.to_string(), (program, module_interner));
+
         Ok(Type::Module(module_type))
     }
 }

@@ -9,10 +9,11 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 
 use crate::frontend::{CallExpr, ExprKind, StringPart};
+use crate::runtime::native_registry::NativeType;
 use crate::sema::{FunctionType, Type};
 
 use super::context::Cg;
-use super::types::{CompiledValue, resolve_type_expr, type_to_cranelift};
+use super::types::{CompiledValue, native_type_to_cranelift, resolve_type_expr, type_to_cranelift};
 
 /// Compile a string literal by calling vole_string_new
 pub(crate) fn compile_string_literal(
@@ -234,8 +235,94 @@ impl Cg<'_, '_, '_> {
             }
         }
 
-        // Regular function call
-        let func_ref = self.func_ref(callee_name)?;
+        // Regular function call - handle module context
+        // 1. Try direct function lookup
+        // 2. If in module context, try mangled name
+        // 3. If in module context, try FFI call
+        if let Some(func_id) = self.ctx.func_ids.get(callee_name) {
+            // Direct function found
+            return self.call_func_id(*func_id, callee_name, call);
+        }
+
+        // Check module context for mangled name or FFI
+        if let Some(module_path) = self.ctx.current_module {
+            let mangled_name = format!("{}::{}", module_path, callee_name);
+            if let Some(func_id) = self.ctx.func_ids.get(&mangled_name) {
+                // Found module function with mangled name
+                return self.call_func_id(*func_id, &mangled_name, call);
+            }
+
+            // Try FFI call for external module functions
+            if let Some(native_func) = self.ctx.native_registry.lookup(module_path, callee_name) {
+                // Compile arguments first
+                let mut args = Vec::new();
+                for arg in &call.args {
+                    let compiled = self.expr(arg)?;
+                    args.push(compiled.value);
+                }
+
+                // Build the Cranelift signature from NativeSignature
+                let mut sig = self.ctx.module.make_signature();
+                for param_type in &native_func.signature.params {
+                    sig.params.push(AbiParam::new(native_type_to_cranelift(
+                        param_type,
+                        self.ctx.pointer_type,
+                    )));
+                }
+                if native_func.signature.return_type != NativeType::Nil {
+                    sig.returns.push(AbiParam::new(native_type_to_cranelift(
+                        &native_func.signature.return_type,
+                        self.ctx.pointer_type,
+                    )));
+                }
+
+                // Import the signature and emit an indirect call
+                let sig_ref = self.builder.import_signature(sig);
+                let func_ptr = native_func.ptr;
+                let func_ptr_val = self
+                    .builder
+                    .ins()
+                    .iconst(self.ctx.pointer_type, func_ptr as i64);
+
+                let call_inst = self
+                    .builder
+                    .ins()
+                    .call_indirect(sig_ref, func_ptr_val, &args);
+                let results = self.builder.inst_results(call_inst);
+
+                if results.is_empty() {
+                    return Ok(self.void_value());
+                } else {
+                    let vole_type = native_type_to_vole_type(&native_func.signature.return_type);
+                    return Ok(CompiledValue {
+                        value: results[0],
+                        ty: native_type_to_cranelift(
+                            &native_func.signature.return_type,
+                            self.ctx.pointer_type,
+                        ),
+                        vole_type,
+                    });
+                }
+            }
+
+            return Err(format!("{} not found", callee_name));
+        }
+
+        // No module context - just fail
+        Err(format!("undefined function: {}", callee_name))
+    }
+
+    /// Helper to call a function by its FuncId
+    fn call_func_id(
+        &mut self,
+        func_id: FuncId,
+        func_name: &str,
+        call: &CallExpr,
+    ) -> Result<CompiledValue, String> {
+        let func_ref = self
+            .ctx
+            .module
+            .declare_func_in_func(func_id, self.builder.func);
 
         // Get expected parameter types from the function's signature
         let sig_ref = self.builder.func.dfg.ext_funcs[func_ref].signature;
@@ -275,7 +362,7 @@ impl Cg<'_, '_, '_> {
         let return_type = self
             .ctx
             .func_return_types
-            .get(callee_name)
+            .get(func_name)
             .cloned()
             .unwrap_or(Type::Void);
 
@@ -502,5 +589,29 @@ impl Cg<'_, '_, '_> {
         } else {
             Ok(self.typed_value(results[0], func_type.return_type.as_ref().clone()))
         }
+    }
+}
+
+/// Convert NativeType to Vole Type
+fn native_type_to_vole_type(nt: &NativeType) -> Type {
+    match nt {
+        NativeType::I8 => Type::I8,
+        NativeType::I16 => Type::I16,
+        NativeType::I32 => Type::I32,
+        NativeType::I64 => Type::I64,
+        NativeType::I128 => Type::I128,
+        NativeType::U8 => Type::U8,
+        NativeType::U16 => Type::U16,
+        NativeType::U32 => Type::U32,
+        NativeType::U64 => Type::U64,
+        NativeType::F32 => Type::F32,
+        NativeType::F64 => Type::F64,
+        NativeType::Bool => Type::Bool,
+        NativeType::String => Type::String,
+        NativeType::Nil => Type::Nil,
+        NativeType::Optional(inner) => {
+            Type::Union(vec![native_type_to_vole_type(inner), Type::Nil])
+        }
+        NativeType::Array(inner) => Type::Array(Box::new(native_type_to_vole_type(inner))),
     }
 }

@@ -285,13 +285,13 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(&mc.object)?;
         let method_name_str = self.ctx.interner.resolve(mc.method);
 
-        // Handle module method calls (e.g., math.sqrt(16.0))
-        // These go directly to external native functions without a receiver
+        // Handle module method calls (e.g., math.sqrt(16.0), math.lerp(...))
+        // These go to either external native functions or pure Vole module functions
         if let Type::Module(ref module_type) = obj.vole_type {
-            // Get the method resolution which should have external_info
+            // Get the method resolution
             let resolution = self.ctx.method_resolutions.get(expr_id);
             if let Some(ResolvedMethod::Implemented {
-                external_info: Some(ext_info),
+                external_info,
                 func_type,
                 ..
             }) = resolution
@@ -304,10 +304,35 @@ impl Cg<'_, '_, '_> {
                 }
 
                 let return_type = (*func_type.return_type).clone();
-                return self.call_external(ext_info, &args, &return_type);
+
+                if let Some(ext_info) = external_info {
+                    // External FFI function
+                    return self.call_external(ext_info, &args, &return_type);
+                } else {
+                    // Pure Vole function - call by mangled name
+                    let mangled_name = format!("{}::{}", module_type.path, method_name_str);
+                    let func_id = self
+                        .ctx
+                        .func_ids
+                        .get(&mangled_name)
+                        .copied()
+                        .ok_or_else(|| format!("Module function {} not found", mangled_name))?;
+                    let func_ref = self
+                        .ctx
+                        .module
+                        .declare_func_in_func(func_id, self.builder.func);
+                    let call_inst = self.builder.ins().call(func_ref, &args);
+                    let results = self.builder.inst_results(call_inst);
+
+                    if results.is_empty() {
+                        return Ok(self.void_value());
+                    } else {
+                        return Ok(self.typed_value(results[0], return_type));
+                    }
+                }
             } else {
                 return Err(format!(
-                    "Module method {}::{} has no external resolution",
+                    "Module method {}::{} has no resolution",
                     module_type.path, method_name_str
                 ));
             }

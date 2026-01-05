@@ -17,6 +17,7 @@ fn compile_and_run(source: &str) -> i64 {
             InterfaceRegistry::new(),
             HashMap::new(),
             HashMap::new(), // error_types
+            HashMap::new(), // module_programs
         );
         compiler.compile_program(&program).unwrap();
     }

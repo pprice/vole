@@ -91,6 +91,9 @@ pub(crate) struct CompileCtx<'a> {
     pub error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
     /// Registry of native functions for external method calls
     pub native_registry: &'a NativeRegistry,
+    /// Current module path when compiling module code (e.g., "std:math")
+    /// None when compiling main program code
+    pub current_module: Option<&'a str>,
 }
 
 /// Resolve a type expression to a Vole Type (uses CompileCtx for full context)

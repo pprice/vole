@@ -113,6 +113,8 @@ pub struct Compiler<'a> {
     error_types: HashMap<Symbol, ErrorTypeInfo>,
     /// Registry of native functions for external method calls
     native_registry: NativeRegistry,
+    /// Module programs and their interners (for compiling pure Vole functions)
+    module_programs: HashMap<String, (Program, Interner)>,
 }
 
 impl<'a> Compiler<'a> {
@@ -126,6 +128,7 @@ impl<'a> Compiler<'a> {
         interface_registry: InterfaceRegistry,
         type_implements: HashMap<Symbol, Vec<Symbol>>,
         error_types: HashMap<Symbol, ErrorTypeInfo>,
+        module_programs: HashMap<String, (Program, Interner)>,
     ) -> Self {
         let pointer_type = jit.pointer_type();
 
@@ -150,6 +153,7 @@ impl<'a> Compiler<'a> {
             type_implements,
             error_types,
             native_registry,
+            module_programs,
         }
     }
 
@@ -183,6 +187,9 @@ impl<'a> Compiler<'a> {
 
     /// Compile a complete program
     pub fn compile_program(&mut self, program: &Program) -> Result<(), String> {
+        // Compile module functions first (before main program)
+        self.compile_module_functions()?;
+
         // Count total tests to assign unique IDs
         let mut test_count = 0usize;
 
@@ -279,6 +286,208 @@ impl<'a> Compiler<'a> {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    /// Compile pure Vole functions from imported modules.
+    /// These are functions defined in module files (not external FFI functions).
+    fn compile_module_functions(&mut self) -> Result<(), String> {
+        // Take ownership of module_programs temporarily to avoid borrow issues
+        let module_programs = std::mem::take(&mut self.module_programs);
+
+        for (module_path, (program, module_interner)) in &module_programs {
+            // Extract module globals (let statements)
+            let module_globals: Vec<LetStmt> = program
+                .declarations
+                .iter()
+                .filter_map(|decl| {
+                    if let Decl::Let(let_stmt) = decl {
+                        Some(let_stmt.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // First pass: declare pure Vole functions
+            for decl in &program.declarations {
+                if let Decl::Function(func) = decl {
+                    let func_name = module_interner.resolve(func.name);
+                    let mangled_name = format!("{}::{}", module_path, func_name);
+
+                    // Create signature and declare function
+                    let sig = self.create_function_signature(func);
+                    self.jit.declare_function(&mangled_name, &sig);
+
+                    // Record return type
+                    let return_type = func
+                        .return_type
+                        .as_ref()
+                        .map(|t| {
+                            resolve_type_expr_with_errors(
+                                t,
+                                &self.type_aliases,
+                                &self.interface_registry,
+                                &self.error_types,
+                            )
+                        })
+                        .unwrap_or(Type::Void);
+                    self.func_return_types
+                        .insert(mangled_name.clone(), return_type);
+                }
+            }
+
+            // Second pass: compile pure Vole function bodies
+            for decl in &program.declarations {
+                if let Decl::Function(func) = decl {
+                    let func_name = module_interner.resolve(func.name);
+                    let mangled_name = format!("{}::{}", module_path, func_name);
+                    self.compile_module_function(
+                        module_path,
+                        &mangled_name,
+                        func,
+                        module_interner,
+                        &module_globals,
+                    )?;
+                }
+            }
+        }
+
+        // Restore module_programs
+        self.module_programs = module_programs;
+
+        Ok(())
+    }
+
+    /// Compile a single module function with its own interner
+    fn compile_module_function(
+        &mut self,
+        module_path: &str,
+        mangled_name: &str,
+        func: &FuncDecl,
+        module_interner: &Interner,
+        module_globals: &[LetStmt],
+    ) -> Result<(), String> {
+        let func_id = *self
+            .jit
+            .func_ids
+            .get(mangled_name)
+            .ok_or_else(|| format!("Module function {} not declared", mangled_name))?;
+
+        // Create function signature
+        let sig = self.create_function_signature(func);
+        self.jit.ctx.func.signature = sig;
+
+        // Collect param types
+        let param_types: Vec<types::Type> = func
+            .params
+            .iter()
+            .map(|p| {
+                type_to_cranelift(
+                    &resolve_type_expr_with_errors(
+                        &p.ty,
+                        &self.type_aliases,
+                        &self.interface_registry,
+                        &self.error_types,
+                    ),
+                    self.pointer_type,
+                )
+            })
+            .collect();
+        let param_vole_types: Vec<Type> = func
+            .params
+            .iter()
+            .map(|p| {
+                resolve_type_expr_with_errors(
+                    &p.ty,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    &self.error_types,
+                )
+            })
+            .collect();
+        let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
+
+        // Get function return type
+        let return_type = func.return_type.as_ref().map(|t| {
+            resolve_type_expr_with_errors(
+                t,
+                &self.type_aliases,
+                &self.interface_registry,
+                &self.error_types,
+            )
+        });
+
+        // Get source file pointer
+        let source_file_ptr = self.source_file_ptr();
+
+        // Create function builder
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+            let entry_block = builder.create_block();
+            builder.append_block_params_for_function_params(entry_block);
+            builder.switch_to_block(entry_block);
+
+            // Build variables map
+            let mut variables = HashMap::new();
+
+            // Bind parameters to variables
+            let params = builder.block_params(entry_block).to_vec();
+            for (((name, ty), vole_ty), val) in param_names
+                .iter()
+                .zip(param_types.iter())
+                .zip(param_vole_types.iter())
+                .zip(params.iter())
+            {
+                let var = builder.declare_var(*ty);
+                builder.def_var(var, *val);
+                variables.insert(*name, (var, vole_ty.clone()));
+            }
+
+            // Compile function body with module's interner
+            let mut cf_ctx = ControlFlowCtx::new();
+            let mut ctx = CompileCtx {
+                interner: module_interner, // Use module's interner
+                pointer_type: self.pointer_type,
+                module: &mut self.jit.module,
+                func_ids: &mut self.jit.func_ids,
+                source_file_ptr,
+                globals: module_globals, // Use module's globals
+                lambda_counter: &mut self.lambda_counter,
+                type_aliases: &self.type_aliases,
+                type_metadata: &self.type_metadata,
+                expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
+                current_function_return_type: return_type,
+                error_types: &self.error_types,
+                native_registry: &self.native_registry,
+                current_module: Some(module_path), // We're compiling module code
+            };
+            let terminated = compile_block(
+                &mut builder,
+                &func.body,
+                &mut variables,
+                &mut cf_ctx,
+                &mut ctx,
+            )?;
+
+            // Add implicit return if no explicit return
+            if !terminated {
+                builder.ins().return_(&[]);
+            }
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        // Define the function
+        self.jit.define_function(func_id)?;
+        self.jit.clear();
 
         Ok(())
     }
@@ -895,6 +1104,7 @@ impl<'a> Compiler<'a> {
                 current_function_return_type: None, // Methods don't use raise statements yet
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
+                current_module: None,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1024,6 +1234,7 @@ impl<'a> Compiler<'a> {
                 current_function_return_type: None, // Methods don't use raise statements yet
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
+                current_module: None,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1155,6 +1366,7 @@ impl<'a> Compiler<'a> {
                 current_function_return_type: None, // Default methods don't use raise statements yet
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
+                current_module: None,
             };
             let terminated =
                 compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -1270,6 +1482,7 @@ impl<'a> Compiler<'a> {
                 current_function_return_type: return_type,
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
+                current_module: None,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1342,6 +1555,7 @@ impl<'a> Compiler<'a> {
                     current_function_return_type: None, // Tests don't have a declared return type
                     error_types: &self.error_types,
                     native_registry: &self.native_registry,
+                    current_module: None,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -1543,6 +1757,7 @@ impl<'a> Compiler<'a> {
                 current_function_return_type: return_type,
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
+                current_module: None,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1608,6 +1823,7 @@ impl<'a> Compiler<'a> {
                 current_function_return_type: None, // Tests don't have a declared return type
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
+                current_module: None,
             };
             let terminated = compile_block(
                 &mut builder,

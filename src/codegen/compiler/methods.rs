@@ -103,12 +103,12 @@ pub(crate) fn compile_method_call(
     let method_name_str = ctx.interner.resolve(mc.method);
 
     // Handle module method calls (e.g., math.sqrt(16.0))
-    // These go directly to external native functions without a receiver
+    // These can be either external native functions (FFI) or pure Vole functions
     if let Type::Module(ref module_type) = obj.vole_type {
-        // Get the method resolution which should have external_info
+        // Get the method resolution
         let resolution = ctx.method_resolutions.get(expr_id);
         if let Some(ResolvedMethod::Implemented {
-            external_info: Some(ext_info),
+            external_info,
             func_type,
             ..
         }) = resolution
@@ -121,10 +121,35 @@ pub(crate) fn compile_method_call(
             }
 
             let return_type = (*func_type.return_type).clone();
-            return compile_external_call(builder, ctx, ext_info, &args, &return_type);
+
+            if let Some(ext_info) = external_info {
+                // External function - use FFI call
+                return compile_external_call(builder, ctx, ext_info, &args, &return_type);
+            } else {
+                // Pure Vole function - call by mangled name
+                let mangled_name = format!("{}::{}", module_type.path, method_name_str);
+                let func_id = ctx
+                    .func_ids
+                    .get(&mangled_name)
+                    .ok_or_else(|| format!("Module function {} not found", mangled_name))?;
+                let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+
+                let call = builder.ins().call(func_ref, &args);
+                let results = builder.inst_results(call);
+
+                if results.is_empty() {
+                    return Ok(CompiledValue::void(builder));
+                } else {
+                    return Ok(CompiledValue {
+                        value: results[0],
+                        ty: type_to_cranelift(&return_type, ctx.pointer_type),
+                        vole_type: return_type,
+                    });
+                }
+            }
         } else {
             return Err(format!(
-                "Module method {}::{} has no external resolution",
+                "Module method {}::{} has no resolution",
                 module_type.path, method_name_str
             ));
         }

@@ -157,6 +157,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
         interface_registry,
         type_implements,
         error_types,
+        module_programs,
     ) = analyzer.into_analysis_results();
     let sema_ns = sema_start.elapsed().as_nanos() as u64;
 
@@ -173,6 +174,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
             interface_registry,
             type_implements,
             error_types,
+            module_programs,
         );
         compiler
             .compile_program(&program)
@@ -224,6 +226,7 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
         interface_registry,
         type_implements,
         error_types,
+        module_programs,
     ) = analyzer.into_analysis_results();
 
     // Compile
@@ -238,6 +241,7 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
             interface_registry,
             type_implements,
             error_types,
+            module_programs,
         );
         compiler
             .compile_program(&program)

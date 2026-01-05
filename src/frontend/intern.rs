@@ -4,7 +4,7 @@ use crate::frontend::ast::Symbol;
 use std::collections::HashMap;
 
 /// Interns strings to unique Symbol IDs
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Interner {
     map: HashMap<String, Symbol>,
     strings: Vec<String>,

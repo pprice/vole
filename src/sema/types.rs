@@ -140,6 +140,8 @@ pub struct ModuleType {
     pub exports: std::collections::HashMap<String, Type>,
     /// Constant values from the module (let PI = 3.14...)
     pub constants: std::collections::HashMap<String, ConstantValue>,
+    /// Names of functions that are external (FFI) - others are pure Vole
+    pub external_funcs: std::collections::HashSet<String>,
 }
 
 impl PartialEq for FunctionType {

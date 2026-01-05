@@ -48,4 +48,43 @@ tests {
         assert(math.PI > 3.14)
         assert(math.PI < 3.15)
     }
+
+    // Tests for pure Vole functions (defined in math.vole, not external)
+    test "math.lerp" {
+        // lerp(0, 10, 0.5) should be 5
+        assert(math.lerp(0.0, 10.0, 0.5) == 5.0)
+        // lerp(0, 10, 0) should be 0
+        assert(math.lerp(0.0, 10.0, 0.0) == 0.0)
+        // lerp(0, 10, 1) should be 10
+        assert(math.lerp(0.0, 10.0, 1.0) == 10.0)
+    }
+
+    // Pure Vole function that calls external FFI functions (min, max)
+    test "math.clamp" {
+        // clamp(5, 0, 10) = 5 (within range)
+        assert(math.clamp(5.0, 0.0, 10.0) == 5.0)
+        // clamp(-5, 0, 10) = 0 (below range)
+        assert(math.clamp(-5.0, 0.0, 10.0) == 0.0)
+        // clamp(15, 0, 10) = 10 (above range)
+        assert(math.clamp(15.0, 0.0, 10.0) == 10.0)
+    }
+
+    // Pure Vole functions that use module constants (PI)
+    test "math.deg_to_rad" {
+        // 180 degrees = PI radians
+        let rad = math.deg_to_rad(180.0)
+        assert(rad > 3.14)
+        assert(rad < 3.15)
+        // 0 degrees = 0 radians
+        assert(math.deg_to_rad(0.0) == 0.0)
+    }
+
+    test "math.rad_to_deg" {
+        // PI radians = 180 degrees
+        let deg = math.rad_to_deg(math.PI)
+        assert(deg > 179.9)
+        assert(deg < 180.1)
+        // 0 radians = 0 degrees
+        assert(math.rad_to_deg(0.0) == 0.0)
+    }
 }
