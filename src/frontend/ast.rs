@@ -336,8 +336,8 @@ pub enum ExprKind {
     /// Method call: point.distance()
     MethodCall(Box<MethodCallExpr>),
 
-    /// Try-catch expression
-    TryCatch(Box<TryCatchExpr>),
+    /// Try expression (propagation operator)
+    Try(Box<Expr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
@@ -530,37 +530,6 @@ pub struct MethodCallExpr {
     pub method_span: Span,
 }
 
-/// Try-catch expression
-#[derive(Debug, Clone)]
-pub struct TryCatchExpr {
-    pub try_expr: Expr,
-    pub catch_arms: Vec<CatchArm>,
-    pub span: Span,
-}
-
-/// A single arm in a catch block
-#[derive(Debug, Clone)]
-pub struct CatchArm {
-    pub pattern: ErrorPattern,
-    pub body: Expr,
-    pub span: Span,
-}
-
-/// Pattern for matching errors in catch
-#[derive(Debug, Clone)]
-pub enum ErrorPattern {
-    /// Match specific error: ErrorName { field1, field2 }
-    Named {
-        name: Symbol,
-        bindings: Vec<(Symbol, Symbol)>, // (field_name, binding_name)
-        span: Span,
-    },
-    /// Match specific error without destructuring: ErrorName {}
-    NamedEmpty { name: Symbol, span: Span },
-    /// Wildcard: _
-    Wildcard(Span),
-}
-
 /// Lambda expression: (params) => body
 #[derive(Debug, Clone)]
 pub struct LambdaExpr {
@@ -647,6 +616,16 @@ pub enum Pattern {
     Type { type_expr: TypeExpr, span: Span },
     /// Val pattern: val x (compares against existing variable)
     Val { name: Symbol, span: Span },
+    /// Success pattern for fallible match: success x, success, success Point { x, y }
+    Success {
+        inner: Option<Box<Pattern>>, // None = bare success, Some = success <pattern>
+        span: Span,
+    },
+    /// Error pattern for fallible match: error e, error, error DivByZero, error DivByZero { msg }
+    Error {
+        inner: Option<Box<Pattern>>, // None = bare error, Some = error <pattern>
+        span: Span,
+    },
 }
 
 #[cfg(test)]

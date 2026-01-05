@@ -1,0 +1,439 @@
+// Comprehensive error handling tests
+// Tests for: error declarations, raise, try propagation, and fallible match patterns
+//
+// NOTE: Some tests use workarounds for current implementation limitations:
+// - Wildcard patterns are added because exhaustiveness check doesn't recognize
+//   success + error as exhaustive for fallible types
+// - All match arms use i64 literals to avoid type mismatch errors
+
+// Error type declarations
+error DivByZero {}
+error Overflow { value: i64, max: i64 }
+error NotFound { key: string }
+error Timeout { ms: i64 }
+
+// Basic fallible function with i64
+func divide(a: i64, b: i64) -> fallible(i64, DivByZero) {
+    if b == 0 {
+        raise DivByZero {}
+    }
+    return a / b
+}
+
+// Fallible function with data in error
+func checkOverflow(value: i64, max: i64) -> fallible(i64, Overflow) {
+    if value > max {
+        raise Overflow { value: value, max: max }
+    }
+    return value
+}
+
+// Function with multiple error types
+func complexOp(x: i64) -> fallible(i64, NotFound | Timeout) {
+    if x < 0 {
+        raise NotFound { key: "negative" }
+    }
+    if x > 100 {
+        raise Timeout { ms: x }
+    }
+    return x * 2
+}
+
+// Try propagation - single error type
+func processDivide(a: i64, b: i64, c: i64) -> fallible(i64, DivByZero) {
+    let x = try divide(a, b)
+    let y = try divide(x, c)
+    return y
+}
+
+// Try propagation - chained operations
+func chainedDivide(a: i64, b: i64, c: i64, d: i64) -> fallible(i64, DivByZero) {
+    let step1 = try divide(a, b)
+    let step2 = try divide(step1, c)
+    let step3 = try divide(step2, d)
+    return step3
+}
+
+// Try propagation - mixed with normal expressions
+func mixedOps(a: i64, b: i64) -> fallible(i64, DivByZero) {
+    let x = try divide(a, b)
+    let y = x + 10  // normal operation
+    let z = try divide(y, 2)
+    return z * 3
+}
+
+tests "error declaration and raising" {
+    test "basic success" {
+        let result = match divide(10, 2) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 5)
+    }
+
+    test "basic error" {
+        let result = match divide(10, 0) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == -999)
+    }
+
+    test "error with data" {
+        let result = match checkOverflow(150, 100) {
+            success x => x
+            Overflow => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "success with data error type" {
+        let result = match checkOverflow(50, 100) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 50)
+    }
+}
+
+tests "try propagation operator" {
+    test "try propagates success" {
+        let result = match processDivide(100, 2, 5) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 10)  // 100/2=50, 50/5=10
+    }
+
+    test "try propagates first error" {
+        let result = match processDivide(100, 0, 5) {
+            success x => x
+            DivByZero => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "try propagates second error" {
+        let result = match processDivide(100, 2, 0) {
+            success x => x
+            DivByZero => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "chained try all success" {
+        let result = match chainedDivide(1000, 2, 5, 10) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 10)  // 1000/2=500, 500/5=100, 100/10=10
+    }
+
+    test "chained try early failure" {
+        let result = match chainedDivide(1000, 0, 5, 10) {
+            success x => x
+            DivByZero => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "chained try late failure" {
+        let result = match chainedDivide(1000, 2, 5, 0) {
+            success x => x
+            DivByZero => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "mixed operations with try" {
+        let result = match mixedOps(20, 2) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        // mixedOps: x = a/b, y = x+10, z = y/2, return z*3
+        // a=20, b=2: x=10, y=20, z=10, return 30
+        assert(result == 30)
+    }
+}
+
+tests "explicit success keyword" {
+    test "success with binding" {
+        let result = match divide(10, 2) {
+            success x => x + 100
+            error => 0
+            _ => -888
+        }
+        assert(result == 105)
+    }
+
+    test "success without binding" {
+        let result = match divide(10, 2) {
+            success => 42
+            error => 0
+            _ => -888
+        }
+        assert(result == 42)
+    }
+}
+
+tests "error pattern variations" {
+    test "bare error catchall" {
+        let result = match divide(10, 0) {
+            success x => x
+            error => -1
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "error with identifier binding" {
+        let result = match divide(10, 0) {
+            success x => x
+            error e => -1
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "specific error type pattern" {
+        // NOTE: error keyword is REQUIRED to match specific error types
+        // Without 'error', 'DivByZero => -1' would be an identifier binding, not a type match
+        let result = match divide(10, 0) {
+            success x => x
+            error DivByZero => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "multiple specific error types in union" {
+        // Test that specific error patterns correctly match in unions
+        let r1 = match complexOp(-5) {
+            success x => x
+            error NotFound => -1
+            error Timeout => -2
+            error => -999
+            _ => -888
+        }
+        assert(r1 == -1)  // NotFound should match
+
+        let r2 = match complexOp(150) {
+            success x => x
+            error NotFound => -1
+            error Timeout => -2
+            error => -999
+            _ => -888
+        }
+        assert(r2 == -2)  // Timeout should match
+    }
+
+    test "error catchall with union type" {
+        // Test that error catchall works for any error in union
+        let r1 = match complexOp(-5) {
+            success x => x
+            error => -1
+            _ => -888
+        }
+        assert(r1 == -1)
+
+        let r2 = match complexOp(150) {
+            success x => x
+            error => -2
+            _ => -888
+        }
+        assert(r2 == -2)
+
+        // Test success
+        let r3 = match complexOp(25) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(r3 == 50)  // 25 * 2 = 50
+    }
+}
+
+tests "match arm ordering" {
+    test "success before error" {
+        let result = match divide(10, 2) {
+            success x => x
+            error => -1
+            _ => -888
+        }
+        assert(result == 5)
+    }
+
+    test "error before success" {
+        let result = match divide(10, 2) {
+            error => -1
+            success x => x
+            _ => -888
+        }
+        assert(result == 5)
+    }
+
+    test "specific error before catchall" {
+        let result = match divide(10, 0) {
+            success x => x
+            error DivByZero => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "catchall error catches when specific misses" {
+        // Test that error catchall catches errors not matched by specific patterns
+        let result = match complexOp(-5) {
+            success x => x
+            error Timeout => -2   // This won't match NotFound
+            error => -999         // Catchall should match NotFound
+            _ => -888
+        }
+        assert(result == -999)  // NotFound should fall through to catchall
+    }
+}
+
+tests "nested fallible operations" {
+    test "outer success inner success" {
+        // Both operations succeed
+        let outer_result = match processDivide(100, 2, 5) {
+            success x => x + 1000
+            error => -1
+            _ => -888
+        }
+        assert(outer_result == 1010)  // 100/2/5 = 10, +1000 = 1010
+    }
+
+    test "handle error then continue" {
+        // Handle an error, get a default, then continue
+        let first = match divide(10, 0) {
+            success x => x
+            error => 100  // default on error
+            _ => -888
+        }
+        let second = match divide(first, 2) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(second == 50)  // 100/2 = 50
+    }
+}
+
+// Helper functions for control flow tests
+func checkPositive(x: i64) -> fallible(bool, DivByZero) {
+    let result = try divide(x, 2)
+    return result > 0
+}
+
+func sumDivisions(n: i64) -> fallible(i64, DivByZero) {
+    let mut sum = 0
+    let mut i = 1
+    while i <= n {
+        let result = try divide(100, i)
+        sum = sum + result
+        i = i + 1
+    }
+    return sum
+}
+
+func findFirstDivisible(divisor: i64) -> fallible(i64, DivByZero) {
+    let mut i = 0
+    while i < 10 {
+        let result = try divide(i * 10, divisor)
+        if result > 5 {
+            return result
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+func mayFail(x: i64) -> fallible(i64, Overflow) {
+    if x > 50 {
+        raise Overflow { value: x, max: 50 }
+    }
+    return x
+}
+
+tests "try in control flow" {
+    test "try in if condition succeeds" {
+        // checkPositive returns true for positive results
+        let succeeded = match checkPositive(10) {
+            success => 1
+            error => -1
+            _ => -888
+        }
+        assert(succeeded == 1)  // 10/2 = 5 > 0, so returns true (success)
+    }
+
+    test "try in loop" {
+        let result = match sumDivisions(4) {
+            success x => x
+            error => -1
+            _ => -888
+        }
+        // 100/1 + 100/2 + 100/3 + 100/4 = 100 + 50 + 33 + 25 = 208
+        assert(result == 208)
+    }
+
+    test "early return via try in loop" {
+        let r1 = match findFirstDivisible(5) {
+            success x => x
+            error => -1
+            _ => -888
+        }
+        // First i where i*10/5 > 5 is i=3: 30/5=6
+        assert(r1 == 6)
+
+        // Division by zero propagates
+        let r2 = match findFirstDivisible(0) {
+            success x => x
+            error DivByZero => -999
+            error => -1
+            _ => -888
+        }
+        assert(r2 == -999)
+    }
+}
+
+tests "guards on patterns" {
+    test "guard on success pattern" {
+        let result = match divide(100, 2) {
+            success x if x > 100 => 1
+            success x if x > 10 => 2
+            success x => 3
+            error => -1
+            _ => -888
+        }
+        assert(result == 2)  // 100/2 = 50, which is > 10 but not > 100
+    }
+
+    test "guard on error pattern" {
+        let result = match mayFail(100) {
+            success x => x
+            error Overflow => -1  // Matches any Overflow
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+}

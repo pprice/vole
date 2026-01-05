@@ -5,10 +5,8 @@
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
 
-use crate::frontend::{
-    AssignTarget, ErrorPattern, Expr, ExprKind, MatchExpr, Pattern, TryCatchExpr, UnaryOp,
-};
-use crate::sema::{ErrorTypeInfo, Type};
+use crate::frontend::{AssignTarget, Expr, ExprKind, MatchExpr, Pattern, UnaryOp};
+use crate::sema::Type;
 
 use super::context::Cg;
 use super::structs::{convert_field_value, convert_to_i64_for_storage};
@@ -57,7 +55,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::StructLiteral(sl) => self.struct_literal(sl),
             ExprKind::FieldAccess(fa) => self.field_access(fa),
             ExprKind::MethodCall(mc) => self.method_call(mc, expr.id),
-            ExprKind::TryCatch(try_catch) => self.try_catch(try_catch),
+            ExprKind::Try(inner) => self.try_propagate(inner),
         }
     }
 
@@ -547,6 +545,124 @@ impl Cg<'_, '_, '_> {
                     };
                     Some(cmp)
                 }
+                Pattern::Success { inner, .. } => {
+                    // Check if tag == FALLIBLE_SUCCESS_TAG (0)
+                    let tag = self.builder.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        scrutinee.value,
+                        FALLIBLE_TAG_OFFSET,
+                    );
+                    let is_success =
+                        self.builder
+                            .ins()
+                            .icmp_imm(IntCC::Equal, tag, FALLIBLE_SUCCESS_TAG);
+
+                    // If there's an inner pattern, we need to extract payload and bind it
+                    if let Some(inner_pat) = inner {
+                        // Extract the success type from scrutinee's vole_type
+                        if let Type::Fallible(ft) = &scrutinee.vole_type {
+                            let success_type = &*ft.success_type;
+                            let payload_ty = type_to_cranelift(success_type, self.ctx.pointer_type);
+                            let payload = self.builder.ins().load(
+                                payload_ty,
+                                MemFlags::new(),
+                                scrutinee.value,
+                                FALLIBLE_PAYLOAD_OFFSET,
+                            );
+
+                            // Handle inner pattern (usually an identifier binding)
+                            if let Pattern::Identifier { name, .. } = inner_pat.as_ref() {
+                                let var = self.builder.declare_var(payload_ty);
+                                self.builder.def_var(var, payload);
+                                arm_variables.insert(*name, (var, success_type.clone()));
+                            }
+                        }
+                    }
+                    Some(is_success)
+                }
+                Pattern::Error { inner, .. } => {
+                    // Check if tag != FALLIBLE_SUCCESS_TAG (i.e., it's an error)
+                    let tag = self.builder.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        scrutinee.value,
+                        FALLIBLE_TAG_OFFSET,
+                    );
+
+                    if let Some(inner_pat) = inner {
+                        // Inner pattern could be identifier (catch-all) or type (specific error)
+                        match inner_pat.as_ref() {
+                            Pattern::Identifier { name, .. } => {
+                                // Check if this is an error type name
+                                if let Some(_error_info) = self.ctx.error_types.get(name) {
+                                    // Specific error type: error DivByZero => ...
+                                    // Get the fallible type to look up the tag
+                                    if let Type::Fallible(ft) = &scrutinee.vole_type {
+                                        let error_tag = fallible_error_tag(ft, *name);
+                                        if let Some(error_tag) = error_tag {
+                                            let is_this_error = self.builder.ins().icmp_imm(
+                                                IntCC::Equal,
+                                                tag,
+                                                error_tag,
+                                            );
+                                            Some(is_this_error)
+                                        } else {
+                                            // Error type not found in fallible - will never match
+                                            let never_match =
+                                                self.builder.ins().iconst(types::I8, 0);
+                                            Some(never_match)
+                                        }
+                                    } else {
+                                        // Not matching on a fallible type
+                                        let never_match = self.builder.ins().iconst(types::I8, 0);
+                                        Some(never_match)
+                                    }
+                                } else {
+                                    // Catch-all error binding: error e => ...
+                                    let is_error = self.builder.ins().icmp_imm(
+                                        IntCC::NotEqual,
+                                        tag,
+                                        FALLIBLE_SUCCESS_TAG,
+                                    );
+
+                                    // Extract error type and bind
+                                    if let Type::Fallible(ft) = &scrutinee.vole_type {
+                                        let error_type = &*ft.error_type;
+                                        let payload_ty =
+                                            type_to_cranelift(error_type, self.ctx.pointer_type);
+                                        let payload = self.builder.ins().load(
+                                            payload_ty,
+                                            MemFlags::new(),
+                                            scrutinee.value,
+                                            FALLIBLE_PAYLOAD_OFFSET,
+                                        );
+                                        let var = self.builder.declare_var(payload_ty);
+                                        self.builder.def_var(var, payload);
+                                        arm_variables.insert(*name, (var, error_type.clone()));
+                                    }
+                                    Some(is_error)
+                                }
+                            }
+                            _ => {
+                                // Catch-all for other patterns (like wildcard)
+                                let is_error = self.builder.ins().icmp_imm(
+                                    IntCC::NotEqual,
+                                    tag,
+                                    FALLIBLE_SUCCESS_TAG,
+                                );
+                                Some(is_error)
+                            }
+                        }
+                    } else {
+                        // Bare error pattern: error => ...
+                        let is_error =
+                            self.builder
+                                .ins()
+                                .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
+                        Some(is_error)
+                    }
+                }
             };
 
             // Save and restore vars for guard evaluation
@@ -621,295 +737,74 @@ impl Cg<'_, '_, '_> {
         })
     }
 
-    /// Compile a try-catch expression
+    /// Compile a try expression (propagation)
     ///
-    /// Layout of a fallible value (returned by the try_expr):
-    /// - Offset 0: tag (i64) - 0 for success, 1+ for error types
-    /// - Offset 8: payload - success value or error fields
-    ///
-    /// Control flow:
-    /// 1. Compile try_expr to get fallible pointer
-    /// 2. Load tag
-    /// 3. Branch: if tag == 0, go to success block
-    /// 4. Otherwise, check each catch arm's pattern
-    /// 5. Merge all paths with block parameter
-    pub fn try_catch(&mut self, try_catch: &TryCatchExpr) -> Result<CompiledValue, String> {
-        // Compile the try expression - should return a pointer to a fallible value
-        let try_result = self.expr(&try_catch.try_expr)?;
+    /// On success: returns unwrapped value
+    /// On error: propagates by returning from function
+    fn try_propagate(&mut self, inner: &Expr) -> Result<CompiledValue, String> {
+        // Compile the inner fallible expression
+        let fallible = self.expr(inner)?;
 
-        // The try_result should be a Fallible type - get the inner types
-        let (success_type, error_type) = match &try_result.vole_type {
-            Type::Fallible(ft) => ((*ft.success_type).clone(), (*ft.error_type).clone()),
-            _ => {
-                return Err(format!(
-                    "try expression must have fallible type, got {:?}",
-                    try_result.vole_type
-                ));
-            }
+        // Get type info
+        let success_type = match &fallible.vole_type {
+            Type::Fallible(ft) => (*ft.success_type).clone(),
+            _ => return Err("try on non-fallible type".to_string()),
         };
 
-        // Extract the FallibleType for tag lookups
-        let fallible_type = match &try_result.vole_type {
-            Type::Fallible(ft) => ft.clone(),
-            _ => unreachable!(),
-        };
-
-        // Load the tag from the fallible value (at offset 0, i64)
+        // Load the tag
         let tag = self.builder.ins().load(
             types::I64,
             MemFlags::new(),
-            try_result.value,
+            fallible.value,
             FALLIBLE_TAG_OFFSET,
         );
 
-        // Create blocks for control flow
+        // Check if success (tag == 0)
+        let is_success = self
+            .builder
+            .ins()
+            .icmp_imm(IntCC::Equal, tag, FALLIBLE_SUCCESS_TAG);
+
+        // Create blocks
         let success_block = self.builder.create_block();
-        let first_catch_block = self.builder.create_block();
+        let error_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
 
-        // Result type is the success type (after unwrapping fallible)
-        let result_cranelift_type = type_to_cranelift(&success_type, self.ctx.pointer_type);
-        self.builder
-            .append_block_param(merge_block, result_cranelift_type);
+        // Get payload type for success
+        let payload_ty = type_to_cranelift(&success_type, self.ctx.pointer_type);
+        self.builder.append_block_param(merge_block, payload_ty);
 
-        // Branch: if tag == 0 (success), go to success_block, else to first catch
-        let success_tag = self.builder.ins().iconst(types::I64, FALLIBLE_SUCCESS_TAG);
-        let is_success = self.builder.ins().icmp(IntCC::Equal, tag, success_tag);
+        // Branch based on tag
         self.builder
             .ins()
-            .brif(is_success, success_block, &[], first_catch_block, &[]);
+            .brif(is_success, success_block, &[], error_block, &[]);
 
-        // === Success block ===
+        // Error block: propagate by returning the fallible value
+        self.builder.switch_to_block(error_block);
+        self.builder.seal_block(error_block);
+        self.builder.ins().return_(&[fallible.value]);
+
+        // Success block: extract payload and jump to merge
         self.builder.switch_to_block(success_block);
         self.builder.seal_block(success_block);
-
-        // Load the success value from the payload (at offset 8)
-        let success_value = self.builder.ins().load(
-            result_cranelift_type,
+        let payload = self.builder.ins().load(
+            payload_ty,
             MemFlags::new(),
-            try_result.value,
+            fallible.value,
             FALLIBLE_PAYLOAD_OFFSET,
         );
-        let success_arg = BlockArg::from(success_value);
-        self.builder.ins().jump(merge_block, &[success_arg]);
+        let payload_arg = BlockArg::from(payload);
+        self.builder.ins().jump(merge_block, &[payload_arg]);
 
-        // === Catch blocks ===
-        // Create blocks for each catch arm
-        let catch_blocks: Vec<Block> = try_catch
-            .catch_arms
-            .iter()
-            .map(|_| self.builder.create_block())
-            .collect();
-
-        // First catch block is where we jump from the initial branch
-        self.builder.switch_to_block(first_catch_block);
-
-        // Jump to the first catch arm's block
-        if !catch_blocks.is_empty() {
-            self.builder.ins().jump(catch_blocks[0], &[]);
-        } else {
-            // No catch arms - should not happen after sema, but handle gracefully
-            let default_val = self.builder.ins().iconst(result_cranelift_type, 0);
-            let default_arg = BlockArg::from(default_val);
-            self.builder.ins().jump(merge_block, &[default_arg]);
-        }
-        self.builder.seal_block(first_catch_block);
-
-        // Create a fallback block for when no catch arm matches (should be unreachable after sema)
-        let fallback_block = self.builder.create_block();
-
-        // Compile each catch arm
-        for (i, arm) in try_catch.catch_arms.iter().enumerate() {
-            let arm_block = catch_blocks[i];
-            let next_block = catch_blocks.get(i + 1).copied().unwrap_or(fallback_block);
-
-            self.builder.switch_to_block(arm_block);
-
-            // Create a new variables scope for this arm's bindings
-            let mut arm_variables = self.vars.clone();
-
-            // Check pattern and bind variables
-            match &arm.pattern {
-                ErrorPattern::Wildcard(_) => {
-                    // Wildcard always matches - go directly to body
-                    // Compile body with the arm's variables
-                    let saved_vars = std::mem::replace(&mut *self.vars, arm_variables);
-                    let body_val = self.expr(&arm.body)?;
-                    let _ = std::mem::replace(&mut *self.vars, saved_vars);
-
-                    let result_val = self.convert_to_result_type(&body_val, result_cranelift_type);
-                    let result_arg = BlockArg::from(result_val);
-                    self.builder.ins().jump(merge_block, &[result_arg]);
-                }
-
-                ErrorPattern::NamedEmpty { name, .. } => {
-                    // Get the error tag for this error type
-                    let error_tag = fallible_error_tag(&fallible_type, *name).ok_or_else(|| {
-                        format!(
-                            "Error type not found in fallible: {}",
-                            self.ctx.interner.resolve(*name)
-                        )
-                    })?;
-
-                    // Compare tag
-                    let expected_tag = self.builder.ins().iconst(types::I64, error_tag);
-                    let matches = self.builder.ins().icmp(IntCC::Equal, tag, expected_tag);
-
-                    // Create body block
-                    let body_block = self.builder.create_block();
-
-                    // Branch: if matches, go to body, else go to next arm
-                    self.builder
-                        .ins()
-                        .brif(matches, body_block, &[], next_block, &[]);
-
-                    // Compile body
-                    self.builder.switch_to_block(body_block);
-
-                    // Compile body with the arm's variables
-                    let saved_vars = std::mem::replace(&mut *self.vars, arm_variables);
-                    let body_val = self.expr(&arm.body)?;
-                    let _ = std::mem::replace(&mut *self.vars, saved_vars);
-
-                    let result_val = self.convert_to_result_type(&body_val, result_cranelift_type);
-                    let result_arg = BlockArg::from(result_val);
-                    self.builder.ins().jump(merge_block, &[result_arg]);
-                    self.builder.seal_block(body_block);
-                }
-
-                ErrorPattern::Named { name, bindings, .. } => {
-                    // Get the error tag for this error type
-                    let error_tag = fallible_error_tag(&fallible_type, *name).ok_or_else(|| {
-                        format!(
-                            "Error type not found in fallible: {}",
-                            self.ctx.interner.resolve(*name)
-                        )
-                    })?;
-
-                    // Compare tag
-                    let expected_tag = self.builder.ins().iconst(types::I64, error_tag);
-                    let matches = self.builder.ins().icmp(IntCC::Equal, tag, expected_tag);
-
-                    // Create body block
-                    let body_block = self.builder.create_block();
-
-                    // Branch: if matches, go to body, else go to next arm
-                    self.builder
-                        .ins()
-                        .brif(matches, body_block, &[], next_block, &[]);
-
-                    // Compile body with field bindings
-                    self.builder.switch_to_block(body_block);
-
-                    // Get the error type info to find field types and offsets
-                    let error_info = get_error_type_info(&error_type, *name).ok_or_else(|| {
-                        format!(
-                            "Error type info not found for: {}",
-                            self.ctx.interner.resolve(*name)
-                        )
-                    })?;
-
-                    // Bind each destructured field
-                    for (field_name, binding_name) in bindings {
-                        // Find the field in the error type
-                        let (field_idx, field_type) = error_info
-                            .fields
-                            .iter()
-                            .enumerate()
-                            .find(|(_, f)| f.name == *field_name)
-                            .map(|(idx, f)| (idx, f.ty.clone()))
-                            .ok_or_else(|| {
-                                format!(
-                                    "Field {} not found in error type {}",
-                                    self.ctx.interner.resolve(*field_name),
-                                    self.ctx.interner.resolve(*name)
-                                )
-                            })?;
-
-                        // Calculate field offset: payload starts at offset 8, each field is 8 bytes
-                        let field_offset = FALLIBLE_PAYLOAD_OFFSET + (field_idx as i32 * 8);
-
-                        // Load the field value
-                        let field_cranelift_type =
-                            type_to_cranelift(&field_type, self.ctx.pointer_type);
-                        let field_value = self.builder.ins().load(
-                            field_cranelift_type,
-                            MemFlags::new(),
-                            try_result.value,
-                            field_offset,
-                        );
-
-                        // Bind to variable
-                        let var = self.builder.declare_var(field_cranelift_type);
-                        self.builder.def_var(var, field_value);
-                        arm_variables.insert(*binding_name, (var, field_type));
-                    }
-
-                    // Compile body with the arm's variables (including field bindings)
-                    let saved_vars = std::mem::replace(&mut *self.vars, arm_variables);
-                    let body_val = self.expr(&arm.body)?;
-                    let _ = std::mem::replace(&mut *self.vars, saved_vars);
-
-                    let result_val = self.convert_to_result_type(&body_val, result_cranelift_type);
-                    let result_arg = BlockArg::from(result_val);
-                    self.builder.ins().jump(merge_block, &[result_arg]);
-                    self.builder.seal_block(body_block);
-                }
-            }
-
-            self.builder.seal_block(arm_block);
-        }
-
-        // === Fallback block (unreachable in practice) ===
-        // This handles the case where no catch arm matched, which should never happen
-        // after semantic analysis ensures exhaustiveness. We still need to jump to
-        // merge_block with a value to satisfy the control flow.
-        self.builder.switch_to_block(fallback_block);
-        self.builder.seal_block(fallback_block);
-        let fallback_val = self.builder.ins().iconst(result_cranelift_type, 0);
-        let fallback_arg = BlockArg::from(fallback_val);
-        self.builder.ins().jump(merge_block, &[fallback_arg]);
-
-        // === Merge block ===
+        // Merge block: continue with extracted value
         self.builder.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);
-
         let result = self.builder.block_params(merge_block)[0];
+
         Ok(CompiledValue {
             value: result,
-            ty: result_cranelift_type,
+            ty: payload_ty,
             vole_type: success_type,
         })
-    }
-
-    /// Convert a compiled value to the expected result type for merge block
-    fn convert_to_result_type(&mut self, val: &CompiledValue, target: types::Type) -> Value {
-        if val.ty == target {
-            return val.value;
-        }
-
-        // Integer widening
-        if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
-            return self.builder.ins().sextend(target, val.value);
-        }
-
-        // Integer narrowing
-        if target.is_int() && val.ty.is_int() && target.bits() < val.ty.bits() {
-            return self.builder.ins().ireduce(target, val.value);
-        }
-
-        val.value
-    }
-}
-
-/// Get error type info from an error type or union of error types
-fn get_error_type_info(error_type: &Type, name: crate::frontend::Symbol) -> Option<ErrorTypeInfo> {
-    match error_type {
-        Type::ErrorType(info) if info.name == name => Some(info.clone()),
-        Type::Union(variants) => variants.iter().find_map(|v| match v {
-            Type::ErrorType(info) if info.name == name => Some(info.clone()),
-            _ => None,
-        }),
-        _ => None,
     }
 }

@@ -40,7 +40,7 @@ vole run hello.vole
 
 | Doc | Description |
 |-----|-------------|
-| [Error Handling](error-handling.md) | Typed errors, fallible functions, try/catch |
+| [Error Handling](error-handling.md) | Typed errors, fallible functions, match patterns |
 | [Iterators](iterators.md) | Lazy sequences: map, filter, reduce, collect |
 | [Testing](testing.md) | Test blocks, assertions, test organization |
 
@@ -82,7 +82,7 @@ func main() {
 | Functions, lambdas, closures | Implemented |
 | Classes, records, interfaces | Implemented |
 | Generics (union constraints) | Implemented |
-| Error handling (fallible, try/catch) | Implemented |
+| Error handling (fallible, try, match patterns) | Implemented |
 | External blocks (native FFI) | Implemented |
 | Iterators (map, filter, reduce, etc.) | Implemented |
 | Testing (test blocks, assert) | Implemented |

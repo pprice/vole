@@ -253,7 +253,7 @@ pub enum SemanticError {
     #[error("try expression requires fallible type, found {found}")]
     #[diagnostic(
         code(E2057),
-        help("try/catch can only be used with fallible function calls")
+        help("try can only propagate errors from fallible function calls")
     )]
     TryOnNonFallible {
         found: String,
@@ -261,36 +261,42 @@ pub enum SemanticError {
         span: SourceSpan,
     },
 
-    #[error("non-exhaustive catch block")]
-    #[diagnostic(
-        code(E2058),
-        help("add a wildcard pattern '_' or handle all error types: {missing}")
-    )]
-    NonExhaustiveCatch {
-        missing: String,
-        #[label("catch does not cover all error types")]
-        span: SourceSpan,
-    },
-
-    #[error("unreachable catch arm for '{name}'")]
-    #[diagnostic(
-        code(E2059),
-        help("this error type is not in the fallible expression's error set")
-    )]
-    UnreachableCatchArm {
-        name: String,
-        #[label("this error cannot be raised")]
-        span: SourceSpan,
-    },
-
-    #[error("catch arms have incompatible types: expected {expected}, found {found}")]
-    #[diagnostic(code(E2060))]
-    CatchArmTypeMismatch {
-        expected: String,
+    #[error("success pattern used on non-fallible type '{found}'")]
+    #[diagnostic(code(E2061))]
+    SuccessPatternOnNonFallible {
         found: String,
-        #[label("first arm has type {expected}")]
-        first_arm: SourceSpan,
-        #[label("this arm has type {found}")]
+        #[label("expected fallible type")]
+        span: SourceSpan,
+    },
+
+    #[error("error pattern used on non-fallible type '{found}'")]
+    #[diagnostic(code(E2062))]
+    ErrorPatternOnNonFallible {
+        found: String,
+        #[label("expected fallible type")]
+        span: SourceSpan,
+    },
+
+    #[error("match on fallible type requires at least one error arm")]
+    #[diagnostic(code(E2063))]
+    MissingErrorArm {
+        #[label("fallible type matched here")]
+        span: SourceSpan,
+    },
+
+    #[error("try expression outside fallible function")]
+    #[diagnostic(code(E2064))]
+    TryOutsideFallible {
+        #[label("try must be in a function with fallible return type")]
+        span: SourceSpan,
+    },
+
+    #[error("try propagates '{try_error}' but function error type is '{func_error}'")]
+    #[diagnostic(code(E2065))]
+    IncompatibleTryError {
+        try_error: String,
+        func_error: String,
+        #[label("incompatible error type")]
         span: SourceSpan,
     },
 }

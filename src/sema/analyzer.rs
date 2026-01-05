@@ -1177,221 +1177,79 @@ impl Analyzer {
         Type::Void // raise doesn't produce a value - it transfers control
     }
 
-    /// Analyze a try-catch expression
+    /// Analyze a try expression (propagation)
     ///
-    /// try-catch unwraps a fallible type, returning the success type.
-    /// The catch arms must exhaustively cover all error types in the fallible's error set.
-    fn analyze_try_catch(
+    /// try unwraps a fallible type:
+    /// - On success: returns the success value
+    /// - On error: propagates the error to the caller (early return)
+    fn analyze_try(
         &mut self,
-        try_catch: &TryCatchExpr,
+        inner_expr: &Expr,
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
-        // Step 1: Check the try expression - it must be a fallible type
-        let try_type = self.check_expr(&try_catch.try_expr, interner)?;
+        // Check the inner expression - must be fallible
+        let inner_type = self.check_expr(inner_expr, interner)?;
 
-        let (success_type, error_type) = match &try_type {
+        let (success_type, error_type) = match &inner_type {
             Type::Fallible(ft) => ((*ft.success_type).clone(), (*ft.error_type).clone()),
             _ => {
                 self.add_error(
                     SemanticError::TryOnNonFallible {
-                        found: format!("{}", try_type),
-                        span: try_catch.try_expr.span.into(),
+                        found: format!("{}", inner_type),
+                        span: inner_expr.span.into(),
                     },
-                    try_catch.try_expr.span,
+                    inner_expr.span,
                 );
-                // Still check the catch arms for more errors, using Error as fallback
                 return Ok(Type::Error);
             }
         };
 
-        // Step 2: Extract the set of error types from the error_type
-        // It could be a single ErrorType or a Union of ErrorTypes
-        let error_set: Vec<ErrorTypeInfo> = match &error_type {
-            Type::ErrorType(info) => vec![info.clone()],
-            Type::Union(variants) => variants
-                .iter()
-                .filter_map(|v| match v {
-                    Type::ErrorType(info) => Some(info.clone()),
-                    _ => None,
-                })
-                .collect(),
-            _ => vec![],
+        // Check that we're in a fallible function context
+        let Some(ref current_error) = self.current_function_error_type else {
+            self.add_error(
+                SemanticError::TryOutsideFallible {
+                    span: inner_expr.span.into(),
+                },
+                inner_expr.span,
+            );
+            return Ok(success_type);
         };
 
-        // Track which errors have been handled
-        let mut handled_errors: HashSet<Symbol> = HashSet::new();
-        let mut has_wildcard = false;
+        // Check that the error type is compatible with the function's error type
+        if !self.error_type_compatible(&error_type, current_error) {
+            self.add_error(
+                SemanticError::IncompatibleTryError {
+                    try_error: format!("{}", error_type),
+                    func_error: format!("{}", current_error),
+                    span: inner_expr.span.into(),
+                },
+                inner_expr.span,
+            );
+        }
 
-        // Step 3: Check each catch arm
-        let mut result_type: Option<Type> = None;
-        let mut first_arm_span: Option<Span> = None;
+        // try unwraps - returns the success type
+        Ok(success_type)
+    }
 
-        for arm in &try_catch.catch_arms {
-            // Enter a new scope for the arm (bindings live here)
-            self.scope = Scope::with_parent(std::mem::take(&mut self.scope));
+    /// Check if error type is compatible with function's declared error type
+    fn error_type_compatible(&self, error_type: &Type, func_error: &Type) -> bool {
+        // Same type
+        if error_type == func_error {
+            return true;
+        }
 
-            // Check the pattern
-            match &arm.pattern {
-                ErrorPattern::Named {
-                    name,
-                    bindings,
-                    span,
-                } => {
-                    // Check if this error is in the error set
-                    let matching_error = error_set.iter().find(|e| e.name == *name);
-
-                    if let Some(error_info) = matching_error {
-                        // Mark as handled
-                        if !handled_errors.insert(*name) {
-                            // Already handled - this is a duplicate
-                            self.add_error(
-                                SemanticError::UnreachableCatchArm {
-                                    name: interner.resolve(*name).to_string(),
-                                    span: (*span).into(),
-                                },
-                                *span,
-                            );
-                        }
-
-                        // Bind the fields in scope
-                        for (field_name, binding_name) in bindings {
-                            if let Some(field) =
-                                error_info.fields.iter().find(|f| f.name == *field_name)
-                            {
-                                self.scope.define(
-                                    *binding_name,
-                                    Variable {
-                                        ty: field.ty.clone(),
-                                        mutable: false,
-                                    },
-                                );
-                            } else {
-                                // Unknown field in error type
-                                self.add_error(
-                                    SemanticError::UnknownField {
-                                        ty: interner.resolve(*name).to_string(),
-                                        field: interner.resolve(*field_name).to_string(),
-                                        span: (*span).into(),
-                                    },
-                                    *span,
-                                );
-                            }
-                        }
-                    } else {
-                        // Error not in the error set
-                        self.add_error(
-                            SemanticError::UnreachableCatchArm {
-                                name: interner.resolve(*name).to_string(),
-                                span: (*span).into(),
-                            },
-                            *span,
-                        );
-                    }
-                }
-                ErrorPattern::NamedEmpty { name, span } => {
-                    // Check if this error is in the error set
-                    let is_in_set = error_set.iter().any(|e| e.name == *name);
-
-                    if is_in_set {
-                        // Mark as handled
-                        if !handled_errors.insert(*name) {
-                            // Already handled - this is a duplicate
-                            self.add_error(
-                                SemanticError::UnreachableCatchArm {
-                                    name: interner.resolve(*name).to_string(),
-                                    span: (*span).into(),
-                                },
-                                *span,
-                            );
-                        }
-                    } else {
-                        // Error not in the error set
-                        self.add_error(
-                            SemanticError::UnreachableCatchArm {
-                                name: interner.resolve(*name).to_string(),
-                                span: (*span).into(),
-                            },
-                            *span,
-                        );
-                    }
-                }
-                ErrorPattern::Wildcard(_) => {
-                    has_wildcard = true;
-                }
+        // error_type is a member of func_error union
+        if let Type::Union(variants) = func_error {
+            if variants.contains(error_type) {
+                return true;
             }
-
-            // Check the body expression
-            let body_type = self.check_expr(&arm.body, interner)?;
-
-            // Unify with previous arms
-            match &result_type {
-                None => {
-                    result_type = Some(body_type);
-                    first_arm_span = Some(arm.span);
-                }
-                Some(expected) if !self.types_compatible(&body_type, expected) => {
-                    self.add_error(
-                        SemanticError::CatchArmTypeMismatch {
-                            expected: format!("{}", expected),
-                            found: format!("{}", body_type),
-                            first_arm: first_arm_span.unwrap().into(),
-                            span: arm.body.span.into(),
-                        },
-                        arm.body.span,
-                    );
-                }
-                _ => {}
-            }
-
-            // Exit arm scope
-            if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-                self.scope = parent;
+            // Also check if error_type is a union whose members are all in func_error
+            if let Type::Union(error_variants) = error_type {
+                return error_variants.iter().all(|ev| variants.contains(ev));
             }
         }
 
-        // Step 4: Check exhaustiveness - all errors must be handled (or there's a wildcard)
-        if !has_wildcard {
-            let unhandled: Vec<_> = error_set
-                .iter()
-                .filter(|e| !handled_errors.contains(&e.name))
-                .collect();
-
-            if !unhandled.is_empty() {
-                let missing_names: Vec<_> = unhandled
-                    .iter()
-                    .map(|e| interner.resolve(e.name).to_string())
-                    .collect();
-
-                self.add_error(
-                    SemanticError::NonExhaustiveCatch {
-                        missing: missing_names.join(", "),
-                        span: try_catch.span.into(),
-                    },
-                    try_catch.span,
-                );
-            }
-        }
-
-        // Step 5: The result type is the success type (try-catch unwraps the fallible)
-        // But we also need to ensure the catch arm bodies are compatible with that
-        // Actually, the catch arms can return any type as long as they're all compatible
-        // with each other - they provide alternative values when errors occur.
-        // The overall type is the union of success type and catch arm types if different,
-        // or just the common type if they match.
-        if let Some(catch_type) = result_type {
-            if self.types_compatible(&catch_type, &success_type) {
-                Ok(success_type)
-            } else if self.types_compatible(&success_type, &catch_type) {
-                Ok(catch_type)
-            } else {
-                // Different types - for now, use success type as the overall type
-                // In a full implementation, we might create a union or require explicit typing
-                Ok(success_type)
-            }
-        } else {
-            // No catch arms (shouldn't happen with valid syntax)
-            Ok(success_type)
-        }
+        false
     }
 
     /// Check expression against an expected type (bidirectional type checking)
@@ -2434,6 +2292,22 @@ impl Analyzer {
                     );
                 }
 
+                // For fallible types, require at least one error arm
+                if let Type::Fallible(_) = &scrutinee_type {
+                    let has_error_arm = match_expr
+                        .arms
+                        .iter()
+                        .any(|arm| matches!(arm.pattern, Pattern::Error { .. }));
+                    if !has_error_arm {
+                        self.add_error(
+                            SemanticError::MissingErrorArm {
+                                span: match_expr.span.into(),
+                            },
+                            match_expr.span,
+                        );
+                    }
+                }
+
                 // Check each arm, collect result types
                 let mut result_type: Option<Type> = None;
                 let mut first_arm_span: Option<Span> = None;
@@ -2995,7 +2869,7 @@ impl Analyzer {
                 Ok(Type::Error)
             }
 
-            ExprKind::TryCatch(try_catch) => self.analyze_try_catch(try_catch, interner),
+            ExprKind::Try(inner) => self.analyze_try(inner, interner),
         }
     }
 
@@ -3085,6 +2959,54 @@ impl Analyzer {
                 }
                 // Val patterns don't narrow types
                 None
+            }
+            Pattern::Success { inner, span } => {
+                // Success pattern only valid when matching on fallible type
+                let success_type = match scrutinee_type {
+                    Type::Fallible(ft) => (*ft.success_type).clone(),
+                    _ => {
+                        self.add_error(
+                            SemanticError::SuccessPatternOnNonFallible {
+                                found: scrutinee_type.name().to_string(),
+                                span: (*span).into(),
+                            },
+                            *span,
+                        );
+                        return None;
+                    }
+                };
+
+                // If there's an inner pattern, check it against success type
+                if let Some(inner_pattern) = inner {
+                    self.check_pattern(inner_pattern, &success_type, interner)
+                } else {
+                    // Bare success - no narrowing
+                    None
+                }
+            }
+            Pattern::Error { inner, span } => {
+                // Error pattern only valid when matching on fallible type
+                let error_type = match scrutinee_type {
+                    Type::Fallible(ft) => (*ft.error_type).clone(),
+                    _ => {
+                        self.add_error(
+                            SemanticError::ErrorPatternOnNonFallible {
+                                found: scrutinee_type.name().to_string(),
+                                span: (*span).into(),
+                            },
+                            *span,
+                        );
+                        return None;
+                    }
+                };
+
+                // If there's an inner pattern, check it against error type
+                if let Some(inner_pattern) = inner {
+                    self.check_pattern(inner_pattern, &error_type, interner)
+                } else {
+                    // Bare error - no narrowing
+                    None
+                }
             }
         }
     }

@@ -42,7 +42,7 @@ fn print_decl<'a>(
         Decl::Record(record) => print_record_decl(arena, record, interner),
         Decl::Interface(iface) => print_interface_decl(arena, iface, interner),
         Decl::Implement(impl_block) => print_implement_block(arena, impl_block, interner),
-        Decl::Error(_) => todo!("error decl printing"),
+        Decl::Error(error_decl) => print_error_decl(arena, error_decl, interner),
         Decl::External(_) => todo!("external decl printing"),
     }
 }
@@ -192,7 +192,7 @@ fn print_stmt<'a>(
         Stmt::Break(_) => arena.text("break"),
         Stmt::Continue(_) => arena.text("continue"),
         Stmt::Return(return_stmt) => print_return_stmt(arena, return_stmt, interner),
-        Stmt::Raise(_) => todo!("raise statement printing"),
+        Stmt::Raise(raise_stmt) => print_raise_stmt(arena, raise_stmt, interner),
     }
 }
 
@@ -261,6 +261,37 @@ fn print_return_stmt<'a>(
     }
 }
 
+/// Print a raise statement.
+fn print_raise_stmt<'a>(
+    arena: &'a Arena<'a>,
+    stmt: &RaiseStmt,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = interner.resolve(stmt.error_name).to_string();
+
+    if stmt.fields.is_empty() {
+        return arena.text("raise ").append(name).append(" {}");
+    }
+
+    let field_docs: Vec<_> = stmt
+        .fields
+        .iter()
+        .map(|f| {
+            arena
+                .text(interner.resolve(f.name).to_string())
+                .append(": ")
+                .append(print_expr(arena, &f.value, interner))
+        })
+        .collect();
+
+    arena
+        .text("raise ")
+        .append(name)
+        .append(" { ")
+        .append(arena.intersperse(field_docs, arena.text(", ")))
+        .append(" }")
+}
+
 /// Print an expression.
 fn print_expr<'a>(
     arena: &'a Arena<'a>,
@@ -295,7 +326,10 @@ fn print_expr<'a>(
         ExprKind::StructLiteral(struct_lit) => print_struct_literal(arena, struct_lit, interner),
         ExprKind::FieldAccess(field) => print_field_access(arena, field, interner),
         ExprKind::MethodCall(method) => print_method_call(arena, method, interner),
-        ExprKind::TryCatch(_) => todo!("try-catch expression printing"),
+        ExprKind::Try(inner) => arena
+            .text("try")
+            .append(arena.space())
+            .append(print_expr(arena, inner, interner)),
     }
 }
 
@@ -650,6 +684,28 @@ fn print_pattern<'a>(
         Pattern::Val { name, .. } => arena
             .text("val ")
             .append(arena.text(interner.resolve(*name).to_string())),
+        Pattern::Success { inner, .. } => {
+            let base = arena.text("success");
+            match inner {
+                Some(inner_pattern) => base.append(arena.text(" ")).append(print_pattern(
+                    arena,
+                    inner_pattern,
+                    interner,
+                )),
+                None => base,
+            }
+        }
+        Pattern::Error { inner, .. } => {
+            let base = arena.text("error");
+            match inner {
+                Some(inner_pattern) => base.append(arena.text(" ")).append(print_pattern(
+                    arena,
+                    inner_pattern,
+                    interner,
+                )),
+                None => base,
+            }
+        }
     }
 }
 
@@ -1057,6 +1113,40 @@ fn print_record_decl<'a>(
         interner,
         "record",
     )
+}
+
+/// Print an error declaration.
+fn print_error_decl<'a>(
+    arena: &'a Arena<'a>,
+    error_decl: &ErrorDecl,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = interner.resolve(error_decl.name).to_string();
+
+    if error_decl.fields.is_empty() {
+        // error Name {}
+        arena.text("error ").append(name).append(" {}")
+    } else {
+        // error Name { field1: Type, field2: Type }
+        let fields: Vec<_> = error_decl
+            .fields
+            .iter()
+            .map(|f| print_field_def(arena, f, interner))
+            .collect();
+
+        let body = arena
+            .hardline()
+            .append(arena.intersperse(fields, arena.hardline()))
+            .nest(INDENT)
+            .append(arena.hardline());
+
+        arena
+            .text("error ")
+            .append(name)
+            .append(" {")
+            .append(body)
+            .append("}")
+    }
 }
 
 /// Print the body of a class-like declaration (class or record).

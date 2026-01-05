@@ -40,10 +40,10 @@ pub enum TokenType {
     KwSelfType,   // Self keyword (implementing type in interface)
     KwVal,        // val keyword (value comparison in match patterns)
     KwError,      // error keyword
+    KwSuccess,    // success keyword
     KwFallible,   // fallible keyword
     KwRaise,      // raise keyword
-    KwTry,        // try keyword
-    KwCatch,      // catch keyword
+    KwTry,        // try keyword (propagation operator)
     KwExternal,   // external keyword
     KwAs,         // as keyword (for external func mapping)
 
@@ -153,10 +153,10 @@ impl TokenType {
             Self::KwSelfType => "Self",
             Self::KwVal => "val",
             Self::KwError => "error",
+            Self::KwSuccess => "success",
             Self::KwFallible => "fallible",
             Self::KwRaise => "raise",
             Self::KwTry => "try",
-            Self::KwCatch => "catch",
             Self::KwExternal => "external",
             Self::KwAs => "as",
             Self::KwI8 => "i8",
