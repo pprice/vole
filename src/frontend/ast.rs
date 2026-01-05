@@ -313,8 +313,8 @@ pub enum ExprKind {
     /// Method call: point.distance()
     MethodCall(Box<MethodCallExpr>),
 
-    /// Try-catch expression
-    TryCatch(Box<TryCatchExpr>),
+    /// Try expression (propagation operator)
+    Try(Box<Expr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
