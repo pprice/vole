@@ -580,10 +580,10 @@ impl<'a> AstPrinter<'a> {
                 // TODO: implement method call display
             }
 
-            ExprKind::TryCatch(_) => {
+            ExprKind::Try(inner) => {
                 self.write_indent(out);
-                out.push_str("TryCatch\n");
-                // TODO: implement try-catch display
+                out.push_str("Try ");
+                self.write_expr(out, inner);
             }
         }
     }
