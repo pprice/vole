@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
 use crate::runtime::NativeRegistry;
+use crate::runtime::native_registry::NativeType;
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::resolution::MethodResolutions;
 use crate::sema::{ErrorTypeInfo, FunctionType, Type};
@@ -25,7 +26,6 @@ pub struct CompiledValue {
 
 impl CompiledValue {
     /// Create a void return value (zero i64)
-    #[allow(dead_code)] // Will be used in subsequent refactor tasks
     pub fn void(builder: &mut FunctionBuilder) -> Self {
         let zero = builder.ins().iconst(types::I64, 0);
         Self {
@@ -430,5 +430,28 @@ pub(crate) fn array_element_tag(ty: &Type) -> i64 {
         Type::Bool => 4,
         Type::Array(_) => 5,
         _ => 2, // default to integer
+    }
+}
+
+/// Convert NativeType to Cranelift type.
+/// Shared utility for external function calls in both compiler.rs and context.rs.
+pub(crate) fn native_type_to_cranelift(nt: &NativeType, pointer_type: types::Type) -> types::Type {
+    match nt {
+        NativeType::I8 => types::I8,
+        NativeType::I16 => types::I16,
+        NativeType::I32 => types::I32,
+        NativeType::I64 => types::I64,
+        NativeType::I128 => types::I128,
+        NativeType::U8 => types::I8,
+        NativeType::U16 => types::I16,
+        NativeType::U32 => types::I32,
+        NativeType::U64 => types::I64,
+        NativeType::F32 => types::F32,
+        NativeType::F64 => types::F64,
+        NativeType::Bool => types::I8,
+        NativeType::String => pointer_type,
+        NativeType::Nil => types::I8, // Nil uses I8 as placeholder
+        NativeType::Optional(_) => types::I64, // Optionals are boxed
+        NativeType::Array(_) => pointer_type,
     }
 }

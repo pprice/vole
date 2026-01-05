@@ -14,7 +14,7 @@ use crate::sema::Type;
 use crate::sema::implement_registry::ExternalMethodInfo;
 
 use super::lambda::CaptureBinding;
-use super::types::{CompileCtx, CompiledValue, type_to_cranelift};
+use super::types::{CompileCtx, CompiledValue, native_type_to_cranelift, type_to_cranelift};
 
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
@@ -175,12 +175,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Create a void return value
     pub fn void_value(&mut self) -> CompiledValue {
-        let zero = self.builder.ins().iconst(types::I64, 0);
-        CompiledValue {
-            value: zero,
-            ty: types::I64,
-            vole_type: Type::Void,
-        }
+        CompiledValue::void(self.builder)
     }
 
     // ========== CompiledValue constructors ==========
@@ -328,27 +323,5 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 vole_type: return_type.clone(),
             })
         }
-    }
-}
-
-/// Convert NativeType to Cranelift type
-fn native_type_to_cranelift(nt: &NativeType, pointer_type: types::Type) -> types::Type {
-    match nt {
-        NativeType::I8 => types::I8,
-        NativeType::I16 => types::I16,
-        NativeType::I32 => types::I32,
-        NativeType::I64 => types::I64,
-        NativeType::I128 => types::I128,
-        NativeType::U8 => types::I8,
-        NativeType::U16 => types::I16,
-        NativeType::U32 => types::I32,
-        NativeType::U64 => types::I64,
-        NativeType::F32 => types::F32,
-        NativeType::F64 => types::F64,
-        NativeType::Bool => types::I8,
-        NativeType::String => pointer_type,
-        NativeType::Nil => types::I8, // Nil uses I8 as placeholder
-        NativeType::Optional(_) => types::I64, // Optionals are boxed
-        NativeType::Array(_) => pointer_type,
     }
 }

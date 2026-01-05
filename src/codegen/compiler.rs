@@ -19,8 +19,8 @@ use super::structs::{
 };
 use super::types::{
     CompileCtx, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET, TypeMetadata,
-    convert_to_type, cranelift_to_vole_type, fallible_error_tag, resolve_type_expr,
-    resolve_type_expr_full, resolve_type_expr_with_errors, type_to_cranelift,
+    convert_to_type, cranelift_to_vole_type, fallible_error_tag, native_type_to_cranelift,
+    resolve_type_expr, resolve_type_expr_full, resolve_type_expr_with_errors, type_to_cranelift,
 };
 use crate::codegen::{CompiledValue, JitContext};
 use crate::frontend::{
@@ -4315,39 +4315,13 @@ fn compile_external_call(
     let results = builder.inst_results(call_inst);
 
     if results.is_empty() {
-        Ok(CompiledValue {
-            value: builder.ins().iconst(types::I64, 0),
-            ty: types::I64,
-            vole_type: Type::Void,
-        })
+        Ok(CompiledValue::void(builder))
     } else {
         Ok(CompiledValue {
             value: results[0],
             ty: type_to_cranelift(return_type, ctx.pointer_type),
             vole_type: return_type.clone(),
         })
-    }
-}
-
-/// Convert NativeType to Cranelift type
-fn native_type_to_cranelift(nt: &NativeType, pointer_type: types::Type) -> types::Type {
-    match nt {
-        NativeType::I8 => types::I8,
-        NativeType::I16 => types::I16,
-        NativeType::I32 => types::I32,
-        NativeType::I64 => types::I64,
-        NativeType::I128 => types::I128,
-        NativeType::U8 => types::I8,
-        NativeType::U16 => types::I16,
-        NativeType::U32 => types::I32,
-        NativeType::U64 => types::I64,
-        NativeType::F32 => types::F32,
-        NativeType::F64 => types::F64,
-        NativeType::Bool => types::I8,
-        NativeType::String => pointer_type,
-        NativeType::Nil => types::I8, // Nil uses I8 as placeholder
-        NativeType::Optional(_) => types::I64, // Optionals are boxed
-        NativeType::Array(_) => pointer_type,
     }
 }
 
