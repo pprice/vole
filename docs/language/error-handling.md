@@ -1,6 +1,6 @@
 # Error Handling
 
-Vole uses typed errors with `fallible` functions and `try`/`catch` for explicit error handling.
+Vole uses typed errors with `fallible` functions and pattern matching for explicit error handling.
 
 ## Quick Reference
 
@@ -10,7 +10,8 @@ Vole uses typed errors with `fallible` functions and `try`/`catch` for explicit 
 | `error Name { field: Type }` | Error with data |
 | `fallible(T, E)` | Return type that may fail |
 | `raise Error {}` | Raise an error |
-| `try expr catch { }` | Handle errors |
+| `match expr { success x => ..., error E => ... }` | Handle errors with pattern matching |
+| `try expr` | Propagate errors (prefix operator) |
 | `E1 \| E2` | Union of error types |
 
 ## In Depth
@@ -100,30 +101,39 @@ func validate_age(age: i32) -> fallible(i32, ValidationError) {
 }
 ```
 
-### Handling Errors with try/catch
+### Handling Errors with Match
 
-Use `try`/`catch` to handle fallible results:
+Use `match` with `success`/`error` patterns to handle fallible results:
 
 ```vole
-let result = try divide(10, 0) catch {
-    DivisionByZero {} => -1
+let result = match divide(10, 0) {
+    x => x * 2,                    // implicit success pattern
+    error DivisionByZero => -1     // error pattern
 }
 println(result)  // -1
 ```
 
-The catch block pattern-matches on error types:
+The `success` keyword is optional for success patterns, but the `error` keyword is required for error patterns:
 
 ```vole
-let value = try risky_operation() catch {
-    NotFound {} => default_value
-    Timeout {} => cached_value
-    InvalidInput {} => fallback_value
+// Explicit success keyword (optional)
+let value = match risky_operation() {
+    success x => x + 1,            // explicit success
+    error NotFound => default_value,
+    error Timeout => cached_value
+}
+
+// Implicit success (more concise)
+let value = match risky_operation() {
+    x => x + 1,                    // implicit success
+    error NotFound => default_value,
+    error Timeout => cached_value
 }
 ```
 
 ### Destructuring Error Data
 
-Extract fields from errors in catch:
+Extract fields from errors in match patterns:
 
 ```vole
 error OutOfRange {
@@ -138,8 +148,9 @@ func clamp(x: i32, max: i32) -> fallible(i32, OutOfRange) {
     return x
 }
 
-let result = try clamp(100, 50) catch {
-    OutOfRange { value, max } => {
+let result = match clamp(100, 50) {
+    x => x,
+    error OutOfRange { value, max } => {
         println("Value {value} exceeded max {max}")
         max
     }
@@ -168,47 +179,66 @@ func fetch_data(url: string) -> fallible(string, NetworkError | ParseError) {
 Handle each error type:
 
 ```vole
-let data = try fetch_data("http://example.com") catch {
-    NetworkError {} => "offline"
-    ParseError { message } => {
+let data = match fetch_data("http://example.com") {
+    result => result,
+    error NetworkError => "offline",
+    error ParseError { message } => {
         println("Parse failed: {message}")
         ""
     }
 }
 ```
 
-### Error Propagation
+### Error Propagation with Try
 
-Call fallible functions from other fallible functions:
+The `try` prefix operator unwraps successful results or propagates errors. It can only be used inside fallible functions:
 
 ```vole
 func process_user(id: i32) -> fallible(string, NotFound | DatabaseError) {
-    let user = try find_user(id) catch {
-        NotFound {} => raise NotFound {}
-        DatabaseError {} => raise DatabaseError {}
-    }
+    let user = try find_user(id)   // unwraps on success, propagates on error
     return user.name
+}
+```
+
+`try` has tight binding, so `try foo().bar()` means `(try foo()).bar()`:
+
+```vole
+func process() -> fallible(i64, DivByZero) {
+    let x = try divide(10, 2)      // unwraps result
+    let y = try divide(x, 3).abs() // (try divide(x, 3)).abs()
+    return y
+}
+```
+
+Using `try` for multiple fallible calls:
+
+```vole
+func process() -> fallible(Result, ProcessError) {
+    let a = try step_one()
+    let b = try step_two(a)
+    return finalize(b)
 }
 ```
 
 ### Exhaustive Error Handling
 
-The catch block must handle all possible error types:
+Match expressions on fallible types must have at least one error pattern:
 
 ```vole
-// Error: non-exhaustive catch
-let x = try operation() catch {
-    ErrorA {} => 1
-    // Missing ErrorB handler!
+// Must handle errors
+let x = match operation() {
+    result => result,
+    error ErrorA => 1,
+    error ErrorB => 2
 }
 ```
 
-Use a wildcard for catch-all:
+Use a wildcard for catch-all error handling:
 
 ```vole
-let x = try operation() catch {
-    ErrorA {} => 1
-    _ => 0  // Catches all other errors
+let x = match operation() {
+    result => result,
+    error _ => 0  // Catches all errors
 }
 ```
 
@@ -222,8 +252,9 @@ error AppError {
 }
 
 func app_operation() -> fallible(i32, AppError) {
-    let result = try low_level_operation() catch {
-        LowLevelError { code } => {
+    let result = match low_level_operation() {
+        x => x,
+        error LowLevelError { code } => {
             raise AppError {
                 message: "Operation failed with code {code}"
             }
@@ -238,34 +269,30 @@ func app_operation() -> fallible(i32, AppError) {
 **Default value on error:**
 
 ```vole
-let config = try load_config() catch {
-    _ => default_config()
+let config = match load_config() {
+    c => c,
+    error _ => default_config()
 }
 ```
 
 **Log and recover:**
 
 ```vole
-let result = try risky_operation() catch {
-    err => {
+let result = match risky_operation() {
+    x => x,
+    error err => {
         log_error(err)
         fallback_value
     }
 }
 ```
 
-**Early return on error:**
+**Propagate with try in fallible functions:**
 
 ```vole
 func process() -> fallible(Result, ProcessError) {
-    let a = try step_one() catch {
-        StepOneError {} => raise ProcessError {}
-    }
-
-    let b = try step_two(a) catch {
-        StepTwoError {} => raise ProcessError {}
-    }
-
+    let a = try step_one()
+    let b = try step_two(a)
     return finalize(b)
 }
 ```
@@ -274,9 +301,10 @@ func process() -> fallible(Result, ProcessError) {
 
 1. **Use specific error types** - Define errors that describe what went wrong
 2. **Include relevant data** - Add fields that help diagnose the issue
-3. **Handle errors at the right level** - Don't catch too early or too late
+3. **Handle errors at the right level** - Don't handle too early or too late
 4. **Don't ignore errors** - Always handle or propagate explicitly
 5. **Use union types sparingly** - Too many error types can be unwieldy
+6. **Use `try` for propagation** - Cleaner than manual re-raising in fallible functions
 
 ### Error vs Optional
 

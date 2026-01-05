@@ -186,9 +186,23 @@ func find(id: i32) -> fallible(Item, NotFound) {
     return items[id]
 }
 
-let item = try find(42) catch {
-    NotFound {} => default_item
-    Invalid { message } => handle(message)
+// Match with success/error patterns
+let item = match find(42) {
+    x => x,                              // implicit success pattern
+    error NotFound => default_item,      // error pattern (keyword required)
+    error Invalid { message } => handle(message)
+}
+
+// Explicit success keyword (optional)
+match fallible_expr {
+    success x => x + 1,
+    error e => handle(e)
+}
+
+// Try propagation (in fallible functions only)
+func process() -> fallible(i64, NotFound) {
+    let x = try find(42)    // unwraps on success, propagates on error
+    return x * 2
 }
 ```
 
