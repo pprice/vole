@@ -4,8 +4,9 @@
 use std::fmt::Write;
 
 use crate::frontend::{
-    AssignTarget, BinaryOp, Block, CompoundOp, Decl, Expr, ExprKind, FuncDecl, Interner, LetStmt,
-    Param, PrimitiveType, Program, Stmt, StringPart, TestCase, TestsDecl, TypeExpr, UnaryOp,
+    AssignTarget, BinaryOp, Block, CompoundOp, Decl, ErrorDecl, Expr, ExprKind, FuncDecl, Interner,
+    LetStmt, Param, PrimitiveType, Program, Stmt, StringPart, TestCase, TestsDecl, TypeExpr,
+    UnaryOp,
 };
 
 /// Pretty-printer for AST nodes that resolves symbols via an Interner.
@@ -68,9 +69,7 @@ impl<'a> AstPrinter<'a> {
             Decl::Interface(_) | Decl::Implement(_) => {
                 // TODO: implement interface/implement display
             }
-            Decl::Error(_) => {
-                // TODO: implement error decl display
-            }
+            Decl::Error(e) => self.write_error_decl(out, e),
         }
     }
 
@@ -119,6 +118,28 @@ impl<'a> AstPrinter<'a> {
         let inner = self.indented();
         for test in &tests.tests {
             inner.write_test_case(out, test);
+        }
+    }
+
+    fn write_error_decl(&self, out: &mut String, error_decl: &ErrorDecl) {
+        self.write_indent(out);
+        let name = self.interner.resolve(error_decl.name);
+        writeln!(out, "ErrorDecl \"{}\"", name).unwrap();
+
+        if !error_decl.fields.is_empty() {
+            let inner = self.indented();
+            inner.write_indent(out);
+            out.push_str("fields: [");
+            for (i, field) in error_decl.fields.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                let field_name = self.interner.resolve(field.name);
+                write!(out, "({}: ", field_name).unwrap();
+                self.write_type_inline(out, &field.ty);
+                out.push(')');
+            }
+            out.push_str("]\n");
         }
     }
 

@@ -212,18 +212,37 @@ tests "error pattern variations" {
     }
 
     test "specific error type pattern" {
+        // NOTE: error keyword is REQUIRED to match specific error types
+        // Without 'error', 'DivByZero => -1' would be an identifier binding, not a type match
         let result = match divide(10, 0) {
             success x => x
-            DivByZero => -1
+            error DivByZero => -1
             error => -999
             _ => -888
         }
         assert(result == -1)
     }
 
-    // TODO: Multiple specific error types in union don't match correctly
-    // Bug: Timeout matches NotFound pattern, NotFound matches Timeout pattern
-    // test "multiple specific error types" { ... }
+    test "multiple specific error types in union" {
+        // Test that specific error patterns correctly match in unions
+        let r1 = match complexOp(-5) {
+            success x => x
+            error NotFound => -1
+            error Timeout => -2
+            error => -999
+            _ => -888
+        }
+        assert(r1 == -1)  // NotFound should match
+
+        let r2 = match complexOp(150) {
+            success x => x
+            error NotFound => -1
+            error Timeout => -2
+            error => -999
+            _ => -888
+        }
+        assert(r2 == -2)  // Timeout should match
+    }
 
     test "error catchall with union type" {
         // Test that error catchall works for any error in union
@@ -273,16 +292,23 @@ tests "match arm ordering" {
     test "specific error before catchall" {
         let result = match divide(10, 0) {
             success x => x
-            DivByZero => -1
+            error DivByZero => -1
             error => -999
             _ => -888
         }
         assert(result == -1)
     }
 
-    // TODO: Fix after specific error pattern matching bug is resolved
-    // Bug: Timeout pattern incorrectly matches NotFound errors
-    // test "catchall error catches when specific misses" { ... }
+    test "catchall error catches when specific misses" {
+        // Test that error catchall catches errors not matched by specific patterns
+        let result = match complexOp(-5) {
+            success x => x
+            error Timeout => -2   // This won't match NotFound
+            error => -999         // Catchall should match NotFound
+            _ => -888
+        }
+        assert(result == -999)  // NotFound should fall through to catchall
+    }
 }
 
 tests "nested fallible operations" {

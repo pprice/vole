@@ -42,7 +42,7 @@ fn print_decl<'a>(
         Decl::Record(record) => print_record_decl(arena, record, interner),
         Decl::Interface(iface) => print_interface_decl(arena, iface, interner),
         Decl::Implement(impl_block) => print_implement_block(arena, impl_block, interner),
-        Decl::Error(_) => todo!("error decl printing"),
+        Decl::Error(error_decl) => print_error_decl(arena, error_decl, interner),
     }
 }
 
@@ -1018,6 +1018,40 @@ fn print_record_decl<'a>(
         interner,
         "record",
     )
+}
+
+/// Print an error declaration.
+fn print_error_decl<'a>(
+    arena: &'a Arena<'a>,
+    error_decl: &ErrorDecl,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = interner.resolve(error_decl.name).to_string();
+
+    if error_decl.fields.is_empty() {
+        // error Name {}
+        arena.text("error ").append(name).append(" {}")
+    } else {
+        // error Name { field1: Type, field2: Type }
+        let fields: Vec<_> = error_decl
+            .fields
+            .iter()
+            .map(|f| print_field_def(arena, f, interner))
+            .collect();
+
+        let body = arena
+            .hardline()
+            .append(arena.intersperse(fields, arena.hardline()))
+            .nest(INDENT)
+            .append(arena.hardline());
+
+        arena
+            .text("error ")
+            .append(name)
+            .append(" {")
+            .append(body)
+            .append("}")
+    }
 }
 
 /// Print the body of a class-like declaration (class or record).
