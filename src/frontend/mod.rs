@@ -5,11 +5,11 @@ pub mod intern;
 pub mod lexer;
 mod parse_decl;
 mod parse_expr;
+mod parse_external;
 mod parse_lambda;
 mod parse_stmt;
 mod parse_string;
 mod parse_type;
-mod parse_external;
 pub mod parser;
 pub mod token;
 
