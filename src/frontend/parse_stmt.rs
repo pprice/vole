@@ -39,6 +39,7 @@ impl<'src> Parser<'src> {
             }
             TokenType::KwContinue => self.continue_stmt(),
             TokenType::KwReturn => self.return_stmt(),
+            TokenType::KwRaise => self.raise_stmt(),
             _ => self.expr_stmt(),
         }
     }
@@ -174,6 +175,60 @@ impl<'src> Parser<'src> {
             .unwrap_or(start_span);
 
         Ok(Stmt::Return(ReturnStmt { value, span }))
+    }
+
+    /// Parse a raise statement: `raise ErrorName { field: value, ... }`
+    fn raise_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'raise'
+
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected error name after raise")?;
+        let error_name = self.interner.intern(&name_token.lexeme);
+
+        self.consume(TokenType::LBrace, "expected '{' after error name")?;
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            // Parse field: name: expr  OR  name (shorthand for name: name)
+            let field_span = self.current.span;
+            let field_name_token = self.current.clone();
+            self.consume(TokenType::Identifier, "expected field name")?;
+            let field_name = self.interner.intern(&field_name_token.lexeme);
+
+            let value = if self.match_token(TokenType::Colon) {
+                self.expression(0)?
+            } else {
+                // Shorthand: field means field: field
+                Expr {
+                    id: self.next_id(),
+                    kind: ExprKind::Identifier(field_name),
+                    span: field_span,
+                }
+            };
+
+            // Allow optional comma
+            if self.check(TokenType::Comma) {
+                self.advance();
+            }
+
+            fields.push(StructFieldInit {
+                name: field_name,
+                value,
+                span: field_span.merge(self.previous.span),
+            });
+            self.skip_newlines();
+        }
+
+        self.consume(TokenType::RBrace, "expected '}' to close raise")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(Stmt::Raise(RaiseStmt {
+            error_name,
+            fields,
+            span,
+        }))
     }
 
     /// Parse an expression statement
