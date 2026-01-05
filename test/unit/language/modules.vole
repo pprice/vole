@@ -1,0 +1,51 @@
+// Integration tests for the module import system with std:math
+let math = import "std:math"
+
+tests {
+    // Tests for native math functions (defined via external block)
+    test "math.sqrt" {
+        assert(math.sqrt(4.0) == 2.0)
+        assert(math.sqrt(16.0) == 4.0)
+    }
+
+    test "math.pow" {
+        assert(math.pow(2.0, 3.0) == 8.0)
+    }
+
+    test "math.abs" {
+        assert(math.abs(-5.0) == 5.0)
+        assert(math.abs(5.0) == 5.0)
+    }
+
+    test "math.min and max" {
+        assert(math.min(3.0, 5.0) == 3.0)
+        assert(math.max(3.0, 5.0) == 5.0)
+    }
+
+    test "math.floor and ceil" {
+        assert(math.floor(3.7) == 3.0)
+        assert(math.ceil(3.2) == 4.0)
+    }
+
+    test "math.round" {
+        assert(math.round(3.5) == 4.0)
+        assert(math.round(3.4) == 3.0)
+    }
+
+    test "math.sin and cos" {
+        // sin(0) = 0, cos(0) = 1
+        assert(math.sin(0.0) == 0.0)
+        assert(math.cos(0.0) == 1.0)
+    }
+
+    test "math.tan" {
+        // tan(0) = 0
+        assert(math.tan(0.0) == 0.0)
+    }
+
+    // Test for module constant (let binding)
+    test "math.PI" {
+        assert(math.PI > 3.14)
+        assert(math.PI < 3.15)
+    }
+}

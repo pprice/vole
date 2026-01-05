@@ -13,6 +13,7 @@ use crate::codegen::structs::{
 use crate::codegen::types::{CompileCtx, CompiledValue};
 use crate::frontend::{Expr, FieldAccessExpr, StructLiteralExpr, Symbol};
 use crate::sema::Type;
+use crate::sema::types::ConstantValue;
 
 pub(crate) fn compile_struct_literal(
     builder: &mut FunctionBuilder,
@@ -81,7 +82,7 @@ pub(crate) fn compile_struct_literal(
     })
 }
 
-/// Compile field access: point.x
+/// Compile field access: point.x or module.constant
 pub(crate) fn compile_field_access(
     builder: &mut FunctionBuilder,
     fa: &FieldAccessExpr,
@@ -90,7 +91,75 @@ pub(crate) fn compile_field_access(
 ) -> Result<CompiledValue, String> {
     let obj = compile_expr(builder, &fa.object, variables, ctx)?;
 
-    // Get slot and type from object's type
+    // Handle module field access for constants (e.g., math.PI)
+    if let Type::Module(ref module_type) = obj.vole_type {
+        let field_name = ctx.interner.resolve(fa.field);
+
+        // Look up constant value in module
+        if let Some(const_val) = module_type.constants.get(field_name) {
+            return match const_val {
+                ConstantValue::F64(v) => {
+                    let val = builder.ins().f64const(*v);
+                    Ok(CompiledValue {
+                        value: val,
+                        ty: types::F64,
+                        vole_type: Type::F64,
+                    })
+                }
+                ConstantValue::I64(v) => {
+                    let val = builder.ins().iconst(types::I64, *v);
+                    Ok(CompiledValue {
+                        value: val,
+                        ty: types::I64,
+                        vole_type: Type::I64,
+                    })
+                }
+                ConstantValue::Bool(v) => {
+                    let val = builder.ins().iconst(types::I8, if *v { 1 } else { 0 });
+                    Ok(CompiledValue {
+                        value: val,
+                        ty: types::I8,
+                        vole_type: Type::Bool,
+                    })
+                }
+                ConstantValue::String(s) => {
+                    // Create string literal
+                    crate::codegen::calls::compile_string_literal(
+                        builder,
+                        s,
+                        ctx.pointer_type,
+                        ctx.module,
+                        ctx.func_ids,
+                    )
+                }
+            };
+        }
+
+        // Check if it's a function export (which would be accessed via method call, not field access)
+        if let Some(export_type) = module_type.exports.get(field_name) {
+            // For function types accessed as fields (e.g., storing a reference),
+            // we need a function pointer - but this is typically done via method calls
+            if matches!(export_type, Type::Function(_)) {
+                return Err(format!(
+                    "Module function {} should be called, not accessed as a field. Use {}() instead.",
+                    field_name, field_name
+                ));
+            }
+
+            // Non-constant export that we don't have a value for
+            return Err(format!(
+                "Module export {} is not a constant literal and cannot be accessed at compile time",
+                field_name
+            ));
+        }
+
+        return Err(format!(
+            "Module {} has no export named {}",
+            module_type.path, field_name
+        ));
+    }
+
+    // Get slot and type from object's type (for classes/records)
     let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, fa.field, ctx)?;
 
     let get_func_id = ctx

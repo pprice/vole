@@ -121,12 +121,25 @@ pub struct FallibleType {
     pub error_type: Box<Type>, // ErrorType or Union of ErrorTypes
 }
 
+/// A constant value that can be stored in a module
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConstantValue {
+    I64(i64),
+    F64(f64),
+    Bool(bool),
+    String(String),
+}
+
+impl Eq for ConstantValue {}
+
 /// Module type: represents an imported module with its exports
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleType {
     pub path: String,
     /// Exports keyed by name string (not Symbol, since modules have their own interners)
     pub exports: std::collections::HashMap<String, Type>,
+    /// Constant values from the module (let PI = 3.14...)
+    pub constants: std::collections::HashMap<String, ConstantValue>,
 }
 
 impl PartialEq for FunctionType {

@@ -14,7 +14,7 @@ use crate::sema::interface_registry::{
     InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
 };
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
-use crate::sema::types::ModuleType;
+use crate::sema::types::{ConstantValue, ModuleType};
 use crate::sema::{
     ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type,
     compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
@@ -923,8 +923,9 @@ impl Analyzer {
             }
         };
 
-        // Collect exports from declarations
+        // Collect exports and constants from declarations
         let mut exports = HashMap::new();
+        let mut constants = HashMap::new();
         let module_interner = parser.into_interner();
 
         for decl in &program.declarations {
@@ -958,16 +959,21 @@ impl Analyzer {
                 }
                 Decl::Let(l) if !l.mutable => {
                     // Only export immutable let bindings
-                    // Infer type from literal for constants
-                    let ty = match &l.init.kind {
-                        ExprKind::FloatLiteral(_) => Type::F64,
-                        ExprKind::IntLiteral(_) => Type::I64,
-                        ExprKind::BoolLiteral(_) => Type::Bool,
-                        ExprKind::StringLiteral(_) => Type::String,
-                        _ => Type::Unknown, // Complex expressions need full analysis
-                    };
+                    // Infer type from literal for constants and store the value
                     let name_str = module_interner.resolve(l.name).to_string();
-                    exports.insert(name_str, ty);
+                    let (ty, const_val) = match &l.init.kind {
+                        ExprKind::FloatLiteral(v) => (Type::F64, Some(ConstantValue::F64(*v))),
+                        ExprKind::IntLiteral(v) => (Type::I64, Some(ConstantValue::I64(*v))),
+                        ExprKind::BoolLiteral(v) => (Type::Bool, Some(ConstantValue::Bool(*v))),
+                        ExprKind::StringLiteral(v) => {
+                            (Type::String, Some(ConstantValue::String(v.clone())))
+                        }
+                        _ => (Type::Unknown, None), // Complex expressions need full analysis
+                    };
+                    exports.insert(name_str.clone(), ty);
+                    if let Some(cv) = const_val {
+                        constants.insert(name_str, cv);
+                    }
                 }
                 Decl::External(ext) => {
                     // External block functions become exports
@@ -1007,6 +1013,7 @@ impl Analyzer {
         let module_type = ModuleType {
             path: import_path.to_string(),
             exports,
+            constants,
         };
 
         self.module_types

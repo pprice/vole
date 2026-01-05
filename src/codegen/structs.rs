@@ -11,6 +11,7 @@ use super::types::{CompileCtx, CompiledValue, type_to_cranelift};
 use crate::frontend::{FieldAccessExpr, MethodCallExpr, NodeId, StructLiteralExpr, Symbol};
 use crate::sema::implement_registry::TypeId;
 use crate::sema::resolution::ResolvedMethod;
+use crate::sema::types::ConstantValue;
 use crate::sema::{FunctionType, Type};
 
 /// Get field slot and type from a class/record type
@@ -178,9 +179,66 @@ impl Cg<'_, '_, '_> {
         })
     }
 
-    /// Compile field access: point.x
+    /// Compile field access: point.x or module.constant
     pub fn field_access(&mut self, fa: &FieldAccessExpr) -> Result<CompiledValue, String> {
         let obj = self.expr(&fa.object)?;
+
+        // Handle module field access for constants (e.g., math.PI)
+        if let Type::Module(ref module_type) = obj.vole_type {
+            let field_name = self.ctx.interner.resolve(fa.field);
+
+            // Look up constant value in module
+            if let Some(const_val) = module_type.constants.get(field_name) {
+                return match const_val {
+                    ConstantValue::F64(v) => {
+                        let val = self.builder.ins().f64const(*v);
+                        Ok(CompiledValue {
+                            value: val,
+                            ty: types::F64,
+                            vole_type: Type::F64,
+                        })
+                    }
+                    ConstantValue::I64(v) => {
+                        let val = self.builder.ins().iconst(types::I64, *v);
+                        Ok(CompiledValue {
+                            value: val,
+                            ty: types::I64,
+                            vole_type: Type::I64,
+                        })
+                    }
+                    ConstantValue::Bool(v) => {
+                        let val = self.builder.ins().iconst(types::I8, if *v { 1 } else { 0 });
+                        Ok(CompiledValue {
+                            value: val,
+                            ty: types::I8,
+                            vole_type: Type::Bool,
+                        })
+                    }
+                    ConstantValue::String(s) => self.string_literal(s),
+                };
+            }
+
+            // Check if it's a function export
+            if let Some(export_type) = module_type.exports.get(field_name) {
+                if matches!(export_type, Type::Function(_)) {
+                    return Err(format!(
+                        "Module function {} should be called, not accessed as a field. Use {}() instead.",
+                        field_name, field_name
+                    ));
+                }
+
+                return Err(format!(
+                    "Module export {} is not a constant literal and cannot be accessed at compile time",
+                    field_name
+                ));
+            }
+
+            return Err(format!(
+                "Module {} has no export named {}",
+                module_type.path, field_name
+            ));
+        }
+
         let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, fa.field, self.ctx)?;
 
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
