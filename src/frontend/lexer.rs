@@ -382,6 +382,7 @@ impl<'src> Lexer<'src> {
             "implement" => Some(TokenType::KwImplement),
             "extends" => Some(TokenType::KwExtends),
             "Self" => Some(TokenType::KwSelfType),
+            "val" => Some(TokenType::KwVal),
             "i8" => Some(TokenType::KwI8),
             "i16" => Some(TokenType::KwI16),
             "i32" => Some(TokenType::KwI32),

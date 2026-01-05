@@ -38,6 +38,7 @@ pub enum TokenType {
     KwImplement,  // implement keyword (implement Trait for Type)
     KwExtends,    // extends keyword (interface inheritance)
     KwSelfType,   // Self keyword (implementing type in interface)
+    KwVal,        // val keyword (value comparison in match patterns)
 
     // Type keywords
     KwI8,
@@ -143,6 +144,7 @@ impl TokenType {
             Self::KwImplement => "implement",
             Self::KwExtends => "extends",
             Self::KwSelfType => "Self",
+            Self::KwVal => "val",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",

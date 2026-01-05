@@ -255,6 +255,45 @@ impl Cg<'_, '_, '_> {
         }
     }
 
+    /// Compile a type pattern check for match expressions
+    /// Returns Some(comparison_value) if a runtime check is needed, None if always matches
+    fn compile_type_pattern_check(
+        &mut self,
+        scrutinee: &CompiledValue,
+        pattern_type: &Type,
+    ) -> Result<Option<Value>, String> {
+        if let Type::Union(variants) = &scrutinee.vole_type {
+            let expected_tag = variants
+                .iter()
+                .position(|v| v == pattern_type)
+                .unwrap_or(usize::MAX);
+
+            if expected_tag == usize::MAX {
+                // Pattern type not in union - will never match
+                let never_match = self.builder.ins().iconst(types::I8, 0);
+                return Ok(Some(never_match));
+            }
+
+            let tag = self
+                .builder
+                .ins()
+                .load(types::I8, MemFlags::new(), scrutinee.value, 0);
+            let expected = self.builder.ins().iconst(types::I8, expected_tag as i64);
+            let result = self.builder.ins().icmp(IntCC::Equal, tag, expected);
+
+            Ok(Some(result))
+        } else {
+            // Non-union scrutinee - pattern matches if types are equal
+            if scrutinee.vole_type == *pattern_type {
+                Ok(None) // Always matches
+            } else {
+                // Never matches
+                let never_match = self.builder.ins().iconst(types::I8, 0);
+                Ok(Some(never_match))
+            }
+        }
+    }
+
     /// Compile a null coalesce expression (??)
     fn null_coalesce(
         &mut self,
@@ -391,6 +430,9 @@ impl Cg<'_, '_, '_> {
         let merge_block = self.builder.create_block();
         self.builder.append_block_param(merge_block, types::I64);
 
+        // Create a trap block for non-exhaustive match (should be unreachable)
+        let trap_block = self.builder.create_block();
+
         let arm_blocks: Vec<Block> = match_expr
             .arms
             .iter()
@@ -409,7 +451,8 @@ impl Cg<'_, '_, '_> {
 
         for (i, arm) in match_expr.arms.iter().enumerate() {
             let arm_block = arm_blocks[i];
-            let next_block = arm_blocks.get(i + 1).copied().unwrap_or(merge_block);
+            // For the last arm, if pattern fails, go to trap (should be unreachable)
+            let next_block = arm_blocks.get(i + 1).copied().unwrap_or(trap_block);
 
             self.builder.switch_to_block(arm_block);
 
@@ -418,10 +461,21 @@ impl Cg<'_, '_, '_> {
             let pattern_matches = match &arm.pattern {
                 Pattern::Wildcard(_) => None,
                 Pattern::Identifier { name, .. } => {
-                    let var = self.builder.declare_var(scrutinee.ty);
-                    self.builder.def_var(var, scrutinee.value);
-                    arm_variables.insert(*name, (var, scrutinee.vole_type.clone()));
-                    None
+                    // Check if this identifier is a type name (class/record)
+                    if let Some(type_meta) = self.ctx.type_metadata.get(name) {
+                        // Type pattern - compare against union variant tag
+                        self.compile_type_pattern_check(&scrutinee, &type_meta.vole_type)?
+                    } else {
+                        // Regular identifier binding
+                        let var = self.builder.declare_var(scrutinee.ty);
+                        self.builder.def_var(var, scrutinee.value);
+                        arm_variables.insert(*name, (var, scrutinee.vole_type.clone()));
+                        None
+                    }
+                }
+                Pattern::Type { type_expr, .. } => {
+                    let pattern_type = resolve_type_expr(type_expr, self.ctx);
+                    self.compile_type_pattern_check(&scrutinee, &pattern_type)?
                 }
                 Pattern::Literal(lit_expr) => {
                     // Save and restore vars for pattern matching
@@ -454,6 +508,36 @@ impl Cg<'_, '_, '_> {
                                 )
                             }
                         }
+                    };
+                    Some(cmp)
+                }
+                Pattern::Val { name, .. } => {
+                    // Val pattern - compare against existing variable's value
+                    let (var, var_type) = arm_variables
+                        .get(name)
+                        .ok_or_else(|| "undefined variable in val pattern".to_string())?
+                        .clone();
+                    let var_val = self.builder.use_var(var);
+
+                    let cmp = match var_type {
+                        Type::F64 => {
+                            self.builder
+                                .ins()
+                                .fcmp(FloatCC::Equal, scrutinee.value, var_val)
+                        }
+                        Type::String => {
+                            if self.ctx.func_ids.contains_key("vole_string_eq") {
+                                self.call_runtime("vole_string_eq", &[scrutinee.value, var_val])?
+                            } else {
+                                self.builder
+                                    .ins()
+                                    .icmp(IntCC::Equal, scrutinee.value, var_val)
+                            }
+                        }
+                        _ => self
+                            .builder
+                            .ins()
+                            .icmp(IntCC::Equal, scrutinee.value, var_val),
                     };
                     Some(cmp)
                 }
@@ -514,6 +598,11 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().jump(merge_block, &[result_arg]);
             self.builder.seal_block(body_block);
         }
+
+        // Fill in trap block (should be unreachable if match is exhaustive)
+        self.builder.switch_to_block(trap_block);
+        self.builder.seal_block(trap_block);
+        self.builder.ins().trap(TrapCode::unwrap_user(1));
 
         self.builder.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);

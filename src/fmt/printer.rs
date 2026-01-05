@@ -642,6 +642,10 @@ fn print_pattern<'a>(
         Pattern::Wildcard(_) => arena.text("_"),
         Pattern::Literal(expr) => print_expr(arena, expr, interner),
         Pattern::Identifier { name, .. } => arena.text(interner.resolve(*name).to_string()),
+        Pattern::Type { type_expr, .. } => print_type_expr(arena, type_expr, interner),
+        Pattern::Val { name, .. } => arena
+            .text("val ")
+            .append(arena.text(interner.resolve(*name).to_string())),
     }
 }
 
