@@ -1,0 +1,15 @@
+[stdout]
+
+[stderr]
+  x [E2050]: unknown interface 'NonExistentInterface'
+   ,-[<path>/unknown_interface_class.vole:2:1]
+ 1 |     // Test that class with unknown interface reports E2050
+ 2 | ,-> class Widget implements NonExistentInterface {
+ 3 | |       name: string
+ 4 | |   
+ 5 | |       func render() -> string {
+ 6 | |           return self.name
+ 7 | |       }
+ 8 | |-> }
+   : `---- not a known interface
+   `----

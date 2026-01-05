@@ -1,0 +1,17 @@
+// Test that missing method from parent interface (extends) reports E2052
+interface Base {
+    func base_method() -> i64
+}
+
+interface Extended extends Base {
+    func extended_method() -> i64
+}
+
+// Missing base_method from parent interface
+record Partial implements Extended {
+    value: i64,
+
+    func extended_method() -> i64 {
+        return self.value
+    }
+}
