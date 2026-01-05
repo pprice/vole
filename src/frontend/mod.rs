@@ -9,6 +9,7 @@ mod parse_lambda;
 mod parse_stmt;
 mod parse_string;
 mod parse_type;
+mod parse_external;
 pub mod parser;
 pub mod token;
 
