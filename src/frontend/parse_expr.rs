@@ -779,13 +779,43 @@ impl<'src> Parser<'src> {
     fn pattern(&mut self) -> Result<Pattern, ParseError> {
         let token = self.current.clone();
 
+        // Check for type keyword patterns (primitives and nil)
+        if let Some(type_expr) = self.token_to_type_expr(&token) {
+            self.advance();
+            return Ok(Pattern::Type {
+                type_expr,
+                span: token.span,
+            });
+        }
+
         match token.ty {
+            // Val pattern: val x (compares against existing variable)
+            TokenType::KwVal => {
+                let start_span = token.span;
+                self.advance(); // consume 'val'
+                let name_token = self.current.clone();
+                if name_token.ty != TokenType::Identifier {
+                    return Err(ParseError::new(
+                        ParserError::ExpectedExpression {
+                            found: name_token.ty.as_str().to_string(),
+                            span: name_token.span.into(),
+                        },
+                        name_token.span,
+                    ));
+                }
+                self.advance(); // consume identifier
+                let name = self.interner.intern(&name_token.lexeme);
+                Ok(Pattern::Val {
+                    name,
+                    span: start_span.merge(name_token.span),
+                })
+            }
             // Wildcard: _
             TokenType::Identifier if token.lexeme == "_" => {
                 self.advance();
                 Ok(Pattern::Wildcard(token.span))
             }
-            // Identifier (binding pattern)
+            // Identifier - could be binding pattern or type pattern (resolved in analyzer)
             TokenType::Identifier => {
                 self.advance();
                 let name = self.interner.intern(&token.lexeme);
@@ -836,6 +866,27 @@ impl<'src> Parser<'src> {
                 },
                 token.span,
             )),
+        }
+    }
+
+    /// Convert a token to a TypeExpr if it's a primitive type or nil keyword
+    fn token_to_type_expr(&self, token: &super::token::Token) -> Option<TypeExpr> {
+        match token.ty {
+            TokenType::KwI8 => Some(TypeExpr::Primitive(PrimitiveType::I8)),
+            TokenType::KwI16 => Some(TypeExpr::Primitive(PrimitiveType::I16)),
+            TokenType::KwI32 => Some(TypeExpr::Primitive(PrimitiveType::I32)),
+            TokenType::KwI64 => Some(TypeExpr::Primitive(PrimitiveType::I64)),
+            TokenType::KwI128 => Some(TypeExpr::Primitive(PrimitiveType::I128)),
+            TokenType::KwU8 => Some(TypeExpr::Primitive(PrimitiveType::U8)),
+            TokenType::KwU16 => Some(TypeExpr::Primitive(PrimitiveType::U16)),
+            TokenType::KwU32 => Some(TypeExpr::Primitive(PrimitiveType::U32)),
+            TokenType::KwU64 => Some(TypeExpr::Primitive(PrimitiveType::U64)),
+            TokenType::KwF32 => Some(TypeExpr::Primitive(PrimitiveType::F32)),
+            TokenType::KwF64 => Some(TypeExpr::Primitive(PrimitiveType::F64)),
+            TokenType::KwBool => Some(TypeExpr::Primitive(PrimitiveType::Bool)),
+            TokenType::KwString => Some(TypeExpr::Primitive(PrimitiveType::String)),
+            TokenType::KwNil => Some(TypeExpr::Nil),
+            _ => None,
         }
     }
 }

@@ -587,6 +587,55 @@ impl<'a> AstPrinter<'a> {
                 let ident = self.interner.resolve(*name);
                 out.push_str(ident);
             }
+            Pattern::Type { type_expr, .. } => {
+                self.write_type_expr_inline(out, type_expr);
+            }
+            Pattern::Val { name, .. } => {
+                out.push_str("val ");
+                let ident = self.interner.resolve(*name);
+                out.push_str(ident);
+            }
+        }
+    }
+
+    fn write_type_expr_inline(&self, out: &mut String, ty: &TypeExpr) {
+        use crate::frontend::TypeExpr;
+        match ty {
+            TypeExpr::Primitive(p) => out.push_str(&format!("{:?}", p).to_lowercase()),
+            TypeExpr::Named(sym) => out.push_str(self.interner.resolve(*sym)),
+            TypeExpr::Array(inner) => {
+                out.push('[');
+                self.write_type_expr_inline(out, inner);
+                out.push(']');
+            }
+            TypeExpr::Optional(inner) => {
+                self.write_type_expr_inline(out, inner);
+                out.push('?');
+            }
+            TypeExpr::Union(types) => {
+                for (i, t) in types.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(" | ");
+                    }
+                    self.write_type_expr_inline(out, t);
+                }
+            }
+            TypeExpr::Nil => out.push_str("nil"),
+            TypeExpr::Function {
+                params,
+                return_type,
+            } => {
+                out.push('(');
+                for (i, p) in params.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    self.write_type_expr_inline(out, p);
+                }
+                out.push_str(") -> ");
+                self.write_type_expr_inline(out, return_type);
+            }
+            TypeExpr::SelfType => out.push_str("Self"),
         }
     }
 }

@@ -1932,14 +1932,20 @@ impl Analyzer {
                 // Check scrutinee type
                 let scrutinee_type = self.check_expr(&match_expr.scrutinee, interner)?;
 
-                // Check exhaustiveness - must have wildcard or identifier catch-all
-                let has_catch_all = match_expr.arms.iter().any(|arm| {
-                    matches!(
-                        arm.pattern,
-                        Pattern::Wildcard(_) | Pattern::Identifier { .. }
-                    )
-                });
-                if !has_catch_all {
+                // Get scrutinee symbol if it's an identifier (for type narrowing)
+                let scrutinee_sym = if let ExprKind::Identifier(sym) = &match_expr.scrutinee.kind {
+                    Some(*sym)
+                } else {
+                    None
+                };
+
+                // Check exhaustiveness - for union types with type patterns, check coverage
+                let is_exhaustive = self.check_match_exhaustiveness(
+                    &match_expr.arms,
+                    &scrutinee_type,
+                    match_expr.span,
+                );
+                if !is_exhaustive {
                     self.add_error(
                         SemanticError::NonExhaustiveMatch {
                             span: match_expr.span.into(),
@@ -1956,8 +1962,16 @@ impl Analyzer {
                     // Enter new scope for arm (bindings live here)
                     self.scope = Scope::with_parent(std::mem::take(&mut self.scope));
 
-                    // Check pattern
-                    self.check_pattern(&arm.pattern, &scrutinee_type, interner);
+                    // Save current type overrides
+                    let saved_overrides = self.type_overrides.clone();
+
+                    // Check pattern and get narrowing info
+                    let narrowed_type = self.check_pattern(&arm.pattern, &scrutinee_type, interner);
+
+                    // Apply type narrowing if scrutinee is an identifier and pattern provides narrowing
+                    if let (Some(sym), Some(narrow_ty)) = (scrutinee_sym, &narrowed_type) {
+                        self.type_overrides.insert(sym, narrow_ty.clone());
+                    }
 
                     // Check guard if present (must be bool)
                     if let Some(guard) = &arm.guard {
@@ -1975,6 +1989,9 @@ impl Analyzer {
 
                     // Check body expression
                     let body_type = self.check_expr(&arm.body, interner)?;
+
+                    // Restore type overrides
+                    self.type_overrides = saved_overrides;
 
                     // Unify with previous arms
                     match &result_type {
@@ -2498,11 +2515,18 @@ impl Analyzer {
         }
     }
 
-    /// Check a pattern against the scrutinee type
-    fn check_pattern(&mut self, pattern: &Pattern, scrutinee_type: &Type, interner: &Interner) {
+    /// Check a pattern against the scrutinee type.
+    /// Returns the narrowed type if this pattern narrows the scrutinee (e.g., type patterns).
+    fn check_pattern(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee_type: &Type,
+        interner: &Interner,
+    ) -> Option<Type> {
         match pattern {
             Pattern::Wildcard(_) => {
-                // Wildcard always matches, nothing to check
+                // Wildcard always matches, nothing to check, no narrowing
+                None
             }
             Pattern::Literal(expr) => {
                 // Check literal type matches scrutinee type
@@ -2519,17 +2543,157 @@ impl Analyzer {
                         expr.span,
                     );
                 }
+                None
             }
-            Pattern::Identifier { name, span: _ } => {
-                // Bind identifier to scrutinee's type in current scope
-                self.scope.define(
-                    *name,
-                    Variable {
-                        ty: scrutinee_type.clone(),
-                        mutable: false,
+            Pattern::Identifier { name, span } => {
+                // Check if this identifier is a known class or record type
+                if let Some(class_type) = self.classes.get(name).cloned() {
+                    // This is a type pattern for a class
+                    let pattern_type = Type::Class(class_type);
+                    self.check_type_pattern_compatibility(&pattern_type, scrutinee_type, *span);
+                    Some(pattern_type)
+                } else if let Some(record_type) = self.records.get(name).cloned() {
+                    // This is a type pattern for a record
+                    let pattern_type = Type::Record(record_type);
+                    self.check_type_pattern_compatibility(&pattern_type, scrutinee_type, *span);
+                    Some(pattern_type)
+                } else {
+                    // Regular identifier binding pattern
+                    self.scope.define(
+                        *name,
+                        Variable {
+                            ty: scrutinee_type.clone(),
+                            mutable: false,
+                        },
+                    );
+                    None
+                }
+            }
+            Pattern::Type { type_expr, span } => {
+                let pattern_type = self.resolve_type(type_expr);
+                self.check_type_pattern_compatibility(&pattern_type, scrutinee_type, *span);
+                Some(pattern_type)
+            }
+            Pattern::Val { name, span } => {
+                // Val pattern compares against existing variable's value
+                if let Some(var) = self.scope.get(*name) {
+                    // Check type compatibility
+                    if !self.types_compatible(&var.ty, scrutinee_type)
+                        && !self.types_compatible(scrutinee_type, &var.ty)
+                    {
+                        self.add_error(
+                            SemanticError::PatternTypeMismatch {
+                                expected: scrutinee_type.name().to_string(),
+                                found: var.ty.name().to_string(),
+                                span: (*span).into(),
+                            },
+                            *span,
+                        );
+                    }
+                } else {
+                    self.add_error(
+                        SemanticError::UndefinedVariable {
+                            name: interner.resolve(*name).to_string(),
+                            span: (*span).into(),
+                        },
+                        *span,
+                    );
+                }
+                // Val patterns don't narrow types
+                None
+            }
+        }
+    }
+
+    /// Check if a match expression is exhaustive
+    fn check_match_exhaustiveness(
+        &self,
+        arms: &[MatchArm],
+        scrutinee_type: &Type,
+        _span: Span,
+    ) -> bool {
+        // Check for catch-all patterns (wildcard or identifier binding)
+        let has_catch_all = arms.iter().any(|arm| {
+            match &arm.pattern {
+                Pattern::Wildcard(_) => true,
+                Pattern::Identifier { name, .. } => {
+                    // Only a catch-all if NOT a known type name
+                    !self.classes.contains_key(name) && !self.records.contains_key(name)
+                }
+                _ => false,
+            }
+        });
+
+        if has_catch_all {
+            return true;
+        }
+
+        // For union types, check if all variants are covered by type patterns
+        if let Type::Union(variants) = scrutinee_type {
+            let mut covered: Vec<bool> = vec![false; variants.len()];
+
+            for arm in arms {
+                let pattern_type = match &arm.pattern {
+                    Pattern::Type { type_expr, .. } => Some(self.resolve_type(type_expr)),
+                    Pattern::Identifier { name, .. } => self
+                        .classes
+                        .get(name)
+                        .map(|class_type| Type::Class(class_type.clone()))
+                        .or_else(|| {
+                            self.records
+                                .get(name)
+                                .map(|record_type| Type::Record(record_type.clone()))
+                        }),
+                    _ => None,
+                };
+
+                if let Some(ref pt) = pattern_type {
+                    for (i, variant) in variants.iter().enumerate() {
+                        if variant == pt {
+                            covered[i] = true;
+                        }
+                    }
+                }
+            }
+
+            return covered.iter().all(|&c| c);
+        }
+
+        // For non-union types without catch-all, not exhaustive
+        false
+    }
+
+    /// Check that a type pattern is compatible with the scrutinee type
+    fn check_type_pattern_compatibility(
+        &mut self,
+        pattern_type: &Type,
+        scrutinee_type: &Type,
+        span: Span,
+    ) {
+        // For union types, the pattern type must be one of the variants
+        if let Type::Union(variants) = scrutinee_type {
+            if !variants.iter().any(|v| v == pattern_type) {
+                self.add_error(
+                    SemanticError::PatternTypeMismatch {
+                        expected: scrutinee_type.name().to_string(),
+                        found: pattern_type.name().to_string(),
+                        span: span.into(),
                     },
+                    span,
                 );
             }
+        } else if scrutinee_type != pattern_type
+            && !self.types_compatible(pattern_type, scrutinee_type)
+        {
+            // For non-union types, pattern must match or be compatible
+            self.add_error(
+                SemanticError::PatternTypeMismatch {
+                    expected: scrutinee_type.name().to_string(),
+                    found: pattern_type.name().to_string(),
+                    span: span.into(),
+                },
+                span,
+            );
         }
     }
 
