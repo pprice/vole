@@ -19,6 +19,17 @@ just fmt            # Format code
 just ci             # Run all checks (mirrors CI)
 ```
 
+Dev tools (for Claude Code):
+```bash
+just dev-next-error sema       # Next available error code (E2061, E1012, E0006)
+just dev-trace-keyword raise   # Trace keyword through lexer→parser→sema→codegen
+just dev-list-errors sema      # List all error codes with messages
+just dev-test-for lambda       # Find test files related to a feature
+just dev-void-ref src/sema/analyzer.rs  # Show equivalent Void (Zig) reference
+just dev-todos                         # List TODOs and FIXMEs in codebase
+just dev-tokens                        # List all token types
+```
+
 Run a single Rust test:
 ```bash
 cargo test test_name
@@ -61,6 +72,35 @@ Source code flows through these stages in order:
    - `codes.rs` → error codes (E0xxx lexer, E1xxx parser, E2xxx semantic)
    - `diagnostic.rs` → structured diagnostic building
    - `render.rs` → terminal output with colors
+
+### Where to Edit
+
+Common tasks mapped to files:
+
+| Task | Files to Edit |
+|------|---------------|
+| **New keyword/token** | `frontend/lexer.rs` (add token), `frontend/token.rs` (Token enum) |
+| **New syntax/expression** | `frontend/parser.rs` or `parse_expr.rs`, `frontend/ast.rs` (AST node) |
+| **New statement** | `frontend/parse_stmt.rs`, `frontend/ast.rs` |
+| **New declaration** | `frontend/parse_decl.rs`, `frontend/ast.rs` |
+| **New type syntax** | `frontend/parse_type.rs` |
+| **New operator** | `frontend/lexer.rs` → `frontend/parser.rs` → `sema/analyzer.rs` → `codegen/ops.rs` |
+| **Type checking** | `sema/analyzer.rs` (main), `sema/types.rs` (type definitions) |
+| **New semantic error** | `errors/sema.rs` (add variant), `sema/analyzer.rs` (emit it) |
+| **New parser error** | `errors/parser.rs` |
+| **Code generation** | `codegen/compiler.rs` (main), `codegen/expr.rs`, `codegen/stmt.rs` |
+| **New builtin function** | `runtime/builtins.rs`, register in `codegen/compiler.rs` |
+| **Classes/records codegen** | `codegen/structs.rs` |
+| **Lambda codegen** | `codegen/lambda.rs` |
+
+Test locations:
+
+| Test Type | Location |
+|-----------|----------|
+| Language feature tests | `test/unit/language/<feature>.vole` |
+| Type system tests | `test/unit/types/` |
+| Error message snapshots | `test/snapshot/check/` |
+| Smoke tests | `test/snapshot/run/` |
 
 ### Testing Infrastructure
 
