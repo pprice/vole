@@ -620,4 +620,8 @@ pub enum Pattern {
     Literal(Expr),
     /// Identifier pattern (binds value): n
     Identifier { name: Symbol, span: Span },
+    /// Type pattern: i32, string, nil, MyClass
+    Type { type_expr: TypeExpr, span: Span },
+    /// Val pattern: val x (compares against existing variable)
+    Val { name: Symbol, span: Span },
 }

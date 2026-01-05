@@ -1,7 +1,7 @@
 [stdout]
 
 [stderr]
-  x [E2055]: unreachable catch arm for 'ErrorC'
+  x [E2059]: unreachable catch arm for 'ErrorC'
     ,-[<path>/error_unreachable_catch_arm.vole:14:9]
  13 |         ErrorB {} => 2
  14 |         ErrorC {} => 3  // ErrorC is not in error set

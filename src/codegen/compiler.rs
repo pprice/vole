@@ -1612,6 +1612,45 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 }
+
+/// Compile a type pattern check for match expressions
+/// Returns Some(comparison_value) if a runtime check is needed, None if always matches
+fn compile_type_pattern_check(
+    builder: &mut FunctionBuilder,
+    scrutinee: &CompiledValue,
+    pattern_type: &Type,
+) -> Option<Value> {
+    if let Type::Union(variants) = &scrutinee.vole_type {
+        let expected_tag = variants
+            .iter()
+            .position(|v| v == pattern_type)
+            .unwrap_or(usize::MAX);
+
+        if expected_tag == usize::MAX {
+            // Pattern type not in union - will never match
+            let never_match = builder.ins().iconst(types::I8, 0);
+            return Some(never_match);
+        }
+
+        let tag = builder
+            .ins()
+            .load(types::I8, MemFlags::new(), scrutinee.value, 0);
+        let expected = builder.ins().iconst(types::I8, expected_tag as i64);
+        let result = builder.ins().icmp(IntCC::Equal, tag, expected);
+
+        Some(result)
+    } else {
+        // Non-union scrutinee - pattern matches if types are equal
+        if scrutinee.vole_type == *pattern_type {
+            None // Always matches
+        } else {
+            // Never matches
+            let never_match = builder.ins().iconst(types::I8, 0);
+            Some(never_match)
+        }
+    }
+}
+
 pub(super) fn compile_expr(
     builder: &mut FunctionBuilder,
     expr: &Expr,
@@ -2162,6 +2201,9 @@ pub(super) fn compile_expr(
             let merge_block = builder.create_block();
             builder.append_block_param(merge_block, types::I64);
 
+            // Create a trap block for non-exhaustive match (should be unreachable)
+            let trap_block = builder.create_block();
+
             // Create blocks for each arm
             let arm_blocks: Vec<Block> = match_expr
                 .arms
@@ -2185,7 +2227,8 @@ pub(super) fn compile_expr(
             // Compile each arm
             for (i, arm) in match_expr.arms.iter().enumerate() {
                 let arm_block = arm_blocks[i];
-                let next_block = arm_blocks.get(i + 1).copied().unwrap_or(merge_block);
+                // For the last arm, if pattern fails, go to trap (should be unreachable)
+                let next_block = arm_blocks.get(i + 1).copied().unwrap_or(trap_block);
 
                 builder.switch_to_block(arm_block);
 
@@ -2199,11 +2242,21 @@ pub(super) fn compile_expr(
                         None
                     }
                     Pattern::Identifier { name, .. } => {
-                        // Bind the scrutinee value to the identifier
-                        let var = builder.declare_var(scrutinee.ty);
-                        builder.def_var(var, scrutinee.value);
-                        arm_variables.insert(*name, (var, scrutinee.vole_type.clone()));
-                        None // Always matches
+                        // Check if this identifier is a type name (class/record)
+                        if let Some(type_meta) = ctx.type_metadata.get(name) {
+                            // Type pattern - compare against union variant tag
+                            compile_type_pattern_check(builder, &scrutinee, &type_meta.vole_type)
+                        } else {
+                            // Bind the scrutinee value to the identifier
+                            let var = builder.declare_var(scrutinee.ty);
+                            builder.def_var(var, scrutinee.value);
+                            arm_variables.insert(*name, (var, scrutinee.vole_type.clone()));
+                            None // Always matches
+                        }
+                    }
+                    Pattern::Type { type_expr, .. } => {
+                        let pattern_type = resolve_type_expr(type_expr, ctx);
+                        compile_type_pattern_check(builder, &scrutinee, &pattern_type)
                     }
                     Pattern::Literal(lit_expr) => {
                         // Compile literal and compare
@@ -2234,6 +2287,33 @@ pub(super) fn compile_expr(
                                         .icmp(IntCC::Equal, scrutinee.value, lit_val.value)
                                 }
                             }
+                        };
+                        Some(cmp)
+                    }
+                    Pattern::Val { name, .. } => {
+                        // Val pattern - compare against existing variable's value
+                        let (var, var_type) = arm_variables
+                            .get(name)
+                            .ok_or_else(|| "undefined variable in val pattern".to_string())?
+                            .clone();
+                        let var_val = builder.use_var(var);
+
+                        let cmp = match var_type {
+                            Type::F64 => {
+                                builder.ins().fcmp(FloatCC::Equal, scrutinee.value, var_val)
+                            }
+                            Type::String => {
+                                if let Some(cmp_id) = ctx.func_ids.get("vole_string_eq") {
+                                    let cmp_ref =
+                                        ctx.module.declare_func_in_func(*cmp_id, builder.func);
+                                    let call =
+                                        builder.ins().call(cmp_ref, &[scrutinee.value, var_val]);
+                                    builder.inst_results(call)[0]
+                                } else {
+                                    builder.ins().icmp(IntCC::Equal, scrutinee.value, var_val)
+                                }
+                            }
+                            _ => builder.ins().icmp(IntCC::Equal, scrutinee.value, var_val),
                         };
                         Some(cmp)
                     }
@@ -2302,6 +2382,11 @@ pub(super) fn compile_expr(
             }
 
             // Note: arm_blocks are sealed inside the loop after their predecessors are known
+
+            // Fill in trap block (should be unreachable if match is exhaustive)
+            builder.switch_to_block(trap_block);
+            builder.seal_block(trap_block);
+            builder.ins().trap(TrapCode::unwrap_user(1));
 
             // Switch to merge block and get result
             builder.switch_to_block(merge_block);

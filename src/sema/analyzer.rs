@@ -306,8 +306,19 @@ impl Analyzer {
                             fields,
                         },
                     );
-                    // Register implements list
+                    // Register and validate implements list
                     if !class.implements.is_empty() {
+                        for iface_sym in &class.implements {
+                            if self.interface_registry.get(*iface_sym).is_none() {
+                                self.add_error(
+                                    SemanticError::UnknownInterface {
+                                        name: interner.resolve(*iface_sym).to_string(),
+                                        span: class.span.into(),
+                                    },
+                                    class.span,
+                                );
+                            }
+                        }
                         self.type_implements
                             .insert(class.name, class.implements.clone());
                     }
@@ -351,8 +362,19 @@ impl Analyzer {
                             fields,
                         },
                     );
-                    // Register implements list
+                    // Register and validate implements list
                     if !record.implements.is_empty() {
+                        for iface_sym in &record.implements {
+                            if self.interface_registry.get(*iface_sym).is_none() {
+                                self.add_error(
+                                    SemanticError::UnknownInterface {
+                                        name: interner.resolve(*iface_sym).to_string(),
+                                        span: record.span.into(),
+                                    },
+                                    record.span,
+                                );
+                            }
+                        }
                         self.type_implements
                             .insert(record.name, record.implements.clone());
                     }
@@ -415,7 +437,35 @@ impl Analyzer {
                     self.interface_registry.register(def);
                 }
                 Decl::Implement(impl_block) => {
+                    // Validate trait exists if specified
+                    if let Some(trait_name) = impl_block.trait_name
+                        && self.interface_registry.get(trait_name).is_none()
+                    {
+                        self.add_error(
+                            SemanticError::UnknownInterface {
+                                name: interner.resolve(trait_name).to_string(),
+                                span: impl_block.span.into(),
+                            },
+                            impl_block.span,
+                        );
+                    }
+
                     let target_type = self.resolve_type(&impl_block.target_type);
+
+                    // Validate target type exists
+                    if matches!(target_type, Type::Error) {
+                        let type_name = match &impl_block.target_type {
+                            TypeExpr::Named(sym) => interner.resolve(*sym).to_string(),
+                            _ => "unknown".to_string(),
+                        };
+                        self.add_error(
+                            SemanticError::UnknownImplementType {
+                                name: type_name,
+                                span: impl_block.span.into(),
+                            },
+                            impl_block.span,
+                        );
+                    }
 
                     if let Some(type_id) = TypeId::from_type(&target_type) {
                         for method in &impl_block.methods {
@@ -507,10 +557,36 @@ impl Analyzer {
                     for method in &class.methods {
                         self.check_method(method, class.name, interner)?;
                     }
+                    // Validate interface satisfaction
+                    if let Some(interfaces) = self.type_implements.get(&class.name).cloned() {
+                        let type_methods = self.get_type_method_signatures(class.name);
+                        for iface_name in interfaces {
+                            self.validate_interface_satisfaction(
+                                class.name,
+                                iface_name,
+                                &type_methods,
+                                class.span,
+                                interner,
+                            );
+                        }
+                    }
                 }
                 Decl::Record(record) => {
                     for method in &record.methods {
                         self.check_method(method, record.name, interner)?;
+                    }
+                    // Validate interface satisfaction
+                    if let Some(interfaces) = self.type_implements.get(&record.name).cloned() {
+                        let type_methods = self.get_type_method_signatures(record.name);
+                        for iface_name in interfaces {
+                            self.validate_interface_satisfaction(
+                                record.name,
+                                iface_name,
+                                &type_methods,
+                                record.span,
+                                interner,
+                            );
+                        }
                     }
                 }
                 Decl::Interface(_) => {
@@ -2263,14 +2339,20 @@ impl Analyzer {
                 // Check scrutinee type
                 let scrutinee_type = self.check_expr(&match_expr.scrutinee, interner)?;
 
-                // Check exhaustiveness - must have wildcard or identifier catch-all
-                let has_catch_all = match_expr.arms.iter().any(|arm| {
-                    matches!(
-                        arm.pattern,
-                        Pattern::Wildcard(_) | Pattern::Identifier { .. }
-                    )
-                });
-                if !has_catch_all {
+                // Get scrutinee symbol if it's an identifier (for type narrowing)
+                let scrutinee_sym = if let ExprKind::Identifier(sym) = &match_expr.scrutinee.kind {
+                    Some(*sym)
+                } else {
+                    None
+                };
+
+                // Check exhaustiveness - for union types with type patterns, check coverage
+                let is_exhaustive = self.check_match_exhaustiveness(
+                    &match_expr.arms,
+                    &scrutinee_type,
+                    match_expr.span,
+                );
+                if !is_exhaustive {
                     self.add_error(
                         SemanticError::NonExhaustiveMatch {
                             span: match_expr.span.into(),
@@ -2287,8 +2369,16 @@ impl Analyzer {
                     // Enter new scope for arm (bindings live here)
                     self.scope = Scope::with_parent(std::mem::take(&mut self.scope));
 
-                    // Check pattern
-                    self.check_pattern(&arm.pattern, &scrutinee_type, interner);
+                    // Save current type overrides
+                    let saved_overrides = self.type_overrides.clone();
+
+                    // Check pattern and get narrowing info
+                    let narrowed_type = self.check_pattern(&arm.pattern, &scrutinee_type, interner);
+
+                    // Apply type narrowing if scrutinee is an identifier and pattern provides narrowing
+                    if let (Some(sym), Some(narrow_ty)) = (scrutinee_sym, &narrowed_type) {
+                        self.type_overrides.insert(sym, narrow_ty.clone());
+                    }
 
                     // Check guard if present (must be bool)
                     if let Some(guard) = &arm.guard {
@@ -2306,6 +2396,9 @@ impl Analyzer {
 
                     // Check body expression
                     let body_type = self.check_expr(&arm.body, interner)?;
+
+                    // Restore type overrides
+                    self.type_overrides = saved_overrides;
 
                     // Unify with previous arms
                     match &result_type {
@@ -2831,11 +2924,18 @@ impl Analyzer {
         }
     }
 
-    /// Check a pattern against the scrutinee type
-    fn check_pattern(&mut self, pattern: &Pattern, scrutinee_type: &Type, interner: &Interner) {
+    /// Check a pattern against the scrutinee type.
+    /// Returns the narrowed type if this pattern narrows the scrutinee (e.g., type patterns).
+    fn check_pattern(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee_type: &Type,
+        interner: &Interner,
+    ) -> Option<Type> {
         match pattern {
             Pattern::Wildcard(_) => {
-                // Wildcard always matches, nothing to check
+                // Wildcard always matches, nothing to check, no narrowing
+                None
             }
             Pattern::Literal(expr) => {
                 // Check literal type matches scrutinee type
@@ -2852,17 +2952,157 @@ impl Analyzer {
                         expr.span,
                     );
                 }
+                None
             }
-            Pattern::Identifier { name, span: _ } => {
-                // Bind identifier to scrutinee's type in current scope
-                self.scope.define(
-                    *name,
-                    Variable {
-                        ty: scrutinee_type.clone(),
-                        mutable: false,
+            Pattern::Identifier { name, span } => {
+                // Check if this identifier is a known class or record type
+                if let Some(class_type) = self.classes.get(name).cloned() {
+                    // This is a type pattern for a class
+                    let pattern_type = Type::Class(class_type);
+                    self.check_type_pattern_compatibility(&pattern_type, scrutinee_type, *span);
+                    Some(pattern_type)
+                } else if let Some(record_type) = self.records.get(name).cloned() {
+                    // This is a type pattern for a record
+                    let pattern_type = Type::Record(record_type);
+                    self.check_type_pattern_compatibility(&pattern_type, scrutinee_type, *span);
+                    Some(pattern_type)
+                } else {
+                    // Regular identifier binding pattern
+                    self.scope.define(
+                        *name,
+                        Variable {
+                            ty: scrutinee_type.clone(),
+                            mutable: false,
+                        },
+                    );
+                    None
+                }
+            }
+            Pattern::Type { type_expr, span } => {
+                let pattern_type = self.resolve_type(type_expr);
+                self.check_type_pattern_compatibility(&pattern_type, scrutinee_type, *span);
+                Some(pattern_type)
+            }
+            Pattern::Val { name, span } => {
+                // Val pattern compares against existing variable's value
+                if let Some(var) = self.scope.get(*name) {
+                    // Check type compatibility
+                    if !self.types_compatible(&var.ty, scrutinee_type)
+                        && !self.types_compatible(scrutinee_type, &var.ty)
+                    {
+                        self.add_error(
+                            SemanticError::PatternTypeMismatch {
+                                expected: scrutinee_type.name().to_string(),
+                                found: var.ty.name().to_string(),
+                                span: (*span).into(),
+                            },
+                            *span,
+                        );
+                    }
+                } else {
+                    self.add_error(
+                        SemanticError::UndefinedVariable {
+                            name: interner.resolve(*name).to_string(),
+                            span: (*span).into(),
+                        },
+                        *span,
+                    );
+                }
+                // Val patterns don't narrow types
+                None
+            }
+        }
+    }
+
+    /// Check if a match expression is exhaustive
+    fn check_match_exhaustiveness(
+        &self,
+        arms: &[MatchArm],
+        scrutinee_type: &Type,
+        _span: Span,
+    ) -> bool {
+        // Check for catch-all patterns (wildcard or identifier binding)
+        let has_catch_all = arms.iter().any(|arm| {
+            match &arm.pattern {
+                Pattern::Wildcard(_) => true,
+                Pattern::Identifier { name, .. } => {
+                    // Only a catch-all if NOT a known type name
+                    !self.classes.contains_key(name) && !self.records.contains_key(name)
+                }
+                _ => false,
+            }
+        });
+
+        if has_catch_all {
+            return true;
+        }
+
+        // For union types, check if all variants are covered by type patterns
+        if let Type::Union(variants) = scrutinee_type {
+            let mut covered: Vec<bool> = vec![false; variants.len()];
+
+            for arm in arms {
+                let pattern_type = match &arm.pattern {
+                    Pattern::Type { type_expr, .. } => Some(self.resolve_type(type_expr)),
+                    Pattern::Identifier { name, .. } => self
+                        .classes
+                        .get(name)
+                        .map(|class_type| Type::Class(class_type.clone()))
+                        .or_else(|| {
+                            self.records
+                                .get(name)
+                                .map(|record_type| Type::Record(record_type.clone()))
+                        }),
+                    _ => None,
+                };
+
+                if let Some(ref pt) = pattern_type {
+                    for (i, variant) in variants.iter().enumerate() {
+                        if variant == pt {
+                            covered[i] = true;
+                        }
+                    }
+                }
+            }
+
+            return covered.iter().all(|&c| c);
+        }
+
+        // For non-union types without catch-all, not exhaustive
+        false
+    }
+
+    /// Check that a type pattern is compatible with the scrutinee type
+    fn check_type_pattern_compatibility(
+        &mut self,
+        pattern_type: &Type,
+        scrutinee_type: &Type,
+        span: Span,
+    ) {
+        // For union types, the pattern type must be one of the variants
+        if let Type::Union(variants) = scrutinee_type {
+            if !variants.iter().any(|v| v == pattern_type) {
+                self.add_error(
+                    SemanticError::PatternTypeMismatch {
+                        expected: scrutinee_type.name().to_string(),
+                        found: pattern_type.name().to_string(),
+                        span: span.into(),
                     },
+                    span,
                 );
             }
+        } else if scrutinee_type != pattern_type
+            && !self.types_compatible(pattern_type, scrutinee_type)
+        {
+            // For non-union types, pattern must match or be compatible
+            self.add_error(
+                SemanticError::PatternTypeMismatch {
+                    expected: scrutinee_type.name().to_string(),
+                    found: pattern_type.name().to_string(),
+                    span: span.into(),
+                },
+                span,
+            );
         }
     }
 
@@ -3287,6 +3527,123 @@ impl Analyzer {
         }
 
         false
+    }
+
+    /// Validate that a type satisfies an interface by having all required methods with correct signatures
+    fn validate_interface_satisfaction(
+        &mut self,
+        type_name: Symbol,
+        iface_name: Symbol,
+        type_methods: &HashMap<Symbol, FunctionType>,
+        span: Span,
+        interner: &Interner,
+    ) {
+        if let Some(iface) = self.interface_registry.get(iface_name).cloned() {
+            // Check methods required by this interface
+            for required in &iface.methods {
+                if required.has_default {
+                    continue;
+                }
+                match type_methods.get(&required.name) {
+                    None => {
+                        // Method is missing entirely
+                        self.add_error(
+                            SemanticError::InterfaceNotSatisfied {
+                                type_name: interner.resolve(type_name).to_string(),
+                                interface_name: interner.resolve(iface_name).to_string(),
+                                method: interner.resolve(required.name).to_string(),
+                                span: span.into(),
+                            },
+                            span,
+                        );
+                    }
+                    Some(found_sig) => {
+                        // Method exists, check signature
+                        if !Self::signatures_match(required, found_sig) {
+                            self.add_error(
+                                SemanticError::InterfaceSignatureMismatch {
+                                    interface_name: interner.resolve(iface_name).to_string(),
+                                    method: interner.resolve(required.name).to_string(),
+                                    expected: Self::format_method_signature(
+                                        &required.params,
+                                        &required.return_type,
+                                    ),
+                                    found: Self::format_method_signature(
+                                        &found_sig.params,
+                                        &found_sig.return_type,
+                                    ),
+                                    span: span.into(),
+                                },
+                                span,
+                            );
+                        }
+                    }
+                }
+            }
+            // Check parent interfaces (extends)
+            for parent_iface in &iface.extends {
+                self.validate_interface_satisfaction(
+                    type_name,
+                    *parent_iface,
+                    type_methods,
+                    span,
+                    interner,
+                );
+            }
+        }
+    }
+
+    /// Get all method signatures for a type (from direct methods + implement blocks)
+    fn get_type_method_signatures(&self, type_name: Symbol) -> HashMap<Symbol, FunctionType> {
+        let mut method_sigs = HashMap::new();
+
+        // Methods defined directly on the type
+        for ((ty, method_name), func_type) in &self.methods {
+            if *ty == type_name {
+                method_sigs.insert(*method_name, func_type.clone());
+            }
+        }
+
+        // Methods from implement blocks
+        if let Some(type_id) = self
+            .records
+            .get(&type_name)
+            .map(|_| TypeId::Record(type_name))
+            .or_else(|| {
+                self.classes
+                    .get(&type_name)
+                    .map(|_| TypeId::Class(type_name))
+            })
+        {
+            for (method_name, method_impl) in self.implement_registry.get_methods_for_type(&type_id)
+            {
+                method_sigs.insert(method_name, method_impl.func_type.clone());
+            }
+        }
+
+        method_sigs
+    }
+
+    /// Check if a method signature matches an interface requirement
+    fn signatures_match(required: &InterfaceMethodDef, found: &FunctionType) -> bool {
+        // Check parameter count
+        if required.params.len() != found.params.len() {
+            return false;
+        }
+        // Check parameter types
+        for (req_param, found_param) in required.params.iter().zip(found.params.iter()) {
+            if req_param != found_param {
+                return false;
+            }
+        }
+        // Check return type
+        required.return_type == *found.return_type
+    }
+
+    /// Format a method signature for error messages
+    fn format_method_signature(params: &[Type], return_type: &Type) -> String {
+        let params_str: Vec<String> = params.iter().map(|t| t.to_string()).collect();
+        format!("({}) -> {}", params_str.join(", "), return_type)
     }
 }
 

@@ -119,6 +119,49 @@ tests "interface extends" {
     }
 }
 
+// Test that implement blocks can satisfy interface requirements
+interface Printable {
+    func print_value() -> string
+}
+
+record Counter {
+    count: i64
+}
+
+// Satisfy Printable via implement block (not inline method)
+implement Printable for Counter {
+    func print_value() -> string {
+        return "counter"
+    }
+}
+
+// Record that declares implements but satisfies via implement block
+interface Incrementable {
+    func increment() -> i64
+}
+
+record Score implements Incrementable {
+    value: i64
+}
+
+implement Incrementable for Score {
+    func increment() -> i64 {
+        return self.value + 1
+    }
+}
+
+tests "implement blocks satisfy interfaces" {
+    test "implement block method can be called" {
+        let c = Counter { count: 5 }
+        assert(c.print_value() == "counter")
+    }
+
+    test "implements declaration satisfied by implement block" {
+        let s = Score { value: 10 }
+        assert(s.increment() == 11)
+    }
+}
+
 // Test built-in methods
 tests "built-in interface methods" {
     test "array.length returns correct size" {

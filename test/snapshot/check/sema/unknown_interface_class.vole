@@ -1,0 +1,8 @@
+// Test that class with unknown interface reports E2050
+class Widget implements NonExistentInterface {
+    name: string
+
+    func render() -> string {
+        return self.name
+    }
+}
