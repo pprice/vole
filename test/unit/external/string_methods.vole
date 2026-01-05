@@ -1,0 +1,20 @@
+implement string {
+    external("std:string") {
+        func "string_length" as length() -> i64
+        func "string_contains" as contains(needle: string) -> bool
+    }
+}
+
+tests {
+    test "string length" {
+        assert("hello".length() == 5)
+        assert("".length() == 0)
+        assert("hello world".length() == 11)
+    }
+
+    test "string contains" {
+        assert("hello world".contains("world"))
+        assert("hello world".contains("hello"))
+        assert(!("hello".contains("xyz")))
+    }
+}
