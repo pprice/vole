@@ -2,7 +2,7 @@
 
 use crate::errors::SemanticError;
 use crate::frontend::*;
-use crate::sema::implement_registry::{ImplementRegistry, MethodImpl, TypeId};
+use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry, MethodImpl, TypeId};
 use crate::sema::interface_registry::{
     InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
 };
@@ -496,6 +496,16 @@ impl Analyzer {
                                 },
                             );
                         }
+
+                        // Analyze external block if present
+                        if let Some(ref external) = impl_block.external {
+                            self.analyze_external_block(
+                                external,
+                                &target_type,
+                                impl_block.trait_name,
+                                interner,
+                            );
+                        }
                     }
                 }
                 Decl::Error(decl) => {
@@ -654,6 +664,62 @@ impl Analyzer {
         };
 
         self.error_types.insert(decl.name, error_info);
+    }
+
+    /// Analyze external block and register external methods in the implement registry
+    fn analyze_external_block(
+        &mut self,
+        external: &ExternalBlock,
+        target_type: &Type,
+        trait_name: Option<Symbol>,
+        interner: &Interner,
+    ) {
+        let type_id = match TypeId::from_type(target_type) {
+            Some(id) => id,
+            None => return, // Skip non-registerable types
+        };
+
+        for func in &external.functions {
+            // Resolve parameter types
+            let param_types: Vec<Type> = func
+                .params
+                .iter()
+                .map(|p| self.resolve_type(&p.ty))
+                .collect();
+
+            // Resolve return type
+            let return_type = match &func.return_type {
+                Some(te) => self.resolve_type(te),
+                None => Type::Nil,
+            };
+
+            let func_type = FunctionType {
+                params: param_types,
+                return_type: Box::new(return_type),
+                is_closure: false,
+            };
+
+            // Determine native name: explicit or default to vole_name
+            let native_name = func
+                .native_name
+                .clone()
+                .unwrap_or_else(|| interner.resolve(func.vole_name).to_string());
+
+            // Register in implement registry
+            self.implement_registry.register_method(
+                type_id.clone(),
+                func.vole_name,
+                MethodImpl {
+                    trait_name,
+                    func_type,
+                    is_builtin: false,
+                    external_info: Some(ExternalMethodInfo {
+                        module_path: external.module_path.clone(),
+                        native_name,
+                    }),
+                },
+            );
+        }
     }
 
     fn check_function(
