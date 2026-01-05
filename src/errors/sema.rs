@@ -183,4 +183,19 @@ pub enum SemanticError {
         #[label("record fields are immutable")]
         span: SourceSpan,
     },
+
+    #[error("raise statement outside fallible function")]
+    #[diagnostic(code(E2050))]
+    RaiseOutsideFallible {
+        #[label("raise must be in a function with fallible return type")]
+        span: SourceSpan,
+    },
+
+    #[error("undefined error type '{name}'")]
+    #[diagnostic(code(E2051))]
+    UndefinedError {
+        name: String,
+        #[label("not defined")]
+        span: SourceSpan,
+    },
 }
