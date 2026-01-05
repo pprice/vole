@@ -1,0 +1,5 @@
+implement UnknownTrait for i64 {
+    func foo() -> i64 {
+        return 42
+    }
+}
