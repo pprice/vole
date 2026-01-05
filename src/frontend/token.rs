@@ -46,6 +46,7 @@ pub enum TokenType {
     KwTry,        // try keyword (propagation operator)
     KwExternal,   // external keyword
     KwAs,         // as keyword (for external func mapping)
+    KwImport,     // import keyword
 
     // Type keywords
     KwI8,
@@ -159,6 +160,7 @@ impl TokenType {
             Self::KwTry => "try",
             Self::KwExternal => "external",
             Self::KwAs => "as",
+            Self::KwImport => "import",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",
