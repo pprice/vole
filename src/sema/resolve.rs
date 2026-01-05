@@ -5,7 +5,8 @@
 use crate::frontend::{Symbol, TypeExpr};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::types::{
-    ClassType, ErrorTypeInfo, FunctionType, InterfaceMethodType, InterfaceType, RecordType, Type,
+    ClassType, ErrorTypeInfo, FallibleType, FunctionType, InterfaceMethodType, InterfaceType,
+    RecordType, Type,
 };
 use std::collections::HashMap;
 
@@ -104,8 +105,16 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
             // For now, return Error to indicate it can't be used outside that context
             Type::Error
         }
-        TypeExpr::Fallible { .. } => {
-            todo!("fallible type resolution")
+        TypeExpr::Fallible {
+            success_type,
+            error_type,
+        } => {
+            let success = resolve_type(success_type, ctx);
+            let error = resolve_type(error_type, ctx);
+            Type::Fallible(FallibleType {
+                success_type: Box::new(success),
+                error_type: Box::new(error),
+            })
         }
     }
 }
