@@ -3011,6 +3011,10 @@ impl Analyzer {
                 // Val patterns don't narrow types
                 None
             }
+            Pattern::Success { .. } | Pattern::Error { .. } => {
+                // TODO: Implement success/error pattern type checking in later task
+                None
+            }
         }
     }
 

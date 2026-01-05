@@ -547,6 +547,10 @@ impl Cg<'_, '_, '_> {
                     };
                     Some(cmp)
                 }
+                Pattern::Success { .. } | Pattern::Error { .. } => {
+                    // TODO: Implement success/error pattern codegen in later task
+                    todo!("success/error pattern codegen not yet implemented")
+                }
             };
 
             // Save and restore vars for guard evaluation

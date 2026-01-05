@@ -619,6 +619,20 @@ impl<'a> AstPrinter<'a> {
                 let ident = self.interner.resolve(*name);
                 out.push_str(ident);
             }
+            Pattern::Success { inner, .. } => {
+                out.push_str("success");
+                if let Some(inner_pattern) = inner {
+                    out.push(' ');
+                    self.write_pattern_inline(out, inner_pattern);
+                }
+            }
+            Pattern::Error { inner, .. } => {
+                out.push_str("error");
+                if let Some(inner_pattern) = inner {
+                    out.push(' ');
+                    self.write_pattern_inline(out, inner_pattern);
+                }
+            }
         }
     }
 

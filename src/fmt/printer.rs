@@ -649,6 +649,24 @@ fn print_pattern<'a>(
         Pattern::Val { name, .. } => arena
             .text("val ")
             .append(arena.text(interner.resolve(*name).to_string())),
+        Pattern::Success { inner, .. } => {
+            let base = arena.text("success");
+            match inner {
+                Some(inner_pattern) => base
+                    .append(arena.text(" "))
+                    .append(print_pattern(arena, inner_pattern, interner)),
+                None => base,
+            }
+        }
+        Pattern::Error { inner, .. } => {
+            let base = arena.text("error");
+            match inner {
+                Some(inner_pattern) => base
+                    .append(arena.text(" "))
+                    .append(print_pattern(arena, inner_pattern, interner)),
+                None => base,
+            }
+        }
     }
 }
 

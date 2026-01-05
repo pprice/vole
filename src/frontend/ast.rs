@@ -624,4 +624,14 @@ pub enum Pattern {
     Type { type_expr: TypeExpr, span: Span },
     /// Val pattern: val x (compares against existing variable)
     Val { name: Symbol, span: Span },
+    /// Success pattern for fallible match: success x, success, success Point { x, y }
+    Success {
+        inner: Option<Box<Pattern>>, // None = bare success, Some = success <pattern>
+        span: Span,
+    },
+    /// Error pattern for fallible match: error e, error, error DivByZero, error DivByZero { msg }
+    Error {
+        inner: Option<Box<Pattern>>, // None = bare error, Some = error <pattern>
+        span: Span,
+    },
 }
