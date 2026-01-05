@@ -1,0 +1,35 @@
+// stdlib/math.vole
+// Standard math functions
+
+external("std:math") {
+    func sin(x: f64) -> f64
+    func cos(x: f64) -> f64
+    func tan(x: f64) -> f64
+    func sqrt(x: f64) -> f64
+    func pow(base: f64, exp: f64) -> f64
+    func floor(x: f64) -> f64
+    func ceil(x: f64) -> f64
+    func round(x: f64) -> f64
+    func abs(x: f64) -> f64
+    func min(a: f64, b: f64) -> f64
+    func max(a: f64, b: f64) -> f64
+}
+
+// Pure Vole implementations
+let PI = 3.14159265358979323846
+
+func lerp(a: f64, b: f64, t: f64) -> f64 {
+    return a + (b - a) * t
+}
+
+func clamp(x: f64, lo: f64, hi: f64) -> f64 {
+    return min(max(x, lo), hi)
+}
+
+func deg_to_rad(degrees: f64) -> f64 {
+    return degrees * PI / 180.0
+}
+
+func rad_to_deg(radians: f64) -> f64 {
+    return radians * 180.0 / PI
+}
