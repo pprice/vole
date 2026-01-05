@@ -23,6 +23,8 @@ pub struct AnalyzedProgram {
     pub expr_types: HashMap<NodeId, Type>,
     pub method_resolutions: MethodResolutions,
     pub interface_registry: InterfaceRegistry,
+    /// Tracks which interfaces each type implements: type_name -> [interface_names]
+    pub type_implements: HashMap<Symbol, Vec<Symbol>>,
 }
 
 /// Render a lexer error to stderr with source context
@@ -121,7 +123,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         return Err(());
     }
 
-    let (type_aliases, expr_types, method_resolutions, interface_registry) =
+    let (type_aliases, expr_types, method_resolutions, interface_registry, type_implements) =
         analyzer.into_analysis_results();
     Ok(AnalyzedProgram {
         program,
@@ -130,6 +132,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         expr_types,
         method_resolutions,
         interface_registry,
+        type_implements,
     })
 }
 
@@ -282,7 +285,7 @@ pub fn run_captured<W: Write + Send + 'static>(
         }
         return Err(());
     }
-    let (type_aliases, expr_types, method_resolutions, interface_registry) =
+    let (type_aliases, expr_types, method_resolutions, interface_registry, type_implements) =
         analyzer.into_analysis_results();
 
     // Compile
@@ -295,6 +298,7 @@ pub fn run_captured<W: Write + Send + 'static>(
             expr_types,
             method_resolutions,
             interface_registry,
+            type_implements,
         );
         if let Err(e) = compiler.compile_program(&program) {
             let _ = writeln!(stderr, "compilation error: {}", e);

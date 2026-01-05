@@ -19,6 +19,15 @@ pub enum ResolvedMethod {
 
     /// Functional interface - call the underlying lambda
     FunctionalInterface { func_type: FunctionType },
+
+    /// Default method from interface (monomorphized for concrete type)
+    /// The method is compiled as TypeName_methodName
+    DefaultMethod {
+        interface_name: Symbol,
+        type_name: Symbol,
+        method_name: Symbol,
+        func_type: FunctionType,
+    },
 }
 
 impl ResolvedMethod {
@@ -28,6 +37,7 @@ impl ResolvedMethod {
             ResolvedMethod::Direct { func_type } => func_type,
             ResolvedMethod::Implemented { func_type, .. } => func_type,
             ResolvedMethod::FunctionalInterface { func_type } => func_type,
+            ResolvedMethod::DefaultMethod { func_type, .. } => func_type,
         }
     }
 

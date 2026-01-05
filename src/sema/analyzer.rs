@@ -70,6 +70,8 @@ pub struct Analyzer {
     pub implement_registry: ImplementRegistry,
     /// Resolved method calls for codegen
     pub method_resolutions: MethodResolutions,
+    /// Tracks which interfaces each type implements: type_name -> [interface_names]
+    type_implements: HashMap<Symbol, Vec<Symbol>>,
 }
 
 impl Analyzer {
@@ -92,6 +94,7 @@ impl Analyzer {
             interface_registry: InterfaceRegistry::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
+            type_implements: HashMap::new(),
         };
 
         // Register built-in interfaces and implementations
@@ -146,7 +149,9 @@ impl Analyzer {
         self.expr_types
     }
 
-    /// Take ownership of type aliases, expression types, method resolutions, and interface registry (consuming self)
+    /// Take ownership of type aliases, expression types, method resolutions, interface registry,
+    /// and type_implements (consuming self)
+    #[allow(clippy::type_complexity)]
     pub fn into_analysis_results(
         self,
     ) -> (
@@ -154,12 +159,14 @@ impl Analyzer {
         HashMap<NodeId, Type>,
         MethodResolutions,
         InterfaceRegistry,
+        HashMap<Symbol, Vec<Symbol>>,
     ) {
         (
             self.type_aliases,
             self.expr_types,
             self.method_resolutions,
             self.interface_registry,
+            self.type_implements,
         )
     }
 
@@ -291,6 +298,11 @@ impl Analyzer {
                             fields,
                         },
                     );
+                    // Register implements list
+                    if !class.implements.is_empty() {
+                        self.type_implements
+                            .insert(class.name, class.implements.clone());
+                    }
                     // Register methods
                     for method in &class.methods {
                         let params: Vec<Type> = method
@@ -331,6 +343,11 @@ impl Analyzer {
                             fields,
                         },
                     );
+                    // Register implements list
+                    if !record.implements.is_empty() {
+                        self.type_implements
+                            .insert(record.name, record.implements.clone());
+                    }
                     // Register methods
                     for method in &record.methods {
                         let params: Vec<Type> = method
@@ -2311,6 +2328,79 @@ impl Analyzer {
                         );
 
                         return Ok(*method_type.return_type);
+                    }
+
+                    // Check for default method from implemented interfaces
+                    if let Some(interfaces) = self.type_implements.get(&type_sym).cloned() {
+                        for interface_name in &interfaces {
+                            if let Some(interface_def) =
+                                self.interface_registry.get(*interface_name)
+                            {
+                                // Look for a default method with matching name
+                                for method_def in &interface_def.methods {
+                                    if method_def.name == method_call.method
+                                        && method_def.has_default
+                                    {
+                                        let func_type = FunctionType {
+                                            params: method_def.params.clone(),
+                                            return_type: Box::new(method_def.return_type.clone()),
+                                            is_closure: false,
+                                        };
+
+                                        // Mark side effects if inside lambda
+                                        if self.in_lambda() {
+                                            self.mark_lambda_has_side_effects();
+                                        }
+
+                                        // Check argument count
+                                        if method_call.args.len() != func_type.params.len() {
+                                            self.add_error(
+                                                SemanticError::WrongArgumentCount {
+                                                    expected: func_type.params.len(),
+                                                    found: method_call.args.len(),
+                                                    span: expr.span.into(),
+                                                },
+                                                expr.span,
+                                            );
+                                        }
+
+                                        // Check argument types
+                                        for (arg, param_ty) in
+                                            method_call.args.iter().zip(func_type.params.iter())
+                                        {
+                                            let arg_ty = self.check_expr_expecting(
+                                                arg,
+                                                Some(param_ty),
+                                                interner,
+                                            )?;
+                                            if !self.types_compatible(&arg_ty, param_ty) {
+                                                self.add_error(
+                                                    SemanticError::TypeMismatch {
+                                                        expected: param_ty.name().to_string(),
+                                                        found: arg_ty.name().to_string(),
+                                                        span: arg.span.into(),
+                                                    },
+                                                    arg.span,
+                                                );
+                                            }
+                                        }
+
+                                        // Record resolution for default method
+                                        self.method_resolutions.insert(
+                                            expr.id,
+                                            ResolvedMethod::DefaultMethod {
+                                                interface_name: *interface_name,
+                                                type_name: type_sym,
+                                                method_name: method_call.method,
+                                                func_type: func_type.clone(),
+                                            },
+                                        );
+
+                                        return Ok(*func_type.return_type);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 

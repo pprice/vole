@@ -150,7 +150,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
     analyzer
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
-    let (type_aliases, expr_types, method_resolutions, interface_registry) =
+    let (type_aliases, expr_types, method_resolutions, interface_registry, type_implements) =
         analyzer.into_analysis_results();
     let sema_ns = sema_start.elapsed().as_nanos() as u64;
 
@@ -165,6 +165,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
             expr_types,
             method_resolutions,
             interface_registry,
+            type_implements,
         );
         compiler
             .compile_program(&program)
@@ -209,7 +210,7 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     analyzer
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
-    let (type_aliases, expr_types, method_resolutions, interface_registry) =
+    let (type_aliases, expr_types, method_resolutions, interface_registry, type_implements) =
         analyzer.into_analysis_results();
 
     // Compile
@@ -222,6 +223,7 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
             expr_types,
             method_resolutions,
             interface_registry,
+            type_implements,
         );
         compiler
             .compile_program(&program)

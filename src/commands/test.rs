@@ -225,6 +225,7 @@ fn run_source_tests(
             analyzed.expr_types.clone(),
             analyzed.method_resolutions.clone(),
             analyzed.interface_registry.clone(),
+            analyzed.type_implements.clone(),
         );
         compiler.set_source_file(file_path);
         compiler
