@@ -8,7 +8,7 @@ use crate::sema::interface_registry::{
 };
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::{
-    ClassType, FunctionType, RecordType, StructField, Type,
+    ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type,
     compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
@@ -59,6 +59,8 @@ pub struct Analyzer {
     classes: HashMap<Symbol, ClassType>,
     /// Registered record types
     records: HashMap<Symbol, RecordType>,
+    /// Registered error types (e.g., DivByZero, OutOfRange)
+    error_types: HashMap<Symbol, ErrorTypeInfo>,
     /// Methods for classes/records: (type_symbol, method_name) -> FunctionType
     methods: HashMap<(Symbol, Symbol), FunctionType>,
     /// Resolved types for each expression node (for codegen)
@@ -89,6 +91,7 @@ impl Analyzer {
             type_aliases: HashMap::new(),
             classes: HashMap::new(),
             records: HashMap::new(),
+            error_types: HashMap::new(),
             methods: HashMap::new(),
             expr_types: HashMap::new(),
             interface_registry: InterfaceRegistry::new(),
@@ -439,8 +442,8 @@ impl Analyzer {
                         }
                     }
                 }
-                Decl::Error(_) => {
-                    // Error declarations processed in a later task
+                Decl::Error(decl) => {
+                    self.analyze_error_decl(decl);
                 }
             }
         }
@@ -514,7 +517,7 @@ impl Analyzer {
                     let _ = impl_block; // suppress warning
                 }
                 Decl::Error(_) => {
-                    // Error declarations processed in a later task
+                    // Error declarations fully processed in first pass
                 }
             }
         }
@@ -527,13 +530,42 @@ impl Analyzer {
     }
 
     fn resolve_type(&self, ty: &TypeExpr) -> Type {
-        let ctx = TypeResolutionContext::new(
-            &self.type_aliases,
-            &self.classes,
-            &self.records,
-            &self.interface_registry,
-        );
+        let ctx = TypeResolutionContext {
+            type_aliases: &self.type_aliases,
+            classes: &self.classes,
+            records: &self.records,
+            error_types: &self.error_types,
+            interface_registry: &self.interface_registry,
+        };
         resolve_type(ty, &ctx)
+    }
+
+    fn analyze_error_decl(&mut self, decl: &ErrorDecl) {
+        let mut fields = Vec::new();
+
+        for (slot, field) in decl.fields.iter().enumerate() {
+            let ctx = TypeResolutionContext {
+                type_aliases: &self.type_aliases,
+                classes: &self.classes,
+                records: &self.records,
+                error_types: &self.error_types,
+                interface_registry: &self.interface_registry,
+            };
+            let ty = resolve_type(&field.ty, &ctx);
+
+            fields.push(StructField {
+                name: field.name,
+                ty,
+                slot,
+            });
+        }
+
+        let error_info = ErrorTypeInfo {
+            name: decl.name,
+            fields,
+        };
+
+        self.error_types.insert(decl.name, error_info);
     }
 
     fn check_function(

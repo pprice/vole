@@ -5,7 +5,7 @@
 use crate::frontend::{Symbol, TypeExpr};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::types::{
-    ClassType, FunctionType, InterfaceMethodType, InterfaceType, RecordType, Type,
+    ClassType, ErrorTypeInfo, FunctionType, InterfaceMethodType, InterfaceType, RecordType, Type,
 };
 use std::collections::HashMap;
 
@@ -14,6 +14,7 @@ pub struct TypeResolutionContext<'a> {
     pub type_aliases: &'a HashMap<Symbol, Type>,
     pub classes: &'a HashMap<Symbol, ClassType>,
     pub records: &'a HashMap<Symbol, RecordType>,
+    pub error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
     pub interface_registry: &'a InterfaceRegistry,
 }
 
@@ -22,12 +23,14 @@ impl<'a> TypeResolutionContext<'a> {
         type_aliases: &'a HashMap<Symbol, Type>,
         classes: &'a HashMap<Symbol, ClassType>,
         records: &'a HashMap<Symbol, RecordType>,
+        error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
         interface_registry: &'a InterfaceRegistry,
     ) -> Self {
         Self {
             type_aliases,
             classes,
             records,
+            error_types,
             interface_registry,
         }
     }
@@ -64,6 +67,9 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
                         .collect(),
                     extends: iface.extends.clone(),
                 })
+            } else if let Some(error_info) = ctx.error_types.get(sym) {
+                // Check if it's an error type
+                Type::ErrorType(error_info.clone())
             } else {
                 Type::Error // Unknown type name
             }
@@ -116,6 +122,8 @@ mod tests {
             std::sync::LazyLock::new(HashMap::new);
         static EMPTY_RECORDS: std::sync::LazyLock<HashMap<Symbol, RecordType>> =
             std::sync::LazyLock::new(HashMap::new);
+        static EMPTY_ERRORS: std::sync::LazyLock<HashMap<Symbol, ErrorTypeInfo>> =
+            std::sync::LazyLock::new(HashMap::new);
         static EMPTY_INTERFACES: std::sync::LazyLock<InterfaceRegistry> =
             std::sync::LazyLock::new(InterfaceRegistry::new);
 
@@ -123,6 +131,7 @@ mod tests {
             &EMPTY_ALIASES,
             &EMPTY_CLASSES,
             &EMPTY_RECORDS,
+            &EMPTY_ERRORS,
             &EMPTY_INTERFACES,
         )
     }
