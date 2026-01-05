@@ -1065,9 +1065,20 @@ pub(super) fn compile_expr(
         ExprKind::Try(inner) => compile_try_propagate(builder, inner, variables, ctx),
 
         ExprKind::Import(_) => {
-            // Import expressions are resolved at semantic analysis time
-            // and should not reach codegen
-            Err("import expressions should be resolved before codegen".to_string())
+            // Import expressions produce a compile-time module value
+            // At runtime this is just a placeholder - actual function calls
+            // go through the method resolution mechanism
+            // We need to retrieve the actual Module type from semantic analysis
+            let vole_type = ctx
+                .expr_types
+                .get(&expr.id)
+                .cloned()
+                .unwrap_or(Type::Unknown);
+            Ok(CompiledValue {
+                value: builder.ins().iconst(types::I64, 0),
+                ty: types::I64,
+                vole_type,
+            })
         }
     }
 }

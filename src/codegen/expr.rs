@@ -57,8 +57,21 @@ impl Cg<'_, '_, '_> {
             ExprKind::MethodCall(mc) => self.method_call(mc, expr.id),
             ExprKind::Try(inner) => self.try_propagate(inner),
             ExprKind::Import(_) => {
-                // Import expressions are resolved at semantic analysis time
-                Err("import expressions should be resolved before codegen".to_string())
+                // Import expressions produce a compile-time module value
+                // At runtime this is just a placeholder - actual function calls
+                // go through the method resolution mechanism
+                // We need to retrieve the actual Module type from semantic analysis
+                let vole_type = self
+                    .ctx
+                    .expr_types
+                    .get(&expr.id)
+                    .cloned()
+                    .unwrap_or(Type::Unknown);
+                Ok(CompiledValue {
+                    value: self.builder.ins().iconst(types::I64, 0),
+                    ty: types::I64,
+                    vole_type,
+                })
             }
         }
     }

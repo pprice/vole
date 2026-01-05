@@ -227,6 +227,34 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(&mc.object)?;
         let method_name_str = self.ctx.interner.resolve(mc.method);
 
+        // Handle module method calls (e.g., math.sqrt(16.0))
+        // These go directly to external native functions without a receiver
+        if let Type::Module(ref module_type) = obj.vole_type {
+            // Get the method resolution which should have external_info
+            let resolution = self.ctx.method_resolutions.get(expr_id);
+            if let Some(ResolvedMethod::Implemented {
+                external_info: Some(ext_info),
+                func_type,
+                ..
+            }) = resolution
+            {
+                // Compile arguments (no receiver for module functions)
+                let mut args = Vec::new();
+                for arg in &mc.args {
+                    let compiled = self.expr(arg)?;
+                    args.push(compiled.value);
+                }
+
+                let return_type = (*func_type.return_type).clone();
+                return self.call_external(ext_info, &args, &return_type);
+            } else {
+                return Err(format!(
+                    "Module method {}::{} has no external resolution",
+                    module_type.path, method_name_str
+                ));
+            }
+        }
+
         // Handle built-in methods
         if let Some(result) = self.builtin_method(&obj, method_name_str)? {
             return Ok(result);

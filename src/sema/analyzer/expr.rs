@@ -1358,6 +1358,84 @@ impl Analyzer {
                     return Ok(Type::Error);
                 }
 
+                // Handle module method calls (e.g., math.sqrt(16.0))
+                if let Type::Module(ref module_type) = object_type {
+                    let method_name_str = interner.resolve(method_call.method);
+
+                    // Look up the method in module exports
+                    if let Some(export_type) = module_type.exports.get(method_name_str) {
+                        if let Type::Function(func_type) = export_type {
+                            // Check argument count
+                            if method_call.args.len() != func_type.params.len() {
+                                self.add_error(
+                                    SemanticError::WrongArgumentCount {
+                                        expected: func_type.params.len(),
+                                        found: method_call.args.len(),
+                                        span: expr.span.into(),
+                                    },
+                                    expr.span,
+                                );
+                            }
+
+                            // Check argument types
+                            for (arg, param_ty) in
+                                method_call.args.iter().zip(func_type.params.iter())
+                            {
+                                let arg_ty =
+                                    self.check_expr_expecting(arg, Some(param_ty), interner)?;
+                                if !self.types_compatible(&arg_ty, param_ty) {
+                                    self.add_error(
+                                        SemanticError::TypeMismatch {
+                                            expected: format!("{}", param_ty),
+                                            found: format!("{}", arg_ty),
+                                            span: arg.span.into(),
+                                        },
+                                        arg.span,
+                                    );
+                                }
+                            }
+
+                            // Record resolution for codegen
+                            let external_info = ExternalMethodInfo {
+                                module_path: module_type.path.clone(),
+                                native_name: method_name_str.to_string(),
+                            };
+
+                            self.method_resolutions.insert(
+                                expr.id,
+                                ResolvedMethod::Implemented {
+                                    trait_name: None,
+                                    func_type: func_type.clone(),
+                                    is_builtin: false,
+                                    external_info: Some(external_info),
+                                },
+                            );
+
+                            return Ok(*func_type.return_type.clone());
+                        } else {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "function".to_string(),
+                                    found: export_type.name().to_string(),
+                                    span: method_call.method_span.into(),
+                                },
+                                method_call.method_span,
+                            );
+                            return Ok(Type::Error);
+                        }
+                    } else {
+                        self.add_error(
+                            SemanticError::ModuleNoExport {
+                                module: module_type.path.clone(),
+                                name: method_name_str.to_string(),
+                                span: method_call.method_span.into(),
+                            },
+                            method_call.method_span,
+                        );
+                        return Ok(Type::Error);
+                    }
+                }
+
                 // Get a descriptive type name for error messages
                 let type_name = if let Some(type_id) = TypeId::from_type(&object_type) {
                     type_id.type_name(interner)

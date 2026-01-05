@@ -102,6 +102,34 @@ pub(crate) fn compile_method_call(
     let obj = compile_expr(builder, &mc.object, variables, ctx)?;
     let method_name_str = ctx.interner.resolve(mc.method);
 
+    // Handle module method calls (e.g., math.sqrt(16.0))
+    // These go directly to external native functions without a receiver
+    if let Type::Module(ref module_type) = obj.vole_type {
+        // Get the method resolution which should have external_info
+        let resolution = ctx.method_resolutions.get(expr_id);
+        if let Some(ResolvedMethod::Implemented {
+            external_info: Some(ext_info),
+            func_type,
+            ..
+        }) = resolution
+        {
+            // Compile arguments (no receiver for module functions)
+            let mut args = Vec::new();
+            for arg in &mc.args {
+                let compiled = compile_expr(builder, arg, variables, ctx)?;
+                args.push(compiled.value);
+            }
+
+            let return_type = (*func_type.return_type).clone();
+            return compile_external_call(builder, ctx, ext_info, &args, &return_type);
+        } else {
+            return Err(format!(
+                "Module method {}::{} has no external resolution",
+                module_type.path, method_name_str
+            ));
+        }
+    }
+
     // Handle built-in methods for primitive types
     if let Some(result) = compile_builtin_method(builder, &obj, method_name_str, ctx)? {
         return Ok(result);

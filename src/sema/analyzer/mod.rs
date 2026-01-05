@@ -10,11 +10,11 @@ use crate::errors::SemanticError;
 use crate::frontend::*;
 use crate::module::ModuleLoader;
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry, MethodImpl, TypeId};
-use crate::sema::types::ModuleType;
 use crate::sema::interface_registry::{
     InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
 };
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
+use crate::sema::types::ModuleType;
 use crate::sema::{
     ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type,
     compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
@@ -979,8 +979,11 @@ impl Analyzer {
                         interface_registry: &self.interface_registry,
                     };
                     for func in &ext.functions {
-                        let params: Vec<Type> =
-                            func.params.iter().map(|p| resolve_type(&p.ty, &ctx)).collect();
+                        let params: Vec<Type> = func
+                            .params
+                            .iter()
+                            .map(|p| resolve_type(&p.ty, &ctx))
+                            .collect();
                         let return_type = func
                             .return_type
                             .as_ref()

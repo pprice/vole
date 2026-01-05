@@ -110,6 +110,8 @@ mod tests {
 
     #[test]
     fn test_is_valid_stdlib_nonexistent() {
-        assert!(!StdlibLocator::is_valid_stdlib(Path::new("/nonexistent/path/xyz123")));
+        assert!(!StdlibLocator::is_valid_stdlib(Path::new(
+            "/nonexistent/path/xyz123"
+        )));
     }
 }
