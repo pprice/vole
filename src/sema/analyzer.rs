@@ -2361,6 +2361,22 @@ impl Analyzer {
                     );
                 }
 
+                // For fallible types, require at least one error arm
+                if let Type::Fallible(_) = &scrutinee_type {
+                    let has_error_arm = match_expr
+                        .arms
+                        .iter()
+                        .any(|arm| matches!(arm.pattern, Pattern::Error { .. }));
+                    if !has_error_arm {
+                        self.add_error(
+                            SemanticError::MissingErrorArm {
+                                span: match_expr.span.into(),
+                            },
+                            match_expr.span,
+                        );
+                    }
+                }
+
                 // Check each arm, collect result types
                 let mut result_type: Option<Type> = None;
                 let mut first_arm_span: Option<Span> = None;
@@ -3011,9 +3027,53 @@ impl Analyzer {
                 // Val patterns don't narrow types
                 None
             }
-            Pattern::Success { .. } | Pattern::Error { .. } => {
-                // TODO: Implement success/error pattern type checking in later task
-                None
+            Pattern::Success { inner, span } => {
+                // Success pattern only valid when matching on fallible type
+                let success_type = match scrutinee_type {
+                    Type::Fallible(ft) => (*ft.success_type).clone(),
+                    _ => {
+                        self.add_error(
+                            SemanticError::SuccessPatternOnNonFallible {
+                                found: scrutinee_type.name().to_string(),
+                                span: (*span).into(),
+                            },
+                            *span,
+                        );
+                        return None;
+                    }
+                };
+
+                // If there's an inner pattern, check it against success type
+                if let Some(inner_pattern) = inner {
+                    self.check_pattern(inner_pattern, &success_type, interner)
+                } else {
+                    // Bare success - no narrowing
+                    None
+                }
+            }
+            Pattern::Error { inner, span } => {
+                // Error pattern only valid when matching on fallible type
+                let error_type = match scrutinee_type {
+                    Type::Fallible(ft) => (*ft.error_type).clone(),
+                    _ => {
+                        self.add_error(
+                            SemanticError::ErrorPatternOnNonFallible {
+                                found: scrutinee_type.name().to_string(),
+                                span: (*span).into(),
+                            },
+                            *span,
+                        );
+                        return None;
+                    }
+                };
+
+                // If there's an inner pattern, check it against error type
+                if let Some(inner_pattern) = inner {
+                    self.check_pattern(inner_pattern, &error_type, interner)
+                } else {
+                    // Bare error - no narrowing
+                    None
+                }
             }
         }
     }

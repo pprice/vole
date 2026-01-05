@@ -293,4 +293,27 @@ pub enum SemanticError {
         #[label("this arm has type {found}")]
         span: SourceSpan,
     },
+
+    #[error("success pattern used on non-fallible type '{found}'")]
+    #[diagnostic(code(E2061))]
+    SuccessPatternOnNonFallible {
+        found: String,
+        #[label("expected fallible type")]
+        span: SourceSpan,
+    },
+
+    #[error("error pattern used on non-fallible type '{found}'")]
+    #[diagnostic(code(E2062))]
+    ErrorPatternOnNonFallible {
+        found: String,
+        #[label("expected fallible type")]
+        span: SourceSpan,
+    },
+
+    #[error("match on fallible type requires at least one error arm")]
+    #[diagnostic(code(E2063))]
+    MissingErrorArm {
+        #[label("fallible type matched here")]
+        span: SourceSpan,
+    },
 }
