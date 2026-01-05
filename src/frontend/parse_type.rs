@@ -145,6 +145,18 @@ impl<'src> Parser<'src> {
                 self.advance();
                 Ok(TypeExpr::SelfType)
             }
+            TokenType::KwFallible => {
+                self.advance(); // consume 'fallible'
+                self.consume(TokenType::LParen, "expected '(' after fallible")?;
+                let success_type = self.parse_type()?;
+                self.consume(TokenType::Comma, "expected ',' in fallible type")?;
+                let error_type = self.parse_type()?;
+                self.consume(TokenType::RParen, "expected ')' after fallible type")?;
+                Ok(TypeExpr::Fallible {
+                    success_type: Box::new(success_type),
+                    error_type: Box::new(error_type),
+                })
+            }
             TokenType::Identifier => {
                 self.advance();
                 let sym = self.interner.intern(&token.lexeme);
