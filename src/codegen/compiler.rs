@@ -228,6 +228,9 @@ impl<'a> Compiler<'a> {
                 Decl::Error(_) => {
                     // Error declarations don't generate code in pass 1
                 }
+                Decl::External(_) => {
+                    // External blocks don't generate code in pass 1
+                }
             }
         }
 
@@ -262,6 +265,9 @@ impl<'a> Compiler<'a> {
                 }
                 Decl::Error(_) => {
                     // Error declarations don't generate code in pass 2
+                }
+                Decl::External(_) => {
+                    // External blocks don't generate code in pass 2
                 }
             }
         }

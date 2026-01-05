@@ -43,6 +43,7 @@ fn print_decl<'a>(
         Decl::Interface(iface) => print_interface_decl(arena, iface, interner),
         Decl::Implement(impl_block) => print_implement_block(arena, impl_block, interner),
         Decl::Error(_) => todo!("error decl printing"),
+        Decl::External(_) => todo!("external decl printing"),
     }
 }
 

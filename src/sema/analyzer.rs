@@ -500,6 +500,9 @@ impl Analyzer {
                 Decl::Error(decl) => {
                     self.analyze_error_decl(decl);
                 }
+                Decl::External(_) => {
+                    // External blocks are processed during code generation
+                }
             }
         }
 
@@ -599,6 +602,9 @@ impl Analyzer {
                 }
                 Decl::Error(_) => {
                     // Error declarations fully processed in first pass
+                }
+                Decl::External(_) => {
+                    // External blocks are processed during code generation
                 }
             }
         }

@@ -384,6 +384,7 @@ impl<'src> Parser<'src> {
         Ok(Decl::Implement(ImplementBlock {
             trait_name,
             target_type,
+            external: None,
             methods,
             span,
         }))

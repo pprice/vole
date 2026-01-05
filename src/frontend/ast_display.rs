@@ -71,6 +71,9 @@ impl<'a> AstPrinter<'a> {
             Decl::Error(_) => {
                 // TODO: implement error decl display
             }
+            Decl::External(_) => {
+                // TODO: implement external decl display
+            }
         }
     }
 

@@ -30,6 +30,7 @@ pub enum Decl {
     Interface(InterfaceDecl),
     Implement(ImplementBlock),
     Error(ErrorDecl),
+    External(ExternalBlock), // Top-level external block
 }
 
 /// Function declaration
@@ -119,7 +120,26 @@ pub struct InterfaceMethod {
 pub struct ImplementBlock {
     pub trait_name: Option<Symbol>, // None for type extension (implement Type { ... })
     pub target_type: TypeExpr,      // The type being extended
+    pub external: Option<ExternalBlock>, // External methods from native code
     pub methods: Vec<FuncDecl>,
+    pub span: Span,
+}
+
+/// External block: external("provider:module") { func declarations }
+#[derive(Debug)]
+pub struct ExternalBlock {
+    pub module_path: String,
+    pub functions: Vec<ExternalFunc>,
+    pub span: Span,
+}
+
+/// External function declaration
+#[derive(Debug)]
+pub struct ExternalFunc {
+    pub native_name: Option<String>, // "string_length" or None
+    pub vole_name: Symbol,
+    pub params: Vec<Param>,
+    pub return_type: Option<TypeExpr>,
     pub span: Span,
 }
 
@@ -624,4 +644,33 @@ pub enum Pattern {
     Type { type_expr: TypeExpr, span: Span },
     /// Val pattern: val x (compares against existing variable)
     Val { name: Symbol, span: Span },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_func_native_name() {
+        let ef = ExternalFunc {
+            native_name: Some("string_length".to_string()),
+            vole_name: Symbol(1),
+            params: vec![],
+            return_type: None,
+            span: Span::default(),
+        };
+        assert_eq!(ef.native_name.as_deref(), Some("string_length"));
+    }
+
+    #[test]
+    fn external_func_default_name() {
+        let ef = ExternalFunc {
+            native_name: None,
+            vole_name: Symbol(1),
+            params: vec![],
+            return_type: None,
+            span: Span::default(),
+        };
+        assert!(ef.native_name.is_none());
+    }
 }
