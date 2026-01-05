@@ -253,22 +253,11 @@ pub enum SemanticError {
     #[error("try expression requires fallible type, found {found}")]
     #[diagnostic(
         code(E2057),
-        help("try/catch can only be used with fallible function calls")
+        help("try can only propagate errors from fallible function calls")
     )]
     TryOnNonFallible {
         found: String,
         #[label("not a fallible type")]
-        span: SourceSpan,
-    },
-
-    #[error("non-exhaustive catch block")]
-    #[diagnostic(
-        code(E2058),
-        help("add a wildcard pattern '_' or handle all error types: {missing}")
-    )]
-    NonExhaustiveCatch {
-        missing: String,
-        #[label("catch does not cover all error types")]
         span: SourceSpan,
     },
 
