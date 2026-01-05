@@ -1,0 +1,14 @@
+interface Greeting {
+    func greet() -> string
+    func farewell() -> string
+}
+
+record Greeter implements Greeting {
+    name: string,
+
+    func greet() -> string {
+        return "Hello"
+    }
+}
+
+// Missing: farewell() method

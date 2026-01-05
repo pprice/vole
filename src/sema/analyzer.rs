@@ -430,16 +430,16 @@ impl Analyzer {
                 }
                 Decl::Implement(impl_block) => {
                     // Validate trait exists if specified
-                    if let Some(trait_name) = impl_block.trait_name {
-                        if self.interface_registry.get(trait_name).is_none() {
-                            self.add_error(
-                                SemanticError::UnknownInterface {
-                                    name: interner.resolve(trait_name).to_string(),
-                                    span: impl_block.span.into(),
-                                },
-                                impl_block.span,
-                            );
-                        }
+                    if let Some(trait_name) = impl_block.trait_name
+                        && self.interface_registry.get(trait_name).is_none()
+                    {
+                        self.add_error(
+                            SemanticError::UnknownInterface {
+                                name: interner.resolve(trait_name).to_string(),
+                                span: impl_block.span.into(),
+                            },
+                            impl_block.span,
+                        );
                     }
 
                     let target_type = self.resolve_type(&impl_block.target_type);
@@ -546,10 +546,36 @@ impl Analyzer {
                     for method in &class.methods {
                         self.check_method(method, class.name, interner)?;
                     }
+                    // Validate interface satisfaction
+                    if let Some(interfaces) = self.type_implements.get(&class.name).cloned() {
+                        let type_methods = self.get_type_method_names(class.name);
+                        for iface_name in interfaces {
+                            self.validate_interface_satisfaction(
+                                class.name,
+                                iface_name,
+                                &type_methods,
+                                class.span,
+                                interner,
+                            );
+                        }
+                    }
                 }
                 Decl::Record(record) => {
                     for method in &record.methods {
                         self.check_method(method, record.name, interner)?;
+                    }
+                    // Validate interface satisfaction
+                    if let Some(interfaces) = self.type_implements.get(&record.name).cloned() {
+                        let type_methods = self.get_type_method_names(record.name);
+                        for iface_name in interfaces {
+                            self.validate_interface_satisfaction(
+                                record.name,
+                                iface_name,
+                                &type_methods,
+                                record.span,
+                                interner,
+                            );
+                        }
                     }
                 }
                 Decl::Interface(_) => {
@@ -2928,6 +2954,76 @@ impl Analyzer {
         }
 
         false
+    }
+
+    /// Validate that a type satisfies an interface by having all required methods
+    fn validate_interface_satisfaction(
+        &mut self,
+        type_name: Symbol,
+        iface_name: Symbol,
+        type_methods: &HashSet<Symbol>,
+        span: Span,
+        interner: &Interner,
+    ) {
+        if let Some(iface) = self.interface_registry.get(iface_name).cloned() {
+            // Check methods required by this interface
+            for required in &iface.methods {
+                if required.has_default {
+                    continue;
+                }
+                if !type_methods.contains(&required.name) {
+                    self.add_error(
+                        SemanticError::InterfaceNotSatisfied {
+                            type_name: interner.resolve(type_name).to_string(),
+                            interface_name: interner.resolve(iface_name).to_string(),
+                            method: interner.resolve(required.name).to_string(),
+                            span: span.into(),
+                        },
+                        span,
+                    );
+                }
+            }
+            // Check parent interfaces (extends)
+            for parent_iface in &iface.extends {
+                self.validate_interface_satisfaction(
+                    type_name,
+                    *parent_iface,
+                    type_methods,
+                    span,
+                    interner,
+                );
+            }
+        }
+    }
+
+    /// Get all method names for a type (from direct methods + implement blocks)
+    fn get_type_method_names(&self, type_name: Symbol) -> HashSet<Symbol> {
+        let mut method_names = HashSet::new();
+
+        // Methods defined directly on the type
+        for (ty, method_name) in self.methods.keys() {
+            if *ty == type_name {
+                method_names.insert(*method_name);
+            }
+        }
+
+        // Methods from implement blocks
+        if let Some(type_id) = self
+            .records
+            .get(&type_name)
+            .map(|_| TypeId::Record(type_name))
+            .or_else(|| {
+                self.classes
+                    .get(&type_name)
+                    .map(|_| TypeId::Class(type_name))
+            })
+        {
+            for (method_name, _) in self.implement_registry.get_methods_for_type(&type_id) {
+                method_names.insert(method_name);
+            }
+        }
+
+        method_names
     }
 }
 

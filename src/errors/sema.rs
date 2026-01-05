@@ -200,7 +200,9 @@ pub enum SemanticError {
         span: SourceSpan,
     },
 
-    #[error("type '{type_name}' does not satisfy interface '{interface_name}': missing method '{method}'")]
+    #[error(
+        "type '{type_name}' does not satisfy interface '{interface_name}': missing method '{method}'"
+    )]
     #[diagnostic(code(E2052))]
     InterfaceNotSatisfied {
         type_name: String,
@@ -211,10 +213,7 @@ pub enum SemanticError {
     },
 
     #[error("method '{method}' has wrong signature for interface '{interface_name}'")]
-    #[diagnostic(
-        code(E2053),
-        help("expected {expected}, found {found}")
-    )]
+    #[diagnostic(code(E2053), help("expected {expected}, found {found}"))]
     InterfaceSignatureMismatch {
         interface_name: String,
         method: String,
