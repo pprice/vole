@@ -14,4 +14,4 @@ pub use interface_registry::{
     InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
 };
 pub use resolution::{MethodResolutions, ResolvedMethod};
-pub use types::{ClassType, FunctionType, RecordType, StructField, Type};
+pub use types::{ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type};
