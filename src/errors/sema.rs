@@ -272,28 +272,6 @@ pub enum SemanticError {
         span: SourceSpan,
     },
 
-    #[error("unreachable catch arm for '{name}'")]
-    #[diagnostic(
-        code(E2059),
-        help("this error type is not in the fallible expression's error set")
-    )]
-    UnreachableCatchArm {
-        name: String,
-        #[label("this error cannot be raised")]
-        span: SourceSpan,
-    },
-
-    #[error("catch arms have incompatible types: expected {expected}, found {found}")]
-    #[diagnostic(code(E2060))]
-    CatchArmTypeMismatch {
-        expected: String,
-        found: String,
-        #[label("first arm has type {expected}")]
-        first_arm: SourceSpan,
-        #[label("this arm has type {found}")]
-        span: SourceSpan,
-    },
-
     #[error("success pattern used on non-fallible type '{found}'")]
     #[diagnostic(code(E2061))]
     SuccessPatternOnNonFallible {

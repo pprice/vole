@@ -507,37 +507,6 @@ pub struct MethodCallExpr {
     pub method_span: Span,
 }
 
-/// Try-catch expression
-#[derive(Debug, Clone)]
-pub struct TryCatchExpr {
-    pub try_expr: Expr,
-    pub catch_arms: Vec<CatchArm>,
-    pub span: Span,
-}
-
-/// A single arm in a catch block
-#[derive(Debug, Clone)]
-pub struct CatchArm {
-    pub pattern: ErrorPattern,
-    pub body: Expr,
-    pub span: Span,
-}
-
-/// Pattern for matching errors in catch
-#[derive(Debug, Clone)]
-pub enum ErrorPattern {
-    /// Match specific error: ErrorName { field1, field2 }
-    Named {
-        name: Symbol,
-        bindings: Vec<(Symbol, Symbol)>, // (field_name, binding_name)
-        span: Span,
-    },
-    /// Match specific error without destructuring: ErrorName {}
-    NamedEmpty { name: Symbol, span: Span },
-    /// Wildcard: _
-    Wildcard(Span),
-}
-
 /// Lambda expression: (params) => body
 #[derive(Debug, Clone)]
 pub struct LambdaExpr {

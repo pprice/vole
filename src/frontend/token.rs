@@ -43,8 +43,7 @@ pub enum TokenType {
     KwSuccess,    // success keyword
     KwFallible,   // fallible keyword
     KwRaise,      // raise keyword
-    KwTry,        // try keyword
-    KwCatch,      // catch keyword
+    KwTry,        // try keyword (propagation operator)
 
     // Type keywords
     KwI8,
@@ -156,7 +155,6 @@ impl TokenType {
             Self::KwFallible => "fallible",
             Self::KwRaise => "raise",
             Self::KwTry => "try",
-            Self::KwCatch => "catch",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",
