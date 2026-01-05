@@ -429,6 +429,19 @@ impl Analyzer {
                     self.interface_registry.register(def);
                 }
                 Decl::Implement(impl_block) => {
+                    // Validate trait exists if specified
+                    if let Some(trait_name) = impl_block.trait_name {
+                        if self.interface_registry.get(trait_name).is_none() {
+                            self.add_error(
+                                SemanticError::UnknownInterface {
+                                    name: interner.resolve(trait_name).to_string(),
+                                    span: impl_block.span.into(),
+                                },
+                                impl_block.span,
+                            );
+                        }
+                    }
+
                     let target_type = self.resolve_type(&impl_block.target_type);
 
                     if let Some(type_id) = TypeId::from_type(&target_type) {
