@@ -18,6 +18,10 @@ impl<'src> Parser<'src> {
             TokenType::KwInterface => self.interface_decl(),
             TokenType::KwImplement => self.implement_block(),
             TokenType::KwError => self.error_decl(),
+            TokenType::KwExternal => {
+                let block = self.parse_external_block()?;
+                Ok(Decl::External(block))
+            }
             _ => Err(ParseError::new(
                 ParserError::UnexpectedToken {
                     token: self.current.ty.as_str().to_string(),
@@ -370,6 +374,15 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::LBrace, "expected '{' in implement block")?;
         self.skip_newlines();
 
+        // Check for external block first
+        let external = if self.check(TokenType::KwExternal) {
+            let ext = self.parse_external_block()?;
+            self.skip_newlines();
+            Some(ext)
+        } else {
+            None
+        };
+
         let mut methods = Vec::new();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
             if let Decl::Function(func) = self.function_decl()? {
@@ -384,7 +397,7 @@ impl<'src> Parser<'src> {
         Ok(Decl::Implement(ImplementBlock {
             trait_name,
             target_type,
-            external: None,
+            external,
             methods,
             span,
         }))
