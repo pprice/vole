@@ -1,7 +1,7 @@
 [stdout]
 
 [stderr]
-  x [E2052]: error type 'UndeclaredError' is not in function's error set
+  x [E2056]: error type 'UndeclaredError' is not in function's error set
    ,-[<path>/error_incompatible_raise.vole:6:5]
  5 | func onlyDeclared() -> fallible(i32, DeclaredError) {
  6 |     raise UndeclaredError {}

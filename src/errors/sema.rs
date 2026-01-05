@@ -184,15 +184,54 @@ pub enum SemanticError {
         span: SourceSpan,
     },
 
-    #[error("raise statement outside fallible function")]
+    #[error("unknown interface '{name}'")]
     #[diagnostic(code(E2050))]
+    UnknownInterface {
+        name: String,
+        #[label("not a known interface")]
+        span: SourceSpan,
+    },
+
+    #[error("cannot implement interface for unknown type '{name}'")]
+    #[diagnostic(code(E2051))]
+    UnknownImplementType {
+        name: String,
+        #[label("not a known type")]
+        span: SourceSpan,
+    },
+
+    #[error(
+        "type '{type_name}' does not satisfy interface '{interface_name}': missing method '{method}'"
+    )]
+    #[diagnostic(code(E2052))]
+    InterfaceNotSatisfied {
+        type_name: String,
+        interface_name: String,
+        method: String,
+        #[label("declared to implement {interface_name}")]
+        span: SourceSpan,
+    },
+
+    #[error("method '{method}' has wrong signature for interface '{interface_name}'")]
+    #[diagnostic(code(E2053), help("expected {expected}, found {found}"))]
+    InterfaceSignatureMismatch {
+        interface_name: String,
+        method: String,
+        expected: String,
+        found: String,
+        #[label("signature mismatch")]
+        span: SourceSpan,
+    },
+
+    #[error("raise statement outside fallible function")]
+    #[diagnostic(code(E2054))]
     RaiseOutsideFallible {
         #[label("raise must be in a function with fallible return type")]
         span: SourceSpan,
     },
 
     #[error("undefined error type '{name}'")]
-    #[diagnostic(code(E2051))]
+    #[diagnostic(code(E2055))]
     UndefinedError {
         name: String,
         #[label("not defined")]
@@ -201,7 +240,7 @@ pub enum SemanticError {
 
     #[error("error type '{raised}' is not in function's error set")]
     #[diagnostic(
-        code(E2052),
+        code(E2056),
         help("add {raised} to error set, or use valid error types for this function: {declared}")
     )]
     IncompatibleRaiseError {
@@ -213,7 +252,7 @@ pub enum SemanticError {
 
     #[error("try expression requires fallible type, found {found}")]
     #[diagnostic(
-        code(E2053),
+        code(E2057),
         help("try/catch can only be used with fallible function calls")
     )]
     TryOnNonFallible {
@@ -224,7 +263,7 @@ pub enum SemanticError {
 
     #[error("non-exhaustive catch block")]
     #[diagnostic(
-        code(E2054),
+        code(E2058),
         help("add a wildcard pattern '_' or handle all error types: {missing}")
     )]
     NonExhaustiveCatch {
@@ -235,7 +274,7 @@ pub enum SemanticError {
 
     #[error("unreachable catch arm for '{name}'")]
     #[diagnostic(
-        code(E2055),
+        code(E2059),
         help("this error type is not in the fallible expression's error set")
     )]
     UnreachableCatchArm {
@@ -245,7 +284,7 @@ pub enum SemanticError {
     },
 
     #[error("catch arms have incompatible types: expected {expected}, found {found}")]
-    #[diagnostic(code(E2056))]
+    #[diagnostic(code(E2060))]
     CatchArmTypeMismatch {
         expected: String,
         found: String,

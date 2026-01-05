@@ -1,0 +1,16 @@
+[stdout]
+
+[stderr]
+  x [E2052]: type 'Greeter' does not satisfy interface 'Greeting': missing method 'farewell'
+    ,-[<path>/missing_interface_method.vole:6:1]
+  5 |     
+  6 | ,-> record Greeter implements Greeting {
+  7 | |       name: string,
+  8 | |   
+  9 | |       func greet() -> string {
+ 10 | |           return "Hello"
+ 11 | |       }
+ 12 | |-> }
+    : `---- declared to implement Greeting
+ 13 |     
+    `----

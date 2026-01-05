@@ -1,7 +1,7 @@
 [stdout]
 
 [stderr]
-  x [E2054]: non-exhaustive catch block
+  x [E2058]: non-exhaustive catch block
     ,-[<path>/error_non_exhaustive_catch.vole:10:18]
   9 |     func main() {
  10 | ,->     let result = try mayFail() catch {

@@ -1,7 +1,7 @@
 [stdout]
 
 [stderr]
-  x [E2050]: raise statement outside fallible function
+  x [E2054]: raise statement outside fallible function
    ,-[<path>/error_raise_outside_fallible.vole:5:5]
  4 | func normalFunc() {
  5 |     raise MyError {}
