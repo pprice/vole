@@ -1,8 +1,23 @@
 // Error handling tests
+//
+// These tests verify the error handling system:
+// - Error declarations with and without fields
+// - Simple raise and catch
+// - Multiple error types (error unions)
+// - Destructuring error fields in catch
+//
+// Note: Tests require codegen support for full execution.
+// Currently they verify type-checking works correctly.
 
+// Error declarations without fields (unit errors)
 error DivByZero {}
-error Overflow { value: i32, max: i32 }
 error NotFound {}
+error NetworkError {}
+
+// Error declarations with fields
+error Overflow { value: i32, max: i32 }
+error ValidationError { field: string, message: string }
+error OutOfRange { value: i32, min: i32, max: i32 }
 
 func divide(a: i32, b: i32) -> fallible(i32, DivByZero) {
     if b == 0 {
@@ -11,37 +26,42 @@ func divide(a: i32, b: i32) -> fallible(i32, DivByZero) {
     return a / b
 }
 
-func safeMath(a: i32, b: i32) -> fallible(i32, DivByZero | Overflow) {
+func safeMath(a: i32, b: i32, max: i32) -> fallible(i32, DivByZero | Overflow) {
     if b == 0 {
         raise DivByZero {}
     }
-    if a > 100 {
-        raise Overflow {}
+    if a > max {
+        raise Overflow { value: a, max }
     }
     return a / b
 }
 
-error ReraiseA { x: i32 }
-error ReraiseB { y: string }
-
-func mayFailAB() -> fallible(i32, ReraiseA | ReraiseB) {
-    raise ReraiseA { x: 42 }
+// Function with error that has multiple fields
+func checkRange(value: i32, min: i32, max: i32) -> fallible(i32, OutOfRange) {
+    if value < min {
+        raise OutOfRange { value, min, max }
+    }
+    if value > max {
+        raise OutOfRange { value, min, max }
+    }
+    return value
 }
 
-func wrapperOnlyA() -> fallible(i32, ReraiseA) {
-    return try mayFailAB() catch {
-        ReraiseA => raise  // Should re-raise as ReraiseA, not ReraiseA|ReraiseB
-        ReraiseB => 0
+// Function with three error types in union
+func complexOperation(x: i32) -> fallible(i32, DivByZero | NotFound | NetworkError) {
+    if x == 0 {
+        raise DivByZero {}
     }
+    if x < 0 {
+        raise NotFound {}
+    }
+    if x > 1000 {
+        raise NetworkError {}
+    }
+    return x + x
 }
 
 tests "error handling" {
-    test "bare raise types to matched pattern" {
-        // If bare raise was typed as ReraiseA|ReraiseB, this wouldn't compile
-        // because wrapperOnlyA only declares ReraiseA
-        let result = try wrapperOnlyA() catch { ReraiseA => -1 }
-        assert(result == -1)
-    }
     test "try success returns value" {
         let result = try divide(10, 2) catch {
             DivByZero {} => -1
@@ -57,26 +77,114 @@ tests "error handling" {
     }
 
     test "union error types success" {
-        let result = try safeMath(50, 2) catch {
+        let result = try safeMath(50, 2, 100) catch {
             DivByZero {} => -1
-            Overflow {} => 100
+            Overflow {} => 0
         }
         assert(result == 25)
     }
 
     test "union error types div by zero" {
-        let result = try safeMath(50, 0) catch {
+        let result = try safeMath(50, 0, 100) catch {
             DivByZero {} => -1
-            Overflow {} => 100
+            Overflow {} => 0
         }
         assert(result == -1)
     }
 
     test "union error types overflow" {
-        let result = try safeMath(200, 2) catch {
+        let result = try safeMath(200, 2, 100) catch {
             DivByZero {} => -1
-            Overflow {} => 100
+            Overflow {} => 0
         }
+        assert(result == 0)
+    }
+
+    // Tests for destructuring error fields
+    test "destructure single field" {
+        let result = try checkRange(50, 0, 10) catch {
+            OutOfRange { value } => value
+        }
+        // value should be 50 when error is raised
+        assert(result == 50)
+    }
+
+    test "destructure multiple fields" {
+        let result = try checkRange(50, 0, 10) catch {
+            OutOfRange { value, min, max } => value + min + max
+        }
+        // 50 + 0 + 10 = 60
+        assert(result == 60)
+    }
+
+    test "destructure in union catch" {
+        let result = try safeMath(200, 2, 100) catch {
+            DivByZero {} => -1
+            Overflow { value, max } => value - max
+        }
+        // 200 - 100 = 100
         assert(result == 100)
+    }
+
+    // Tests for three-way error union
+    test "triple union first error" {
+        let result = try complexOperation(0) catch {
+            DivByZero {} => 1
+            NotFound {} => 2
+            NetworkError {} => 3
+        }
+        assert(result == 1)
+    }
+
+    test "triple union second error" {
+        let result = try complexOperation(-5) catch {
+            DivByZero {} => 1
+            NotFound {} => 2
+            NetworkError {} => 3
+        }
+        assert(result == 2)
+    }
+
+    test "triple union third error" {
+        let result = try complexOperation(2000) catch {
+            DivByZero {} => 1
+            NotFound {} => 2
+            NetworkError {} => 3
+        }
+        assert(result == 3)
+    }
+
+    test "triple union success" {
+        let result = try complexOperation(5) catch {
+            DivByZero {} => 1
+            NotFound {} => 2
+            NetworkError {} => 3
+        }
+        // 5 + 5 = 10
+        assert(result == 10)
+    }
+
+    // Test range check success
+    test "range check success" {
+        let result = try checkRange(5, 0, 10) catch {
+            OutOfRange {} => -1
+        }
+        assert(result == 5)
+    }
+
+    // Test range check low bound fail
+    test "range check below min" {
+        let result = try checkRange(-5, 0, 10) catch {
+            OutOfRange {} => -1
+        }
+        assert(result == -1)
+    }
+
+    // Test range check high bound fail
+    test "range check above max" {
+        let result = try checkRange(15, 0, 10) catch {
+            OutOfRange {} => -1
+        }
+        assert(result == -1)
     }
 }

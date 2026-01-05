@@ -1,0 +1,6 @@
+// Error: raise statement outside fallible function
+error MyError {}
+
+func normalFunc() {
+    raise MyError {}
+}

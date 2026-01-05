@@ -198,4 +198,60 @@ pub enum SemanticError {
         #[label("not defined")]
         span: SourceSpan,
     },
+
+    #[error("error type '{raised}' is not in function's error set")]
+    #[diagnostic(
+        code(E2052),
+        help("add {raised} to error set, or use valid error types for this function: {declared}")
+    )]
+    IncompatibleRaiseError {
+        raised: String,
+        declared: String,
+        #[label("cannot raise this error type")]
+        span: SourceSpan,
+    },
+
+    #[error("try expression requires fallible type, found {found}")]
+    #[diagnostic(
+        code(E2053),
+        help("try/catch can only be used with fallible function calls")
+    )]
+    TryOnNonFallible {
+        found: String,
+        #[label("not a fallible type")]
+        span: SourceSpan,
+    },
+
+    #[error("non-exhaustive catch block")]
+    #[diagnostic(
+        code(E2054),
+        help("add a wildcard pattern '_' or handle all error types: {missing}")
+    )]
+    NonExhaustiveCatch {
+        missing: String,
+        #[label("catch does not cover all error types")]
+        span: SourceSpan,
+    },
+
+    #[error("unreachable catch arm for '{name}'")]
+    #[diagnostic(
+        code(E2055),
+        help("this error type is not in the fallible expression's error set")
+    )]
+    UnreachableCatchArm {
+        name: String,
+        #[label("this error cannot be raised")]
+        span: SourceSpan,
+    },
+
+    #[error("catch arms have incompatible types: expected {expected}, found {found}")]
+    #[diagnostic(code(E2056))]
+    CatchArmTypeMismatch {
+        expected: String,
+        found: String,
+        #[label("first arm has type {expected}")]
+        first_arm: SourceSpan,
+        #[label("this arm has type {found}")]
+        span: SourceSpan,
+    },
 }

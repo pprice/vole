@@ -150,8 +150,14 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
     analyzer
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
-    let (type_aliases, expr_types, method_resolutions, interface_registry, type_implements) =
-        analyzer.into_analysis_results();
+    let (
+        type_aliases,
+        expr_types,
+        method_resolutions,
+        interface_registry,
+        type_implements,
+        error_types,
+    ) = analyzer.into_analysis_results();
     let sema_ns = sema_start.elapsed().as_nanos() as u64;
 
     // Codegen phase
@@ -166,6 +172,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
             method_resolutions,
             interface_registry,
             type_implements,
+            error_types,
         );
         compiler
             .compile_program(&program)
@@ -210,8 +217,14 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     analyzer
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
-    let (type_aliases, expr_types, method_resolutions, interface_registry, type_implements) =
-        analyzer.into_analysis_results();
+    let (
+        type_aliases,
+        expr_types,
+        method_resolutions,
+        interface_registry,
+        type_implements,
+        error_types,
+    ) = analyzer.into_analysis_results();
 
     // Compile
     let mut jit = JitContext::new();
@@ -224,6 +237,7 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
             method_resolutions,
             interface_registry,
             type_implements,
+            error_types,
         );
         compiler
             .compile_program(&program)

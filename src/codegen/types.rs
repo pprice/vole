@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::resolution::MethodResolutions;
-use crate::sema::{FunctionType, Type};
+use crate::sema::{ErrorTypeInfo, FunctionType, Type};
 
 /// Compiled value with its type
 #[derive(Clone)]
@@ -84,19 +84,29 @@ pub(crate) struct CompileCtx<'a> {
     pub func_return_types: &'a HashMap<String, Type>,
     /// Interface definitions registry
     pub interface_registry: &'a InterfaceRegistry,
+    /// Current function's return type (needed for raise statements in fallible functions)
+    pub current_function_return_type: Option<Type>,
+    /// Error type definitions from semantic analysis
+    pub error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
 }
 
 /// Resolve a type expression to a Vole Type (uses CompileCtx for full context)
 pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
-    resolve_type_expr_full(ty, ctx.type_aliases, ctx.interface_registry)
+    resolve_type_expr_with_errors(
+        ty,
+        ctx.type_aliases,
+        ctx.interface_registry,
+        ctx.error_types,
+    )
 }
 
-/// Resolve a type expression using aliases and interface registry
-/// This is used when CompileCtx is not available (e.g., during Compiler setup)
-pub(crate) fn resolve_type_expr_full(
+/// Resolve a type expression using aliases, interface registry, and error types
+/// This is the full resolution function that handles all named types including errors
+pub(crate) fn resolve_type_expr_with_errors(
     ty: &TypeExpr,
     type_aliases: &HashMap<Symbol, Type>,
     interface_registry: &InterfaceRegistry,
+    error_types: &HashMap<Symbol, ErrorTypeInfo>,
 ) -> Type {
     match ty {
         TypeExpr::Primitive(p) => Type::from_primitive(*p),
@@ -120,23 +130,30 @@ pub(crate) fn resolve_type_expr_full(
                         .collect(),
                     extends: iface.extends.clone(),
                 })
+            } else if let Some(error_info) = error_types.get(sym) {
+                // Check error types
+                Type::ErrorType(error_info.clone())
             } else {
                 Type::Error
             }
         }
         TypeExpr::Array(elem) => {
-            let elem_ty = resolve_type_expr_full(elem, type_aliases, interface_registry);
+            let elem_ty =
+                resolve_type_expr_with_errors(elem, type_aliases, interface_registry, error_types);
             Type::Array(Box::new(elem_ty))
         }
         TypeExpr::Optional(inner) => {
             // T? desugars to T | nil
-            let inner_ty = resolve_type_expr_full(inner, type_aliases, interface_registry);
+            let inner_ty =
+                resolve_type_expr_with_errors(inner, type_aliases, interface_registry, error_types);
             Type::Union(vec![inner_ty, Type::Nil])
         }
         TypeExpr::Union(variants) => {
             let variant_types: Vec<Type> = variants
                 .iter()
-                .map(|v| resolve_type_expr_full(v, type_aliases, interface_registry))
+                .map(|v| {
+                    resolve_type_expr_with_errors(v, type_aliases, interface_registry, error_types)
+                })
                 .collect();
             Type::normalize_union(variant_types)
         }
@@ -147,9 +164,16 @@ pub(crate) fn resolve_type_expr_full(
         } => {
             let param_types: Vec<Type> = params
                 .iter()
-                .map(|p| resolve_type_expr_full(p, type_aliases, interface_registry))
+                .map(|p| {
+                    resolve_type_expr_with_errors(p, type_aliases, interface_registry, error_types)
+                })
                 .collect();
-            let ret_type = resolve_type_expr_full(return_type, type_aliases, interface_registry);
+            let ret_type = resolve_type_expr_with_errors(
+                return_type,
+                type_aliases,
+                interface_registry,
+                error_types,
+            );
             Type::Function(FunctionType {
                 params: param_types,
                 return_type: Box::new(ret_type),
@@ -160,10 +184,41 @@ pub(crate) fn resolve_type_expr_full(
             // Self type is resolved during interface/implement compilation
             Type::Error
         }
-        TypeExpr::Fallible { .. } => {
-            todo!("fallible type resolution")
+        TypeExpr::Fallible {
+            success_type,
+            error_type,
+        } => {
+            let success = resolve_type_expr_with_errors(
+                success_type,
+                type_aliases,
+                interface_registry,
+                error_types,
+            );
+            let error = resolve_type_expr_with_errors(
+                error_type,
+                type_aliases,
+                interface_registry,
+                error_types,
+            );
+            Type::Fallible(crate::sema::types::FallibleType {
+                success_type: Box::new(success),
+                error_type: Box::new(error),
+            })
         }
     }
+}
+
+/// Resolve a type expression using aliases and interface registry
+/// This is used when CompileCtx is not available (e.g., during Compiler setup)
+/// Note: This does NOT resolve error types - use resolve_type_expr_with_errors for that
+pub(crate) fn resolve_type_expr_full(
+    ty: &TypeExpr,
+    type_aliases: &HashMap<Symbol, Type>,
+    interface_registry: &InterfaceRegistry,
+) -> Type {
+    // Use an empty error_types map for backward compatibility
+    let empty_error_types = HashMap::new();
+    resolve_type_expr_with_errors(ty, type_aliases, interface_registry, &empty_error_types)
 }
 
 /// Convert a Vole type to a Cranelift type
@@ -180,6 +235,7 @@ pub(crate) fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::
         Type::String => pointer_type,
         Type::Nil => types::I8,            // Nil uses minimal representation
         Type::Union(_) => pointer_type,    // Unions are passed by pointer
+        Type::Fallible(_) => pointer_type, // Fallibles are passed by pointer (tagged union)
         Type::Function(_) => pointer_type, // Function pointers
         _ => types::I64,                   // Default
     }
@@ -205,7 +261,99 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
             // Layout: [tag:1][padding:7][payload:max_payload] aligned to 8
             8 + max_payload.div_ceil(8) * 8
         }
+        Type::ErrorType(info) => {
+            // Error types are struct-like: sum of all field sizes, aligned to 8
+            let fields_size: u32 = info
+                .fields
+                .iter()
+                .map(|f| type_size(&f.ty, pointer_type))
+                .sum();
+            fields_size.div_ceil(8) * 8
+        }
+        Type::Fallible(ft) => {
+            // Fallible layout: | tag (i64) | payload (max size of T or any E) |
+            // Tag is always 8 bytes (i64)
+            let success_size = type_size(&ft.success_type, pointer_type);
+
+            // Compute max error payload size
+            let error_size = match ft.error_type.as_ref() {
+                Type::ErrorType(info) => {
+                    // Single error type
+                    info.fields
+                        .iter()
+                        .map(|f| type_size(&f.ty, pointer_type))
+                        .sum()
+                }
+                Type::Union(variants) => {
+                    // Union of error types - find max payload
+                    variants
+                        .iter()
+                        .filter_map(|v| match v {
+                            Type::ErrorType(info) => Some(
+                                info.fields
+                                    .iter()
+                                    .map(|f| type_size(&f.ty, pointer_type))
+                                    .sum(),
+                            ),
+                            _ => None,
+                        })
+                        .max()
+                        .unwrap_or(0)
+                }
+                _ => 0,
+            };
+
+            let max_payload = success_size.max(error_size);
+            // Layout: [tag:8][payload:max_payload] aligned to 8
+            8 + max_payload.div_ceil(8) * 8
+        }
         _ => 8, // default
+    }
+}
+
+// ============================================================================
+// Fallible type layout helpers
+// ============================================================================
+
+/// Tag value for success in a fallible type (payload is the success value)
+pub(crate) const FALLIBLE_SUCCESS_TAG: i64 = 0;
+
+/// Offset of the tag field in a fallible value (always 0)
+pub(crate) const FALLIBLE_TAG_OFFSET: i32 = 0;
+
+/// Offset of the payload field in a fallible value (always 8, after the i64 tag)
+pub(crate) const FALLIBLE_PAYLOAD_OFFSET: i32 = 8;
+
+/// Size of the tag field in bytes
+#[allow(dead_code)] // Will be used in subsequent codegen tasks
+pub(crate) const FALLIBLE_TAG_SIZE: u32 = 8;
+
+/// Get the error tag for a specific error type within a fallible type.
+/// Returns the 1-based index (tag 0 is reserved for success).
+pub(crate) fn fallible_error_tag(
+    fallible: &crate::sema::types::FallibleType,
+    error_name: Symbol,
+) -> Option<i64> {
+    match fallible.error_type.as_ref() {
+        Type::ErrorType(info) => {
+            if info.name == error_name {
+                Some(1) // Single error type always gets tag 1
+            } else {
+                None
+            }
+        }
+        Type::Union(variants) => {
+            // Find the 1-based index of the error type in the union
+            for (idx, variant) in variants.iter().enumerate() {
+                if let Type::ErrorType(info) = variant
+                    && info.name == error_name
+                {
+                    return Some((idx + 1) as i64);
+                }
+            }
+            None
+        }
+        _ => None,
     }
 }
 

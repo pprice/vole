@@ -6,12 +6,16 @@ use std::collections::HashMap;
 
 use cranelift::prelude::*;
 
-use crate::frontend::{self, ExprKind, Stmt, Symbol};
+use crate::frontend::{self, ExprKind, RaiseStmt, Stmt, Symbol};
 use crate::sema::Type;
 
 use super::compiler::ControlFlowCtx;
 use super::context::{Cg, ControlFlow};
-use super::types::{CompileCtx, CompiledValue, resolve_type_expr, type_size, type_to_cranelift};
+use super::structs::convert_to_i64_for_storage;
+use super::types::{
+    CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
+    fallible_error_tag, resolve_type_expr, type_size, type_to_cranelift,
+};
 
 /// Compile a block of statements (wrapper for compatibility)
 pub(super) fn compile_block(
@@ -166,7 +170,44 @@ impl Cg<'_, '_, '_> {
             Stmt::Return(ret) => {
                 if let Some(value) = &ret.value {
                     let compiled = self.expr(value)?;
-                    self.builder.ins().return_(&[compiled.value]);
+
+                    // Check if the function has a fallible return type
+                    if let Some(Type::Fallible(ft)) = &self.ctx.current_function_return_type {
+                        // For fallible functions, wrap the success value in a fallible struct
+                        let fallible_size =
+                            type_size(&Type::Fallible(ft.clone()), self.ctx.pointer_type);
+
+                        // Allocate stack slot for the fallible result
+                        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                            StackSlotKind::ExplicitSlot,
+                            fallible_size,
+                            0,
+                        ));
+
+                        // Store the success tag at offset 0
+                        let tag_val = self.builder.ins().iconst(types::I64, FALLIBLE_SUCCESS_TAG);
+                        self.builder
+                            .ins()
+                            .stack_store(tag_val, slot, FALLIBLE_TAG_OFFSET);
+
+                        // Store the success value at the payload offset
+                        // Convert to i64 if needed for storage
+                        let store_value = convert_to_i64_for_storage(self.builder, &compiled);
+                        self.builder
+                            .ins()
+                            .stack_store(store_value, slot, FALLIBLE_PAYLOAD_OFFSET);
+
+                        // Get the pointer to the fallible result
+                        let fallible_ptr =
+                            self.builder
+                                .ins()
+                                .stack_addr(self.ctx.pointer_type, slot, 0);
+
+                        self.builder.ins().return_(&[fallible_ptr]);
+                    } else {
+                        // Non-fallible function, return value directly
+                        self.builder.ins().return_(&[compiled.value]);
+                    }
                 } else {
                     self.builder.ins().return_(&[]);
                 }
@@ -267,9 +308,7 @@ impl Cg<'_, '_, '_> {
                 Ok(true)
             }
 
-            Stmt::Raise(_) => {
-                todo!("raise statement codegen")
-            }
+            Stmt::Raise(raise_stmt) => self.raise_stmt(raise_stmt),
         }
     }
 
@@ -463,5 +502,114 @@ impl Cg<'_, '_, '_> {
             ty: self.ctx.pointer_type,
             vole_type: union_type.clone(),
         })
+    }
+
+    /// Compile a raise statement: raise ErrorName { field: value, ... }
+    ///
+    /// This allocates a fallible result on the stack with:
+    /// - Tag at offset 0 (error tag from fallible_error_tag())
+    /// - Error fields at payload offset 8+
+    ///
+    /// Then returns from the function with the fallible pointer.
+    fn raise_stmt(&mut self, raise_stmt: &RaiseStmt) -> Result<bool, String> {
+        // Get the current function's return type - must be Fallible
+        let return_type = self
+            .ctx
+            .current_function_return_type
+            .as_ref()
+            .ok_or("raise statement used outside of a function with declared return type")?;
+
+        let fallible_type = match return_type {
+            Type::Fallible(ft) => ft,
+            _ => {
+                return Err(format!(
+                    "raise statement used in function with non-fallible return type: {:?}",
+                    return_type
+                ));
+            }
+        };
+
+        // Get the error tag for this error type
+        let error_tag =
+            fallible_error_tag(fallible_type, raise_stmt.error_name).ok_or_else(|| {
+                format!(
+                    "Error type {} not found in fallible type",
+                    self.ctx.interner.resolve(raise_stmt.error_name)
+                )
+            })?;
+
+        // Calculate the size of the fallible type
+        let fallible_size = type_size(return_type, self.ctx.pointer_type);
+
+        // Allocate stack slot for the fallible result
+        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            fallible_size,
+            0,
+        ));
+
+        // Store the error tag at offset 0
+        let tag_val = self.builder.ins().iconst(types::I64, error_tag);
+        self.builder
+            .ins()
+            .stack_store(tag_val, slot, FALLIBLE_TAG_OFFSET);
+
+        // Get the error type info to know field order
+        let error_type_info = match fallible_type.error_type.as_ref() {
+            Type::ErrorType(info) if info.name == raise_stmt.error_name => Some(info.clone()),
+            Type::Union(variants) => variants.iter().find_map(|v| match v {
+                Type::ErrorType(info) if info.name == raise_stmt.error_name => Some(info.clone()),
+                _ => None,
+            }),
+            _ => None,
+        }
+        .ok_or_else(|| {
+            format!(
+                "Could not find error type info for {}",
+                self.ctx.interner.resolve(raise_stmt.error_name)
+            )
+        })?;
+
+        // Store each field value at the appropriate offset in the payload
+        // Fields are stored sequentially at 8-byte intervals (i64 storage)
+        for (field_idx, field_def) in error_type_info.fields.iter().enumerate() {
+            // Find the matching field in the raise statement
+            let field_init = raise_stmt
+                .fields
+                .iter()
+                .find(|f| f.name == field_def.name)
+                .ok_or_else(|| {
+                    format!(
+                        "Missing field {} in raise statement",
+                        self.ctx.interner.resolve(field_def.name)
+                    )
+                })?;
+
+            // Compile the field value expression
+            let field_value = self.expr(&field_init.value)?;
+
+            // Convert to i64 for storage (same as struct fields)
+            let store_value = convert_to_i64_for_storage(self.builder, &field_value);
+
+            // Calculate field offset: payload starts at offset 8, each field is 8 bytes
+            let field_offset = FALLIBLE_PAYLOAD_OFFSET + (field_idx as i32 * 8);
+
+            // Store the field value
+            self.builder
+                .ins()
+                .stack_store(store_value, slot, field_offset);
+        }
+
+        // Get the pointer to the fallible result
+        let fallible_ptr = self
+            .builder
+            .ins()
+            .stack_addr(self.ctx.pointer_type, slot, 0);
+
+        // Return from the function with the fallible pointer
+        self.builder.ins().return_(&[fallible_ptr]);
+
+        // Raise always terminates the current block
+        Ok(true)
     }
 }
