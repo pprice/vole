@@ -160,6 +160,9 @@ pub(crate) fn resolve_type_expr_full(
             // Self type is resolved during interface/implement compilation
             Type::Error
         }
+        TypeExpr::Fallible { .. } => {
+            todo!("fallible type resolution")
+        }
     }
 }
 

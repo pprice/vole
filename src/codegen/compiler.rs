@@ -214,6 +214,9 @@ impl<'a> Compiler<'a> {
                 Decl::Implement(impl_block) => {
                     self.register_implement_block(impl_block);
                 }
+                Decl::Error(_) => {
+                    // Error declarations don't generate code in pass 1
+                }
             }
         }
 
@@ -245,6 +248,9 @@ impl<'a> Compiler<'a> {
                 }
                 Decl::Implement(impl_block) => {
                     self.compile_implement_block(impl_block)?;
+                }
+                Decl::Error(_) => {
+                    // Error declarations don't generate code in pass 2
                 }
             }
         }
@@ -2333,6 +2339,10 @@ pub(super) fn compile_expr(
         ExprKind::FieldAccess(fa) => compile_field_access(builder, fa, variables, ctx),
 
         ExprKind::MethodCall(mc) => compile_method_call(builder, mc, expr.id, variables, ctx),
+
+        ExprKind::TryCatch(_) => {
+            todo!("try-catch expression codegen")
+        }
     }
 }
 

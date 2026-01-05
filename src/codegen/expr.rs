@@ -52,6 +52,9 @@ impl Cg<'_, '_, '_> {
             ExprKind::StructLiteral(sl) => self.struct_literal(sl),
             ExprKind::FieldAccess(fa) => self.field_access(fa),
             ExprKind::MethodCall(mc) => self.method_call(mc, expr.id),
+            ExprKind::TryCatch(_) => {
+                todo!("try-catch expression codegen")
+            }
         }
     }
 

@@ -266,6 +266,10 @@ impl Cg<'_, '_, '_> {
                 }
                 Ok(true)
             }
+
+            Stmt::Raise(_) => {
+                todo!("raise statement codegen")
+            }
         }
     }
 

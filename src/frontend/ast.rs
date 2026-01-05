@@ -29,6 +29,7 @@ pub enum Decl {
     Record(RecordDecl),
     Interface(InterfaceDecl),
     Implement(ImplementBlock),
+    Error(ErrorDecl),
 }
 
 /// Function declaration
@@ -122,6 +123,14 @@ pub struct ImplementBlock {
     pub span: Span,
 }
 
+/// Error type declaration: error Name { fields }
+#[derive(Debug)]
+pub struct ErrorDecl {
+    pub name: Symbol,
+    pub fields: Vec<FieldDef>,
+    pub span: Span,
+}
+
 /// Type expression
 #[derive(Debug, Clone)]
 pub enum TypeExpr {
@@ -136,6 +145,11 @@ pub enum TypeExpr {
         return_type: Box<TypeExpr>,
     },
     SelfType, // Self keyword (implementing type in interface)
+    /// Fallible type: fallible(T, E)
+    Fallible {
+        success_type: Box<TypeExpr>,
+        error_type: Box<TypeExpr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,6 +187,7 @@ pub enum Stmt {
     Break(Span),
     Continue(Span),
     Return(ReturnStmt),
+    Raise(RaiseStmt),
 }
 
 /// Let binding: let x = expr or let mut x = expr
@@ -222,6 +237,14 @@ pub struct IfStmt {
 #[derive(Debug, Clone)]
 pub struct ReturnStmt {
     pub value: Option<Expr>,
+    pub span: Span,
+}
+
+/// Raise statement: raise ErrorName { fields }
+#[derive(Debug, Clone)]
+pub struct RaiseStmt {
+    pub error_name: Symbol,
+    pub fields: Vec<StructFieldInit>,
     pub span: Span,
 }
 
@@ -289,6 +312,9 @@ pub enum ExprKind {
 
     /// Method call: point.distance()
     MethodCall(Box<MethodCallExpr>),
+
+    /// Try-catch expression
+    TryCatch(Box<TryCatchExpr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
@@ -479,6 +505,37 @@ pub struct MethodCallExpr {
     pub method: Symbol,
     pub args: Vec<Expr>,
     pub method_span: Span,
+}
+
+/// Try-catch expression
+#[derive(Debug, Clone)]
+pub struct TryCatchExpr {
+    pub try_expr: Expr,
+    pub catch_arms: Vec<CatchArm>,
+    pub span: Span,
+}
+
+/// A single arm in a catch block
+#[derive(Debug, Clone)]
+pub struct CatchArm {
+    pub pattern: ErrorPattern,
+    pub body: Expr,
+    pub span: Span,
+}
+
+/// Pattern for matching errors in catch
+#[derive(Debug, Clone)]
+pub enum ErrorPattern {
+    /// Match specific error: ErrorName { field1, field2 }
+    Named {
+        name: Symbol,
+        bindings: Vec<(Symbol, Symbol)>, // (field_name, binding_name)
+        span: Span,
+    },
+    /// Match specific error without destructuring: ErrorName {}
+    NamedEmpty { name: Symbol, span: Span },
+    /// Wildcard: _
+    Wildcard(Span),
 }
 
 /// Lambda expression: (params) => body

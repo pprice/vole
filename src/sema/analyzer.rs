@@ -439,6 +439,9 @@ impl Analyzer {
                         }
                     }
                 }
+                Decl::Error(_) => {
+                    // Error declarations processed in a later task
+                }
             }
         }
 
@@ -509,6 +512,9 @@ impl Analyzer {
                     // Methods will be type-checked when called
                     // Could add validation here later (e.g., verify trait satisfaction)
                     let _ = impl_block; // suppress warning
+                }
+                Decl::Error(_) => {
+                    // Error declarations processed in a later task
                 }
             }
         }
@@ -833,6 +839,9 @@ impl Analyzer {
                         ret.span,
                     );
                 }
+            }
+            Stmt::Raise(_) => {
+                todo!("raise statement type checking")
             }
         }
         Ok(())
@@ -2418,6 +2427,10 @@ impl Analyzer {
                     self.check_expr(arg, interner)?;
                 }
                 Ok(Type::Error)
+            }
+
+            ExprKind::TryCatch(_) => {
+                todo!("try-catch expression type checking")
             }
         }
     }

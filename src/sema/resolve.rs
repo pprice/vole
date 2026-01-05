@@ -98,6 +98,9 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
             // For now, return Error to indicate it can't be used outside that context
             Type::Error
         }
+        TypeExpr::Fallible { .. } => {
+            todo!("fallible type resolution")
+        }
     }
 }
 
