@@ -780,6 +780,52 @@ impl<'src> Parser<'src> {
     fn pattern(&mut self) -> Result<Pattern, ParseError> {
         let token = self.current.clone();
 
+        // Handle success pattern: success, success x, success Type
+        if token.ty == TokenType::KwSuccess {
+            let start_span = token.span;
+            self.advance(); // consume 'success'
+
+            // Check if there's an inner pattern (look for => or if which end a pattern)
+            if self.check(TokenType::FatArrow) || self.check(TokenType::KwIf) {
+                // Bare success pattern
+                return Ok(Pattern::Success {
+                    inner: None,
+                    span: start_span,
+                });
+            }
+
+            // Parse inner pattern
+            let inner = self.pattern()?;
+            let end_span = self.get_pattern_span(&inner);
+            return Ok(Pattern::Success {
+                inner: Some(Box::new(inner)),
+                span: start_span.merge(end_span),
+            });
+        }
+
+        // Handle error pattern: error, error e, error DivByZero, error DivByZero { x }
+        if token.ty == TokenType::KwError {
+            let start_span = token.span;
+            self.advance(); // consume 'error'
+
+            // Check if there's an inner pattern
+            if self.check(TokenType::FatArrow) || self.check(TokenType::KwIf) {
+                // Bare error pattern
+                return Ok(Pattern::Error {
+                    inner: None,
+                    span: start_span,
+                });
+            }
+
+            // Parse inner pattern
+            let inner = self.pattern()?;
+            let end_span = self.get_pattern_span(&inner);
+            return Ok(Pattern::Error {
+                inner: Some(Box::new(inner)),
+                span: start_span.merge(end_span),
+            });
+        }
+
         // Check for type keyword patterns (primitives and nil)
         if let Some(type_expr) = self.token_to_type_expr(&token) {
             self.advance();
@@ -867,6 +913,19 @@ impl<'src> Parser<'src> {
                 },
                 token.span,
             )),
+        }
+    }
+
+    /// Get the span from a pattern
+    fn get_pattern_span(&self, pattern: &Pattern) -> Span {
+        match pattern {
+            Pattern::Wildcard(s) => *s,
+            Pattern::Identifier { span, .. } => *span,
+            Pattern::Type { span, .. } => *span,
+            Pattern::Val { span, .. } => *span,
+            Pattern::Success { span, .. } => *span,
+            Pattern::Error { span, .. } => *span,
+            Pattern::Literal(expr) => expr.span,
         }
     }
 
