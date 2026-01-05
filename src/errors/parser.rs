@@ -94,4 +94,11 @@ pub enum ParserError {
         #[label("expected 'as'")]
         span: SourceSpan,
     },
+
+    #[error("duplicate external block")]
+    #[diagnostic(code(E1023))]
+    DuplicateExternalBlock {
+        #[label("second external block")]
+        span: SourceSpan,
+    },
 }

@@ -885,6 +885,67 @@ fn primitive_type_str(prim: PrimitiveType) -> &'static str {
     }
 }
 
+/// Print an external block.
+fn print_external_block<'a>(
+    arena: &'a Arena<'a>,
+    external: &ExternalBlock,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let header = arena
+        .text("external(")
+        .append(print_string_literal(arena, &external.module_path))
+        .append(arena.text(")"));
+
+    if external.functions.is_empty() {
+        return header.append(arena.text(" {}"));
+    }
+
+    let func_docs: Vec<_> = external
+        .functions
+        .iter()
+        .map(|f| print_external_func(arena, f, interner))
+        .collect();
+
+    let body = arena.intersperse(func_docs, arena.hardline());
+
+    header
+        .append(arena.text(" {"))
+        .append(arena.hardline().append(body).nest(INDENT))
+        .append(arena.hardline())
+        .append(arena.text("}"))
+}
+
+/// Print an external function declaration.
+fn print_external_func<'a>(
+    arena: &'a Arena<'a>,
+    func: &ExternalFunc,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name_part = if let Some(native_name) = &func.native_name {
+        arena
+            .text("func ")
+            .append(print_string_literal(arena, native_name))
+            .append(arena.text(" as "))
+            .append(arena.text(interner.resolve(func.vole_name).to_string()))
+    } else {
+        arena
+            .text("func ")
+            .append(arena.text(interner.resolve(func.vole_name).to_string()))
+    };
+
+    let params = print_params(arena, &func.params, interner);
+
+    let return_type = if let Some(ty) = &func.return_type {
+        arena
+            .text(" -> ")
+            .append(print_type_expr(arena, ty, interner))
+    } else {
+        arena.nil()
+    };
+
+    name_part.append(params).append(return_type)
+}
+
 /// Print a tests declaration.
 fn print_tests_decl<'a>(
     arena: &'a Arena<'a>,
@@ -958,6 +1019,7 @@ fn print_class_decl<'a>(
         &name,
         implements,
         &class.fields,
+        class.external.as_ref(),
         &class.methods,
         interner,
         "class",
@@ -990,6 +1052,7 @@ fn print_record_decl<'a>(
         &name,
         implements,
         &record.fields,
+        record.external.as_ref(),
         &record.methods,
         interner,
         "record",
@@ -997,16 +1060,18 @@ fn print_record_decl<'a>(
 }
 
 /// Print the body of a class-like declaration (class or record).
+#[allow(clippy::too_many_arguments)]
 fn print_class_like_body<'a>(
     arena: &'a Arena<'a>,
     name: &str,
     implements: DocBuilder<'a, Arena<'a>>,
     fields: &[FieldDef],
+    external: Option<&ExternalBlock>,
     methods: &[FuncDecl],
     interner: &Interner,
     keyword: &str,
 ) -> DocBuilder<'a, Arena<'a>> {
-    if fields.is_empty() && methods.is_empty() {
+    if fields.is_empty() && external.is_none() && methods.is_empty() {
         return arena
             .text(keyword.to_string())
             .append(arena.text(" "))
@@ -1015,39 +1080,34 @@ fn print_class_like_body<'a>(
             .append(arena.text(" {}"));
     }
 
-    // Build the body content
-    let body = if !fields.is_empty() && !methods.is_empty() {
-        // Fields separated by single lines, then blank line, then methods
+    // Build body sections
+    let mut sections: Vec<DocBuilder<'a, Arena<'a>>> = Vec::new();
+
+    // Fields section
+    if !fields.is_empty() {
         let field_docs: Vec<_> = fields
             .iter()
             .map(|f| print_field_def(arena, f, interner))
             .collect();
+        sections.push(arena.intersperse(field_docs, arena.hardline()));
+    }
+
+    // External section
+    if let Some(ext) = external {
+        sections.push(print_external_block(arena, ext, interner));
+    }
+
+    // Methods section
+    if !methods.is_empty() {
         let method_docs: Vec<_> = methods
             .iter()
             .map(|m| print_func_decl(arena, m, interner))
             .collect();
+        sections.push(arena.intersperse(method_docs, arena.hardline().append(arena.hardline())));
+    }
 
-        let fields_section = arena.intersperse(field_docs, arena.hardline());
-        let methods_section =
-            arena.intersperse(method_docs, arena.hardline().append(arena.hardline()));
-
-        fields_section
-            .append(arena.hardline())
-            .append(arena.hardline())
-            .append(methods_section)
-    } else if !fields.is_empty() {
-        let field_docs: Vec<_> = fields
-            .iter()
-            .map(|f| print_field_def(arena, f, interner))
-            .collect();
-        arena.intersperse(field_docs, arena.hardline())
-    } else {
-        let method_docs: Vec<_> = methods
-            .iter()
-            .map(|m| print_func_decl(arena, m, interner))
-            .collect();
-        arena.intersperse(method_docs, arena.hardline().append(arena.hardline()))
-    };
+    // Join sections with blank lines
+    let body = arena.intersperse(sections, arena.hardline().append(arena.hardline()));
 
     arena
         .text(keyword.to_string())
@@ -1094,7 +1154,7 @@ fn print_interface_decl<'a>(
             .append(arena.intersperse(extend_names, arena.text(", ")))
     };
 
-    if iface.fields.is_empty() && iface.methods.is_empty() {
+    if iface.fields.is_empty() && iface.external.is_none() && iface.methods.is_empty() {
         return arena
             .text("interface ")
             .append(arena.text(name))
@@ -1102,19 +1162,36 @@ fn print_interface_decl<'a>(
             .append(arena.text(" {}"));
     }
 
-    let mut body_parts: Vec<DocBuilder<'a, Arena<'a>>> = Vec::new();
+    // Build body sections
+    let mut sections: Vec<DocBuilder<'a, Arena<'a>>> = Vec::new();
 
-    // Fields
-    for field in &iface.fields {
-        body_parts.push(print_field_def(arena, field, interner));
+    // Fields section
+    if !iface.fields.is_empty() {
+        let field_docs: Vec<_> = iface
+            .fields
+            .iter()
+            .map(|f| print_field_def(arena, f, interner))
+            .collect();
+        sections.push(arena.intersperse(field_docs, arena.hardline()));
     }
 
-    // Methods
-    for method in &iface.methods {
-        body_parts.push(print_interface_method(arena, method, interner));
+    // External section
+    if let Some(ext) = &iface.external {
+        sections.push(print_external_block(arena, ext, interner));
     }
 
-    let body = arena.intersperse(body_parts, arena.hardline());
+    // Methods section
+    if !iface.methods.is_empty() {
+        let method_docs: Vec<_> = iface
+            .methods
+            .iter()
+            .map(|m| print_interface_method(arena, m, interner))
+            .collect();
+        sections.push(arena.intersperse(method_docs, arena.hardline()));
+    }
+
+    // Join sections with blank lines
+    let body = arena.intersperse(sections, arena.hardline().append(arena.hardline()));
 
     arena
         .text("interface ")
@@ -1176,17 +1253,30 @@ fn print_implement_block<'a>(
             .append(print_type_expr(arena, &impl_block.target_type, interner))
     };
 
-    if impl_block.methods.is_empty() {
+    if impl_block.external.is_none() && impl_block.methods.is_empty() {
         return header.append(arena.text(" {}"));
     }
 
-    let method_docs: Vec<_> = impl_block
-        .methods
-        .iter()
-        .map(|m| print_func_decl(arena, m, interner))
-        .collect();
+    // Build body sections
+    let mut sections: Vec<DocBuilder<'a, Arena<'a>>> = Vec::new();
 
-    let body = arena.intersperse(method_docs, arena.hardline().append(arena.hardline()));
+    // External section
+    if let Some(ext) = &impl_block.external {
+        sections.push(print_external_block(arena, ext, interner));
+    }
+
+    // Methods section
+    if !impl_block.methods.is_empty() {
+        let method_docs: Vec<_> = impl_block
+            .methods
+            .iter()
+            .map(|m| print_func_decl(arena, m, interner))
+            .collect();
+        sections.push(arena.intersperse(method_docs, arena.hardline().append(arena.hardline())));
+    }
+
+    // Join sections with blank lines
+    let body = arena.intersperse(sections, arena.hardline().append(arena.hardline()));
 
     header
         .append(arena.text(" {"))

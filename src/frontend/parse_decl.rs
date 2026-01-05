@@ -252,6 +252,14 @@ impl<'src> Parser<'src> {
 
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
             if self.check(TokenType::KwExternal) {
+                if external.is_some() {
+                    return Err(ParseError::new(
+                        ParserError::DuplicateExternalBlock {
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
+                }
                 external = Some(self.parse_external_block()?);
             } else if self.check(TokenType::KwFunc) {
                 methods.push(self.interface_method()?);
@@ -380,18 +388,20 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::LBrace, "expected '{' in implement block")?;
         self.skip_newlines();
 
-        // Check for external block first
-        let external = if self.check(TokenType::KwExternal) {
-            let ext = self.parse_external_block()?;
-            self.skip_newlines();
-            Some(ext)
-        } else {
-            None
-        };
-
+        let mut external = None;
         let mut methods = Vec::new();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
-            if let Decl::Function(func) = self.function_decl()? {
+            if self.check(TokenType::KwExternal) {
+                if external.is_some() {
+                    return Err(ParseError::new(
+                        ParserError::DuplicateExternalBlock {
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
+                }
+                external = Some(self.parse_external_block()?);
+            } else if let Decl::Function(func) = self.function_decl()? {
                 methods.push(func);
             }
             self.skip_newlines();
@@ -419,6 +429,14 @@ impl<'src> Parser<'src> {
 
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
             if self.check(TokenType::KwExternal) {
+                if external.is_some() {
+                    return Err(ParseError::new(
+                        ParserError::DuplicateExternalBlock {
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
+                }
                 external = Some(self.parse_external_block()?);
             } else if self.check(TokenType::KwFunc) {
                 // Parse method
