@@ -632,6 +632,7 @@ impl<'src> Parser<'src> {
                 })
             }
             TokenType::KwMatch => self.match_expr(),
+            TokenType::KwTry => self.try_catch_expr(),
             // Type keywords in expression position: `let X = i32`
             TokenType::KwI8
             | TokenType::KwI16
@@ -837,5 +838,114 @@ impl<'src> Parser<'src> {
                 token.span,
             )),
         }
+    }
+
+    /// Parse a try-catch expression
+    fn try_catch_expr(&mut self) -> Result<Expr, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'try'
+
+        // Parse the fallible expression
+        let try_expr = self.expression(0)?;
+
+        self.consume(TokenType::KwCatch, "expected 'catch' after try expression")?;
+        self.consume(TokenType::LBrace, "expected '{' after catch")?;
+        self.skip_newlines();
+
+        let mut catch_arms = Vec::new();
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            let arm = self.catch_arm()?;
+            catch_arms.push(arm);
+            self.skip_newlines();
+        }
+
+        self.consume(TokenType::RBrace, "expected '}' to close catch")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(Expr {
+            id: self.next_id(),
+            kind: ExprKind::TryCatch(Box::new(TryCatchExpr {
+                try_expr,
+                catch_arms,
+                span,
+            })),
+            span,
+        })
+    }
+
+    /// Parse a single catch arm
+    fn catch_arm(&mut self) -> Result<CatchArm, ParseError> {
+        let start_span = self.current.span;
+
+        // Parse pattern: ErrorName { bindings } or ErrorName {} or _
+        let pattern = if self.check(TokenType::Identifier) {
+            let name_token = self.current.clone();
+            self.advance();
+            let name = self.interner.intern(&name_token.lexeme);
+
+            if self.match_token(TokenType::LBrace) {
+                self.skip_newlines();
+                let mut bindings = Vec::new();
+
+                while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+                    let field_token = self.current.clone();
+                    self.consume(TokenType::Identifier, "expected field name")?;
+                    let field_name = self.interner.intern(&field_token.lexeme);
+                    // For now, binding name = field name
+                    bindings.push((field_name, field_name));
+
+                    if self.check(TokenType::Comma) {
+                        self.advance();
+                    }
+                    self.skip_newlines();
+                }
+
+                self.consume(TokenType::RBrace, "expected '}' in error pattern")?;
+
+                if bindings.is_empty() {
+                    ErrorPattern::NamedEmpty {
+                        name,
+                        span: start_span.merge(self.previous.span),
+                    }
+                } else {
+                    ErrorPattern::Named {
+                        name,
+                        bindings,
+                        span: start_span.merge(self.previous.span),
+                    }
+                }
+            } else {
+                // ErrorName without braces - treat as ErrorName {}
+                ErrorPattern::NamedEmpty {
+                    name,
+                    span: name_token.span,
+                }
+            }
+        } else if self.current.lexeme == "_" {
+            let span = self.current.span;
+            self.advance();
+            ErrorPattern::Wildcard(span)
+        } else {
+            return Err(ParseError::new(
+                ParserError::UnexpectedToken {
+                    token: self.current.ty.as_str().to_string(),
+                    span: self.current.span.into(),
+                },
+                self.current.span,
+            ));
+        };
+
+        self.consume(TokenType::FatArrow, "expected '=>' after pattern")?;
+
+        // Parse body expression
+        let body = self.expression(0)?;
+
+        let span = start_span.merge(body.span);
+
+        Ok(CatchArm {
+            pattern,
+            body,
+            span,
+        })
     }
 }
