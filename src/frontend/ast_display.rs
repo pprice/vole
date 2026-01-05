@@ -68,6 +68,9 @@ impl<'a> AstPrinter<'a> {
             Decl::Interface(_) | Decl::Implement(_) => {
                 // TODO: implement interface/implement display
             }
+            Decl::Error(_) => {
+                // TODO: implement error decl display
+            }
         }
     }
 
@@ -193,6 +196,16 @@ impl<'a> AstPrinter<'a> {
             TypeExpr::SelfType => {
                 out.push_str("Self");
             }
+            TypeExpr::Fallible {
+                success_type,
+                error_type,
+            } => {
+                out.push_str("fallible(");
+                self.write_type_inline(out, success_type);
+                out.push_str(", ");
+                self.write_type_inline(out, error_type);
+                out.push(')');
+            }
         }
     }
 
@@ -259,6 +272,11 @@ impl<'a> AstPrinter<'a> {
                 inner.write_indent(out);
                 out.push_str("body:\n");
                 inner.indented().write_block(out, &f.body);
+            }
+            Stmt::Raise(_) => {
+                self.write_indent(out);
+                out.push_str("Raise\n");
+                // TODO: implement raise statement display
             }
         }
     }
@@ -560,6 +578,12 @@ impl<'a> AstPrinter<'a> {
                 self.write_indent(out);
                 out.push_str("MethodCall\n");
                 // TODO: implement method call display
+            }
+
+            ExprKind::TryCatch(_) => {
+                self.write_indent(out);
+                out.push_str("TryCatch\n");
+                // TODO: implement try-catch display
             }
         }
     }

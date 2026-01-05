@@ -42,6 +42,7 @@ fn print_decl<'a>(
         Decl::Record(record) => print_record_decl(arena, record, interner),
         Decl::Interface(iface) => print_interface_decl(arena, iface, interner),
         Decl::Implement(impl_block) => print_implement_block(arena, impl_block, interner),
+        Decl::Error(_) => todo!("error decl printing"),
     }
 }
 
@@ -190,6 +191,7 @@ fn print_stmt<'a>(
         Stmt::Break(_) => arena.text("break"),
         Stmt::Continue(_) => arena.text("continue"),
         Stmt::Return(return_stmt) => print_return_stmt(arena, return_stmt, interner),
+        Stmt::Raise(_) => todo!("raise statement printing"),
     }
 }
 
@@ -292,6 +294,7 @@ fn print_expr<'a>(
         ExprKind::StructLiteral(struct_lit) => print_struct_literal(arena, struct_lit, interner),
         ExprKind::FieldAccess(field) => print_field_access(arena, field, interner),
         ExprKind::MethodCall(method) => print_method_call(arena, method, interner),
+        ExprKind::TryCatch(_) => todo!("try-catch expression printing"),
     }
 }
 
@@ -846,6 +849,15 @@ fn print_type_expr<'a>(
                 .append(print_type_expr(arena, return_type, interner))
         }
         TypeExpr::SelfType => arena.text("Self"),
+        TypeExpr::Fallible {
+            success_type,
+            error_type,
+        } => arena
+            .text("fallible(")
+            .append(print_type_expr(arena, success_type, interner))
+            .append(arena.text(", "))
+            .append(print_type_expr(arena, error_type, interner))
+            .append(arena.text(")")),
     }
 }
 
