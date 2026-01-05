@@ -234,15 +234,17 @@ func divide(a: i32, b: i32) -> fallible(i32, DivByZero) {
 
 tests "divide function" {
     test "divides correctly" {
-        let result = try divide(10, 2) catch {
-            DivByZero {} => -1
+        let result = match divide(10, 2) {
+            x => x
+            error DivByZero => -1
         }
         assert(result == 5)
     }
 
     test "raises on zero divisor" {
-        let result = try divide(10, 0) catch {
-            DivByZero {} => -999
+        let result = match divide(10, 0) {
+            x => x
+            error DivByZero => -999
         }
         assert(result == -999)
     }
