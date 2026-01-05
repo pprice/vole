@@ -54,6 +54,8 @@ pub enum Type {
     ErrorType(ErrorTypeInfo),
     /// Fallible return type: fallible(T, E)
     Fallible(FallibleType),
+    /// Module type (from import expression)
+    Module(ModuleType),
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -117,6 +119,13 @@ pub struct ErrorTypeInfo {
 pub struct FallibleType {
     pub success_type: Box<Type>,
     pub error_type: Box<Type>, // ErrorType or Union of ErrorTypes
+}
+
+/// Module type: represents an imported module with its exports
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleType {
+    pub path: String,
+    pub exports: std::collections::HashMap<Symbol, Type>,
 }
 
 impl PartialEq for FunctionType {
@@ -266,6 +275,7 @@ impl Type {
             Type::Interface(_) => "interface",
             Type::ErrorType(_) => "error",
             Type::Fallible(_) => "fallible",
+            Type::Module(_) => "module",
         }
     }
 
@@ -366,6 +376,7 @@ impl std::fmt::Display for Type {
             Type::Fallible(ft) => {
                 write!(f, "fallible({}, {})", ft.success_type, ft.error_type)
             }
+            Type::Module(m) => write!(f, "module(\"{}\")", m.path),
             _ => write!(f, "{}", self.name()),
         }
     }
