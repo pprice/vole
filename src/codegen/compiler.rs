@@ -28,7 +28,9 @@ use crate::frontend::{
     ImplementBlock, InterfaceDecl, InterfaceMethod, Interner, LetStmt, NodeId, Pattern, Program,
     RecordDecl, StringPart, Symbol, TestCase, TestsDecl, TryCatchExpr, TypeExpr, UnaryOp,
 };
-use crate::sema::implement_registry::TypeId;
+use crate::runtime::NativeRegistry;
+use crate::runtime::native_registry::NativeType;
+use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::{ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type};
@@ -111,6 +113,8 @@ pub struct Compiler<'a> {
     type_implements: HashMap<Symbol, Vec<Symbol>>,
     /// Error type definitions from semantic analysis
     error_types: HashMap<Symbol, ErrorTypeInfo>,
+    /// Registry of native functions for external method calls
+    native_registry: NativeRegistry,
 }
 
 impl<'a> Compiler<'a> {
@@ -126,6 +130,11 @@ impl<'a> Compiler<'a> {
         error_types: HashMap<Symbol, ErrorTypeInfo>,
     ) -> Self {
         let pointer_type = jit.pointer_type();
+
+        // Initialize native registry with stdlib functions
+        let mut native_registry = NativeRegistry::new();
+        crate::runtime::stdlib::register_stdlib(&mut native_registry);
+
         Self {
             jit,
             interner,
@@ -142,6 +151,7 @@ impl<'a> Compiler<'a> {
             interface_registry,
             type_implements,
             error_types,
+            native_registry,
         }
     }
 
@@ -886,6 +896,7 @@ impl<'a> Compiler<'a> {
                 interface_registry: &self.interface_registry,
                 current_function_return_type: None, // Methods don't use raise statements yet
                 error_types: &self.error_types,
+                native_registry: &self.native_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1014,6 +1025,7 @@ impl<'a> Compiler<'a> {
                 interface_registry: &self.interface_registry,
                 current_function_return_type: None, // Methods don't use raise statements yet
                 error_types: &self.error_types,
+                native_registry: &self.native_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1144,6 +1156,7 @@ impl<'a> Compiler<'a> {
                 interface_registry: &self.interface_registry,
                 current_function_return_type: None, // Default methods don't use raise statements yet
                 error_types: &self.error_types,
+                native_registry: &self.native_registry,
             };
             let terminated =
                 compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -1258,6 +1271,7 @@ impl<'a> Compiler<'a> {
                 interface_registry: &self.interface_registry,
                 current_function_return_type: return_type,
                 error_types: &self.error_types,
+                native_registry: &self.native_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1329,6 +1343,7 @@ impl<'a> Compiler<'a> {
                     interface_registry: &self.interface_registry,
                     current_function_return_type: None, // Tests don't have a declared return type
                     error_types: &self.error_types,
+                    native_registry: &self.native_registry,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -1529,6 +1544,7 @@ impl<'a> Compiler<'a> {
                 interface_registry: &self.interface_registry,
                 current_function_return_type: return_type,
                 error_types: &self.error_types,
+                native_registry: &self.native_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1593,6 +1609,7 @@ impl<'a> Compiler<'a> {
                 interface_registry: &self.interface_registry,
                 current_function_return_type: None, // Tests don't have a declared return type
                 error_types: &self.error_types,
+                native_registry: &self.native_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -4104,12 +4121,28 @@ fn compile_method_call(
             ResolvedMethod::Implemented {
                 func_type,
                 is_builtin,
+                external_info,
                 ..
             } => {
                 if *is_builtin {
                     // Built-in methods should have been handled above
                     return Err(format!("Unhandled builtin method: {}", method_name_str));
                 }
+
+                // Check if this is an external native method
+                if let Some(ext_info) = external_info {
+                    // Compile the receiver and arguments
+                    let mut args = vec![obj.value];
+                    for arg in &mc.args {
+                        let compiled = compile_expr(builder, arg, variables, ctx)?;
+                        args.push(compiled.value);
+                    }
+
+                    // Call the external native function
+                    let return_type = (*func_type.return_type).clone();
+                    return compile_external_call(builder, ctx, ext_info, &args, &return_type);
+                }
+
                 // Implement block method: use TypeName::methodName
                 let type_id = TypeId::from_type(&obj.vole_type)
                     .ok_or_else(|| format!("Cannot get TypeId for {:?}", obj.vole_type))?;
@@ -4232,6 +4265,89 @@ fn compile_builtin_method(
             }))
         }
         _ => Ok(None),
+    }
+}
+
+/// Compile a call to an external native function.
+/// This is used for methods marked with external blocks.
+fn compile_external_call(
+    builder: &mut FunctionBuilder,
+    ctx: &mut CompileCtx,
+    external_info: &ExternalMethodInfo,
+    args: &[Value],
+    return_type: &Type,
+) -> Result<CompiledValue, String> {
+    // Look up the native function in the registry
+    let native_func = ctx
+        .native_registry
+        .lookup(&external_info.module_path, &external_info.native_name)
+        .ok_or_else(|| {
+            format!(
+                "Native function {}::{} not found in registry",
+                external_info.module_path, external_info.native_name
+            )
+        })?;
+
+    // Build the Cranelift signature from NativeSignature
+    let mut sig = ctx.module.make_signature();
+    for param_type in &native_func.signature.params {
+        sig.params.push(AbiParam::new(native_type_to_cranelift(
+            param_type,
+            ctx.pointer_type,
+        )));
+    }
+    if native_func.signature.return_type != NativeType::Nil {
+        sig.returns.push(AbiParam::new(native_type_to_cranelift(
+            &native_func.signature.return_type,
+            ctx.pointer_type,
+        )));
+    }
+
+    // Import the signature and emit an indirect call
+    let sig_ref = builder.import_signature(sig);
+    let func_ptr = native_func.ptr;
+
+    // Load the function pointer as a constant
+    let func_ptr_val = builder.ins().iconst(ctx.pointer_type, func_ptr as i64);
+
+    // Emit the indirect call
+    let call_inst = builder.ins().call_indirect(sig_ref, func_ptr_val, args);
+    let results = builder.inst_results(call_inst);
+
+    if results.is_empty() {
+        Ok(CompiledValue {
+            value: builder.ins().iconst(types::I64, 0),
+            ty: types::I64,
+            vole_type: Type::Void,
+        })
+    } else {
+        Ok(CompiledValue {
+            value: results[0],
+            ty: type_to_cranelift(return_type, ctx.pointer_type),
+            vole_type: return_type.clone(),
+        })
+    }
+}
+
+/// Convert NativeType to Cranelift type
+fn native_type_to_cranelift(nt: &NativeType, pointer_type: types::Type) -> types::Type {
+    match nt {
+        NativeType::I8 => types::I8,
+        NativeType::I16 => types::I16,
+        NativeType::I32 => types::I32,
+        NativeType::I64 => types::I64,
+        NativeType::I128 => types::I128,
+        NativeType::U8 => types::I8,
+        NativeType::U16 => types::I16,
+        NativeType::U32 => types::I32,
+        NativeType::U64 => types::I64,
+        NativeType::F32 => types::F32,
+        NativeType::F64 => types::F64,
+        NativeType::Bool => types::I8,
+        NativeType::String => pointer_type,
+        NativeType::Nil => types::I8, // Nil uses I8 as placeholder
+        NativeType::Optional(_) => types::I64, // Optionals are boxed
+        NativeType::Array(_) => pointer_type,
     }
 }
 

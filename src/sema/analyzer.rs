@@ -2700,6 +2700,7 @@ impl Analyzer {
                             is_closure: false,
                         },
                         is_builtin: true,
+                        external_info: None,
                     };
                     self.method_resolutions.insert(expr.id, resolved);
                     return Ok(return_type);
@@ -2733,6 +2734,7 @@ impl Analyzer {
                             trait_name: impl_.trait_name,
                             func_type: func_type.clone(),
                             is_builtin: impl_.is_builtin,
+                            external_info: impl_.external_info.clone(),
                         },
                     );
 
@@ -3451,6 +3453,7 @@ impl Analyzer {
                     is_closure: false,
                 },
                 is_builtin: true,
+                external_info: None,
             };
             self.method_resolutions
                 .insert(call_node_id, resolved.clone());
@@ -3481,6 +3484,7 @@ impl Analyzer {
                 trait_name: impl_.trait_name,
                 func_type: impl_.func_type.clone(),
                 is_builtin: impl_.is_builtin,
+                external_info: impl_.external_info.clone(),
             };
             self.method_resolutions
                 .insert(call_node_id, resolved.clone());

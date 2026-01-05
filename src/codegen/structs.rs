@@ -249,12 +249,28 @@ impl Cg<'_, '_, '_> {
                 ResolvedMethod::Implemented {
                     func_type,
                     is_builtin,
+                    external_info,
                     ..
                 } => {
                     if *is_builtin {
                         // Built-in methods should have been handled above
                         return Err(format!("Unhandled builtin method: {}", method_name_str));
                     }
+
+                    // Check if this is an external native method
+                    if let Some(ext_info) = external_info {
+                        // Compile the receiver and arguments
+                        let mut args = vec![obj.value];
+                        for arg in &mc.args {
+                            let compiled = self.expr(arg)?;
+                            args.push(compiled.value);
+                        }
+
+                        // Call the external native function
+                        let return_type = (*func_type.return_type).clone();
+                        return self.call_external(ext_info, &args, &return_type);
+                    }
+
                     // Implement block method: use TypeName::methodName
                     let type_id = TypeId::from_type(&obj.vole_type)
                         .ok_or_else(|| format!("Cannot get TypeId for {:?}", obj.vole_type))?;

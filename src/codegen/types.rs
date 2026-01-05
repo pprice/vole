@@ -9,6 +9,7 @@ use cranelift_module::FuncId;
 use std::collections::HashMap;
 
 use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
+use crate::runtime::NativeRegistry;
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::resolution::MethodResolutions;
 use crate::sema::{ErrorTypeInfo, FunctionType, Type};
@@ -88,6 +89,8 @@ pub(crate) struct CompileCtx<'a> {
     pub current_function_return_type: Option<Type>,
     /// Error type definitions from semantic analysis
     pub error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
+    /// Registry of native functions for external method calls
+    pub native_registry: &'a NativeRegistry,
 }
 
 /// Resolve a type expression to a Vole Type (uses CompileCtx for full context)

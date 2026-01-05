@@ -5,11 +5,13 @@
 
 use std::collections::HashMap;
 
-use cranelift::prelude::{FunctionBuilder, InstBuilder, Value, Variable, types};
+use cranelift::prelude::{AbiParam, FunctionBuilder, InstBuilder, Value, Variable, types};
 use cranelift_module::{FuncId, Module};
 
 use crate::frontend::Symbol;
+use crate::runtime::native_registry::NativeType;
 use crate::sema::Type;
+use crate::sema::implement_registry::ExternalMethodInfo;
 
 use super::lambda::CaptureBinding;
 use super::types::{CompileCtx, CompiledValue, type_to_cranelift};
@@ -261,5 +263,92 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Extend a boolean condition to I32 for use with brif
     pub fn cond_to_i32(&mut self, cond: Value) -> Value {
         self.builder.ins().uextend(types::I32, cond)
+    }
+
+    // ========== External native function calls ==========
+
+    /// Call an external native function from the NativeRegistry.
+    /// Returns CompiledValue with the result, or error if function not found.
+    pub fn call_external(
+        &mut self,
+        external_info: &ExternalMethodInfo,
+        args: &[Value],
+        return_type: &Type,
+    ) -> Result<CompiledValue, String> {
+        // Look up the native function in the registry
+        let native_func = self
+            .ctx
+            .native_registry
+            .lookup(&external_info.module_path, &external_info.native_name)
+            .ok_or_else(|| {
+                format!(
+                    "Native function {}::{} not found in registry",
+                    external_info.module_path, external_info.native_name
+                )
+            })?;
+
+        // Build the Cranelift signature from NativeSignature
+        let mut sig = self.ctx.module.make_signature();
+        for param_type in &native_func.signature.params {
+            sig.params.push(AbiParam::new(native_type_to_cranelift(
+                param_type,
+                self.ctx.pointer_type,
+            )));
+        }
+        if native_func.signature.return_type != NativeType::Nil {
+            sig.returns.push(AbiParam::new(native_type_to_cranelift(
+                &native_func.signature.return_type,
+                self.ctx.pointer_type,
+            )));
+        }
+
+        // Import the signature and emit an indirect call
+        let sig_ref = self.builder.import_signature(sig);
+        let func_ptr = native_func.ptr;
+
+        // Load the function pointer as a constant
+        let func_ptr_val = self
+            .builder
+            .ins()
+            .iconst(self.ctx.pointer_type, func_ptr as i64);
+
+        // Emit the indirect call
+        let call_inst = self
+            .builder
+            .ins()
+            .call_indirect(sig_ref, func_ptr_val, args);
+        let results = self.builder.inst_results(call_inst);
+
+        if results.is_empty() {
+            Ok(self.void_value())
+        } else {
+            Ok(CompiledValue {
+                value: results[0],
+                ty: type_to_cranelift(return_type, self.ctx.pointer_type),
+                vole_type: return_type.clone(),
+            })
+        }
+    }
+}
+
+/// Convert NativeType to Cranelift type
+fn native_type_to_cranelift(nt: &NativeType, pointer_type: types::Type) -> types::Type {
+    match nt {
+        NativeType::I8 => types::I8,
+        NativeType::I16 => types::I16,
+        NativeType::I32 => types::I32,
+        NativeType::I64 => types::I64,
+        NativeType::I128 => types::I128,
+        NativeType::U8 => types::I8,
+        NativeType::U16 => types::I16,
+        NativeType::U32 => types::I32,
+        NativeType::U64 => types::I64,
+        NativeType::F32 => types::F32,
+        NativeType::F64 => types::F64,
+        NativeType::Bool => types::I8,
+        NativeType::String => pointer_type,
+        NativeType::Nil => types::I8, // Nil uses I8 as placeholder
+        NativeType::Optional(_) => types::I64, // Optionals are boxed
+        NativeType::Array(_) => pointer_type,
     }
 }

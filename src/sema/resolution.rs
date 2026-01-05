@@ -1,6 +1,7 @@
 // src/sema/resolution.rs
 
 use crate::frontend::{NodeId, Symbol};
+use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::types::FunctionType;
 use std::collections::HashMap;
 
@@ -15,6 +16,7 @@ pub enum ResolvedMethod {
         trait_name: Option<Symbol>,
         func_type: FunctionType,
         is_builtin: bool,
+        external_info: Option<ExternalMethodInfo>,
     },
 
     /// Functional interface - call the underlying lambda
@@ -97,6 +99,7 @@ mod tests {
             trait_name: None,
             func_type: ft,
             is_builtin: true,
+            external_info: None,
         };
         assert!(implemented.is_builtin());
     }
