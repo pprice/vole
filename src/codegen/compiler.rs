@@ -15,8 +15,7 @@ use super::calls::{compile_string_literal, value_to_string};
 use super::lambda::{CaptureBinding, compile_lambda};
 use super::stmt::{compile_block, construct_union};
 use super::structs::{
-    convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type,
-    get_method_return_type, get_type_name_symbol,
+    convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type, get_type_name_symbol,
 };
 use super::types::{
     CompileCtx, TypeMetadata, convert_to_type, cranelift_to_vole_type, resolve_type_expr,
@@ -28,7 +27,8 @@ use crate::frontend::{
     Interner, LetStmt, NodeId, Pattern, Program, RecordDecl, StringPart, Symbol, TestCase,
     TestsDecl, TypeExpr, UnaryOp,
 };
-use crate::sema::resolution::MethodResolutions;
+use crate::sema::implement_registry::TypeId;
+use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::{ClassType, FunctionType, RecordType, StructField, Type};
 
 /// Metadata about a compiled test
@@ -276,6 +276,26 @@ impl<'a> Compiler<'a> {
         self.jit.create_signature(&params, ret)
     }
 
+    /// Create a method signature for implement blocks (self type can be primitive or pointer)
+    fn create_implement_method_signature(&self, method: &FuncDecl, self_type: &Type) -> Signature {
+        // For implement blocks, `self` type depends on the target type
+        // Primitives use their actual type, classes/records use pointer
+        let self_cranelift_type = type_to_cranelift(self_type, self.pointer_type);
+        let mut params = vec![self_cranelift_type];
+        for param in &method.params {
+            params.push(type_to_cranelift(
+                &resolve_type_expr(&param.ty, &self.type_aliases),
+                self.pointer_type,
+            ));
+        }
+
+        let ret = method.return_type.as_ref().map(|t| {
+            type_to_cranelift(&resolve_type_expr(t, &self.type_aliases), self.pointer_type)
+        });
+
+        self.jit.create_signature(&params, ret)
+    }
+
     /// Register a class type and declare its methods
     fn register_class(&mut self, class: &ClassDecl) {
         let type_id = self.next_type_id;
@@ -424,7 +444,7 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    /// Get the type name symbol from a TypeExpr (for implement blocks)
+    /// Get the type name symbol from a TypeExpr (for implement blocks on records/classes)
     fn get_type_name_symbol(&self, ty: &TypeExpr) -> Option<Symbol> {
         match ty {
             TypeExpr::Named(sym) => Some(*sym),
@@ -432,54 +452,207 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// Get the type name string from a TypeExpr (works for primitives and named types)
+    fn get_type_name_from_expr(&self, ty: &TypeExpr) -> Option<String> {
+        match ty {
+            TypeExpr::Primitive(p) => Some(Type::from_primitive(*p).name().to_string()),
+            TypeExpr::Named(sym) => Some(self.interner.resolve(*sym).to_string()),
+            _ => None,
+        }
+    }
+
     /// Register implement block methods (first pass)
     fn register_implement_block(&mut self, impl_block: &ImplementBlock) {
-        let Some(type_sym) = self.get_type_name_symbol(&impl_block.target_type) else {
-            return; // Can only implement for named types
+        // Get type name string (works for primitives and named types)
+        let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
+            return; // Unsupported type for implement block
         };
 
-        // Get existing type metadata (must exist from record/class registration)
-        let Some(metadata) = self.type_metadata.get_mut(&type_sym) else {
-            return; // Type not found
+        // Get the Vole type for the target (used for creating signature)
+        // For named types (records/classes), look up in type_metadata since they're not in type_aliases
+        let self_vole_type = match &impl_block.target_type {
+            TypeExpr::Primitive(p) => Type::from_primitive(*p),
+            TypeExpr::Named(sym) => self
+                .type_metadata
+                .get(sym)
+                .map(|m| m.vole_type.clone())
+                .unwrap_or(Type::Error),
+            _ => resolve_type_expr(&impl_block.target_type, &self.type_aliases),
         };
 
-        // Add method return types to metadata
-        for method in &impl_block.methods {
-            let return_type = method
-                .return_type
-                .as_ref()
-                .map(|t| resolve_type_expr(t, &self.type_aliases))
-                .unwrap_or(Type::Void);
-            metadata
-                .method_return_types
-                .insert(method.name, return_type);
+        // For named types (records/classes), add method return types to metadata
+        if let Some(type_sym) = self.get_type_name_symbol(&impl_block.target_type)
+            && let Some(metadata) = self.type_metadata.get_mut(&type_sym)
+        {
+            for method in &impl_block.methods {
+                let return_type = method
+                    .return_type
+                    .as_ref()
+                    .map(|t| resolve_type_expr(t, &self.type_aliases))
+                    .unwrap_or(Type::Void);
+                metadata
+                    .method_return_types
+                    .insert(method.name, return_type);
+            }
         }
 
-        // Declare methods as functions: TypeName_methodName
-        let type_name = self.interner.resolve(type_sym);
+        // Declare methods as functions: TypeName::methodName (implement block convention)
         for method in &impl_block.methods {
             let method_name_str = self.interner.resolve(method.name);
-            let full_name = format!("{}_{}", type_name, method_name_str);
-            let sig = self.create_method_signature(method);
+            let full_name = format!("{}::{}", type_name, method_name_str);
+            let sig = self.create_implement_method_signature(method, &self_vole_type);
             self.jit.declare_function(&full_name, &sig);
         }
     }
 
     /// Compile implement block methods (second pass)
     fn compile_implement_block(&mut self, impl_block: &ImplementBlock) -> Result<(), String> {
-        let Some(type_sym) = self.get_type_name_symbol(&impl_block.target_type) else {
-            return Ok(()); // Can only implement for named types
+        // Get type name string (works for primitives and named types)
+        let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
+            return Ok(()); // Unsupported type for implement block
         };
 
-        let metadata = self
-            .type_metadata
-            .get(&type_sym)
-            .cloned()
-            .ok_or("Internal error: type not registered for implement block")?;
+        // Get the Vole type for `self` binding
+        // For named types (records/classes), look up in type_metadata since they're not in type_aliases
+        let self_vole_type = match &impl_block.target_type {
+            TypeExpr::Primitive(p) => Type::from_primitive(*p),
+            TypeExpr::Named(sym) => self
+                .type_metadata
+                .get(sym)
+                .map(|m| m.vole_type.clone())
+                .unwrap_or(Type::Error),
+            _ => resolve_type_expr(&impl_block.target_type, &self.type_aliases),
+        };
 
         for method in &impl_block.methods {
-            self.compile_method(method, type_sym, &metadata)?;
+            self.compile_implement_method(method, &type_name, &self_vole_type)?;
         }
+        Ok(())
+    }
+
+    /// Compile a method from an implement block
+    fn compile_implement_method(
+        &mut self,
+        method: &FuncDecl,
+        type_name: &str,
+        self_vole_type: &Type,
+    ) -> Result<(), String> {
+        let method_name_str = self.interner.resolve(method.name);
+        let full_name = format!("{}::{}", type_name, method_name_str);
+
+        let func_id = *self
+            .jit
+            .func_ids
+            .get(&full_name)
+            .ok_or_else(|| format!("Internal error: method {} not declared", full_name))?;
+
+        // Create method signature with correct self type (primitives use their type, not pointer)
+        let sig = self.create_implement_method_signature(method, self_vole_type);
+        self.jit.ctx.func.signature = sig;
+
+        // Get the Cranelift type for self
+        let self_cranelift_type = type_to_cranelift(self_vole_type, self.pointer_type);
+
+        // Collect param types (not including self)
+        let param_types: Vec<types::Type> = method
+            .params
+            .iter()
+            .map(|p| {
+                type_to_cranelift(
+                    &resolve_type_expr(&p.ty, &self.type_aliases),
+                    self.pointer_type,
+                )
+            })
+            .collect();
+        let param_vole_types: Vec<Type> = method
+            .params
+            .iter()
+            .map(|p| resolve_type_expr(&p.ty, &self.type_aliases))
+            .collect();
+        let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+
+        // Get source file pointer before borrowing ctx.func
+        let source_file_ptr = self.source_file_ptr();
+
+        // Clone type for the closure
+        let self_type = self_vole_type.clone();
+
+        // Create function builder
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+            let entry_block = builder.create_block();
+            builder.append_block_params_for_function_params(entry_block);
+            builder.switch_to_block(entry_block);
+
+            // Build variables map
+            let mut variables = HashMap::new();
+
+            // Get entry block params (self + user params)
+            let params = builder.block_params(entry_block).to_vec();
+
+            // Bind `self` as the first parameter (using correct type for primitives)
+            let self_sym = self
+                .interner
+                .lookup("self")
+                .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
+            let self_var = builder.declare_var(self_cranelift_type);
+            builder.def_var(self_var, params[0]);
+            variables.insert(self_sym, (self_var, self_type));
+
+            // Bind remaining parameters
+            for (((name, ty), vole_ty), val) in param_names
+                .iter()
+                .zip(param_types.iter())
+                .zip(param_vole_types.iter())
+                .zip(params[1..].iter())
+            {
+                let var = builder.declare_var(*ty);
+                builder.def_var(var, *val);
+                variables.insert(*name, (var, vole_ty.clone()));
+            }
+
+            // Compile method body
+            let mut cf_ctx = ControlFlowCtx::new();
+            let mut ctx = CompileCtx {
+                interner: self.interner,
+                pointer_type: self.pointer_type,
+                module: &mut self.jit.module,
+                func_ids: &mut self.jit.func_ids,
+                source_file_ptr,
+                globals: &self.globals,
+                lambda_counter: &mut self.lambda_counter,
+                type_aliases: &self.type_aliases,
+                type_metadata: &self.type_metadata,
+                expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
+            };
+            let terminated = compile_block(
+                &mut builder,
+                &method.body,
+                &mut variables,
+                &mut cf_ctx,
+                &mut ctx,
+            )?;
+
+            if !terminated {
+                // Return void if no explicit return
+                builder.ins().return_(&[]);
+            }
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        // Define the function
+        self.jit
+            .module
+            .define_function(func_id, &mut self.jit.ctx)
+            .map_err(|e| e.to_string())?;
+        self.jit.module.clear_context(&mut self.jit.ctx);
+
         Ok(())
     }
 
@@ -1836,7 +2009,7 @@ pub(super) fn compile_expr(
 
         ExprKind::FieldAccess(fa) => compile_field_access(builder, fa, variables, ctx),
 
-        ExprKind::MethodCall(mc) => compile_method_call(builder, mc, variables, ctx),
+        ExprKind::MethodCall(mc) => compile_method_call(builder, mc, expr.id, variables, ctx),
     }
 }
 
@@ -3061,6 +3234,7 @@ fn compile_index_assign(
 fn compile_method_call(
     builder: &mut FunctionBuilder,
     mc: &MethodCallExpr,
+    expr_id: NodeId,
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
@@ -3072,12 +3246,41 @@ fn compile_method_call(
         return Ok(result);
     }
 
-    // Get the type name from the object's vole_type
-    let type_name = get_type_name_symbol(&obj.vole_type)?;
+    // Look up method resolution to determine naming convention and return type
+    let resolution = ctx
+        .method_resolutions
+        .get(expr_id)
+        .ok_or_else(|| format!("No resolution for method call: {}", method_name_str))?;
 
-    // Build the method function name: TypeName_methodName
-    let type_name_str = ctx.interner.resolve(type_name);
-    let full_name = format!("{}_{}", type_name_str, method_name_str);
+    // Determine the method function name based on resolution type
+    let (full_name, return_type) = match resolution {
+        ResolvedMethod::Direct { func_type } => {
+            // Direct method on class/record: use TypeName_methodName
+            let type_name = get_type_name_symbol(&obj.vole_type)?;
+            let type_name_str = ctx.interner.resolve(type_name);
+            let name = format!("{}_{}", type_name_str, method_name_str);
+            (name, (*func_type.return_type).clone())
+        }
+        ResolvedMethod::Implemented {
+            func_type,
+            is_builtin,
+            ..
+        } => {
+            if *is_builtin {
+                // Built-in methods should have been handled above
+                return Err(format!("Unhandled builtin method: {}", method_name_str));
+            }
+            // Implement block method: use TypeName::methodName
+            let type_id = TypeId::from_type(&obj.vole_type)
+                .ok_or_else(|| format!("Cannot get TypeId for {:?}", obj.vole_type))?;
+            let type_name_str = type_id.type_name(ctx.interner);
+            let name = format!("{}::{}", type_name_str, method_name_str);
+            (name, (*func_type.return_type).clone())
+        }
+        ResolvedMethod::FunctionalInterface { .. } => {
+            return Err("FunctionalInterface method calls not yet supported".to_string());
+        }
+    };
 
     let method_func_id = ctx
         .func_ids
@@ -3096,9 +3299,6 @@ fn compile_method_call(
 
     let call = builder.ins().call(method_func_ref, &args);
     let results = builder.inst_results(call);
-
-    // Get return type from method signature
-    let return_type = get_method_return_type(&obj.vole_type, mc.method, ctx)?;
 
     if results.is_empty() {
         Ok(CompiledValue {

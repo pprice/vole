@@ -6,9 +6,11 @@
 use cranelift::prelude::*;
 
 use super::context::Cg;
-use super::types::{CompileCtx, CompiledValue};
-use crate::frontend::{FieldAccessExpr, MethodCallExpr, StructLiteralExpr, Symbol};
+use super::types::{CompileCtx, CompiledValue, type_to_cranelift};
+use crate::frontend::{FieldAccessExpr, MethodCallExpr, NodeId, StructLiteralExpr, Symbol};
 use crate::sema::Type;
+use crate::sema::implement_registry::TypeId;
+use crate::sema::resolution::ResolvedMethod;
 
 /// Get field slot and type from a class/record type
 pub(crate) fn get_field_slot_and_type(
@@ -57,26 +59,6 @@ pub(crate) fn get_type_name_symbol(vole_type: &Type) -> Result<Symbol, String> {
             vole_type
         )),
     }
-}
-
-/// Get the return type of a method
-pub(crate) fn get_method_return_type(
-    vole_type: &Type,
-    method: Symbol,
-    ctx: &CompileCtx,
-) -> Result<Type, String> {
-    let type_name = get_type_name_symbol(vole_type)?;
-    let metadata = ctx
-        .type_metadata
-        .get(&type_name)
-        .ok_or_else(|| "Type metadata not found".to_string())?;
-
-    // Look up the method return type from metadata
-    metadata
-        .method_return_types
-        .get(&method)
-        .cloned()
-        .ok_or_else(|| format!("Method {} not found in type", ctx.interner.resolve(method)))
 }
 
 /// Convert a raw i64 field value to the appropriate Cranelift type
@@ -236,7 +218,11 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a method call: point.distance()
-    pub fn method_call(&mut self, mc: &MethodCallExpr) -> Result<CompiledValue, String> {
+    pub fn method_call(
+        &mut self,
+        mc: &MethodCallExpr,
+        expr_id: NodeId,
+    ) -> Result<CompiledValue, String> {
         let obj = self.expr(&mc.object)?;
         let method_name_str = self.ctx.interner.resolve(mc.method);
 
@@ -245,9 +231,42 @@ impl Cg<'_, '_, '_> {
             return Ok(result);
         }
 
-        let type_name = get_type_name_symbol(&obj.vole_type)?;
-        let type_name_str = self.ctx.interner.resolve(type_name);
-        let full_name = format!("{}_{}", type_name_str, method_name_str);
+        // Look up method resolution to determine naming convention and return type
+        let resolution = self
+            .ctx
+            .method_resolutions
+            .get(expr_id)
+            .ok_or_else(|| format!("No resolution for method call: {}", method_name_str))?;
+
+        // Determine the method function name based on resolution type
+        let (full_name, return_type) = match resolution {
+            ResolvedMethod::Direct { func_type } => {
+                // Direct method on class/record: use TypeName_methodName
+                let type_name = get_type_name_symbol(&obj.vole_type)?;
+                let type_name_str = self.ctx.interner.resolve(type_name);
+                let name = format!("{}_{}", type_name_str, method_name_str);
+                (name, (*func_type.return_type).clone())
+            }
+            ResolvedMethod::Implemented {
+                func_type,
+                is_builtin,
+                ..
+            } => {
+                if *is_builtin {
+                    // Built-in methods should have been handled above
+                    return Err(format!("Unhandled builtin method: {}", method_name_str));
+                }
+                // Implement block method: use TypeName::methodName
+                let type_id = TypeId::from_type(&obj.vole_type)
+                    .ok_or_else(|| format!("Cannot get TypeId for {:?}", obj.vole_type))?;
+                let type_name_str = type_id.type_name(self.ctx.interner);
+                let name = format!("{}::{}", type_name_str, method_name_str);
+                (name, (*func_type.return_type).clone())
+            }
+            ResolvedMethod::FunctionalInterface { .. } => {
+                return Err("FunctionalInterface method calls not yet supported".to_string());
+            }
+        };
 
         let method_func_ref = self.func_ref(&full_name)?;
 
@@ -260,12 +279,14 @@ impl Cg<'_, '_, '_> {
         let call = self.builder.ins().call(method_func_ref, &args);
         let results = self.builder.inst_results(call);
 
-        let return_type = get_method_return_type(&obj.vole_type, mc.method, self.ctx)?;
-
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            Ok(self.typed_value(results[0], return_type))
+            Ok(CompiledValue {
+                value: results[0],
+                ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
+                vole_type: return_type,
+            })
         }
     }
 
