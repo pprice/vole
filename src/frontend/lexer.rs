@@ -384,6 +384,7 @@ impl<'src> Lexer<'src> {
             "Self" => Some(TokenType::KwSelfType),
             "val" => Some(TokenType::KwVal),
             "error" => Some(TokenType::KwError),
+            "success" => Some(TokenType::KwSuccess),
             "fallible" => Some(TokenType::KwFallible),
             "raise" => Some(TokenType::KwRaise),
             "try" => Some(TokenType::KwTry),
