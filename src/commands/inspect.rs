@@ -101,7 +101,7 @@ pub fn inspect_files(
                     had_error = true;
                     continue;
                 }
-                let (type_aliases, expr_types, method_resolutions) =
+                let (type_aliases, expr_types, method_resolutions, interface_registry) =
                     analyzer.into_analysis_results();
 
                 // Generate IR
@@ -112,6 +112,7 @@ pub fn inspect_files(
                     type_aliases,
                     expr_types,
                     method_resolutions,
+                    interface_registry,
                 );
                 let include_tests = !no_tests;
 

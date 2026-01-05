@@ -146,15 +146,21 @@ impl Analyzer {
         self.expr_types
     }
 
-    /// Take ownership of type aliases, expression types, and method resolutions (consuming self)
+    /// Take ownership of type aliases, expression types, method resolutions, and interface registry (consuming self)
     pub fn into_analysis_results(
         self,
     ) -> (
         HashMap<Symbol, Type>,
         HashMap<NodeId, Type>,
         MethodResolutions,
+        InterfaceRegistry,
     ) {
-        (self.type_aliases, self.expr_types, self.method_resolutions)
+        (
+            self.type_aliases,
+            self.expr_types,
+            self.method_resolutions,
+            self.interface_registry,
+        )
     }
 
     /// Record the resolved type for an expression
@@ -1346,6 +1352,24 @@ impl Analyzer {
                         return Ok(*func_type.return_type);
                     }
 
+                    // Check if it's a variable with a functional interface type
+                    if let Some(Type::Interface(iface)) = self.get_variable_type(*sym)
+                        && let Some(func_type) = self.get_functional_interface_type(iface.name)
+                    {
+                        // Calling a functional interface - treat like a closure call
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                        }
+                        self.check_call_args(
+                            &call.args,
+                            &func_type.params,
+                            expr.span,
+                            true, // with_inference
+                            interner,
+                        )?;
+                        return Ok(*func_type.return_type);
+                    }
+
                     // Check if it's a known builtin function
                     let name = interner.resolve(*sym);
                     if name == "println"
@@ -2155,6 +2179,82 @@ impl Analyzer {
                     }
 
                     return Ok(*func_type.return_type);
+                }
+
+                // Check if object is a functional interface and method matches its single method
+                if let Type::Interface(iface) = &object_type {
+                    // Check if interface is functional and method matches its abstract method
+                    if let Some(iface_def) = self.interface_registry.get(iface.name) {
+                        // For functional interfaces, check if the method matches
+                        if let Some(method_def) = self.interface_registry.is_functional(iface.name)
+                            && method_def.name == method_call.method
+                        {
+                            let func_type = FunctionType {
+                                params: method_def.params.clone(),
+                                return_type: Box::new(method_def.return_type.clone()),
+                                is_closure: true,
+                            };
+
+                            // Mark side effects if inside lambda
+                            if self.in_lambda() {
+                                self.mark_lambda_has_side_effects();
+                            }
+
+                            // Check argument count
+                            if method_call.args.len() != func_type.params.len() {
+                                self.add_error(
+                                    SemanticError::WrongArgumentCount {
+                                        expected: func_type.params.len(),
+                                        found: method_call.args.len(),
+                                        span: expr.span.into(),
+                                    },
+                                    expr.span,
+                                );
+                            }
+
+                            // Check argument types
+                            for (arg, param_ty) in
+                                method_call.args.iter().zip(func_type.params.iter())
+                            {
+                                let arg_ty =
+                                    self.check_expr_expecting(arg, Some(param_ty), interner)?;
+                                if !self.types_compatible(&arg_ty, param_ty) {
+                                    self.add_error(
+                                        SemanticError::TypeMismatch {
+                                            expected: param_ty.name().to_string(),
+                                            found: arg_ty.name().to_string(),
+                                            span: arg.span.into(),
+                                        },
+                                        arg.span,
+                                    );
+                                }
+                            }
+
+                            // Record resolution for functional interface method
+                            self.method_resolutions.insert(
+                                expr.id,
+                                ResolvedMethod::FunctionalInterface {
+                                    func_type: func_type.clone(),
+                                },
+                            );
+
+                            return Ok(*func_type.return_type);
+                        }
+
+                        // For non-functional interfaces, check if method is defined
+                        for method_def in &iface_def.methods {
+                            if method_def.name == method_call.method {
+                                // TODO: Support method calls on non-functional interfaces
+                                // For now, we just allow the call
+                                let func_type = FunctionType {
+                                    params: method_def.params.clone(),
+                                    return_type: Box::new(method_def.return_type.clone()),
+                                    is_closure: false,
+                                };
+                                return Ok(*func_type.return_type);
+                            }
+                        }
+                    }
                 }
 
                 // Next, check direct methods for class/record types

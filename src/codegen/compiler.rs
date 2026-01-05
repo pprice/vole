@@ -19,7 +19,7 @@ use super::structs::{
 };
 use super::types::{
     CompileCtx, TypeMetadata, convert_to_type, cranelift_to_vole_type, resolve_type_expr,
-    type_to_cranelift,
+    resolve_type_expr_full, type_to_cranelift,
 };
 use crate::codegen::{CompiledValue, JitContext};
 use crate::frontend::{
@@ -28,6 +28,7 @@ use crate::frontend::{
     TestsDecl, TypeExpr, UnaryOp,
 };
 use crate::sema::implement_registry::TypeId;
+use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::{ClassType, FunctionType, RecordType, StructField, Type};
 
@@ -100,10 +101,11 @@ pub struct Compiler<'a> {
     /// Expression types from semantic analysis (includes narrowed types)
     expr_types: HashMap<NodeId, Type>,
     /// Resolved method calls from semantic analysis
-    #[allow(dead_code)] // Will be used in future refactoring
     method_resolutions: MethodResolutions,
     /// Return types of compiled functions
     func_return_types: HashMap<String, Type>,
+    /// Interface definitions registry
+    interface_registry: InterfaceRegistry,
 }
 
 impl<'a> Compiler<'a> {
@@ -113,6 +115,7 @@ impl<'a> Compiler<'a> {
         type_aliases: HashMap<Symbol, Type>,
         expr_types: HashMap<NodeId, Type>,
         method_resolutions: MethodResolutions,
+        interface_registry: InterfaceRegistry,
     ) -> Self {
         let pointer_type = jit.pointer_type();
         Self {
@@ -128,6 +131,7 @@ impl<'a> Compiler<'a> {
             expr_types,
             method_resolutions,
             func_return_types: HashMap::new(),
+            interface_registry,
         }
     }
 
@@ -175,7 +179,9 @@ impl<'a> Compiler<'a> {
                     let return_type = func
                         .return_type
                         .as_ref()
-                        .map(|t| resolve_type_expr(t, &self.type_aliases))
+                        .map(|t| {
+                            resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry)
+                        })
                         .unwrap_or(Type::Void);
                     self.func_return_types.insert(name.to_string(), return_type);
                 }
@@ -246,13 +252,16 @@ impl<'a> Compiler<'a> {
         let mut params = Vec::new();
         for param in &func.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr(&param.ty, &self.type_aliases),
+                &resolve_type_expr_full(&param.ty, &self.type_aliases, &self.interface_registry),
                 self.pointer_type,
             ));
         }
 
         let ret = func.return_type.as_ref().map(|t| {
-            type_to_cranelift(&resolve_type_expr(t, &self.type_aliases), self.pointer_type)
+            type_to_cranelift(
+                &resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry),
+                self.pointer_type,
+            )
         });
 
         self.jit.create_signature(&params, ret)
@@ -264,13 +273,16 @@ impl<'a> Compiler<'a> {
         let mut params = vec![self.pointer_type];
         for param in &method.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr(&param.ty, &self.type_aliases),
+                &resolve_type_expr_full(&param.ty, &self.type_aliases, &self.interface_registry),
                 self.pointer_type,
             ));
         }
 
         let ret = method.return_type.as_ref().map(|t| {
-            type_to_cranelift(&resolve_type_expr(t, &self.type_aliases), self.pointer_type)
+            type_to_cranelift(
+                &resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry),
+                self.pointer_type,
+            )
         });
 
         self.jit.create_signature(&params, ret)
@@ -284,13 +296,16 @@ impl<'a> Compiler<'a> {
         let mut params = vec![self_cranelift_type];
         for param in &method.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr(&param.ty, &self.type_aliases),
+                &resolve_type_expr_full(&param.ty, &self.type_aliases, &self.interface_registry),
                 self.pointer_type,
             ));
         }
 
         let ret = method.return_type.as_ref().map(|t| {
-            type_to_cranelift(&resolve_type_expr(t, &self.type_aliases), self.pointer_type)
+            type_to_cranelift(
+                &resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry),
+                self.pointer_type,
+            )
         });
 
         self.jit.create_signature(&params, ret)
@@ -308,7 +323,7 @@ impl<'a> Compiler<'a> {
             field_slots.insert(field.name, i);
             struct_fields.push(StructField {
                 name: field.name,
-                ty: resolve_type_expr(&field.ty, &self.type_aliases),
+                ty: resolve_type_expr_full(&field.ty, &self.type_aliases, &self.interface_registry),
                 slot: i,
             });
         }
@@ -325,7 +340,7 @@ impl<'a> Compiler<'a> {
             let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| resolve_type_expr(t, &self.type_aliases))
+                .map(|t| resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry))
                 .unwrap_or(Type::Void);
             method_return_types.insert(method.name, return_type);
         }
@@ -363,7 +378,7 @@ impl<'a> Compiler<'a> {
             field_slots.insert(field.name, i);
             struct_fields.push(StructField {
                 name: field.name,
-                ty: resolve_type_expr(&field.ty, &self.type_aliases),
+                ty: resolve_type_expr_full(&field.ty, &self.type_aliases, &self.interface_registry),
                 slot: i,
             });
         }
@@ -380,7 +395,7 @@ impl<'a> Compiler<'a> {
             let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| resolve_type_expr(t, &self.type_aliases))
+                .map(|t| resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry))
                 .unwrap_or(Type::Void);
             method_return_types.insert(method.name, return_type);
         }
@@ -477,7 +492,11 @@ impl<'a> Compiler<'a> {
                 .get(sym)
                 .map(|m| m.vole_type.clone())
                 .unwrap_or(Type::Error),
-            _ => resolve_type_expr(&impl_block.target_type, &self.type_aliases),
+            _ => resolve_type_expr_full(
+                &impl_block.target_type,
+                &self.type_aliases,
+                &self.interface_registry,
+            ),
         };
 
         // For named types (records/classes), add method return types to metadata
@@ -488,7 +507,9 @@ impl<'a> Compiler<'a> {
                 let return_type = method
                     .return_type
                     .as_ref()
-                    .map(|t| resolve_type_expr(t, &self.type_aliases))
+                    .map(|t| {
+                        resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry)
+                    })
                     .unwrap_or(Type::Void);
                 metadata
                     .method_return_types
@@ -521,7 +542,11 @@ impl<'a> Compiler<'a> {
                 .get(sym)
                 .map(|m| m.vole_type.clone())
                 .unwrap_or(Type::Error),
-            _ => resolve_type_expr(&impl_block.target_type, &self.type_aliases),
+            _ => resolve_type_expr_full(
+                &impl_block.target_type,
+                &self.type_aliases,
+                &self.interface_registry,
+            ),
         };
 
         for method in &impl_block.methods {
@@ -559,7 +584,7 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr(&p.ty, &self.type_aliases),
+                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
                     self.pointer_type,
                 )
             })
@@ -567,7 +592,7 @@ impl<'a> Compiler<'a> {
         let param_vole_types: Vec<Type> = method
             .params
             .iter()
-            .map(|p| resolve_type_expr(&p.ty, &self.type_aliases))
+            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
@@ -628,6 +653,7 @@ impl<'a> Compiler<'a> {
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -683,7 +709,7 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr(&p.ty, &self.type_aliases),
+                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
                     self.pointer_type,
                 )
             })
@@ -691,7 +717,7 @@ impl<'a> Compiler<'a> {
         let param_vole_types: Vec<Type> = method
             .params
             .iter()
-            .map(|p| resolve_type_expr(&p.ty, &self.type_aliases))
+            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
@@ -753,6 +779,7 @@ impl<'a> Compiler<'a> {
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -792,7 +819,7 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr(&p.ty, &self.type_aliases),
+                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
                     self.pointer_type,
                 )
             })
@@ -800,7 +827,7 @@ impl<'a> Compiler<'a> {
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| resolve_type_expr(&p.ty, &self.type_aliases))
+            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
@@ -847,6 +874,7 @@ impl<'a> Compiler<'a> {
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -915,6 +943,7 @@ impl<'a> Compiler<'a> {
                     expr_types: &self.expr_types,
                     method_resolutions: &self.method_resolutions,
                     func_return_types: &self.func_return_types,
+                    interface_registry: &self.interface_registry,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -973,7 +1002,9 @@ impl<'a> Compiler<'a> {
                     let return_type = func
                         .return_type
                         .as_ref()
-                        .map(|t| resolve_type_expr(t, &self.type_aliases))
+                        .map(|t| {
+                            resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry)
+                        })
                         .unwrap_or(Type::Void);
                     self.func_return_types.insert(name.to_string(), return_type);
                 }
@@ -1027,7 +1058,7 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr(&p.ty, &self.type_aliases),
+                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
                     self.pointer_type,
                 )
             })
@@ -1035,7 +1066,7 @@ impl<'a> Compiler<'a> {
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| resolve_type_expr(&p.ty, &self.type_aliases))
+            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
@@ -1083,6 +1114,7 @@ impl<'a> Compiler<'a> {
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1144,6 +1176,7 @@ impl<'a> Compiler<'a> {
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1885,7 +1918,7 @@ pub(super) fn compile_expr(
 
         ExprKind::Is(is_expr) => {
             let value = compile_expr(builder, &is_expr.value, variables, ctx)?;
-            let tested_type = resolve_type_expr(&is_expr.type_expr, ctx.type_aliases);
+            let tested_type = resolve_type_expr(&is_expr.type_expr, ctx);
 
             // If value is a union, check the tag
             if let Type::Union(variants) = &value.vole_type {
@@ -2584,6 +2617,20 @@ fn compile_call(
         return compile_indirect_call(builder, var, &ft, &call.args, variables, ctx);
     }
 
+    // Check if callee is a variable with interface type (functional interface)
+    if let Some((var, Type::Interface(iface))) = variables.get(&callee_sym) {
+        // Look up the functional interface's function type
+        if let Some(method_def) = ctx.interface_registry.is_functional(iface.name) {
+            let ft = FunctionType {
+                params: method_def.params.clone(),
+                return_type: Box::new(method_def.return_type.clone()),
+                is_closure: true, // Interface variables hold closures
+            };
+            let var = *var;
+            return compile_indirect_call(builder, var, &ft, &call.args, variables, ctx);
+        }
+    }
+
     // Check if callee is a global variable with function type
     if let Some(global) = ctx.globals.iter().find(|g| g.name == callee_sym) {
         // Compile the global's initializer to get the function pointer
@@ -2593,6 +2640,24 @@ fn compile_call(
                 builder,
                 callee_value.value,
                 ft,
+                &call.args,
+                variables,
+                ctx,
+            );
+        }
+        // Check if global is a functional interface
+        if let Type::Interface(iface) = &callee_value.vole_type
+            && let Some(method_def) = ctx.interface_registry.is_functional(iface.name)
+        {
+            let ft = FunctionType {
+                params: method_def.params.clone(),
+                return_type: Box::new(method_def.return_type.clone()),
+                is_closure: true,
+            };
+            return compile_indirect_call_value(
+                builder,
+                callee_value.value,
+                &ft,
                 &call.args,
                 variables,
                 ctx,
@@ -3277,8 +3342,10 @@ fn compile_method_call(
             let name = format!("{}::{}", type_name_str, method_name_str);
             (name, (*func_type.return_type).clone())
         }
-        ResolvedMethod::FunctionalInterface { .. } => {
-            return Err("FunctionalInterface method calls not yet supported".to_string());
+        ResolvedMethod::FunctionalInterface { func_type } => {
+            // For functional interfaces, the object IS the closure pointer
+            // Call it as a closure
+            return compile_closure_call(builder, obj.value, func_type, &mc.args, variables, ctx);
         }
     };
 
@@ -3376,6 +3443,7 @@ mod tests {
                 HashMap::new(),
                 HashMap::new(),
                 MethodResolutions::new(),
+                InterfaceRegistry::new(),
             );
             compiler.compile_program(&program).unwrap();
         }
