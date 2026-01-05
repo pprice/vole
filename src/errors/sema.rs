@@ -183,4 +183,44 @@ pub enum SemanticError {
         #[label("record fields are immutable")]
         span: SourceSpan,
     },
+
+    #[error("unknown interface '{name}'")]
+    #[diagnostic(code(E2050))]
+    UnknownInterface {
+        name: String,
+        #[label("not a known interface")]
+        span: SourceSpan,
+    },
+
+    #[error("cannot implement interface for unknown type '{name}'")]
+    #[diagnostic(code(E2051))]
+    UnknownImplementType {
+        name: String,
+        #[label("not a known type")]
+        span: SourceSpan,
+    },
+
+    #[error("type '{type_name}' does not satisfy interface '{interface_name}': missing method '{method}'")]
+    #[diagnostic(code(E2052))]
+    InterfaceNotSatisfied {
+        type_name: String,
+        interface_name: String,
+        method: String,
+        #[label("declared to implement {interface_name}")]
+        span: SourceSpan,
+    },
+
+    #[error("method '{method}' has wrong signature for interface '{interface_name}'")]
+    #[diagnostic(
+        code(E2053),
+        help("expected {expected}, found {found}")
+    )]
+    InterfaceSignatureMismatch {
+        interface_name: String,
+        method: String,
+        expected: String,
+        found: String,
+        #[label("signature mismatch")]
+        span: SourceSpan,
+    },
 }
