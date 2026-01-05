@@ -70,4 +70,28 @@ pub enum ParserError {
         #[label("expected '=>'")]
         span: SourceSpan,
     },
+
+    #[error("invalid external module path")]
+    #[diagnostic(
+        code(E1020),
+        help("expected format \"provider:module\" (e.g., \"std:string\")")
+    )]
+    InvalidExternalModulePath {
+        #[label("invalid module path")]
+        span: SourceSpan,
+    },
+
+    #[error("expected string literal for module path")]
+    #[diagnostic(code(E1021))]
+    ExpectedModulePath {
+        #[label("expected \"provider:module\"")]
+        span: SourceSpan,
+    },
+
+    #[error("expected 'as' after native function name")]
+    #[diagnostic(code(E1022))]
+    ExpectedAs {
+        #[label("expected 'as'")]
+        span: SourceSpan,
+    },
 }
