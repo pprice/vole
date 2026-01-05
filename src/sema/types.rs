@@ -50,6 +50,10 @@ pub enum Type {
     Record(RecordType),
     /// Interface type
     Interface(InterfaceType),
+    /// Error type (e.g., DivByZero)
+    ErrorType(ErrorTypeInfo),
+    /// Fallible return type: fallible(T, E)
+    Fallible(FallibleType),
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -99,6 +103,20 @@ pub struct InterfaceMethodType {
     pub params: Vec<Type>,
     pub return_type: Box<Type>,
     pub has_default: bool, // True if interface provides default implementation
+}
+
+/// Error type definition (e.g., DivByZero, OutOfRange { value: i32 })
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErrorTypeInfo {
+    pub name: Symbol,
+    pub fields: Vec<StructField>,
+}
+
+/// Fallible type: fallible(T, E)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FallibleType {
+    pub success_type: Box<Type>,
+    pub error_type: Box<Type>, // ErrorType or Union of ErrorTypes
 }
 
 impl PartialEq for FunctionType {
@@ -246,6 +264,8 @@ impl Type {
             Type::Class(_) => "class",
             Type::Record(_) => "record",
             Type::Interface(_) => "interface",
+            Type::ErrorType(_) => "error",
+            Type::Fallible(_) => "fallible",
         }
     }
 
@@ -340,6 +360,12 @@ impl std::fmt::Display for Type {
             Type::Array(elem) => write!(f, "[{}]", elem),
             Type::Class(_) => write!(f, "class"),
             Type::Record(_) => write!(f, "record"),
+            Type::ErrorType(_) => {
+                write!(f, "error")
+            }
+            Type::Fallible(ft) => {
+                write!(f, "fallible({}, {})", ft.success_type, ft.error_type)
+            }
             _ => write!(f, "{}", self.name()),
         }
     }
