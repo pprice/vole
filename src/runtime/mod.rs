@@ -5,6 +5,7 @@ pub mod builtins;
 pub mod closure;
 pub mod instance;
 pub mod native_registry;
+pub mod stdlib;
 pub mod string;
 pub mod value;
 
