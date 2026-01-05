@@ -690,7 +690,7 @@ impl Analyzer {
             // Resolve return type
             let return_type = match &func.return_type {
                 Some(te) => self.resolve_type(te),
-                None => Type::Nil,
+                None => Type::Void,
             };
 
             let func_type = FunctionType {
