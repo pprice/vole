@@ -86,12 +86,25 @@ impl ModuleLoader {
             return Err(LoadError::CircularImport(import_path.to_string()));
         }
 
-        // Mark as loading
+        // Mark as loading - use a scope to ensure cleanup
         self.loading_stack.insert(resolved.clone());
+        let result = self.load_uncached(&resolved);
+        self.loading_stack.remove(&resolved);
 
+        match result {
+            Ok(info) => {
+                self.cache.insert(resolved, info.clone());
+                Ok(info)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Internal: load a module without caching (used by load())
+    fn load_uncached(&self, resolved: &PathBuf) -> Result<ModuleInfo, LoadError> {
         // Read the file
-        let source = std::fs::read_to_string(&resolved)
-            .map_err(|e| LoadError::ReadError(e.to_string()))?;
+        let source = std::fs::read_to_string(resolved)
+            .map_err(|e| LoadError::ReadError(format!("{}: {}", resolved.display(), e)))?;
 
         // Extract module name
         let name = resolved
@@ -100,17 +113,11 @@ impl ModuleLoader {
             .unwrap_or("unknown")
             .to_string();
 
-        let info = ModuleInfo {
+        Ok(ModuleInfo {
             path: resolved.clone(),
             source,
             name,
-        };
-
-        // Cache and remove from loading stack
-        self.loading_stack.remove(&resolved);
-        self.cache.insert(resolved, info.clone());
-
-        Ok(info)
+        })
     }
 
     /// Resolve an import path to a canonical file path
