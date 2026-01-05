@@ -8,23 +8,23 @@
 // ===========================================================================
 
 interface Predicate {
-    func check(value: i32) -> bool
+    func check(value: i64) -> bool
 }
 
 interface Consumer {
-    func accept(value: i32)
+    func accept(value: i64)
 }
 
 interface Supplier {
-    func get() -> i32
+    func get() -> i64
 }
 
 interface Transform {
-    func apply(value: i32) -> i32
+    func apply(value: i64) -> i64
 }
 
 interface BiTransform {
-    func apply(a: i32, b: i32) -> i32
+    func apply(a: i64, b: i64) -> i64
 }
 
 // ===========================================================================
@@ -32,9 +32,9 @@ interface BiTransform {
 // ===========================================================================
 
 // Functional interfaces work when declared at module level
-let isPositive: Predicate = (x: i32) -> bool => x > 0
-let double: Transform = (x: i32) -> i32 => x * 2
-let add: BiTransform = (a: i32, b: i32) -> i32 => a + b
+let isPositive: Predicate = (x: i64) => x > 0
+let double: Transform = (x: i64) => x * 2
+let add: BiTransform = (a: i64, b: i64) => a + b
 
 tests {
     test "predicate interface - direct call" {
@@ -64,14 +64,14 @@ tests {
 
 tests "local functional interfaces" {
     test "local predicate in test block" {
-        let pred: Predicate = (x: i32) -> bool => x > 0
+        let pred: Predicate = (x: i64) => x > 0
         assert(pred(5) == true)
         assert(pred(-3) == false)
         assert(pred.check(10) == true)
     }
 
     test "local transform in test block" {
-        let triple: Transform = (x: i32) -> i32 => x * 3
+        let triple: Transform = (x: i64) => x * 3
         assert(triple(7) == 21)
         assert(triple.apply(10) == 30)
     }

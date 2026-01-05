@@ -4,11 +4,14 @@
 // This module contains helper functions and impl Cg methods for field access, method lookups.
 
 use cranelift::prelude::*;
+use cranelift_module::Module;
 
 use super::context::Cg;
-use super::types::{CompileCtx, CompiledValue};
-use crate::frontend::{FieldAccessExpr, MethodCallExpr, StructLiteralExpr, Symbol};
-use crate::sema::Type;
+use super::types::{CompileCtx, CompiledValue, type_to_cranelift};
+use crate::frontend::{FieldAccessExpr, MethodCallExpr, NodeId, StructLiteralExpr, Symbol};
+use crate::sema::implement_registry::TypeId;
+use crate::sema::resolution::ResolvedMethod;
+use crate::sema::{FunctionType, Type};
 
 /// Get field slot and type from a class/record type
 pub(crate) fn get_field_slot_and_type(
@@ -57,26 +60,6 @@ pub(crate) fn get_type_name_symbol(vole_type: &Type) -> Result<Symbol, String> {
             vole_type
         )),
     }
-}
-
-/// Get the return type of a method
-pub(crate) fn get_method_return_type(
-    vole_type: &Type,
-    method: Symbol,
-    ctx: &CompileCtx,
-) -> Result<Type, String> {
-    let type_name = get_type_name_symbol(vole_type)?;
-    let metadata = ctx
-        .type_metadata
-        .get(&type_name)
-        .ok_or_else(|| "Type metadata not found".to_string())?;
-
-    // Look up the method return type from metadata
-    metadata
-        .method_return_types
-        .get(&method)
-        .cloned()
-        .ok_or_else(|| format!("Method {} not found in type", ctx.interner.resolve(method)))
 }
 
 /// Convert a raw i64 field value to the appropriate Cranelift type
@@ -236,7 +219,11 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a method call: point.distance()
-    pub fn method_call(&mut self, mc: &MethodCallExpr) -> Result<CompiledValue, String> {
+    pub fn method_call(
+        &mut self,
+        mc: &MethodCallExpr,
+        expr_id: NodeId,
+    ) -> Result<CompiledValue, String> {
         let obj = self.expr(&mc.object)?;
         let method_name_str = self.ctx.interner.resolve(mc.method);
 
@@ -245,9 +232,89 @@ impl Cg<'_, '_, '_> {
             return Ok(result);
         }
 
-        let type_name = get_type_name_symbol(&obj.vole_type)?;
-        let type_name_str = self.ctx.interner.resolve(type_name);
-        let full_name = format!("{}_{}", type_name_str, method_name_str);
+        // Look up method resolution to determine naming convention and return type
+        // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
+        let resolution = self.ctx.method_resolutions.get(expr_id);
+
+        // Determine the method function name based on resolution type
+        let (full_name, return_type) = if let Some(resolution) = resolution {
+            match resolution {
+                ResolvedMethod::Direct { func_type } => {
+                    // Direct method on class/record: use TypeName_methodName
+                    let type_name = get_type_name_symbol(&obj.vole_type)?;
+                    let type_name_str = self.ctx.interner.resolve(type_name);
+                    let name = format!("{}_{}", type_name_str, method_name_str);
+                    (name, (*func_type.return_type).clone())
+                }
+                ResolvedMethod::Implemented {
+                    func_type,
+                    is_builtin,
+                    ..
+                } => {
+                    if *is_builtin {
+                        // Built-in methods should have been handled above
+                        return Err(format!("Unhandled builtin method: {}", method_name_str));
+                    }
+                    // Implement block method: use TypeName::methodName
+                    let type_id = TypeId::from_type(&obj.vole_type)
+                        .ok_or_else(|| format!("Cannot get TypeId for {:?}", obj.vole_type))?;
+                    let type_name_str = type_id.type_name(self.ctx.interner);
+                    let name = format!("{}::{}", type_name_str, method_name_str);
+                    (name, (*func_type.return_type).clone())
+                }
+                ResolvedMethod::FunctionalInterface { func_type } => {
+                    // For functional interfaces, the object holds the function ptr or closure
+                    // The actual is_closure status depends on the lambda's compilation,
+                    // which we can get from the object's actual type
+                    let is_closure = if let Type::Function(ft) = &obj.vole_type {
+                        ft.is_closure
+                    } else {
+                        // If it's not a function type (e.g., still typed as Interface),
+                        // fall back to the resolution's flag
+                        func_type.is_closure
+                    };
+                    let actual_func_type = FunctionType {
+                        params: func_type.params.clone(),
+                        return_type: func_type.return_type.clone(),
+                        is_closure,
+                    };
+                    return self.functional_interface_call(obj.value, actual_func_type, mc);
+                }
+                ResolvedMethod::DefaultMethod {
+                    type_name,
+                    func_type,
+                    ..
+                } => {
+                    // Default method from interface, monomorphized for the concrete type
+                    // Name format is TypeName_methodName (same as direct methods)
+                    let type_name_str = self.ctx.interner.resolve(*type_name);
+                    let name = format!("{}_{}", type_name_str, method_name_str);
+                    (name, (*func_type.return_type).clone())
+                }
+            }
+        } else {
+            // No resolution found - try to resolve directly from object type
+            // This handles method calls inside default method bodies where sema
+            // doesn't analyze the interface body
+            let type_name = get_type_name_symbol(&obj.vole_type)?;
+            let type_name_str = self.ctx.interner.resolve(type_name);
+
+            // Look up method return type from type metadata
+            let return_type = self
+                .ctx
+                .type_metadata
+                .get(&type_name)
+                .and_then(|meta| meta.method_return_types.get(&mc.method).cloned())
+                .ok_or_else(|| {
+                    format!(
+                        "Method {} not found on type {}",
+                        method_name_str, type_name_str
+                    )
+                })?;
+
+            let name = format!("{}_{}", type_name_str, method_name_str);
+            (name, return_type)
+        };
 
         let method_func_ref = self.func_ref(&full_name)?;
 
@@ -260,12 +327,14 @@ impl Cg<'_, '_, '_> {
         let call = self.builder.ins().call(method_func_ref, &args);
         let results = self.builder.inst_results(call);
 
-        let return_type = get_method_return_type(&obj.vole_type, mc.method, self.ctx)?;
-
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            Ok(self.typed_value(results[0], return_type))
+            Ok(CompiledValue {
+                value: results[0],
+                ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
+                vole_type: return_type,
+            })
         }
     }
 
@@ -285,6 +354,114 @@ impl Cg<'_, '_, '_> {
                 Ok(Some(self.i64_value(result)))
             }
             _ => Ok(None),
+        }
+    }
+
+    /// Call a functional interface as a closure or pure function
+    fn functional_interface_call(
+        &mut self,
+        func_ptr_or_closure: Value,
+        func_type: FunctionType,
+        mc: &MethodCallExpr,
+    ) -> Result<CompiledValue, String> {
+        // Check if this is actually a closure or a pure function
+        // The FunctionType passed in has is_closure set from the analyzer,
+        // but we need to handle both cases since the underlying lambda
+        // might be pure (no captures) or a closure (has captures).
+        //
+        // The actual calling convention is determined by whether the
+        // lambda had captures, which we track via the FunctionType.
+        // Since functional interfaces can hold either, we need to check
+        // both cases at runtime... BUT for now, since we're compiling
+        // statically, we trust the func_type.is_closure flag.
+        //
+        // Note: The issue is that functional interfaces always mark is_closure: true
+        // in the analyzer, but the actual lambda might be pure. We need to
+        // check the object's actual type to determine this.
+        //
+        // For now, trust that pure functions (is_closure=false) are called directly.
+        if func_type.is_closure {
+            // It's a closure - extract function pointer and pass closure
+            let func_ptr = self.call_runtime("vole_closure_get_func", &[func_ptr_or_closure])?;
+
+            // Build the Cranelift signature for the closure call
+            // First param is the closure pointer, then the user params
+            let mut sig = self.ctx.module.make_signature();
+            sig.params.push(AbiParam::new(self.ctx.pointer_type)); // Closure pointer
+            for param_type in &func_type.params {
+                sig.params.push(AbiParam::new(type_to_cranelift(
+                    param_type,
+                    self.ctx.pointer_type,
+                )));
+            }
+            if func_type.return_type.as_ref() != &Type::Void {
+                sig.returns.push(AbiParam::new(type_to_cranelift(
+                    &func_type.return_type,
+                    self.ctx.pointer_type,
+                )));
+            }
+
+            let sig_ref = self.builder.import_signature(sig);
+
+            // Compile arguments - closure pointer first, then user args
+            let mut args = vec![func_ptr_or_closure];
+            for arg in &mc.args {
+                let compiled = self.expr(arg)?;
+                args.push(compiled.value);
+            }
+
+            // Perform the indirect call
+            let call_inst = self.builder.ins().call_indirect(sig_ref, func_ptr, &args);
+            let results = self.builder.inst_results(call_inst);
+
+            if results.is_empty() {
+                Ok(self.void_value())
+            } else {
+                Ok(CompiledValue {
+                    value: results[0],
+                    ty: type_to_cranelift(&func_type.return_type, self.ctx.pointer_type),
+                    vole_type: (*func_type.return_type).clone(),
+                })
+            }
+        } else {
+            // It's a pure function - call directly
+            let mut sig = self.ctx.module.make_signature();
+            for param_type in &func_type.params {
+                sig.params.push(AbiParam::new(type_to_cranelift(
+                    param_type,
+                    self.ctx.pointer_type,
+                )));
+            }
+            if func_type.return_type.as_ref() != &Type::Void {
+                sig.returns.push(AbiParam::new(type_to_cranelift(
+                    &func_type.return_type,
+                    self.ctx.pointer_type,
+                )));
+            }
+
+            let sig_ref = self.builder.import_signature(sig);
+
+            let mut args = Vec::new();
+            for arg in &mc.args {
+                let compiled = self.expr(arg)?;
+                args.push(compiled.value);
+            }
+
+            let call_inst = self
+                .builder
+                .ins()
+                .call_indirect(sig_ref, func_ptr_or_closure, &args);
+            let results = self.builder.inst_results(call_inst);
+
+            if results.is_empty() {
+                Ok(self.void_value())
+            } else {
+                Ok(CompiledValue {
+                    value: results[0],
+                    ty: type_to_cranelift(&func_type.return_type, self.ctx.pointer_type),
+                    vole_type: (*func_type.return_type).clone(),
+                })
+            }
         }
     }
 }

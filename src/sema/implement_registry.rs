@@ -22,6 +22,27 @@ pub enum PrimitiveTypeId {
     String,
 }
 
+impl PrimitiveTypeId {
+    /// Get the string name for this primitive type (used in method mangling)
+    pub fn name(&self) -> &'static str {
+        match self {
+            PrimitiveTypeId::I8 => "i8",
+            PrimitiveTypeId::I16 => "i16",
+            PrimitiveTypeId::I32 => "i32",
+            PrimitiveTypeId::I64 => "i64",
+            PrimitiveTypeId::I128 => "i128",
+            PrimitiveTypeId::U8 => "u8",
+            PrimitiveTypeId::U16 => "u16",
+            PrimitiveTypeId::U32 => "u32",
+            PrimitiveTypeId::U64 => "u64",
+            PrimitiveTypeId::F32 => "f32",
+            PrimitiveTypeId::F64 => "f64",
+            PrimitiveTypeId::Bool => "bool",
+            PrimitiveTypeId::String => "string",
+        }
+    }
+}
+
 /// Unique identifier for types in the registry
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum TypeId {
@@ -52,6 +73,15 @@ impl TypeId {
             Type::Class(c) => Some(TypeId::Class(c.name)),
             Type::Record(r) => Some(TypeId::Record(r.name)),
             _ => None,
+        }
+    }
+
+    /// Get the string name for method mangling (e.g., "i32" or record name)
+    pub fn type_name(&self, interner: &crate::frontend::Interner) -> String {
+        match self {
+            TypeId::Primitive(p) => p.name().to_string(),
+            TypeId::Array => "array".to_string(),
+            TypeId::Class(sym) | TypeId::Record(sym) => interner.resolve(*sym).to_string(),
         }
     }
 }

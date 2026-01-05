@@ -12,6 +12,7 @@ use crate::codegen::{Compiler, JitContext};
 use crate::errors::{LexerError, render_to_stderr, render_to_writer};
 use crate::frontend::{AstPrinter, Interner, NodeId, ParseError, Parser, Symbol, ast::Program};
 use crate::runtime::set_stdout_capture;
+use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::{Analyzer, MethodResolutions, Type, TypeError};
 
 /// Result of parsing and analyzing a source file.
@@ -21,6 +22,9 @@ pub struct AnalyzedProgram {
     pub type_aliases: HashMap<Symbol, Type>,
     pub expr_types: HashMap<NodeId, Type>,
     pub method_resolutions: MethodResolutions,
+    pub interface_registry: InterfaceRegistry,
+    /// Tracks which interfaces each type implements: type_name -> [interface_names]
+    pub type_implements: HashMap<Symbol, Vec<Symbol>>,
 }
 
 /// Render a lexer error to stderr with source context
@@ -119,13 +123,16 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         return Err(());
     }
 
-    let (type_aliases, expr_types, method_resolutions) = analyzer.into_analysis_results();
+    let (type_aliases, expr_types, method_resolutions, interface_registry, type_implements) =
+        analyzer.into_analysis_results();
     Ok(AnalyzedProgram {
         program,
         interner,
         type_aliases,
         expr_types,
         method_resolutions,
+        interface_registry,
+        type_implements,
     })
 }
 
@@ -278,7 +285,8 @@ pub fn run_captured<W: Write + Send + 'static>(
         }
         return Err(());
     }
-    let (type_aliases, expr_types, method_resolutions) = analyzer.into_analysis_results();
+    let (type_aliases, expr_types, method_resolutions, interface_registry, type_implements) =
+        analyzer.into_analysis_results();
 
     // Compile
     let mut jit = JitContext::new();
@@ -289,6 +297,8 @@ pub fn run_captured<W: Write + Send + 'static>(
             type_aliases,
             expr_types,
             method_resolutions,
+            interface_registry,
+            type_implements,
         );
         if let Err(e) = compiler.compile_program(&program) {
             let _ = writeln!(stderr, "compilation error: {}", e);

@@ -111,7 +111,7 @@ impl Cg<'_, '_, '_> {
                 let init = self.expr(&let_stmt.init)?;
 
                 let (final_value, final_type) = if let Some(ty_expr) = &let_stmt.ty {
-                    let declared_type = resolve_type_expr(ty_expr, self.ctx.type_aliases);
+                    let declared_type = resolve_type_expr(ty_expr, self.ctx);
 
                     if matches!(&declared_type, Type::Union(_))
                         && !matches!(&init.vole_type, Type::Union(_))
@@ -136,6 +136,14 @@ impl Cg<'_, '_, '_> {
                     } else if declared_type == Type::F64 && init.vole_type == Type::F32 {
                         let widened = self.builder.ins().fpromote(types::F64, init.value);
                         (widened, declared_type)
+                    } else if let Type::Interface(_) = &declared_type {
+                        // For functional interfaces, keep the actual function type from the lambda
+                        // This preserves the is_closure flag for proper calling convention
+                        if matches!(&init.vole_type, Type::Function(_)) {
+                            (init.value, init.vole_type)
+                        } else {
+                            (init.value, declared_type)
+                        }
                     } else {
                         (init.value, declared_type)
                     }

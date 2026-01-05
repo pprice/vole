@@ -51,7 +51,7 @@ impl Cg<'_, '_, '_> {
             }
             ExprKind::StructLiteral(sl) => self.struct_literal(sl),
             ExprKind::FieldAccess(fa) => self.field_access(fa),
-            ExprKind::MethodCall(mc) => self.method_call(mc),
+            ExprKind::MethodCall(mc) => self.method_call(mc, expr.id),
         }
     }
 
@@ -234,7 +234,7 @@ impl Cg<'_, '_, '_> {
     /// Compile an `is` type check expression
     fn is_expr(&mut self, is_expr: &crate::frontend::IsExpr) -> Result<CompiledValue, String> {
         let value = self.expr(&is_expr.value)?;
-        let tested_type = resolve_type_expr(&is_expr.type_expr, self.ctx.type_aliases);
+        let tested_type = resolve_type_expr(&is_expr.type_expr, self.ctx);
 
         if let Type::Union(variants) = &value.vole_type {
             let expected_tag = variants

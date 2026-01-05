@@ -70,6 +70,8 @@ pub struct Analyzer {
     pub implement_registry: ImplementRegistry,
     /// Resolved method calls for codegen
     pub method_resolutions: MethodResolutions,
+    /// Tracks which interfaces each type implements: type_name -> [interface_names]
+    type_implements: HashMap<Symbol, Vec<Symbol>>,
 }
 
 impl Analyzer {
@@ -92,6 +94,7 @@ impl Analyzer {
             interface_registry: InterfaceRegistry::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
+            type_implements: HashMap::new(),
         };
 
         // Register built-in interfaces and implementations
@@ -146,15 +149,25 @@ impl Analyzer {
         self.expr_types
     }
 
-    /// Take ownership of type aliases, expression types, and method resolutions (consuming self)
+    /// Take ownership of type aliases, expression types, method resolutions, interface registry,
+    /// and type_implements (consuming self)
+    #[allow(clippy::type_complexity)]
     pub fn into_analysis_results(
         self,
     ) -> (
         HashMap<Symbol, Type>,
         HashMap<NodeId, Type>,
         MethodResolutions,
+        InterfaceRegistry,
+        HashMap<Symbol, Vec<Symbol>>,
     ) {
-        (self.type_aliases, self.expr_types, self.method_resolutions)
+        (
+            self.type_aliases,
+            self.expr_types,
+            self.method_resolutions,
+            self.interface_registry,
+            self.type_implements,
+        )
     }
 
     /// Record the resolved type for an expression
@@ -285,6 +298,11 @@ impl Analyzer {
                             fields,
                         },
                     );
+                    // Register implements list
+                    if !class.implements.is_empty() {
+                        self.type_implements
+                            .insert(class.name, class.implements.clone());
+                    }
                     // Register methods
                     for method in &class.methods {
                         let params: Vec<Type> = method
@@ -325,6 +343,11 @@ impl Analyzer {
                             fields,
                         },
                     );
+                    // Register implements list
+                    if !record.implements.is_empty() {
+                        self.type_implements
+                            .insert(record.name, record.implements.clone());
+                    }
                     // Register methods
                     for method in &record.methods {
                         let params: Vec<Type> = method
@@ -1346,6 +1369,24 @@ impl Analyzer {
                         return Ok(*func_type.return_type);
                     }
 
+                    // Check if it's a variable with a functional interface type
+                    if let Some(Type::Interface(iface)) = self.get_variable_type(*sym)
+                        && let Some(func_type) = self.get_functional_interface_type(iface.name)
+                    {
+                        // Calling a functional interface - treat like a closure call
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                        }
+                        self.check_call_args(
+                            &call.args,
+                            &func_type.params,
+                            expr.span,
+                            true, // with_inference
+                            interner,
+                        )?;
+                        return Ok(*func_type.return_type);
+                    }
+
                     // Check if it's a known builtin function
                     let name = interner.resolve(*sym);
                     if name == "println"
@@ -2091,39 +2132,47 @@ impl Analyzer {
                     return Ok(return_type);
                 }
 
-                // Get type symbol from object type
-                let type_sym = match &object_type {
-                    Type::Class(class_type) => class_type.name,
-                    Type::Record(record_type) => record_type.name,
-                    Type::Error => return Ok(Type::Error),
-                    _ => {
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "class or record".to_string(),
-                                found: object_type.name().to_string(),
-                                span: method_call.object.span.into(),
-                            },
-                            method_call.object.span,
-                        );
-                        return Ok(Type::Error);
-                    }
+                // Handle Type::Error early
+                if matches!(object_type, Type::Error) {
+                    return Ok(Type::Error);
+                }
+
+                // Get a descriptive type name for error messages
+                let type_name = if let Some(type_id) = TypeId::from_type(&object_type) {
+                    type_id.type_name(interner)
+                } else {
+                    object_type.name().to_string()
                 };
 
-                let type_name = interner.resolve(type_sym).to_string();
+                // First, check implement registry for ANY type (primitives, arrays, classes, records)
+                // This allows implement blocks to work for all types
+                if let Some(type_id) = TypeId::from_type(&object_type)
+                    && let Some(impl_) = self
+                        .implement_registry
+                        .get_method(&type_id, method_call.method)
+                {
+                    let func_type = impl_.func_type.clone();
 
-                // Look up the method
-                let method_key = (type_sym, method_call.method);
-                if let Some(method_type) = self.methods.get(&method_key).cloned() {
+                    // Record resolution
+                    self.method_resolutions.insert(
+                        expr.id,
+                        ResolvedMethod::Implemented {
+                            trait_name: impl_.trait_name,
+                            func_type: func_type.clone(),
+                            is_builtin: impl_.is_builtin,
+                        },
+                    );
+
                     // Mark side effects if inside lambda
                     if self.in_lambda() {
                         self.mark_lambda_has_side_effects();
                     }
 
                     // Check argument count
-                    if method_call.args.len() != method_type.params.len() {
+                    if method_call.args.len() != func_type.params.len() {
                         self.add_error(
                             SemanticError::WrongArgumentCount {
-                                expected: method_type.params.len(),
+                                expected: func_type.params.len(),
                                 found: method_call.args.len(),
                                 span: expr.span.into(),
                             },
@@ -2132,7 +2181,7 @@ impl Analyzer {
                     }
 
                     // Check argument types
-                    for (arg, param_ty) in method_call.args.iter().zip(method_type.params.iter()) {
+                    for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                         let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
                         if !self.types_compatible(&arg_ty, param_ty) {
                             self.add_error(
@@ -2146,43 +2195,105 @@ impl Analyzer {
                         }
                     }
 
-                    // Record resolution for direct method
-                    self.method_resolutions.insert(
-                        expr.id,
-                        ResolvedMethod::Direct {
-                            func_type: method_type.clone(),
-                        },
-                    );
+                    return Ok(*func_type.return_type);
+                }
 
-                    Ok(*method_type.return_type)
-                } else if let Some(type_id) = TypeId::from_type(&object_type) {
-                    // Check implement registry for methods added via implement blocks
-                    if let Some(impl_) = self
-                        .implement_registry
-                        .get_method(&type_id, method_call.method)
-                    {
-                        let func_type = impl_.func_type.clone();
+                // Check if object is a functional interface and method matches its single method
+                if let Type::Interface(iface) = &object_type {
+                    // Check if interface is functional and method matches its abstract method
+                    if let Some(iface_def) = self.interface_registry.get(iface.name) {
+                        // For functional interfaces, check if the method matches
+                        if let Some(method_def) = self.interface_registry.is_functional(iface.name)
+                            && method_def.name == method_call.method
+                        {
+                            let func_type = FunctionType {
+                                params: method_def.params.clone(),
+                                return_type: Box::new(method_def.return_type.clone()),
+                                is_closure: true,
+                            };
 
-                        // Record resolution
-                        self.method_resolutions.insert(
-                            expr.id,
-                            ResolvedMethod::Implemented {
-                                trait_name: impl_.trait_name,
-                                func_type: func_type.clone(),
-                                is_builtin: impl_.is_builtin,
-                            },
-                        );
+                            // Mark side effects if inside lambda
+                            if self.in_lambda() {
+                                self.mark_lambda_has_side_effects();
+                            }
 
+                            // Check argument count
+                            if method_call.args.len() != func_type.params.len() {
+                                self.add_error(
+                                    SemanticError::WrongArgumentCount {
+                                        expected: func_type.params.len(),
+                                        found: method_call.args.len(),
+                                        span: expr.span.into(),
+                                    },
+                                    expr.span,
+                                );
+                            }
+
+                            // Check argument types
+                            for (arg, param_ty) in
+                                method_call.args.iter().zip(func_type.params.iter())
+                            {
+                                let arg_ty =
+                                    self.check_expr_expecting(arg, Some(param_ty), interner)?;
+                                if !self.types_compatible(&arg_ty, param_ty) {
+                                    self.add_error(
+                                        SemanticError::TypeMismatch {
+                                            expected: param_ty.name().to_string(),
+                                            found: arg_ty.name().to_string(),
+                                            span: arg.span.into(),
+                                        },
+                                        arg.span,
+                                    );
+                                }
+                            }
+
+                            // Record resolution for functional interface method
+                            self.method_resolutions.insert(
+                                expr.id,
+                                ResolvedMethod::FunctionalInterface {
+                                    func_type: func_type.clone(),
+                                },
+                            );
+
+                            return Ok(*func_type.return_type);
+                        }
+
+                        // For non-functional interfaces, check if method is defined
+                        for method_def in &iface_def.methods {
+                            if method_def.name == method_call.method {
+                                // TODO: Support method calls on non-functional interfaces
+                                // For now, we just allow the call
+                                let func_type = FunctionType {
+                                    params: method_def.params.clone(),
+                                    return_type: Box::new(method_def.return_type.clone()),
+                                    is_closure: false,
+                                };
+                                return Ok(*func_type.return_type);
+                            }
+                        }
+                    }
+                }
+
+                // Next, check direct methods for class/record types
+                let type_sym = match &object_type {
+                    Type::Class(class_type) => Some(class_type.name),
+                    Type::Record(record_type) => Some(record_type.name),
+                    _ => None,
+                };
+
+                if let Some(type_sym) = type_sym {
+                    let method_key = (type_sym, method_call.method);
+                    if let Some(method_type) = self.methods.get(&method_key).cloned() {
                         // Mark side effects if inside lambda
                         if self.in_lambda() {
                             self.mark_lambda_has_side_effects();
                         }
 
                         // Check argument count
-                        if method_call.args.len() != func_type.params.len() {
+                        if method_call.args.len() != method_type.params.len() {
                             self.add_error(
                                 SemanticError::WrongArgumentCount {
-                                    expected: func_type.params.len(),
+                                    expected: method_type.params.len(),
                                     found: method_call.args.len(),
                                     span: expr.span.into(),
                                 },
@@ -2191,7 +2302,8 @@ impl Analyzer {
                         }
 
                         // Check argument types
-                        for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter())
+                        for (arg, param_ty) in
+                            method_call.args.iter().zip(method_type.params.iter())
                         {
                             let arg_ty =
                                 self.check_expr_expecting(arg, Some(param_ty), interner)?;
@@ -2207,37 +2319,105 @@ impl Analyzer {
                             }
                         }
 
-                        Ok(*func_type.return_type)
-                    } else {
-                        self.add_error(
-                            SemanticError::UnknownMethod {
-                                ty: type_name,
-                                method: interner.resolve(method_call.method).to_string(),
-                                span: method_call.method_span.into(),
+                        // Record resolution for direct method
+                        self.method_resolutions.insert(
+                            expr.id,
+                            ResolvedMethod::Direct {
+                                func_type: method_type.clone(),
                             },
-                            method_call.method_span,
                         );
-                        // Still check args for more errors
-                        for arg in &method_call.args {
-                            self.check_expr(arg, interner)?;
+
+                        return Ok(*method_type.return_type);
+                    }
+
+                    // Check for default method from implemented interfaces
+                    if let Some(interfaces) = self.type_implements.get(&type_sym).cloned() {
+                        for interface_name in &interfaces {
+                            if let Some(interface_def) =
+                                self.interface_registry.get(*interface_name)
+                            {
+                                // Look for a default method with matching name
+                                for method_def in &interface_def.methods {
+                                    if method_def.name == method_call.method
+                                        && method_def.has_default
+                                    {
+                                        let func_type = FunctionType {
+                                            params: method_def.params.clone(),
+                                            return_type: Box::new(method_def.return_type.clone()),
+                                            is_closure: false,
+                                        };
+
+                                        // Mark side effects if inside lambda
+                                        if self.in_lambda() {
+                                            self.mark_lambda_has_side_effects();
+                                        }
+
+                                        // Check argument count
+                                        if method_call.args.len() != func_type.params.len() {
+                                            self.add_error(
+                                                SemanticError::WrongArgumentCount {
+                                                    expected: func_type.params.len(),
+                                                    found: method_call.args.len(),
+                                                    span: expr.span.into(),
+                                                },
+                                                expr.span,
+                                            );
+                                        }
+
+                                        // Check argument types
+                                        for (arg, param_ty) in
+                                            method_call.args.iter().zip(func_type.params.iter())
+                                        {
+                                            let arg_ty = self.check_expr_expecting(
+                                                arg,
+                                                Some(param_ty),
+                                                interner,
+                                            )?;
+                                            if !self.types_compatible(&arg_ty, param_ty) {
+                                                self.add_error(
+                                                    SemanticError::TypeMismatch {
+                                                        expected: param_ty.name().to_string(),
+                                                        found: arg_ty.name().to_string(),
+                                                        span: arg.span.into(),
+                                                    },
+                                                    arg.span,
+                                                );
+                                            }
+                                        }
+
+                                        // Record resolution for default method
+                                        self.method_resolutions.insert(
+                                            expr.id,
+                                            ResolvedMethod::DefaultMethod {
+                                                interface_name: *interface_name,
+                                                type_name: type_sym,
+                                                method_name: method_call.method,
+                                                func_type: func_type.clone(),
+                                            },
+                                        );
+
+                                        return Ok(*func_type.return_type);
+                                    }
+                                }
+                            }
                         }
-                        Ok(Type::Error)
                     }
-                } else {
-                    self.add_error(
-                        SemanticError::UnknownMethod {
-                            ty: type_name,
-                            method: interner.resolve(method_call.method).to_string(),
-                            span: method_call.method_span.into(),
-                        },
-                        method_call.method_span,
-                    );
-                    // Still check args for more errors
-                    for arg in &method_call.args {
-                        self.check_expr(arg, interner)?;
-                    }
-                    Ok(Type::Error)
                 }
+
+                // No method found - report error
+                self.add_error(
+                    SemanticError::UnknownMethod {
+                        ty: type_name,
+                        method: interner.resolve(method_call.method).to_string(),
+                        span: method_call.method_span.into(),
+                    },
+                    method_call.method_span,
+                );
+                // Still check args for more errors
+                for arg in &method_call.args {
+                    self.check_expr(arg, interner)?;
+                }
+                Ok(Type::Error)
             }
         }
     }

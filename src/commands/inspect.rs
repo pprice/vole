@@ -101,8 +101,13 @@ pub fn inspect_files(
                     had_error = true;
                     continue;
                 }
-                let (type_aliases, expr_types, method_resolutions) =
-                    analyzer.into_analysis_results();
+                let (
+                    type_aliases,
+                    expr_types,
+                    method_resolutions,
+                    interface_registry,
+                    type_implements,
+                ) = analyzer.into_analysis_results();
 
                 // Generate IR
                 let mut jit = JitContext::new();
@@ -112,6 +117,8 @@ pub fn inspect_files(
                     type_aliases,
                     expr_types,
                     method_resolutions,
+                    interface_registry,
+                    type_implements,
                 );
                 let include_tests = !no_tests;
 

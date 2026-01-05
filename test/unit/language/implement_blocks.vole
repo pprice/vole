@@ -1,24 +1,29 @@
-// Test that implement blocks parse and compile correctly
-// NOTE: Method calls on primitives via implement blocks don't work at runtime yet.
-// The IR generates field.get on primitives which fails to resolve the method.
-// This is a known limitation - implement blocks work for classes/records but not primitives.
+// Test that implement blocks work for primitives and records
 
 interface Describable {
     func describe() -> string
 }
 
-// This parses and compiles, but calling x.describe() on an i32 fails at runtime
 implement Describable for i32 {
     func describe() -> string {
         return "an integer"
     }
 }
 
-tests {
-    test "implement block parses" {
-        // If we got here, the implement block parsed and compiled successfully
-        // Actual method dispatch on primitives is not yet implemented
+implement Describable for string {
+    func describe() -> string {
+        return "a string"
+    }
+}
+
+tests "primitive implement blocks" {
+    test "implement block for i32" {
         let x: i32 = 42
-        assert(x == 42)
+        assert(x.describe() == "an integer")
+    }
+
+    test "implement block for string" {
+        let s: string = "hello"
+        assert(s.describe() == "a string")
     }
 }

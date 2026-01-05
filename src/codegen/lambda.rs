@@ -80,7 +80,7 @@ pub(crate) fn infer_expr_type(
                 if global.name == *sym
                     && let Some(type_expr) = &global.ty
                 {
-                    return resolve_type_expr(type_expr, ctx.type_aliases);
+                    return resolve_type_expr(type_expr, ctx);
                 }
             }
             Type::I64
@@ -137,14 +137,14 @@ pub(crate) fn infer_expr_type(
                 .iter()
                 .map(|p| {
                     p.ty.as_ref()
-                        .map(|t| resolve_type_expr(t, ctx.type_aliases))
+                        .map(|t| resolve_type_expr(t, ctx))
                         .unwrap_or(Type::I64)
                 })
                 .collect();
             let return_ty = lambda
                 .return_type
                 .as_ref()
-                .map(|t| resolve_type_expr(t, ctx.type_aliases))
+                .map(|t| resolve_type_expr(t, ctx))
                 .unwrap_or(Type::I64);
             Type::Function(FunctionType {
                 params: lambda_params,
@@ -188,9 +188,7 @@ fn compile_pure_lambda(
         .iter()
         .map(|p| {
             p.ty.as_ref()
-                .map(|t| {
-                    type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type)
-                })
+                .map(|t| type_to_cranelift(&resolve_type_expr(t, ctx), ctx.pointer_type))
                 .unwrap_or(types::I64)
         })
         .collect();
@@ -200,7 +198,7 @@ fn compile_pure_lambda(
         .iter()
         .map(|p| {
             p.ty.as_ref()
-                .map(|t| resolve_type_expr(t, ctx.type_aliases))
+                .map(|t| resolve_type_expr(t, ctx))
                 .unwrap_or(Type::I64)
         })
         .collect();
@@ -215,7 +213,7 @@ fn compile_pure_lambda(
     let return_vole_type = lambda
         .return_type
         .as_ref()
-        .map(|t| resolve_type_expr(t, ctx.type_aliases))
+        .map(|t| resolve_type_expr(t, ctx))
         .unwrap_or_else(|| infer_lambda_return_type(&lambda.body, &param_context, ctx));
 
     let return_type = type_to_cranelift(&return_vole_type, ctx.pointer_type);
@@ -309,9 +307,7 @@ fn compile_lambda_with_captures(
         .iter()
         .map(|p| {
             p.ty.as_ref()
-                .map(|t| {
-                    type_to_cranelift(&resolve_type_expr(t, ctx.type_aliases), ctx.pointer_type)
-                })
+                .map(|t| type_to_cranelift(&resolve_type_expr(t, ctx), ctx.pointer_type))
                 .unwrap_or(types::I64)
         })
         .collect();
@@ -321,7 +317,7 @@ fn compile_lambda_with_captures(
         .iter()
         .map(|p| {
             p.ty.as_ref()
-                .map(|t| resolve_type_expr(t, ctx.type_aliases))
+                .map(|t| resolve_type_expr(t, ctx))
                 .unwrap_or(Type::I64)
         })
         .collect();
@@ -336,7 +332,7 @@ fn compile_lambda_with_captures(
     let return_vole_type = lambda
         .return_type
         .as_ref()
-        .map(|t| resolve_type_expr(t, ctx.type_aliases))
+        .map(|t| resolve_type_expr(t, ctx))
         .unwrap_or_else(|| infer_lambda_return_type(&lambda.body, &param_context, ctx));
 
     let return_type = type_to_cranelift(&return_vole_type, ctx.pointer_type);

@@ -15,20 +15,21 @@ use super::calls::{compile_string_literal, value_to_string};
 use super::lambda::{CaptureBinding, compile_lambda};
 use super::stmt::{compile_block, construct_union};
 use super::structs::{
-    convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type,
-    get_method_return_type, get_type_name_symbol,
+    convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type, get_type_name_symbol,
 };
 use super::types::{
     CompileCtx, TypeMetadata, convert_to_type, cranelift_to_vole_type, resolve_type_expr,
-    type_to_cranelift,
+    resolve_type_expr_full, type_to_cranelift,
 };
 use crate::codegen::{CompiledValue, JitContext};
 use crate::frontend::{
     self, AssignTarget, BinaryOp, ClassDecl, Decl, Expr, ExprKind, FuncDecl, ImplementBlock,
-    Interner, LetStmt, NodeId, Pattern, Program, RecordDecl, StringPart, Symbol, TestCase,
-    TestsDecl, TypeExpr, UnaryOp,
+    InterfaceDecl, InterfaceMethod, Interner, LetStmt, NodeId, Pattern, Program, RecordDecl,
+    StringPart, Symbol, TestCase, TestsDecl, TypeExpr, UnaryOp,
 };
-use crate::sema::resolution::MethodResolutions;
+use crate::sema::implement_registry::TypeId;
+use crate::sema::interface_registry::InterfaceRegistry;
+use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::{ClassType, FunctionType, RecordType, StructField, Type};
 
 /// Metadata about a compiled test
@@ -100,10 +101,13 @@ pub struct Compiler<'a> {
     /// Expression types from semantic analysis (includes narrowed types)
     expr_types: HashMap<NodeId, Type>,
     /// Resolved method calls from semantic analysis
-    #[allow(dead_code)] // Will be used in future refactoring
     method_resolutions: MethodResolutions,
     /// Return types of compiled functions
     func_return_types: HashMap<String, Type>,
+    /// Interface definitions registry
+    interface_registry: InterfaceRegistry,
+    /// Tracks which interfaces each type implements: type_name -> [interface_names]
+    type_implements: HashMap<Symbol, Vec<Symbol>>,
 }
 
 impl<'a> Compiler<'a> {
@@ -113,6 +117,8 @@ impl<'a> Compiler<'a> {
         type_aliases: HashMap<Symbol, Type>,
         expr_types: HashMap<NodeId, Type>,
         method_resolutions: MethodResolutions,
+        interface_registry: InterfaceRegistry,
+        type_implements: HashMap<Symbol, Vec<Symbol>>,
     ) -> Self {
         let pointer_type = jit.pointer_type();
         Self {
@@ -128,6 +134,8 @@ impl<'a> Compiler<'a> {
             expr_types,
             method_resolutions,
             func_return_types: HashMap::new(),
+            interface_registry,
+            type_implements,
         }
     }
 
@@ -175,7 +183,9 @@ impl<'a> Compiler<'a> {
                     let return_type = func
                         .return_type
                         .as_ref()
-                        .map(|t| resolve_type_expr(t, &self.type_aliases))
+                        .map(|t| {
+                            resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry)
+                        })
                         .unwrap_or(Type::Void);
                     self.func_return_types.insert(name.to_string(), return_type);
                 }
@@ -193,10 +203,10 @@ impl<'a> Compiler<'a> {
                     self.globals.push(let_stmt.clone());
                 }
                 Decl::Class(class) => {
-                    self.register_class(class);
+                    self.register_class(class, program);
                 }
                 Decl::Record(record) => {
-                    self.register_record(record);
+                    self.register_record(record, program);
                 }
                 Decl::Interface(_) => {
                     // Interface declarations don't generate code directly
@@ -225,10 +235,10 @@ impl<'a> Compiler<'a> {
                     // Globals are handled during identifier lookup
                 }
                 Decl::Class(class) => {
-                    self.compile_class_methods(class)?;
+                    self.compile_class_methods(class, program)?;
                 }
                 Decl::Record(record) => {
-                    self.compile_record_methods(record)?;
+                    self.compile_record_methods(record, program)?;
                 }
                 Decl::Interface(_) => {
                     // Interface methods are compiled when used via implement blocks
@@ -246,13 +256,16 @@ impl<'a> Compiler<'a> {
         let mut params = Vec::new();
         for param in &func.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr(&param.ty, &self.type_aliases),
+                &resolve_type_expr_full(&param.ty, &self.type_aliases, &self.interface_registry),
                 self.pointer_type,
             ));
         }
 
         let ret = func.return_type.as_ref().map(|t| {
-            type_to_cranelift(&resolve_type_expr(t, &self.type_aliases), self.pointer_type)
+            type_to_cranelift(
+                &resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry),
+                self.pointer_type,
+            )
         });
 
         self.jit.create_signature(&params, ret)
@@ -264,20 +277,83 @@ impl<'a> Compiler<'a> {
         let mut params = vec![self.pointer_type];
         for param in &method.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr(&param.ty, &self.type_aliases),
+                &resolve_type_expr_full(&param.ty, &self.type_aliases, &self.interface_registry),
                 self.pointer_type,
             ));
         }
 
         let ret = method.return_type.as_ref().map(|t| {
-            type_to_cranelift(&resolve_type_expr(t, &self.type_aliases), self.pointer_type)
+            type_to_cranelift(
+                &resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry),
+                self.pointer_type,
+            )
         });
 
         self.jit.create_signature(&params, ret)
     }
 
+    /// Create a method signature for implement blocks (self type can be primitive or pointer)
+    fn create_implement_method_signature(&self, method: &FuncDecl, self_type: &Type) -> Signature {
+        // For implement blocks, `self` type depends on the target type
+        // Primitives use their actual type, classes/records use pointer
+        let self_cranelift_type = type_to_cranelift(self_type, self.pointer_type);
+        let mut params = vec![self_cranelift_type];
+        for param in &method.params {
+            params.push(type_to_cranelift(
+                &resolve_type_expr_full(&param.ty, &self.type_aliases, &self.interface_registry),
+                self.pointer_type,
+            ));
+        }
+
+        let ret = method.return_type.as_ref().map(|t| {
+            type_to_cranelift(
+                &resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry),
+                self.pointer_type,
+            )
+        });
+
+        self.jit.create_signature(&params, ret)
+    }
+
+    /// Create a method signature for an interface method (self as pointer + params)
+    fn create_interface_method_signature(&self, method: &InterfaceMethod) -> Signature {
+        // Methods have `self` as implicit first parameter (pointer to instance)
+        let mut params = vec![self.pointer_type];
+        for param in &method.params {
+            params.push(type_to_cranelift(
+                &resolve_type_expr_full(&param.ty, &self.type_aliases, &self.interface_registry),
+                self.pointer_type,
+            ));
+        }
+
+        let ret = method.return_type.as_ref().map(|t| {
+            type_to_cranelift(
+                &resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry),
+                self.pointer_type,
+            )
+        });
+
+        self.jit.create_signature(&params, ret)
+    }
+
+    /// Find an interface declaration by name in the program
+    fn find_interface_decl<'b>(
+        &self,
+        program: &'b Program,
+        interface_name: Symbol,
+    ) -> Option<&'b InterfaceDecl> {
+        for decl in &program.declarations {
+            if let Decl::Interface(iface) = decl
+                && iface.name == interface_name
+            {
+                return Some(iface);
+            }
+        }
+        None
+    }
+
     /// Register a class type and declare its methods
-    fn register_class(&mut self, class: &ClassDecl) {
+    fn register_class(&mut self, class: &ClassDecl, program: &Program) {
         let type_id = self.next_type_id;
         self.next_type_id += 1;
 
@@ -288,7 +364,7 @@ impl<'a> Compiler<'a> {
             field_slots.insert(field.name, i);
             struct_fields.push(StructField {
                 name: field.name,
-                ty: resolve_type_expr(&field.ty, &self.type_aliases),
+                ty: resolve_type_expr_full(&field.ty, &self.type_aliases, &self.interface_registry),
                 slot: i,
             });
         }
@@ -305,9 +381,37 @@ impl<'a> Compiler<'a> {
             let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| resolve_type_expr(t, &self.type_aliases))
+                .map(|t| resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry))
                 .unwrap_or(Type::Void);
             method_return_types.insert(method.name, return_type);
+        }
+
+        // Collect method names that the class directly defines
+        let direct_methods: std::collections::HashSet<_> =
+            class.methods.iter().map(|m| m.name).collect();
+
+        // Also add return types for default methods from implemented interfaces
+        if let Some(interfaces) = self.type_implements.get(&class.name).cloned() {
+            for interface_name in &interfaces {
+                if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
+                    for method in &interface_decl.methods {
+                        if method.body.is_some() && !direct_methods.contains(&method.name) {
+                            let return_type = method
+                                .return_type
+                                .as_ref()
+                                .map(|t| {
+                                    resolve_type_expr_full(
+                                        t,
+                                        &self.type_aliases,
+                                        &self.interface_registry,
+                                    )
+                                })
+                                .unwrap_or(Type::Void);
+                            method_return_types.insert(method.name, return_type);
+                        }
+                    }
+                }
+            }
         }
 
         self.type_metadata.insert(
@@ -329,10 +433,26 @@ impl<'a> Compiler<'a> {
             let sig = self.create_method_signature(method);
             self.jit.declare_function(&full_name, &sig);
         }
+
+        // Declare default methods from implemented interfaces
+        if let Some(interfaces) = self.type_implements.get(&class.name).cloned() {
+            for interface_name in &interfaces {
+                if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
+                    for method in &interface_decl.methods {
+                        if method.body.is_some() && !direct_methods.contains(&method.name) {
+                            let method_name_str = self.interner.resolve(method.name);
+                            let full_name = format!("{}_{}", type_name, method_name_str);
+                            let sig = self.create_interface_method_signature(method);
+                            self.jit.declare_function(&full_name, &sig);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Register a record type and declare its methods
-    fn register_record(&mut self, record: &RecordDecl) {
+    fn register_record(&mut self, record: &RecordDecl, program: &Program) {
         let type_id = self.next_type_id;
         self.next_type_id += 1;
 
@@ -343,7 +463,7 @@ impl<'a> Compiler<'a> {
             field_slots.insert(field.name, i);
             struct_fields.push(StructField {
                 name: field.name,
-                ty: resolve_type_expr(&field.ty, &self.type_aliases),
+                ty: resolve_type_expr_full(&field.ty, &self.type_aliases, &self.interface_registry),
                 slot: i,
             });
         }
@@ -360,9 +480,37 @@ impl<'a> Compiler<'a> {
             let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| resolve_type_expr(t, &self.type_aliases))
+                .map(|t| resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry))
                 .unwrap_or(Type::Void);
             method_return_types.insert(method.name, return_type);
+        }
+
+        // Collect method names that the record directly defines
+        let direct_methods: std::collections::HashSet<_> =
+            record.methods.iter().map(|m| m.name).collect();
+
+        // Also add return types for default methods from implemented interfaces
+        if let Some(interfaces) = self.type_implements.get(&record.name).cloned() {
+            for interface_name in &interfaces {
+                if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
+                    for method in &interface_decl.methods {
+                        if method.body.is_some() && !direct_methods.contains(&method.name) {
+                            let return_type = method
+                                .return_type
+                                .as_ref()
+                                .map(|t| {
+                                    resolve_type_expr_full(
+                                        t,
+                                        &self.type_aliases,
+                                        &self.interface_registry,
+                                    )
+                                })
+                                .unwrap_or(Type::Void);
+                            method_return_types.insert(method.name, return_type);
+                        }
+                    }
+                }
+            }
         }
 
         self.type_metadata.insert(
@@ -384,10 +532,30 @@ impl<'a> Compiler<'a> {
             let sig = self.create_method_signature(method);
             self.jit.declare_function(&full_name, &sig);
         }
+
+        // Declare default methods from implemented interfaces
+        if let Some(interfaces) = self.type_implements.get(&record.name).cloned() {
+            for interface_name in &interfaces {
+                if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
+                    for method in &interface_decl.methods {
+                        if method.body.is_some() && !direct_methods.contains(&method.name) {
+                            let method_name_str = self.interner.resolve(method.name);
+                            let full_name = format!("{}_{}", type_name, method_name_str);
+                            let sig = self.create_interface_method_signature(method);
+                            self.jit.declare_function(&full_name, &sig);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Compile methods for a class
-    fn compile_class_methods(&mut self, class: &ClassDecl) -> Result<(), String> {
+    fn compile_class_methods(
+        &mut self,
+        class: &ClassDecl,
+        program: &Program,
+    ) -> Result<(), String> {
         let metadata = self
             .type_metadata
             .get(&class.name)
@@ -402,11 +570,30 @@ impl<'a> Compiler<'a> {
         for method in &class.methods {
             self.compile_method(method, class.name, &metadata)?;
         }
+
+        // Compile default methods from implemented interfaces
+        let direct_methods: std::collections::HashSet<_> =
+            class.methods.iter().map(|m| m.name).collect();
+        if let Some(interfaces) = self.type_implements.get(&class.name).cloned() {
+            for interface_name in &interfaces {
+                if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
+                    for method in &interface_decl.methods {
+                        if method.body.is_some() && !direct_methods.contains(&method.name) {
+                            self.compile_default_method(method, class.name, &metadata)?;
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
     /// Compile methods for a record
-    fn compile_record_methods(&mut self, record: &RecordDecl) -> Result<(), String> {
+    fn compile_record_methods(
+        &mut self,
+        record: &RecordDecl,
+        program: &Program,
+    ) -> Result<(), String> {
         let metadata = self
             .type_metadata
             .get(&record.name)
@@ -421,10 +608,25 @@ impl<'a> Compiler<'a> {
         for method in &record.methods {
             self.compile_method(method, record.name, &metadata)?;
         }
+
+        // Compile default methods from implemented interfaces
+        let direct_methods: std::collections::HashSet<_> =
+            record.methods.iter().map(|m| m.name).collect();
+        if let Some(interfaces) = self.type_implements.get(&record.name).cloned() {
+            for interface_name in &interfaces {
+                if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
+                    for method in &interface_decl.methods {
+                        if method.body.is_some() && !direct_methods.contains(&method.name) {
+                            self.compile_default_method(method, record.name, &metadata)?;
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
-    /// Get the type name symbol from a TypeExpr (for implement blocks)
+    /// Get the type name symbol from a TypeExpr (for implement blocks on records/classes)
     fn get_type_name_symbol(&self, ty: &TypeExpr) -> Option<Symbol> {
         match ty {
             TypeExpr::Named(sym) => Some(*sym),
@@ -432,54 +634,218 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// Get the type name string from a TypeExpr (works for primitives and named types)
+    fn get_type_name_from_expr(&self, ty: &TypeExpr) -> Option<String> {
+        match ty {
+            TypeExpr::Primitive(p) => Some(Type::from_primitive(*p).name().to_string()),
+            TypeExpr::Named(sym) => Some(self.interner.resolve(*sym).to_string()),
+            _ => None,
+        }
+    }
+
     /// Register implement block methods (first pass)
     fn register_implement_block(&mut self, impl_block: &ImplementBlock) {
-        let Some(type_sym) = self.get_type_name_symbol(&impl_block.target_type) else {
-            return; // Can only implement for named types
+        // Get type name string (works for primitives and named types)
+        let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
+            return; // Unsupported type for implement block
         };
 
-        // Get existing type metadata (must exist from record/class registration)
-        let Some(metadata) = self.type_metadata.get_mut(&type_sym) else {
-            return; // Type not found
+        // Get the Vole type for the target (used for creating signature)
+        // For named types (records/classes), look up in type_metadata since they're not in type_aliases
+        let self_vole_type = match &impl_block.target_type {
+            TypeExpr::Primitive(p) => Type::from_primitive(*p),
+            TypeExpr::Named(sym) => self
+                .type_metadata
+                .get(sym)
+                .map(|m| m.vole_type.clone())
+                .unwrap_or(Type::Error),
+            _ => resolve_type_expr_full(
+                &impl_block.target_type,
+                &self.type_aliases,
+                &self.interface_registry,
+            ),
         };
 
-        // Add method return types to metadata
-        for method in &impl_block.methods {
-            let return_type = method
-                .return_type
-                .as_ref()
-                .map(|t| resolve_type_expr(t, &self.type_aliases))
-                .unwrap_or(Type::Void);
-            metadata
-                .method_return_types
-                .insert(method.name, return_type);
+        // For named types (records/classes), add method return types to metadata
+        if let Some(type_sym) = self.get_type_name_symbol(&impl_block.target_type)
+            && let Some(metadata) = self.type_metadata.get_mut(&type_sym)
+        {
+            for method in &impl_block.methods {
+                let return_type = method
+                    .return_type
+                    .as_ref()
+                    .map(|t| {
+                        resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry)
+                    })
+                    .unwrap_or(Type::Void);
+                metadata
+                    .method_return_types
+                    .insert(method.name, return_type);
+            }
         }
 
-        // Declare methods as functions: TypeName_methodName
-        let type_name = self.interner.resolve(type_sym);
+        // Declare methods as functions: TypeName::methodName (implement block convention)
         for method in &impl_block.methods {
             let method_name_str = self.interner.resolve(method.name);
-            let full_name = format!("{}_{}", type_name, method_name_str);
-            let sig = self.create_method_signature(method);
+            let full_name = format!("{}::{}", type_name, method_name_str);
+            let sig = self.create_implement_method_signature(method, &self_vole_type);
             self.jit.declare_function(&full_name, &sig);
         }
     }
 
     /// Compile implement block methods (second pass)
     fn compile_implement_block(&mut self, impl_block: &ImplementBlock) -> Result<(), String> {
-        let Some(type_sym) = self.get_type_name_symbol(&impl_block.target_type) else {
-            return Ok(()); // Can only implement for named types
+        // Get type name string (works for primitives and named types)
+        let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
+            return Ok(()); // Unsupported type for implement block
         };
 
-        let metadata = self
-            .type_metadata
-            .get(&type_sym)
-            .cloned()
-            .ok_or("Internal error: type not registered for implement block")?;
+        // Get the Vole type for `self` binding
+        // For named types (records/classes), look up in type_metadata since they're not in type_aliases
+        let self_vole_type = match &impl_block.target_type {
+            TypeExpr::Primitive(p) => Type::from_primitive(*p),
+            TypeExpr::Named(sym) => self
+                .type_metadata
+                .get(sym)
+                .map(|m| m.vole_type.clone())
+                .unwrap_or(Type::Error),
+            _ => resolve_type_expr_full(
+                &impl_block.target_type,
+                &self.type_aliases,
+                &self.interface_registry,
+            ),
+        };
 
         for method in &impl_block.methods {
-            self.compile_method(method, type_sym, &metadata)?;
+            self.compile_implement_method(method, &type_name, &self_vole_type)?;
         }
+        Ok(())
+    }
+
+    /// Compile a method from an implement block
+    fn compile_implement_method(
+        &mut self,
+        method: &FuncDecl,
+        type_name: &str,
+        self_vole_type: &Type,
+    ) -> Result<(), String> {
+        let method_name_str = self.interner.resolve(method.name);
+        let full_name = format!("{}::{}", type_name, method_name_str);
+
+        let func_id = *self
+            .jit
+            .func_ids
+            .get(&full_name)
+            .ok_or_else(|| format!("Internal error: method {} not declared", full_name))?;
+
+        // Create method signature with correct self type (primitives use their type, not pointer)
+        let sig = self.create_implement_method_signature(method, self_vole_type);
+        self.jit.ctx.func.signature = sig;
+
+        // Get the Cranelift type for self
+        let self_cranelift_type = type_to_cranelift(self_vole_type, self.pointer_type);
+
+        // Collect param types (not including self)
+        let param_types: Vec<types::Type> = method
+            .params
+            .iter()
+            .map(|p| {
+                type_to_cranelift(
+                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
+                    self.pointer_type,
+                )
+            })
+            .collect();
+        let param_vole_types: Vec<Type> = method
+            .params
+            .iter()
+            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
+            .collect();
+        let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+
+        // Get source file pointer before borrowing ctx.func
+        let source_file_ptr = self.source_file_ptr();
+
+        // Clone type for the closure
+        let self_type = self_vole_type.clone();
+
+        // Create function builder
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+            let entry_block = builder.create_block();
+            builder.append_block_params_for_function_params(entry_block);
+            builder.switch_to_block(entry_block);
+
+            // Build variables map
+            let mut variables = HashMap::new();
+
+            // Get entry block params (self + user params)
+            let params = builder.block_params(entry_block).to_vec();
+
+            // Bind `self` as the first parameter (using correct type for primitives)
+            let self_sym = self
+                .interner
+                .lookup("self")
+                .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
+            let self_var = builder.declare_var(self_cranelift_type);
+            builder.def_var(self_var, params[0]);
+            variables.insert(self_sym, (self_var, self_type));
+
+            // Bind remaining parameters
+            for (((name, ty), vole_ty), val) in param_names
+                .iter()
+                .zip(param_types.iter())
+                .zip(param_vole_types.iter())
+                .zip(params[1..].iter())
+            {
+                let var = builder.declare_var(*ty);
+                builder.def_var(var, *val);
+                variables.insert(*name, (var, vole_ty.clone()));
+            }
+
+            // Compile method body
+            let mut cf_ctx = ControlFlowCtx::new();
+            let mut ctx = CompileCtx {
+                interner: self.interner,
+                pointer_type: self.pointer_type,
+                module: &mut self.jit.module,
+                func_ids: &mut self.jit.func_ids,
+                source_file_ptr,
+                globals: &self.globals,
+                lambda_counter: &mut self.lambda_counter,
+                type_aliases: &self.type_aliases,
+                type_metadata: &self.type_metadata,
+                expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
+            };
+            let terminated = compile_block(
+                &mut builder,
+                &method.body,
+                &mut variables,
+                &mut cf_ctx,
+                &mut ctx,
+            )?;
+
+            if !terminated {
+                // Return void if no explicit return
+                builder.ins().return_(&[]);
+            }
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        // Define the function
+        self.jit
+            .module
+            .define_function(func_id, &mut self.jit.ctx)
+            .map_err(|e| e.to_string())?;
+        self.jit.module.clear_context(&mut self.jit.ctx);
+
         Ok(())
     }
 
@@ -510,7 +876,7 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr(&p.ty, &self.type_aliases),
+                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
                     self.pointer_type,
                 )
             })
@@ -518,7 +884,7 @@ impl<'a> Compiler<'a> {
         let param_vole_types: Vec<Type> = method
             .params
             .iter()
-            .map(|p| resolve_type_expr(&p.ty, &self.type_aliases))
+            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
@@ -580,6 +946,7 @@ impl<'a> Compiler<'a> {
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -588,6 +955,129 @@ impl<'a> Compiler<'a> {
                 &mut cf_ctx,
                 &mut ctx,
             )?;
+
+            // Add implicit return if no explicit return
+            if !terminated {
+                builder.ins().return_(&[]);
+            }
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        // Define the function
+        self.jit.define_function(func_id)?;
+        self.jit.clear();
+
+        Ok(())
+    }
+
+    /// Compile a default method from an interface, monomorphized for a concrete type
+    fn compile_default_method(
+        &mut self,
+        method: &InterfaceMethod,
+        type_name: Symbol,
+        metadata: &TypeMetadata,
+    ) -> Result<(), String> {
+        let type_name_str = self.interner.resolve(type_name);
+        let method_name_str = self.interner.resolve(method.name);
+        let full_name = format!("{}_{}", type_name_str, method_name_str);
+
+        let func_id =
+            *self.jit.func_ids.get(&full_name).ok_or_else(|| {
+                format!("Internal error: default method {} not declared", full_name)
+            })?;
+
+        // Create method signature (self + params)
+        let sig = self.create_interface_method_signature(method);
+        self.jit.ctx.func.signature = sig;
+
+        // Collect param types (not including self)
+        let param_types: Vec<types::Type> = method
+            .params
+            .iter()
+            .map(|p| {
+                type_to_cranelift(
+                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
+                    self.pointer_type,
+                )
+            })
+            .collect();
+        let param_vole_types: Vec<Type> = method
+            .params
+            .iter()
+            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
+            .collect();
+        let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+
+        // Get source file pointer before borrowing ctx.func
+        let source_file_ptr = self.source_file_ptr();
+
+        // Clone metadata for the closure - self has the concrete type!
+        let self_vole_type = metadata.vole_type.clone();
+
+        // Create function builder
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+            let entry_block = builder.create_block();
+            builder.append_block_params_for_function_params(entry_block);
+            builder.switch_to_block(entry_block);
+
+            // Build variables map
+            let mut variables = HashMap::new();
+
+            // Get entry block params (self + user params)
+            let params = builder.block_params(entry_block).to_vec();
+
+            // Bind `self` as the first parameter with the concrete type
+            let self_sym = self
+                .interner
+                .lookup("self")
+                .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
+            let self_var = builder.declare_var(self.pointer_type);
+            builder.def_var(self_var, params[0]);
+            variables.insert(self_sym, (self_var, self_vole_type));
+
+            // Bind remaining parameters
+            for (((name, ty), vole_ty), val) in param_names
+                .iter()
+                .zip(param_types.iter())
+                .zip(param_vole_types.iter())
+                .zip(params[1..].iter())
+            {
+                let var = builder.declare_var(*ty);
+                builder.def_var(var, *val);
+                variables.insert(*name, (var, vole_ty.clone()));
+            }
+
+            // Compile method body (must exist for default methods)
+            let body = method.body.as_ref().ok_or_else(|| {
+                format!(
+                    "Internal error: default method {} has no body",
+                    method_name_str
+                )
+            })?;
+
+            let mut cf_ctx = ControlFlowCtx::new();
+            let mut ctx = CompileCtx {
+                interner: self.interner,
+                pointer_type: self.pointer_type,
+                module: &mut self.jit.module,
+                func_ids: &mut self.jit.func_ids,
+                source_file_ptr,
+                globals: &self.globals,
+                lambda_counter: &mut self.lambda_counter,
+                type_aliases: &self.type_aliases,
+                type_metadata: &self.type_metadata,
+                expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
+            };
+            let terminated =
+                compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
 
             // Add implicit return if no explicit return
             if !terminated {
@@ -619,7 +1109,7 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr(&p.ty, &self.type_aliases),
+                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
                     self.pointer_type,
                 )
             })
@@ -627,7 +1117,7 @@ impl<'a> Compiler<'a> {
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| resolve_type_expr(&p.ty, &self.type_aliases))
+            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
@@ -674,6 +1164,7 @@ impl<'a> Compiler<'a> {
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -742,6 +1233,7 @@ impl<'a> Compiler<'a> {
                     expr_types: &self.expr_types,
                     method_resolutions: &self.method_resolutions,
                     func_return_types: &self.func_return_types,
+                    interface_registry: &self.interface_registry,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -800,7 +1292,9 @@ impl<'a> Compiler<'a> {
                     let return_type = func
                         .return_type
                         .as_ref()
-                        .map(|t| resolve_type_expr(t, &self.type_aliases))
+                        .map(|t| {
+                            resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry)
+                        })
                         .unwrap_or(Type::Void);
                     self.func_return_types.insert(name.to_string(), return_type);
                 }
@@ -854,7 +1348,7 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr(&p.ty, &self.type_aliases),
+                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
                     self.pointer_type,
                 )
             })
@@ -862,7 +1356,7 @@ impl<'a> Compiler<'a> {
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| resolve_type_expr(&p.ty, &self.type_aliases))
+            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
@@ -910,6 +1404,7 @@ impl<'a> Compiler<'a> {
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -971,6 +1466,7 @@ impl<'a> Compiler<'a> {
                 expr_types: &self.expr_types,
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1712,7 +2208,7 @@ pub(super) fn compile_expr(
 
         ExprKind::Is(is_expr) => {
             let value = compile_expr(builder, &is_expr.value, variables, ctx)?;
-            let tested_type = resolve_type_expr(&is_expr.type_expr, ctx.type_aliases);
+            let tested_type = resolve_type_expr(&is_expr.type_expr, ctx);
 
             // If value is a union, check the tag
             if let Type::Union(variants) = &value.vole_type {
@@ -1836,7 +2332,7 @@ pub(super) fn compile_expr(
 
         ExprKind::FieldAccess(fa) => compile_field_access(builder, fa, variables, ctx),
 
-        ExprKind::MethodCall(mc) => compile_method_call(builder, mc, variables, ctx),
+        ExprKind::MethodCall(mc) => compile_method_call(builder, mc, expr.id, variables, ctx),
     }
 }
 
@@ -2411,6 +2907,20 @@ fn compile_call(
         return compile_indirect_call(builder, var, &ft, &call.args, variables, ctx);
     }
 
+    // Check if callee is a variable with interface type (functional interface)
+    if let Some((var, Type::Interface(iface))) = variables.get(&callee_sym) {
+        // Look up the functional interface's function type
+        if let Some(method_def) = ctx.interface_registry.is_functional(iface.name) {
+            let ft = FunctionType {
+                params: method_def.params.clone(),
+                return_type: Box::new(method_def.return_type.clone()),
+                is_closure: true, // Interface variables hold closures
+            };
+            let var = *var;
+            return compile_indirect_call(builder, var, &ft, &call.args, variables, ctx);
+        }
+    }
+
     // Check if callee is a global variable with function type
     if let Some(global) = ctx.globals.iter().find(|g| g.name == callee_sym) {
         // Compile the global's initializer to get the function pointer
@@ -2420,6 +2930,24 @@ fn compile_call(
                 builder,
                 callee_value.value,
                 ft,
+                &call.args,
+                variables,
+                ctx,
+            );
+        }
+        // Check if global is a functional interface
+        if let Type::Interface(iface) = &callee_value.vole_type
+            && let Some(method_def) = ctx.interface_registry.is_functional(iface.name)
+        {
+            let ft = FunctionType {
+                params: method_def.params.clone(),
+                return_type: Box::new(method_def.return_type.clone()),
+                is_closure: true,
+            };
+            return compile_indirect_call_value(
+                builder,
+                callee_value.value,
+                &ft,
                 &call.args,
                 variables,
                 ctx,
@@ -3061,6 +3589,7 @@ fn compile_index_assign(
 fn compile_method_call(
     builder: &mut FunctionBuilder,
     mc: &MethodCallExpr,
+    expr_id: NodeId,
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
@@ -3072,12 +3601,77 @@ fn compile_method_call(
         return Ok(result);
     }
 
-    // Get the type name from the object's vole_type
-    let type_name = get_type_name_symbol(&obj.vole_type)?;
+    // Look up method resolution to determine naming convention and return type
+    // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
+    let resolution = ctx.method_resolutions.get(expr_id);
 
-    // Build the method function name: TypeName_methodName
-    let type_name_str = ctx.interner.resolve(type_name);
-    let full_name = format!("{}_{}", type_name_str, method_name_str);
+    // Determine the method function name based on resolution type
+    let (full_name, return_type) = if let Some(resolution) = resolution {
+        match resolution {
+            ResolvedMethod::Direct { func_type } => {
+                // Direct method on class/record: use TypeName_methodName
+                let type_name = get_type_name_symbol(&obj.vole_type)?;
+                let type_name_str = ctx.interner.resolve(type_name);
+                let name = format!("{}_{}", type_name_str, method_name_str);
+                (name, (*func_type.return_type).clone())
+            }
+            ResolvedMethod::Implemented {
+                func_type,
+                is_builtin,
+                ..
+            } => {
+                if *is_builtin {
+                    // Built-in methods should have been handled above
+                    return Err(format!("Unhandled builtin method: {}", method_name_str));
+                }
+                // Implement block method: use TypeName::methodName
+                let type_id = TypeId::from_type(&obj.vole_type)
+                    .ok_or_else(|| format!("Cannot get TypeId for {:?}", obj.vole_type))?;
+                let type_name_str = type_id.type_name(ctx.interner);
+                let name = format!("{}::{}", type_name_str, method_name_str);
+                (name, (*func_type.return_type).clone())
+            }
+            ResolvedMethod::FunctionalInterface { func_type } => {
+                // For functional interfaces, the object IS the closure pointer
+                // Call it as a closure
+                return compile_closure_call(
+                    builder, obj.value, func_type, &mc.args, variables, ctx,
+                );
+            }
+            ResolvedMethod::DefaultMethod {
+                type_name,
+                func_type,
+                ..
+            } => {
+                // Default method from interface, monomorphized for the concrete type
+                // Name format is TypeName_methodName (same as direct methods)
+                let type_name_str = ctx.interner.resolve(*type_name);
+                let name = format!("{}_{}", type_name_str, method_name_str);
+                (name, (*func_type.return_type).clone())
+            }
+        }
+    } else {
+        // No resolution found - try to resolve directly from object type
+        // This handles method calls inside default method bodies where sema
+        // doesn't analyze the interface body
+        let type_name = get_type_name_symbol(&obj.vole_type)?;
+        let type_name_str = ctx.interner.resolve(type_name);
+
+        // Look up method return type from type metadata
+        let return_type = ctx
+            .type_metadata
+            .get(&type_name)
+            .and_then(|meta| meta.method_return_types.get(&mc.method).cloned())
+            .ok_or_else(|| {
+                format!(
+                    "Method {} not found on type {}",
+                    method_name_str, type_name_str
+                )
+            })?;
+
+        let name = format!("{}_{}", type_name_str, method_name_str);
+        (name, return_type)
+    };
 
     let method_func_id = ctx
         .func_ids
@@ -3096,9 +3690,6 @@ fn compile_method_call(
 
     let call = builder.ins().call(method_func_ref, &args);
     let results = builder.inst_results(call);
-
-    // Get return type from method signature
-    let return_type = get_method_return_type(&obj.vole_type, mc.method, ctx)?;
 
     if results.is_empty() {
         Ok(CompiledValue {
@@ -3176,6 +3767,8 @@ mod tests {
                 HashMap::new(),
                 HashMap::new(),
                 MethodResolutions::new(),
+                InterfaceRegistry::new(),
+                HashMap::new(),
             );
             compiler.compile_program(&program).unwrap();
         }
