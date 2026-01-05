@@ -83,6 +83,7 @@ func main() {
 | Classes, records, interfaces | Implemented |
 | Generics (union constraints) | Implemented |
 | Error handling (fallible, try/catch) | Implemented |
+| External blocks (native FFI) | Implemented |
 | Iterators (map, filter, reduce, etc.) | Implemented |
 | Testing (test blocks, assert) | Implemented |
 | Returned closures (currying) | WIP |

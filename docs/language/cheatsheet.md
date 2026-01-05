@@ -219,6 +219,22 @@ tests "group" {
 }
 ```
 
+## External Blocks (Native FFI)
+
+```vole
+// Inside implement block - add native methods to types
+implement string {
+    external("std:string") {
+        func "string_length" as length() -> i64
+        func "string_contains" as contains(needle: string) -> bool
+    }
+}
+
+// Usage
+"hello".length()        // 5
+"hello".contains("ell") // true
+```
+
 ## Built-in Functions
 
 ```vole
