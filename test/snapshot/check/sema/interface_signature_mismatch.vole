@@ -1,0 +1,12 @@
+interface Adder {
+    func add(a: i64, b: i64) -> i64
+}
+
+record Calculator implements Adder {
+    name: string,
+
+    // Wrong signature: takes i32 instead of i64
+    func add(a: i32, b: i32) -> i32 {
+        return a + b
+    }
+}

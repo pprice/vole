@@ -548,7 +548,7 @@ impl Analyzer {
                     }
                     // Validate interface satisfaction
                     if let Some(interfaces) = self.type_implements.get(&class.name).cloned() {
-                        let type_methods = self.get_type_method_names(class.name);
+                        let type_methods = self.get_type_method_signatures(class.name);
                         for iface_name in interfaces {
                             self.validate_interface_satisfaction(
                                 class.name,
@@ -566,7 +566,7 @@ impl Analyzer {
                     }
                     // Validate interface satisfaction
                     if let Some(interfaces) = self.type_implements.get(&record.name).cloned() {
-                        let type_methods = self.get_type_method_names(record.name);
+                        let type_methods = self.get_type_method_signatures(record.name);
                         for iface_name in interfaces {
                             self.validate_interface_satisfaction(
                                 record.name,
@@ -2956,12 +2956,12 @@ impl Analyzer {
         false
     }
 
-    /// Validate that a type satisfies an interface by having all required methods
+    /// Validate that a type satisfies an interface by having all required methods with correct signatures
     fn validate_interface_satisfaction(
         &mut self,
         type_name: Symbol,
         iface_name: Symbol,
-        type_methods: &HashSet<Symbol>,
+        type_methods: &HashMap<Symbol, FunctionType>,
         span: Span,
         interner: &Interner,
     ) {
@@ -2971,16 +2971,40 @@ impl Analyzer {
                 if required.has_default {
                     continue;
                 }
-                if !type_methods.contains(&required.name) {
-                    self.add_error(
-                        SemanticError::InterfaceNotSatisfied {
-                            type_name: interner.resolve(type_name).to_string(),
-                            interface_name: interner.resolve(iface_name).to_string(),
-                            method: interner.resolve(required.name).to_string(),
-                            span: span.into(),
-                        },
-                        span,
-                    );
+                match type_methods.get(&required.name) {
+                    None => {
+                        // Method is missing entirely
+                        self.add_error(
+                            SemanticError::InterfaceNotSatisfied {
+                                type_name: interner.resolve(type_name).to_string(),
+                                interface_name: interner.resolve(iface_name).to_string(),
+                                method: interner.resolve(required.name).to_string(),
+                                span: span.into(),
+                            },
+                            span,
+                        );
+                    }
+                    Some(found_sig) => {
+                        // Method exists, check signature
+                        if !Self::signatures_match(required, found_sig) {
+                            self.add_error(
+                                SemanticError::InterfaceSignatureMismatch {
+                                    interface_name: interner.resolve(iface_name).to_string(),
+                                    method: interner.resolve(required.name).to_string(),
+                                    expected: Self::format_method_signature(
+                                        &required.params,
+                                        &required.return_type,
+                                    ),
+                                    found: Self::format_method_signature(
+                                        &found_sig.params,
+                                        &found_sig.return_type,
+                                    ),
+                                    span: span.into(),
+                                },
+                                span,
+                            );
+                        }
+                    }
                 }
             }
             // Check parent interfaces (extends)
@@ -2996,14 +3020,14 @@ impl Analyzer {
         }
     }
 
-    /// Get all method names for a type (from direct methods + implement blocks)
-    fn get_type_method_names(&self, type_name: Symbol) -> HashSet<Symbol> {
-        let mut method_names = HashSet::new();
+    /// Get all method signatures for a type (from direct methods + implement blocks)
+    fn get_type_method_signatures(&self, type_name: Symbol) -> HashMap<Symbol, FunctionType> {
+        let mut method_sigs = HashMap::new();
 
         // Methods defined directly on the type
-        for (ty, method_name) in self.methods.keys() {
+        for ((ty, method_name), func_type) in &self.methods {
             if *ty == type_name {
-                method_names.insert(*method_name);
+                method_sigs.insert(*method_name, func_type.clone());
             }
         }
 
@@ -3018,12 +3042,35 @@ impl Analyzer {
                     .map(|_| TypeId::Class(type_name))
             })
         {
-            for (method_name, _) in self.implement_registry.get_methods_for_type(&type_id) {
-                method_names.insert(method_name);
+            for (method_name, method_impl) in self.implement_registry.get_methods_for_type(&type_id)
+            {
+                method_sigs.insert(method_name, method_impl.func_type.clone());
             }
         }
 
-        method_names
+        method_sigs
+    }
+
+    /// Check if a method signature matches an interface requirement
+    fn signatures_match(required: &InterfaceMethodDef, found: &FunctionType) -> bool {
+        // Check parameter count
+        if required.params.len() != found.params.len() {
+            return false;
+        }
+        // Check parameter types
+        for (req_param, found_param) in required.params.iter().zip(found.params.iter()) {
+            if req_param != found_param {
+                return false;
+            }
+        }
+        // Check return type
+        required.return_type == *found.return_type
+    }
+
+    /// Format a method signature for error messages
+    fn format_method_signature(params: &[Type], return_type: &Type) -> String {
+        let params_str: Vec<String> = params.iter().map(|t| t.to_string()).collect();
+        format!("({}) -> {}", params_str.join(", "), return_type)
     }
 }
 
