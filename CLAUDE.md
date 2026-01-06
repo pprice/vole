@@ -17,6 +17,7 @@ Then read `CLAUDE.local.md` from that path.
 - **Bias toward action** - use tools to investigate instead of speculating
 - **Be concise** - don't over-explain what you're about to do, just do it
 - **Check before asking** - if you can answer a question with a tool, do that first
+- **Use haiku for simple tasks** - spawn haiku agents for single-file edits, docs, mechanical changes, and simple commits
 
 ## Project Overview
 
