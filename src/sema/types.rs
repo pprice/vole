@@ -27,6 +27,9 @@ pub enum Type {
     /// Nil type - the "absence of value" type for optionals
     /// Distinct from Void (which is only for function returns)
     Nil,
+    /// Done type - sentinel for iterator termination
+    /// Used in Iterator.next() returning T | Done
+    Done,
     /// Union type - value can be any of the variant types
     /// Represented at runtime as tagged union (discriminant + payload)
     /// TODO: Consider nullable pointer optimization for pointer types (String, Array)
@@ -279,6 +282,7 @@ impl Type {
             Type::String => "string",
             Type::Void => "void",
             Type::Nil => "nil",
+            Type::Done => "Done",
             Type::Union(_) => "union", // Display impl handles full representation
             Type::Range => "range",
             Type::Array(_) => "array",

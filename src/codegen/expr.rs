@@ -46,6 +46,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::Index(idx) => self.index(&idx.object, &idx.index),
             ExprKind::Match(match_expr) => self.match_expr(match_expr),
             ExprKind::Nil => Ok(self.nil_value()),
+            ExprKind::Done => Ok(self.done_value()),
             ExprKind::Is(is_expr) => self.is_expr(is_expr),
             ExprKind::NullCoalesce(nc) => self.null_coalesce(nc),
             ExprKind::Lambda(lambda) => self.lambda(lambda),

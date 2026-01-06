@@ -47,6 +47,7 @@ pub enum TokenType {
     KwExternal,   // external keyword
     KwAs,         // as keyword (for external func mapping)
     KwImport,     // import keyword
+    KwDone,       // Done keyword (iterator termination sentinel)
 
     // Type keywords
     KwI8,
@@ -162,6 +163,7 @@ impl TokenType {
             Self::KwExternal => "external",
             Self::KwAs => "as",
             Self::KwImport => "import",
+            Self::KwDone => "Done",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",

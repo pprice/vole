@@ -22,6 +22,7 @@ f32  f64                // Floats (f64 default)
 bool                    // true, false
 string                  // "hello"
 nil                     // Absence of value
+Done                    // Iterator termination sentinel
 
 // Compound
 [T]                     // Array: [1, 2, 3]

@@ -190,6 +190,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
             Type::normalize_union(variant_types)
         }
         TypeExpr::Nil => Type::Nil,
+        TypeExpr::Done => Type::Done,
         TypeExpr::Function {
             params,
             return_type,
@@ -288,6 +289,7 @@ pub(crate) fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::
         Type::Bool => types::I8,
         Type::String => pointer_type,
         Type::Nil => types::I8,            // Nil uses minimal representation
+        Type::Done => types::I8,           // Done uses minimal representation (like Nil)
         Type::Union(_) => pointer_type,    // Unions are passed by pointer
         Type::Fallible(_) => pointer_type, // Fallibles are passed by pointer (tagged union)
         Type::Function(_) => pointer_type, // Function pointers
@@ -304,7 +306,7 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
         Type::I64 | Type::U64 | Type::F64 => 8,
         Type::I128 => 16,
         Type::String | Type::Array(_) => pointer_type.bytes(), // pointer size
-        Type::Nil | Type::Void => 0,
+        Type::Nil | Type::Done | Type::Void => 0,
         Type::Union(variants) => {
             // Tag (1 byte) + padding + max payload size, aligned to 8
             let max_payload = variants

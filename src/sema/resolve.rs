@@ -83,6 +83,7 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
             Type::Array(Box::new(elem_ty))
         }
         TypeExpr::Nil => Type::Nil,
+        TypeExpr::Done => Type::Done,
         TypeExpr::Optional(inner) => {
             let inner_ty = resolve_type(inner, ctx);
             Type::optional(inner_ty)

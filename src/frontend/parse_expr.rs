@@ -455,6 +455,18 @@ impl<'src> Parser<'src> {
                     span: token.span,
                 })
             }
+            TokenType::KwDone => {
+                let start_span = token.span;
+                self.advance(); // consume 'Done'
+                self.consume(TokenType::LBrace, "expected '{' after Done")?;
+                let end_span = self.current.span;
+                self.consume(TokenType::RBrace, "expected '}' after Done")?;
+                Ok(Expr {
+                    id: self.next_id(),
+                    kind: ExprKind::Done,
+                    span: start_span.merge(end_span),
+                })
+            }
             TokenType::KwImport => {
                 let start_span = token.span;
                 self.advance(); // consume 'import'
@@ -1008,6 +1020,7 @@ impl<'src> Parser<'src> {
             TokenType::KwBool => Some(TypeExpr::Primitive(PrimitiveType::Bool)),
             TokenType::KwString => Some(TypeExpr::Primitive(PrimitiveType::String)),
             TokenType::KwNil => Some(TypeExpr::Nil),
+            TokenType::KwDone => Some(TypeExpr::Done),
             _ => None,
         }
     }

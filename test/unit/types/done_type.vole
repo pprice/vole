@@ -1,0 +1,43 @@
+// Done type tests
+
+func returns_done() -> Done {
+    return Done {}
+}
+
+tests {
+    test "done type exists" {
+        let d: Done = Done {}
+        assert(true)  // Just checking it compiles
+    }
+
+    test "done from function" {
+        let d = returns_done()
+        assert(true)
+    }
+
+    test "done in union with is check" {
+        let result: i32 | Done = Done {}
+        let is_done = result is Done
+        assert(is_done)
+    }
+
+    test "match done in three-way union" {
+        let result: i32 | string | Done = Done {}
+        let matched = match result {
+            i32 => 1
+            string => 2
+            Done => 3
+        }
+        assert(matched == 3)
+    }
+
+    test "match i32 in three-way union with done" {
+        let result: i32 | string | Done = 42
+        let matched = match result {
+            i32 => 1
+            string => 2
+            Done => 3
+        }
+        assert(matched == 1)
+    }
+}

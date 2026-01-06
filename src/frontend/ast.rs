@@ -163,6 +163,7 @@ pub enum TypeExpr {
     Optional(Box<TypeExpr>), // T? syntax (desugars to Union with Nil)
     Union(Vec<TypeExpr>),    // A | B | C
     Nil,                     // nil type
+    Done,                    // Done type (iterator termination sentinel)
     Function {
         params: Vec<TypeExpr>,
         return_type: Box<TypeExpr>,
@@ -313,6 +314,9 @@ pub enum ExprKind {
 
     /// Nil literal
     Nil,
+
+    /// Done literal (iterator termination sentinel)
+    Done,
 
     /// Null coalescing: value ?? default
     NullCoalesce(Box<NullCoalesceExpr>),

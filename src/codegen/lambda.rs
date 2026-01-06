@@ -69,6 +69,7 @@ pub(crate) fn infer_expr_type(
         ExprKind::StringLiteral(_) => Type::String,
         ExprKind::InterpolatedString(_) => Type::String,
         ExprKind::Nil => Type::Nil,
+        ExprKind::Done => Type::Done,
 
         ExprKind::Identifier(sym) => {
             for (name, ty) in param_types {

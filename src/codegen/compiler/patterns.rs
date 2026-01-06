@@ -935,6 +935,17 @@ pub(super) fn compile_expr(
             })
         }
 
+        ExprKind::Done => {
+            // Done has no runtime value - return a zero constant
+            // Like Nil, the actual type will be determined by context (union wrapping)
+            let zero = builder.ins().iconst(types::I8, 0);
+            Ok(CompiledValue {
+                value: zero,
+                ty: types::I8,
+                vole_type: Type::Done,
+            })
+        }
+
         ExprKind::Is(is_expr) => {
             let value = compile_expr(builder, &is_expr.value, variables, ctx)?;
             let tested_type = resolve_type_expr(&is_expr.type_expr, ctx);

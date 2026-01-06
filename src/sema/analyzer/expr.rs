@@ -1135,6 +1135,8 @@ impl Analyzer {
 
             ExprKind::Nil => Ok(Type::Nil),
 
+            ExprKind::Done => Ok(Type::Done),
+
             ExprKind::NullCoalesce(nc) => {
                 let value_type = self.check_expr(&nc.value, interner)?;
 

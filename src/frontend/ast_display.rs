@@ -203,6 +203,9 @@ impl<'a> AstPrinter<'a> {
             TypeExpr::Nil => {
                 out.push_str("nil");
             }
+            TypeExpr::Done => {
+                out.push_str("Done");
+            }
             TypeExpr::Function {
                 params,
                 return_type,
@@ -523,6 +526,11 @@ impl<'a> AstPrinter<'a> {
                 writeln!(out, "Nil").unwrap();
             }
 
+            ExprKind::Done => {
+                self.write_indent(out);
+                writeln!(out, "Done").unwrap();
+            }
+
             ExprKind::NullCoalesce(nc) => {
                 self.write_indent(out);
                 writeln!(out, "NullCoalesce").unwrap();
@@ -694,6 +702,7 @@ impl<'a> AstPrinter<'a> {
                 }
             }
             TypeExpr::Nil => out.push_str("nil"),
+            TypeExpr::Done => out.push_str("Done"),
             TypeExpr::Function {
                 params,
                 return_type,
