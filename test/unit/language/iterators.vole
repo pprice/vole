@@ -71,4 +71,13 @@ tests "iterators" {
 
         assert(count == 3)
     }
+
+    test "collect to array" {
+        let arr = [1, 2, 3]
+        let collected = arr.iter().collect()
+        assert(collected.length() == 3)
+        assert(collected[0] == 1)
+        assert(collected[1] == 2)
+        assert(collected[2] == 3)
+    }
 }

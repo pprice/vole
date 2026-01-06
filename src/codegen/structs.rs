@@ -669,6 +669,15 @@ impl Cg<'_, '_, '_> {
                     vole_type: union_type,
                 }))
             }
+            // Iterator.collect() -> [T]
+            (Type::Iterator(elem_ty), "collect") => {
+                let result = self.call_runtime("vole_array_iter_collect", &[obj.value])?;
+                Ok(Some(CompiledValue {
+                    value: result,
+                    ty: self.ctx.pointer_type,
+                    vole_type: Type::Array(elem_ty.clone()),
+                }))
+            }
             (Type::String, "length") => {
                 let result = self.call_runtime("vole_string_len", &[obj.value])?;
                 Ok(Some(self.i64_value(result)))

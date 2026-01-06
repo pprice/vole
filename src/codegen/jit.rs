@@ -136,6 +136,10 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
         self.import_function("vole_array_iter_next", &sig);
 
+        // vole_array_iter_collect(iter: *mut ArrayIterator) -> *mut RcArray
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_array_iter_collect", &sig);
+
         // vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64)
         let sig = self.create_signature(&[ptr_ty, types::I64, types::I64, types::I64], None);
         self.import_function("vole_array_set", &sig);
@@ -284,6 +288,10 @@ impl JitContext {
         builder.symbol(
             "vole_array_iter_next",
             crate::runtime::iterator::vole_array_iter_next as *const u8,
+        );
+        builder.symbol(
+            "vole_array_iter_collect",
+            crate::runtime::iterator::vole_array_iter_collect as *const u8,
         );
         builder.symbol(
             "vole_array_set",

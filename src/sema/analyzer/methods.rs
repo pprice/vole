@@ -138,6 +138,20 @@ impl Analyzer {
                 }
                 Some(Type::Union(vec![*elem_ty.clone(), Type::Done]))
             }
+            // Iterator.collect() -> [T]
+            (Type::Iterator(elem_ty), "collect") => {
+                if !args.is_empty() {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 0,
+                            found: args.len(),
+                            span: args[0].span.into(),
+                        },
+                        args[0].span,
+                    );
+                }
+                Some(Type::Array(elem_ty.clone()))
+            }
             // String.length() -> i64
             (Type::String, "length") => {
                 if !args.is_empty() {
@@ -231,6 +245,7 @@ impl Analyzer {
             (Type::Iterator(elem_ty), "next") => {
                 Some(Type::Union(vec![*elem_ty.clone(), Type::Done]))
             }
+            (Type::Iterator(elem_ty), "collect") => Some(Type::Array(elem_ty.clone())),
             (Type::String, "length") => Some(Type::I64),
             _ => None,
         }

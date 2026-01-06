@@ -375,6 +375,21 @@ pub(crate) fn compile_builtin_method(
                 vole_type: union_type,
             }))
         }
+        // Iterator.collect() -> [T]
+        (Type::Iterator(elem_ty), "collect") => {
+            let func_id = ctx
+                .func_ids
+                .get("vole_array_iter_collect")
+                .ok_or_else(|| "vole_array_iter_collect not found".to_string())?;
+            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let call = builder.ins().call(func_ref, &[obj.value]);
+            let result = builder.inst_results(call)[0];
+            Ok(Some(CompiledValue {
+                value: result,
+                ty: ctx.pointer_type,
+                vole_type: Type::Array(elem_ty.clone()),
+            }))
+        }
         // String.length() -> i64
         (Type::String, "length") => {
             let func_id = ctx

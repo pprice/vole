@@ -72,3 +72,44 @@ pub extern "C" fn vole_array_iter_next(iter: *mut ArrayIterator, out_value: *mut
     iter.index += 1;
     1 // Has value
 }
+
+/// Collect all remaining iterator values into a new array
+/// Returns pointer to newly allocated array (empty if iterator is null)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_array_iter_collect(iter: *mut ArrayIterator) -> *mut RcArray {
+    use crate::runtime::value::TaggedValue;
+
+    let result = RcArray::new();
+
+    if iter.is_null() {
+        return result;
+    }
+
+    loop {
+        let iter_ref = unsafe { &mut *iter };
+        if iter_ref.index >= unsafe { (*iter_ref.array).len } as i64 {
+            break;
+        }
+
+        let tagged_value = unsafe {
+            let data = (*iter_ref.array).data;
+            *data.add(iter_ref.index as usize)
+        };
+
+        // Push to result array with original tag and value
+        unsafe {
+            RcArray::push(
+                result,
+                TaggedValue {
+                    tag: tagged_value.tag,
+                    value: tagged_value.value,
+                },
+            );
+        }
+
+        iter_ref.index += 1;
+    }
+
+    result
+}
