@@ -6,6 +6,7 @@ pub mod lexer;
 mod parse_decl;
 mod parse_expr;
 mod parse_external;
+mod parse_generic;
 mod parse_lambda;
 mod parse_stmt;
 mod parse_string;
