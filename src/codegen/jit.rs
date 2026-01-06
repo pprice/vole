@@ -164,6 +164,18 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_filter_iter_collect", &sig);
 
+        // vole_iter_count(iter: *mut UnifiedIterator) -> i64
+        let sig = self.create_signature(&[ptr_ty], Some(types::I64));
+        self.import_function("vole_iter_count", &sig);
+
+        // vole_iter_sum(iter: *mut UnifiedIterator) -> i64
+        let sig = self.create_signature(&[ptr_ty], Some(types::I64));
+        self.import_function("vole_iter_sum", &sig);
+
+        // vole_iter_for_each(iter: *mut UnifiedIterator, callback: *const Closure)
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], None);
+        self.import_function("vole_iter_for_each", &sig);
+
         // vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64)
         let sig = self.create_signature(&[ptr_ty, types::I64, types::I64, types::I64], None);
         self.import_function("vole_array_set", &sig);
@@ -340,6 +352,18 @@ impl JitContext {
         builder.symbol(
             "vole_filter_iter_collect",
             crate::runtime::iterator::vole_filter_iter_collect as *const u8,
+        );
+        builder.symbol(
+            "vole_iter_count",
+            crate::runtime::iterator::vole_iter_count as *const u8,
+        );
+        builder.symbol(
+            "vole_iter_sum",
+            crate::runtime::iterator::vole_iter_sum as *const u8,
+        );
+        builder.symbol(
+            "vole_iter_for_each",
+            crate::runtime::iterator::vole_iter_for_each as *const u8,
         );
         builder.symbol(
             "vole_array_set",

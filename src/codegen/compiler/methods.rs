@@ -178,6 +178,13 @@ pub(crate) fn compile_method_call(
         return compile_iterator_filter(builder, &obj, elem_ty, &mc.args, variables, ctx);
     }
 
+    // Handle iterator.for_each(fn) -> calls function for each element
+    if let Type::Iterator(_) | Type::MapIterator(_) | Type::FilterIterator(_) = &obj.vole_type
+        && method_name_str == "for_each"
+    {
+        return compile_iterator_for_each(builder, &obj, &mc.args, variables, ctx);
+    }
+
     // Look up method resolution to determine naming convention and return type
     // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
     let resolution = ctx.method_resolutions.get(expr_id);
@@ -548,6 +555,40 @@ pub(crate) fn compile_builtin_method(
                 vole_type: Type::Array(elem_ty.clone()),
             }))
         }
+        // Iterator.count() -> i64 (works on any iterator type)
+        (Type::Iterator(_), "count")
+        | (Type::MapIterator(_), "count")
+        | (Type::FilterIterator(_), "count") => {
+            let func_id = ctx
+                .func_ids
+                .get("vole_iter_count")
+                .ok_or_else(|| "vole_iter_count not found".to_string())?;
+            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let call = builder.ins().call(func_ref, &[obj.value]);
+            let result = builder.inst_results(call)[0];
+            Ok(Some(CompiledValue {
+                value: result,
+                ty: types::I64,
+                vole_type: Type::I64,
+            }))
+        }
+        // Iterator.sum() -> i64 (works on numeric iterators)
+        (Type::Iterator(_), "sum")
+        | (Type::MapIterator(_), "sum")
+        | (Type::FilterIterator(_), "sum") => {
+            let func_id = ctx
+                .func_ids
+                .get("vole_iter_sum")
+                .ok_or_else(|| "vole_iter_sum not found".to_string())?;
+            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let call = builder.ins().call(func_ref, &[obj.value]);
+            let result = builder.inst_results(call)[0];
+            Ok(Some(CompiledValue {
+                value: result,
+                ty: types::I64,
+                vole_type: Type::I64,
+            }))
+        }
         // String.length() -> i64
         (Type::String, "length") => {
             let func_id = ctx
@@ -686,6 +727,64 @@ fn compile_iterator_filter(
         value: result,
         ty: ctx.pointer_type,
         vole_type: Type::FilterIterator(Box::new(elem_ty.clone())),
+    })
+}
+
+/// Compile Iterator.for_each(fn) -> calls function for each element, returns void
+fn compile_iterator_for_each(
+    builder: &mut FunctionBuilder,
+    iter_obj: &CompiledValue,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    if args.len() != 1 {
+        return Err(format!("for_each expects 1 argument, got {}", args.len()));
+    }
+
+    // Compile the callback function (should be a lambda/closure)
+    let callback = compile_expr(builder, &args[0], variables, ctx)?;
+
+    // The callback should be a function
+    let is_closure = match &callback.vole_type {
+        Type::Function(ft) => ft.is_closure,
+        _ => {
+            return Err(format!(
+                "for_each argument must be a function, got {:?}",
+                callback.vole_type
+            ));
+        }
+    };
+
+    // If it's a pure function (not a closure), wrap it in a closure structure
+    // so the runtime can uniformly call it as a closure
+    let closure_ptr = if is_closure {
+        callback.value
+    } else {
+        // Wrap pure function in a closure with 0 captures
+        let alloc_id = ctx
+            .func_ids
+            .get("vole_closure_alloc")
+            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
+        let alloc_ref = ctx.module.declare_func_in_func(*alloc_id, builder.func);
+        let zero = builder.ins().iconst(types::I64, 0);
+        let alloc_call = builder.ins().call(alloc_ref, &[callback.value, zero]);
+        builder.inst_results(alloc_call)[0]
+    };
+
+    // Call vole_iter_for_each(iter, callback_closure)
+    let func_id = ctx
+        .func_ids
+        .get("vole_iter_for_each")
+        .ok_or_else(|| "vole_iter_for_each not found".to_string())?;
+    let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+    builder.ins().call(func_ref, &[iter_obj.value, closure_ptr]);
+
+    // for_each returns void
+    Ok(CompiledValue {
+        value: builder.ins().iconst(types::I64, 0),
+        ty: types::I64,
+        vole_type: Type::Void,
     })
 }
 

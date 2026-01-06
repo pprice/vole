@@ -413,3 +413,88 @@ pub extern "C" fn vole_filter_iter_collect(iter: *mut UnifiedIterator) -> *mut R
 
     result
 }
+
+// =============================================================================
+// Consumer methods - eager evaluation that consumes the entire iterator
+// =============================================================================
+
+/// Count the number of elements in any iterator
+/// Returns the count as i64
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_iter_count(iter: *mut UnifiedIterator) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let mut count: i64 = 0;
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_array_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+        count += 1;
+    }
+
+    count
+}
+
+/// Sum all elements in any iterator (assumes i64 elements)
+/// Returns the sum as i64
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_iter_sum(iter: *mut UnifiedIterator) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let mut sum: i64 = 0;
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_array_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+        sum += value;
+    }
+
+    sum
+}
+
+/// Call a function for each element in any iterator
+/// The callback is a closure that takes one i64 argument and returns nothing
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_iter_for_each(iter: *mut UnifiedIterator, callback: *const Closure) {
+    if iter.is_null() || callback.is_null() {
+        return;
+    }
+
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_array_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+
+        // Call the callback closure with the value
+        unsafe {
+            let func_ptr = Closure::get_func(callback);
+            let num_captures = (*callback).num_captures;
+
+            if num_captures == 0 {
+                // Pure function - call with just the value
+                let callback_fn: extern "C" fn(i64) = std::mem::transmute(func_ptr);
+                callback_fn(value);
+            } else {
+                // Closure - pass closure pointer as first arg
+                let callback_fn: extern "C" fn(*const Closure, i64) = std::mem::transmute(func_ptr);
+                callback_fn(callback, value);
+            }
+        }
+    }
+}

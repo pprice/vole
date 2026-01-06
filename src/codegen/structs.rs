@@ -491,6 +491,13 @@ impl Cg<'_, '_, '_> {
             return self.iterator_filter(&obj, elem_ty, &mc.args);
         }
 
+        // Handle iterator.for_each(fn) -> calls function for each element
+        if let Type::Iterator(_) | Type::MapIterator(_) | Type::FilterIterator(_) = &obj.vole_type
+            && method_name_str == "for_each"
+        {
+            return self.iterator_for_each(&obj, &mc.args);
+        }
+
         // Look up method resolution to determine naming convention and return type
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
         let resolution = self.ctx.method_resolutions.get(expr_id);
@@ -825,6 +832,20 @@ impl Cg<'_, '_, '_> {
                     vole_type: Type::Array(elem_ty.clone()),
                 }))
             }
+            // Iterator.count() -> i64 (works on any iterator type)
+            (Type::Iterator(_), "count")
+            | (Type::MapIterator(_), "count")
+            | (Type::FilterIterator(_), "count") => {
+                let result = self.call_runtime("vole_iter_count", &[obj.value])?;
+                Ok(Some(self.i64_value(result)))
+            }
+            // Iterator.sum() -> i64 (works on numeric iterators)
+            (Type::Iterator(_), "sum")
+            | (Type::MapIterator(_), "sum")
+            | (Type::FilterIterator(_), "sum") => {
+                let result = self.call_runtime("vole_iter_sum", &[obj.value])?;
+                Ok(Some(self.i64_value(result)))
+            }
             (Type::String, "length") => {
                 let result = self.call_runtime("vole_string_len", &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
@@ -922,6 +943,47 @@ impl Cg<'_, '_, '_> {
             ty: self.ctx.pointer_type,
             vole_type: Type::FilterIterator(Box::new(elem_ty.clone())),
         })
+    }
+
+    /// Handle Iterator.for_each(fn) -> calls function for each element, returns void
+    fn iterator_for_each(
+        &mut self,
+        iter_obj: &CompiledValue,
+        args: &[Expr],
+    ) -> Result<CompiledValue, String> {
+        if args.len() != 1 {
+            return Err(format!("for_each expects 1 argument, got {}", args.len()));
+        }
+
+        // Compile the callback function (should be a lambda/closure)
+        let callback = self.expr(&args[0])?;
+
+        // The callback should be a function
+        let is_closure = match &callback.vole_type {
+            Type::Function(ft) => ft.is_closure,
+            _ => {
+                return Err(format!(
+                    "for_each argument must be a function, got {:?}",
+                    callback.vole_type
+                ));
+            }
+        };
+
+        // If it's a pure function (not a closure), wrap it in a closure structure
+        // so the runtime can uniformly call it as a closure
+        let closure_ptr = if is_closure {
+            callback.value
+        } else {
+            // Wrap pure function in a closure with 0 captures
+            let zero = self.builder.ins().iconst(types::I64, 0);
+            self.call_runtime("vole_closure_alloc", &[callback.value, zero])?
+        };
+
+        // Call vole_iter_for_each(iter, callback_closure)
+        self.call_runtime_void("vole_iter_for_each", &[iter_obj.value, closure_ptr])?;
+
+        // for_each returns void
+        Ok(self.void_value())
     }
 
     /// Call a functional interface as a closure or pure function

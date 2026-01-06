@@ -156,6 +156,96 @@ impl Analyzer {
                 }
                 Some(Type::Array(elem_ty.clone()))
             }
+            // Iterator.count() -> i64
+            (Type::Iterator(_), "count")
+            | (Type::MapIterator(_), "count")
+            | (Type::FilterIterator(_), "count") => {
+                if !args.is_empty() {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 0,
+                            found: args.len(),
+                            span: args[0].span.into(),
+                        },
+                        args[0].span,
+                    );
+                }
+                Some(Type::I64)
+            }
+            // Iterator.sum() -> i64 (only for numeric iterators)
+            (Type::Iterator(elem_ty), "sum")
+            | (Type::MapIterator(elem_ty), "sum")
+            | (Type::FilterIterator(elem_ty), "sum") => {
+                if !args.is_empty() {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 0,
+                            found: args.len(),
+                            span: args[0].span.into(),
+                        },
+                        args[0].span,
+                    );
+                }
+                // sum() only works on numeric types (i64, i32)
+                match elem_ty.as_ref() {
+                    Type::I64 | Type::I32 => Some(Type::I64),
+                    _ => {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "numeric iterator (i64 or i32)".to_string(),
+                                found: format!("Iterator<{}>", elem_ty.name()),
+                                span: args.first().map(|a| a.span).unwrap_or_default().into(),
+                            },
+                            args.first().map(|a| a.span).unwrap_or_default(),
+                        );
+                        Some(Type::I64)
+                    }
+                }
+            }
+            // Iterator.for_each(fn) -> () where fn: (T) -> ()
+            (Type::Iterator(elem_ty), "for_each")
+            | (Type::MapIterator(elem_ty), "for_each")
+            | (Type::FilterIterator(elem_ty), "for_each") => {
+                if args.len() != 1 {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 1,
+                            found: args.len(),
+                            span: args.first().map(|a| a.span).unwrap_or_default().into(),
+                        },
+                        args.first().map(|a| a.span).unwrap_or_default(),
+                    );
+                    return Some(Type::Void);
+                }
+
+                // The argument should be a function (T) -> ()
+                let expected_fn_type = FunctionType {
+                    params: vec![*elem_ty.clone()],
+                    return_type: Box::new(Type::Void),
+                    is_closure: true,
+                };
+
+                let arg = &args[0];
+                let arg_ty = if let ExprKind::Lambda(lambda) = &arg.kind {
+                    self.analyze_lambda(lambda, Some(&expected_fn_type), _interner)
+                } else {
+                    self.check_expr(arg, _interner).unwrap_or(Type::Error)
+                };
+
+                // Verify it's a function
+                if !matches!(&arg_ty, Type::Function(_)) {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "function".to_string(),
+                            found: arg_ty.name().to_string(),
+                            span: arg.span.into(),
+                        },
+                        arg.span,
+                    );
+                }
+
+                Some(Type::Void)
+            }
             // Iterator.filter(fn) -> FilterIterator<T> where fn: (T) -> bool
             // MapIterator.filter(fn) -> FilterIterator<T> (chained filter)
             // FilterIterator.filter(fn) -> FilterIterator<T> (chained filter)
@@ -366,6 +456,18 @@ impl Analyzer {
             (Type::Iterator(elem_ty), "collect")
             | (Type::MapIterator(elem_ty), "collect")
             | (Type::FilterIterator(elem_ty), "collect") => Some(Type::Array(elem_ty.clone())),
+            // count() returns i64 for any iterator type
+            (Type::Iterator(_), "count")
+            | (Type::MapIterator(_), "count")
+            | (Type::FilterIterator(_), "count") => Some(Type::I64),
+            // sum() returns i64 (only works on numeric iterators, but return type is always i64)
+            (Type::Iterator(_), "sum")
+            | (Type::MapIterator(_), "sum")
+            | (Type::FilterIterator(_), "sum") => Some(Type::I64),
+            // for_each() returns void
+            (Type::Iterator(_), "for_each")
+            | (Type::MapIterator(_), "for_each")
+            | (Type::FilterIterator(_), "for_each") => Some(Type::Void),
             // Note: map() and filter() are not included here because they need argument analysis
             // to determine return type. It's handled via method_resolutions in codegen.
             (Type::String, "length") => Some(Type::I64),

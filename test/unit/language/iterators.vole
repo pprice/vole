@@ -161,4 +161,85 @@ tests "iterators" {
         assert(result[1] == 8)
         assert(result[2] == 10)
     }
+
+    // Consumer methods: count(), sum(), for_each()
+
+    test "count elements" {
+        let arr = [1, 2, 3, 4, 5]
+        assert(arr.iter().count() == 5)
+    }
+
+    test "count with filter" {
+        let arr = [1, 2, 3, 4, 5]
+        assert(arr.iter().filter((x) => x % 2 == 0).count() == 2)
+    }
+
+    test "count empty iterator" {
+        let arr: [i64] = []
+        assert(arr.iter().count() == 0)
+    }
+
+    test "count with map" {
+        let arr = [1, 2, 3]
+        assert(arr.iter().map((x) => x * 2).count() == 3)
+    }
+
+    test "sum elements" {
+        let arr = [1, 2, 3, 4, 5]
+        assert(arr.iter().sum() == 15)
+    }
+
+    test "sum with map" {
+        let arr = [1, 2, 3, 4, 5]
+        assert(arr.iter().map((x) => x * 2).sum() == 30)
+    }
+
+    test "sum empty iterator" {
+        let arr: [i64] = []
+        assert(arr.iter().sum() == 0)
+    }
+
+    test "sum with filter" {
+        let arr = [1, 2, 3, 4, 5]
+        assert(arr.iter().filter((x) => x % 2 == 0).sum() == 6)
+    }
+
+    // Note: Vole closures capture variables by copying to heap storage.
+    // The closure's copy is separate from the outer variable, so side effects
+    // on captured variables won't affect the outer scope. For this reason,
+    // for_each is primarily useful for side effects like printing.
+
+    test "for_each executes without error" {
+        let arr = [1, 2, 3]
+        // Just verify for_each doesn't crash - it runs the callback
+        arr.iter().for_each((x) => { let y = x * 2 })
+        assert(true)
+    }
+
+    test "for_each with filter chain" {
+        let arr = [1, 2, 3, 4, 5]
+        // for_each after filter should work
+        arr.iter().filter((x) => x > 3).for_each((x) => { let y = x })
+        assert(true)
+    }
+
+    test "for_each empty iterator" {
+        let arr: [i64] = []
+        // for_each on empty iterator should just do nothing
+        arr.iter().for_each((x) => { let y = x })
+        assert(true)
+    }
+
+    test "chained operations with count" {
+        let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        let result = arr.iter().filter((x) => x % 2 == 0).map((x) => x * 10).count()
+        assert(result == 5)
+    }
+
+    test "chained operations with sum" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().filter((x) => x % 2 == 1).map((x) => x * 2).sum()
+        // Odd numbers: 1, 3, 5 -> doubled: 2, 6, 10 -> sum: 18
+        assert(result == 18)
+    }
 }
