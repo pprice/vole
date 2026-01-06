@@ -178,7 +178,7 @@ impl Cg<'_, '_, '_> {
         // Check if it's a functional interface variable
         if let Some((var, vole_type)) = self.vars.get(&callee_sym)
             && let Type::Interface(iface) = vole_type
-            && let Some(method_def) = self.ctx.interface_registry.is_functional(iface.name)
+            && let Some(method_def) = self.ctx.interface_registry.is_functional(iface.name, self.ctx.interner)
         {
             let func_type = FunctionType {
                 params: method_def.params.clone(),
@@ -200,7 +200,7 @@ impl Cg<'_, '_, '_> {
                 // If declared as functional interface, call using the lambda's actual type
                 // (the lambda might be a pure function or a closure depending on captures)
                 if let Type::Interface(iface) = &declared_type
-                    && let Some(method_def) = self.ctx.interface_registry.is_functional(iface.name)
+                    && let Some(method_def) = self.ctx.interface_registry.is_functional(iface.name, self.ctx.interner)
                 {
                     // Use the lambda's actual is_closure status from compilation
                     let is_closure = if let Type::Function(ft) = &lambda_val.vole_type {
@@ -224,7 +224,7 @@ impl Cg<'_, '_, '_> {
 
             // If it's an interface type (functional interface), call as closure
             if let Type::Interface(iface) = &lambda_val.vole_type
-                && let Some(method_def) = self.ctx.interface_registry.is_functional(iface.name)
+                && let Some(method_def) = self.ctx.interface_registry.is_functional(iface.name, self.ctx.interner)
             {
                 let func_type = FunctionType {
                     params: method_def.params.clone(),

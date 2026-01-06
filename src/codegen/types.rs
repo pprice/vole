@@ -103,6 +103,7 @@ pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
         ctx.type_aliases,
         ctx.interface_registry,
         ctx.error_types,
+        ctx.interner,
     )
 }
 
@@ -113,6 +114,7 @@ pub(crate) fn resolve_type_expr_with_errors(
     type_aliases: &HashMap<Symbol, Type>,
     interface_registry: &InterfaceRegistry,
     error_types: &HashMap<Symbol, ErrorTypeInfo>,
+    interner: &Interner,
 ) -> Type {
     match ty {
         TypeExpr::Primitive(p) => Type::from_primitive(*p),
@@ -120,7 +122,7 @@ pub(crate) fn resolve_type_expr_with_errors(
             // Look up type alias first
             if let Some(aliased) = type_aliases.get(sym) {
                 aliased.clone()
-            } else if let Some(iface) = interface_registry.get(*sym) {
+            } else if let Some(iface) = interface_registry.get(*sym, interner) {
                 // Check interface registry
                 Type::Interface(crate::sema::types::InterfaceType {
                     name: *sym,
@@ -145,20 +147,20 @@ pub(crate) fn resolve_type_expr_with_errors(
         }
         TypeExpr::Array(elem) => {
             let elem_ty =
-                resolve_type_expr_with_errors(elem, type_aliases, interface_registry, error_types);
+                resolve_type_expr_with_errors(elem, type_aliases, interface_registry, error_types, interner);
             Type::Array(Box::new(elem_ty))
         }
         TypeExpr::Optional(inner) => {
             // T? desugars to T | nil
             let inner_ty =
-                resolve_type_expr_with_errors(inner, type_aliases, interface_registry, error_types);
+                resolve_type_expr_with_errors(inner, type_aliases, interface_registry, error_types, interner);
             Type::Union(vec![inner_ty, Type::Nil])
         }
         TypeExpr::Union(variants) => {
             let variant_types: Vec<Type> = variants
                 .iter()
                 .map(|v| {
-                    resolve_type_expr_with_errors(v, type_aliases, interface_registry, error_types)
+                    resolve_type_expr_with_errors(v, type_aliases, interface_registry, error_types, interner)
                 })
                 .collect();
             Type::normalize_union(variant_types)
@@ -171,7 +173,7 @@ pub(crate) fn resolve_type_expr_with_errors(
             let param_types: Vec<Type> = params
                 .iter()
                 .map(|p| {
-                    resolve_type_expr_with_errors(p, type_aliases, interface_registry, error_types)
+                    resolve_type_expr_with_errors(p, type_aliases, interface_registry, error_types, interner)
                 })
                 .collect();
             let ret_type = resolve_type_expr_with_errors(
@@ -179,6 +181,7 @@ pub(crate) fn resolve_type_expr_with_errors(
                 type_aliases,
                 interface_registry,
                 error_types,
+                interner,
             );
             Type::Function(FunctionType {
                 params: param_types,
@@ -199,12 +202,14 @@ pub(crate) fn resolve_type_expr_with_errors(
                 type_aliases,
                 interface_registry,
                 error_types,
+                interner,
             );
             let error = resolve_type_expr_with_errors(
                 error_type,
                 type_aliases,
                 interface_registry,
                 error_types,
+                interner,
             );
             Type::Fallible(crate::sema::types::FallibleType {
                 success_type: Box::new(success),
@@ -221,10 +226,11 @@ pub(crate) fn resolve_type_expr_full(
     ty: &TypeExpr,
     type_aliases: &HashMap<Symbol, Type>,
     interface_registry: &InterfaceRegistry,
+    interner: &Interner,
 ) -> Type {
     // Use an empty error_types map for backward compatibility
     let empty_error_types = HashMap::new();
-    resolve_type_expr_with_errors(ty, type_aliases, interface_registry, &empty_error_types)
+    resolve_type_expr_with_errors(ty, type_aliases, interface_registry, &empty_error_types, interner)
 }
 
 /// Convert a Vole type to a Cranelift type

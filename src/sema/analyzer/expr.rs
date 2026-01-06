@@ -84,8 +84,8 @@ impl Analyzer {
                         if left_ty.is_numeric() && right_ty.is_numeric() {
                             // If we have an expected type and both sides match, use it
                             if let Some(exp) = expected
-                                && self.types_compatible(&left_ty, exp)
-                                && self.types_compatible(&right_ty, exp)
+                                && self.types_compatible(&left_ty, exp, interner)
+                                && self.types_compatible(&right_ty, exp, interner)
                             {
                                 return Ok(exp.clone());
                             }
@@ -151,8 +151,8 @@ impl Analyzer {
 
                         if left_ty.is_integer() && right_ty.is_integer() {
                             if let Some(exp) = expected
-                                && self.types_compatible(&left_ty, exp)
-                                && self.types_compatible(&right_ty, exp)
+                                && self.types_compatible(&left_ty, exp, interner)
+                                && self.types_compatible(&right_ty, exp, interner)
                             {
                                 return Ok(exp.clone());
                             }
@@ -267,7 +267,7 @@ impl Analyzer {
                         Some(ft.clone())
                     } else if let Type::Interface(iface) = t {
                         // Check if it's a functional interface (single abstract method, no fields)
-                        self.get_functional_interface_type(iface.name)
+                        self.get_functional_interface_type(iface.name, interner)
                     } else {
                         None
                     }
@@ -278,7 +278,7 @@ impl Analyzer {
             _ => {
                 let inferred = self.check_expr(expr, interner)?;
                 if let Some(expected_ty) = expected
-                    && !self.types_compatible(&inferred, expected_ty)
+                    && !self.types_compatible(&inferred, expected_ty, interner)
                 {
                     self.add_error(
                         SemanticError::TypeMismatch {
@@ -540,7 +540,7 @@ impl Analyzer {
 
                     // Check if it's a variable with a functional interface type
                     if let Some(Type::Interface(iface)) = self.get_variable_type(*sym)
-                        && let Some(func_type) = self.get_functional_interface_type(iface.name)
+                        && let Some(func_type) = self.get_functional_interface_type(iface.name, interner)
                     {
                         // Calling a functional interface - treat like a closure call
                         if self.in_lambda() {
@@ -654,7 +654,7 @@ impl Analyzer {
                                     expr.span,
                                 );
                             }
-                            if !self.types_compatible(&value_ty, &var_ty) {
+                            if !self.types_compatible(&value_ty, &var_ty, interner) {
                                 self.add_error(
                                     SemanticError::TypeMismatch {
                                         expected: var_ty.name().to_string(),
@@ -688,7 +688,7 @@ impl Analyzer {
                             Type::Class(c) => {
                                 if let Some(field_def) = c.fields.iter().find(|f| f.name == *field)
                                 {
-                                    if !self.types_compatible(&value_ty, &field_def.ty) {
+                                    if !self.types_compatible(&value_ty, &field_def.ty, interner) {
                                         self.add_error(
                                             SemanticError::TypeMismatch {
                                                 expected: field_def.ty.name().to_string(),
@@ -761,7 +761,7 @@ impl Analyzer {
                         // Get element type and check assignment compatibility
                         match obj_type {
                             Type::Array(elem_ty) => {
-                                if !self.types_compatible(&value_ty, &elem_ty) {
+                                if !self.types_compatible(&value_ty, &elem_ty, interner) {
                                     self.add_error(
                                         SemanticError::TypeMismatch {
                                             expected: elem_ty.name().to_string(),
@@ -955,7 +955,7 @@ impl Analyzer {
                     // Check remaining elements match
                     for elem in elements.iter().skip(1) {
                         let ty = self.check_expr(elem, interner)?;
-                        if !self.types_compatible(&ty, &elem_ty) {
+                        if !self.types_compatible(&ty, &elem_ty, interner) {
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: elem_ty.name().to_string(),
@@ -1037,6 +1037,7 @@ impl Analyzer {
                     &match_expr.arms,
                     &scrutinee_type,
                     match_expr.span,
+                    interner,
                 );
                 if !is_exhaustive {
                     self.add_error(
@@ -1161,7 +1162,7 @@ impl Analyzer {
 
             ExprKind::Is(is_expr) => {
                 let value_type = self.check_expr(&is_expr.value, interner)?;
-                let tested_type = self.resolve_type(&is_expr.type_expr);
+                let tested_type = self.resolve_type(&is_expr.type_expr, interner);
 
                 // Warn/error if tested type is not a variant of value's union
                 if let Type::Union(variants) = &value_type
@@ -1383,7 +1384,7 @@ impl Analyzer {
                             {
                                 let arg_ty =
                                     self.check_expr_expecting(arg, Some(param_ty), interner)?;
-                                if !self.types_compatible(&arg_ty, param_ty) {
+                                if !self.types_compatible(&arg_ty, param_ty, interner) {
                                     self.add_error(
                                         SemanticError::TypeMismatch {
                                             expected: format!("{}", param_ty),
@@ -1489,7 +1490,7 @@ impl Analyzer {
                     // Check argument types
                     for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                         let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
-                        if !self.types_compatible(&arg_ty, param_ty) {
+                        if !self.types_compatible(&arg_ty, param_ty, interner) {
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: param_ty.name().to_string(),
@@ -1507,9 +1508,9 @@ impl Analyzer {
                 // Check if object is a functional interface and method matches its single method
                 if let Type::Interface(iface) = &object_type {
                     // Check if interface is functional and method matches its abstract method
-                    if let Some(iface_def) = self.interface_registry.get(iface.name) {
+                    if let Some(iface_def) = self.interface_registry.get(iface.name, interner) {
                         // For functional interfaces, check if the method matches
-                        if let Some(method_def) = self.interface_registry.is_functional(iface.name)
+                        if let Some(method_def) = self.interface_registry.is_functional(iface.name, interner)
                             && method_def.name == method_call.method
                         {
                             let func_type = FunctionType {
@@ -1541,7 +1542,7 @@ impl Analyzer {
                             {
                                 let arg_ty =
                                     self.check_expr_expecting(arg, Some(param_ty), interner)?;
-                                if !self.types_compatible(&arg_ty, param_ty) {
+                                if !self.types_compatible(&arg_ty, param_ty, interner) {
                                     self.add_error(
                                         SemanticError::TypeMismatch {
                                             expected: param_ty.name().to_string(),
@@ -1613,7 +1614,7 @@ impl Analyzer {
                         {
                             let arg_ty =
                                 self.check_expr_expecting(arg, Some(param_ty), interner)?;
-                            if !self.types_compatible(&arg_ty, param_ty) {
+                            if !self.types_compatible(&arg_ty, param_ty, interner) {
                                 self.add_error(
                                     SemanticError::TypeMismatch {
                                         expected: param_ty.name().to_string(),
@@ -1640,7 +1641,7 @@ impl Analyzer {
                     if let Some(interfaces) = self.type_implements.get(&type_sym).cloned() {
                         for interface_name in &interfaces {
                             if let Some(interface_def) =
-                                self.interface_registry.get(*interface_name)
+                                self.interface_registry.get(*interface_name, interner)
                             {
                                 // Look for a default method with matching name
                                 for method_def in &interface_def.methods {
@@ -1679,7 +1680,7 @@ impl Analyzer {
                                                 Some(param_ty),
                                                 interner,
                                             )?;
-                                            if !self.types_compatible(&arg_ty, param_ty) {
+                                            if !self.types_compatible(&arg_ty, param_ty, interner) {
                                                 self.add_error(
                                                     SemanticError::TypeMismatch {
                                                         expected: param_ty.name().to_string(),

@@ -1,0 +1,16 @@
+// Regression test for Symbol mismatch bug
+// Previously, Symbol IDs from different interners could collide.
+// e.g., "UnknownTrait" might get Symbol(1) in user code, but Symbol(1)
+// from prelude was "Equatable", causing false matches.
+
+// This should correctly error - "FakePreludeTrait" doesn't exist
+record Point {
+    x: i64,
+    y: i64,
+}
+
+implement FakePreludeTrait for Point {
+    func notReal() -> i64 {
+        return 0
+    }
+}

@@ -1,0 +1,37 @@
+// Test prelude methods on primitive types
+// These methods are automatically available via the prelude system
+
+tests {
+    // String methods
+    test "string length via method" {
+        let s = "hello"
+        assert(s.length() == 5)
+    }
+
+    test "string length unicode" {
+        let s = "héllo"
+        assert(s.length() == 5)  // Character count, not byte count
+    }
+
+    test "string length emoji" {
+        // Emoji is a single character
+        let s = "hi👋"
+        assert(s.length() == 3)
+    }
+
+    test "empty string length" {
+        let s = ""
+        assert(s.length() == 0)
+    }
+
+    // Array methods
+    test "array length via method" {
+        let arr = [1, 2, 3, 4, 5]
+        assert(arr.length() == 5)
+    }
+
+    test "empty array length" {
+        let arr: [i64] = []
+        assert(arr.length() == 0)
+    }
+}

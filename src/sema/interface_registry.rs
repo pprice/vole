@@ -24,15 +24,19 @@ pub struct InterfaceMethodDef {
 #[derive(Debug, Clone)]
 pub struct InterfaceDef {
     pub name: Symbol,
+    /// String name for cross-interner lookups
+    pub name_str: String,
     pub extends: Vec<Symbol>,
     pub fields: Vec<InterfaceFieldDef>,
     pub methods: Vec<InterfaceMethodDef>,
 }
 
 /// Registry of all interface definitions
+/// NOTE: Uses String keys instead of Symbol to allow cross-interner lookups
+/// (prelude uses different interner than user code)
 #[derive(Debug, Default, Clone)]
 pub struct InterfaceRegistry {
-    interfaces: HashMap<Symbol, InterfaceDef>,
+    interfaces: HashMap<String, InterfaceDef>,
 }
 
 impl InterfaceRegistry {
@@ -42,24 +46,31 @@ impl InterfaceRegistry {
 
     /// Register an interface definition
     pub fn register(&mut self, def: InterfaceDef) {
-        self.interfaces.insert(def.name, def);
+        self.interfaces.insert(def.name_str.clone(), def);
     }
 
-    /// Look up an interface by name
-    pub fn get(&self, name: Symbol) -> Option<&InterfaceDef> {
-        self.interfaces.get(&name)
+    /// Look up an interface by string name
+    pub fn get_by_str(&self, name: &str) -> Option<&InterfaceDef> {
+        self.interfaces.get(name)
+    }
+
+    /// Look up an interface by Symbol (requires interner to resolve)
+    pub fn get(&self, name: Symbol, interner: &crate::frontend::Interner) -> Option<&InterfaceDef> {
+        let name_str = interner.resolve(name);
+        self.interfaces.get(name_str)
     }
 
     /// Merge another registry into this one
     pub fn merge(&mut self, other: &InterfaceRegistry) {
         for (name, def) in &other.interfaces {
-            self.interfaces.insert(*name, def.clone());
+            self.interfaces.insert(name.clone(), def.clone());
         }
     }
 
     /// Check if an interface is a functional interface (single abstract method, no fields)
-    pub fn is_functional(&self, name: Symbol) -> Option<&InterfaceMethodDef> {
-        let interface = self.interfaces.get(&name)?;
+    pub fn is_functional(&self, name: Symbol, interner: &crate::frontend::Interner) -> Option<&InterfaceMethodDef> {
+        let name_str = interner.resolve(name);
+        let interface = self.interfaces.get(name_str)?;
 
         // Must have no required fields
         if !interface.fields.is_empty() {
@@ -85,6 +96,7 @@ impl InterfaceRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frontend::Interner;
 
     fn sym(id: u32) -> Symbol {
         Symbol(id)
@@ -95,6 +107,7 @@ mod tests {
         let mut registry = InterfaceRegistry::new();
         let def = InterfaceDef {
             name: sym(1),
+            name_str: "TestInterface".to_string(),
             extends: vec![],
             fields: vec![],
             methods: vec![InterfaceMethodDef {
@@ -106,7 +119,7 @@ mod tests {
         };
         registry.register(def);
 
-        let retrieved = registry.get(sym(1));
+        let retrieved = registry.get_by_str("TestInterface");
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().methods.len(), 1);
     }
@@ -114,8 +127,11 @@ mod tests {
     #[test]
     fn is_functional_with_single_method() {
         let mut registry = InterfaceRegistry::new();
+        let mut interner = Interner::new();
+        let name_sym = interner.intern("Runnable");
         let def = InterfaceDef {
-            name: sym(1),
+            name: name_sym,
+            name_str: "Runnable".to_string(),
             extends: vec![],
             fields: vec![],
             methods: vec![InterfaceMethodDef {
@@ -127,14 +143,17 @@ mod tests {
         };
         registry.register(def);
 
-        assert!(registry.is_functional(sym(1)).is_some());
+        assert!(registry.is_functional(name_sym, &interner).is_some());
     }
 
     #[test]
     fn not_functional_with_fields() {
         let mut registry = InterfaceRegistry::new();
+        let mut interner = Interner::new();
+        let name_sym = interner.intern("HasField");
         let def = InterfaceDef {
-            name: sym(1),
+            name: name_sym,
+            name_str: "HasField".to_string(),
             extends: vec![],
             fields: vec![InterfaceFieldDef {
                 name: sym(3),
@@ -149,14 +168,17 @@ mod tests {
         };
         registry.register(def);
 
-        assert!(registry.is_functional(sym(1)).is_none());
+        assert!(registry.is_functional(name_sym, &interner).is_none());
     }
 
     #[test]
     fn not_functional_with_multiple_abstract_methods() {
         let mut registry = InterfaceRegistry::new();
+        let mut interner = Interner::new();
+        let name_sym = interner.intern("MultiMethod");
         let def = InterfaceDef {
-            name: sym(1),
+            name: name_sym,
+            name_str: "MultiMethod".to_string(),
             extends: vec![],
             fields: vec![],
             methods: vec![
@@ -176,14 +198,17 @@ mod tests {
         };
         registry.register(def);
 
-        assert!(registry.is_functional(sym(1)).is_none());
+        assert!(registry.is_functional(name_sym, &interner).is_none());
     }
 
     #[test]
     fn functional_ignores_default_methods() {
         let mut registry = InterfaceRegistry::new();
+        let mut interner = Interner::new();
+        let name_sym = interner.intern("WithDefault");
         let def = InterfaceDef {
-            name: sym(1),
+            name: name_sym,
+            name_str: "WithDefault".to_string(),
             extends: vec![],
             fields: vec![],
             methods: vec![
@@ -204,7 +229,7 @@ mod tests {
         registry.register(def);
 
         // Should be functional - only one abstract method
-        assert!(registry.is_functional(sym(1)).is_some());
+        assert!(registry.is_functional(name_sym, &interner).is_some());
     }
 
     #[test]
@@ -214,6 +239,7 @@ mod tests {
 
         registry1.register(InterfaceDef {
             name: sym(1),
+            name_str: "Interface1".to_string(),
             extends: vec![],
             fields: vec![],
             methods: vec![InterfaceMethodDef {
@@ -226,6 +252,7 @@ mod tests {
 
         registry2.register(InterfaceDef {
             name: sym(2),
+            name_str: "Interface2".to_string(),
             extends: vec![],
             fields: vec![],
             methods: vec![InterfaceMethodDef {
@@ -238,7 +265,7 @@ mod tests {
 
         registry1.merge(&registry2);
 
-        assert!(registry1.get(sym(1)).is_some());
-        assert!(registry1.get(sym(2)).is_some());
+        assert!(registry1.get_by_str("Interface1").is_some());
+        assert!(registry1.get_by_str("Interface2").is_some());
     }
 }

@@ -21,7 +21,7 @@ impl Analyzer {
     ) -> Result<(), Vec<TypeError>> {
         match stmt {
             Stmt::Let(let_stmt) => {
-                let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t));
+                let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t, interner));
                 let init_type =
                     self.check_expr_expecting(&let_stmt.init, declared_type.as_ref(), interner)?;
 
@@ -41,7 +41,7 @@ impl Analyzer {
                 if var_type == Type::Type
                     && let ExprKind::TypeLiteral(type_expr) = &let_stmt.init.kind
                 {
-                    let aliased_type = self.resolve_type(type_expr);
+                    let aliased_type = self.resolve_type(type_expr, interner);
                     self.type_aliases.insert(let_stmt.name, aliased_type);
                 }
 
@@ -93,7 +93,7 @@ impl Analyzer {
                 // Check if condition is `x is T` for flow-sensitive narrowing
                 let narrowing_info = if let ExprKind::Is(is_expr) = &if_stmt.condition.kind {
                     if let ExprKind::Identifier(sym) = &is_expr.value.kind {
-                        let tested_type = self.resolve_type(&is_expr.type_expr);
+                        let tested_type = self.resolve_type(&is_expr.type_expr, interner);
                         Some((*sym, tested_type))
                     } else {
                         None
@@ -187,7 +187,7 @@ impl Analyzer {
                         other => other.clone(),
                     };
 
-                    if !self.types_compatible(&ret_type, &expected_value_type) {
+                    if !self.types_compatible(&ret_type, &expected_value_type, interner) {
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: expected_value_type.name().to_string(),

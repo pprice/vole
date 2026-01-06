@@ -21,7 +21,7 @@ impl Analyzer {
         for (i, param) in lambda.params.iter().enumerate() {
             let ty = if let Some(type_expr) = &param.ty {
                 // Explicit type annotation
-                self.resolve_type(type_expr)
+                self.resolve_type(type_expr, interner)
             } else if let Some(expected) = expected_type {
                 // Infer from expected type
                 if i < expected.params.len() {
@@ -68,7 +68,7 @@ impl Analyzer {
         }
 
         // Determine return type
-        let declared_return = lambda.return_type.as_ref().map(|t| self.resolve_type(t));
+        let declared_return = lambda.return_type.as_ref().map(|t| self.resolve_type(t, interner));
         let expected_return = expected_type.map(|ft| (*ft.return_type).clone());
 
         // Analyze body and infer return type

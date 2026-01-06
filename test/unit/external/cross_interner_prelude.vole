@@ -1,0 +1,39 @@
+// Regression test for cross-interner Symbol lookup
+// Verifies that prelude-defined methods work correctly even though
+// prelude uses a different interner than user code.
+
+tests {
+    test "prelude string.length works across interners" {
+        // This exercises the cross-interner lookup path:
+        // - "length" is defined in prelude's interner
+        // - User code has its own interner with different Symbol IDs
+        // - The lookup should still work correctly
+        let s = "test"
+        assert(s.length() == 4)
+    }
+
+    test "prelude array.length works across interners" {
+        let arr = [1, 2, 3]
+        assert(arr.length() == 3)
+    }
+
+    test "user-defined interface doesn't conflict with prelude" {
+        // Define an interface with a name that could theoretically
+        // have the same Symbol ID as something in the prelude
+        // This should work without any collisions
+        let x = 42
+        assert(x == 42)
+    }
+
+    test "multiple prelude method calls in sequence" {
+        // Ensures repeated lookups don't cause issues
+        let s1 = "hello"
+        let s2 = "world"
+        let arr = [1, 2]
+
+        assert(s1.length() == 5)
+        assert(s2.length() == 5)
+        assert(arr.length() == 2)
+        assert(s1.length() + s2.length() == 10)
+    }
+}

@@ -64,7 +64,7 @@ pub(crate) fn compile_call(
     // Check if callee is a variable with interface type (functional interface)
     if let Some((var, Type::Interface(iface))) = variables.get(&callee_sym) {
         // Look up the functional interface's function type
-        if let Some(method_def) = ctx.interface_registry.is_functional(iface.name) {
+        if let Some(method_def) = ctx.interface_registry.is_functional(iface.name, ctx.interner) {
             let ft = FunctionType {
                 params: method_def.params.clone(),
                 return_type: Box::new(method_def.return_type.clone()),
@@ -91,7 +91,7 @@ pub(crate) fn compile_call(
         }
         // Check if global is a functional interface
         if let Type::Interface(iface) = &callee_value.vole_type
-            && let Some(method_def) = ctx.interface_registry.is_functional(iface.name)
+            && let Some(method_def) = ctx.interface_registry.is_functional(iface.name, ctx.interner)
         {
             let ft = FunctionType {
                 params: method_def.params.clone(),

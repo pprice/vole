@@ -220,19 +220,10 @@ impl Analyzer {
 
         // Analyze the prelude file
         if sub_analyzer.analyze(&program, &prelude_interner).is_ok() {
-            // TODO: Merge registries once symbol remapping is implemented
-            // Currently, symbols from prelude files don't match symbols in user code
-            // because each Parser has its own Interner. Until we implement symbol
-            // remapping during merge, merging would cause false positive interface
-            // lookups where Symbol(N) from prelude matches Symbol(N) from user code
-            // even though they represent different strings.
-            //
-            // For now, the infrastructure is in place but actual merging is disabled.
-            // A later task will implement proper symbol remapping.
-            //
-            // self.interface_registry.merge(&sub_analyzer.interface_registry);
-            // self.implement_registry.merge(&sub_analyzer.implement_registry);
-            let _ = sub_analyzer; // Suppress unused warning
+            // Merge the interface registry
+            self.interface_registry.merge(&sub_analyzer.interface_registry);
+            // Merge the implement registry
+            self.implement_registry.merge(&sub_analyzer.implement_registry);
         }
         // Silently ignore analysis errors in prelude
     }
@@ -379,7 +370,7 @@ impl Analyzer {
             if let Decl::Let(let_stmt) = decl
                 && let ExprKind::TypeLiteral(type_expr) = &let_stmt.init.kind
             {
-                let aliased_type = self.resolve_type(type_expr);
+                let aliased_type = self.resolve_type(type_expr, interner);
                 self.type_aliases.insert(let_stmt.name, aliased_type);
             }
         }
@@ -391,12 +382,12 @@ impl Analyzer {
                     let params: Vec<Type> = func
                         .params
                         .iter()
-                        .map(|p| self.resolve_type(&p.ty))
+                        .map(|p| self.resolve_type(&p.ty, interner))
                         .collect();
                     let return_type = func
                         .return_type
                         .as_ref()
-                        .map(|t| self.resolve_type(t))
+                        .map(|t| self.resolve_type(t, interner))
                         .unwrap_or(Type::Void);
 
                     self.functions.insert(
@@ -421,7 +412,7 @@ impl Analyzer {
                         .enumerate()
                         .map(|(i, f)| StructField {
                             name: f.name,
-                            ty: self.resolve_type(&f.ty),
+                            ty: self.resolve_type(&f.ty, interner),
                             slot: i,
                         })
                         .collect();
@@ -435,7 +426,7 @@ impl Analyzer {
                     // Register and validate implements list
                     if !class.implements.is_empty() {
                         for iface_sym in &class.implements {
-                            if self.interface_registry.get(*iface_sym).is_none() {
+                            if self.interface_registry.get(*iface_sym, interner).is_none() {
                                 self.add_error(
                                     SemanticError::UnknownInterface {
                                         name: interner.resolve(*iface_sym).to_string(),
@@ -453,12 +444,12 @@ impl Analyzer {
                         let params: Vec<Type> = method
                             .params
                             .iter()
-                            .map(|p| self.resolve_type(&p.ty))
+                            .map(|p| self.resolve_type(&p.ty, interner))
                             .collect();
                         let return_type = method
                             .return_type
                             .as_ref()
-                            .map(|t| self.resolve_type(t))
+                            .map(|t| self.resolve_type(t, interner))
                             .unwrap_or(Type::Void);
                         self.methods.insert(
                             (class.name, method.name),
@@ -477,7 +468,7 @@ impl Analyzer {
                         .enumerate()
                         .map(|(i, f)| StructField {
                             name: f.name,
-                            ty: self.resolve_type(&f.ty),
+                            ty: self.resolve_type(&f.ty, interner),
                             slot: i,
                         })
                         .collect();
@@ -491,7 +482,7 @@ impl Analyzer {
                     // Register and validate implements list
                     if !record.implements.is_empty() {
                         for iface_sym in &record.implements {
-                            if self.interface_registry.get(*iface_sym).is_none() {
+                            if self.interface_registry.get(*iface_sym, interner).is_none() {
                                 self.add_error(
                                     SemanticError::UnknownInterface {
                                         name: interner.resolve(*iface_sym).to_string(),
@@ -509,12 +500,12 @@ impl Analyzer {
                         let params: Vec<Type> = method
                             .params
                             .iter()
-                            .map(|p| self.resolve_type(&p.ty))
+                            .map(|p| self.resolve_type(&p.ty, interner))
                             .collect();
                         let return_type = method
                             .return_type
                             .as_ref()
-                            .map(|t| self.resolve_type(t))
+                            .map(|t| self.resolve_type(t, interner))
                             .unwrap_or(Type::Void);
                         self.methods.insert(
                             (record.name, method.name),
@@ -533,7 +524,7 @@ impl Analyzer {
                         .iter()
                         .map(|f| InterfaceFieldDef {
                             name: f.name,
-                            ty: self.resolve_type(&f.ty),
+                            ty: self.resolve_type(&f.ty, interner),
                         })
                         .collect();
 
@@ -543,11 +534,11 @@ impl Analyzer {
                         .iter()
                         .map(|m| InterfaceMethodDef {
                             name: m.name,
-                            params: m.params.iter().map(|p| self.resolve_type(&p.ty)).collect(),
+                            params: m.params.iter().map(|p| self.resolve_type(&p.ty, interner)).collect(),
                             return_type: m
                                 .return_type
                                 .as_ref()
-                                .map(|t| self.resolve_type(t))
+                                .map(|t| self.resolve_type(t, interner))
                                 .unwrap_or(Type::Void),
                             has_default: m.body.is_some(),
                         })
@@ -555,6 +546,7 @@ impl Analyzer {
 
                     let def = InterfaceDef {
                         name: interface_decl.name,
+                        name_str: interner.resolve(interface_decl.name).to_string(),
                         extends: interface_decl.extends.clone(),
                         fields,
                         methods,
@@ -565,7 +557,7 @@ impl Analyzer {
                 Decl::Implement(impl_block) => {
                     // Validate trait exists if specified
                     if let Some(trait_name) = impl_block.trait_name
-                        && self.interface_registry.get(trait_name).is_none()
+                        && self.interface_registry.get(trait_name, interner).is_none()
                     {
                         self.add_error(
                             SemanticError::UnknownInterface {
@@ -576,7 +568,7 @@ impl Analyzer {
                         );
                     }
 
-                    let target_type = self.resolve_type(&impl_block.target_type);
+                    let target_type = self.resolve_type(&impl_block.target_type, interner);
 
                     // Validate target type exists
                     if matches!(target_type, Type::Error) {
@@ -599,13 +591,13 @@ impl Analyzer {
                                 params: method
                                     .params
                                     .iter()
-                                    .map(|p| self.resolve_type(&p.ty))
+                                    .map(|p| self.resolve_type(&p.ty, interner))
                                     .collect(),
                                 return_type: Box::new(
                                     method
                                         .return_type
                                         .as_ref()
-                                        .map(|t| self.resolve_type(t))
+                                        .map(|t| self.resolve_type(t, interner))
                                         .unwrap_or(Type::Void),
                                 ),
                                 is_closure: false,
@@ -635,7 +627,7 @@ impl Analyzer {
                     }
                 }
                 Decl::Error(decl) => {
-                    self.analyze_error_decl(decl);
+                    self.analyze_error_decl(decl, interner);
                 }
                 Decl::External(_) => {
                     // External blocks are processed during code generation
@@ -646,7 +638,7 @@ impl Analyzer {
         // Process global let declarations (type check and add to scope)
         for decl in &program.declarations {
             if let Decl::Let(let_stmt) = decl {
-                let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t));
+                let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t, interner));
                 let init_type =
                     self.check_expr_expecting(&let_stmt.init, declared_type.as_ref(), interner)?;
 
@@ -666,7 +658,7 @@ impl Analyzer {
                 if var_type == Type::Type
                     && let ExprKind::TypeLiteral(type_expr) = &let_stmt.init.kind
                 {
-                    let aliased_type = self.resolve_type(type_expr);
+                    let aliased_type = self.resolve_type(type_expr, interner);
                     self.type_aliases.insert(let_stmt.name, aliased_type);
                 }
 
@@ -753,18 +745,19 @@ impl Analyzer {
         }
     }
 
-    fn resolve_type(&self, ty: &TypeExpr) -> Type {
+    fn resolve_type(&self, ty: &TypeExpr, interner: &Interner) -> Type {
         let ctx = TypeResolutionContext {
             type_aliases: &self.type_aliases,
             classes: &self.classes,
             records: &self.records,
             error_types: &self.error_types,
             interface_registry: &self.interface_registry,
+            interner,
         };
         resolve_type(ty, &ctx)
     }
 
-    fn analyze_error_decl(&mut self, decl: &ErrorDecl) {
+    fn analyze_error_decl(&mut self, decl: &ErrorDecl, interner: &Interner) {
         let mut fields = Vec::new();
 
         for (slot, field) in decl.fields.iter().enumerate() {
@@ -774,6 +767,7 @@ impl Analyzer {
                 records: &self.records,
                 error_types: &self.error_types,
                 interface_registry: &self.interface_registry,
+                interner,
             };
             let ty = resolve_type(&field.ty, &ctx);
 
@@ -810,12 +804,12 @@ impl Analyzer {
             let param_types: Vec<Type> = func
                 .params
                 .iter()
-                .map(|p| self.resolve_type(&p.ty))
+                .map(|p| self.resolve_type(&p.ty, interner))
                 .collect();
 
             // Resolve return type
             let return_type = match &func.return_type {
-                Some(te) => self.resolve_type(te),
+                Some(te) => self.resolve_type(te, interner),
                 None => Type::Void,
             };
 
@@ -1051,6 +1045,7 @@ impl Analyzer {
                         records: &self.records,
                         error_types: &self.error_types,
                         interface_registry: &self.interface_registry,
+                        interner: &module_interner,
                     };
                     let params: Vec<Type> =
                         f.params.iter().map(|p| resolve_type(&p.ty, &ctx)).collect();
@@ -1096,6 +1091,7 @@ impl Analyzer {
                         records: &self.records,
                         error_types: &self.error_types,
                         interface_registry: &self.interface_registry,
+                        interner: &module_interner,
                     };
                     for func in &ext.functions {
                         let params: Vec<Type> = func
