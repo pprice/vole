@@ -50,6 +50,13 @@ impl InterfaceRegistry {
         self.interfaces.get(&name)
     }
 
+    /// Merge another registry into this one
+    pub fn merge(&mut self, other: &InterfaceRegistry) {
+        for (name, def) in &other.interfaces {
+            self.interfaces.insert(*name, def.clone());
+        }
+    }
+
     /// Check if an interface is a functional interface (single abstract method, no fields)
     pub fn is_functional(&self, name: Symbol) -> Option<&InterfaceMethodDef> {
         let interface = self.interfaces.get(&name)?;
@@ -198,5 +205,40 @@ mod tests {
 
         // Should be functional - only one abstract method
         assert!(registry.is_functional(sym(1)).is_some());
+    }
+
+    #[test]
+    fn merge_registries() {
+        let mut registry1 = InterfaceRegistry::new();
+        let mut registry2 = InterfaceRegistry::new();
+
+        registry1.register(InterfaceDef {
+            name: sym(1),
+            extends: vec![],
+            fields: vec![],
+            methods: vec![InterfaceMethodDef {
+                name: sym(10),
+                params: vec![Type::I64],
+                return_type: Type::Bool,
+                has_default: false,
+            }],
+        });
+
+        registry2.register(InterfaceDef {
+            name: sym(2),
+            extends: vec![],
+            fields: vec![],
+            methods: vec![InterfaceMethodDef {
+                name: sym(11),
+                params: vec![],
+                return_type: Type::String,
+                has_default: false,
+            }],
+        });
+
+        registry1.merge(&registry2);
+
+        assert!(registry1.get(sym(1)).is_some());
+        assert!(registry1.get(sym(2)).is_some());
     }
 }
