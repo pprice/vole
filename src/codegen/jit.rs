@@ -546,6 +546,18 @@ impl JitContext {
     pub fn clear(&mut self) {
         self.ctx.clear();
     }
+
+    /// Split into parts for compilation - allows FunctionBuilder and CompileCtx to coexist.
+    /// Returns disjoint mutable references: (func, module, func_ids)
+    pub fn split_for_compile(
+        &mut self,
+    ) -> (
+        &mut cranelift_codegen::ir::Function,
+        &mut JITModule,
+        &mut HashMap<String, FuncId>,
+    ) {
+        (&mut self.ctx.func, &mut self.module, &mut self.func_ids)
+    }
 }
 
 impl Default for JitContext {

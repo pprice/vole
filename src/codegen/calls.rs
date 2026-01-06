@@ -185,6 +185,7 @@ impl Cg<'_, '_, '_> {
             && let Type::Interface(iface) = vole_type
             && let Some(method_def) = self
                 .ctx
+                .analyzed
                 .interface_registry
                 .is_functional(iface.name, self.ctx.interner)
         {
@@ -210,6 +211,7 @@ impl Cg<'_, '_, '_> {
                 if let Type::Interface(iface) = &declared_type
                     && let Some(method_def) = self
                         .ctx
+                        .analyzed
                         .interface_registry
                         .is_functional(iface.name, self.ctx.interner)
                 {
@@ -237,6 +239,7 @@ impl Cg<'_, '_, '_> {
             if let Type::Interface(iface) = &lambda_val.vole_type
                 && let Some(method_def) = self
                     .ctx
+                    .analyzed
                     .interface_registry
                     .is_functional(iface.name, self.ctx.interner)
             {

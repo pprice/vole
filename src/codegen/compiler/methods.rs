@@ -106,7 +106,7 @@ pub(crate) fn compile_method_call(
     // These can be either external native functions (FFI) or pure Vole functions
     if let Type::Module(ref module_type) = obj.vole_type {
         // Get the method resolution
-        let resolution = ctx.method_resolutions.get(expr_id);
+        let resolution = ctx.analyzed.method_resolutions.get(expr_id);
         if let Some(ResolvedMethod::Implemented {
             external_info,
             func_type,
@@ -230,7 +230,7 @@ pub(crate) fn compile_method_call(
 
     // Look up method resolution to determine naming convention and return type
     // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
-    let resolution = ctx.method_resolutions.get(expr_id);
+    let resolution = ctx.analyzed.method_resolutions.get(expr_id);
 
     // Determine the method function name based on resolution type
     let (full_name, return_type) = if let Some(resolution) = resolution {

@@ -19,15 +19,14 @@ use std::collections::HashMap;
 use super::stmt::compile_block;
 use super::types::{CompileCtx, TypeMetadata, resolve_type_expr_full, type_to_cranelift};
 use crate::codegen::JitContext;
+use crate::commands::common::AnalyzedProgram;
 use crate::frontend::{
     ClassDecl, Decl, FuncDecl, ImplementBlock, InterfaceDecl, InterfaceMethod, Interner, LetStmt,
-    NodeId, Program, RecordDecl, Symbol, TestCase, TestsDecl, TypeExpr,
+    Program, RecordDecl, Symbol, TestCase, TestsDecl, TypeExpr,
 };
 use crate::runtime::NativeRegistry;
-use crate::sema::generic::{GenericFuncDef, MonomorphCache, MonomorphInstance, MonomorphKey};
-use crate::sema::interface_registry::InterfaceRegistry;
-use crate::sema::resolution::MethodResolutions;
-use crate::sema::{ClassType, ErrorTypeInfo, RecordType, StructField, Type};
+use crate::sema::generic::MonomorphInstance;
+use crate::sema::{ClassType, RecordType, StructField, Type};
 
 // Re-export functions from split modules
 
@@ -84,59 +83,26 @@ impl Default for ControlFlowCtx {
 /// Compiler for generating Cranelift IR from AST
 pub struct Compiler<'a> {
     jit: &'a mut JitContext,
-    interner: &'a Interner,
+    /// Reference to analyzed program (types, methods, etc.)
+    analyzed: &'a AnalyzedProgram,
     pointer_type: types::Type,
     tests: Vec<TestInfo>,
     /// Global variable declarations (let statements at module level)
     globals: Vec<LetStmt>,
     /// Counter for generating unique lambda names
     lambda_counter: usize,
-    /// Type aliases from semantic analysis
-    type_aliases: HashMap<Symbol, Type>,
     /// Class and record metadata: name -> TypeMetadata
     type_metadata: HashMap<Symbol, TypeMetadata>,
     /// Next type ID to assign
     next_type_id: u32,
-    /// Expression types from semantic analysis (includes narrowed types)
-    expr_types: HashMap<NodeId, Type>,
-    /// Resolved method calls from semantic analysis
-    method_resolutions: MethodResolutions,
     /// Return types of compiled functions
     func_return_types: HashMap<String, Type>,
-    /// Interface definitions registry
-    interface_registry: InterfaceRegistry,
-    /// Tracks which interfaces each type implements: type_name -> [interface_names]
-    type_implements: HashMap<Symbol, Vec<Symbol>>,
-    /// Error type definitions from semantic analysis
-    error_types: HashMap<Symbol, ErrorTypeInfo>,
     /// Registry of native functions for external method calls
     native_registry: NativeRegistry,
-    /// Module programs and their interners (for compiling pure Vole functions)
-    module_programs: HashMap<String, (Program, Interner)>,
-    /// Generic function definitions (for monomorphization)
-    generic_functions: HashMap<Symbol, GenericFuncDef>,
-    /// Cache of monomorphized function instances
-    monomorph_cache: MonomorphCache,
-    /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
-    generic_calls: HashMap<NodeId, MonomorphKey>,
 }
 
 impl<'a> Compiler<'a> {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        jit: &'a mut JitContext,
-        interner: &'a Interner,
-        type_aliases: HashMap<Symbol, Type>,
-        expr_types: HashMap<NodeId, Type>,
-        method_resolutions: MethodResolutions,
-        interface_registry: InterfaceRegistry,
-        type_implements: HashMap<Symbol, Vec<Symbol>>,
-        error_types: HashMap<Symbol, ErrorTypeInfo>,
-        module_programs: HashMap<String, (Program, Interner)>,
-        generic_functions: HashMap<Symbol, GenericFuncDef>,
-        monomorph_cache: MonomorphCache,
-        generic_calls: HashMap<NodeId, MonomorphKey>,
-    ) -> Self {
+    pub fn new(jit: &'a mut JitContext, analyzed: &'a AnalyzedProgram) -> Self {
         let pointer_type = jit.pointer_type();
 
         // Initialize native registry with stdlib functions
@@ -145,25 +111,15 @@ impl<'a> Compiler<'a> {
 
         Self {
             jit,
-            interner,
+            analyzed,
             pointer_type,
             tests: Vec::new(),
             globals: Vec::new(),
             lambda_counter: 0,
-            type_aliases,
             type_metadata: HashMap::new(),
             next_type_id: 0,
-            expr_types,
-            method_resolutions,
             func_return_types: HashMap::new(),
-            interface_registry,
-            type_implements,
-            error_types,
             native_registry,
-            module_programs,
-            generic_functions,
-            monomorph_cache,
-            generic_calls,
         }
     }
 
@@ -226,7 +182,7 @@ impl<'a> Compiler<'a> {
                         continue;
                     }
                     let sig = self.create_function_signature(func);
-                    let name = self.interner.resolve(func.name);
+                    let name = self.analyzed.interner.resolve(func.name);
                     self.jit.declare_function(name, &sig);
                     // Record return type for use in call expressions
                     // Note: Use resolve_type_with_metadata so that record types (like
@@ -326,10 +282,11 @@ impl<'a> Compiler<'a> {
     /// Compile pure Vole functions from imported modules.
     /// These are functions defined in module files (not external FFI functions).
     fn compile_module_functions(&mut self) -> Result<(), String> {
-        // Take ownership of module_programs temporarily to avoid borrow issues
-        let module_programs = std::mem::take(&mut self.module_programs);
+        // Collect module paths first to avoid borrow issues
+        let module_paths: Vec<_> = self.analyzed.module_programs.keys().cloned().collect();
 
-        for (module_path, (program, module_interner)) in &module_programs {
+        for module_path in &module_paths {
+            let (program, module_interner) = &self.analyzed.module_programs[module_path];
             // Extract module globals (let statements)
             let module_globals: Vec<LetStmt> = program
                 .declarations
@@ -360,9 +317,9 @@ impl<'a> Compiler<'a> {
                         .map(|t| {
                             resolve_type_expr_full(
                                 t,
-                                &self.type_aliases,
-                                &self.interface_registry,
-                                self.interner,
+                                &self.analyzed.type_aliases,
+                                &self.analyzed.interface_registry,
+                                &self.analyzed.interner,
                             )
                         })
                         .unwrap_or(Type::Void);
@@ -386,9 +343,6 @@ impl<'a> Compiler<'a> {
                 }
             }
         }
-
-        // Restore module_programs
-        self.module_programs = module_programs;
 
         Ok(())
     }
@@ -420,9 +374,9 @@ impl<'a> Compiler<'a> {
                 type_to_cranelift(
                     &resolve_type_expr_full(
                         &p.ty,
-                        &self.type_aliases,
-                        &self.interface_registry,
-                        self.interner,
+                        &self.analyzed.type_aliases,
+                        &self.analyzed.interface_registry,
+                        &self.analyzed.interner,
                     ),
                     self.pointer_type,
                 )
@@ -434,9 +388,9 @@ impl<'a> Compiler<'a> {
             .map(|p| {
                 resolve_type_expr_full(
                     &p.ty,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 )
             })
             .collect();
@@ -446,9 +400,9 @@ impl<'a> Compiler<'a> {
         let return_type = func.return_type.as_ref().map(|t| {
             resolve_type_expr_full(
                 t,
-                &self.type_aliases,
-                &self.interface_registry,
-                self.interner,
+                &self.analyzed.type_aliases,
+                &self.analyzed.interface_registry,
+                &self.analyzed.interner,
             )
         });
 
@@ -483,6 +437,7 @@ impl<'a> Compiler<'a> {
             // Compile function body with module's interner
             let mut cf_ctx = ControlFlowCtx::new();
             let mut ctx = CompileCtx {
+                analyzed: self.analyzed,
                 interner: module_interner, // Use module's interner
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
@@ -490,18 +445,13 @@ impl<'a> Compiler<'a> {
                 source_file_ptr,
                 globals: module_globals, // Use module's globals
                 lambda_counter: &mut self.lambda_counter,
-                type_aliases: &self.type_aliases,
                 type_metadata: &self.type_metadata,
-                expr_types: &self.expr_types,
-                method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
-                interface_registry: &self.interface_registry,
                 current_function_return_type: return_type,
-                error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: Some(module_path), // We're compiling module code
-                generic_calls: &self.generic_calls,
-                monomorph_cache: &self.monomorph_cache,
+                generic_calls: &self.analyzed.generic_calls,
+                monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -533,9 +483,9 @@ impl<'a> Compiler<'a> {
             params.push(type_to_cranelift(
                 &resolve_type_expr_full(
                     &param.ty,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 ),
                 self.pointer_type,
             ));
@@ -545,9 +495,9 @@ impl<'a> Compiler<'a> {
             type_to_cranelift(
                 &resolve_type_expr_full(
                     t,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 ),
                 self.pointer_type,
             )
@@ -564,9 +514,9 @@ impl<'a> Compiler<'a> {
             params.push(type_to_cranelift(
                 &resolve_type_expr_full(
                     &param.ty,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 ),
                 self.pointer_type,
             ));
@@ -576,9 +526,9 @@ impl<'a> Compiler<'a> {
             type_to_cranelift(
                 &resolve_type_expr_full(
                     t,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 ),
                 self.pointer_type,
             )
@@ -597,9 +547,9 @@ impl<'a> Compiler<'a> {
             params.push(type_to_cranelift(
                 &resolve_type_expr_full(
                     &param.ty,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 ),
                 self.pointer_type,
             ));
@@ -609,9 +559,9 @@ impl<'a> Compiler<'a> {
             type_to_cranelift(
                 &resolve_type_expr_full(
                     t,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 ),
                 self.pointer_type,
             )
@@ -628,9 +578,9 @@ impl<'a> Compiler<'a> {
             params.push(type_to_cranelift(
                 &resolve_type_expr_full(
                     &param.ty,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 ),
                 self.pointer_type,
             ));
@@ -640,9 +590,9 @@ impl<'a> Compiler<'a> {
             type_to_cranelift(
                 &resolve_type_expr_full(
                     t,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 ),
                 self.pointer_type,
             )
@@ -674,11 +624,11 @@ impl<'a> Compiler<'a> {
         let empty_error_types = HashMap::new();
         resolve_type_expr_with_metadata(
             ty,
-            &self.type_aliases,
-            &self.interface_registry,
+            &self.analyzed.type_aliases,
+            &self.analyzed.interface_registry,
             &empty_error_types,
             &self.type_metadata,
-            self.interner,
+            &self.analyzed.interner,
         )
     }
 
@@ -749,7 +699,7 @@ impl<'a> Compiler<'a> {
             class.methods.iter().map(|m| m.name).collect();
 
         // Also add return types for default methods from implemented interfaces
-        if let Some(interfaces) = self.type_implements.get(&class.name).cloned() {
+        if let Some(interfaces) = self.analyzed.type_implements.get(&class.name).cloned() {
             for interface_name in &interfaces {
                 if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
                     for method in &interface_decl.methods {
@@ -778,21 +728,21 @@ impl<'a> Compiler<'a> {
         );
 
         // Declare methods as functions: ClassName_methodName
-        let type_name = self.interner.resolve(class.name);
+        let type_name = self.analyzed.interner.resolve(class.name);
         for method in &class.methods {
-            let method_name_str = self.interner.resolve(method.name);
+            let method_name_str = self.analyzed.interner.resolve(method.name);
             let full_name = format!("{}_{}", type_name, method_name_str);
             let sig = self.create_method_signature(method);
             self.jit.declare_function(&full_name, &sig);
         }
 
         // Declare default methods from implemented interfaces
-        if let Some(interfaces) = self.type_implements.get(&class.name).cloned() {
+        if let Some(interfaces) = self.analyzed.type_implements.get(&class.name).cloned() {
             for interface_name in &interfaces {
                 if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
                     for method in &interface_decl.methods {
                         if method.body.is_some() && !direct_methods.contains(&method.name) {
-                            let method_name_str = self.interner.resolve(method.name);
+                            let method_name_str = self.analyzed.interner.resolve(method.name);
                             let full_name = format!("{}_{}", type_name, method_name_str);
                             let sig = self.create_interface_method_signature(method);
                             self.jit.declare_function(&full_name, &sig);
@@ -870,7 +820,7 @@ impl<'a> Compiler<'a> {
             record.methods.iter().map(|m| m.name).collect();
 
         // Also add return types for default methods from implemented interfaces
-        if let Some(interfaces) = self.type_implements.get(&record.name).cloned() {
+        if let Some(interfaces) = self.analyzed.type_implements.get(&record.name).cloned() {
             for interface_name in &interfaces {
                 if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
                     for method in &interface_decl.methods {
@@ -899,21 +849,21 @@ impl<'a> Compiler<'a> {
         );
 
         // Declare methods as functions: RecordName_methodName
-        let type_name = self.interner.resolve(record.name);
+        let type_name = self.analyzed.interner.resolve(record.name);
         for method in &record.methods {
-            let method_name_str = self.interner.resolve(method.name);
+            let method_name_str = self.analyzed.interner.resolve(method.name);
             let full_name = format!("{}_{}", type_name, method_name_str);
             let sig = self.create_method_signature(method);
             self.jit.declare_function(&full_name, &sig);
         }
 
         // Declare default methods from implemented interfaces
-        if let Some(interfaces) = self.type_implements.get(&record.name).cloned() {
+        if let Some(interfaces) = self.analyzed.type_implements.get(&record.name).cloned() {
             for interface_name in &interfaces {
                 if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
                     for method in &interface_decl.methods {
                         if method.body.is_some() && !direct_methods.contains(&method.name) {
-                            let method_name_str = self.interner.resolve(method.name);
+                            let method_name_str = self.analyzed.interner.resolve(method.name);
                             let full_name = format!("{}_{}", type_name, method_name_str);
                             let sig = self.create_interface_method_signature(method);
                             self.jit.declare_function(&full_name, &sig);
@@ -937,7 +887,7 @@ impl<'a> Compiler<'a> {
             .ok_or_else(|| {
                 format!(
                     "Internal error: class {} not registered",
-                    self.interner.resolve(class.name)
+                    self.analyzed.interner.resolve(class.name)
                 )
             })?;
 
@@ -948,7 +898,7 @@ impl<'a> Compiler<'a> {
         // Compile default methods from implemented interfaces
         let direct_methods: std::collections::HashSet<_> =
             class.methods.iter().map(|m| m.name).collect();
-        if let Some(interfaces) = self.type_implements.get(&class.name).cloned() {
+        if let Some(interfaces) = self.analyzed.type_implements.get(&class.name).cloned() {
             for interface_name in &interfaces {
                 if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
                     for method in &interface_decl.methods {
@@ -975,7 +925,7 @@ impl<'a> Compiler<'a> {
             .ok_or_else(|| {
                 format!(
                     "Internal error: record {} not registered",
-                    self.interner.resolve(record.name)
+                    self.analyzed.interner.resolve(record.name)
                 )
             })?;
 
@@ -986,7 +936,7 @@ impl<'a> Compiler<'a> {
         // Compile default methods from implemented interfaces
         let direct_methods: std::collections::HashSet<_> =
             record.methods.iter().map(|m| m.name).collect();
-        if let Some(interfaces) = self.type_implements.get(&record.name).cloned() {
+        if let Some(interfaces) = self.analyzed.type_implements.get(&record.name).cloned() {
             for interface_name in &interfaces {
                 if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
                     for method in &interface_decl.methods {
@@ -1012,7 +962,7 @@ impl<'a> Compiler<'a> {
     fn get_type_name_from_expr(&self, ty: &TypeExpr) -> Option<String> {
         match ty {
             TypeExpr::Primitive(p) => Some(Type::from_primitive(*p).name().to_string()),
-            TypeExpr::Named(sym) => Some(self.interner.resolve(*sym).to_string()),
+            TypeExpr::Named(sym) => Some(self.analyzed.interner.resolve(*sym).to_string()),
             _ => None,
         }
     }
@@ -1035,9 +985,9 @@ impl<'a> Compiler<'a> {
                 .unwrap_or(Type::Error),
             _ => resolve_type_expr_full(
                 &impl_block.target_type,
-                &self.type_aliases,
-                &self.interface_registry,
-                self.interner,
+                &self.analyzed.type_aliases,
+                &self.analyzed.interface_registry,
+                &self.analyzed.interner,
             ),
         };
 
@@ -1052,9 +1002,9 @@ impl<'a> Compiler<'a> {
                     .map(|t| {
                         resolve_type_expr_full(
                             t,
-                            &self.type_aliases,
-                            &self.interface_registry,
-                            self.interner,
+                            &self.analyzed.type_aliases,
+                            &self.analyzed.interface_registry,
+                            &self.analyzed.interner,
                         )
                     })
                     .unwrap_or(Type::Void);
@@ -1066,7 +1016,7 @@ impl<'a> Compiler<'a> {
 
         // Declare methods as functions: TypeName::methodName (implement block convention)
         for method in &impl_block.methods {
-            let method_name_str = self.interner.resolve(method.name);
+            let method_name_str = self.analyzed.interner.resolve(method.name);
             let full_name = format!("{}::{}", type_name, method_name_str);
             let sig = self.create_implement_method_signature(method, &self_vole_type);
             self.jit.declare_function(&full_name, &sig);
@@ -1091,9 +1041,9 @@ impl<'a> Compiler<'a> {
                 .unwrap_or(Type::Error),
             _ => resolve_type_expr_full(
                 &impl_block.target_type,
-                &self.type_aliases,
-                &self.interface_registry,
-                self.interner,
+                &self.analyzed.type_aliases,
+                &self.analyzed.interface_registry,
+                &self.analyzed.interner,
             ),
         };
 
@@ -1110,7 +1060,7 @@ impl<'a> Compiler<'a> {
         type_name: &str,
         self_vole_type: &Type,
     ) -> Result<(), String> {
-        let method_name_str = self.interner.resolve(method.name);
+        let method_name_str = self.analyzed.interner.resolve(method.name);
         let full_name = format!("{}::{}", type_name, method_name_str);
 
         let func_id = *self
@@ -1134,9 +1084,9 @@ impl<'a> Compiler<'a> {
                 type_to_cranelift(
                     &resolve_type_expr_full(
                         &p.ty,
-                        &self.type_aliases,
-                        &self.interface_registry,
-                        self.interner,
+                        &self.analyzed.type_aliases,
+                        &self.analyzed.interface_registry,
+                        &self.analyzed.interner,
                     ),
                     self.pointer_type,
                 )
@@ -1148,9 +1098,9 @@ impl<'a> Compiler<'a> {
             .map(|p| {
                 resolve_type_expr_full(
                     &p.ty,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 )
             })
             .collect();
@@ -1179,6 +1129,7 @@ impl<'a> Compiler<'a> {
 
             // Bind `self` as the first parameter (using correct type for primitives)
             let self_sym = self
+                .analyzed
                 .interner
                 .lookup("self")
                 .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
@@ -1202,34 +1153,30 @@ impl<'a> Compiler<'a> {
             let method_return_type = method.return_type.as_ref().map(|t| {
                 resolve_type_expr_full(
                     t,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 )
             });
 
             // Compile method body
             let mut cf_ctx = ControlFlowCtx::new();
             let mut ctx = CompileCtx {
-                interner: self.interner,
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &self.globals,
                 lambda_counter: &mut self.lambda_counter,
-                type_aliases: &self.type_aliases,
                 type_metadata: &self.type_metadata,
-                expr_types: &self.expr_types,
-                method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
-                interface_registry: &self.interface_registry,
                 current_function_return_type: method_return_type,
-                error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.generic_calls,
-                monomorph_cache: &self.monomorph_cache,
+                generic_calls: &self.analyzed.generic_calls,
+                monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1265,8 +1212,8 @@ impl<'a> Compiler<'a> {
         type_name: Symbol,
         metadata: &TypeMetadata,
     ) -> Result<(), String> {
-        let type_name_str = self.interner.resolve(type_name);
-        let method_name_str = self.interner.resolve(method.name);
+        let type_name_str = self.analyzed.interner.resolve(type_name);
+        let method_name_str = self.analyzed.interner.resolve(method.name);
         let full_name = format!("{}_{}", type_name_str, method_name_str);
 
         let func_id = *self
@@ -1287,9 +1234,9 @@ impl<'a> Compiler<'a> {
                 type_to_cranelift(
                     &resolve_type_expr_full(
                         &p.ty,
-                        &self.type_aliases,
-                        &self.interface_registry,
-                        self.interner,
+                        &self.analyzed.type_aliases,
+                        &self.analyzed.interface_registry,
+                        &self.analyzed.interner,
                     ),
                     self.pointer_type,
                 )
@@ -1301,9 +1248,9 @@ impl<'a> Compiler<'a> {
             .map(|p| {
                 resolve_type_expr_full(
                     &p.ty,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 )
             })
             .collect();
@@ -1333,6 +1280,7 @@ impl<'a> Compiler<'a> {
             // Bind `self` as the first parameter
             // Note: "self" should already be interned during parsing of method bodies
             let self_sym = self
+                .analyzed
                 .interner
                 .lookup("self")
                 .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
@@ -1355,25 +1303,21 @@ impl<'a> Compiler<'a> {
             // Compile method body
             let mut cf_ctx = ControlFlowCtx::new();
             let mut ctx = CompileCtx {
-                interner: self.interner,
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &self.globals,
                 lambda_counter: &mut self.lambda_counter,
-                type_aliases: &self.type_aliases,
                 type_metadata: &self.type_metadata,
-                expr_types: &self.expr_types,
-                method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
-                interface_registry: &self.interface_registry,
                 current_function_return_type: None, // Methods don't use raise statements yet
-                error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.generic_calls,
-                monomorph_cache: &self.monomorph_cache,
+                generic_calls: &self.analyzed.generic_calls,
+                monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1406,8 +1350,8 @@ impl<'a> Compiler<'a> {
         type_name: Symbol,
         metadata: &TypeMetadata,
     ) -> Result<(), String> {
-        let type_name_str = self.interner.resolve(type_name);
-        let method_name_str = self.interner.resolve(method.name);
+        let type_name_str = self.analyzed.interner.resolve(type_name);
+        let method_name_str = self.analyzed.interner.resolve(method.name);
         let full_name = format!("{}_{}", type_name_str, method_name_str);
 
         let func_id =
@@ -1427,9 +1371,9 @@ impl<'a> Compiler<'a> {
                 type_to_cranelift(
                     &resolve_type_expr_full(
                         &p.ty,
-                        &self.type_aliases,
-                        &self.interface_registry,
-                        self.interner,
+                        &self.analyzed.type_aliases,
+                        &self.analyzed.interface_registry,
+                        &self.analyzed.interner,
                     ),
                     self.pointer_type,
                 )
@@ -1441,9 +1385,9 @@ impl<'a> Compiler<'a> {
             .map(|p| {
                 resolve_type_expr_full(
                     &p.ty,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 )
             })
             .collect();
@@ -1472,6 +1416,7 @@ impl<'a> Compiler<'a> {
 
             // Bind `self` as the first parameter with the concrete type
             let self_sym = self
+                .analyzed
                 .interner
                 .lookup("self")
                 .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
@@ -1501,25 +1446,21 @@ impl<'a> Compiler<'a> {
 
             let mut cf_ctx = ControlFlowCtx::new();
             let mut ctx = CompileCtx {
-                interner: self.interner,
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &self.globals,
                 lambda_counter: &mut self.lambda_counter,
-                type_aliases: &self.type_aliases,
                 type_metadata: &self.type_metadata,
-                expr_types: &self.expr_types,
-                method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
-                interface_registry: &self.interface_registry,
                 current_function_return_type: None, // Default methods don't use raise statements yet
-                error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.generic_calls,
-                monomorph_cache: &self.monomorph_cache,
+                generic_calls: &self.analyzed.generic_calls,
+                monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated =
                 compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -1541,7 +1482,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_function(&mut self, func: &FuncDecl) -> Result<(), String> {
-        let name = self.interner.resolve(func.name);
+        let name = self.analyzed.interner.resolve(func.name);
         let func_id = *self.jit.func_ids.get(name).unwrap();
 
         // Create function signature
@@ -1556,9 +1497,9 @@ impl<'a> Compiler<'a> {
                 type_to_cranelift(
                     &resolve_type_expr_full(
                         &p.ty,
-                        &self.type_aliases,
-                        &self.interface_registry,
-                        self.interner,
+                        &self.analyzed.type_aliases,
+                        &self.analyzed.interface_registry,
+                        &self.analyzed.interner,
                     ),
                     self.pointer_type,
                 )
@@ -1570,9 +1511,9 @@ impl<'a> Compiler<'a> {
             .map(|p| {
                 resolve_type_expr_full(
                     &p.ty,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 )
             })
             .collect();
@@ -1582,9 +1523,9 @@ impl<'a> Compiler<'a> {
         let return_type = func.return_type.as_ref().map(|t| {
             resolve_type_expr_full(
                 t,
-                &self.type_aliases,
-                &self.interface_registry,
-                self.interner,
+                &self.analyzed.type_aliases,
+                &self.analyzed.interface_registry,
+                &self.analyzed.interner,
             )
         });
 
@@ -1619,25 +1560,21 @@ impl<'a> Compiler<'a> {
             // Compile function body
             let mut cf_ctx = ControlFlowCtx::new();
             let mut ctx = CompileCtx {
-                interner: self.interner,
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &self.globals,
                 lambda_counter: &mut self.lambda_counter,
-                type_aliases: &self.type_aliases,
                 type_metadata: &self.type_metadata,
-                expr_types: &self.expr_types,
-                method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
-                interface_registry: &self.interface_registry,
                 current_function_return_type: return_type,
-                error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.generic_calls,
-                monomorph_cache: &self.monomorph_cache,
+                generic_calls: &self.analyzed.generic_calls,
+                monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1694,25 +1631,21 @@ impl<'a> Compiler<'a> {
                 // Compile test body
                 let mut cf_ctx = ControlFlowCtx::new();
                 let mut ctx = CompileCtx {
-                    interner: self.interner,
+                    analyzed: self.analyzed,
+                    interner: &self.analyzed.interner,
                     pointer_type: self.pointer_type,
                     module: &mut self.jit.module,
                     func_ids: &mut self.jit.func_ids,
                     source_file_ptr,
                     globals: &self.globals,
                     lambda_counter: &mut self.lambda_counter,
-                    type_aliases: &self.type_aliases,
                     type_metadata: &self.type_metadata,
-                    expr_types: &self.expr_types,
-                    method_resolutions: &self.method_resolutions,
                     func_return_types: &self.func_return_types,
-                    interface_registry: &self.interface_registry,
                     current_function_return_type: None, // Tests don't have a declared return type
-                    error_types: &self.error_types,
                     native_registry: &self.native_registry,
                     current_module: None,
-                    generic_calls: &self.generic_calls,
-                    monomorph_cache: &self.monomorph_cache,
+                    generic_calls: &self.analyzed.generic_calls,
+                    monomorph_cache: &self.analyzed.monomorph_cache,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -1765,7 +1698,7 @@ impl<'a> Compiler<'a> {
             match decl {
                 Decl::Function(func) => {
                     let sig = self.create_function_signature(func);
-                    let name = self.interner.resolve(func.name);
+                    let name = self.analyzed.interner.resolve(func.name);
                     self.jit.declare_function(name, &sig);
                     // Record return type for use in call expressions
                     let return_type = func
@@ -1774,9 +1707,9 @@ impl<'a> Compiler<'a> {
                         .map(|t| {
                             resolve_type_expr_full(
                                 t,
-                                &self.type_aliases,
-                                &self.interface_registry,
-                                self.interner,
+                                &self.analyzed.type_aliases,
+                                &self.analyzed.interface_registry,
+                                &self.analyzed.interner,
                             )
                         })
                         .unwrap_or(Type::Void);
@@ -1798,7 +1731,7 @@ impl<'a> Compiler<'a> {
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
-                    let name = self.interner.resolve(func.name);
+                    let name = self.analyzed.interner.resolve(func.name);
                     self.build_function_ir(func)?;
                     writeln!(writer, "// func {}", name).map_err(|e| e.to_string())?;
                     writeln!(writer, "{}", self.jit.ctx.func).map_err(|e| e.to_string())?;
@@ -1834,9 +1767,9 @@ impl<'a> Compiler<'a> {
                 type_to_cranelift(
                     &resolve_type_expr_full(
                         &p.ty,
-                        &self.type_aliases,
-                        &self.interface_registry,
-                        self.interner,
+                        &self.analyzed.type_aliases,
+                        &self.analyzed.interface_registry,
+                        &self.analyzed.interner,
                     ),
                     self.pointer_type,
                 )
@@ -1848,9 +1781,9 @@ impl<'a> Compiler<'a> {
             .map(|p| {
                 resolve_type_expr_full(
                     &p.ty,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.interface_registry,
+                    &self.analyzed.interner,
                 )
             })
             .collect();
@@ -1860,9 +1793,9 @@ impl<'a> Compiler<'a> {
         let return_type = func.return_type.as_ref().map(|t| {
             resolve_type_expr_full(
                 t,
-                &self.type_aliases,
-                &self.interface_registry,
-                self.interner,
+                &self.analyzed.type_aliases,
+                &self.analyzed.interface_registry,
+                &self.analyzed.interner,
             )
         });
 
@@ -1898,25 +1831,21 @@ impl<'a> Compiler<'a> {
             let mut cf_ctx = ControlFlowCtx::new();
             let empty_type_metadata = HashMap::new();
             let mut ctx = CompileCtx {
-                interner: self.interner,
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &[],
                 lambda_counter: &mut self.lambda_counter,
-                type_aliases: &self.type_aliases,
                 type_metadata: &empty_type_metadata,
-                expr_types: &self.expr_types,
-                method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
-                interface_registry: &self.interface_registry,
                 current_function_return_type: return_type,
-                error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.generic_calls,
-                monomorph_cache: &self.monomorph_cache,
+                generic_calls: &self.analyzed.generic_calls,
+                monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1966,25 +1895,21 @@ impl<'a> Compiler<'a> {
             let mut cf_ctx = ControlFlowCtx::new();
             let empty_type_metadata = HashMap::new();
             let mut ctx = CompileCtx {
-                interner: self.interner,
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &[],
                 lambda_counter: &mut self.lambda_counter,
-                type_aliases: &self.type_aliases,
                 type_metadata: &empty_type_metadata,
-                expr_types: &self.expr_types,
-                method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
-                interface_registry: &self.interface_registry,
                 current_function_return_type: None, // Tests don't have a declared return type
-                error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.generic_calls,
-                monomorph_cache: &self.monomorph_cache,
+                generic_calls: &self.analyzed.generic_calls,
+                monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -2014,6 +1939,7 @@ impl<'a> Compiler<'a> {
     fn declare_monomorphized_instances(&mut self) -> Result<(), String> {
         // Collect instances to avoid borrow issues
         let instances: Vec<_> = self
+            .analyzed
             .monomorph_cache
             .instances()
             .map(|(key, instance)| (key.clone(), instance.clone()))
@@ -2065,6 +1991,7 @@ impl<'a> Compiler<'a> {
 
         // Collect instances to avoid borrow issues
         let instances: Vec<_> = self
+            .analyzed
             .monomorph_cache
             .instances()
             .map(|(key, instance)| (key.clone(), instance.clone()))
@@ -2160,25 +2087,21 @@ impl<'a> Compiler<'a> {
             // Compile function body
             let mut cf_ctx = ControlFlowCtx::new();
             let mut ctx = CompileCtx {
-                interner: self.interner,
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_ids: &mut self.jit.func_ids,
                 source_file_ptr,
                 globals: &self.globals,
                 lambda_counter: &mut self.lambda_counter,
-                type_aliases: &self.type_aliases,
                 type_metadata: &self.type_metadata,
-                expr_types: &self.expr_types,
-                method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
-                interface_registry: &self.interface_registry,
                 current_function_return_type: return_type,
-                error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.generic_calls,
-                monomorph_cache: &self.monomorph_cache,
+                generic_calls: &self.analyzed.generic_calls,
+                monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -2206,7 +2129,7 @@ impl<'a> Compiler<'a> {
 
     /// Generate a mangled name for a monomorphized function instance
     fn mangle_monomorph_name(&self, original_name: Symbol, instance_id: u32) -> String {
-        let name = self.interner.resolve(original_name);
+        let name = self.analyzed.interner.resolve(original_name);
         format!("{}__mono_{}", name, instance_id)
     }
 }

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bench::{ResourceUsage, Stats, SystemInfo};
 use crate::codegen::{Compiler, JitContext};
+use crate::commands::common::AnalyzedProgram;
 use crate::frontend::{Lexer, Parser};
 use crate::sema::Analyzer;
 
@@ -164,26 +165,28 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
     ) = analyzer.into_analysis_results();
     let sema_ns = sema_start.elapsed().as_nanos() as u64;
 
+    let analyzed = AnalyzedProgram {
+        program,
+        interner,
+        type_aliases,
+        expr_types,
+        method_resolutions,
+        interface_registry,
+        type_implements,
+        error_types,
+        module_programs,
+        generic_functions,
+        monomorph_cache,
+        generic_calls,
+    };
+
     // Codegen phase
     let codegen_start = Instant::now();
     let mut jit = JitContext::new();
     {
-        let mut compiler = Compiler::new(
-            &mut jit,
-            &interner,
-            type_aliases,
-            expr_types,
-            method_resolutions,
-            interface_registry,
-            type_implements,
-            error_types,
-            module_programs,
-            generic_functions,
-            monomorph_cache,
-            generic_calls,
-        );
+        let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler
-            .compile_program(&program)
+            .compile_program(&analyzed.program)
             .map_err(|e| format!("codegen error: {}", e))?;
     }
     let codegen_ns = codegen_start.elapsed().as_nanos() as u64;
@@ -238,25 +241,27 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
         generic_calls,
     ) = analyzer.into_analysis_results();
 
+    let analyzed = AnalyzedProgram {
+        program,
+        interner,
+        type_aliases,
+        expr_types,
+        method_resolutions,
+        interface_registry,
+        type_implements,
+        error_types,
+        module_programs,
+        generic_functions,
+        monomorph_cache,
+        generic_calls,
+    };
+
     // Compile
     let mut jit = JitContext::new();
     {
-        let mut compiler = Compiler::new(
-            &mut jit,
-            &interner,
-            type_aliases,
-            expr_types,
-            method_resolutions,
-            interface_registry,
-            type_implements,
-            error_types,
-            module_programs,
-            generic_functions,
-            monomorph_cache,
-            generic_calls,
-        );
+        let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler
-            .compile_program(&program)
+            .compile_program(&analyzed.program)
             .map_err(|e| format!("codegen error: {}", e))?;
     }
     jit.finalize();

@@ -8,12 +8,12 @@ use cranelift_jit::JITModule;
 use cranelift_module::FuncId;
 use std::collections::HashMap;
 
+use crate::commands::common::AnalyzedProgram;
 use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
 use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::generic::{MonomorphCache, MonomorphKey};
 use crate::sema::interface_registry::InterfaceRegistry;
-use crate::sema::resolution::MethodResolutions;
 use crate::sema::{ErrorTypeInfo, FunctionType, Type};
 
 /// Compiled value with its type
@@ -65,6 +65,9 @@ pub(crate) struct TypeMetadata {
 /// Context for compiling expressions and statements
 /// Bundles common parameters to reduce function argument count
 pub(crate) struct CompileCtx<'a> {
+    /// Analyzed program containing type_aliases, expr_types, method_resolutions, etc.
+    pub analyzed: &'a AnalyzedProgram,
+    /// Interner for symbol resolution (may differ from analyzed.interner for module code)
     pub interner: &'a Interner,
     pub pointer_type: types::Type,
     pub module: &'a mut JITModule,
@@ -74,22 +77,12 @@ pub(crate) struct CompileCtx<'a> {
     pub globals: &'a [LetStmt],
     /// Counter for generating unique lambda names
     pub lambda_counter: &'a mut usize,
-    /// Type aliases from semantic analysis
-    pub type_aliases: &'a HashMap<Symbol, Type>,
     /// Class and record metadata for struct literals, field access, and method calls
     pub type_metadata: &'a HashMap<Symbol, TypeMetadata>,
-    /// Expression types from semantic analysis (includes narrowed types)
-    pub expr_types: &'a HashMap<NodeId, Type>,
-    /// Resolved method calls from semantic analysis
-    pub method_resolutions: &'a MethodResolutions,
     /// Return types of compiled functions
     pub func_return_types: &'a HashMap<String, Type>,
-    /// Interface definitions registry
-    pub interface_registry: &'a InterfaceRegistry,
     /// Current function's return type (needed for raise statements in fallible functions)
     pub current_function_return_type: Option<Type>,
-    /// Error type definitions from semantic analysis
-    pub error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
     /// Registry of native functions for external method calls
     pub native_registry: &'a NativeRegistry,
     /// Current module path when compiling module code (e.g., "std:math")
@@ -105,9 +98,9 @@ pub(crate) struct CompileCtx<'a> {
 pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
     resolve_type_expr_with_metadata(
         ty,
-        ctx.type_aliases,
-        ctx.interface_registry,
-        ctx.error_types,
+        &ctx.analyzed.type_aliases,
+        &ctx.analyzed.interface_registry,
+        &ctx.analyzed.error_types,
         ctx.type_metadata,
         ctx.interner,
     )

@@ -38,20 +38,7 @@ fn execute(path: &Path) -> Result<(), String> {
     // Compile
     let mut jit = JitContext::new();
     {
-        let mut compiler = Compiler::new(
-            &mut jit,
-            &analyzed.interner,
-            analyzed.type_aliases.clone(),
-            analyzed.expr_types.clone(),
-            analyzed.method_resolutions.clone(),
-            analyzed.interface_registry.clone(),
-            analyzed.type_implements.clone(),
-            analyzed.error_types.clone(),
-            analyzed.module_programs.clone(),
-            analyzed.generic_functions.clone(),
-            analyzed.monomorph_cache.clone(),
-            analyzed.generic_calls.clone(),
-        );
+        let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler
             .compile_program(&analyzed.program)
             .map_err(|e| format!("compilation error: {}", e))?;

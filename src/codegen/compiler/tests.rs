@@ -1,29 +1,34 @@
 use super::*;
+use crate::commands::common::AnalyzedProgram;
 use crate::frontend::Parser;
 use crate::sema::generic::MonomorphCache;
+use crate::sema::interface_registry::InterfaceRegistry;
+use crate::sema::resolution::MethodResolutions;
 
 fn compile_and_run(source: &str) -> i64 {
     let mut parser = Parser::new(source);
     let program = parser.parse_program().unwrap();
     let interner = parser.into_interner();
 
+    let analyzed = AnalyzedProgram {
+        program,
+        interner,
+        type_aliases: HashMap::new(),
+        expr_types: HashMap::new(),
+        method_resolutions: MethodResolutions::new(),
+        interface_registry: InterfaceRegistry::new(),
+        type_implements: HashMap::new(),
+        error_types: HashMap::new(),
+        module_programs: HashMap::new(),
+        generic_functions: HashMap::new(),
+        monomorph_cache: MonomorphCache::new(),
+        generic_calls: HashMap::new(),
+    };
+
     let mut jit = JitContext::new();
     {
-        let mut compiler = Compiler::new(
-            &mut jit,
-            &interner,
-            HashMap::new(),
-            HashMap::new(),
-            MethodResolutions::new(),
-            InterfaceRegistry::new(),
-            HashMap::new(),
-            HashMap::new(), // error_types
-            HashMap::new(), // module_programs
-            HashMap::new(), // generic_functions
-            MonomorphCache::new(),
-            HashMap::new(), // generic_calls
-        );
-        compiler.compile_program(&program).unwrap();
+        let mut compiler = Compiler::new(&mut jit, &analyzed);
+        compiler.compile_program(&analyzed.program).unwrap();
     }
     jit.finalize();
 

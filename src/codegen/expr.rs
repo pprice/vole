@@ -65,6 +65,7 @@ impl Cg<'_, '_, '_> {
                 // We need to retrieve the actual Module type from semantic analysis
                 let vole_type = self
                     .ctx
+                    .analyzed
                     .expr_types
                     .get(&expr.id)
                     .cloned()
@@ -93,7 +94,7 @@ impl Cg<'_, '_, '_> {
             let ty = self.builder.func.dfg.value_type(val);
 
             // Check for narrowed type from semantic analysis
-            if let Some(narrowed_type) = self.ctx.expr_types.get(&expr.id)
+            if let Some(narrowed_type) = self.ctx.analyzed.expr_types.get(&expr.id)
                 && matches!(vole_type, Type::Union(_))
                 && !matches!(narrowed_type, Type::Union(_))
             {
@@ -618,7 +619,7 @@ impl Cg<'_, '_, '_> {
                         match inner_pat.as_ref() {
                             Pattern::Identifier { name, .. } => {
                                 // Check if this is an error type name
-                                if let Some(_error_info) = self.ctx.error_types.get(name) {
+                                if let Some(_error_info) = self.ctx.analyzed.error_types.get(name) {
                                     // Specific error type: error DivByZero => ...
                                     // Get the fallible type to look up the tag
                                     if let Type::Fallible(ft) = &scrutinee.vole_type {

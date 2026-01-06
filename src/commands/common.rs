@@ -352,24 +352,26 @@ pub fn run_captured<W: Write + Send + 'static>(
         generic_calls,
     ) = analyzer.into_analysis_results();
 
+    let analyzed = AnalyzedProgram {
+        program,
+        interner,
+        type_aliases,
+        expr_types,
+        method_resolutions,
+        interface_registry,
+        type_implements,
+        error_types,
+        module_programs,
+        generic_functions,
+        monomorph_cache,
+        generic_calls,
+    };
+
     // Compile
     let mut jit = JitContext::new();
     {
-        let mut compiler = Compiler::new(
-            &mut jit,
-            &interner,
-            type_aliases,
-            expr_types,
-            method_resolutions,
-            interface_registry,
-            type_implements,
-            error_types,
-            module_programs,
-            generic_functions,
-            monomorph_cache,
-            generic_calls,
-        );
-        if let Err(e) = compiler.compile_program(&program) {
+        let mut compiler = Compiler::new(&mut jit, &analyzed);
+        if let Err(e) = compiler.compile_program(&analyzed.program) {
             let _ = writeln!(stderr, "compilation error: {}", e);
             return Err(());
         }

@@ -100,7 +100,7 @@ pub(super) fn compile_expr(
 
                 // Check if this expression has a narrowed type from semantic analysis
                 // (e.g., inside `if x is i64 { ... }`, x's type is narrowed from i64|nil to i64)
-                if let Some(narrowed_type) = ctx.expr_types.get(&expr.id) {
+                if let Some(narrowed_type) = ctx.analyzed.expr_types.get(&expr.id) {
                     // If variable is a union but narrowed type is not, extract the payload
                     if matches!(vole_type, Type::Union(_))
                         && !matches!(narrowed_type, Type::Union(_))
@@ -777,7 +777,7 @@ pub(super) fn compile_expr(
                             match inner_pat.as_ref() {
                                 Pattern::Identifier { name, .. } => {
                                     // Check if this is an error type name
-                                    if let Some(_error_info) = ctx.error_types.get(name) {
+                                    if let Some(_error_info) = ctx.analyzed.error_types.get(name) {
                                         // Specific error type: error DivByZero => ...
                                         if let Type::Fallible(ft) = &scrutinee.vole_type {
                                             let error_tag = fallible_error_tag(ft, *name);
@@ -1086,6 +1086,7 @@ pub(super) fn compile_expr(
             // go through the method resolution mechanism
             // We need to retrieve the actual Module type from semantic analysis
             let vole_type = ctx
+                .analyzed
                 .expr_types
                 .get(&expr.id)
                 .cloned()

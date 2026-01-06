@@ -7,6 +7,7 @@ use miette::NamedSource;
 
 use crate::cli::{InspectType, expand_paths};
 use crate::codegen::{Compiler, JitContext};
+use crate::commands::common::AnalyzedProgram;
 use crate::errors::render_to_stderr;
 use crate::frontend::{AstPrinter, Parser};
 use crate::sema::Analyzer;
@@ -115,10 +116,9 @@ pub fn inspect_files(
                 ) = analyzer.into_analysis_results();
 
                 // Generate IR
-                let mut jit = JitContext::new();
-                let mut compiler = Compiler::new(
-                    &mut jit,
-                    &interner,
+                let analyzed = AnalyzedProgram {
+                    program,
+                    interner,
                     type_aliases,
                     expr_types,
                     method_resolutions,
@@ -129,11 +129,13 @@ pub fn inspect_files(
                     generic_functions,
                     monomorph_cache,
                     generic_calls,
-                );
+                };
+                let mut jit = JitContext::new();
+                let mut compiler = Compiler::new(&mut jit, &analyzed);
                 let include_tests = !no_tests;
 
                 if let Err(e) =
-                    compiler.compile_to_ir(&program, &mut std::io::stdout(), include_tests)
+                    compiler.compile_to_ir(&analyzed.program, &mut std::io::stdout(), include_tests)
                 {
                     eprintln!("error: {}", e);
                     had_error = true;
