@@ -44,6 +44,10 @@ pub enum Type {
     MapIterator(Box<Type>),
     /// Filter iterator type - wraps another iterator with a predicate function
     FilterIterator(Box<Type>),
+    /// Take iterator type - returns first n elements then Done
+    TakeIterator(Box<Type>),
+    /// Skip iterator type - skips first n elements, returns rest
+    SkipIterator(Box<Type>),
     /// Function type
     Function(FunctionType),
     /// Unknown (for type inference)
@@ -295,6 +299,8 @@ impl Type {
             Type::Iterator(_) => "iterator",
             Type::MapIterator(_) => "iterator",
             Type::FilterIterator(_) => "iterator",
+            Type::TakeIterator(_) => "iterator",
+            Type::SkipIterator(_) => "iterator",
             Type::Function(_) => "function",
             Type::Unknown => "unknown",
             Type::Error => "error",
@@ -400,6 +406,8 @@ impl std::fmt::Display for Type {
             Type::Iterator(elem) => write!(f, "Iterator<{}>", elem),
             Type::MapIterator(elem) => write!(f, "Iterator<{}>", elem),
             Type::FilterIterator(elem) => write!(f, "Iterator<{}>", elem),
+            Type::TakeIterator(elem) => write!(f, "Iterator<{}>", elem),
+            Type::SkipIterator(elem) => write!(f, "Iterator<{}>", elem),
             Type::Class(_) => write!(f, "class"),
             Type::Record(_) => write!(f, "record"),
             Type::ErrorType(_) => {

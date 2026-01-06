@@ -127,7 +127,9 @@ impl Analyzer {
             // Iterator.next() -> T | Done
             (Type::Iterator(elem_ty), "next")
             | (Type::MapIterator(elem_ty), "next")
-            | (Type::FilterIterator(elem_ty), "next") => {
+            | (Type::FilterIterator(elem_ty), "next")
+            | (Type::TakeIterator(elem_ty), "next")
+            | (Type::SkipIterator(elem_ty), "next") => {
                 if !args.is_empty() {
                     self.add_error(
                         SemanticError::WrongArgumentCount {
@@ -143,7 +145,9 @@ impl Analyzer {
             // Iterator.collect() -> [T]
             (Type::Iterator(elem_ty), "collect")
             | (Type::MapIterator(elem_ty), "collect")
-            | (Type::FilterIterator(elem_ty), "collect") => {
+            | (Type::FilterIterator(elem_ty), "collect")
+            | (Type::TakeIterator(elem_ty), "collect")
+            | (Type::SkipIterator(elem_ty), "collect") => {
                 if !args.is_empty() {
                     self.add_error(
                         SemanticError::WrongArgumentCount {
@@ -159,7 +163,9 @@ impl Analyzer {
             // Iterator.count() -> i64
             (Type::Iterator(_), "count")
             | (Type::MapIterator(_), "count")
-            | (Type::FilterIterator(_), "count") => {
+            | (Type::FilterIterator(_), "count")
+            | (Type::TakeIterator(_), "count")
+            | (Type::SkipIterator(_), "count") => {
                 if !args.is_empty() {
                     self.add_error(
                         SemanticError::WrongArgumentCount {
@@ -175,7 +181,9 @@ impl Analyzer {
             // Iterator.sum() -> i64 (only for numeric iterators)
             (Type::Iterator(elem_ty), "sum")
             | (Type::MapIterator(elem_ty), "sum")
-            | (Type::FilterIterator(elem_ty), "sum") => {
+            | (Type::FilterIterator(elem_ty), "sum")
+            | (Type::TakeIterator(elem_ty), "sum")
+            | (Type::SkipIterator(elem_ty), "sum") => {
                 if !args.is_empty() {
                     self.add_error(
                         SemanticError::WrongArgumentCount {
@@ -205,7 +213,9 @@ impl Analyzer {
             // Iterator.for_each(fn) -> () where fn: (T) -> ()
             (Type::Iterator(elem_ty), "for_each")
             | (Type::MapIterator(elem_ty), "for_each")
-            | (Type::FilterIterator(elem_ty), "for_each") => {
+            | (Type::FilterIterator(elem_ty), "for_each")
+            | (Type::TakeIterator(elem_ty), "for_each")
+            | (Type::SkipIterator(elem_ty), "for_each") => {
                 if args.len() != 1 {
                     self.add_error(
                         SemanticError::WrongArgumentCount {
@@ -249,9 +259,13 @@ impl Analyzer {
             // Iterator.filter(fn) -> FilterIterator<T> where fn: (T) -> bool
             // MapIterator.filter(fn) -> FilterIterator<T> (chained filter)
             // FilterIterator.filter(fn) -> FilterIterator<T> (chained filter)
+            // TakeIterator.filter(fn) -> FilterIterator<T> (chained filter)
+            // SkipIterator.filter(fn) -> FilterIterator<T> (chained filter)
             (Type::Iterator(elem_ty), "filter")
             | (Type::MapIterator(elem_ty), "filter")
-            | (Type::FilterIterator(elem_ty), "filter") => {
+            | (Type::FilterIterator(elem_ty), "filter")
+            | (Type::TakeIterator(elem_ty), "filter")
+            | (Type::SkipIterator(elem_ty), "filter") => {
                 if args.len() != 1 {
                     self.add_error(
                         SemanticError::WrongArgumentCount {
@@ -310,9 +324,13 @@ impl Analyzer {
             // Iterator.map(fn) -> MapIterator<U> where fn: (T) -> U
             // MapIterator.map(fn) -> MapIterator<V> where fn: (U) -> V (chained map)
             // FilterIterator.map(fn) -> MapIterator<V> (map after filter)
+            // TakeIterator.map(fn) -> MapIterator<V> (map after take)
+            // SkipIterator.map(fn) -> MapIterator<V> (map after skip)
             (Type::Iterator(elem_ty), "map")
             | (Type::MapIterator(elem_ty), "map")
-            | (Type::FilterIterator(elem_ty), "map") => {
+            | (Type::FilterIterator(elem_ty), "map")
+            | (Type::TakeIterator(elem_ty), "map")
+            | (Type::SkipIterator(elem_ty), "map") => {
                 if args.len() != 1 {
                     self.add_error(
                         SemanticError::WrongArgumentCount {
@@ -357,6 +375,82 @@ impl Analyzer {
                 };
 
                 Some(Type::MapIterator(Box::new(output_type)))
+            }
+            // Iterator.take(n) -> TakeIterator<T> where n: i64
+            // Works on any iterator type
+            (Type::Iterator(elem_ty), "take")
+            | (Type::MapIterator(elem_ty), "take")
+            | (Type::FilterIterator(elem_ty), "take")
+            | (Type::TakeIterator(elem_ty), "take")
+            | (Type::SkipIterator(elem_ty), "take") => {
+                if args.len() != 1 {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 1,
+                            found: args.len(),
+                            span: args.first().map(|a| a.span).unwrap_or_default().into(),
+                        },
+                        args.first().map(|a| a.span).unwrap_or_default(),
+                    );
+                    return Some(Type::TakeIterator(elem_ty.clone()));
+                }
+
+                // The argument should be an integer (i64)
+                let arg = &args[0];
+                let arg_ty = self.check_expr(arg, _interner).unwrap_or(Type::Error);
+
+                // Verify it's an integer type
+                if !arg_ty.is_integer() {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "i64".to_string(),
+                            found: arg_ty.name().to_string(),
+                            span: arg.span.into(),
+                        },
+                        arg.span,
+                    );
+                }
+
+                // Take preserves element type
+                Some(Type::TakeIterator(elem_ty.clone()))
+            }
+            // Iterator.skip(n) -> SkipIterator<T> where n: i64
+            // Works on any iterator type
+            (Type::Iterator(elem_ty), "skip")
+            | (Type::MapIterator(elem_ty), "skip")
+            | (Type::FilterIterator(elem_ty), "skip")
+            | (Type::TakeIterator(elem_ty), "skip")
+            | (Type::SkipIterator(elem_ty), "skip") => {
+                if args.len() != 1 {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 1,
+                            found: args.len(),
+                            span: args.first().map(|a| a.span).unwrap_or_default().into(),
+                        },
+                        args.first().map(|a| a.span).unwrap_or_default(),
+                    );
+                    return Some(Type::SkipIterator(elem_ty.clone()));
+                }
+
+                // The argument should be an integer (i64)
+                let arg = &args[0];
+                let arg_ty = self.check_expr(arg, _interner).unwrap_or(Type::Error);
+
+                // Verify it's an integer type
+                if !arg_ty.is_integer() {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "i64".to_string(),
+                            found: arg_ty.name().to_string(),
+                            span: arg.span.into(),
+                        },
+                        arg.span,
+                    );
+                }
+
+                // Skip preserves element type
+                Some(Type::SkipIterator(elem_ty.clone()))
             }
             // String.length() -> i64
             (Type::String, "length") => {
@@ -450,23 +544,33 @@ impl Analyzer {
             (Type::Array(elem_ty), "iter") => Some(Type::Iterator(elem_ty.clone())),
             (Type::Iterator(elem_ty), "next")
             | (Type::MapIterator(elem_ty), "next")
-            | (Type::FilterIterator(elem_ty), "next") => {
+            | (Type::FilterIterator(elem_ty), "next")
+            | (Type::TakeIterator(elem_ty), "next")
+            | (Type::SkipIterator(elem_ty), "next") => {
                 Some(Type::Union(vec![*elem_ty.clone(), Type::Done]))
             }
             (Type::Iterator(elem_ty), "collect")
             | (Type::MapIterator(elem_ty), "collect")
-            | (Type::FilterIterator(elem_ty), "collect") => Some(Type::Array(elem_ty.clone())),
+            | (Type::FilterIterator(elem_ty), "collect")
+            | (Type::TakeIterator(elem_ty), "collect")
+            | (Type::SkipIterator(elem_ty), "collect") => Some(Type::Array(elem_ty.clone())),
             // count() returns i64 for any iterator type
             (Type::Iterator(_), "count")
             | (Type::MapIterator(_), "count")
-            | (Type::FilterIterator(_), "count") => Some(Type::I64),
+            | (Type::FilterIterator(_), "count")
+            | (Type::TakeIterator(_), "count")
+            | (Type::SkipIterator(_), "count") => Some(Type::I64),
             // sum() returns i64 (only works on numeric iterators, but return type is always i64)
             (Type::Iterator(_), "sum")
             | (Type::MapIterator(_), "sum")
+            | (Type::TakeIterator(_), "sum")
+            | (Type::SkipIterator(_), "sum")
             | (Type::FilterIterator(_), "sum") => Some(Type::I64),
             // for_each() returns void
             (Type::Iterator(_), "for_each")
             | (Type::MapIterator(_), "for_each")
+            | (Type::TakeIterator(_), "for_each")
+            | (Type::SkipIterator(_), "for_each")
             | (Type::FilterIterator(_), "for_each") => Some(Type::Void),
             // Note: map() and filter() are not included here because they need argument analysis
             // to determine return type. It's handled via method_resolutions in codegen.

@@ -474,25 +474,57 @@ impl Cg<'_, '_, '_> {
         }
 
         // Handle iterator.map(fn) -> creates a MapIterator
-        // Also handle MapIterator.map(fn) and FilterIterator.map(fn) for chained maps
-        if let Type::Iterator(elem_ty) | Type::MapIterator(elem_ty) | Type::FilterIterator(elem_ty) =
-            &obj.vole_type
+        // Also handle MapIterator.map(fn), FilterIterator.map(fn), TakeIterator.map(fn), SkipIterator.map(fn) for chained maps
+        if let Type::Iterator(elem_ty)
+        | Type::MapIterator(elem_ty)
+        | Type::FilterIterator(elem_ty)
+        | Type::TakeIterator(elem_ty)
+        | Type::SkipIterator(elem_ty) = &obj.vole_type
             && method_name_str == "map"
         {
             return self.iterator_map(&obj, elem_ty, &mc.args);
         }
 
         // Handle iterator.filter(fn) -> creates a FilterIterator
-        // Also handle MapIterator.filter(fn) and FilterIterator.filter(fn) for chained filters
-        if let Type::Iterator(elem_ty) | Type::MapIterator(elem_ty) | Type::FilterIterator(elem_ty) =
-            &obj.vole_type
+        // Also handle MapIterator.filter(fn), FilterIterator.filter(fn), TakeIterator.filter(fn), SkipIterator.filter(fn) for chained filters
+        if let Type::Iterator(elem_ty)
+        | Type::MapIterator(elem_ty)
+        | Type::FilterIterator(elem_ty)
+        | Type::TakeIterator(elem_ty)
+        | Type::SkipIterator(elem_ty) = &obj.vole_type
             && method_name_str == "filter"
         {
             return self.iterator_filter(&obj, elem_ty, &mc.args);
         }
 
+        // Handle iterator.take(n) -> creates a TakeIterator
+        if let Type::Iterator(elem_ty)
+        | Type::MapIterator(elem_ty)
+        | Type::FilterIterator(elem_ty)
+        | Type::TakeIterator(elem_ty)
+        | Type::SkipIterator(elem_ty) = &obj.vole_type
+            && method_name_str == "take"
+        {
+            return self.iterator_take(&obj, elem_ty, &mc.args);
+        }
+
+        // Handle iterator.skip(n) -> creates a SkipIterator
+        if let Type::Iterator(elem_ty)
+        | Type::MapIterator(elem_ty)
+        | Type::FilterIterator(elem_ty)
+        | Type::TakeIterator(elem_ty)
+        | Type::SkipIterator(elem_ty) = &obj.vole_type
+            && method_name_str == "skip"
+        {
+            return self.iterator_skip(&obj, elem_ty, &mc.args);
+        }
+
         // Handle iterator.for_each(fn) -> calls function for each element
-        if let Type::Iterator(_) | Type::MapIterator(_) | Type::FilterIterator(_) = &obj.vole_type
+        if let Type::Iterator(_)
+        | Type::MapIterator(_)
+        | Type::FilterIterator(_)
+        | Type::TakeIterator(_)
+        | Type::SkipIterator(_) = &obj.vole_type
             && method_name_str == "for_each"
         {
             return self.iterator_for_each(&obj, &mc.args);
@@ -832,17 +864,125 @@ impl Cg<'_, '_, '_> {
                     vole_type: Type::Array(elem_ty.clone()),
                 }))
             }
+            // TakeIterator.next() -> T | Done
+            (Type::TakeIterator(elem_ty), "next") => {
+                let out_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    8,
+                    0,
+                ));
+                let out_ptr = self
+                    .builder
+                    .ins()
+                    .stack_addr(self.ctx.pointer_type, out_slot, 0);
+
+                let has_value = self.call_runtime("vole_take_iter_next", &[obj.value, out_ptr])?;
+
+                let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
+
+                let union_type = Type::Union(vec![*elem_ty.clone(), Type::Done]);
+                let union_size = 16u32;
+                let union_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    union_size,
+                    0,
+                ));
+
+                let zero = self.builder.ins().iconst(types::I64, 0);
+                let is_done = self.builder.ins().icmp(IntCC::Equal, has_value, zero);
+                let tag_done = self.builder.ins().iconst(types::I8, 1);
+                let tag_value = self.builder.ins().iconst(types::I8, 0);
+                let tag = self.builder.ins().select(is_done, tag_done, tag_value);
+
+                self.builder.ins().stack_store(tag, union_slot, 0);
+                self.builder.ins().stack_store(value, union_slot, 8);
+
+                let union_ptr = self
+                    .builder
+                    .ins()
+                    .stack_addr(self.ctx.pointer_type, union_slot, 0);
+                Ok(Some(CompiledValue {
+                    value: union_ptr,
+                    ty: self.ctx.pointer_type,
+                    vole_type: union_type,
+                }))
+            }
+            // TakeIterator.collect() -> [T]
+            (Type::TakeIterator(elem_ty), "collect") => {
+                let result = self.call_runtime("vole_take_iter_collect", &[obj.value])?;
+                Ok(Some(CompiledValue {
+                    value: result,
+                    ty: self.ctx.pointer_type,
+                    vole_type: Type::Array(elem_ty.clone()),
+                }))
+            }
+            // SkipIterator.next() -> T | Done
+            (Type::SkipIterator(elem_ty), "next") => {
+                let out_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    8,
+                    0,
+                ));
+                let out_ptr = self
+                    .builder
+                    .ins()
+                    .stack_addr(self.ctx.pointer_type, out_slot, 0);
+
+                let has_value = self.call_runtime("vole_skip_iter_next", &[obj.value, out_ptr])?;
+
+                let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
+
+                let union_type = Type::Union(vec![*elem_ty.clone(), Type::Done]);
+                let union_size = 16u32;
+                let union_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    union_size,
+                    0,
+                ));
+
+                let zero = self.builder.ins().iconst(types::I64, 0);
+                let is_done = self.builder.ins().icmp(IntCC::Equal, has_value, zero);
+                let tag_done = self.builder.ins().iconst(types::I8, 1);
+                let tag_value = self.builder.ins().iconst(types::I8, 0);
+                let tag = self.builder.ins().select(is_done, tag_done, tag_value);
+
+                self.builder.ins().stack_store(tag, union_slot, 0);
+                self.builder.ins().stack_store(value, union_slot, 8);
+
+                let union_ptr = self
+                    .builder
+                    .ins()
+                    .stack_addr(self.ctx.pointer_type, union_slot, 0);
+                Ok(Some(CompiledValue {
+                    value: union_ptr,
+                    ty: self.ctx.pointer_type,
+                    vole_type: union_type,
+                }))
+            }
+            // SkipIterator.collect() -> [T]
+            (Type::SkipIterator(elem_ty), "collect") => {
+                let result = self.call_runtime("vole_skip_iter_collect", &[obj.value])?;
+                Ok(Some(CompiledValue {
+                    value: result,
+                    ty: self.ctx.pointer_type,
+                    vole_type: Type::Array(elem_ty.clone()),
+                }))
+            }
             // Iterator.count() -> i64 (works on any iterator type)
             (Type::Iterator(_), "count")
             | (Type::MapIterator(_), "count")
-            | (Type::FilterIterator(_), "count") => {
+            | (Type::FilterIterator(_), "count")
+            | (Type::TakeIterator(_), "count")
+            | (Type::SkipIterator(_), "count") => {
                 let result = self.call_runtime("vole_iter_count", &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
             }
             // Iterator.sum() -> i64 (works on numeric iterators)
             (Type::Iterator(_), "sum")
             | (Type::MapIterator(_), "sum")
-            | (Type::FilterIterator(_), "sum") => {
+            | (Type::FilterIterator(_), "sum")
+            | (Type::TakeIterator(_), "sum")
+            | (Type::SkipIterator(_), "sum") => {
                 let result = self.call_runtime("vole_iter_sum", &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
             }
@@ -942,6 +1082,56 @@ impl Cg<'_, '_, '_> {
             value: result,
             ty: self.ctx.pointer_type,
             vole_type: Type::FilterIterator(Box::new(elem_ty.clone())),
+        })
+    }
+
+    /// Handle Iterator.take(n) -> creates a TakeIterator
+    fn iterator_take(
+        &mut self,
+        iter_obj: &CompiledValue,
+        elem_ty: &Type,
+        args: &[Expr],
+    ) -> Result<CompiledValue, String> {
+        if args.len() != 1 {
+            return Err(format!("take expects 1 argument, got {}", args.len()));
+        }
+
+        // Compile the count argument (should be an integer)
+        let count = self.expr(&args[0])?;
+
+        // Call vole_take_iter(source_iter, count)
+        let result = self.call_runtime("vole_take_iter", &[iter_obj.value, count.value])?;
+
+        // TakeIterator preserves element type
+        Ok(CompiledValue {
+            value: result,
+            ty: self.ctx.pointer_type,
+            vole_type: Type::TakeIterator(Box::new(elem_ty.clone())),
+        })
+    }
+
+    /// Handle Iterator.skip(n) -> creates a SkipIterator
+    fn iterator_skip(
+        &mut self,
+        iter_obj: &CompiledValue,
+        elem_ty: &Type,
+        args: &[Expr],
+    ) -> Result<CompiledValue, String> {
+        if args.len() != 1 {
+            return Err(format!("skip expects 1 argument, got {}", args.len()));
+        }
+
+        // Compile the count argument (should be an integer)
+        let count = self.expr(&args[0])?;
+
+        // Call vole_skip_iter(source_iter, count)
+        let result = self.call_runtime("vole_skip_iter", &[iter_obj.value, count.value])?;
+
+        // SkipIterator preserves element type
+        Ok(CompiledValue {
+            value: result,
+            ty: self.ctx.pointer_type,
+            vole_type: Type::SkipIterator(Box::new(elem_ty.clone())),
         })
     }
 

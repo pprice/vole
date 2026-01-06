@@ -242,4 +242,166 @@ tests "iterators" {
         // Odd numbers: 1, 3, 5 -> doubled: 2, 6, 10 -> sum: 18
         assert(result == 18)
     }
+
+    // take() tests
+
+    test "take first n elements" {
+        let arr = [1, 2, 3, 4, 5]
+        let first3 = arr.iter().take(3).collect()
+        assert(first3.length() == 3)
+        assert(first3[0] == 1)
+        assert(first3[1] == 2)
+        assert(first3[2] == 3)
+    }
+
+    test "take more than available" {
+        let arr = [1, 2]
+        let result = arr.iter().take(10).collect()
+        assert(result.length() == 2)
+    }
+
+    test "take with map" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().map((x) => x * 2).take(2).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 2)
+        assert(result[1] == 4)
+    }
+
+    test "take zero elements" {
+        let arr = [1, 2, 3]
+        let result = arr.iter().take(0).collect()
+        assert(result.length() == 0)
+    }
+
+    test "take from empty array" {
+        let arr: [i64] = []
+        let result = arr.iter().take(5).collect()
+        assert(result.length() == 0)
+    }
+
+    test "take with filter" {
+        let arr = [1, 2, 3, 4, 5, 6]
+        let result = arr.iter().filter((x) => x % 2 == 0).take(2).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 2)
+        assert(result[1] == 4)
+    }
+
+    test "take count" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().take(3).count()
+        assert(result == 3)
+    }
+
+    test "take sum" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().take(3).sum()
+        assert(result == 6)
+    }
+
+    // skip() tests
+
+    test "skip first n elements" {
+        let arr = [1, 2, 3, 4, 5]
+        let last2 = arr.iter().skip(3).collect()
+        assert(last2.length() == 2)
+        assert(last2[0] == 4)
+        assert(last2[1] == 5)
+    }
+
+    test "skip more than available" {
+        let arr = [1, 2]
+        let result = arr.iter().skip(10).collect()
+        assert(result.length() == 0)
+    }
+
+    test "skip with filter" {
+        let arr = [1, 2, 3, 4, 5, 6]
+        let result = arr.iter().filter((x) => x % 2 == 0).skip(1).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 4)
+        assert(result[1] == 6)
+    }
+
+    test "skip zero elements" {
+        let arr = [1, 2, 3]
+        let result = arr.iter().skip(0).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 1)
+    }
+
+    test "skip from empty array" {
+        let arr: [i64] = []
+        let result = arr.iter().skip(5).collect()
+        assert(result.length() == 0)
+    }
+
+    test "skip with map" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().map((x) => x * 2).skip(2).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 6)  // 3*2
+        assert(result[1] == 8)  // 4*2
+        assert(result[2] == 10) // 5*2
+    }
+
+    test "skip count" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().skip(2).count()
+        assert(result == 3)
+    }
+
+    test "skip sum" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().skip(2).sum()
+        // 3 + 4 + 5 = 12
+        assert(result == 12)
+    }
+
+    // Combined take and skip tests
+
+    test "skip then take" {
+        let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        // Skip first 3, then take next 4: [4, 5, 6, 7]
+        let result = arr.iter().skip(3).take(4).collect()
+        assert(result.length() == 4)
+        assert(result[0] == 4)
+        assert(result[1] == 5)
+        assert(result[2] == 6)
+        assert(result[3] == 7)
+    }
+
+    test "take then skip" {
+        let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        // Take first 6, then skip 2: [3, 4, 5, 6]
+        let result = arr.iter().take(6).skip(2).collect()
+        assert(result.length() == 4)
+        assert(result[0] == 3)
+        assert(result[1] == 4)
+        assert(result[2] == 5)
+        assert(result[3] == 6)
+    }
+
+    test "filter map take" {
+        let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        // Filter evens: [2, 4, 6, 8, 10], map double: [4, 8, 12, 16, 20], take 3: [4, 8, 12]
+        let result = arr.iter().filter((x) => x % 2 == 0).map((x) => x * 2).take(3).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 4)
+        assert(result[1] == 8)
+        assert(result[2] == 12)
+    }
+
+    test "map filter skip" {
+        let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        // Map double: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
+        // Filter > 10: [12, 14, 16, 18, 20]
+        // Skip 2: [16, 18, 20]
+        let result = arr.iter().map((x) => x * 2).filter((x) => x > 10).skip(2).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 16)
+        assert(result[1] == 18)
+        assert(result[2] == 20)
+    }
 }
