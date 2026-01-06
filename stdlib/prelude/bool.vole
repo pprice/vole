@@ -1,0 +1,13 @@
+// stdlib/prelude/bool.vole
+
+implement Equatable for bool {
+    external("std:intrinsics") {
+        func "bool_equals" as equals(other: Self) -> bool
+    }
+}
+
+implement Stringable for bool {
+    external("std:intrinsics") {
+        func "bool_to_string" as to_string() -> string
+    }
+}

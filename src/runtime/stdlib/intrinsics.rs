@@ -63,6 +63,14 @@ pub fn module() -> NativeModule {
             return_type: NativeType::String,
         },
     );
+    m.register(
+        "i32_hash",
+        i32_hash as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I32],
+            return_type: NativeType::I64,
+        },
+    );
 
     // f64 functions
     m.register(
@@ -161,6 +169,12 @@ pub extern "C" fn i32_compare(a: i32, b: i32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn i32_to_string(n: i32) -> *const RcString {
     RcString::new(&n.to_string())
+}
+
+/// Hash an i32 value (just extend to i64)
+#[unsafe(no_mangle)]
+pub extern "C" fn i32_hash(n: i32) -> i64 {
+    n as i64
 }
 
 // =============================================================================
@@ -347,6 +361,7 @@ mod tests {
         assert!(m.get("i32_equals").is_some());
         assert!(m.get("i32_compare").is_some());
         assert!(m.get("i32_to_string").is_some());
+        assert!(m.get("i32_hash").is_some());
         assert!(m.get("f64_equals").is_some());
         assert!(m.get("f64_compare").is_some());
         assert!(m.get("f64_to_string").is_some());
