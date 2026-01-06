@@ -54,6 +54,7 @@ pub enum Decl {
 #[derive(Debug, Clone)]
 pub struct FuncDecl {
     pub name: Symbol,
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub return_type: Option<TypeExpr>,
     pub body: Block,

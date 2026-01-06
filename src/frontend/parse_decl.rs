@@ -66,6 +66,7 @@ impl<'src> Parser<'src> {
 
         Ok(Decl::Function(FuncDecl {
             name,
+            type_params: Vec::new(),
             params,
             return_type,
             body,

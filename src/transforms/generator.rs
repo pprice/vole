@@ -741,6 +741,7 @@ impl<'a> GeneratorTransformer<'a> {
 
         FuncDecl {
             name: next_sym,
+            type_params: Vec::new(),
             // Note: Methods in implement blocks don't list `self` explicitly;
             // it's added implicitly by codegen
             params: vec![],
@@ -815,6 +816,7 @@ impl<'a> GeneratorTransformer<'a> {
 
         FuncDecl {
             name: original.name,
+            type_params: Vec::new(),
             params: original.params.clone(),
             // Return type is the generated record (not the original Iterator<T>)
             return_type: Some(TypeExpr::Named(record_name)),
