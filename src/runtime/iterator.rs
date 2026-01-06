@@ -12,14 +12,16 @@ use crate::runtime::closure::Closure;
 pub enum IteratorKind {
     Array = 0,
     Map = 1,
+    Filter = 2,
 }
 
-/// Unified iterator source - can be either an array or a map iterator
-/// This allows chaining (e.g., arr.iter().map(f).map(g))
+/// Unified iterator source - can be either an array, map, or filter iterator
+/// This allows chaining (e.g., arr.iter().map(f).filter(p).map(g))
 #[repr(C)]
 pub union IteratorSource {
     pub array: ArraySource,
     pub map: MapSource,
+    pub filter: FilterSource,
 }
 
 /// Source data for array iteration
@@ -40,6 +42,16 @@ pub struct MapSource {
     pub transform: *const Closure,
 }
 
+/// Source data for filter iteration
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FilterSource {
+    /// Pointer to source iterator (could be any iterator type)
+    pub source: *mut UnifiedIterator,
+    /// Predicate closure that returns bool
+    pub predicate: *const Closure,
+}
+
 /// Unified iterator structure
 /// The kind field tells us which variant is active
 #[repr(C)]
@@ -51,6 +63,7 @@ pub struct UnifiedIterator {
 // Legacy type aliases for backwards compatibility
 pub type ArrayIterator = UnifiedIterator;
 pub type MapIterator = UnifiedIterator;
+pub type FilterIterator = UnifiedIterator;
 
 /// Create a new array iterator
 /// Returns pointer to heap-allocated iterator
@@ -132,6 +145,10 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
         IteratorKind::Map => {
             // For map iterators, delegate to map_next logic
             vole_map_iter_next(iter, out_value)
+        }
+        IteratorKind::Filter => {
+            // For filter iterators, delegate to filter_next logic
+            vole_filter_iter_next(iter, out_value)
         }
     }
 }
@@ -260,6 +277,122 @@ pub extern "C" fn vole_map_iter_collect(iter: *mut UnifiedIterator) -> *mut RcAr
     loop {
         let mut value: i64 = 0;
         let has_value = vole_map_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+
+        // Push to result array
+        // Tag 0 = i64 type (for now, we'll handle other types later)
+        unsafe {
+            RcArray::push(
+                result,
+                TaggedValue {
+                    tag: 0,
+                    value: value as u64,
+                },
+            );
+        }
+    }
+
+    result
+}
+
+// =============================================================================
+// FilterIterator - lazy filtering over any iterator
+// =============================================================================
+
+/// Create a new filter iterator wrapping any source iterator
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_filter_iter(
+    source: *mut UnifiedIterator,
+    predicate: *const Closure,
+) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Filter,
+        source: IteratorSource {
+            filter: FilterSource { source, predicate },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next value from filter iterator
+/// Calls the source iterator's next, applies the predicate function, skips non-matching elements
+/// Returns 1 and stores value in out_value if a matching element is found
+/// Returns 0 if iterator exhausted (Done)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_filter_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &*iter };
+
+    // This function should only be called for Filter iterators
+    if iter_ref.kind != IteratorKind::Filter {
+        return 0;
+    }
+
+    let filter_src = unsafe { iter_ref.source.filter };
+
+    // Keep getting values from source until we find one that passes the predicate
+    loop {
+        // Get next value from source iterator (could be Array, Map, or Filter)
+        let mut source_value: i64 = 0;
+        let has_value = vole_array_iter_next(filter_src.source, &mut source_value);
+
+        if has_value == 0 {
+            return 0; // Done - source exhausted
+        }
+
+        // Apply predicate function
+        // Check if this is a closure (has captures) or a pure function (no captures)
+        // Note: Vole bools are i8, so predicate returns i8 (0 or 1)
+        let passes: i8 = unsafe {
+            let func_ptr = Closure::get_func(filter_src.predicate);
+            let num_captures = (*filter_src.predicate).num_captures;
+
+            if num_captures == 0 {
+                // Pure function - call with just the value
+                let predicate_fn: extern "C" fn(i64) -> i8 = std::mem::transmute(func_ptr);
+                predicate_fn(source_value)
+            } else {
+                // Closure - pass closure pointer as first arg
+                let predicate_fn: extern "C" fn(*const Closure, i64) -> i8 =
+                    std::mem::transmute(func_ptr);
+                predicate_fn(filter_src.predicate, source_value)
+            }
+        };
+
+        // If predicate returns non-zero (true), yield this value
+        if passes != 0 {
+            unsafe { *out_value = source_value };
+            return 1; // Has value
+        }
+        // Otherwise, continue to next element
+    }
+}
+
+/// Collect all remaining filter iterator values into a new array
+/// Returns pointer to newly allocated array
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_filter_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
+    use crate::runtime::value::TaggedValue;
+
+    let result = RcArray::new();
+
+    if iter.is_null() {
+        return result;
+    }
+
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_filter_iter_next(iter, &mut value);
 
         if has_value == 0 {
             break;

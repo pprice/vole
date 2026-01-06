@@ -152,6 +152,18 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_map_iter_collect", &sig);
 
+        // vole_filter_iter(source: *mut UnifiedIterator, predicate: *const Closure) -> *mut FilterIterator
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
+        self.import_function("vole_filter_iter", &sig);
+
+        // vole_filter_iter_next(iter: *mut FilterIterator, out_value: *mut i64) -> i64
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
+        self.import_function("vole_filter_iter_next", &sig);
+
+        // vole_filter_iter_collect(iter: *mut FilterIterator) -> *mut RcArray
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_filter_iter_collect", &sig);
+
         // vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64)
         let sig = self.create_signature(&[ptr_ty, types::I64, types::I64, types::I64], None);
         self.import_function("vole_array_set", &sig);
@@ -316,6 +328,18 @@ impl JitContext {
         builder.symbol(
             "vole_map_iter_collect",
             crate::runtime::iterator::vole_map_iter_collect as *const u8,
+        );
+        builder.symbol(
+            "vole_filter_iter",
+            crate::runtime::iterator::vole_filter_iter as *const u8,
+        );
+        builder.symbol(
+            "vole_filter_iter_next",
+            crate::runtime::iterator::vole_filter_iter_next as *const u8,
+        );
+        builder.symbol(
+            "vole_filter_iter_collect",
+            crate::runtime::iterator::vole_filter_iter_collect as *const u8,
         );
         builder.symbol(
             "vole_array_set",

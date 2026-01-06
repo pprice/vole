@@ -106,4 +106,59 @@ tests "iterators" {
         assert(result[1] == 6)   // (2+1)*2 = 6
         assert(result[2] == 8)   // (3+1)*2 = 8
     }
+
+    test "filter keeps matching elements" {
+        let arr = [1, 2, 3, 4, 5]
+        let evens = arr.iter().filter((x) => x % 2 == 0).collect()
+        assert(evens.length() == 2)
+        assert(evens[0] == 2)
+        assert(evens[1] == 4)
+    }
+
+    test "filter with closure" {
+        let arr = [1, 2, 3, 4, 5]
+        let threshold = 3
+        let result = arr.iter().filter((x) => x > threshold).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 4)
+        assert(result[1] == 5)
+    }
+
+    test "chained filter and map" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().filter((x) => x % 2 == 0).map((x) => x * 10).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 20)
+        assert(result[1] == 40)
+    }
+
+    test "chained map and filter" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().map((x) => x * 2).filter((x) => x > 5).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 6)   // 3*2 = 6
+        assert(result[1] == 8)   // 4*2 = 8
+        assert(result[2] == 10)  // 5*2 = 10
+    }
+
+    test "filter all elements" {
+        let arr = [1, 2, 3]
+        let result = arr.iter().filter((x) => x > 10).collect()
+        assert(result.length() == 0)
+    }
+
+    test "filter no elements" {
+        let arr = [1, 2, 3]
+        let result = arr.iter().filter((x) => x > 0).collect()
+        assert(result.length() == 3)
+    }
+
+    test "chained filters" {
+        let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        let result = arr.iter().filter((x) => x % 2 == 0).filter((x) => x > 4).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 6)
+        assert(result[1] == 8)
+        assert(result[2] == 10)
+    }
 }

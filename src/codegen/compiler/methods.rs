@@ -161,11 +161,21 @@ pub(crate) fn compile_method_call(
     }
 
     // Handle iterator.map(fn) -> creates a MapIterator
-    // Also handle MapIterator.map(fn) for chained maps
-    if let Type::Iterator(elem_ty) | Type::MapIterator(elem_ty) = &obj.vole_type
+    // Also handle MapIterator.map(fn) and FilterIterator.map(fn) for chained maps
+    if let Type::Iterator(elem_ty) | Type::MapIterator(elem_ty) | Type::FilterIterator(elem_ty) =
+        &obj.vole_type
         && method_name_str == "map"
     {
         return compile_iterator_map(builder, &obj, elem_ty, &mc.args, variables, ctx);
+    }
+
+    // Handle iterator.filter(fn) -> creates a FilterIterator
+    // Also handle MapIterator.filter(fn) and FilterIterator.filter(fn) for chained filters
+    if let Type::Iterator(elem_ty) | Type::MapIterator(elem_ty) | Type::FilterIterator(elem_ty) =
+        &obj.vole_type
+        && method_name_str == "filter"
+    {
+        return compile_iterator_filter(builder, &obj, elem_ty, &mc.args, variables, ctx);
     }
 
     // Look up method resolution to determine naming convention and return type
@@ -468,6 +478,76 @@ pub(crate) fn compile_builtin_method(
                 vole_type: Type::Array(elem_ty.clone()),
             }))
         }
+        // FilterIterator.next() -> T | Done
+        (Type::FilterIterator(elem_ty), "next") => {
+            // Create stack slot for output value (8 bytes for i64)
+            let out_slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                8,
+                0,
+            ));
+            let out_ptr = builder.ins().stack_addr(ctx.pointer_type, out_slot, 0);
+
+            // Call runtime: has_value = vole_filter_iter_next(iter, out_ptr)
+            let func_id = ctx
+                .func_ids
+                .get("vole_filter_iter_next")
+                .ok_or_else(|| "vole_filter_iter_next not found".to_string())?;
+            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let call = builder.ins().call(func_ref, &[obj.value, out_ptr]);
+            let has_value = builder.inst_results(call)[0];
+
+            // Load value from out_slot
+            let value = builder.ins().stack_load(types::I64, out_slot, 0);
+
+            // Build union result: T | Done
+            // Union layout: [tag:1][padding:7][payload:8] = 16 bytes
+            // Tag 0 = element type (T), Tag 1 = Done
+            let union_type = Type::Union(vec![*elem_ty.clone(), Type::Done]);
+            let union_size = 16u32; // tag(1) + padding(7) + payload(8)
+            let union_slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                union_size,
+                0,
+            ));
+
+            // Determine tag based on has_value:
+            // has_value != 0 => tag = 0 (element type)
+            // has_value == 0 => tag = 1 (Done)
+            let zero = builder.ins().iconst(types::I64, 0);
+            let is_done = builder.ins().icmp(IntCC::Equal, has_value, zero);
+            let tag_done = builder.ins().iconst(types::I8, 1);
+            let tag_value = builder.ins().iconst(types::I8, 0);
+            let tag = builder.ins().select(is_done, tag_done, tag_value);
+
+            // Store tag at offset 0
+            builder.ins().stack_store(tag, union_slot, 0);
+
+            // Store payload at offset 8 (value if has_value, 0 if done)
+            builder.ins().stack_store(value, union_slot, 8);
+
+            let union_ptr = builder.ins().stack_addr(ctx.pointer_type, union_slot, 0);
+            Ok(Some(CompiledValue {
+                value: union_ptr,
+                ty: ctx.pointer_type,
+                vole_type: union_type,
+            }))
+        }
+        // FilterIterator.collect() -> [T]
+        (Type::FilterIterator(elem_ty), "collect") => {
+            let func_id = ctx
+                .func_ids
+                .get("vole_filter_iter_collect")
+                .ok_or_else(|| "vole_filter_iter_collect not found".to_string())?;
+            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let call = builder.ins().call(func_ref, &[obj.value]);
+            let result = builder.inst_results(call)[0];
+            Ok(Some(CompiledValue {
+                value: result,
+                ty: ctx.pointer_type,
+                vole_type: Type::Array(elem_ty.clone()),
+            }))
+        }
         // String.length() -> i64
         (Type::String, "length") => {
             let func_id = ctx
@@ -546,6 +626,66 @@ fn compile_iterator_map(
         value: result,
         ty: ctx.pointer_type,
         vole_type: Type::MapIterator(Box::new(output_type)),
+    })
+}
+
+/// Compile Iterator.filter(fn) -> creates a FilterIterator
+fn compile_iterator_filter(
+    builder: &mut FunctionBuilder,
+    iter_obj: &CompiledValue,
+    elem_ty: &Type,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    if args.len() != 1 {
+        return Err(format!("filter expects 1 argument, got {}", args.len()));
+    }
+
+    // Compile the predicate function (should be a lambda/closure)
+    let predicate = compile_expr(builder, &args[0], variables, ctx)?;
+
+    // The predicate should be a function returning bool
+    let is_closure = match &predicate.vole_type {
+        Type::Function(ft) => ft.is_closure,
+        _ => {
+            return Err(format!(
+                "filter argument must be a function, got {:?}",
+                predicate.vole_type
+            ));
+        }
+    };
+
+    // If it's a pure function (not a closure), wrap it in a closure structure
+    // so the runtime can uniformly call it as a closure
+    let closure_ptr = if is_closure {
+        predicate.value
+    } else {
+        // Wrap pure function in a closure with 0 captures
+        let alloc_id = ctx
+            .func_ids
+            .get("vole_closure_alloc")
+            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
+        let alloc_ref = ctx.module.declare_func_in_func(*alloc_id, builder.func);
+        let zero = builder.ins().iconst(types::I64, 0);
+        let alloc_call = builder.ins().call(alloc_ref, &[predicate.value, zero]);
+        builder.inst_results(alloc_call)[0]
+    };
+
+    // Call vole_filter_iter(source_iter, predicate_closure)
+    let func_id = ctx
+        .func_ids
+        .get("vole_filter_iter")
+        .ok_or_else(|| "vole_filter_iter not found".to_string())?;
+    let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+    let call = builder.ins().call(func_ref, &[iter_obj.value, closure_ptr]);
+    let result = builder.inst_results(call)[0];
+
+    // FilterIterator preserves element type
+    Ok(CompiledValue {
+        value: result,
+        ty: ctx.pointer_type,
+        vole_type: Type::FilterIterator(Box::new(elem_ty.clone())),
     })
 }
 
