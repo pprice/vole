@@ -13,6 +13,23 @@ pub struct NodeId(pub u32);
 /// For backwards compatibility and clarity in type maps
 pub type ExprId = NodeId;
 
+/// Type parameter declaration: T or T: Constraint
+#[derive(Debug, Clone)]
+pub struct TypeParam {
+    pub name: Symbol,
+    pub constraint: Option<TypeConstraint>,
+    pub span: Span,
+}
+
+/// Constraint on a type parameter
+#[derive(Debug, Clone)]
+pub enum TypeConstraint {
+    /// Single interface: T: Stringable
+    Interface(Symbol),
+    /// Union of types: T: i32 | i64
+    Union(Vec<TypeExpr>),
+}
+
 /// A complete program
 #[derive(Debug, Clone)]
 pub struct Program {
