@@ -125,7 +125,7 @@ impl Analyzer {
                 Some(Type::Iterator(elem_ty.clone()))
             }
             // Iterator.next() -> T | Done
-            (Type::Iterator(elem_ty), "next") => {
+            (Type::Iterator(elem_ty), "next") | (Type::MapIterator(elem_ty), "next") => {
                 if !args.is_empty() {
                     self.add_error(
                         SemanticError::WrongArgumentCount {
@@ -139,7 +139,7 @@ impl Analyzer {
                 Some(Type::Union(vec![*elem_ty.clone(), Type::Done]))
             }
             // Iterator.collect() -> [T]
-            (Type::Iterator(elem_ty), "collect") => {
+            (Type::Iterator(elem_ty), "collect") | (Type::MapIterator(elem_ty), "collect") => {
                 if !args.is_empty() {
                     self.add_error(
                         SemanticError::WrongArgumentCount {
@@ -151,6 +151,54 @@ impl Analyzer {
                     );
                 }
                 Some(Type::Array(elem_ty.clone()))
+            }
+            // Iterator.map(fn) -> MapIterator<U> where fn: (T) -> U
+            // MapIterator.map(fn) -> MapIterator<V> where fn: (U) -> V (chained map)
+            (Type::Iterator(elem_ty), "map") | (Type::MapIterator(elem_ty), "map") => {
+                if args.len() != 1 {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 1,
+                            found: args.len(),
+                            span: args.first().map(|a| a.span).unwrap_or_default().into(),
+                        },
+                        args.first().map(|a| a.span).unwrap_or_default(),
+                    );
+                    return Some(Type::MapIterator(elem_ty.clone()));
+                }
+
+                // The argument should be a function (T) -> U
+                // We need to analyze the lambda with expected type context
+                let expected_fn_type = FunctionType {
+                    params: vec![*elem_ty.clone()],
+                    return_type: Box::new(Type::I64), // Default, will be inferred
+                    is_closure: true,
+                };
+
+                let arg = &args[0];
+                let arg_ty = if let ExprKind::Lambda(lambda) = &arg.kind {
+                    self.analyze_lambda(lambda, Some(&expected_fn_type), _interner)
+                } else {
+                    self.check_expr(arg, _interner).unwrap_or(Type::Error)
+                };
+
+                // Extract return type from the function
+                let output_type = match &arg_ty {
+                    Type::Function(ft) => (*ft.return_type).clone(),
+                    _ => {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "function".to_string(),
+                                found: arg_ty.name().to_string(),
+                                span: arg.span.into(),
+                            },
+                            arg.span,
+                        );
+                        *elem_ty.clone()
+                    }
+                };
+
+                Some(Type::MapIterator(Box::new(output_type)))
             }
             // String.length() -> i64
             (Type::String, "length") => {
@@ -242,10 +290,14 @@ impl Analyzer {
         match (object_type, method_name) {
             (Type::Array(_), "length") => Some(Type::I64),
             (Type::Array(elem_ty), "iter") => Some(Type::Iterator(elem_ty.clone())),
-            (Type::Iterator(elem_ty), "next") => {
+            (Type::Iterator(elem_ty), "next") | (Type::MapIterator(elem_ty), "next") => {
                 Some(Type::Union(vec![*elem_ty.clone(), Type::Done]))
             }
-            (Type::Iterator(elem_ty), "collect") => Some(Type::Array(elem_ty.clone())),
+            (Type::Iterator(elem_ty), "collect") | (Type::MapIterator(elem_ty), "collect") => {
+                Some(Type::Array(elem_ty.clone()))
+            }
+            // Note: map() is not included here because it needs argument analysis
+            // to determine return type. It's handled via method_resolutions in codegen.
             (Type::String, "length") => Some(Type::I64),
             _ => None,
         }

@@ -1,23 +1,62 @@
 //! Iterator runtime support
 //!
 //! Provides runtime representation for iterators.
+//! Uses a unified IteratorSource enum to support chaining (e.g., map().map()).
 
 use crate::runtime::array::RcArray;
+use crate::runtime::closure::Closure;
 
-/// Runtime iterator state for arrays
+/// Enum discriminant for iterator sources
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IteratorKind {
+    Array = 0,
+    Map = 1,
+}
+
+/// Unified iterator source - can be either an array or a map iterator
+/// This allows chaining (e.g., arr.iter().map(f).map(g))
 #[repr(C)]
-pub struct ArrayIterator {
-    /// Pointer to the source array
+pub union IteratorSource {
+    pub array: ArraySource,
+    pub map: MapSource,
+}
+
+/// Source data for array iteration
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ArraySource {
     pub array: *const RcArray,
-    /// Current index
     pub index: i64,
 }
+
+/// Source data for map iteration
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct MapSource {
+    /// Pointer to source iterator (could be ArrayIterator or another MapIterator)
+    pub source: *mut UnifiedIterator,
+    /// Transform closure
+    pub transform: *const Closure,
+}
+
+/// Unified iterator structure
+/// The kind field tells us which variant is active
+#[repr(C)]
+pub struct UnifiedIterator {
+    pub kind: IteratorKind,
+    pub source: IteratorSource,
+}
+
+// Legacy type aliases for backwards compatibility
+pub type ArrayIterator = UnifiedIterator;
+pub type MapIterator = UnifiedIterator;
 
 /// Create a new array iterator
 /// Returns pointer to heap-allocated iterator
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn vole_array_iter(array: *const RcArray) -> *mut ArrayIterator {
+pub extern "C" fn vole_array_iter(array: *const RcArray) -> *mut UnifiedIterator {
     // Increment ref count on array so it stays alive while iterator exists
     unsafe {
         if !array.is_null() {
@@ -25,7 +64,12 @@ pub extern "C" fn vole_array_iter(array: *const RcArray) -> *mut ArrayIterator {
         }
     }
 
-    let iter = Box::new(ArrayIterator { array, index: 0 });
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Array,
+        source: IteratorSource {
+            array: ArraySource { array, index: 0 },
+        },
+    });
     Box::into_raw(iter)
 }
 
@@ -36,48 +80,67 @@ pub extern "C" fn vole_array_iter(array: *const RcArray) -> *mut ArrayIterator {
 /// For now, iterators leak - this is acceptable for short-lived test programs.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn vole_array_iter_free(iter: *mut ArrayIterator) {
+pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
     if iter.is_null() {
         return;
     }
 
     unsafe {
-        // Decrement ref count on array
-        let array = (*iter).array;
-        if !array.is_null() {
-            RcArray::dec_ref(array as *mut RcArray);
+        let iter_ref = &*iter;
+        if iter_ref.kind == IteratorKind::Array {
+            // Decrement ref count on array
+            let array = iter_ref.source.array.array;
+            if !array.is_null() {
+                RcArray::dec_ref(array as *mut RcArray);
+            }
         }
+        // For map iterators, we'd need to recursively free the source
+        // This is deferred until we have proper cleanup semantics
 
         // Free the iterator
         drop(Box::from_raw(iter));
     }
 }
 
-/// Get next value from array iterator
+/// Get next value from any iterator (array or map)
 /// Returns 1 and stores value in out_value if available
 /// Returns 0 if iterator exhausted (Done)
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn vole_array_iter_next(iter: *mut ArrayIterator, out_value: *mut i64) -> i64 {
-    let iter = unsafe { &mut *iter };
-    if iter.index >= unsafe { (*iter.array).len } as i64 {
-        return 0; // Done
+pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
     }
-    let tagged_value = unsafe {
-        let data = (*iter.array).data;
-        *data.add(iter.index as usize)
-    };
-    // Store the value part (ignoring tag for now - iterators return element type)
-    unsafe { *out_value = tagged_value.value as i64 };
-    iter.index += 1;
-    1 // Has value
+
+    let iter_ref = unsafe { &mut *iter };
+
+    match iter_ref.kind {
+        IteratorKind::Array => {
+            let src = unsafe { &mut iter_ref.source.array };
+            if src.index >= unsafe { (*src.array).len } as i64 {
+                return 0; // Done
+            }
+            let tagged_value = unsafe {
+                let data = (*src.array).data;
+                *data.add(src.index as usize)
+            };
+            // Store the value part (ignoring tag for now - iterators return element type)
+            unsafe { *out_value = tagged_value.value as i64 };
+            src.index += 1;
+            1 // Has value
+        }
+        IteratorKind::Map => {
+            // For map iterators, delegate to map_next logic
+            vole_map_iter_next(iter, out_value)
+        }
+    }
 }
 
 /// Collect all remaining iterator values into a new array
 /// Returns pointer to newly allocated array (empty if iterator is null)
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn vole_array_iter_collect(iter: *mut ArrayIterator) -> *mut RcArray {
+pub extern "C" fn vole_array_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
     use crate::runtime::value::TaggedValue;
 
     let result = RcArray::new();
@@ -87,28 +150,132 @@ pub extern "C" fn vole_array_iter_collect(iter: *mut ArrayIterator) -> *mut RcAr
     }
 
     loop {
-        let iter_ref = unsafe { &mut *iter };
-        if iter_ref.index >= unsafe { (*iter_ref.array).len } as i64 {
+        let mut value: i64 = 0;
+        let has_value = vole_array_iter_next(iter, &mut value);
+
+        if has_value == 0 {
             break;
         }
 
-        let tagged_value = unsafe {
-            let data = (*iter_ref.array).data;
-            *data.add(iter_ref.index as usize)
-        };
-
-        // Push to result array with original tag and value
+        // Push to result array with value
         unsafe {
             RcArray::push(
                 result,
                 TaggedValue {
-                    tag: tagged_value.tag,
-                    value: tagged_value.value,
+                    tag: 0, // i64 type
+                    value: value as u64,
                 },
             );
         }
+    }
 
-        iter_ref.index += 1;
+    result
+}
+
+// =============================================================================
+// MapIterator - lazy transformation over any iterator
+// =============================================================================
+
+/// Create a new map iterator wrapping any source iterator
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_map_iter(
+    source: *mut UnifiedIterator,
+    transform: *const Closure,
+) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Map,
+        source: IteratorSource {
+            map: MapSource { source, transform },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next value from map iterator
+/// Calls the source iterator's next, applies the transform function, returns result
+/// Returns 1 and stores transformed value in out_value if available
+/// Returns 0 if iterator exhausted (Done)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_map_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &*iter };
+
+    // This function should only be called for Map iterators
+    // but vole_array_iter_next delegates here for Map kind
+    if iter_ref.kind != IteratorKind::Map {
+        return 0;
+    }
+
+    let map_src = unsafe { iter_ref.source.map };
+
+    // Get next value from source iterator (could be Array or Map)
+    let mut source_value: i64 = 0;
+    let has_value = vole_array_iter_next(map_src.source, &mut source_value);
+
+    if has_value == 0 {
+        return 0; // Done
+    }
+
+    // Apply transform function
+    // Check if this is a closure (has captures) or a pure function (no captures)
+    unsafe {
+        let func_ptr = Closure::get_func(map_src.transform);
+        let num_captures = (*map_src.transform).num_captures;
+
+        let result = if num_captures == 0 {
+            // Pure function - call with just the value
+            let transform_fn: extern "C" fn(i64) -> i64 = std::mem::transmute(func_ptr);
+            transform_fn(source_value)
+        } else {
+            // Closure - pass closure pointer as first arg
+            let transform_fn: extern "C" fn(*const Closure, i64) -> i64 =
+                std::mem::transmute(func_ptr);
+            transform_fn(map_src.transform, source_value)
+        };
+        *out_value = result;
+    }
+
+    1 // Has value
+}
+
+/// Collect all remaining map iterator values into a new array
+/// Returns pointer to newly allocated array
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_map_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
+    use crate::runtime::value::TaggedValue;
+
+    let result = RcArray::new();
+
+    if iter.is_null() {
+        return result;
+    }
+
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_map_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+
+        // Push to result array
+        // Tag 0 = i64 type (for now, we'll handle other types later)
+        unsafe {
+            RcArray::push(
+                result,
+                TaggedValue {
+                    tag: 0,
+                    value: value as u64,
+                },
+            );
+        }
     }
 
     result

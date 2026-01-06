@@ -11,7 +11,7 @@ use cranelift_module::Module;
 use super::context::Cg;
 use super::types::{CompileCtx, CompiledValue, type_to_cranelift};
 use crate::frontend::{
-    FieldAccessExpr, MethodCallExpr, NodeId, OptionalChainExpr, StructLiteralExpr, Symbol,
+    Expr, FieldAccessExpr, MethodCallExpr, NodeId, OptionalChainExpr, StructLiteralExpr, Symbol,
 };
 use crate::sema::implement_registry::TypeId;
 use crate::sema::resolution::ResolvedMethod;
@@ -386,9 +386,9 @@ impl Cg<'_, '_, '_> {
     /// Compile field assignment: obj.field = value
     pub fn field_assign(
         &mut self,
-        object: &crate::frontend::Expr,
+        object: &Expr,
         field: Symbol,
-        value_expr: &crate::frontend::Expr,
+        value_expr: &Expr,
     ) -> Result<CompiledValue, String> {
         let obj = self.expr(object)?;
         let value = self.expr(value_expr)?;
@@ -471,6 +471,14 @@ impl Cg<'_, '_, '_> {
         // Handle built-in methods
         if let Some(result) = self.builtin_method(&obj, method_name_str)? {
             return Ok(result);
+        }
+
+        // Handle iterator.map(fn) -> creates a MapIterator
+        // Also handle MapIterator.map(fn) for chained maps
+        if let Type::Iterator(elem_ty) | Type::MapIterator(elem_ty) = &obj.vole_type
+            && method_name_str == "map"
+        {
+            return self.iterator_map(&obj, elem_ty, &mc.args);
         }
 
         // Look up method resolution to determine naming convention and return type
@@ -678,12 +686,121 @@ impl Cg<'_, '_, '_> {
                     vole_type: Type::Array(elem_ty.clone()),
                 }))
             }
+            // MapIterator.next() -> T | Done
+            (Type::MapIterator(elem_ty), "next") => {
+                // Create stack slot for output value (8 bytes for i64)
+                let out_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    8,
+                    0,
+                ));
+                let out_ptr = self
+                    .builder
+                    .ins()
+                    .stack_addr(self.ctx.pointer_type, out_slot, 0);
+
+                // Call runtime: has_value = vole_map_iter_next(iter, out_ptr)
+                let has_value = self.call_runtime("vole_map_iter_next", &[obj.value, out_ptr])?;
+
+                // Load value from out_slot
+                let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
+
+                // Build union result: T | Done
+                // Union layout: [tag:1][padding:7][payload:8] = 16 bytes
+                // Tag 0 = element type (T), Tag 1 = Done
+                let union_type = Type::Union(vec![*elem_ty.clone(), Type::Done]);
+                let union_size = 16u32; // tag(1) + padding(7) + payload(8)
+                let union_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    union_size,
+                    0,
+                ));
+
+                // Determine tag based on has_value:
+                // has_value != 0 => tag = 0 (element type)
+                // has_value == 0 => tag = 1 (Done)
+                let zero = self.builder.ins().iconst(types::I64, 0);
+                let is_done = self.builder.ins().icmp(IntCC::Equal, has_value, zero);
+                let tag_done = self.builder.ins().iconst(types::I8, 1);
+                let tag_value = self.builder.ins().iconst(types::I8, 0);
+                let tag = self.builder.ins().select(is_done, tag_done, tag_value);
+
+                // Store tag at offset 0
+                self.builder.ins().stack_store(tag, union_slot, 0);
+
+                // Store payload at offset 8 (value if has_value, 0 if done)
+                self.builder.ins().stack_store(value, union_slot, 8);
+
+                let union_ptr = self
+                    .builder
+                    .ins()
+                    .stack_addr(self.ctx.pointer_type, union_slot, 0);
+                Ok(Some(CompiledValue {
+                    value: union_ptr,
+                    ty: self.ctx.pointer_type,
+                    vole_type: union_type,
+                }))
+            }
+            // MapIterator.collect() -> [T]
+            (Type::MapIterator(elem_ty), "collect") => {
+                let result = self.call_runtime("vole_map_iter_collect", &[obj.value])?;
+                Ok(Some(CompiledValue {
+                    value: result,
+                    ty: self.ctx.pointer_type,
+                    vole_type: Type::Array(elem_ty.clone()),
+                }))
+            }
             (Type::String, "length") => {
                 let result = self.call_runtime("vole_string_len", &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
             }
             _ => Ok(None),
         }
+    }
+
+    /// Handle Iterator.map(fn) -> creates a MapIterator
+    fn iterator_map(
+        &mut self,
+        iter_obj: &CompiledValue,
+        _elem_ty: &Type,
+        args: &[Expr],
+    ) -> Result<CompiledValue, String> {
+        if args.len() != 1 {
+            return Err(format!("map expects 1 argument, got {}", args.len()));
+        }
+
+        // Compile the transform function (should be a lambda/closure)
+        let transform = self.expr(&args[0])?;
+
+        // The transform should be a function
+        let (output_type, is_closure) = match &transform.vole_type {
+            Type::Function(ft) => ((*ft.return_type).clone(), ft.is_closure),
+            _ => {
+                return Err(format!(
+                    "map argument must be a function, got {:?}",
+                    transform.vole_type
+                ));
+            }
+        };
+
+        // If it's a pure function (not a closure), wrap it in a closure structure
+        // so the runtime can uniformly call it as a closure
+        let closure_ptr = if is_closure {
+            transform.value
+        } else {
+            // Wrap pure function in a closure with 0 captures
+            let zero = self.builder.ins().iconst(types::I64, 0);
+            self.call_runtime("vole_closure_alloc", &[transform.value, zero])?
+        };
+
+        // Call vole_map_iter(source_iter, transform_closure)
+        let result = self.call_runtime("vole_map_iter", &[iter_obj.value, closure_ptr])?;
+
+        Ok(CompiledValue {
+            value: result,
+            ty: self.ctx.pointer_type,
+            vole_type: Type::MapIterator(Box::new(output_type)),
+        })
     }
 
     /// Call a functional interface as a closure or pure function

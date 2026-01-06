@@ -38,8 +38,10 @@ pub enum Type {
     Range,
     /// Array type (e.g., [i32], [string])
     Array(Box<Type>),
-    /// Iterator type (e.g., Iterator<i32>)
+    /// Iterator type (e.g., Iterator<i32>) - direct array iterator
     Iterator(Box<Type>),
+    /// Mapped iterator type - wraps another iterator with a transform function
+    MapIterator(Box<Type>),
     /// Function type
     Function(FunctionType),
     /// Unknown (for type inference)
@@ -289,6 +291,7 @@ impl Type {
             Type::Range => "range",
             Type::Array(_) => "array",
             Type::Iterator(_) => "iterator",
+            Type::MapIterator(_) => "iterator",
             Type::Function(_) => "function",
             Type::Unknown => "unknown",
             Type::Error => "error",
@@ -392,6 +395,7 @@ impl std::fmt::Display for Type {
             }
             Type::Array(elem) => write!(f, "[{}]", elem),
             Type::Iterator(elem) => write!(f, "Iterator<{}>", elem),
+            Type::MapIterator(elem) => write!(f, "Iterator<{}>", elem),
             Type::Class(_) => write!(f, "class"),
             Type::Record(_) => write!(f, "record"),
             Type::ErrorType(_) => {

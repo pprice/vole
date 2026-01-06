@@ -80,4 +80,30 @@ tests "iterators" {
         assert(collected[1] == 2)
         assert(collected[2] == 3)
     }
+
+    test "map transforms elements" {
+        let arr = [1, 2, 3]
+        let doubled = arr.iter().map((x) => x * 2).collect()
+        assert(doubled.length() == 3)
+        assert(doubled[0] == 2)
+        assert(doubled[1] == 4)
+        assert(doubled[2] == 6)
+    }
+
+    test "map with closure captures" {
+        let arr = [1, 2, 3]
+        let multiplier = 10
+        let result = arr.iter().map((x) => x * multiplier).collect()
+        assert(result[0] == 10)
+        assert(result[1] == 20)
+        assert(result[2] == 30)
+    }
+
+    test "chained map" {
+        let arr = [1, 2, 3]
+        let result = arr.iter().map((x) => x + 1).map((x) => x * 2).collect()
+        assert(result[0] == 4)   // (1+1)*2 = 4
+        assert(result[1] == 6)   // (2+1)*2 = 6
+        assert(result[2] == 8)   // (3+1)*2 = 8
+    }
 }
