@@ -957,3 +957,46 @@ fn parse_import_expr() {
         panic!("Expected Let declaration");
     }
 }
+
+#[test]
+fn test_parse_generic_function() {
+    let source = "func identity<T>(x: T) -> T { return x }";
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("should parse");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        assert_eq!(f.type_params.len(), 1);
+        assert!(f.type_params[0].constraint.is_none());
+    } else {
+        panic!("expected function");
+    }
+}
+
+#[test]
+fn test_parse_constrained_type_param() {
+    let source = "func show<T: Stringable>(x: T) -> string { return x.to_string() }";
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("should parse");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        assert_eq!(f.type_params.len(), 1);
+        assert!(f.type_params[0].constraint.is_some());
+    } else {
+        panic!("expected function");
+    }
+}
+
+#[test]
+fn test_parse_generic_function_multiple_params() {
+    let source = "func pair<A, B>(a: A, b: B) -> A { return a }";
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("should parse");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        assert_eq!(f.type_params.len(), 2);
+        assert!(f.type_params[0].constraint.is_none());
+        assert!(f.type_params[1].constraint.is_none());
+    } else {
+        panic!("expected function");
+    }
+}

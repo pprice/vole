@@ -40,6 +40,9 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::Identifier, "expected function name")?;
         let name = self.interner.intern(&name_token.lexeme);
 
+        // Parse optional type parameters: func foo<T, U>()
+        let type_params = self.parse_type_params()?;
+
         self.consume(TokenType::LParen, "expected '(' after function name")?;
 
         let mut params = Vec::new();
@@ -66,7 +69,7 @@ impl<'src> Parser<'src> {
 
         Ok(Decl::Function(FuncDecl {
             name,
-            type_params: Vec::new(),
+            type_params,
             params,
             return_type,
             body,

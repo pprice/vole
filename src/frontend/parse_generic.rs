@@ -2,9 +2,9 @@
 //
 // Generic type parameter parsing for Vole.
 
+use super::TokenType;
 use super::ast::{TypeConstraint, TypeExpr, TypeParam};
 use super::parser::{ParseError, Parser};
-use super::TokenType;
 
 impl<'src> Parser<'src> {
     /// Parse optional type parameters: <T>, <T: Foo>, <A, B: Bar>
