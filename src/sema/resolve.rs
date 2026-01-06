@@ -3,6 +3,7 @@
 // Type resolution: converts TypeExpr (AST representation) to Type (semantic representation)
 
 use crate::frontend::{Interner, Symbol, TypeExpr};
+use crate::sema::generic::TypeParamScope;
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::types::{
     ClassType, ErrorTypeInfo, FallibleType, FunctionType, InterfaceMethodType, InterfaceType,
@@ -18,6 +19,8 @@ pub struct TypeResolutionContext<'a> {
     pub error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
     pub interface_registry: &'a InterfaceRegistry,
     pub interner: &'a Interner,
+    /// Type parameters in scope (for generic contexts)
+    pub type_params: Option<&'a TypeParamScope>,
 }
 
 impl<'a> TypeResolutionContext<'a> {
@@ -36,6 +39,28 @@ impl<'a> TypeResolutionContext<'a> {
             error_types,
             interface_registry,
             interner,
+            type_params: None,
+        }
+    }
+
+    /// Create a context with type parameters in scope
+    pub fn with_type_params(
+        type_aliases: &'a HashMap<Symbol, Type>,
+        classes: &'a HashMap<Symbol, ClassType>,
+        records: &'a HashMap<Symbol, RecordType>,
+        error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
+        interface_registry: &'a InterfaceRegistry,
+        interner: &'a Interner,
+        type_params: &'a TypeParamScope,
+    ) -> Self {
+        Self {
+            type_aliases,
+            classes,
+            records,
+            error_types,
+            interface_registry,
+            interner,
+            type_params: Some(type_params),
         }
     }
 }
@@ -49,6 +74,12 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
     match ty {
         TypeExpr::Primitive(p) => Type::from_primitive(*p),
         TypeExpr::Named(sym) => {
+            // Check if it's a type parameter in scope first
+            if let Some(type_params) = ctx.type_params
+                && type_params.is_type_param(*sym)
+            {
+                return Type::TypeParam(*sym);
+            }
             // Look up type alias first
             if let Some(aliased) = ctx.type_aliases.get(sym) {
                 aliased.clone()
@@ -124,9 +155,13 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
                 error_type: Box::new(error),
             })
         }
-        TypeExpr::Generic { .. } => {
-            // TODO: Implement generic type resolution
-            Type::Error
+        TypeExpr::Generic { name, args } => {
+            // Resolve all type arguments
+            let resolved_args: Vec<Type> = args.iter().map(|a| resolve_type(a, ctx)).collect();
+            Type::GenericInstance {
+                def: *name,
+                args: resolved_args,
+            }
         }
     }
 }

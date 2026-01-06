@@ -767,6 +767,7 @@ impl Analyzer {
             error_types: &self.error_types,
             interface_registry: &self.interface_registry,
             interner,
+            type_params: None,
         };
         resolve_type(ty, &ctx)
     }
@@ -782,6 +783,7 @@ impl Analyzer {
                 error_types: &self.error_types,
                 interface_registry: &self.interface_registry,
                 interner,
+                type_params: None,
             };
             let ty = resolve_type(&field.ty, &ctx);
 
@@ -1080,6 +1082,7 @@ impl Analyzer {
                         error_types: &self.error_types,
                         interface_registry: &self.interface_registry,
                         interner: &module_interner,
+                        type_params: None,
                     };
                     let params: Vec<Type> =
                         f.params.iter().map(|p| resolve_type(&p.ty, &ctx)).collect();
@@ -1126,6 +1129,7 @@ impl Analyzer {
                         error_types: &self.error_types,
                         interface_registry: &self.interface_registry,
                         interner: &module_interner,
+                        type_params: None,
                     };
                     for func in &ext.functions {
                         let params: Vec<Type> = func

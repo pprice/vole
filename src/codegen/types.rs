@@ -262,9 +262,25 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 error_type: Box::new(error),
             })
         }
-        TypeExpr::Generic { .. } => {
-            // TODO: Implement generic type resolution
-            Type::Error
+        TypeExpr::Generic { name, args } => {
+            // Resolve all type arguments
+            let resolved_args: Vec<Type> = args
+                .iter()
+                .map(|a| {
+                    resolve_type_expr_with_metadata(
+                        a,
+                        type_aliases,
+                        interface_registry,
+                        error_types,
+                        type_metadata,
+                        interner,
+                    )
+                })
+                .collect();
+            Type::GenericInstance {
+                def: *name,
+                args: resolved_args,
+            }
         }
     }
 }

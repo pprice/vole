@@ -69,6 +69,16 @@ pub enum Type {
     Fallible(FallibleType),
     /// Module type (from import expression)
     Module(ModuleType),
+    /// Type parameter (e.g., T in func identity<T>(x: T) -> T)
+    /// Only valid within generic context during type checking
+    TypeParam(Symbol),
+    /// Generic type instance (e.g., Box<i64>, Iterator<string>)
+    GenericInstance {
+        /// Name of the generic type definition
+        def: Symbol,
+        /// Concrete type arguments
+        args: Vec<Type>,
+    },
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -311,6 +321,8 @@ impl Type {
             Type::ErrorType(_) => "error",
             Type::Fallible(_) => "fallible",
             Type::Module(_) => "module",
+            Type::TypeParam(_) => "type parameter",
+            Type::GenericInstance { .. } => "generic",
         }
     }
 
@@ -417,6 +429,17 @@ impl std::fmt::Display for Type {
                 write!(f, "fallible({}, {})", ft.success_type, ft.error_type)
             }
             Type::Module(m) => write!(f, "module(\"{}\")", m.path),
+            Type::TypeParam(sym) => write!(f, "{:?}", sym), // Symbol Debug shows interned string
+            Type::GenericInstance { def, args } => {
+                write!(f, "{:?}<", def)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", arg)?;
+                }
+                write!(f, ">")
+            }
             _ => write!(f, "{}", self.name()),
         }
     }
