@@ -551,7 +551,7 @@ fn satisfies_interface_with_field() {
     let ty = Type::Record(person_type.clone());
 
     // Check if Person satisfies Named
-    assert!(analyzer.satisfies_interface(&ty, named_sym));
+    assert!(analyzer.satisfies_interface(&ty, named_sym, &interner));
 }
 
 #[test]
@@ -578,7 +578,7 @@ fn satisfies_interface_missing_field() {
     let ty = Type::Record(point_type.clone());
 
     // Point does NOT satisfy Named (missing name field)
-    assert!(!analyzer.satisfies_interface(&ty, named_sym));
+    assert!(!analyzer.satisfies_interface(&ty, named_sym, &interner));
 }
 
 #[test]
@@ -606,5 +606,5 @@ fn satisfies_interface_with_method() {
     let user_type = analyzer.records.get(&user_sym).unwrap();
     let ty = Type::Record(user_type.clone());
 
-    assert!(analyzer.satisfies_interface(&ty, hashable_sym));
+    assert!(analyzer.satisfies_interface(&ty, hashable_sym, &interner));
 }

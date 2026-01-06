@@ -4,7 +4,7 @@ use super::*;
 
 #[allow(dead_code)]
 impl Analyzer {
-    pub(crate) fn types_compatible(&self, from: &Type, to: &Type) -> bool {
+    pub(crate) fn types_compatible(&self, from: &Type, to: &Type, interner: &Interner) -> bool {
         // Use the core compatibility check for most cases
         if types_compatible_core(from, to) {
             return true;
@@ -13,7 +13,7 @@ impl Analyzer {
         // Function type is compatible with functional interface if signatures match
         if let Type::Function(fn_type) = from
             && let Type::Interface(iface) = to
-            && let Some(iface_fn) = self.get_functional_interface_type(iface.name)
+            && let Some(iface_fn) = self.get_functional_interface_type(iface.name, interner)
             && function_compatible_with_interface(fn_type, &iface_fn)
         {
             return true;
@@ -71,7 +71,7 @@ impl Analyzer {
                 self.check_expr(arg, interner)?
             };
 
-            if !self.types_compatible(&arg_ty, param_ty) {
+            if !self.types_compatible(&arg_ty, param_ty, interner) {
                 self.add_error(
                     SemanticError::TypeMismatch {
                         expected: param_ty.name().to_string(),
@@ -208,8 +208,11 @@ impl Analyzer {
     pub(crate) fn get_functional_interface_type(
         &self,
         interface_name: Symbol,
+        interner: &Interner,
     ) -> Option<FunctionType> {
-        let method = self.interface_registry.is_functional(interface_name)?;
+        let method = self
+            .interface_registry
+            .is_functional(interface_name, interner)?;
         Some(FunctionType {
             params: method.params.clone(),
             return_type: Box::new(method.return_type.clone()),
@@ -221,14 +224,19 @@ impl Analyzer {
     ///
     /// This implements duck typing: a type satisfies an interface if it has
     /// all required fields and methods, regardless of explicit `implements`.
-    pub fn satisfies_interface(&self, ty: &Type, interface_name: Symbol) -> bool {
-        let Some(interface) = self.interface_registry.get(interface_name) else {
+    pub fn satisfies_interface(
+        &self,
+        ty: &Type,
+        interface_name: Symbol,
+        interner: &Interner,
+    ) -> bool {
+        let Some(interface) = self.interface_registry.get(interface_name, interner) else {
             return false;
         };
 
         // Check required fields
         for field in &interface.fields {
-            if !self.type_has_field(ty, field.name, &field.ty) {
+            if !self.type_has_field(ty, field.name, &field.ty, interner) {
                 return false;
             }
         }
@@ -246,7 +254,7 @@ impl Analyzer {
 
         // Check parent interfaces (extends)
         for parent in &interface.extends {
-            if !self.satisfies_interface(ty, *parent) {
+            if !self.satisfies_interface(ty, *parent, interner) {
                 return false;
             }
         }
@@ -260,16 +268,15 @@ impl Analyzer {
         ty: &Type,
         field_name: Symbol,
         expected_type: &Type,
+        interner: &Interner,
     ) -> bool {
         match ty {
-            Type::Record(r) => r
-                .fields
-                .iter()
-                .any(|f| f.name == field_name && self.types_compatible(&f.ty, expected_type)),
-            Type::Class(c) => c
-                .fields
-                .iter()
-                .any(|f| f.name == field_name && self.types_compatible(&f.ty, expected_type)),
+            Type::Record(r) => r.fields.iter().any(|f| {
+                f.name == field_name && self.types_compatible(&f.ty, expected_type, interner)
+            }),
+            Type::Class(c) => c.fields.iter().any(|f| {
+                f.name == field_name && self.types_compatible(&f.ty, expected_type, interner)
+            }),
             _ => false,
         }
     }
@@ -320,7 +327,7 @@ impl Analyzer {
         span: Span,
         interner: &Interner,
     ) {
-        if let Some(iface) = self.interface_registry.get(iface_name).cloned() {
+        if let Some(iface) = self.interface_registry.get(iface_name, interner).cloned() {
             // Check methods required by this interface
             for required in &iface.methods {
                 if required.has_default {

@@ -1,0 +1,23 @@
+// stdlib/prelude/i64.vole
+
+implement Equatable for i64 {
+    external("std:intrinsics") {
+        func "i64_equals" as equals(other: Self) -> bool
+    }
+}
+
+implement Comparable for i64 {
+    external("std:intrinsics") {
+        func "i64_compare" as compare(other: Self) -> i32
+    }
+}
+
+implement Hashable for i64 {
+    func hash() -> i64 { return self }
+}
+
+implement Stringable for i64 {
+    external("std:intrinsics") {
+        func "i64_to_string" as to_string() -> string
+    }
+}

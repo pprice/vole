@@ -1,0 +1,23 @@
+// stdlib/prelude/traits.vole
+// Core trait definitions for Vole
+
+interface Equatable {
+    func equals(other: Self) -> bool
+}
+
+interface Comparable {
+    func compare(other: Self) -> i32
+
+    func lt(other: Self) -> bool { return self.compare(other) < 0 }
+    func gt(other: Self) -> bool { return self.compare(other) > 0 }
+    func lte(other: Self) -> bool { return self.compare(other) <= 0 }
+    func gte(other: Self) -> bool { return self.compare(other) >= 0 }
+}
+
+interface Hashable {
+    func hash() -> i64
+}
+
+interface Stringable {
+    func to_string() -> string
+}

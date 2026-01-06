@@ -143,7 +143,8 @@ pub extern "C" fn vole_string_len(ptr: *const RcString) -> usize {
     if ptr.is_null() {
         return 0;
     }
-    unsafe { (*ptr).len }
+    // Return character count, not byte count (UTF-8 aware)
+    unsafe { (*ptr).as_str().chars().count() }
 }
 
 #[unsafe(no_mangle)]
@@ -225,14 +226,34 @@ mod tests {
         let data = b"hello";
         let s = vole_string_new(data.as_ptr(), data.len());
 
+        // vole_string_len returns character count, not byte count
         assert_eq!(vole_string_len(s), 5);
 
         let read_data = vole_string_data(s);
         let read_str = unsafe {
-            let slice = slice::from_raw_parts(read_data, vole_string_len(s));
+            // For reading the actual bytes, use the raw byte length
+            let byte_len = (*s).len;
+            let slice = slice::from_raw_parts(read_data, byte_len);
             str::from_utf8_unchecked(slice)
         };
         assert_eq!(read_str, "hello");
+
+        vole_string_dec(s);
+    }
+
+    #[test]
+    fn string_len_unicode() {
+        // "héllo" has 5 characters but 6 bytes
+        let data = "héllo";
+        let s = vole_string_new(data.as_ptr(), data.len());
+
+        // vole_string_len returns character count
+        assert_eq!(vole_string_len(s), 5);
+
+        // But the actual byte storage is 6
+        unsafe {
+            assert_eq!((*s).len, 6);
+        }
 
         vole_string_dec(s);
     }

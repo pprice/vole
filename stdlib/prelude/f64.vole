@@ -1,0 +1,19 @@
+// stdlib/prelude/f64.vole
+
+implement Equatable for f64 {
+    external("std:intrinsics") {
+        func "f64_equals" as equals(other: Self) -> bool
+    }
+}
+
+implement Comparable for f64 {
+    external("std:intrinsics") {
+        func "f64_compare" as compare(other: Self) -> i32
+    }
+}
+
+implement Stringable for f64 {
+    external("std:intrinsics") {
+        func "f64_to_string" as to_string() -> string
+    }
+}

@@ -146,6 +146,13 @@ impl ImplementRegistry {
             .map(|(k, v)| (k.method_name, v))
             .collect()
     }
+
+    /// Merge another registry into this one
+    pub fn merge(&mut self, other: &ImplementRegistry) {
+        for (key, method) in &other.methods {
+            self.methods.insert(key.clone(), method.clone());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -239,5 +246,58 @@ mod tests {
 
         let methods = registry.get_methods_for_type(&type_id);
         assert_eq!(methods.len(), 2);
+    }
+
+    #[test]
+    fn merge_registries() {
+        let mut registry1 = ImplementRegistry::new();
+        let mut registry2 = ImplementRegistry::new();
+
+        // Add method to registry1
+        registry1.register_method(
+            TypeId::Primitive(PrimitiveTypeId::I64),
+            sym(10), // "equals"
+            MethodImpl {
+                trait_name: Some(sym(20)), // "Equatable"
+                func_type: FunctionType {
+                    params: vec![Type::I64],
+                    return_type: Box::new(Type::Bool),
+                    is_closure: false,
+                },
+                is_builtin: false,
+                external_info: None,
+            },
+        );
+
+        // Add different method to registry2
+        registry2.register_method(
+            TypeId::Primitive(PrimitiveTypeId::String),
+            sym(11), // "length"
+            MethodImpl {
+                trait_name: None,
+                func_type: FunctionType {
+                    params: vec![],
+                    return_type: Box::new(Type::I64),
+                    is_closure: false,
+                },
+                is_builtin: false,
+                external_info: None,
+            },
+        );
+
+        // Merge registry2 into registry1
+        registry1.merge(&registry2);
+
+        // Both methods should be present
+        assert!(
+            registry1
+                .get_method(&TypeId::Primitive(PrimitiveTypeId::I64), sym(10))
+                .is_some()
+        );
+        assert!(
+            registry1
+                .get_method(&TypeId::Primitive(PrimitiveTypeId::String), sym(11))
+                .is_some()
+        );
     }
 }

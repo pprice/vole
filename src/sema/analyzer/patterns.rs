@@ -19,8 +19,8 @@ impl Analyzer {
             Pattern::Literal(expr) => {
                 // Check literal type matches scrutinee type
                 if let Ok(lit_type) = self.check_expr(expr, interner)
-                    && !self.types_compatible(&lit_type, scrutinee_type)
-                    && !self.types_compatible(scrutinee_type, &lit_type)
+                    && !self.types_compatible(&lit_type, scrutinee_type, interner)
+                    && !self.types_compatible(scrutinee_type, &lit_type, interner)
                 {
                     self.add_error(
                         SemanticError::PatternTypeMismatch {
@@ -38,12 +38,22 @@ impl Analyzer {
                 if let Some(class_type) = self.classes.get(name).cloned() {
                     // This is a type pattern for a class
                     let pattern_type = Type::Class(class_type);
-                    self.check_type_pattern_compatibility(&pattern_type, scrutinee_type, *span);
+                    self.check_type_pattern_compatibility(
+                        &pattern_type,
+                        scrutinee_type,
+                        *span,
+                        interner,
+                    );
                     Some(pattern_type)
                 } else if let Some(record_type) = self.records.get(name).cloned() {
                     // This is a type pattern for a record
                     let pattern_type = Type::Record(record_type);
-                    self.check_type_pattern_compatibility(&pattern_type, scrutinee_type, *span);
+                    self.check_type_pattern_compatibility(
+                        &pattern_type,
+                        scrutinee_type,
+                        *span,
+                        interner,
+                    );
                     Some(pattern_type)
                 } else {
                     // Regular identifier binding pattern
@@ -58,16 +68,21 @@ impl Analyzer {
                 }
             }
             Pattern::Type { type_expr, span } => {
-                let pattern_type = self.resolve_type(type_expr);
-                self.check_type_pattern_compatibility(&pattern_type, scrutinee_type, *span);
+                let pattern_type = self.resolve_type(type_expr, interner);
+                self.check_type_pattern_compatibility(
+                    &pattern_type,
+                    scrutinee_type,
+                    *span,
+                    interner,
+                );
                 Some(pattern_type)
             }
             Pattern::Val { name, span } => {
                 // Val pattern compares against existing variable's value
                 if let Some(var) = self.scope.get(*name) {
                     // Check type compatibility
-                    if !self.types_compatible(&var.ty, scrutinee_type)
-                        && !self.types_compatible(scrutinee_type, &var.ty)
+                    if !self.types_compatible(&var.ty, scrutinee_type, interner)
+                        && !self.types_compatible(scrutinee_type, &var.ty, interner)
                     {
                         self.add_error(
                             SemanticError::PatternTypeMismatch {
@@ -147,6 +162,7 @@ impl Analyzer {
         arms: &[MatchArm],
         scrutinee_type: &Type,
         _span: Span,
+        interner: &Interner,
     ) -> bool {
         // Check for catch-all patterns (wildcard or identifier binding)
         let has_catch_all = arms.iter().any(|arm| {
@@ -170,7 +186,7 @@ impl Analyzer {
 
             for arm in arms {
                 let pattern_type = match &arm.pattern {
-                    Pattern::Type { type_expr, .. } => Some(self.resolve_type(type_expr)),
+                    Pattern::Type { type_expr, .. } => Some(self.resolve_type(type_expr, interner)),
                     Pattern::Identifier { name, .. } => self
                         .classes
                         .get(name)
@@ -205,6 +221,7 @@ impl Analyzer {
         pattern_type: &Type,
         scrutinee_type: &Type,
         span: Span,
+        interner: &Interner,
     ) {
         // For union types, the pattern type must be one of the variants
         if let Type::Union(variants) = scrutinee_type {
@@ -219,7 +236,7 @@ impl Analyzer {
                 );
             }
         } else if scrutinee_type != pattern_type
-            && !self.types_compatible(pattern_type, scrutinee_type)
+            && !self.types_compatible(pattern_type, scrutinee_type, interner)
         {
             // For non-union types, pattern must match or be compatible
             self.add_error(

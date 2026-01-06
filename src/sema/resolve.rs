@@ -2,7 +2,7 @@
 //
 // Type resolution: converts TypeExpr (AST representation) to Type (semantic representation)
 
-use crate::frontend::{Symbol, TypeExpr};
+use crate::frontend::{Interner, Symbol, TypeExpr};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::types::{
     ClassType, ErrorTypeInfo, FallibleType, FunctionType, InterfaceMethodType, InterfaceType,
@@ -17,6 +17,7 @@ pub struct TypeResolutionContext<'a> {
     pub records: &'a HashMap<Symbol, RecordType>,
     pub error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
     pub interface_registry: &'a InterfaceRegistry,
+    pub interner: &'a Interner,
 }
 
 impl<'a> TypeResolutionContext<'a> {
@@ -26,6 +27,7 @@ impl<'a> TypeResolutionContext<'a> {
         records: &'a HashMap<Symbol, RecordType>,
         error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
         interface_registry: &'a InterfaceRegistry,
+        interner: &'a Interner,
     ) -> Self {
         Self {
             type_aliases,
@@ -33,6 +35,7 @@ impl<'a> TypeResolutionContext<'a> {
             records,
             error_types,
             interface_registry,
+            interner,
         }
     }
 }
@@ -53,7 +56,7 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
                 Type::Record(record.clone())
             } else if let Some(class) = ctx.classes.get(sym) {
                 Type::Class(class.clone())
-            } else if let Some(iface) = ctx.interface_registry.get(*sym) {
+            } else if let Some(iface) = ctx.interface_registry.get(*sym, ctx.interner) {
                 Type::Interface(InterfaceType {
                     name: *sym,
                     methods: iface
@@ -125,6 +128,8 @@ mod tests {
     use crate::frontend::PrimitiveType;
 
     fn empty_context() -> TypeResolutionContext<'static> {
+        use crate::frontend::Interner;
+
         static EMPTY_ALIASES: std::sync::LazyLock<HashMap<Symbol, Type>> =
             std::sync::LazyLock::new(HashMap::new);
         static EMPTY_CLASSES: std::sync::LazyLock<HashMap<Symbol, ClassType>> =
@@ -135,6 +140,8 @@ mod tests {
             std::sync::LazyLock::new(HashMap::new);
         static EMPTY_INTERFACES: std::sync::LazyLock<InterfaceRegistry> =
             std::sync::LazyLock::new(InterfaceRegistry::new);
+        static EMPTY_INTERNER: std::sync::LazyLock<Interner> =
+            std::sync::LazyLock::new(Interner::new);
 
         TypeResolutionContext::new(
             &EMPTY_ALIASES,
@@ -142,6 +149,7 @@ mod tests {
             &EMPTY_RECORDS,
             &EMPTY_ERRORS,
             &EMPTY_INTERFACES,
+            &EMPTY_INTERNER,
         )
     }
 
@@ -208,8 +216,35 @@ mod tests {
 
     #[test]
     fn resolve_unknown_named_type() {
-        let ctx = empty_context();
-        let named = TypeExpr::Named(Symbol(999));
+        // Create a context with an interner that has the symbol
+        use crate::frontend::Interner;
+
+        static EMPTY_ALIASES: std::sync::LazyLock<HashMap<Symbol, Type>> =
+            std::sync::LazyLock::new(HashMap::new);
+        static EMPTY_CLASSES: std::sync::LazyLock<HashMap<Symbol, ClassType>> =
+            std::sync::LazyLock::new(HashMap::new);
+        static EMPTY_RECORDS: std::sync::LazyLock<HashMap<Symbol, RecordType>> =
+            std::sync::LazyLock::new(HashMap::new);
+        static EMPTY_ERRORS: std::sync::LazyLock<HashMap<Symbol, ErrorTypeInfo>> =
+            std::sync::LazyLock::new(HashMap::new);
+        static EMPTY_INTERFACES: std::sync::LazyLock<InterfaceRegistry> =
+            std::sync::LazyLock::new(InterfaceRegistry::new);
+        static TEST_INTERNER: std::sync::LazyLock<Interner> = std::sync::LazyLock::new(|| {
+            let mut interner = Interner::new();
+            interner.intern("UnknownType"); // Symbol(0) = "UnknownType"
+            interner
+        });
+
+        let ctx = TypeResolutionContext::new(
+            &EMPTY_ALIASES,
+            &EMPTY_CLASSES,
+            &EMPTY_RECORDS,
+            &EMPTY_ERRORS,
+            &EMPTY_INTERFACES,
+            &TEST_INTERNER,
+        );
+        // Use Symbol(0) which corresponds to "UnknownType"
+        let named = TypeExpr::Named(Symbol(0));
         assert_eq!(resolve_type(&named, &ctx), Type::Error);
     }
 

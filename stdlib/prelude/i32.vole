@@ -1,0 +1,25 @@
+// stdlib/prelude/i32.vole
+
+implement Equatable for i32 {
+    external("std:intrinsics") {
+        func "i32_equals" as equals(other: Self) -> bool
+    }
+}
+
+implement Comparable for i32 {
+    external("std:intrinsics") {
+        func "i32_compare" as compare(other: Self) -> i32
+    }
+}
+
+implement Hashable for i32 {
+    external("std:intrinsics") {
+        func "i32_hash" as hash() -> i64
+    }
+}
+
+implement Stringable for i32 {
+    external("std:intrinsics") {
+        func "i32_to_string" as to_string() -> string
+    }
+}

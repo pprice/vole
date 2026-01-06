@@ -210,6 +210,7 @@ impl<'a> Compiler<'a> {
                                 &self.type_aliases,
                                 &self.interface_registry,
                                 &self.error_types,
+                                self.interner,
                             )
                         })
                         .unwrap_or(Type::Void);
@@ -330,6 +331,7 @@ impl<'a> Compiler<'a> {
                                 &self.type_aliases,
                                 &self.interface_registry,
                                 &self.error_types,
+                                self.interner,
                             )
                         })
                         .unwrap_or(Type::Void);
@@ -390,6 +392,7 @@ impl<'a> Compiler<'a> {
                         &self.type_aliases,
                         &self.interface_registry,
                         &self.error_types,
+                        self.interner,
                     ),
                     self.pointer_type,
                 )
@@ -404,6 +407,7 @@ impl<'a> Compiler<'a> {
                     &self.type_aliases,
                     &self.interface_registry,
                     &self.error_types,
+                    self.interner,
                 )
             })
             .collect();
@@ -416,6 +420,7 @@ impl<'a> Compiler<'a> {
                 &self.type_aliases,
                 &self.interface_registry,
                 &self.error_types,
+                self.interner,
             )
         });
 
@@ -501,6 +506,7 @@ impl<'a> Compiler<'a> {
                     &self.type_aliases,
                     &self.interface_registry,
                     &self.error_types,
+                    self.interner,
                 ),
                 self.pointer_type,
             ));
@@ -513,6 +519,7 @@ impl<'a> Compiler<'a> {
                     &self.type_aliases,
                     &self.interface_registry,
                     &self.error_types,
+                    self.interner,
                 ),
                 self.pointer_type,
             )
@@ -532,6 +539,7 @@ impl<'a> Compiler<'a> {
                     &self.type_aliases,
                     &self.interface_registry,
                     &self.error_types,
+                    self.interner,
                 ),
                 self.pointer_type,
             ));
@@ -544,6 +552,7 @@ impl<'a> Compiler<'a> {
                     &self.type_aliases,
                     &self.interface_registry,
                     &self.error_types,
+                    self.interner,
                 ),
                 self.pointer_type,
             )
@@ -565,6 +574,7 @@ impl<'a> Compiler<'a> {
                     &self.type_aliases,
                     &self.interface_registry,
                     &self.error_types,
+                    self.interner,
                 ),
                 self.pointer_type,
             ));
@@ -577,6 +587,7 @@ impl<'a> Compiler<'a> {
                     &self.type_aliases,
                     &self.interface_registry,
                     &self.error_types,
+                    self.interner,
                 ),
                 self.pointer_type,
             )
@@ -596,6 +607,7 @@ impl<'a> Compiler<'a> {
                     &self.type_aliases,
                     &self.interface_registry,
                     &self.error_types,
+                    self.interner,
                 ),
                 self.pointer_type,
             ));
@@ -608,6 +620,7 @@ impl<'a> Compiler<'a> {
                     &self.type_aliases,
                     &self.interface_registry,
                     &self.error_types,
+                    self.interner,
                 ),
                 self.pointer_type,
             )
@@ -644,7 +657,12 @@ impl<'a> Compiler<'a> {
             field_slots.insert(field.name, i);
             struct_fields.push(StructField {
                 name: field.name,
-                ty: resolve_type_expr_full(&field.ty, &self.type_aliases, &self.interface_registry),
+                ty: resolve_type_expr_full(
+                    &field.ty,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    self.interner,
+                ),
                 slot: i,
             });
         }
@@ -661,7 +679,14 @@ impl<'a> Compiler<'a> {
             let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry))
+                .map(|t| {
+                    resolve_type_expr_full(
+                        t,
+                        &self.type_aliases,
+                        &self.interface_registry,
+                        self.interner,
+                    )
+                })
                 .unwrap_or(Type::Void);
             method_return_types.insert(method.name, return_type);
         }
@@ -684,6 +709,7 @@ impl<'a> Compiler<'a> {
                                         t,
                                         &self.type_aliases,
                                         &self.interface_registry,
+                                        self.interner,
                                     )
                                 })
                                 .unwrap_or(Type::Void);
@@ -743,7 +769,12 @@ impl<'a> Compiler<'a> {
             field_slots.insert(field.name, i);
             struct_fields.push(StructField {
                 name: field.name,
-                ty: resolve_type_expr_full(&field.ty, &self.type_aliases, &self.interface_registry),
+                ty: resolve_type_expr_full(
+                    &field.ty,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    self.interner,
+                ),
                 slot: i,
             });
         }
@@ -760,7 +791,14 @@ impl<'a> Compiler<'a> {
             let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry))
+                .map(|t| {
+                    resolve_type_expr_full(
+                        t,
+                        &self.type_aliases,
+                        &self.interface_registry,
+                        self.interner,
+                    )
+                })
                 .unwrap_or(Type::Void);
             method_return_types.insert(method.name, return_type);
         }
@@ -783,6 +821,7 @@ impl<'a> Compiler<'a> {
                                         t,
                                         &self.type_aliases,
                                         &self.interface_registry,
+                                        self.interner,
                                     )
                                 })
                                 .unwrap_or(Type::Void);
@@ -943,6 +982,7 @@ impl<'a> Compiler<'a> {
                 &impl_block.target_type,
                 &self.type_aliases,
                 &self.interface_registry,
+                self.interner,
             ),
         };
 
@@ -955,7 +995,12 @@ impl<'a> Compiler<'a> {
                     .return_type
                     .as_ref()
                     .map(|t| {
-                        resolve_type_expr_full(t, &self.type_aliases, &self.interface_registry)
+                        resolve_type_expr_full(
+                            t,
+                            &self.type_aliases,
+                            &self.interface_registry,
+                            self.interner,
+                        )
                     })
                     .unwrap_or(Type::Void);
                 metadata
@@ -993,6 +1038,7 @@ impl<'a> Compiler<'a> {
                 &impl_block.target_type,
                 &self.type_aliases,
                 &self.interface_registry,
+                self.interner,
             ),
         };
 
@@ -1031,7 +1077,12 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
+                    &resolve_type_expr_full(
+                        &p.ty,
+                        &self.type_aliases,
+                        &self.interface_registry,
+                        self.interner,
+                    ),
                     self.pointer_type,
                 )
             })
@@ -1039,7 +1090,14 @@ impl<'a> Compiler<'a> {
         let param_vole_types: Vec<Type> = method
             .params
             .iter()
-            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
+            .map(|p| {
+                resolve_type_expr_full(
+                    &p.ty,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    self.interner,
+                )
+            })
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
@@ -1160,7 +1218,12 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
+                    &resolve_type_expr_full(
+                        &p.ty,
+                        &self.type_aliases,
+                        &self.interface_registry,
+                        self.interner,
+                    ),
                     self.pointer_type,
                 )
             })
@@ -1168,7 +1231,14 @@ impl<'a> Compiler<'a> {
         let param_vole_types: Vec<Type> = method
             .params
             .iter()
-            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
+            .map(|p| {
+                resolve_type_expr_full(
+                    &p.ty,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    self.interner,
+                )
+            })
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
@@ -1286,7 +1356,12 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry),
+                    &resolve_type_expr_full(
+                        &p.ty,
+                        &self.type_aliases,
+                        &self.interface_registry,
+                        self.interner,
+                    ),
                     self.pointer_type,
                 )
             })
@@ -1294,7 +1369,14 @@ impl<'a> Compiler<'a> {
         let param_vole_types: Vec<Type> = method
             .params
             .iter()
-            .map(|p| resolve_type_expr_full(&p.ty, &self.type_aliases, &self.interface_registry))
+            .map(|p| {
+                resolve_type_expr_full(
+                    &p.ty,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    self.interner,
+                )
+            })
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
@@ -1406,6 +1488,7 @@ impl<'a> Compiler<'a> {
                         &self.type_aliases,
                         &self.interface_registry,
                         &self.error_types,
+                        self.interner,
                     ),
                     self.pointer_type,
                 )
@@ -1420,6 +1503,7 @@ impl<'a> Compiler<'a> {
                     &self.type_aliases,
                     &self.interface_registry,
                     &self.error_types,
+                    self.interner,
                 )
             })
             .collect();
@@ -1432,6 +1516,7 @@ impl<'a> Compiler<'a> {
                 &self.type_aliases,
                 &self.interface_registry,
                 &self.error_types,
+                self.interner,
             )
         });
 
@@ -1620,6 +1705,7 @@ impl<'a> Compiler<'a> {
                                 &self.type_aliases,
                                 &self.interface_registry,
                                 &self.error_types,
+                                self.interner,
                             )
                         })
                         .unwrap_or(Type::Void);
@@ -1680,6 +1766,7 @@ impl<'a> Compiler<'a> {
                         &self.type_aliases,
                         &self.interface_registry,
                         &self.error_types,
+                        self.interner,
                     ),
                     self.pointer_type,
                 )
@@ -1694,6 +1781,7 @@ impl<'a> Compiler<'a> {
                     &self.type_aliases,
                     &self.interface_registry,
                     &self.error_types,
+                    self.interner,
                 )
             })
             .collect();
@@ -1706,6 +1794,7 @@ impl<'a> Compiler<'a> {
                 &self.type_aliases,
                 &self.interface_registry,
                 &self.error_types,
+                self.interner,
             )
         });
 
