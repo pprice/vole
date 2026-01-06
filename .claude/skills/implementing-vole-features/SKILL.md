@@ -1,6 +1,7 @@
 ---
 name: implementing-vole-features
 description: Use when starting work on Vole language features in a worktree, before implementing any code
+user-invocable: true
 ---
 
 # Implementing Vole Features

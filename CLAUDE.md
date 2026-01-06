@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Loading Private Instructions
+
+Always check for `CLAUDE.local.md` which contains private instructions not checked into git.
+
+**If in a git worktree**, find and load `CLAUDE.local.md` from the main repo:
+```bash
+git worktree list  # First entry is the main worktree
+```
+Then read `CLAUDE.local.md` from that path.
+
+## Working Style
+
+- **Bias toward action** - use tools to investigate instead of speculating
+- **Be concise** - don't over-explain what you're about to do, just do it
+- **Check before asking** - if you can answer a question with a tool, do that first
+
 ## Project Overview
 
 Vole is a compiled programming language with JIT compilation via Cranelift. It features a complete compiler pipeline: lexer, parser, semantic analyzer (type checking), and code generator.
