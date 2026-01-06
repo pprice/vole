@@ -1329,6 +1329,69 @@ impl Analyzer {
                 }
             }
 
+            ExprKind::OptionalChain(opt_chain) => {
+                let object_type = self.check_expr(&opt_chain.object, interner)?;
+
+                // Handle errors early
+                if matches!(object_type, Type::Error) {
+                    return Ok(Type::Error);
+                }
+
+                // The object must be an optional type (union with nil)
+                let inner_type = if object_type.is_optional() {
+                    object_type.unwrap_optional().unwrap_or(Type::Error)
+                } else {
+                    // If not optional, treat it as regular field access wrapped in optional
+                    // This allows `obj?.field` where obj is not optional (returns T?)
+                    object_type.clone()
+                };
+
+                // Get fields from inner type
+                let (type_name, fields) = match &inner_type {
+                    Type::Class(class_type) => (
+                        interner.resolve(class_type.name).to_string(),
+                        &class_type.fields,
+                    ),
+                    Type::Record(record_type) => (
+                        interner.resolve(record_type.name).to_string(),
+                        &record_type.fields,
+                    ),
+                    Type::Error => return Ok(Type::Error),
+                    _ => {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "optional class or record".to_string(),
+                                found: object_type.name().to_string(),
+                                span: opt_chain.object.span.into(),
+                            },
+                            opt_chain.object.span,
+                        );
+                        return Ok(Type::Error);
+                    }
+                };
+
+                // Find the field
+                if let Some(field) = fields.iter().find(|f| f.name == opt_chain.field) {
+                    // Result is always optional (field_type | nil)
+                    // But if field type is already optional, don't double-wrap
+                    if field.ty.is_optional() {
+                        Ok(field.ty.clone())
+                    } else {
+                        Ok(Type::optional(field.ty.clone()))
+                    }
+                } else {
+                    self.add_error(
+                        SemanticError::UnknownField {
+                            ty: type_name,
+                            field: interner.resolve(opt_chain.field).to_string(),
+                            span: opt_chain.field_span.into(),
+                        },
+                        opt_chain.field_span,
+                    );
+                    Ok(Type::Error)
+                }
+            }
+
             ExprKind::MethodCall(method_call) => {
                 let object_type = self.check_expr(&method_call.object, interner)?;
                 let method_name = interner.resolve(method_call.method);

@@ -9,7 +9,8 @@ use std::collections::HashMap;
 
 use super::calls::{compile_call, compile_call_with_captures};
 use super::fields::{
-    compile_field_access, compile_field_assign, compile_index_assign, compile_struct_literal,
+    compile_field_access, compile_field_assign, compile_index_assign, compile_optional_chain,
+    compile_struct_literal,
 };
 use super::methods::{compile_method_call, compile_try_propagate};
 use super::ops::{compile_binary_op, compile_compound_assign};
@@ -1059,6 +1060,8 @@ pub(super) fn compile_expr(
         ExprKind::StructLiteral(sl) => compile_struct_literal(builder, sl, variables, ctx),
 
         ExprKind::FieldAccess(fa) => compile_field_access(builder, fa, variables, ctx),
+
+        ExprKind::OptionalChain(oc) => compile_optional_chain(builder, oc, variables, ctx),
 
         ExprKind::MethodCall(mc) => compile_method_call(builder, mc, expr.id, variables, ctx),
 

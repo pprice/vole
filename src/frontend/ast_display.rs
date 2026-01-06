@@ -598,6 +598,12 @@ impl<'a> AstPrinter<'a> {
                 // TODO: implement field access display
             }
 
+            ExprKind::OptionalChain(_) => {
+                self.write_indent(out);
+                out.push_str("OptionalChain\n");
+                // TODO: implement optional chain display
+            }
+
             ExprKind::MethodCall(_) => {
                 self.write_indent(out);
                 out.push_str("MethodCall\n");

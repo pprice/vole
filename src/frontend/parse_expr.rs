@@ -343,6 +343,23 @@ impl<'src> Parser<'src> {
                         span,
                     };
                 }
+            } else if self.match_token(TokenType::QuestionDot) {
+                // Optional chaining: expr?.field
+                let field_span = self.current.span;
+                let field_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected field name after '?.'")?;
+                let field = self.interner.intern(&field_token.lexeme);
+
+                let span = expr.span.merge(field_span);
+                expr = Expr {
+                    id: self.next_id(),
+                    kind: ExprKind::OptionalChain(Box::new(OptionalChainExpr {
+                        object: expr,
+                        field,
+                        field_span,
+                    })),
+                    span,
+                };
             } else {
                 break;
             }

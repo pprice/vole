@@ -98,22 +98,24 @@ pub(crate) struct CompileCtx<'a> {
 
 /// Resolve a type expression to a Vole Type (uses CompileCtx for full context)
 pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
-    resolve_type_expr_with_errors(
+    resolve_type_expr_with_metadata(
         ty,
         ctx.type_aliases,
         ctx.interface_registry,
         ctx.error_types,
+        ctx.type_metadata,
         ctx.interner,
     )
 }
 
-/// Resolve a type expression using aliases, interface registry, and error types
-/// This is the full resolution function that handles all named types including errors
-pub(crate) fn resolve_type_expr_with_errors(
+/// Resolve a type expression using aliases, interface registry, error types, and type metadata
+/// This is the full resolution function that handles all named types including classes/records
+pub(crate) fn resolve_type_expr_with_metadata(
     ty: &TypeExpr,
     type_aliases: &HashMap<Symbol, Type>,
     interface_registry: &InterfaceRegistry,
     error_types: &HashMap<Symbol, ErrorTypeInfo>,
+    type_metadata: &HashMap<Symbol, TypeMetadata>,
     interner: &Interner,
 ) -> Type {
     match ty {
@@ -141,27 +143,32 @@ pub(crate) fn resolve_type_expr_with_errors(
             } else if let Some(error_info) = error_types.get(sym) {
                 // Check error types
                 Type::ErrorType(error_info.clone())
+            } else if let Some(metadata) = type_metadata.get(sym) {
+                // Check class/record type metadata
+                metadata.vole_type.clone()
             } else {
                 Type::Error
             }
         }
         TypeExpr::Array(elem) => {
-            let elem_ty = resolve_type_expr_with_errors(
+            let elem_ty = resolve_type_expr_with_metadata(
                 elem,
                 type_aliases,
                 interface_registry,
                 error_types,
+                type_metadata,
                 interner,
             );
             Type::Array(Box::new(elem_ty))
         }
         TypeExpr::Optional(inner) => {
             // T? desugars to T | nil
-            let inner_ty = resolve_type_expr_with_errors(
+            let inner_ty = resolve_type_expr_with_metadata(
                 inner,
                 type_aliases,
                 interface_registry,
                 error_types,
+                type_metadata,
                 interner,
             );
             Type::Union(vec![inner_ty, Type::Nil])
@@ -170,11 +177,12 @@ pub(crate) fn resolve_type_expr_with_errors(
             let variant_types: Vec<Type> = variants
                 .iter()
                 .map(|v| {
-                    resolve_type_expr_with_errors(
+                    resolve_type_expr_with_metadata(
                         v,
                         type_aliases,
                         interface_registry,
                         error_types,
+                        type_metadata,
                         interner,
                     )
                 })
@@ -189,20 +197,22 @@ pub(crate) fn resolve_type_expr_with_errors(
             let param_types: Vec<Type> = params
                 .iter()
                 .map(|p| {
-                    resolve_type_expr_with_errors(
+                    resolve_type_expr_with_metadata(
                         p,
                         type_aliases,
                         interface_registry,
                         error_types,
+                        type_metadata,
                         interner,
                     )
                 })
                 .collect();
-            let ret_type = resolve_type_expr_with_errors(
+            let ret_type = resolve_type_expr_with_metadata(
                 return_type,
                 type_aliases,
                 interface_registry,
                 error_types,
+                type_metadata,
                 interner,
             );
             Type::Function(FunctionType {
@@ -219,18 +229,20 @@ pub(crate) fn resolve_type_expr_with_errors(
             success_type,
             error_type,
         } => {
-            let success = resolve_type_expr_with_errors(
+            let success = resolve_type_expr_with_metadata(
                 success_type,
                 type_aliases,
                 interface_registry,
                 error_types,
+                type_metadata,
                 interner,
             );
-            let error = resolve_type_expr_with_errors(
+            let error = resolve_type_expr_with_metadata(
                 error_type,
                 type_aliases,
                 interface_registry,
                 error_types,
+                type_metadata,
                 interner,
             );
             Type::Fallible(crate::sema::types::FallibleType {
@@ -243,20 +255,22 @@ pub(crate) fn resolve_type_expr_with_errors(
 
 /// Resolve a type expression using aliases and interface registry
 /// This is used when CompileCtx is not available (e.g., during Compiler setup)
-/// Note: This does NOT resolve error types - use resolve_type_expr_with_errors for that
+/// Note: This does NOT resolve class/record types from type_metadata - use resolve_type_expr for that
 pub(crate) fn resolve_type_expr_full(
     ty: &TypeExpr,
     type_aliases: &HashMap<Symbol, Type>,
     interface_registry: &InterfaceRegistry,
     interner: &Interner,
 ) -> Type {
-    // Use an empty error_types map for backward compatibility
+    // Use empty maps for backward compatibility
     let empty_error_types = HashMap::new();
-    resolve_type_expr_with_errors(
+    let empty_type_metadata = HashMap::new();
+    resolve_type_expr_with_metadata(
         ty,
         type_aliases,
         interface_registry,
         &empty_error_types,
+        &empty_type_metadata,
         interner,
     )
 }

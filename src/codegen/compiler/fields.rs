@@ -7,11 +7,13 @@ use cranelift_module::Module;
 use std::collections::HashMap;
 
 use super::patterns::compile_expr;
+use crate::codegen::stmt::construct_union;
 use crate::codegen::structs::{
     convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type,
 };
+use crate::codegen::types::type_to_cranelift;
 use crate::codegen::types::{CompileCtx, CompiledValue};
-use crate::frontend::{Expr, FieldAccessExpr, StructLiteralExpr, Symbol};
+use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, StructLiteralExpr, Symbol};
 use crate::sema::Type;
 use crate::sema::types::ConstantValue;
 
@@ -179,6 +181,117 @@ pub(crate) fn compile_field_access(
         value: result_val,
         ty: cranelift_ty,
         vole_type: field_type,
+    })
+}
+
+/// Compile optional chaining: obj?.field
+/// If obj is nil, returns nil; otherwise returns obj.field wrapped in optional
+pub(crate) fn compile_optional_chain(
+    builder: &mut FunctionBuilder,
+    oc: &OptionalChainExpr,
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    let obj = compile_expr(builder, &oc.object, variables, ctx)?;
+
+    // The object should be an optional type (union with nil)
+    let Type::Union(variants) = &obj.vole_type else {
+        return Err("Expected optional type for ?.".to_string());
+    };
+
+    // Find the nil tag
+    let nil_tag = variants
+        .iter()
+        .position(|v| v == &Type::Nil)
+        .unwrap_or(usize::MAX);
+
+    // Check if object is nil by reading the tag
+    let tag = builder.ins().load(types::I8, MemFlags::new(), obj.value, 0);
+    let nil_tag_val = builder.ins().iconst(types::I8, nil_tag as i64);
+    let is_nil = builder.ins().icmp(IntCC::Equal, tag, nil_tag_val);
+
+    // Create blocks for branching
+    let nil_block = builder.create_block();
+    let not_nil_block = builder.create_block();
+    let merge_block = builder.create_block();
+
+    // Get the inner (non-nil) type for field access
+    let inner_type = obj.vole_type.unwrap_optional().unwrap_or(Type::Error);
+
+    // Get the field type from the inner type
+    let (slot, field_type) = get_field_slot_and_type(&inner_type, oc.field, ctx)?;
+
+    // Result type is field_type | nil (optional)
+    // But if field type is already optional, don't double-wrap
+    let result_vole_type = if field_type.is_optional() {
+        field_type.clone()
+    } else {
+        Type::optional(field_type.clone())
+    };
+    let cranelift_type = type_to_cranelift(&result_vole_type, ctx.pointer_type);
+    builder.append_block_param(merge_block, cranelift_type);
+
+    builder
+        .ins()
+        .brif(is_nil, nil_block, &[], not_nil_block, &[]);
+
+    // Nil block: return nil wrapped in the optional type
+    builder.switch_to_block(nil_block);
+    builder.seal_block(nil_block);
+    let nil_val = CompiledValue {
+        value: builder.ins().iconst(types::I8, 0),
+        ty: types::I8,
+        vole_type: Type::Nil,
+    };
+    let nil_union = construct_union(builder, nil_val, &result_vole_type, ctx.pointer_type)?;
+    builder.ins().jump(merge_block, &[nil_union.value.into()]);
+
+    // Not-nil block: do field access and wrap result in optional
+    builder.switch_to_block(not_nil_block);
+    builder.seal_block(not_nil_block);
+
+    // Load the actual object from the union payload (offset 8)
+    let inner_cranelift_type = type_to_cranelift(&inner_type, ctx.pointer_type);
+    let inner_obj = builder
+        .ins()
+        .load(inner_cranelift_type, MemFlags::new(), obj.value, 8);
+
+    // Get field from the inner object
+    let get_func_id = ctx
+        .func_ids
+        .get("vole_instance_get_field")
+        .ok_or_else(|| "vole_instance_get_field not found".to_string())?;
+    let get_func_ref = ctx.module.declare_func_in_func(*get_func_id, builder.func);
+    let slot_val = builder.ins().iconst(types::I32, slot as i64);
+    let call = builder.ins().call(get_func_ref, &[inner_obj, slot_val]);
+    let field_raw = builder.inst_results(call)[0];
+    let (field_val, field_cranelift_ty) = convert_field_value(builder, field_raw, &field_type);
+
+    // Wrap the field value in an optional (using construct_union)
+    // But if field type is already optional, it's already a union - just use it directly
+    let field_compiled = CompiledValue {
+        value: field_val,
+        ty: field_cranelift_ty,
+        vole_type: field_type.clone(),
+    };
+    let final_value = if field_type.is_optional() {
+        // Field is already optional, use as-is
+        field_compiled
+    } else {
+        // Wrap non-optional field in optional
+        construct_union(builder, field_compiled, &result_vole_type, ctx.pointer_type)?
+    };
+    builder.ins().jump(merge_block, &[final_value.value.into()]);
+
+    // Merge block
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+
+    let result = builder.block_params(merge_block)[0];
+    Ok(CompiledValue {
+        value: result,
+        ty: cranelift_type,
+        vole_type: result_vole_type,
     })
 }
 
