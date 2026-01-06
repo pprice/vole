@@ -286,6 +286,7 @@ impl<'a> GeneratorTransformer<'a> {
         // Create the record declaration
         let record_decl = RecordDecl {
             name: record_name,
+            type_params: Vec::new(),
             implements: Vec::new(),
             fields,
             external: None,

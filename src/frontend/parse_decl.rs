@@ -128,6 +128,7 @@ impl<'src> Parser<'src> {
 
         Ok(Decl::Class(ClassDecl {
             name,
+            type_params: Vec::new(),
             implements,
             fields,
             external,
@@ -157,6 +158,7 @@ impl<'src> Parser<'src> {
 
         Ok(Decl::Record(RecordDecl {
             name,
+            type_params: Vec::new(),
             implements,
             fields,
             external,
@@ -301,6 +303,7 @@ impl<'src> Parser<'src> {
 
         Ok(Decl::Interface(InterfaceDecl {
             name,
+            type_params: Vec::new(),
             extends,
             fields,
             external,

@@ -97,6 +97,7 @@ pub struct FieldDef {
 #[derive(Debug, Clone)]
 pub struct ClassDecl {
     pub name: Symbol,
+    pub type_params: Vec<TypeParam>,
     pub implements: Vec<Symbol>, // Interfaces this class implements
     pub fields: Vec<FieldDef>,
     pub external: Option<ExternalBlock>, // External methods from native code
@@ -108,6 +109,7 @@ pub struct ClassDecl {
 #[derive(Debug, Clone)]
 pub struct RecordDecl {
     pub name: Symbol,
+    pub type_params: Vec<TypeParam>,
     pub implements: Vec<Symbol>, // Interfaces this record implements
     pub fields: Vec<FieldDef>,
     pub external: Option<ExternalBlock>, // External methods from native code
@@ -119,6 +121,7 @@ pub struct RecordDecl {
 #[derive(Debug, Clone)]
 pub struct InterfaceDecl {
     pub name: Symbol,
+    pub type_params: Vec<TypeParam>,
     pub extends: Vec<Symbol>,            // Parent interfaces
     pub fields: Vec<FieldDef>,           // Required fields
     pub external: Option<ExternalBlock>, // External methods from native code
