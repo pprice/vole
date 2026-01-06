@@ -1000,3 +1000,29 @@ fn test_parse_generic_function_multiple_params() {
         panic!("expected function");
     }
 }
+
+#[test]
+fn test_parse_generic_record() {
+    let source = "record Box<T> { value: T }";
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("should parse");
+
+    if let Decl::Record(r) = &program.declarations[0] {
+        assert_eq!(r.type_params.len(), 1);
+    } else {
+        panic!("expected record");
+    }
+}
+
+#[test]
+fn test_parse_generic_class() {
+    let source = "class Container<T> { item: T }";
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("should parse");
+
+    if let Decl::Class(c) = &program.declarations[0] {
+        assert_eq!(c.type_params.len(), 1);
+    } else {
+        panic!("expected class");
+    }
+}

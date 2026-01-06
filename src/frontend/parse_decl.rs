@@ -118,6 +118,9 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::Identifier, "expected class name")?;
         let name = self.interner.intern(&name_token.lexeme);
 
+        // Parse optional type parameters: class Foo<T>
+        let type_params = self.parse_type_params()?;
+
         // Parse optional implements clause
         let implements = self.parse_implements_clause()?;
 
@@ -131,7 +134,7 @@ impl<'src> Parser<'src> {
 
         Ok(Decl::Class(ClassDecl {
             name,
-            type_params: Vec::new(),
+            type_params,
             implements,
             fields,
             external,
@@ -148,6 +151,9 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::Identifier, "expected record name")?;
         let name = self.interner.intern(&name_token.lexeme);
 
+        // Parse optional type parameters: record Box<T>
+        let type_params = self.parse_type_params()?;
+
         // Parse optional implements clause
         let implements = self.parse_implements_clause()?;
 
@@ -161,7 +167,7 @@ impl<'src> Parser<'src> {
 
         Ok(Decl::Record(RecordDecl {
             name,
-            type_params: Vec::new(),
+            type_params,
             implements,
             fields,
             external,
