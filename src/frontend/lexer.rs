@@ -155,6 +155,8 @@ impl<'src> Lexer<'src> {
             '?' => {
                 if self.match_char('?') {
                     self.make_token(TokenType::QuestionQuestion)
+                } else if self.match_char('.') {
+                    self.make_token(TokenType::QuestionDot)
                 } else {
                     self.make_token(TokenType::Question)
                 }

@@ -93,6 +93,7 @@ pub enum TokenType {
     LessLess,         // <<
     GreaterGreater,   // >>
     Question,         // ?
+    QuestionDot,      // ?.
     QuestionQuestion, // ??
 
     // Delimiters
@@ -201,6 +202,7 @@ impl TokenType {
             Self::LessLess => "<<",
             Self::GreaterGreater => ">>",
             Self::Question => "?",
+            Self::QuestionDot => "?.",
             Self::QuestionQuestion => "??",
             Self::LParen => "(",
             Self::RParen => ")",

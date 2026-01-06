@@ -17,10 +17,7 @@ use cranelift_module::Module;
 use std::collections::HashMap;
 
 use super::stmt::compile_block;
-use super::types::{
-    CompileCtx, TypeMetadata, resolve_type_expr_full, resolve_type_expr_with_errors,
-    type_to_cranelift,
-};
+use super::types::{CompileCtx, TypeMetadata, resolve_type_expr_full, type_to_cranelift};
 use crate::codegen::JitContext;
 use crate::frontend::{
     ClassDecl, Decl, FuncDecl, ImplementBlock, InterfaceDecl, InterfaceMethod, Interner, LetStmt,
@@ -193,7 +190,21 @@ impl<'a> Compiler<'a> {
         // Count total tests to assign unique IDs
         let mut test_count = 0usize;
 
-        // First pass: declare all functions and tests, collect globals
+        // Pre-pass: Register all record/class names first so they're available for field type resolution
+        // This allows records to reference each other (e.g., Company.ceo: Person?)
+        for decl in &program.declarations {
+            match decl {
+                Decl::Class(class) => {
+                    self.pre_register_class(class);
+                }
+                Decl::Record(record) => {
+                    self.pre_register_record(record);
+                }
+                _ => {}
+            }
+        }
+
+        // First pass: declare all functions and tests, collect globals, finalize type metadata
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
@@ -205,11 +216,10 @@ impl<'a> Compiler<'a> {
                         .return_type
                         .as_ref()
                         .map(|t| {
-                            resolve_type_expr_with_errors(
+                            resolve_type_expr_full(
                                 t,
                                 &self.type_aliases,
                                 &self.interface_registry,
-                                &self.error_types,
                                 self.interner,
                             )
                         })
@@ -230,10 +240,10 @@ impl<'a> Compiler<'a> {
                     self.globals.push(let_stmt.clone());
                 }
                 Decl::Class(class) => {
-                    self.register_class(class, program);
+                    self.finalize_class(class, program);
                 }
                 Decl::Record(record) => {
-                    self.register_record(record, program);
+                    self.finalize_record(record, program);
                 }
                 Decl::Interface(_) => {
                     // Interface declarations don't generate code directly
@@ -326,11 +336,10 @@ impl<'a> Compiler<'a> {
                         .return_type
                         .as_ref()
                         .map(|t| {
-                            resolve_type_expr_with_errors(
+                            resolve_type_expr_full(
                                 t,
                                 &self.type_aliases,
                                 &self.interface_registry,
-                                &self.error_types,
                                 self.interner,
                             )
                         })
@@ -387,11 +396,10 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_with_errors(
+                    &resolve_type_expr_full(
                         &p.ty,
                         &self.type_aliases,
                         &self.interface_registry,
-                        &self.error_types,
                         self.interner,
                     ),
                     self.pointer_type,
@@ -402,11 +410,10 @@ impl<'a> Compiler<'a> {
             .params
             .iter()
             .map(|p| {
-                resolve_type_expr_with_errors(
+                resolve_type_expr_full(
                     &p.ty,
                     &self.type_aliases,
                     &self.interface_registry,
-                    &self.error_types,
                     self.interner,
                 )
             })
@@ -415,11 +422,10 @@ impl<'a> Compiler<'a> {
 
         // Get function return type
         let return_type = func.return_type.as_ref().map(|t| {
-            resolve_type_expr_with_errors(
+            resolve_type_expr_full(
                 t,
                 &self.type_aliases,
                 &self.interface_registry,
-                &self.error_types,
                 self.interner,
             )
         });
@@ -501,11 +507,10 @@ impl<'a> Compiler<'a> {
         let mut params = Vec::new();
         for param in &func.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr_with_errors(
+                &resolve_type_expr_full(
                     &param.ty,
                     &self.type_aliases,
                     &self.interface_registry,
-                    &self.error_types,
                     self.interner,
                 ),
                 self.pointer_type,
@@ -514,11 +519,10 @@ impl<'a> Compiler<'a> {
 
         let ret = func.return_type.as_ref().map(|t| {
             type_to_cranelift(
-                &resolve_type_expr_with_errors(
+                &resolve_type_expr_full(
                     t,
                     &self.type_aliases,
                     &self.interface_registry,
-                    &self.error_types,
                     self.interner,
                 ),
                 self.pointer_type,
@@ -534,11 +538,10 @@ impl<'a> Compiler<'a> {
         let mut params = vec![self.pointer_type];
         for param in &method.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr_with_errors(
+                &resolve_type_expr_full(
                     &param.ty,
                     &self.type_aliases,
                     &self.interface_registry,
-                    &self.error_types,
                     self.interner,
                 ),
                 self.pointer_type,
@@ -547,11 +550,10 @@ impl<'a> Compiler<'a> {
 
         let ret = method.return_type.as_ref().map(|t| {
             type_to_cranelift(
-                &resolve_type_expr_with_errors(
+                &resolve_type_expr_full(
                     t,
                     &self.type_aliases,
                     &self.interface_registry,
-                    &self.error_types,
                     self.interner,
                 ),
                 self.pointer_type,
@@ -569,11 +571,10 @@ impl<'a> Compiler<'a> {
         let mut params = vec![self_cranelift_type];
         for param in &method.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr_with_errors(
+                &resolve_type_expr_full(
                     &param.ty,
                     &self.type_aliases,
                     &self.interface_registry,
-                    &self.error_types,
                     self.interner,
                 ),
                 self.pointer_type,
@@ -582,11 +583,10 @@ impl<'a> Compiler<'a> {
 
         let ret = method.return_type.as_ref().map(|t| {
             type_to_cranelift(
-                &resolve_type_expr_with_errors(
+                &resolve_type_expr_full(
                     t,
                     &self.type_aliases,
                     &self.interface_registry,
-                    &self.error_types,
                     self.interner,
                 ),
                 self.pointer_type,
@@ -602,11 +602,10 @@ impl<'a> Compiler<'a> {
         let mut params = vec![self.pointer_type];
         for param in &method.params {
             params.push(type_to_cranelift(
-                &resolve_type_expr_with_errors(
+                &resolve_type_expr_full(
                     &param.ty,
                     &self.type_aliases,
                     &self.interface_registry,
-                    &self.error_types,
                     self.interner,
                 ),
                 self.pointer_type,
@@ -615,11 +614,10 @@ impl<'a> Compiler<'a> {
 
         let ret = method.return_type.as_ref().map(|t| {
             type_to_cranelift(
-                &resolve_type_expr_with_errors(
+                &resolve_type_expr_full(
                     t,
                     &self.type_aliases,
                     &self.interface_registry,
-                    &self.error_types,
                     self.interner,
                 ),
                 self.pointer_type,
@@ -645,10 +643,53 @@ impl<'a> Compiler<'a> {
         None
     }
 
-    /// Register a class type and declare its methods
-    fn register_class(&mut self, class: &ClassDecl, program: &Program) {
+    /// Resolve a type expression using type_metadata (for record/class field types)
+    /// This allows resolving types like `Person?` where Person is another record/class
+    fn resolve_type_with_metadata(&self, ty: &TypeExpr) -> Type {
+        use super::types::resolve_type_expr_with_metadata;
+        let empty_error_types = HashMap::new();
+        resolve_type_expr_with_metadata(
+            ty,
+            &self.type_aliases,
+            &self.interface_registry,
+            &empty_error_types,
+            &self.type_metadata,
+            self.interner,
+        )
+    }
+
+    /// Pre-register a class type (just the name and type_id)
+    /// This is called first so that field type resolution can find other classes/records
+    fn pre_register_class(&mut self, class: &ClassDecl) {
         let type_id = self.next_type_id;
         self.next_type_id += 1;
+
+        // Create a placeholder vole_type (will be replaced in finalize_class)
+        let placeholder_type = Type::Class(ClassType {
+            name: class.name,
+            fields: vec![],
+        });
+
+        self.type_metadata.insert(
+            class.name,
+            TypeMetadata {
+                type_id,
+                field_slots: HashMap::new(),
+                is_class: true,
+                vole_type: placeholder_type,
+                method_return_types: HashMap::new(),
+            },
+        );
+    }
+
+    /// Finalize a class type: fill in field types and declare methods
+    fn finalize_class(&mut self, class: &ClassDecl, program: &Program) {
+        // Get the pre-registered type_id
+        let type_id = self
+            .type_metadata
+            .get(&class.name)
+            .expect("class should be pre-registered")
+            .type_id;
 
         // Build field slots map and StructField list
         let mut field_slots = HashMap::new();
@@ -657,12 +698,7 @@ impl<'a> Compiler<'a> {
             field_slots.insert(field.name, i);
             struct_fields.push(StructField {
                 name: field.name,
-                ty: resolve_type_expr_full(
-                    &field.ty,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
-                ),
+                ty: self.resolve_type_with_metadata(&field.ty),
                 slot: i,
             });
         }
@@ -679,14 +715,7 @@ impl<'a> Compiler<'a> {
             let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| {
-                    resolve_type_expr_full(
-                        t,
-                        &self.type_aliases,
-                        &self.interface_registry,
-                        self.interner,
-                    )
-                })
+                .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(Type::Void);
             method_return_types.insert(method.name, return_type);
         }
@@ -704,14 +733,7 @@ impl<'a> Compiler<'a> {
                             let return_type = method
                                 .return_type
                                 .as_ref()
-                                .map(|t| {
-                                    resolve_type_expr_full(
-                                        t,
-                                        &self.type_aliases,
-                                        &self.interface_registry,
-                                        self.interner,
-                                    )
-                                })
+                                .map(|t| self.resolve_type_with_metadata(t))
                                 .unwrap_or(Type::Void);
                             method_return_types.insert(method.name, return_type);
                         }
@@ -757,10 +779,38 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Register a record type and declare its methods
-    fn register_record(&mut self, record: &RecordDecl, program: &Program) {
+    /// Pre-register a record type (just the name and type_id)
+    /// This is called first so that field type resolution can find other records
+    fn pre_register_record(&mut self, record: &RecordDecl) {
         let type_id = self.next_type_id;
         self.next_type_id += 1;
+
+        // Create a placeholder vole_type (will be replaced in finalize_record)
+        let placeholder_type = Type::Record(RecordType {
+            name: record.name,
+            fields: vec![],
+        });
+
+        self.type_metadata.insert(
+            record.name,
+            TypeMetadata {
+                type_id,
+                field_slots: HashMap::new(),
+                is_class: false,
+                vole_type: placeholder_type,
+                method_return_types: HashMap::new(),
+            },
+        );
+    }
+
+    /// Finalize a record type: fill in field types and declare methods
+    fn finalize_record(&mut self, record: &RecordDecl, program: &Program) {
+        // Get the pre-registered type_id
+        let type_id = self
+            .type_metadata
+            .get(&record.name)
+            .expect("record should be pre-registered")
+            .type_id;
 
         // Build field slots map and StructField list
         let mut field_slots = HashMap::new();
@@ -769,12 +819,7 @@ impl<'a> Compiler<'a> {
             field_slots.insert(field.name, i);
             struct_fields.push(StructField {
                 name: field.name,
-                ty: resolve_type_expr_full(
-                    &field.ty,
-                    &self.type_aliases,
-                    &self.interface_registry,
-                    self.interner,
-                ),
+                ty: self.resolve_type_with_metadata(&field.ty),
                 slot: i,
             });
         }
@@ -791,14 +836,7 @@ impl<'a> Compiler<'a> {
             let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| {
-                    resolve_type_expr_full(
-                        t,
-                        &self.type_aliases,
-                        &self.interface_registry,
-                        self.interner,
-                    )
-                })
+                .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(Type::Void);
             method_return_types.insert(method.name, return_type);
         }
@@ -816,14 +854,7 @@ impl<'a> Compiler<'a> {
                             let return_type = method
                                 .return_type
                                 .as_ref()
-                                .map(|t| {
-                                    resolve_type_expr_full(
-                                        t,
-                                        &self.type_aliases,
-                                        &self.interface_registry,
-                                        self.interner,
-                                    )
-                                })
+                                .map(|t| self.resolve_type_with_metadata(t))
                                 .unwrap_or(Type::Void);
                             method_return_types.insert(method.name, return_type);
                         }
@@ -1483,11 +1514,10 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_with_errors(
+                    &resolve_type_expr_full(
                         &p.ty,
                         &self.type_aliases,
                         &self.interface_registry,
-                        &self.error_types,
                         self.interner,
                     ),
                     self.pointer_type,
@@ -1498,11 +1528,10 @@ impl<'a> Compiler<'a> {
             .params
             .iter()
             .map(|p| {
-                resolve_type_expr_with_errors(
+                resolve_type_expr_full(
                     &p.ty,
                     &self.type_aliases,
                     &self.interface_registry,
-                    &self.error_types,
                     self.interner,
                 )
             })
@@ -1511,11 +1540,10 @@ impl<'a> Compiler<'a> {
 
         // Get function return type (needed for raise statements in fallible functions)
         let return_type = func.return_type.as_ref().map(|t| {
-            resolve_type_expr_with_errors(
+            resolve_type_expr_full(
                 t,
                 &self.type_aliases,
                 &self.interface_registry,
-                &self.error_types,
                 self.interner,
             )
         });
@@ -1700,11 +1728,10 @@ impl<'a> Compiler<'a> {
                         .return_type
                         .as_ref()
                         .map(|t| {
-                            resolve_type_expr_with_errors(
+                            resolve_type_expr_full(
                                 t,
                                 &self.type_aliases,
                                 &self.interface_registry,
-                                &self.error_types,
                                 self.interner,
                             )
                         })
@@ -1761,11 +1788,10 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_with_errors(
+                    &resolve_type_expr_full(
                         &p.ty,
                         &self.type_aliases,
                         &self.interface_registry,
-                        &self.error_types,
                         self.interner,
                     ),
                     self.pointer_type,
@@ -1776,11 +1802,10 @@ impl<'a> Compiler<'a> {
             .params
             .iter()
             .map(|p| {
-                resolve_type_expr_with_errors(
+                resolve_type_expr_full(
                     &p.ty,
                     &self.type_aliases,
                     &self.interface_registry,
-                    &self.error_types,
                     self.interner,
                 )
             })
@@ -1789,11 +1814,10 @@ impl<'a> Compiler<'a> {
 
         // Get function return type (needed for raise statements in fallible functions)
         let return_type = func.return_type.as_ref().map(|t| {
-            resolve_type_expr_with_errors(
+            resolve_type_expr_full(
                 t,
                 &self.type_aliases,
                 &self.interface_registry,
-                &self.error_types,
                 self.interner,
             )
         });

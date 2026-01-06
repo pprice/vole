@@ -336,6 +336,9 @@ pub enum ExprKind {
     /// Field access: point.x
     FieldAccess(Box<FieldAccessExpr>),
 
+    /// Optional chaining: obj?.field
+    OptionalChain(Box<OptionalChainExpr>),
+
     /// Method call: point.distance()
     MethodCall(Box<MethodCallExpr>),
 
@@ -519,6 +522,14 @@ pub struct StructFieldInit {
 /// Field access expression: expr.field
 #[derive(Debug, Clone)]
 pub struct FieldAccessExpr {
+    pub object: Expr,
+    pub field: Symbol,
+    pub field_span: Span,
+}
+
+/// Optional chaining expression: expr?.field
+#[derive(Debug, Clone)]
+pub struct OptionalChainExpr {
     pub object: Expr,
     pub field: Symbol,
     pub field_span: Span,

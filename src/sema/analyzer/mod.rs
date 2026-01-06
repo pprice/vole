@@ -468,10 +468,13 @@ impl Analyzer {
                         .fields
                         .iter()
                         .enumerate()
-                        .map(|(i, f)| StructField {
-                            name: f.name,
-                            ty: self.resolve_type(&f.ty, interner),
-                            slot: i,
+                        .map(|(i, f)| {
+                            let ty = self.resolve_type(&f.ty, interner);
+                            StructField {
+                                name: f.name,
+                                ty,
+                                slot: i,
+                            }
                         })
                         .collect();
                     self.records.insert(
