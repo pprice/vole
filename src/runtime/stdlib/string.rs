@@ -198,9 +198,7 @@ fn byte_index_to_char_index(s: &str, byte_idx: usize) -> usize {
 /// Convert a character index to a byte index in a string
 /// Returns None if char_idx is out of bounds
 fn char_index_to_byte_index(s: &str, char_idx: usize) -> Option<usize> {
-    s.char_indices()
-        .nth(char_idx)
-        .map(|(byte_idx, _)| byte_idx)
+    s.char_indices().nth(char_idx).map(|(byte_idx, _)| byte_idx)
 }
 
 // ============================================================================

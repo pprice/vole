@@ -289,7 +289,15 @@ mod tests {
         registry1.merge(&registry2);
 
         // Both methods should be present
-        assert!(registry1.get_method(&TypeId::Primitive(PrimitiveTypeId::I64), sym(10)).is_some());
-        assert!(registry1.get_method(&TypeId::Primitive(PrimitiveTypeId::String), sym(11)).is_some());
+        assert!(
+            registry1
+                .get_method(&TypeId::Primitive(PrimitiveTypeId::I64), sym(10))
+                .is_some()
+        );
+        assert!(
+            registry1
+                .get_method(&TypeId::Primitive(PrimitiveTypeId::String), sym(11))
+                .is_some()
+        );
     }
 }
