@@ -1,0 +1,17 @@
+// Iterator type annotation tests
+// Test that Iterator<T> syntax parses and type-checks correctly
+
+func identity_iter(x: Iterator<i32> | nil) -> Iterator<i32> | nil {
+    return x
+}
+
+tests {
+    test "iterator type in function signature" {
+        // Test that Iterator<T> | nil can be used in function signatures
+        // and that nil values work with it
+        let result = identity_iter(nil)
+        // Can't directly compare yet since Iterator has no values,
+        // but if we got here the type parsed and compiled correctly
+        assert(true)
+    }
+}

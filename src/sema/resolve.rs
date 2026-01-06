@@ -82,6 +82,10 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
             let elem_ty = resolve_type(elem, ctx);
             Type::Array(Box::new(elem_ty))
         }
+        TypeExpr::Iterator(elem) => {
+            let elem_ty = resolve_type(elem, ctx);
+            Type::Iterator(Box::new(elem_ty))
+        }
         TypeExpr::Nil => Type::Nil,
         TypeExpr::Done => Type::Done,
         TypeExpr::Optional(inner) => {
@@ -254,5 +258,13 @@ mod tests {
         let ctx = empty_context();
         // Self type is only valid in interface/implement context
         assert_eq!(resolve_type(&TypeExpr::SelfType, &ctx), Type::Error);
+    }
+
+    #[test]
+    fn resolve_iterator_type() {
+        let ctx = empty_context();
+        let iter_expr = TypeExpr::Iterator(Box::new(TypeExpr::Primitive(PrimitiveType::I32)));
+        let resolved = resolve_type(&iter_expr, &ctx);
+        assert_eq!(resolved, Type::Iterator(Box::new(Type::I32)));
     }
 }

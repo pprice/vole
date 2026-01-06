@@ -161,6 +161,17 @@ pub(crate) fn resolve_type_expr_with_metadata(
             );
             Type::Array(Box::new(elem_ty))
         }
+        TypeExpr::Iterator(elem) => {
+            let elem_ty = resolve_type_expr_with_metadata(
+                elem,
+                type_aliases,
+                interface_registry,
+                error_types,
+                type_metadata,
+                interner,
+            );
+            Type::Iterator(Box::new(elem_ty))
+        }
         TypeExpr::Optional(inner) => {
             // T? desugars to T | nil
             let inner_ty = resolve_type_expr_with_metadata(
