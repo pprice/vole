@@ -171,7 +171,22 @@ impl<'src> Parser<'src> {
             TokenType::Identifier => {
                 self.advance();
                 let sym = self.interner.intern(&token.lexeme);
-                Ok(TypeExpr::Named(sym))
+
+                // Check for generic arguments: Foo<T, U>
+                if self.check(TokenType::Lt) {
+                    self.advance(); // consume '<'
+                    let mut args = Vec::new();
+                    if !self.check(TokenType::Gt) {
+                        args.push(self.parse_type()?);
+                        while self.match_token(TokenType::Comma) {
+                            args.push(self.parse_type()?);
+                        }
+                    }
+                    self.consume(TokenType::Gt, "expected '>' after type arguments")?;
+                    Ok(TypeExpr::Generic { name: sym, args })
+                } else {
+                    Ok(TypeExpr::Named(sym))
+                }
             }
             _ => Err(ParseError::new(
                 ParserError::ExpectedType {

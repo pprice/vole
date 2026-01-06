@@ -1043,3 +1043,33 @@ interface Iterable<T> {
         panic!("expected interface");
     }
 }
+
+#[test]
+fn test_parse_generic_type() {
+    let source = "func foo(x: Box<i64>) { }";
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("should parse");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        if let TypeExpr::Generic { name: _, args } = &f.params[0].ty {
+            assert_eq!(args.len(), 1);
+        } else {
+            panic!("expected generic type");
+        }
+    }
+}
+
+#[test]
+fn test_parse_nested_generic_type() {
+    let source = "func foo(x: Map<string, i64>) { }";
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("should parse");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        if let TypeExpr::Generic { args, .. } = &f.params[0].ty {
+            assert_eq!(args.len(), 2);
+        } else {
+            panic!("expected generic type");
+        }
+    }
+}
