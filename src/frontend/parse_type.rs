@@ -176,13 +176,13 @@ impl<'src> Parser<'src> {
                 if self.check(TokenType::Lt) {
                     self.advance(); // consume '<'
                     let mut args = Vec::new();
-                    if !self.check(TokenType::Gt) {
+                    if !self.check_gt_in_type_context() {
                         args.push(self.parse_type()?);
                         while self.match_token(TokenType::Comma) {
                             args.push(self.parse_type()?);
                         }
                     }
-                    self.consume(TokenType::Gt, "expected '>' after type arguments")?;
+                    self.consume_gt_in_type_context()?;
                     Ok(TypeExpr::Generic { name: sym, args })
                 } else {
                     Ok(TypeExpr::Named(sym))

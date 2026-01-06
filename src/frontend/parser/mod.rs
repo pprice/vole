@@ -9,6 +9,9 @@ pub struct Parser<'src> {
     pub(super) previous: Token,
     pub(super) interner: Interner,
     next_node_id: u32,
+    /// Tracks when we've consumed half of a '>>' token while parsing generics.
+    /// When true, the next check/consume for '>' should succeed without advancing.
+    pending_gt: bool,
 }
 
 /// A parse error wrapping a miette-enabled ParserError
@@ -38,6 +41,7 @@ impl<'src> Parser<'src> {
             previous: Token::new(TokenType::Eof, "", Span::default()),
             interner,
             next_node_id: 0,
+            pending_gt: false,
         }
     }
 
@@ -54,6 +58,7 @@ impl<'src> Parser<'src> {
             previous: Token::new(TokenType::Eof, "", Span::default()),
             interner,
             next_node_id: 0,
+            pending_gt: false,
         }
     }
 
@@ -135,6 +140,42 @@ impl<'src> Parser<'src> {
             Err(ParseError::new(
                 ParserError::ExpectedToken {
                     expected: msg.to_string(),
+                    found: self.current.ty.as_str().to_string(),
+                    span: self.current.span.into(),
+                },
+                self.current.span,
+            ))
+        }
+    }
+
+    /// Check if we can consume a '>' in type argument context.
+    /// Returns true for '>', '>>' (first half), or if pending_gt is set.
+    pub(super) fn check_gt_in_type_context(&self) -> bool {
+        self.pending_gt
+            || self.current.ty == TokenType::Gt
+            || self.current.ty == TokenType::GreaterGreater
+    }
+
+    /// Consume a '>' in type argument context, handling '>>' splitting.
+    /// - If pending_gt is set, consume it (no token advance needed)
+    /// - If current is '>', advance normally
+    /// - If current is '>>', set pending_gt and advance
+    pub(super) fn consume_gt_in_type_context(&mut self) -> Result<(), ParseError> {
+        if self.pending_gt {
+            self.pending_gt = false;
+            Ok(())
+        } else if self.current.ty == TokenType::Gt {
+            self.advance();
+            Ok(())
+        } else if self.current.ty == TokenType::GreaterGreater {
+            // Consume '>>' but leave a pending '>' for the outer generic
+            self.pending_gt = true;
+            self.advance();
+            Ok(())
+        } else {
+            Err(ParseError::new(
+                ParserError::ExpectedToken {
+                    expected: "'>'".to_string(),
                     found: self.current.ty.as_str().to_string(),
                     span: self.current.span.into(),
                 },

@@ -17,7 +17,7 @@ impl<'src> Parser<'src> {
 
         let mut params = Vec::new();
 
-        if !self.check(TokenType::Gt) {
+        if !self.check_gt_in_type_context() {
             loop {
                 let param = self.parse_type_param()?;
                 params.push(param);
@@ -27,7 +27,7 @@ impl<'src> Parser<'src> {
             }
         }
 
-        self.consume(TokenType::Gt, "expected '>' after type parameters")?;
+        self.consume_gt_in_type_context()?;
         Ok(params)
     }
 

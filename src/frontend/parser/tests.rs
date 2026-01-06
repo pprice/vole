@@ -1073,3 +1073,64 @@ fn test_parse_nested_generic_type() {
         }
     }
 }
+
+#[test]
+fn test_parse_deeply_nested_generic_type() {
+    // Tests >> token splitting: Box<i64>> must be parsed as Box<i64> >
+    let source = "func foo(x: Map<string, Box<i64>>) { }";
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .expect("should parse nested generics with >>");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        if let TypeExpr::Generic { args, .. } = &f.params[0].ty {
+            assert_eq!(args.len(), 2, "Map should have 2 type args");
+            // Second arg should be Box<i64>
+            if let TypeExpr::Generic {
+                args: inner_args, ..
+            } = &args[1]
+            {
+                assert_eq!(inner_args.len(), 1, "Box should have 1 type arg");
+            } else {
+                panic!("expected Box<i64> as second type argument");
+            }
+        } else {
+            panic!("expected generic type");
+        }
+    }
+}
+
+#[test]
+fn test_parse_triple_nested_generic() {
+    // Tests >>> case: three levels of nesting
+    let source = "func foo(x: Outer<Middle<Inner<i64>>>) { }";
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .expect("should parse triple nested generics");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        if let TypeExpr::Generic { args, .. } = &f.params[0].ty {
+            assert_eq!(args.len(), 1);
+            if let TypeExpr::Generic {
+                args: middle_args, ..
+            } = &args[0]
+            {
+                assert_eq!(middle_args.len(), 1);
+                if let TypeExpr::Generic {
+                    args: inner_args, ..
+                } = &middle_args[0]
+                {
+                    assert_eq!(inner_args.len(), 1);
+                } else {
+                    panic!("expected Inner<i64>");
+                }
+            } else {
+                panic!("expected Middle<Inner<i64>>");
+            }
+        } else {
+            panic!("expected generic type");
+        }
+    }
+}
