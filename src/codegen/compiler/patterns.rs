@@ -488,7 +488,9 @@ pub(super) fn compile_expr(
         ExprKind::StringLiteral(s) => {
             compile_string_literal(builder, s, ctx.pointer_type, ctx.module, ctx.func_ids)
         }
-        ExprKind::Call(call) => compile_call(builder, call, expr.span.line, variables, ctx),
+        ExprKind::Call(call) => {
+            compile_call(builder, call, expr.span.line, expr.id, variables, ctx)
+        }
         ExprKind::InterpolatedString(parts) => {
             compile_interpolated_string(builder, parts, variables, ctx)
         }
@@ -1271,6 +1273,7 @@ pub(super) fn compile_expr_with_captures(
                 builder,
                 call,
                 expr.span.line,
+                expr.id,
                 variables,
                 capture_bindings,
                 closure_var,

@@ -37,7 +37,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::CompoundAssign(compound) => self.compound_assign(compound),
             ExprKind::Grouping(inner) => self.expr(inner),
             ExprKind::StringLiteral(s) => self.string_literal(s),
-            ExprKind::Call(call) => self.call(call, expr.span.line),
+            ExprKind::Call(call) => self.call(call, expr.span.line, expr.id),
             ExprKind::InterpolatedString(parts) => self.interpolated_string(parts),
             ExprKind::Range(_) => {
                 Err("Range expressions only supported in for-in context".to_string())

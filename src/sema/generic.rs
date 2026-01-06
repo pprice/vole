@@ -2,10 +2,11 @@
 //
 // Generic type parameter handling for Vole.
 // This module provides structures for tracking type parameters in scope
-// and will later support monomorphization.
+// and supports monomorphization of generic functions.
 
 use crate::frontend::Symbol;
-use crate::sema::types::Type;
+use crate::sema::types::{FunctionType, Type};
+use std::collections::HashMap;
 
 /// Information about a type parameter in scope
 #[derive(Debug, Clone)]
@@ -65,6 +66,148 @@ impl TypeParamScope {
     }
 }
 
+/// Information about a generic function definition
+#[derive(Debug, Clone)]
+pub struct GenericFuncDef {
+    /// The function's type parameters (e.g., T, U)
+    pub type_params: Vec<TypeParamInfo>,
+    /// Parameter types with TypeParam placeholders (e.g., [TypeParam(T), i64])
+    pub param_types: Vec<Type>,
+    /// Return type with TypeParam placeholders
+    pub return_type: Type,
+}
+
+/// Key for looking up monomorphized function instances.
+/// Uses a string representation for hashability since Type doesn't implement Hash.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MonomorphKey {
+    /// Original generic function name
+    pub func_name: Symbol,
+    /// String representation of concrete types (for hashing)
+    pub type_key: String,
+}
+
+impl MonomorphKey {
+    /// Create a key from function name and concrete type arguments
+    pub fn new(func_name: Symbol, type_args: &[Type]) -> Self {
+        // Create a stable string representation of the types
+        let type_key = type_args
+            .iter()
+            .map(|t| format!("{:?}", t))
+            .collect::<Vec<_>>()
+            .join(",");
+        Self {
+            func_name,
+            type_key,
+        }
+    }
+}
+
+/// Cache of monomorphized function instances.
+/// Maps (func_name, concrete_types) -> monomorphized function info.
+#[derive(Debug, Default, Clone)]
+pub struct MonomorphCache {
+    /// Cached monomorphized instances
+    instances: HashMap<MonomorphKey, MonomorphInstance>,
+    /// Counter for generating unique names
+    next_id: u32,
+}
+
+/// A monomorphized function instance
+#[derive(Debug, Clone)]
+pub struct MonomorphInstance {
+    /// Original generic function name
+    pub original_name: Symbol,
+    /// Unique ID for this instance (used to generate mangled name)
+    pub instance_id: u32,
+    /// The concrete function type after substitution
+    pub func_type: FunctionType,
+    /// Map from type param name to concrete type
+    pub substitutions: HashMap<Symbol, Type>,
+}
+
+impl MonomorphCache {
+    /// Create a new empty cache
+    pub fn new() -> Self {
+        Self {
+            instances: HashMap::new(),
+            next_id: 0,
+        }
+    }
+
+    /// Look up an existing monomorphized instance
+    pub fn get(&self, key: &MonomorphKey) -> Option<&MonomorphInstance> {
+        self.instances.get(key)
+    }
+
+    /// Insert a new monomorphized instance
+    pub fn insert(&mut self, key: MonomorphKey, instance: MonomorphInstance) {
+        self.instances.insert(key, instance);
+    }
+
+    /// Check if an instance exists
+    pub fn contains(&self, key: &MonomorphKey) -> bool {
+        self.instances.contains_key(key)
+    }
+
+    /// Generate the next unique ID for mangled names
+    pub fn next_unique_id(&mut self) -> u32 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    /// Get all cached instances (for codegen)
+    pub fn instances(&self) -> impl Iterator<Item = (&MonomorphKey, &MonomorphInstance)> {
+        self.instances.iter()
+    }
+}
+
+/// Substitute concrete types for type parameters in a type
+pub fn substitute_type(ty: &Type, substitutions: &HashMap<Symbol, Type>) -> Type {
+    match ty {
+        Type::TypeParam(sym) => substitutions.get(sym).cloned().unwrap_or(ty.clone()),
+        Type::Array(elem) => Type::Array(Box::new(substitute_type(elem, substitutions))),
+        Type::Iterator(elem) => Type::Iterator(Box::new(substitute_type(elem, substitutions))),
+        Type::MapIterator(elem) => {
+            Type::MapIterator(Box::new(substitute_type(elem, substitutions)))
+        }
+        Type::FilterIterator(elem) => {
+            Type::FilterIterator(Box::new(substitute_type(elem, substitutions)))
+        }
+        Type::TakeIterator(elem) => {
+            Type::TakeIterator(Box::new(substitute_type(elem, substitutions)))
+        }
+        Type::SkipIterator(elem) => {
+            Type::SkipIterator(Box::new(substitute_type(elem, substitutions)))
+        }
+        Type::Union(types) => Type::Union(
+            types
+                .iter()
+                .map(|t| substitute_type(t, substitutions))
+                .collect(),
+        ),
+        Type::Function(ft) => Type::Function(FunctionType {
+            params: ft
+                .params
+                .iter()
+                .map(|t| substitute_type(t, substitutions))
+                .collect(),
+            return_type: Box::new(substitute_type(&ft.return_type, substitutions)),
+            is_closure: ft.is_closure,
+        }),
+        Type::GenericInstance { def, args } => Type::GenericInstance {
+            def: *def,
+            args: args
+                .iter()
+                .map(|t| substitute_type(t, substitutions))
+                .collect(),
+        },
+        // All other types don't contain type parameters
+        _ => ty.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,5 +230,55 @@ mod tests {
         let u = Symbol(1);
         assert!(!scope.is_type_param(u));
         assert!(scope.get(u).is_none());
+    }
+
+    #[test]
+    fn test_monomorph_cache() {
+        let mut cache = MonomorphCache::new();
+        let func_name = Symbol(0);
+
+        let key1 = MonomorphKey::new(func_name, &[Type::I64]);
+        let key2 = MonomorphKey::new(func_name, &[Type::String]);
+        let key1_dup = MonomorphKey::new(func_name, &[Type::I64]);
+
+        assert!(!cache.contains(&key1));
+
+        cache.insert(
+            key1.clone(),
+            MonomorphInstance {
+                original_name: func_name,
+                instance_id: 0,
+                func_type: FunctionType {
+                    params: vec![Type::I64],
+                    return_type: Box::new(Type::I64),
+                    is_closure: false,
+                },
+                substitutions: HashMap::new(),
+            },
+        );
+
+        assert!(cache.contains(&key1));
+        assert!(cache.contains(&key1_dup)); // Same types = same key
+        assert!(!cache.contains(&key2)); // Different types = different key
+    }
+
+    #[test]
+    fn test_substitute_type() {
+        let t = Symbol(0);
+        let mut subs = HashMap::new();
+        subs.insert(t, Type::I64);
+
+        // Simple substitution
+        let result = substitute_type(&Type::TypeParam(t), &subs);
+        assert_eq!(result, Type::I64);
+
+        // Array of type param
+        let arr = Type::Array(Box::new(Type::TypeParam(t)));
+        let result = substitute_type(&arr, &subs);
+        assert_eq!(result, Type::Array(Box::new(Type::I64)));
+
+        // Non-param types unchanged
+        let result = substitute_type(&Type::Bool, &subs);
+        assert_eq!(result, Type::Bool);
     }
 }

@@ -109,6 +109,9 @@ pub fn inspect_files(
                     type_implements,
                     error_types,
                     module_programs,
+                    generic_functions,
+                    monomorph_cache,
+                    generic_calls,
                 ) = analyzer.into_analysis_results();
 
                 // Generate IR
@@ -123,6 +126,9 @@ pub fn inspect_files(
                     type_implements,
                     error_types,
                     module_programs,
+                    generic_functions,
+                    monomorph_cache,
+                    generic_calls,
                 );
                 let include_tests = !no_tests;
 

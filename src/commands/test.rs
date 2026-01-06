@@ -228,6 +228,9 @@ fn run_source_tests(
             analyzed.type_implements.clone(),
             analyzed.error_types.clone(),
             analyzed.module_programs.clone(),
+            analyzed.generic_functions.clone(),
+            analyzed.monomorph_cache.clone(),
+            analyzed.generic_calls.clone(),
         );
         compiler.set_source_file(file_path);
         compiler

@@ -12,6 +12,7 @@ use crate::codegen::{Compiler, JitContext};
 use crate::errors::{LexerError, render_to_stderr, render_to_writer};
 use crate::frontend::{AstPrinter, Interner, NodeId, ParseError, Parser, Symbol, ast::Program};
 use crate::runtime::set_stdout_capture;
+use crate::sema::generic::{GenericFuncDef, MonomorphCache, MonomorphKey};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::{Analyzer, ErrorTypeInfo, MethodResolutions, Type, TypeError};
 use crate::transforms;
@@ -30,6 +31,12 @@ pub struct AnalyzedProgram {
     pub error_types: HashMap<Symbol, ErrorTypeInfo>,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: HashMap<String, (Program, Interner)>,
+    /// Generic function definitions (for monomorphization)
+    pub generic_functions: HashMap<Symbol, GenericFuncDef>,
+    /// Cache of monomorphized function instances
+    pub monomorph_cache: MonomorphCache,
+    /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
+    pub generic_calls: HashMap<NodeId, MonomorphKey>,
 }
 
 /// Render a lexer error to stderr with source context
@@ -145,6 +152,9 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         type_implements,
         error_types,
         module_programs,
+        generic_functions,
+        monomorph_cache,
+        generic_calls,
     ) = analyzer.into_analysis_results();
     Ok(AnalyzedProgram {
         program,
@@ -156,6 +166,9 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         type_implements,
         error_types,
         module_programs,
+        generic_functions,
+        monomorph_cache,
+        generic_calls,
     })
 }
 
@@ -334,6 +347,9 @@ pub fn run_captured<W: Write + Send + 'static>(
         type_implements,
         error_types,
         module_programs,
+        generic_functions,
+        monomorph_cache,
+        generic_calls,
     ) = analyzer.into_analysis_results();
 
     // Compile
@@ -349,6 +365,9 @@ pub fn run_captured<W: Write + Send + 'static>(
             type_implements,
             error_types,
             module_programs,
+            generic_functions,
+            monomorph_cache,
+            generic_calls,
         );
         if let Err(e) = compiler.compile_program(&program) {
             let _ = writeln!(stderr, "compilation error: {}", e);

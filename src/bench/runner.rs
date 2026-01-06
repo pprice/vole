@@ -158,6 +158,9 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
         type_implements,
         error_types,
         module_programs,
+        generic_functions,
+        monomorph_cache,
+        generic_calls,
     ) = analyzer.into_analysis_results();
     let sema_ns = sema_start.elapsed().as_nanos() as u64;
 
@@ -175,6 +178,9 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
             type_implements,
             error_types,
             module_programs,
+            generic_functions,
+            monomorph_cache,
+            generic_calls,
         );
         compiler
             .compile_program(&program)
@@ -227,6 +233,9 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
         type_implements,
         error_types,
         module_programs,
+        generic_functions,
+        monomorph_cache,
+        generic_calls,
     ) = analyzer.into_analysis_results();
 
     // Compile
@@ -242,6 +251,9 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
             type_implements,
             error_types,
             module_programs,
+            generic_functions,
+            monomorph_cache,
+            generic_calls,
         );
         compiler
             .compile_program(&program)

@@ -11,14 +11,16 @@ use crate::codegen::lambda::CaptureBinding;
 use crate::codegen::types::{
     CompileCtx, CompiledValue, cranelift_to_vole_type, native_type_to_cranelift, type_to_cranelift,
 };
-use crate::frontend::{CallExpr, Expr, ExprKind, Symbol};
+use crate::frontend::{CallExpr, Expr, ExprKind, NodeId, Symbol};
 use crate::runtime::native_registry::{NativeFunction, NativeType};
 use crate::sema::{FunctionType, Type};
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_call_with_captures(
     builder: &mut FunctionBuilder,
     call: &CallExpr,
     call_line: u32,
+    call_expr_id: NodeId,
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     _capture_bindings: &HashMap<Symbol, CaptureBinding>,
     _closure_var: Option<Variable>,
@@ -26,7 +28,7 @@ pub(crate) fn compile_call_with_captures(
 ) -> Result<CompiledValue, String> {
     // For now, delegate to regular call compilation
     // The callee might be a closure, but we handle that in compile_indirect_call_value
-    compile_call(builder, call, call_line, variables, ctx)
+    compile_call(builder, call, call_line, call_expr_id, variables, ctx)
 }
 
 /// Compile a function call expression
@@ -34,6 +36,7 @@ pub(crate) fn compile_call(
     builder: &mut FunctionBuilder,
     call: &CallExpr,
     call_line: u32,
+    call_expr_id: NodeId,
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
@@ -111,6 +114,20 @@ pub(crate) fn compile_call(
                 variables,
                 ctx,
             );
+        }
+    }
+
+    // Check if this is a call to a generic function (via monomorphization)
+    if let Some(monomorph_key) = ctx.generic_calls.get(&call_expr_id) {
+        // Look up the monomorphized instance
+        if let Some(instance) = ctx.monomorph_cache.get(monomorph_key) {
+            // Use the mangled function name
+            let mangled_name = format!(
+                "{}__mono_{}",
+                ctx.interner.resolve(instance.original_name),
+                instance.instance_id
+            );
+            return compile_user_function_call(builder, &mangled_name, &call.args, variables, ctx);
         }
     }
 

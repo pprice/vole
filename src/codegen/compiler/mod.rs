@@ -24,6 +24,7 @@ use crate::frontend::{
     NodeId, Program, RecordDecl, Symbol, TestCase, TestsDecl, TypeExpr,
 };
 use crate::runtime::NativeRegistry;
+use crate::sema::generic::{GenericFuncDef, MonomorphCache, MonomorphInstance, MonomorphKey};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::resolution::MethodResolutions;
 use crate::sema::{ClassType, ErrorTypeInfo, RecordType, StructField, Type};
@@ -112,6 +113,12 @@ pub struct Compiler<'a> {
     native_registry: NativeRegistry,
     /// Module programs and their interners (for compiling pure Vole functions)
     module_programs: HashMap<String, (Program, Interner)>,
+    /// Generic function definitions (for monomorphization)
+    generic_functions: HashMap<Symbol, GenericFuncDef>,
+    /// Cache of monomorphized function instances
+    monomorph_cache: MonomorphCache,
+    /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
+    generic_calls: HashMap<NodeId, MonomorphKey>,
 }
 
 impl<'a> Compiler<'a> {
@@ -126,6 +133,9 @@ impl<'a> Compiler<'a> {
         type_implements: HashMap<Symbol, Vec<Symbol>>,
         error_types: HashMap<Symbol, ErrorTypeInfo>,
         module_programs: HashMap<String, (Program, Interner)>,
+        generic_functions: HashMap<Symbol, GenericFuncDef>,
+        monomorph_cache: MonomorphCache,
+        generic_calls: HashMap<NodeId, MonomorphKey>,
     ) -> Self {
         let pointer_type = jit.pointer_type();
 
@@ -151,6 +161,9 @@ impl<'a> Compiler<'a> {
             error_types,
             native_registry,
             module_programs,
+            generic_functions,
+            monomorph_cache,
+            generic_calls,
         }
     }
 
@@ -208,6 +221,10 @@ impl<'a> Compiler<'a> {
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
+                    // Skip generic functions - they're templates, not actual functions
+                    if !func.type_params.is_empty() {
+                        continue;
+                    }
                     let sig = self.create_function_signature(func);
                     let name = self.interner.resolve(func.name);
                     self.jit.declare_function(name, &sig);
@@ -258,12 +275,19 @@ impl<'a> Compiler<'a> {
         // Reset counter for second pass
         test_count = 0;
 
+        // Declare monomorphized function instances before second pass
+        self.declare_monomorphized_instances()?;
+
         // Second pass: compile function bodies and tests
         // Note: Decl::Let globals are handled by inlining their initializers
         // when referenced (see compile_expr for ExprKind::Identifier)
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
+                    // Skip generic functions - they're compiled via monomorphized instances
+                    if !func.type_params.is_empty() {
+                        continue;
+                    }
                     self.compile_function(func)?;
                 }
                 Decl::Tests(tests_decl) => {
@@ -292,6 +316,9 @@ impl<'a> Compiler<'a> {
                 }
             }
         }
+
+        // Compile monomorphized instances
+        self.compile_monomorphized_instances(program)?;
 
         Ok(())
     }
@@ -473,6 +500,8 @@ impl<'a> Compiler<'a> {
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: Some(module_path), // We're compiling module code
+                generic_calls: &self.generic_calls,
+                monomorph_cache: &self.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1199,6 +1228,8 @@ impl<'a> Compiler<'a> {
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
+                generic_calls: &self.generic_calls,
+                monomorph_cache: &self.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1341,6 +1372,8 @@ impl<'a> Compiler<'a> {
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
+                generic_calls: &self.generic_calls,
+                monomorph_cache: &self.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1485,6 +1518,8 @@ impl<'a> Compiler<'a> {
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
+                generic_calls: &self.generic_calls,
+                monomorph_cache: &self.monomorph_cache,
             };
             let terminated =
                 compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -1601,6 +1636,8 @@ impl<'a> Compiler<'a> {
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
+                generic_calls: &self.generic_calls,
+                monomorph_cache: &self.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1674,6 +1711,8 @@ impl<'a> Compiler<'a> {
                     error_types: &self.error_types,
                     native_registry: &self.native_registry,
                     current_module: None,
+                    generic_calls: &self.generic_calls,
+                    monomorph_cache: &self.monomorph_cache,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -1876,6 +1915,8 @@ impl<'a> Compiler<'a> {
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
+                generic_calls: &self.generic_calls,
+                monomorph_cache: &self.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1942,6 +1983,8 @@ impl<'a> Compiler<'a> {
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,
+                generic_calls: &self.generic_calls,
+                monomorph_cache: &self.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1965,6 +2008,206 @@ impl<'a> Compiler<'a> {
         // This method is for IR inspection only.
 
         Ok(())
+    }
+
+    /// Declare all monomorphized function instances
+    fn declare_monomorphized_instances(&mut self) -> Result<(), String> {
+        // Collect instances to avoid borrow issues
+        let instances: Vec<_> = self
+            .monomorph_cache
+            .instances()
+            .map(|(key, instance)| (key.clone(), instance.clone()))
+            .collect();
+
+        for (_key, instance) in instances {
+            let mangled_name =
+                self.mangle_monomorph_name(instance.original_name, instance.instance_id);
+
+            // Create signature from the concrete function type
+            let mut params = Vec::new();
+            for param_type in &instance.func_type.params {
+                params.push(type_to_cranelift(param_type, self.pointer_type));
+            }
+            let ret = if *instance.func_type.return_type == Type::Void {
+                None
+            } else {
+                Some(type_to_cranelift(
+                    &instance.func_type.return_type,
+                    self.pointer_type,
+                ))
+            };
+            let sig = self.jit.create_signature(&params, ret);
+            self.jit.declare_function(&mangled_name, &sig);
+
+            // Record return type for call expressions
+            self.func_return_types
+                .insert(mangled_name, (*instance.func_type.return_type).clone());
+        }
+
+        Ok(())
+    }
+
+    /// Compile all monomorphized function instances
+    fn compile_monomorphized_instances(&mut self, program: &Program) -> Result<(), String> {
+        // Build a map of generic function names to their ASTs
+        let generic_func_asts: HashMap<Symbol, &FuncDecl> = program
+            .declarations
+            .iter()
+            .filter_map(|decl| {
+                if let Decl::Function(func) = decl
+                    && !func.type_params.is_empty()
+                {
+                    return Some((func.name, func));
+                }
+                None
+            })
+            .collect();
+
+        // Collect instances to avoid borrow issues
+        let instances: Vec<_> = self
+            .monomorph_cache
+            .instances()
+            .map(|(key, instance)| (key.clone(), instance.clone()))
+            .collect();
+
+        for (_key, instance) in instances {
+            let func = generic_func_asts
+                .get(&instance.original_name)
+                .ok_or_else(|| {
+                    format!(
+                        "Internal error: generic function AST not found for {:?}",
+                        instance.original_name
+                    )
+                })?;
+
+            self.compile_monomorphized_function(func, &instance)?;
+        }
+
+        Ok(())
+    }
+
+    /// Compile a single monomorphized function instance
+    fn compile_monomorphized_function(
+        &mut self,
+        func: &FuncDecl,
+        instance: &MonomorphInstance,
+    ) -> Result<(), String> {
+        let mangled_name = self.mangle_monomorph_name(instance.original_name, instance.instance_id);
+
+        let func_id = *self
+            .jit
+            .func_ids
+            .get(&mangled_name)
+            .ok_or_else(|| format!("Monomorphized function {} not declared", mangled_name))?;
+
+        // Create function signature from concrete types
+        let mut params = Vec::new();
+        for param_type in &instance.func_type.params {
+            params.push(type_to_cranelift(param_type, self.pointer_type));
+        }
+        let ret = if *instance.func_type.return_type == Type::Void {
+            None
+        } else {
+            Some(type_to_cranelift(
+                &instance.func_type.return_type,
+                self.pointer_type,
+            ))
+        };
+        let sig = self.jit.create_signature(&params, ret);
+        self.jit.ctx.func.signature = sig;
+
+        // Get parameter names and concrete types
+        let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
+        let param_types: Vec<types::Type> = instance
+            .func_type
+            .params
+            .iter()
+            .map(|t| type_to_cranelift(t, self.pointer_type))
+            .collect();
+        let param_vole_types: Vec<Type> = instance.func_type.params.clone();
+
+        // Get return type
+        let return_type = Some((*instance.func_type.return_type).clone());
+
+        // Get source file pointer
+        let source_file_ptr = self.source_file_ptr();
+
+        // Create function builder
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+            let entry_block = builder.create_block();
+            builder.append_block_params_for_function_params(entry_block);
+            builder.switch_to_block(entry_block);
+
+            // Build variables map
+            let mut variables = HashMap::new();
+
+            // Bind parameters to variables
+            let params = builder.block_params(entry_block).to_vec();
+            for (((name, ty), vole_ty), val) in param_names
+                .iter()
+                .zip(param_types.iter())
+                .zip(param_vole_types.iter())
+                .zip(params.iter())
+            {
+                let var = builder.declare_var(*ty);
+                builder.def_var(var, *val);
+                variables.insert(*name, (var, vole_ty.clone()));
+            }
+
+            // Compile function body
+            let mut cf_ctx = ControlFlowCtx::new();
+            let mut ctx = CompileCtx {
+                interner: self.interner,
+                pointer_type: self.pointer_type,
+                module: &mut self.jit.module,
+                func_ids: &mut self.jit.func_ids,
+                source_file_ptr,
+                globals: &self.globals,
+                lambda_counter: &mut self.lambda_counter,
+                type_aliases: &self.type_aliases,
+                type_metadata: &self.type_metadata,
+                expr_types: &self.expr_types,
+                method_resolutions: &self.method_resolutions,
+                func_return_types: &self.func_return_types,
+                interface_registry: &self.interface_registry,
+                current_function_return_type: return_type,
+                error_types: &self.error_types,
+                native_registry: &self.native_registry,
+                current_module: None,
+                generic_calls: &self.generic_calls,
+                monomorph_cache: &self.monomorph_cache,
+            };
+            let terminated = compile_block(
+                &mut builder,
+                &func.body,
+                &mut variables,
+                &mut cf_ctx,
+                &mut ctx,
+            )?;
+
+            // Add implicit return if no explicit return
+            if !terminated {
+                builder.ins().return_(&[]);
+            }
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        // Define the function
+        self.jit.define_function(func_id)?;
+        self.jit.clear();
+
+        Ok(())
+    }
+
+    /// Generate a mangled name for a monomorphized function instance
+    fn mangle_monomorph_name(&self, original_name: Symbol, instance_id: u32) -> String {
+        let name = self.interner.resolve(original_name);
+        format!("{}__mono_{}", name, instance_id)
     }
 }
 

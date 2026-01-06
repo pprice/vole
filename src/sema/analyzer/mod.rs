@@ -9,6 +9,10 @@ mod stmt;
 use crate::errors::SemanticError;
 use crate::frontend::*;
 use crate::module::ModuleLoader;
+use crate::sema::generic::{
+    GenericFuncDef, MonomorphCache, MonomorphInstance, MonomorphKey, TypeParamInfo, TypeParamScope,
+    substitute_type,
+};
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry, MethodImpl, TypeId};
 use crate::sema::interface_registry::{
     InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
@@ -95,6 +99,12 @@ pub struct Analyzer {
     module_programs: HashMap<String, (Program, Interner)>,
     /// Flag to prevent recursive prelude loading
     loading_prelude: bool,
+    /// Generic function definitions (with type params)
+    generic_functions: HashMap<Symbol, GenericFuncDef>,
+    /// Cache of monomorphized function instances
+    pub monomorph_cache: MonomorphCache,
+    /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
+    generic_calls: HashMap<NodeId, MonomorphKey>,
 }
 
 impl Analyzer {
@@ -125,6 +135,9 @@ impl Analyzer {
             module_types: HashMap::new(),
             module_programs: HashMap::new(),
             loading_prelude: false,
+            generic_functions: HashMap::new(),
+            monomorph_cache: MonomorphCache::new(),
+            generic_calls: HashMap::new(),
         };
 
         // Register built-in interfaces and implementations
@@ -218,6 +231,9 @@ impl Analyzer {
             module_types: HashMap::new(),
             module_programs: HashMap::new(),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
+            generic_functions: HashMap::new(),
+            monomorph_cache: MonomorphCache::new(),
+            generic_calls: HashMap::new(),
         };
 
         // Copy existing interface registry so prelude files can reference earlier definitions
@@ -253,6 +269,81 @@ impl Analyzer {
         );
     }
 
+    /// Infer type parameters from argument types.
+    /// Given type params like [T, U], param types like [T, [U]], and arg types like [i64, [string]],
+    /// returns a map {T -> i64, U -> string}.
+    pub(crate) fn infer_type_params(
+        &self,
+        type_params: &[TypeParamInfo],
+        param_types: &[Type],
+        arg_types: &[Type],
+    ) -> HashMap<Symbol, Type> {
+        let mut inferred = HashMap::new();
+
+        // For each parameter, try to match its type against the argument type
+        for (param_type, arg_type) in param_types.iter().zip(arg_types.iter()) {
+            self.unify_types(param_type, arg_type, type_params, &mut inferred);
+        }
+
+        inferred
+    }
+
+    /// Unify a parameter type pattern with an argument type, extracting type param bindings.
+    fn unify_types(
+        &self,
+        pattern: &Type,
+        actual: &Type,
+        type_params: &[TypeParamInfo],
+        inferred: &mut HashMap<Symbol, Type>,
+    ) {
+        match (pattern, actual) {
+            // If the pattern is a type param, bind it
+            (Type::TypeParam(sym), actual) => {
+                // Only bind if it's one of our type params
+                if type_params.iter().any(|tp| tp.name == *sym) {
+                    // Only bind if not already bound (first binding wins)
+                    inferred.entry(*sym).or_insert_with(|| actual.clone());
+                }
+            }
+            // Array: unify element types
+            (Type::Array(p_elem), Type::Array(a_elem)) => {
+                self.unify_types(p_elem, a_elem, type_params, inferred);
+            }
+            // Iterator types: unify element types
+            (Type::Iterator(p_elem), Type::Iterator(a_elem))
+            | (Type::MapIterator(p_elem), Type::MapIterator(a_elem))
+            | (Type::FilterIterator(p_elem), Type::FilterIterator(a_elem))
+            | (Type::TakeIterator(p_elem), Type::TakeIterator(a_elem))
+            | (Type::SkipIterator(p_elem), Type::SkipIterator(a_elem)) => {
+                self.unify_types(p_elem, a_elem, type_params, inferred);
+            }
+            // Union: try to match each pattern variant
+            (Type::Union(p_types), Type::Union(a_types)) => {
+                for (p, a) in p_types.iter().zip(a_types.iter()) {
+                    self.unify_types(p, a, type_params, inferred);
+                }
+            }
+            // Function types: unify params and return
+            (Type::Function(p_ft), Type::Function(a_ft)) => {
+                for (p, a) in p_ft.params.iter().zip(a_ft.params.iter()) {
+                    self.unify_types(p, a, type_params, inferred);
+                }
+                self.unify_types(&p_ft.return_type, &a_ft.return_type, type_params, inferred);
+            }
+            // GenericInstance: unify type args
+            (
+                Type::GenericInstance { args: p_args, .. },
+                Type::GenericInstance { args: a_args, .. },
+            ) => {
+                for (p, a) in p_args.iter().zip(a_args.iter()) {
+                    self.unify_types(p, a, type_params, inferred);
+                }
+            }
+            // Everything else: no type params to extract
+            _ => {}
+        }
+    }
+
     /// Get the collected type aliases (for use by codegen)
     pub fn type_aliases(&self) -> &HashMap<Symbol, Type> {
         &self.type_aliases
@@ -274,7 +365,7 @@ impl Analyzer {
     }
 
     /// Take ownership of type aliases, expression types, method resolutions, interface registry,
-    /// type_implements, error_types, and module_programs (consuming self)
+    /// type_implements, error_types, module_programs, generic_functions, monomorph_cache, and generic_calls (consuming self)
     #[allow(clippy::type_complexity)]
     pub fn into_analysis_results(
         self,
@@ -286,6 +377,9 @@ impl Analyzer {
         HashMap<Symbol, Vec<Symbol>>,
         HashMap<Symbol, ErrorTypeInfo>,
         HashMap<String, (Program, Interner)>,
+        HashMap<Symbol, GenericFuncDef>,
+        MonomorphCache,
+        HashMap<NodeId, MonomorphKey>,
     ) {
         (
             self.type_aliases,
@@ -295,6 +389,9 @@ impl Analyzer {
             self.type_implements,
             self.error_types,
             self.module_programs,
+            self.generic_functions,
+            self.monomorph_cache,
+            self.generic_calls,
         )
     }
 
@@ -386,25 +483,73 @@ impl Analyzer {
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
-                    let params: Vec<Type> = func
-                        .params
-                        .iter()
-                        .map(|p| self.resolve_type(&p.ty, interner))
-                        .collect();
-                    let return_type = func
-                        .return_type
-                        .as_ref()
-                        .map(|t| self.resolve_type(t, interner))
-                        .unwrap_or(Type::Void);
+                    if func.type_params.is_empty() {
+                        // Non-generic function: resolve types normally
+                        let params: Vec<Type> = func
+                            .params
+                            .iter()
+                            .map(|p| self.resolve_type(&p.ty, interner))
+                            .collect();
+                        let return_type = func
+                            .return_type
+                            .as_ref()
+                            .map(|t| self.resolve_type(t, interner))
+                            .unwrap_or(Type::Void);
 
-                    self.functions.insert(
-                        func.name,
-                        FunctionType {
-                            params,
-                            return_type: Box::new(return_type),
-                            is_closure: false, // Named functions are never closures
-                        },
-                    );
+                        self.functions.insert(
+                            func.name,
+                            FunctionType {
+                                params,
+                                return_type: Box::new(return_type),
+                                is_closure: false,
+                            },
+                        );
+                    } else {
+                        // Generic function: resolve with type params in scope
+                        let mut type_param_scope = TypeParamScope::new();
+                        let type_params: Vec<TypeParamInfo> = func
+                            .type_params
+                            .iter()
+                            .map(|tp| {
+                                let info = TypeParamInfo {
+                                    name: tp.name,
+                                    constraint: None, // TODO: resolve constraints
+                                };
+                                type_param_scope.add(info.clone());
+                                info
+                            })
+                            .collect();
+
+                        // Resolve param types with type params in scope
+                        let ctx = TypeResolutionContext::with_type_params(
+                            &self.type_aliases,
+                            &self.classes,
+                            &self.records,
+                            &self.error_types,
+                            &self.interface_registry,
+                            interner,
+                            &type_param_scope,
+                        );
+                        let param_types: Vec<Type> = func
+                            .params
+                            .iter()
+                            .map(|p| resolve_type(&p.ty, &ctx))
+                            .collect();
+                        let return_type = func
+                            .return_type
+                            .as_ref()
+                            .map(|t| resolve_type(t, &ctx))
+                            .unwrap_or(Type::Void);
+
+                        self.generic_functions.insert(
+                            func.name,
+                            GenericFuncDef {
+                                type_params,
+                                param_types,
+                                return_type,
+                            },
+                        );
+                    }
                 }
                 Decl::Tests(_) => {
                     // Tests don't need signatures in the first pass
@@ -863,6 +1008,12 @@ impl Analyzer {
         func: &FuncDecl,
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
+        // Skip generic functions - they will be type-checked when monomorphized
+        // TODO: In M4+, we could type-check with abstract type params
+        if !func.type_params.is_empty() {
+            return Ok(());
+        }
+
         let func_type = self.functions.get(&func.name).cloned().unwrap();
         let return_type = *func_type.return_type.clone();
         self.current_function_return = Some(return_type.clone());

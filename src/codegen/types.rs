@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
 use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
+use crate::sema::generic::{MonomorphCache, MonomorphKey};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::resolution::MethodResolutions;
 use crate::sema::{ErrorTypeInfo, FunctionType, Type};
@@ -94,6 +95,10 @@ pub(crate) struct CompileCtx<'a> {
     /// Current module path when compiling module code (e.g., "std:math")
     /// None when compiling main program code
     pub current_module: Option<&'a str>,
+    /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
+    pub generic_calls: &'a HashMap<NodeId, MonomorphKey>,
+    /// Cache of monomorphized function instances
+    pub monomorph_cache: &'a MonomorphCache,
 }
 
 /// Resolve a type expression to a Vole Type (uses CompileCtx for full context)

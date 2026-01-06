@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 
-use crate::frontend::{CallExpr, ExprKind, StringPart};
+use crate::frontend::{CallExpr, ExprKind, NodeId, StringPart};
 use crate::runtime::native_registry::NativeType;
 use crate::sema::{FunctionType, Type};
 
@@ -152,7 +152,12 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a function call
-    pub fn call(&mut self, call: &CallExpr, call_line: u32) -> Result<CompiledValue, String> {
+    pub fn call(
+        &mut self,
+        call: &CallExpr,
+        call_line: u32,
+        call_expr_id: NodeId,
+    ) -> Result<CompiledValue, String> {
         let callee_sym = match &call.callee.kind {
             ExprKind::Identifier(sym) => *sym,
             _ => return self.indirect_call(call),
@@ -241,6 +246,21 @@ impl Cg<'_, '_, '_> {
                     is_closure: true,
                 };
                 return self.call_closure_value(lambda_val.value, func_type, call);
+            }
+        }
+
+        // Check if this is a call to a generic function (via monomorphization)
+        if let Some(monomorph_key) = self.ctx.generic_calls.get(&call_expr_id)
+            && let Some(instance) = self.ctx.monomorph_cache.get(monomorph_key)
+        {
+            // Use the mangled function name
+            let mangled_name = format!(
+                "{}__mono_{}",
+                self.ctx.interner.resolve(instance.original_name),
+                instance.instance_id
+            );
+            if let Some(func_id) = self.ctx.func_ids.get(&mangled_name) {
+                return self.call_func_id(*func_id, &mangled_name, call);
             }
         }
 

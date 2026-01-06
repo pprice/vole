@@ -1,5 +1,6 @@
 use super::*;
 use crate::frontend::Parser;
+use crate::sema::generic::MonomorphCache;
 
 fn compile_and_run(source: &str) -> i64 {
     let mut parser = Parser::new(source);
@@ -18,6 +19,9 @@ fn compile_and_run(source: &str) -> i64 {
             HashMap::new(),
             HashMap::new(), // error_types
             HashMap::new(), // module_programs
+            HashMap::new(), // generic_functions
+            MonomorphCache::new(),
+            HashMap::new(), // generic_calls
         );
         compiler.compile_program(&program).unwrap();
     }

@@ -1,0 +1,18 @@
+// Test: Generic function that applies another function
+func apply_twice<T>(x: T, f: (T) -> T) -> T {
+    return f(f(x))
+}
+
+tests {
+    test "apply_twice with i64" {
+        let double = (x: i64) => x * 2
+        let result = apply_twice(5, double)
+        assert(result == 20)  // 5 * 2 * 2 = 20
+    }
+
+    test "apply_twice with bool" {
+        let negate = (b: bool) => !b
+        let result = apply_twice(true, negate)
+        assert(result == true)  // !(!true) = true
+    }
+}
