@@ -4,6 +4,7 @@ pub mod assert;
 pub mod builtins;
 pub mod closure;
 pub mod instance;
+pub mod iterator;
 pub mod native_registry;
 pub mod stdlib;
 pub mod string;

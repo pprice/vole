@@ -606,6 +606,14 @@ impl Cg<'_, '_, '_> {
                 let result = self.call_runtime("vole_array_len", &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
             }
+            (Type::Array(elem_ty), "iter") => {
+                let result = self.call_runtime("vole_array_iter", &[obj.value])?;
+                Ok(Some(CompiledValue {
+                    value: result,
+                    ty: self.ctx.pointer_type,
+                    vole_type: Type::Iterator(elem_ty.clone()),
+                }))
+            }
             (Type::String, "length") => {
                 let result = self.call_runtime("vole_string_len", &[obj.value])?;
                 Ok(Some(self.i64_value(result)))

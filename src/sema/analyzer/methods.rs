@@ -110,6 +110,20 @@ impl Analyzer {
                 }
                 Some(Type::I64)
             }
+            // Array.iter() -> Iterator<T>
+            (Type::Array(elem_ty), "iter") => {
+                if !args.is_empty() {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 0,
+                            found: args.len(),
+                            span: args[0].span.into(),
+                        },
+                        args[0].span,
+                    );
+                }
+                Some(Type::Iterator(elem_ty.clone()))
+            }
             // String.length() -> i64
             (Type::String, "length") => {
                 if !args.is_empty() {
@@ -199,6 +213,7 @@ impl Analyzer {
     ) -> Option<Type> {
         match (object_type, method_name) {
             (Type::Array(_), "length") => Some(Type::I64),
+            (Type::Array(elem_ty), "iter") => Some(Type::Iterator(elem_ty.clone())),
             (Type::String, "length") => Some(Type::I64),
             _ => None,
         }
