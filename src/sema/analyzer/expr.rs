@@ -1799,6 +1799,17 @@ impl Analyzer {
             ExprKind::Import(path) => self
                 .analyze_module(path, expr.span, interner)
                 .map_err(|_| self.errors.clone()),
+
+            ExprKind::Yield(yield_expr) => {
+                // For now, yield is not yet supported - will be implemented with generators
+                self.errors.push(TypeError::new(
+                    SemanticError::YieldOutsideGenerator {
+                        span: yield_expr.span.into(),
+                    },
+                    yield_expr.span,
+                ));
+                Err(self.errors.clone())
+            }
         }
     }
 }

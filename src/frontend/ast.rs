@@ -349,6 +349,9 @@ pub enum ExprKind {
 
     /// Try expression (propagation operator)
     Try(Box<Expr>),
+
+    /// Yield expression (generator yield)
+    Yield(Box<YieldExpr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
@@ -547,6 +550,13 @@ pub struct MethodCallExpr {
     pub method: Symbol,
     pub args: Vec<Expr>,
     pub method_span: Span,
+}
+
+/// Yield expression: yield value
+#[derive(Debug, Clone)]
+pub struct YieldExpr {
+    pub value: Expr,
+    pub span: Span,
 }
 
 /// Lambda expression: (params) => body

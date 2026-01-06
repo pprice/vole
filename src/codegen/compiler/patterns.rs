@@ -1094,6 +1094,10 @@ pub(super) fn compile_expr(
                 vole_type,
             })
         }
+        ExprKind::Yield(_) => {
+            // Yield should be caught in semantic analysis
+            Err("yield expression not supported outside generator context".to_string())
+        }
     }
 }
 

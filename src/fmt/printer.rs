@@ -336,6 +336,10 @@ fn print_expr<'a>(
             .text("import")
             .append(arena.space())
             .append(arena.text(format!("\"{}\"", path))),
+        ExprKind::Yield(yield_expr) => arena
+            .text("yield")
+            .append(arena.space())
+            .append(print_expr(arena, &yield_expr.value, interner)),
     }
 }
 

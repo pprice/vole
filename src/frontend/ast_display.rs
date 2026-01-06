@@ -633,6 +633,12 @@ impl<'a> AstPrinter<'a> {
                 self.write_indent(out);
                 out.push_str(&format!("Import \"{}\"\n", path));
             }
+
+            ExprKind::Yield(yield_expr) => {
+                self.write_indent(out);
+                out.push_str("Yield ");
+                self.write_expr(out, &yield_expr.value);
+            }
         }
     }
 

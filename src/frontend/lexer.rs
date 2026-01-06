@@ -395,6 +395,7 @@ impl<'src> Lexer<'src> {
             "import" => Some(TokenType::KwImport),
             "Done" => Some(TokenType::KwDone),
             "Iterator" => Some(TokenType::KwIterator),
+            "yield" => Some(TokenType::KwYield),
             "i8" => Some(TokenType::KwI8),
             "i16" => Some(TokenType::KwI16),
             "i32" => Some(TokenType::KwI32),

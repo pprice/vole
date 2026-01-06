@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  x [E2069]: yield expression outside of generator function
+   ,-[<path>/yield_syntax.vole:3:5]
+ 2 | func gen() -> Iterator<i32> {
+ 3 |     yield 1
+   :     ^^^|^^^
+   :        `-- yield used here
+ 4 |     yield 2
+   `----
+  help: yield can only be used inside generator functions

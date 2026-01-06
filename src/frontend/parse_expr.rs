@@ -691,6 +691,7 @@ impl<'src> Parser<'src> {
             }
             TokenType::KwMatch => self.match_expr(),
             TokenType::KwTry => self.try_expr(),
+            TokenType::KwYield => self.yield_expr(),
             // Type keywords in expression position: `let X = i32`
             TokenType::KwI8
             | TokenType::KwI16
@@ -999,6 +1000,22 @@ impl<'src> Parser<'src> {
         Ok(Expr {
             id: self.next_id(),
             kind: ExprKind::Try(Box::new(inner)),
+            span,
+        })
+    }
+
+    /// Parse a yield expression (generator yield)
+    fn yield_expr(&mut self) -> Result<Expr, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'yield'
+
+        // Parse the value to yield
+        let value = self.expression(0)?;
+        let span = start_span.merge(value.span);
+
+        Ok(Expr {
+            id: self.next_id(),
+            kind: ExprKind::Yield(Box::new(YieldExpr { value, span })),
             span,
         })
     }

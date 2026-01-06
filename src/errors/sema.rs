@@ -326,4 +326,11 @@ pub enum SemanticError {
         #[label("import here")]
         span: SourceSpan,
     },
+
+    #[error("yield expression outside of generator function")]
+    #[diagnostic(code(E2069), help("yield can only be used inside generator functions"))]
+    YieldOutsideGenerator {
+        #[label("yield used here")]
+        span: SourceSpan,
+    },
 }

@@ -49,6 +49,7 @@ pub enum TokenType {
     KwImport,     // import keyword
     KwDone,       // Done keyword (iterator termination sentinel)
     KwIterator,   // Iterator keyword (parameterized iterator type)
+    KwYield,      // yield keyword (generator yield expression)
 
     // Type keywords
     KwI8,
@@ -166,6 +167,7 @@ impl TokenType {
             Self::KwImport => "import",
             Self::KwDone => "Done",
             Self::KwIterator => "Iterator",
+            Self::KwYield => "yield",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",

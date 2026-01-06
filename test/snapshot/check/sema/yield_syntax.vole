@@ -1,0 +1,5 @@
+// Test that yield parses (will fail in sema for now)
+func gen() -> Iterator<i32> {
+    yield 1
+    yield 2
+}
