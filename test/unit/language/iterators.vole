@@ -25,4 +25,50 @@ tests "iterators" {
         let iter2 = arr.iter()
         assert(true)
     }
+
+    test "iterator next returns value" {
+        let arr = [10, 20, 30]
+        let iter = arr.iter()
+
+        let first = iter.next()
+        // Check that we got a value, not Done
+        let not_done = !(first is Done)
+        assert(not_done)
+    }
+
+    test "iterator next returns done when exhausted" {
+        let arr = [1]
+        let iter = arr.iter()
+
+        iter.next()  // consume the one element
+        let second = iter.next()
+
+        let is_done = second is Done
+        assert(is_done)
+    }
+
+    test "iterate all elements" {
+        let arr = [1, 2, 3]
+        let iter = arr.iter()
+        let mut count = 0
+
+        // Verify we can call next() three times and get values
+        let first = iter.next()
+        assert(!(first is Done))
+        count = count + 1
+
+        let second = iter.next()
+        assert(!(second is Done))
+        count = count + 1
+
+        let third = iter.next()
+        assert(!(third is Done))
+        count = count + 1
+
+        // Fourth call should return Done
+        let fourth = iter.next()
+        assert(fourth is Done)
+
+        assert(count == 3)
+    }
 }

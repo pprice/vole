@@ -614,6 +614,61 @@ impl Cg<'_, '_, '_> {
                     vole_type: Type::Iterator(elem_ty.clone()),
                 }))
             }
+            // Iterator.next() -> T | Done
+            (Type::Iterator(elem_ty), "next") => {
+                // Create stack slot for output value (8 bytes for i64)
+                let out_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    8,
+                    0,
+                ));
+                let out_ptr = self
+                    .builder
+                    .ins()
+                    .stack_addr(self.ctx.pointer_type, out_slot, 0);
+
+                // Call runtime: has_value = vole_array_iter_next(iter, out_ptr)
+                let has_value = self.call_runtime("vole_array_iter_next", &[obj.value, out_ptr])?;
+
+                // Load value from out_slot
+                let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
+
+                // Build union result: T | Done
+                // Union layout: [tag:1][padding:7][payload:8] = 16 bytes
+                // Tag 0 = element type (T), Tag 1 = Done
+                let union_type = Type::Union(vec![*elem_ty.clone(), Type::Done]);
+                let union_size = 16u32; // tag(1) + padding(7) + payload(8)
+                let union_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    union_size,
+                    0,
+                ));
+
+                // Determine tag based on has_value:
+                // has_value != 0 => tag = 0 (element type)
+                // has_value == 0 => tag = 1 (Done)
+                let zero = self.builder.ins().iconst(types::I64, 0);
+                let is_done = self.builder.ins().icmp(IntCC::Equal, has_value, zero);
+                let tag_done = self.builder.ins().iconst(types::I8, 1);
+                let tag_value = self.builder.ins().iconst(types::I8, 0);
+                let tag = self.builder.ins().select(is_done, tag_done, tag_value);
+
+                // Store tag at offset 0
+                self.builder.ins().stack_store(tag, union_slot, 0);
+
+                // Store payload at offset 8 (value if has_value, 0 if done)
+                self.builder.ins().stack_store(value, union_slot, 8);
+
+                let union_ptr = self
+                    .builder
+                    .ins()
+                    .stack_addr(self.ctx.pointer_type, union_slot, 0);
+                Ok(Some(CompiledValue {
+                    value: union_ptr,
+                    ty: self.ctx.pointer_type,
+                    vole_type: union_type,
+                }))
+            }
             (Type::String, "length") => {
                 let result = self.call_runtime("vole_string_len", &[obj.value])?;
                 Ok(Some(self.i64_value(result)))

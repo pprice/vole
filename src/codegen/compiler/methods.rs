@@ -320,6 +320,61 @@ pub(crate) fn compile_builtin_method(
                 vole_type: Type::Iterator(elem_ty.clone()),
             }))
         }
+        // Iterator.next() -> T | Done
+        (Type::Iterator(elem_ty), "next") => {
+            // Create stack slot for output value (8 bytes for i64)
+            let out_slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                8,
+                0,
+            ));
+            let out_ptr = builder.ins().stack_addr(ctx.pointer_type, out_slot, 0);
+
+            // Call runtime: has_value = vole_array_iter_next(iter, out_ptr)
+            let func_id = ctx
+                .func_ids
+                .get("vole_array_iter_next")
+                .ok_or_else(|| "vole_array_iter_next not found".to_string())?;
+            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let call = builder.ins().call(func_ref, &[obj.value, out_ptr]);
+            let has_value = builder.inst_results(call)[0];
+
+            // Load value from out_slot
+            let value = builder.ins().stack_load(types::I64, out_slot, 0);
+
+            // Build union result: T | Done
+            // Union layout: [tag:1][padding:7][payload:8] = 16 bytes
+            // Tag 0 = element type (T), Tag 1 = Done
+            let union_type = Type::Union(vec![*elem_ty.clone(), Type::Done]);
+            let union_size = 16u32; // tag(1) + padding(7) + payload(8)
+            let union_slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                union_size,
+                0,
+            ));
+
+            // Determine tag based on has_value:
+            // has_value != 0 => tag = 0 (element type)
+            // has_value == 0 => tag = 1 (Done)
+            let zero = builder.ins().iconst(types::I64, 0);
+            let is_done = builder.ins().icmp(IntCC::Equal, has_value, zero);
+            let tag_done = builder.ins().iconst(types::I8, 1);
+            let tag_value = builder.ins().iconst(types::I8, 0);
+            let tag = builder.ins().select(is_done, tag_done, tag_value);
+
+            // Store tag at offset 0
+            builder.ins().stack_store(tag, union_slot, 0);
+
+            // Store payload at offset 8 (value if has_value, 0 if done)
+            builder.ins().stack_store(value, union_slot, 8);
+
+            let union_ptr = builder.ins().stack_addr(ctx.pointer_type, union_slot, 0);
+            Ok(Some(CompiledValue {
+                value: union_ptr,
+                ty: ctx.pointer_type,
+                vole_type: union_type,
+            }))
+        }
         // String.length() -> i64
         (Type::String, "length") => {
             let func_id = ctx
