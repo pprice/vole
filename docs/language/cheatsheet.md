@@ -29,6 +29,7 @@ Done                    // Iterator termination sentinel
 T?                      // Optional: string?
 A | B                   // Union: i32 | string
 (A, B) -> R             // Function: (i32) -> bool
+Iterator<T>             // Iterator: produces values of type T
 type                    // Type as value: let t: type = i32
 ```
 
@@ -209,17 +210,70 @@ func process() -> fallible(i64, NotFound) {
 
 ## Iterators
 
+Arrays provide `.iter()` to get an iterator. Iterators are lazy and support chaining.
+
+### Creating Iterators
 ```vole
-array
-    .map((x) => x * 2)          // Transform
-    .filter((x) => x > 0)       // Filter
-    .take(5)                    // First 5
-    .skip(2)                    // Skip 2
-    .reduce(0, (a, x) => a + x) // Fold
-    .sum()                      // Sum numbers
-    .count()                    // Count elements
-    .collect()                  // To array
+let arr = [1, 2, 3, 4, 5]
+let iter = arr.iter()
 ```
+
+### Iterator Methods
+
+**Transformers (lazy, return iterators):**
+- `.map(fn)` - Transform each element: `arr.iter().map((x) => x * 2)`
+- `.filter(fn)` - Keep if predicate true: `arr.iter().filter((x) => x > 2)`
+- `.take(n)` - First n elements: `arr.iter().take(3)`
+- `.skip(n)` - Skip first n: `arr.iter().skip(2)`
+
+**Consumers (eager, materialize results):**
+- `.collect()` - Materialize to array: `arr.iter().collect()`
+- `.count()` - Count elements: `arr.iter().count()`
+- `.sum()` - Sum numeric elements: `arr.iter().sum()`
+- `.reduce(init, fn)` - Fold to single value: `arr.iter().reduce(0, (acc, x) => acc + x)`
+- `.for_each(fn)` - Execute side effects: `arr.iter().for_each((x) => print(x))`
+
+### Chaining
+```vole
+let result = [1, 2, 3, 4, 5]
+    .iter()
+    .filter((x) => x % 2 == 0)
+    .map((x) => x * 10)
+    .take(2)
+    .collect()
+// result == [20, 40]
+```
+
+### Iterator Protocol
+
+Iterators use `next() -> T | Done`:
+```vole
+let iter = [1, 2].iter()
+match iter.next() {
+    Done => print("empty")
+    i64 as value => print(value)
+}
+```
+
+## Generators
+
+Functions containing `yield` are generators. They return `Iterator<T>`.
+
+```vole
+func counter(max: i64) -> Iterator<i64> {
+    let mut i = 0
+    while i < max {
+        yield i
+        i = i + 1
+    }
+}
+
+// Usage
+let iter = counter(3)
+// iter.next() -> 0, 1, 2, Done
+```
+
+**Note:** Generators are transformed to state machines at compile time.
 
 ## Testing
 
