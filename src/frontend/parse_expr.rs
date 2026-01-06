@@ -599,6 +599,7 @@ impl<'src> Parser<'src> {
                                 return Ok(Expr {
                                     id: self.next_id(),
                                     kind: ExprKind::Lambda(Box::new(LambdaExpr {
+                                        type_params: Vec::new(),
                                         params: vec![LambdaParam {
                                             name,
                                             ty: None,

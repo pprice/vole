@@ -133,6 +133,7 @@ pub struct InterfaceDecl {
 #[derive(Debug, Clone)]
 pub struct InterfaceMethod {
     pub name: Symbol,
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub return_type: Option<TypeExpr>,
     pub body: Option<Block>, // None = abstract, Some = default implementation
@@ -583,6 +584,7 @@ pub struct YieldExpr {
 /// Lambda expression: (params) => body
 #[derive(Debug, Clone)]
 pub struct LambdaExpr {
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<LambdaParam>,
     pub return_type: Option<TypeExpr>,
     pub body: LambdaBody,

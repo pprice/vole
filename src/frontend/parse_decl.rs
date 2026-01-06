@@ -353,6 +353,7 @@ impl<'src> Parser<'src> {
 
         Ok(InterfaceMethod {
             name,
+            type_params: Vec::new(),
             params,
             return_type,
             body,

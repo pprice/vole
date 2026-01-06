@@ -89,6 +89,7 @@ impl<'src> Parser<'src> {
         Ok(Expr {
             id: self.next_id(),
             kind: ExprKind::Lambda(Box::new(LambdaExpr {
+                type_params: Vec::new(),
                 params,
                 return_type,
                 body,
@@ -172,6 +173,7 @@ impl<'src> Parser<'src> {
         Ok(Expr {
             id: self.next_id(),
             kind: ExprKind::Lambda(Box::new(LambdaExpr {
+                type_params: Vec::new(),
                 params,
                 return_type,
                 body,
