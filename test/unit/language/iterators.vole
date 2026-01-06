@@ -404,4 +404,69 @@ tests "iterators" {
         assert(result[1] == 18)
         assert(result[2] == 20)
     }
+
+    // reduce() tests
+
+    test "reduce to sum" {
+        let arr = [1, 2, 3, 4, 5]
+        let total = arr.iter().reduce(0, (acc, x) => acc + x)
+        assert(total == 15)
+    }
+
+    test "reduce to product" {
+        let arr = [1, 2, 3, 4]
+        let product = arr.iter().reduce(1, (acc, x) => acc * x)
+        assert(product == 24)
+    }
+
+    test "reduce empty iterator" {
+        let arr: [i64] = []
+        let result = arr.iter().reduce(100, (acc, x) => acc + x)
+        assert(result == 100)
+    }
+
+    test "reduce with filter" {
+        let arr = [1, 2, 3, 4, 5]
+        let sum_evens = arr.iter().filter((x) => x % 2 == 0).reduce(0, (acc, x) => acc + x)
+        assert(sum_evens == 6)
+    }
+
+    test "reduce with map" {
+        let arr = [1, 2, 3]
+        // Double each element then sum: (1*2) + (2*2) + (3*2) = 2 + 4 + 6 = 12
+        let result = arr.iter().map((x) => x * 2).reduce(0, (acc, x) => acc + x)
+        assert(result == 12)
+    }
+
+    test "reduce with take" {
+        let arr = [1, 2, 3, 4, 5]
+        // Take first 3, then sum: 1 + 2 + 3 = 6
+        let result = arr.iter().take(3).reduce(0, (acc, x) => acc + x)
+        assert(result == 6)
+    }
+
+    test "reduce with skip" {
+        let arr = [1, 2, 3, 4, 5]
+        // Skip first 2, then sum: 3 + 4 + 5 = 12
+        let result = arr.iter().skip(2).reduce(0, (acc, x) => acc + x)
+        assert(result == 12)
+    }
+
+    test "reduce with closure" {
+        let arr = [1, 2, 3]
+        let multiplier = 10
+        // Multiply each by 10 then sum: (1*10) + (2*10) + (3*10) = 60
+        let result = arr.iter().reduce(0, (acc, x) => acc + x * multiplier)
+        assert(result == 60)
+    }
+
+    test "reduce chained operations" {
+        let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        // Filter evens: [2, 4, 6, 8, 10]
+        // Map double: [4, 8, 12, 16, 20]
+        // Take 3: [4, 8, 12]
+        // Sum: 24
+        let result = arr.iter().filter((x) => x % 2 == 0).map((x) => x * 2).take(3).reduce(0, (acc, x) => acc + x)
+        assert(result == 24)
+    }
 }

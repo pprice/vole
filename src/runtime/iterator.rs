@@ -535,6 +535,50 @@ pub extern "C" fn vole_iter_for_each(iter: *mut UnifiedIterator, callback: *cons
     }
 }
 
+/// Reduce all elements in any iterator using an accumulator function
+/// Takes initial value and a reducer closure (acc, value) -> new_acc
+/// Returns the final accumulated value
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_iter_reduce(
+    iter: *mut UnifiedIterator,
+    init: i64,
+    reducer: *const Closure,
+) -> i64 {
+    if iter.is_null() || reducer.is_null() {
+        return init;
+    }
+
+    let mut acc = init;
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_array_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+
+        // Call the reducer closure with (acc, value) -> new_acc
+        unsafe {
+            let func_ptr = Closure::get_func(reducer);
+            let num_captures = (*reducer).num_captures;
+
+            acc = if num_captures == 0 {
+                // Pure function - call with (acc, value)
+                let reducer_fn: extern "C" fn(i64, i64) -> i64 = std::mem::transmute(func_ptr);
+                reducer_fn(acc, value)
+            } else {
+                // Closure - pass closure pointer as first arg, then (acc, value)
+                let reducer_fn: extern "C" fn(*const Closure, i64, i64) -> i64 =
+                    std::mem::transmute(func_ptr);
+                reducer_fn(reducer, acc, value)
+            };
+        }
+    }
+
+    acc
+}
+
 // =============================================================================
 // TakeIterator - lazy take of first n elements
 // =============================================================================

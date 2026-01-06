@@ -176,6 +176,10 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty, ptr_ty], None);
         self.import_function("vole_iter_for_each", &sig);
 
+        // vole_iter_reduce(iter: *mut UnifiedIterator, init: i64, reducer: *const Closure) -> i64
+        let sig = self.create_signature(&[ptr_ty, types::I64, ptr_ty], Some(types::I64));
+        self.import_function("vole_iter_reduce", &sig);
+
         // vole_take_iter(source: *mut UnifiedIterator, count: i64) -> *mut TakeIterator
         let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
         self.import_function("vole_take_iter", &sig);
@@ -388,6 +392,10 @@ impl JitContext {
         builder.symbol(
             "vole_iter_for_each",
             crate::runtime::iterator::vole_iter_for_each as *const u8,
+        );
+        builder.symbol(
+            "vole_iter_reduce",
+            crate::runtime::iterator::vole_iter_reduce as *const u8,
         );
         builder.symbol(
             "vole_take_iter",

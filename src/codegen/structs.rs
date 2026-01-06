@@ -530,6 +530,17 @@ impl Cg<'_, '_, '_> {
             return self.iterator_for_each(&obj, &mc.args);
         }
 
+        // Handle iterator.reduce(init, fn) -> reduces iterator to single value
+        if let Type::Iterator(_)
+        | Type::MapIterator(_)
+        | Type::FilterIterator(_)
+        | Type::TakeIterator(_)
+        | Type::SkipIterator(_) = &obj.vole_type
+            && method_name_str == "reduce"
+        {
+            return self.iterator_reduce(&obj, &mc.args);
+        }
+
         // Look up method resolution to determine naming convention and return type
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
         let resolution = self.ctx.method_resolutions.get(expr_id);
@@ -1174,6 +1185,57 @@ impl Cg<'_, '_, '_> {
 
         // for_each returns void
         Ok(self.void_value())
+    }
+
+    /// Handle Iterator.reduce(init, fn) -> reduces iterator to single value
+    fn iterator_reduce(
+        &mut self,
+        iter_obj: &CompiledValue,
+        args: &[Expr],
+    ) -> Result<CompiledValue, String> {
+        if args.len() != 2 {
+            return Err(format!("reduce expects 2 arguments, got {}", args.len()));
+        }
+
+        // Compile the initial value
+        let init = self.expr(&args[0])?;
+
+        // Compile the reducer function (should be a lambda/closure)
+        let reducer = self.expr(&args[1])?;
+
+        // The reducer should be a function
+        let is_closure = match &reducer.vole_type {
+            Type::Function(ft) => ft.is_closure,
+            _ => {
+                return Err(format!(
+                    "reduce argument must be a function, got {:?}",
+                    reducer.vole_type
+                ));
+            }
+        };
+
+        // If it's a pure function (not a closure), wrap it in a closure structure
+        // so the runtime can uniformly call it as a closure
+        let closure_ptr = if is_closure {
+            reducer.value
+        } else {
+            // Wrap pure function in a closure with 0 captures
+            let zero = self.builder.ins().iconst(types::I64, 0);
+            self.call_runtime("vole_closure_alloc", &[reducer.value, zero])?
+        };
+
+        // Call vole_iter_reduce(iter, init, reducer_closure)
+        let result = self.call_runtime(
+            "vole_iter_reduce",
+            &[iter_obj.value, init.value, closure_ptr],
+        )?;
+
+        // reduce returns the same type as init
+        Ok(CompiledValue {
+            value: result,
+            ty: init.ty,
+            vole_type: init.vole_type,
+        })
     }
 
     /// Call a functional interface as a closure or pure function

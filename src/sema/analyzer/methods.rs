@@ -452,6 +452,86 @@ impl Analyzer {
                 // Skip preserves element type
                 Some(Type::SkipIterator(elem_ty.clone()))
             }
+            // Iterator.reduce(init, fn) -> U where fn: (U, T) -> U
+            // Takes an initial value and an accumulator function, returns the final accumulated value
+            (Type::Iterator(elem_ty), "reduce")
+            | (Type::MapIterator(elem_ty), "reduce")
+            | (Type::FilterIterator(elem_ty), "reduce")
+            | (Type::TakeIterator(elem_ty), "reduce")
+            | (Type::SkipIterator(elem_ty), "reduce") => {
+                if args.len() != 2 {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 2,
+                            found: args.len(),
+                            span: args.first().map(|a| a.span).unwrap_or_default().into(),
+                        },
+                        args.first().map(|a| a.span).unwrap_or_default(),
+                    );
+                    // Return I64 as default - the actual type depends on the init value
+                    return Some(Type::I64);
+                }
+
+                // First argument is the initial value (any type U)
+                let init_arg = &args[0];
+                let init_ty = self.check_expr(init_arg, _interner).unwrap_or(Type::Error);
+
+                // Second argument should be a function (U, T) -> U
+                let expected_fn_type = FunctionType {
+                    params: vec![init_ty.clone(), *elem_ty.clone()],
+                    return_type: Box::new(init_ty.clone()),
+                    is_closure: true,
+                };
+
+                let reducer_arg = &args[1];
+                let reducer_ty = if let ExprKind::Lambda(lambda) = &reducer_arg.kind {
+                    self.analyze_lambda(lambda, Some(&expected_fn_type), _interner)
+                } else {
+                    self.check_expr(reducer_arg, _interner)
+                        .unwrap_or(Type::Error)
+                };
+
+                // Verify it's a function with correct signature
+                match &reducer_ty {
+                    Type::Function(ft) => {
+                        // Check it has 2 parameters
+                        if ft.params.len() != 2 {
+                            self.add_error(
+                                SemanticError::WrongArgumentCount {
+                                    expected: 2,
+                                    found: ft.params.len(),
+                                    span: reducer_arg.span.into(),
+                                },
+                                reducer_arg.span,
+                            );
+                        }
+                        // Return type should match the accumulator type (init type)
+                        if *ft.return_type != init_ty {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: init_ty.name().to_string(),
+                                    found: ft.return_type.name().to_string(),
+                                    span: reducer_arg.span.into(),
+                                },
+                                reducer_arg.span,
+                            );
+                        }
+                    }
+                    _ => {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "function".to_string(),
+                                found: reducer_ty.name().to_string(),
+                                span: reducer_arg.span.into(),
+                            },
+                            reducer_arg.span,
+                        );
+                    }
+                }
+
+                // reduce returns the same type as the initial value
+                Some(init_ty)
+            }
             // String.length() -> i64
             (Type::String, "length") => {
                 if !args.is_empty() {

@@ -217,6 +217,17 @@ pub(crate) fn compile_method_call(
         return compile_iterator_for_each(builder, &obj, &mc.args, variables, ctx);
     }
 
+    // Handle iterator.reduce(init, fn) -> reduces iterator to single value
+    if let Type::Iterator(_)
+    | Type::MapIterator(_)
+    | Type::FilterIterator(_)
+    | Type::TakeIterator(_)
+    | Type::SkipIterator(_) = &obj.vole_type
+        && method_name_str == "reduce"
+    {
+        return compile_iterator_reduce(builder, &obj, &mc.args, variables, ctx);
+    }
+
     // Look up method resolution to determine naming convention and return type
     // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
     let resolution = ctx.method_resolutions.get(expr_id);
@@ -1011,6 +1022,70 @@ fn compile_iterator_for_each(
         value: builder.ins().iconst(types::I64, 0),
         ty: types::I64,
         vole_type: Type::Void,
+    })
+}
+
+/// Compile Iterator.reduce(init, fn) -> reduces iterator to single value
+fn compile_iterator_reduce(
+    builder: &mut FunctionBuilder,
+    iter_obj: &CompiledValue,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    if args.len() != 2 {
+        return Err(format!("reduce expects 2 arguments, got {}", args.len()));
+    }
+
+    // Compile the initial value
+    let init = compile_expr(builder, &args[0], variables, ctx)?;
+
+    // Compile the reducer function (should be a lambda/closure)
+    let reducer = compile_expr(builder, &args[1], variables, ctx)?;
+
+    // The reducer should be a function
+    let is_closure = match &reducer.vole_type {
+        Type::Function(ft) => ft.is_closure,
+        _ => {
+            return Err(format!(
+                "reduce argument must be a function, got {:?}",
+                reducer.vole_type
+            ));
+        }
+    };
+
+    // If it's a pure function (not a closure), wrap it in a closure structure
+    // so the runtime can uniformly call it as a closure
+    let closure_ptr = if is_closure {
+        reducer.value
+    } else {
+        // Wrap pure function in a closure with 0 captures
+        let alloc_id = ctx
+            .func_ids
+            .get("vole_closure_alloc")
+            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
+        let alloc_ref = ctx.module.declare_func_in_func(*alloc_id, builder.func);
+        let zero = builder.ins().iconst(types::I64, 0);
+        let alloc_call = builder.ins().call(alloc_ref, &[reducer.value, zero]);
+        builder.inst_results(alloc_call)[0]
+    };
+
+    // Call vole_iter_reduce(iter, init, reducer_closure)
+    let func_id = ctx
+        .func_ids
+        .get("vole_iter_reduce")
+        .ok_or_else(|| "vole_iter_reduce not found".to_string())?;
+    let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+    let call = builder
+        .ins()
+        .call(func_ref, &[iter_obj.value, init.value, closure_ptr]);
+    let result = builder.inst_results(call)[0];
+
+    // reduce returns the same type as init
+    Ok(CompiledValue {
+        value: result,
+        ty: init.ty,
+        vole_type: init.vole_type,
     })
 }
 
