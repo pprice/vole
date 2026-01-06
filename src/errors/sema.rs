@@ -333,4 +333,24 @@ pub enum SemanticError {
         #[label("yield used here")]
         span: SourceSpan,
     },
+
+    #[error("yield in function without Iterator return type")]
+    #[diagnostic(
+        code(E2070),
+        help("functions that use yield must have return type Iterator<T>")
+    )]
+    YieldInNonGenerator {
+        found: String,
+        #[label("function returns {found}, not Iterator<T>")]
+        span: SourceSpan,
+    },
+
+    #[error("yield expression type '{found}' doesn't match Iterator element type '{expected}'")]
+    #[diagnostic(code(E2071))]
+    YieldTypeMismatch {
+        expected: String,
+        found: String,
+        #[label("expected {expected}")]
+        span: SourceSpan,
+    },
 }

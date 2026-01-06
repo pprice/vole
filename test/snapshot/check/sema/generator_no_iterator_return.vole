@@ -1,0 +1,5 @@
+// Yield in non-generator function (doesn't return Iterator)
+func not_gen() -> i64 {
+    yield 1  // Error: yield in function that doesn't return Iterator
+    return 0
+}

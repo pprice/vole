@@ -1801,14 +1801,50 @@ impl Analyzer {
                 .map_err(|_| self.errors.clone()),
 
             ExprKind::Yield(yield_expr) => {
-                // For now, yield is not yet supported - will be implemented with generators
-                self.errors.push(TypeError::new(
-                    SemanticError::YieldOutsideGenerator {
-                        span: yield_expr.span.into(),
-                    },
-                    yield_expr.span,
-                ));
-                Err(self.errors.clone())
+                // Check if we're inside a function at all
+                if self.current_function_return.is_none() {
+                    self.add_error(
+                        SemanticError::YieldOutsideGenerator {
+                            span: yield_expr.span.into(),
+                        },
+                        yield_expr.span,
+                    );
+                    return Ok(Type::Void);
+                }
+
+                // Check if we're inside a generator function (Iterator<T> return type)
+                let Some(element_type) = self.current_generator_element_type.clone() else {
+                    // Not a generator - report error with actual return type
+                    let return_type = self.current_function_return.as_ref().unwrap();
+                    self.add_error(
+                        SemanticError::YieldInNonGenerator {
+                            found: format!("{}", return_type),
+                            span: yield_expr.span.into(),
+                        },
+                        yield_expr.span,
+                    );
+                    return Ok(Type::Void);
+                };
+
+                // Type check the yield expression against the Iterator element type
+                let yield_type =
+                    self.check_expr_expecting(&yield_expr.value, Some(&element_type), interner)?;
+
+                // Check type compatibility
+                if !self.types_compatible(&yield_type, &element_type, interner) {
+                    self.add_error(
+                        SemanticError::YieldTypeMismatch {
+                            expected: format!("{}", element_type),
+                            found: format!("{}", yield_type),
+                            span: yield_expr.value.span.into(),
+                        },
+                        yield_expr.value.span,
+                    );
+                }
+
+                // yield expression returns Void (its value is the yielded element, but
+                // the expression itself doesn't produce a value in the control flow)
+                Ok(Type::Void)
             }
         }
     }

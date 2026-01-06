@@ -1,0 +1,4 @@
+// Yield type doesn't match Iterator element type
+func gen() -> Iterator<i64> {
+    yield "hello"  // Error: expected i64, got string
+}

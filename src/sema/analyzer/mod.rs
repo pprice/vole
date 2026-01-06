@@ -52,6 +52,9 @@ pub struct Analyzer {
     current_function_return: Option<Type>,
     /// Current function's error type (if fallible)
     current_function_error_type: Option<Type>,
+    /// Generator context: if inside a generator function, this holds the Iterator element type.
+    /// None means we're not in a generator (or not in a function at all).
+    current_generator_element_type: Option<Type>,
     errors: Vec<TypeError>,
     /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
     type_overrides: HashMap<Symbol, Type>,
@@ -102,6 +105,7 @@ impl Analyzer {
             globals: HashMap::new(),
             current_function_return: None,
             current_function_error_type: None,
+            current_generator_element_type: None,
             errors: Vec::new(),
             type_overrides: HashMap::new(),
             lambda_captures: Vec::new(),
@@ -194,6 +198,7 @@ impl Analyzer {
             globals: HashMap::new(),
             current_function_return: None,
             current_function_error_type: None,
+            current_generator_element_type: None,
             errors: Vec::new(),
             type_overrides: HashMap::new(),
             lambda_captures: Vec::new(),
@@ -867,6 +872,9 @@ impl Analyzer {
             self.current_function_error_type = None;
         }
 
+        // Set generator context if return type is Iterator<T>
+        self.current_generator_element_type = self.extract_iterator_element_type(&return_type);
+
         // Create new scope with parameters
         let parent_scope = std::mem::take(&mut self.scope);
         self.scope = Scope::with_parent(parent_scope);
@@ -890,8 +898,21 @@ impl Analyzer {
         }
         self.current_function_return = None;
         self.current_function_error_type = None;
+        self.current_generator_element_type = None;
 
         Ok(())
+    }
+
+    /// Extract the element type from an Iterator<T> type, or None if not an iterator type
+    fn extract_iterator_element_type(&self, ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Iterator(elem) => Some((**elem).clone()),
+            Type::MapIterator(elem) => Some((**elem).clone()),
+            Type::FilterIterator(elem) => Some((**elem).clone()),
+            Type::TakeIterator(elem) => Some((**elem).clone()),
+            Type::SkipIterator(elem) => Some((**elem).clone()),
+            _ => None,
+        }
     }
 
     fn check_method(
@@ -911,6 +932,9 @@ impl Analyzer {
         } else {
             self.current_function_error_type = None;
         }
+
+        // Set generator context if return type is Iterator<T>
+        self.current_generator_element_type = self.extract_iterator_element_type(&return_type);
 
         // Create scope with 'self' and parameters
         let parent_scope = std::mem::take(&mut self.scope);
@@ -954,6 +978,7 @@ impl Analyzer {
         }
         self.current_function_return = None;
         self.current_function_error_type = None;
+        self.current_generator_element_type = None;
 
         Ok(())
     }
