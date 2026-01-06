@@ -238,6 +238,17 @@ impl<'a> AstPrinter<'a> {
                 self.write_type_inline(out, error_type);
                 out.push(')');
             }
+            TypeExpr::Generic { name, args } => {
+                out.push_str(self.interner.resolve(*name));
+                out.push('<');
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    self.write_type_inline(out, arg);
+                }
+                out.push('>');
+            }
         }
     }
 
@@ -743,6 +754,17 @@ impl<'a> AstPrinter<'a> {
                 out.push_str(", ");
                 self.write_type_expr_inline(out, error_type);
                 out.push(')');
+            }
+            TypeExpr::Generic { name, args } => {
+                out.push_str(self.interner.resolve(*name));
+                out.push('<');
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    self.write_type_expr_inline(out, arg);
+                }
+                out.push('>');
             }
         }
     }

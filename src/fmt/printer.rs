@@ -945,6 +945,17 @@ fn print_type_expr<'a>(
             .append(arena.text(", "))
             .append(print_type_expr(arena, error_type, interner))
             .append(arena.text(")")),
+        TypeExpr::Generic { name, args } => {
+            let arg_docs: Vec<_> = args
+                .iter()
+                .map(|t| print_type_expr(arena, t, interner))
+                .collect();
+            arena
+                .text(interner.resolve(*name).to_string())
+                .append(arena.text("<"))
+                .append(arena.intersperse(arg_docs, arena.text(", ")))
+                .append(arena.text(">"))
+        }
     }
 }
 

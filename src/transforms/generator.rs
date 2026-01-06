@@ -573,6 +573,14 @@ impl<'a> GeneratorTransformer<'a> {
                 self.type_expr_to_string(success_type),
                 self.type_expr_to_string(error_type)
             ),
+            TypeExpr::Generic { name, args } => {
+                let args_str = args
+                    .iter()
+                    .map(|a| self.type_expr_to_string(a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}<{}>", self.interner.resolve(*name), args_str)
+            }
         }
     }
 

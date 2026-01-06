@@ -262,6 +262,10 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 error_type: Box::new(error),
             })
         }
+        TypeExpr::Generic { .. } => {
+            // TODO: Implement generic type resolution
+            Type::Error
+        }
     }
 }
 

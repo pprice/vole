@@ -124,6 +124,10 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
                 error_type: Box::new(error),
             })
         }
+        TypeExpr::Generic { .. } => {
+            // TODO: Implement generic type resolution
+            Type::Error
+        }
     }
 }
 

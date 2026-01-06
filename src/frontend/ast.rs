@@ -197,6 +197,11 @@ pub enum TypeExpr {
         success_type: Box<TypeExpr>,
         error_type: Box<TypeExpr>,
     },
+    /// Generic type application: Box<i64>, Map<string, i64>
+    Generic {
+        name: Symbol,
+        args: Vec<TypeExpr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
