@@ -1026,3 +1026,20 @@ fn test_parse_generic_class() {
         panic!("expected class");
     }
 }
+
+#[test]
+fn test_parse_generic_interface() {
+    let source = r#"
+interface Iterable<T> {
+    func next() -> T?
+}
+"#;
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("should parse");
+
+    if let Decl::Interface(i) = &program.declarations[0] {
+        assert_eq!(i.type_params.len(), 1);
+    } else {
+        panic!("expected interface");
+    }
+}

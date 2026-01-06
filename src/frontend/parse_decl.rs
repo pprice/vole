@@ -242,6 +242,9 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::Identifier, "expected interface name")?;
         let name = self.interner.intern(&name_token.lexeme);
 
+        // Parse optional type parameters: interface Iterator<T>
+        let type_params = self.parse_type_params()?;
+
         // Parse optional extends clause
         let mut extends = Vec::new();
         if self.match_token(TokenType::KwExtends) {
@@ -312,7 +315,7 @@ impl<'src> Parser<'src> {
 
         Ok(Decl::Interface(InterfaceDecl {
             name,
-            type_params: Vec::new(),
+            type_params,
             extends,
             fields,
             external,
