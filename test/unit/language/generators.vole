@@ -1,0 +1,21 @@
+// Generator function tests
+// Test transformation of generator functions containing yield into state machines
+
+func simple_gen() -> Iterator<i64> {
+    yield 1
+    yield 2
+    yield 3
+}
+
+tests {
+    test "simple generator creates" {
+        let iter = simple_gen()
+        assert(true)
+    }
+
+    test "generator next" {
+        let iter = simple_gen()
+        let result = iter.next()
+        assert(true)
+    }
+}

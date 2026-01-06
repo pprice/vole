@@ -212,17 +212,12 @@ impl<'a> Compiler<'a> {
                     let name = self.interner.resolve(func.name);
                     self.jit.declare_function(name, &sig);
                     // Record return type for use in call expressions
+                    // Note: Use resolve_type_with_metadata so that record types (like
+                    // generated generator records) are properly resolved from type_metadata
                     let return_type = func
                         .return_type
                         .as_ref()
-                        .map(|t| {
-                            resolve_type_expr_full(
-                                t,
-                                &self.type_aliases,
-                                &self.interface_registry,
-                                self.interner,
-                            )
-                        })
+                        .map(|t| self.resolve_type_with_metadata(t))
                         .unwrap_or(Type::Void);
                     self.func_return_types.insert(name.to_string(), return_type);
                 }
@@ -1174,6 +1169,16 @@ impl<'a> Compiler<'a> {
                 variables.insert(*name, (var, vole_ty.clone()));
             }
 
+            // Compute the method's return type for proper union wrapping
+            let method_return_type = method.return_type.as_ref().map(|t| {
+                resolve_type_expr_full(
+                    t,
+                    &self.type_aliases,
+                    &self.interface_registry,
+                    self.interner,
+                )
+            });
+
             // Compile method body
             let mut cf_ctx = ControlFlowCtx::new();
             let mut ctx = CompileCtx {
@@ -1190,7 +1195,7 @@ impl<'a> Compiler<'a> {
                 method_resolutions: &self.method_resolutions,
                 func_return_types: &self.func_return_types,
                 interface_registry: &self.interface_registry,
-                current_function_return_type: None, // Methods don't use raise statements yet
+                current_function_return_type: method_return_type,
                 error_types: &self.error_types,
                 native_registry: &self.native_registry,
                 current_module: None,

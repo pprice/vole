@@ -204,6 +204,13 @@ impl Cg<'_, '_, '_> {
                                 .stack_addr(self.ctx.pointer_type, slot, 0);
 
                         self.builder.ins().return_(&[fallible_ptr]);
+                    } else if let Some(Type::Union(variants)) =
+                        &self.ctx.current_function_return_type
+                    {
+                        // For union return types, wrap the value in a union
+                        let union_type = Type::Union(variants.clone());
+                        let wrapped = self.construct_union(compiled, &union_type)?;
+                        self.builder.ins().return_(&[wrapped.value]);
                     } else {
                         // Non-fallible function, return value directly
                         self.builder.ins().return_(&[compiled.value]);

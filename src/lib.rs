@@ -10,4 +10,5 @@ pub mod module;
 pub mod runtime;
 pub mod sema;
 pub mod snap;
+pub mod transforms;
 pub mod util;

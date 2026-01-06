@@ -504,8 +504,14 @@ pub(crate) fn compile_user_function_call(
     } else {
         let result = results[0];
         let ty = builder.func.dfg.value_type(result);
-        // Infer vole_type from Cranelift type
-        let vole_type = cranelift_to_vole_type(ty);
+        // Look up the actual Vole return type from func_return_types
+        // This is important for record types where the Cranelift type is i64 (pointer)
+        // but the Vole type is Record(...)
+        let vole_type = ctx
+            .func_return_types
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| cranelift_to_vole_type(ty));
         Ok(CompiledValue {
             value: result,
             ty,

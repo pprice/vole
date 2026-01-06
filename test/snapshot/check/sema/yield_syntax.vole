@@ -1,5 +1,5 @@
-// Test that yield parses (will fail in sema for now)
-func gen() -> Iterator<i32> {
+// Test that yield parses and transforms correctly
+func gen() -> Iterator<i64> {
     yield 1
     yield 2
 }

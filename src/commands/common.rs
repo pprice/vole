@@ -14,6 +14,7 @@ use crate::frontend::{AstPrinter, Interner, NodeId, ParseError, Parser, Symbol, 
 use crate::runtime::set_stdout_capture;
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::{Analyzer, ErrorTypeInfo, MethodResolutions, Type, TypeError};
+use crate::transforms;
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
@@ -91,7 +92,7 @@ fn render_sema_error_to<W: Write>(err: &TypeError, file_path: &str, source: &str
 pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgram, ()> {
     // Parse
     let mut parser = Parser::with_file(source, file_path);
-    let program = match parser.parse_program() {
+    let mut program = match parser.parse_program() {
         Ok(prog) => prog,
         Err(e) => {
             // Render any lexer errors first
@@ -116,7 +117,16 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         return Err(());
     }
 
-    let interner = parser.into_interner();
+    let mut interner = parser.into_interner();
+
+    // Transform generators to state machines (before type checking)
+    let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
+    if !transform_errors.is_empty() {
+        for err in &transform_errors {
+            render_sema_error(err, file_path, source);
+        }
+        return Err(());
+    }
 
     // Type check
     let mut analyzer = Analyzer::new(file_path, source);
@@ -218,7 +228,7 @@ pub fn check_captured<W: Write + Send + 'static>(
 ) -> Result<(), ()> {
     // Parse
     let mut parser = Parser::with_file(source, file_path);
-    let program = match parser.parse_program() {
+    let mut program = match parser.parse_program() {
         Ok(prog) => prog,
         Err(e) => {
             let lexer_errors = parser.take_lexer_errors();
@@ -241,7 +251,16 @@ pub fn check_captured<W: Write + Send + 'static>(
         return Err(());
     }
 
-    let interner = parser.into_interner();
+    let mut interner = parser.into_interner();
+
+    // Transform generators to state machines (before type checking)
+    let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
+    if !transform_errors.is_empty() {
+        for err in &transform_errors {
+            render_sema_error_to(err, file_path, source, &mut stderr);
+        }
+        return Err(());
+    }
 
     // Type check
     let mut analyzer = Analyzer::new(file_path, source);
@@ -265,7 +284,7 @@ pub fn run_captured<W: Write + Send + 'static>(
 ) -> Result<(), ()> {
     // Parse and analyze
     let mut parser = Parser::with_file(source, file_path);
-    let program = match parser.parse_program() {
+    let mut program = match parser.parse_program() {
         Ok(prog) => prog,
         Err(e) => {
             let lexer_errors = parser.take_lexer_errors();
@@ -288,7 +307,16 @@ pub fn run_captured<W: Write + Send + 'static>(
         return Err(());
     }
 
-    let interner = parser.into_interner();
+    let mut interner = parser.into_interner();
+
+    // Transform generators to state machines (before type checking)
+    let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
+    if !transform_errors.is_empty() {
+        for err in &transform_errors {
+            render_sema_error_to(err, file_path, source, &mut stderr);
+        }
+        return Err(());
+    }
 
     // Type check
     let mut analyzer = Analyzer::new(file_path, source);
