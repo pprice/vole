@@ -254,6 +254,28 @@ impl FunctionRegistry {
         key
     }
 
+    pub fn intern_test_name(&mut self, index: usize) -> (NameId, FunctionKey) {
+        let name_id = self
+            .names
+            .intern_indexed_raw(self.builtin_module(), "__test_", index);
+        let key = self.intern_name_id(name_id);
+        let name_id = self
+            .name_for_qualified(key)
+            .expect("test function name_id should be available");
+        (name_id, key)
+    }
+
+    pub fn intern_lambda_name(&mut self, index: usize) -> (NameId, FunctionKey) {
+        let name_id = self
+            .names
+            .intern_indexed_raw(self.builtin_module(), "__lambda_", index);
+        let key = self.intern_name_id(name_id);
+        let name_id = self
+            .name_for_qualified(key)
+            .expect("lambda name_id should be available");
+        (name_id, key)
+    }
+
     pub fn set_func_id(&mut self, key: FunctionKey, func_id: FuncId) {
         if let Some(entry) = self.entries.get_mut(key.0 as usize) {
             entry.func_id = Some(func_id);

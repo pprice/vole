@@ -8,7 +8,7 @@ mod stmt;
 
 use crate::errors::SemanticError;
 use crate::frontend::*;
-use crate::identity::{ModuleId, NameId, NameTable};
+use crate::identity::{ModuleId, NameId, NameTable, Namer, NamerLookup};
 use crate::module::ModuleLoader;
 use crate::sema::generic::{
     GenericFuncDef, MonomorphCache, MonomorphInstance, MonomorphKey, TypeParamInfo, TypeParamScope,
@@ -166,6 +166,7 @@ impl Analyzer {
 
     fn register_primitive_name_ids(&mut self, interner: &Interner) {
         let builtin_module = self.name_table.builtin_module();
+        let mut namer = Namer::new(&mut self.name_table, interner);
         for prim in [
             PrimitiveTypeId::I8,
             PrimitiveTypeId::I16,
@@ -182,13 +183,13 @@ impl Analyzer {
             PrimitiveTypeId::String,
         ] {
             let name_id = if let Some(sym) = interner.lookup(prim.name()) {
-                self.name_table.intern(builtin_module, &[sym])
+                namer.intern_symbol(builtin_module, sym)
             } else {
-                self.name_table.intern_raw(builtin_module, &[prim.name()])
+                namer.intern_raw(builtin_module, &[prim.name()])
             };
             self.type_table.register_primitive_name(prim, name_id);
         }
-        let array_name = self.name_table.intern_raw(builtin_module, &["array"]);
+        let array_name = namer.intern_raw(builtin_module, &["array"]);
         self.type_table.register_array_name(array_name);
     }
 
@@ -523,15 +524,13 @@ impl Analyzer {
     }
 
     fn method_name_id(&mut self, name: Symbol, interner: &Interner) -> NameId {
-        let module_id = self.name_table.builtin_module();
-        let name_str = interner.resolve(name);
-        self.name_table.intern_raw(module_id, &[name_str])
+        let mut namer = Namer::new(&mut self.name_table, interner);
+        namer.method(name)
     }
 
     fn method_name_id_lookup(&self, name: Symbol, interner: &Interner) -> Option<NameId> {
-        let module_id = self.name_table.builtin_module_id()?;
-        let name_str = interner.resolve(name);
-        self.name_table.name_id_raw(module_id, &[name_str])
+        let namer = NamerLookup::new(&self.name_table, interner);
+        namer.method(name)
     }
 
     /// Mark the current lambda as having side effects

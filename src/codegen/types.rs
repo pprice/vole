@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use crate::codegen::FunctionRegistry;
 use crate::commands::common::AnalyzedProgram;
 use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
-use crate::identity::{ModuleId, NameId, NameTable};
+use crate::identity::{ModuleId, NameId, NameTable, NamerLookup};
 use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::generic::{MonomorphCache, MonomorphKey};
@@ -139,12 +139,8 @@ pub(crate) fn method_name_id(
     interner: &Interner,
     name: Symbol,
 ) -> Option<NameId> {
-    let module_id = analyzed
-        .name_table
-        .builtin_module_id()
-        .unwrap_or_else(|| analyzed.name_table.main_module());
-    let name_str = interner.resolve(name);
-    analyzed.name_table.name_id_raw(module_id, &[name_str])
+    let namer = NamerLookup::new(&analyzed.name_table, interner);
+    namer.method(name)
 }
 
 pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: &Type) -> String {

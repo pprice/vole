@@ -108,7 +108,6 @@ impl Compiler<'_> {
         });
 
         // Collect method return types
-        let type_name = self.analyzed.interner.resolve(class.name);
         let module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
         for method in &class.methods {
@@ -117,13 +116,14 @@ impl Compiler<'_> {
                 .as_ref()
                 .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(Type::Void);
-            let method_name_str = self.analyzed.interner.resolve(method.name);
-            let full_name = format!("{}_{}", type_name, method_name_str);
             let sig = self.create_method_signature(method);
-            let func_id = self.jit.declare_function(&full_name, &sig);
             let func_key = self
                 .func_registry
                 .intern_qualified(module_id, &[class.name, method.name]);
+            let display_name = self
+                .func_registry
+                .display(func_key, &self.analyzed.interner);
+            let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
             let method_id = method_name_id(self.analyzed, &self.analyzed.interner, method.name)
                 .unwrap_or_else(|| {
@@ -158,13 +158,14 @@ impl Compiler<'_> {
                                 .as_ref()
                                 .map(|t| self.resolve_type_with_metadata(t))
                                 .unwrap_or(Type::Void);
-                            let method_name_str = self.analyzed.interner.resolve(method.name);
-                            let full_name = format!("{}_{}", type_name, method_name_str);
                             let sig = self.create_interface_method_signature(method);
-                            let func_id = self.jit.declare_function(&full_name, &sig);
                             let func_key = self
                                 .func_registry
                                 .intern_qualified(module_id, &[class.name, method.name]);
+                            let display_name = self
+                                .func_registry
+                                .display(func_key, &self.analyzed.interner);
+                            let func_id = self.jit.declare_function(&display_name, &sig);
                             self.func_registry.set_func_id(func_key, func_id);
                             let method_id =
                                 method_name_id(self.analyzed, &self.analyzed.interner, method.name)
@@ -278,7 +279,6 @@ impl Compiler<'_> {
         });
 
         // Collect method return types
-        let type_name = self.analyzed.interner.resolve(record.name);
         let module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
         for method in &record.methods {
@@ -287,13 +287,14 @@ impl Compiler<'_> {
                 .as_ref()
                 .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(Type::Void);
-            let method_name_str = self.analyzed.interner.resolve(method.name);
-            let full_name = format!("{}_{}", type_name, method_name_str);
             let sig = self.create_method_signature(method);
-            let func_id = self.jit.declare_function(&full_name, &sig);
             let func_key = self
                 .func_registry
                 .intern_qualified(module_id, &[record.name, method.name]);
+            let display_name = self
+                .func_registry
+                .display(func_key, &self.analyzed.interner);
+            let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
             let method_id = method_name_id(self.analyzed, &self.analyzed.interner, method.name)
                 .unwrap_or_else(|| {
@@ -328,13 +329,14 @@ impl Compiler<'_> {
                                 .as_ref()
                                 .map(|t| self.resolve_type_with_metadata(t))
                                 .unwrap_or(Type::Void);
-                            let method_name_str = self.analyzed.interner.resolve(method.name);
-                            let full_name = format!("{}_{}", type_name, method_name_str);
                             let sig = self.create_interface_method_signature(method);
-                            let func_id = self.jit.declare_function(&full_name, &sig);
                             let func_key = self
                                 .func_registry
                                 .intern_qualified(module_id, &[record.name, method.name]);
+                            let display_name = self
+                                .func_registry
+                                .display(func_key, &self.analyzed.interner);
+                            let func_id = self.jit.declare_function(&display_name, &sig);
                             self.func_registry.set_func_id(func_key, func_id);
                             let method_id =
                                 method_name_id(self.analyzed, &self.analyzed.interner, method.name)

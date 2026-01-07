@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::identity::Namer;
 
 impl Analyzer {
     pub(super) fn check_call_expr(
@@ -126,17 +127,21 @@ impl Analyzer {
                     .filter_map(|tp| inferred.get(&tp.name).cloned())
                     .collect();
                 let type_keys = type_args.iter().map(|ty| self.type_key_for(ty)).collect();
-                let name_id = self
-                    .name_table
-                    .intern(self.name_table.main_module(), &[*sym]);
+                let module_id = self.name_table.main_module();
+                let name_id = {
+                    let mut namer = Namer::new(&mut self.name_table, interner);
+                    namer.intern_symbol(module_id, *sym)
+                };
                 let key = MonomorphKey::new(name_id, type_keys);
 
                 if !self.monomorph_cache.contains(&key) {
                     let id = self.monomorph_cache.next_unique_id();
                     let module_id = self.name_table.module_of(name_id);
                     let base_sym = self.name_table.last_symbol(name_id).unwrap_or(*sym);
-                    let mangled = format!("{}__mono_{}", interner.resolve(base_sym), id);
-                    let mangled_name = self.name_table.intern_raw(module_id, &[mangled.as_str()]);
+                    let mangled_name = {
+                        let mut namer = Namer::new(&mut self.name_table, interner);
+                        namer.monomorph(module_id, base_sym, id)
+                    };
                     self.monomorph_cache.insert(
                         key.clone(),
                         MonomorphInstance {

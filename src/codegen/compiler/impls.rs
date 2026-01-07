@@ -171,13 +171,9 @@ impl Compiler<'_> {
                 self.func_registry
                     .intern_with_prefix(type_id.name_id(), method.name)
             } else {
-                let full_name = format!(
-                    "{}::{}",
-                    type_name,
-                    self.analyzed.interner.resolve(method.name)
-                );
+                let method_name_str = self.analyzed.interner.resolve(method.name);
                 self.func_registry
-                    .intern_raw_qualified(func_module, &[&full_name])
+                    .intern_raw_qualified(func_module, &[type_name.as_str(), method_name_str])
             };
             let display_name = self
                 .func_registry
@@ -274,9 +270,8 @@ impl Compiler<'_> {
                 .intern_with_prefix(type_id.name_id(), method.name)
         } else {
             let method_name_str = self.analyzed.interner.resolve(method.name);
-            let full_name = format!("{}::{}", type_name, method_name_str);
             self.func_registry
-                .intern_raw_qualified(func_module, &[&full_name])
+                .intern_raw_qualified(func_module, &[type_name, method_name_str])
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             let display = self

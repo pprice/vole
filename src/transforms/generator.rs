@@ -234,8 +234,7 @@ impl<'a> GeneratorTransformer<'a> {
         };
 
         // Generate unique name for the state machine record
-        let record_name_str = format!("__Generator_{}", self.interner.resolve(func.name));
-        let record_name = self.interner.intern(&record_name_str);
+        let record_name = self.interner.intern_with_prefix("__Generator_", func.name);
         self.generator_count += 1;
 
         // Collect yields to determine states

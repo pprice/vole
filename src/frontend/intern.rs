@@ -36,6 +36,11 @@ impl Interner {
         self.map.get(s).copied()
     }
 
+    pub fn intern_with_prefix(&mut self, prefix: &str, base: Symbol) -> Symbol {
+        let name = format!("{}{}", prefix, self.resolve(base));
+        self.intern(&name)
+    }
+
     pub fn seed_builtin_symbols(&mut self) {
         for name in [
             "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "f32", "f64", "bool",

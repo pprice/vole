@@ -8,17 +8,15 @@ use crate::codegen::FunctionKey;
 use crate::codegen::stmt::compile_block;
 use crate::codegen::types::{CompileCtx, resolve_type_expr_full, type_to_cranelift};
 use crate::frontend::{Decl, FuncDecl, Interner, LetStmt, Program, Symbol, TestCase, TestsDecl};
-use crate::identity::NameId;
+use crate::identity::{NameId, NamerLookup};
 use crate::sema::Type;
 use crate::sema::generic::MonomorphInstance;
 
 impl Compiler<'_> {
     fn main_function_key_and_name(&mut self, sym: Symbol) -> (FunctionKey, String) {
+        let namer = NamerLookup::new(&self.analyzed.name_table, &self.analyzed.interner);
+        let name_id = namer.function(self.analyzed.name_table.main_module(), sym);
         let display_name = self.analyzed.interner.resolve(sym).to_string();
-        let name_id = self
-            .analyzed
-            .name_table
-            .name_id(self.analyzed.name_table.main_module(), &[sym]);
         let key = if let Some(name_id) = name_id {
             self.func_registry.intern_name_id(name_id)
         } else {
@@ -34,14 +32,7 @@ impl Compiler<'_> {
             return (name_id, key);
         }
 
-        let segment = format!("__test_{}", test_index);
-        let key = self
-            .func_registry
-            .intern_raw_qualified(self.func_registry.builtin_module(), &[segment.as_str()]);
-        let name_id = self
-            .func_registry
-            .name_for_qualified(key)
-            .expect("test function name_id should be available");
+        let (name_id, key) = self.func_registry.intern_test_name(test_index);
         if self.test_name_ids.len() == test_index {
             self.test_name_ids.push(name_id);
         } else if self.test_name_ids.len() < test_index {
@@ -219,10 +210,8 @@ impl Compiler<'_> {
                         .name_table
                         .module_id_if_known(module_path)
                         .unwrap_or_else(|| self.analyzed.name_table.main_module());
-                    let name_id = self
-                        .analyzed
-                        .name_table
-                        .name_id(module_id, &[func.name])
+                    let name_id = NamerLookup::new(&self.analyzed.name_table, module_interner)
+                        .function(module_id, func.name)
                         .expect("module function name_id should be registered");
                     let display_name = self.analyzed.name_table.display(name_id, module_interner);
 
@@ -259,10 +248,8 @@ impl Compiler<'_> {
                         .name_table
                         .module_id_if_known(module_path)
                         .unwrap_or_else(|| self.analyzed.name_table.main_module());
-                    let name_id = self
-                        .analyzed
-                        .name_table
-                        .name_id(module_id, &[func.name])
+                    let name_id = NamerLookup::new(&self.analyzed.name_table, module_interner)
+                        .function(module_id, func.name)
                         .expect("module function name_id should be registered");
                     self.compile_module_function(
                         module_path,
@@ -955,10 +942,10 @@ impl Compiler<'_> {
                 if let Decl::Function(func) = decl
                     && !func.type_params.is_empty()
                 {
-                    let name_id = self
-                        .analyzed
-                        .name_table
-                        .name_id(self.analyzed.name_table.main_module(), &[func.name])
+                    let namer =
+                        NamerLookup::new(&self.analyzed.name_table, &self.analyzed.interner);
+                    let name_id = namer
+                        .function(self.analyzed.name_table.main_module(), func.name)
                         .expect("generic function name_id should be registered");
                     return Some((name_id, func));
                 }

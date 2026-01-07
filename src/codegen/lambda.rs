@@ -182,7 +182,6 @@ fn compile_pure_lambda(
     lambda: &LambdaExpr,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
-    let lambda_segment = format!("__lambda_{}", *ctx.lambda_counter);
     *ctx.lambda_counter += 1;
 
     let param_types: Vec<types::Type> = lambda
@@ -226,14 +225,7 @@ fn compile_pure_lambda(
     }
     sig.returns.push(AbiParam::new(return_type));
 
-    let func_key = ctx.func_registry.intern_raw_qualified(
-        ctx.func_registry.builtin_module(),
-        &[lambda_segment.as_str()],
-    );
-    let name_id = ctx
-        .func_registry
-        .name_for_qualified(func_key)
-        .expect("lambda name_id should be registered");
+    let (name_id, func_key) = ctx.func_registry.intern_lambda_name(*ctx.lambda_counter);
     let lambda_name = ctx
         .func_registry
         .name_table()
@@ -315,7 +307,6 @@ fn compile_lambda_with_captures(
     let captures = lambda.captures.borrow();
     let num_captures = captures.len();
 
-    let lambda_segment = format!("__lambda_{}", *ctx.lambda_counter);
     *ctx.lambda_counter += 1;
 
     let param_types: Vec<types::Type> = lambda
@@ -361,14 +352,7 @@ fn compile_lambda_with_captures(
     }
     sig.returns.push(AbiParam::new(return_type));
 
-    let func_key = ctx.func_registry.intern_raw_qualified(
-        ctx.func_registry.builtin_module(),
-        &[lambda_segment.as_str()],
-    );
-    let name_id = ctx
-        .func_registry
-        .name_for_qualified(func_key)
-        .expect("lambda name_id should be registered");
+    let (name_id, func_key) = ctx.func_registry.intern_lambda_name(*ctx.lambda_counter);
     let lambda_name = ctx
         .func_registry
         .name_table()

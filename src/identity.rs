@@ -6,6 +6,9 @@ use std::collections::HashMap;
 
 use crate::frontend::{Interner, Symbol};
 
+mod namer;
+pub use namer::{Namer, NamerLookup};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModuleId(u32);
 
@@ -138,6 +141,11 @@ impl NameTable {
         });
         self.name_lookup.insert(key, id);
         id
+    }
+
+    pub fn intern_indexed_raw(&mut self, module: ModuleId, prefix: &str, index: usize) -> NameId {
+        let name = format!("{}{}", prefix, index);
+        self.intern_raw(module, &[name.as_str()])
     }
 
     pub fn name_id(&self, module: ModuleId, segments: &[Symbol]) -> Option<NameId> {
