@@ -1,0 +1,17 @@
+// Error: type parameter constraint mismatch
+interface Runnable {
+    func run() -> i64
+}
+
+record Foo {
+    value: i64,
+}
+
+func use<T: Runnable>(x: T) -> i64 {
+    return 0
+}
+
+func main() {
+    let f = Foo { value: 1 }
+    use(f)
+}

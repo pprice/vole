@@ -80,6 +80,12 @@ impl Analyzer {
                     &generic_def.param_types,
                     &arg_types,
                 );
+                self.check_type_param_constraints(
+                    &generic_def.type_params,
+                    &inferred,
+                    expr.span,
+                    interner,
+                );
 
                 // Create the concrete function type by substituting
                 let concrete_params: Vec<Type> = generic_def

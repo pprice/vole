@@ -604,19 +604,37 @@ impl Analyzer {
                         );
                     } else {
                         // Generic function: resolve with type params in scope
-                        let mut type_param_scope = TypeParamScope::new();
+                        let mut name_scope = TypeParamScope::new();
+                        for tp in &func.type_params {
+                            name_scope.add(TypeParamInfo {
+                                name: tp.name,
+                                constraint: None,
+                            });
+                        }
+
                         let type_params: Vec<TypeParamInfo> = func
                             .type_params
                             .iter()
                             .map(|tp| {
-                                let info = TypeParamInfo {
+                                let constraint = tp.constraint.as_ref().and_then(|c| {
+                                    self.resolve_type_param_constraint(
+                                        c,
+                                        &name_scope,
+                                        interner,
+                                        tp.span,
+                                    )
+                                });
+                                TypeParamInfo {
                                     name: tp.name,
-                                    constraint: None, // TODO: resolve constraints
-                                };
-                                type_param_scope.add(info.clone());
-                                info
+                                    constraint,
+                                }
                             })
                             .collect();
+
+                        let mut type_param_scope = TypeParamScope::new();
+                        for info in &type_params {
+                            type_param_scope.add(info.clone());
+                        }
 
                         // Resolve param types with type params in scope
                         let module_id = self.name_table.main_module();
@@ -1095,6 +1113,95 @@ impl Analyzer {
 
         self.error_types.insert(decl.name, error_info.clone());
         self.register_named_type(decl.name, Type::ErrorType(error_info));
+    }
+
+    fn resolve_type_param_constraint(
+        &mut self,
+        constraint: &TypeConstraint,
+        type_param_scope: &TypeParamScope,
+        interner: &Interner,
+        span: Span,
+    ) -> Option<crate::sema::generic::TypeConstraint> {
+        match constraint {
+            TypeConstraint::Interface(sym) => {
+                if self.interface_registry.get(*sym, interner).is_none() {
+                    self.add_error(
+                        SemanticError::UnknownInterface {
+                            name: interner.resolve(*sym).to_string(),
+                            span: span.into(),
+                        },
+                        span,
+                    );
+                    return None;
+                }
+                Some(crate::sema::generic::TypeConstraint::Interface(*sym))
+            }
+            TypeConstraint::Union(types) => {
+                let module_id = self.name_table.main_module();
+                let mut ctx = TypeResolutionContext::with_type_params(
+                    &self.type_aliases,
+                    &self.classes,
+                    &self.records,
+                    &self.error_types,
+                    &self.interface_registry,
+                    interner,
+                    &mut self.name_table,
+                    module_id,
+                    type_param_scope,
+                );
+                let resolved = types.iter().map(|ty| resolve_type(ty, &mut ctx)).collect();
+                Some(crate::sema::generic::TypeConstraint::Union(resolved))
+            }
+        }
+    }
+
+    fn check_type_param_constraints(
+        &mut self,
+        type_params: &[TypeParamInfo],
+        inferred: &HashMap<Symbol, Type>,
+        span: Span,
+        interner: &Interner,
+    ) {
+        for param in type_params {
+            let Some(constraint) = &param.constraint else {
+                continue;
+            };
+            let Some(found) = inferred.get(&param.name) else {
+                continue;
+            };
+            match constraint {
+                crate::sema::generic::TypeConstraint::Interface(interface_name) => {
+                    if !self.satisfies_interface(found, *interface_name, interner) {
+                        let found_display = self.type_display(found, interner);
+                        self.add_error(
+                            SemanticError::TypeParamConstraintMismatch {
+                                type_param: interner.resolve(param.name).to_string(),
+                                expected: interner.resolve(*interface_name).to_string(),
+                                found: found_display,
+                                span: span.into(),
+                            },
+                            span,
+                        );
+                    }
+                }
+                crate::sema::generic::TypeConstraint::Union(variants) => {
+                    let expected = Type::normalize_union(variants.clone());
+                    if !types_compatible_core(found, &expected) {
+                        let expected_display = self.type_display(&expected, interner);
+                        let found_display = self.type_display(found, interner);
+                        self.add_error(
+                            SemanticError::TypeParamConstraintMismatch {
+                                type_param: interner.resolve(param.name).to_string(),
+                                expected: expected_display,
+                                found: found_display,
+                                span: span.into(),
+                            },
+                            span,
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// Analyze external block and register external methods in the implement registry

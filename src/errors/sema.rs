@@ -374,4 +374,14 @@ pub enum SemanticError {
         #[label("method call on union type")]
         span: SourceSpan,
     },
+
+    #[error("type argument for '{type_param}' does not satisfy constraint '{expected}'")]
+    #[diagnostic(code(E2074))]
+    TypeParamConstraintMismatch {
+        type_param: String,
+        expected: String,
+        found: String,
+        #[label("found '{found}'")]
+        span: SourceSpan,
+    },
 }

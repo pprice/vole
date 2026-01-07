@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2074]: type argument for 'T' does not satisfy constraint 'Runnable'
+    ,-[<path>/generic_constraint_interface.vole:16:5]
+ 15 |     let f = Foo { value: 1 }
+ 16 |     use(f)
+    :     ^^^|^^
+    :        `-- found 'main::Foo'
+ 17 | }
+    `----
