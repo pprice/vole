@@ -76,6 +76,11 @@ pub struct TypeTable {
     fingerprint_lookup: HashMap<TypeFingerprint, TypeKey>,
     primitive_names: HashMap<PrimitiveTypeId, NameId>,
     array_name: Option<NameId>,
+    iterator_name: Option<NameId>,
+    map_iterator_name: Option<NameId>,
+    filter_iterator_name: Option<NameId>,
+    take_iterator_name: Option<NameId>,
+    skip_iterator_name: Option<NameId>,
 }
 
 impl TypeTable {
@@ -86,6 +91,11 @@ impl TypeTable {
             fingerprint_lookup: HashMap::new(),
             primitive_names: HashMap::new(),
             array_name: None,
+            iterator_name: None,
+            map_iterator_name: None,
+            filter_iterator_name: None,
+            take_iterator_name: None,
+            skip_iterator_name: None,
         }
     }
 
@@ -119,12 +129,67 @@ impl TypeTable {
         self.array_name = Some(name_id);
     }
 
+    pub fn register_iterator_name(&mut self, name_id: NameId) {
+        if self.iterator_name.is_some() {
+            return;
+        }
+        self.iterator_name = Some(name_id);
+    }
+
+    pub fn register_map_iterator_name(&mut self, name_id: NameId) {
+        if self.map_iterator_name.is_some() {
+            return;
+        }
+        self.map_iterator_name = Some(name_id);
+    }
+
+    pub fn register_filter_iterator_name(&mut self, name_id: NameId) {
+        if self.filter_iterator_name.is_some() {
+            return;
+        }
+        self.filter_iterator_name = Some(name_id);
+    }
+
+    pub fn register_take_iterator_name(&mut self, name_id: NameId) {
+        if self.take_iterator_name.is_some() {
+            return;
+        }
+        self.take_iterator_name = Some(name_id);
+    }
+
+    pub fn register_skip_iterator_name(&mut self, name_id: NameId) {
+        if self.skip_iterator_name.is_some() {
+            return;
+        }
+        self.skip_iterator_name = Some(name_id);
+    }
+
     pub fn primitive_name_id(&self, prim: PrimitiveTypeId) -> Option<NameId> {
         self.primitive_names.get(&prim).copied()
     }
 
     pub fn array_name_id(&self) -> Option<NameId> {
         self.array_name
+    }
+
+    pub fn iterator_name_id(&self) -> Option<NameId> {
+        self.iterator_name
+    }
+
+    pub fn map_iterator_name_id(&self) -> Option<NameId> {
+        self.map_iterator_name
+    }
+
+    pub fn filter_iterator_name_id(&self) -> Option<NameId> {
+        self.filter_iterator_name
+    }
+
+    pub fn take_iterator_name_id(&self) -> Option<NameId> {
+        self.take_iterator_name
+    }
+
+    pub fn skip_iterator_name_id(&self) -> Option<NameId> {
+        self.skip_iterator_name
     }
 
     pub fn insert_named(&mut self, ty: Type, name_id: NameId) -> TypeKey {

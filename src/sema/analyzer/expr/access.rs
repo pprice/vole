@@ -188,25 +188,6 @@ impl Analyzer {
             return Ok(Type::Error);
         }
 
-        // Handle built-in methods for primitive types
-        if let Some(return_type) =
-            self.check_builtin_method(&object_type, method_name, &method_call.args, interner)
-        {
-            // Record the resolution for codegen
-            let resolved = ResolvedMethod::Implemented {
-                trait_name: None,
-                func_type: FunctionType {
-                    params: vec![],
-                    return_type: Box::new(return_type.clone()),
-                    is_closure: false,
-                },
-                is_builtin: true,
-                external_info: None,
-            };
-            self.method_resolutions.insert(expr.id, resolved);
-            return Ok(return_type);
-        }
-
         // Handle module method calls (e.g., math.sqrt(16.0))
         if let Type::Module(ref module_type) = object_type {
             let method_name_str = interner.resolve(method_call.method);
@@ -303,6 +284,18 @@ impl Analyzer {
         let type_name = self.type_display(&object_type, interner);
 
         if let Some(resolved) = self.resolve_method(&object_type, method_call.method, interner) {
+            if resolved.is_builtin()
+                && let Some(return_type) = self.check_builtin_method(
+                    &object_type,
+                    method_name,
+                    &method_call.args,
+                    interner,
+                )
+            {
+                self.method_resolutions.insert(expr.id, resolved);
+                return Ok(return_type);
+            }
+
             let func_type = resolved.func_type().clone();
 
             // Mark side effects if inside lambda

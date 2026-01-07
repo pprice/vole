@@ -107,17 +107,24 @@ pub(crate) fn compile_method_call(
         }
     }
 
-    // Handle built-in methods for primitive types
-    if let Some(result) = compile_builtin_method(builder, &obj, method_name_str, ctx)? {
-        return Ok(result);
-    }
-
     let method_id = method_name_id(ctx.analyzed, ctx.interner, mc.method).ok_or_else(|| {
         format!(
             "codegen error: method name not interned (method: {})",
             method_name_str
         )
     })?;
+
+    let resolution = ctx.analyzed.method_resolutions.get(expr_id);
+    if matches!(
+        resolution,
+        Some(ResolvedMethod::Implemented {
+            is_builtin: true,
+            ..
+        })
+    ) && let Some(result) = compile_builtin_method(builder, &obj, method_name_str, ctx)?
+    {
+        return Ok(result);
+    }
 
     // Handle iterator.map(fn) -> creates a MapIterator
     // Also handle MapIterator.map(fn), FilterIterator.map(fn), TakeIterator.map(fn), SkipIterator.map(fn) for chained maps
@@ -189,8 +196,6 @@ pub(crate) fn compile_method_call(
 
     // Look up method resolution to determine naming convention and return type
     // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
-    let resolution = ctx.analyzed.method_resolutions.get(expr_id);
-
     let target = resolve_method_target(MethodResolutionInput {
         analyzed: ctx.analyzed,
         type_metadata: ctx.type_metadata,

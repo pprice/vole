@@ -164,6 +164,162 @@ impl Analyzer {
         // will be registered when we have the interner available in a later task
     }
 
+    fn register_builtin_methods(&mut self, interner: &Interner) {
+        macro_rules! register_builtin {
+            ($type_id:expr, $method_id:expr, $func_type:expr) => {
+                self.implement_registry.register_method(
+                    $type_id,
+                    $method_id,
+                    MethodImpl {
+                        trait_name: None,
+                        func_type: $func_type,
+                        is_builtin: true,
+                        external_info: None,
+                    },
+                );
+            };
+        }
+
+        let builtin_module = self.name_table.builtin_module();
+        let mut namer = Namer::new(&mut self.name_table, interner);
+        let mut method_id = |name: &str| namer.intern_raw(builtin_module, &[name]);
+        let method_len = method_id("length");
+        let method_iter = method_id("iter");
+        let method_next = method_id("next");
+        let method_collect = method_id("collect");
+        let method_count = method_id("count");
+        let method_sum = method_id("sum");
+        let method_for_each = method_id("for_each");
+        let method_filter = method_id("filter");
+        let method_map = method_id("map");
+        let method_take = method_id("take");
+        let method_skip = method_id("skip");
+        let method_reduce = method_id("reduce");
+
+        let array_id = self.type_table.array_name_id().map(TypeId::from_name_id);
+        let string_id = self
+            .type_table
+            .primitive_name_id(PrimitiveTypeId::String)
+            .map(TypeId::from_name_id);
+        let iterator_id = self.type_table.iterator_name_id().map(TypeId::from_name_id);
+        let map_iterator_id = self
+            .type_table
+            .map_iterator_name_id()
+            .map(TypeId::from_name_id);
+        let filter_iterator_id = self
+            .type_table
+            .filter_iterator_name_id()
+            .map(TypeId::from_name_id);
+        let take_iterator_id = self
+            .type_table
+            .take_iterator_name_id()
+            .map(TypeId::from_name_id);
+        let skip_iterator_id = self
+            .type_table
+            .skip_iterator_name_id()
+            .map(TypeId::from_name_id);
+
+        let iter_type_ids = [
+            iterator_id,
+            map_iterator_id,
+            filter_iterator_id,
+            take_iterator_id,
+            skip_iterator_id,
+        ];
+
+        let unknown = Type::Unknown;
+        let unknown_fn = |params| FunctionType {
+            params,
+            return_type: Box::new(Type::Unknown),
+            is_closure: false,
+        };
+
+        if let Some(type_id) = array_id {
+            register_builtin!(
+                type_id,
+                method_len,
+                FunctionType {
+                    params: vec![],
+                    return_type: Box::new(Type::I64),
+                    is_closure: false,
+                }
+            );
+            register_builtin!(
+                type_id,
+                method_iter,
+                FunctionType {
+                    params: vec![],
+                    return_type: Box::new(unknown.clone()),
+                    is_closure: false,
+                }
+            );
+        }
+
+        if let Some(type_id) = string_id {
+            register_builtin!(
+                type_id,
+                method_len,
+                FunctionType {
+                    params: vec![],
+                    return_type: Box::new(Type::I64),
+                    is_closure: false,
+                }
+            );
+        }
+
+        for maybe_id in iter_type_ids {
+            let Some(type_id) = maybe_id else {
+                continue;
+            };
+            register_builtin!(type_id, method_next, unknown_fn(vec![]));
+            register_builtin!(type_id, method_collect, unknown_fn(vec![]));
+            register_builtin!(
+                type_id,
+                method_count,
+                FunctionType {
+                    params: vec![],
+                    return_type: Box::new(Type::I64),
+                    is_closure: false,
+                }
+            );
+            register_builtin!(
+                type_id,
+                method_sum,
+                FunctionType {
+                    params: vec![],
+                    return_type: Box::new(Type::I64),
+                    is_closure: false,
+                }
+            );
+            register_builtin!(type_id, method_for_each, unknown_fn(vec![unknown.clone()]));
+            register_builtin!(type_id, method_filter, unknown_fn(vec![unknown.clone()]));
+            register_builtin!(type_id, method_map, unknown_fn(vec![unknown.clone()]));
+            register_builtin!(
+                type_id,
+                method_take,
+                FunctionType {
+                    params: vec![Type::I64],
+                    return_type: Box::new(unknown.clone()),
+                    is_closure: false,
+                }
+            );
+            register_builtin!(
+                type_id,
+                method_skip,
+                FunctionType {
+                    params: vec![Type::I64],
+                    return_type: Box::new(unknown.clone()),
+                    is_closure: false,
+                }
+            );
+            register_builtin!(
+                type_id,
+                method_reduce,
+                unknown_fn(vec![unknown.clone(), unknown.clone()])
+            );
+        }
+    }
+
     fn register_primitive_name_ids(&mut self, interner: &Interner) {
         let builtin_module = self.name_table.builtin_module();
         let mut namer = Namer::new(&mut self.name_table, interner);
@@ -191,6 +347,20 @@ impl Analyzer {
         }
         let array_name = namer.intern_raw(builtin_module, &["array"]);
         self.type_table.register_array_name(array_name);
+        let iterator_name = namer.intern_raw(builtin_module, &["iterator"]);
+        let map_iterator_name = namer.intern_raw(builtin_module, &["map_iterator"]);
+        let filter_iterator_name = namer.intern_raw(builtin_module, &["filter_iterator"]);
+        let take_iterator_name = namer.intern_raw(builtin_module, &["take_iterator"]);
+        let skip_iterator_name = namer.intern_raw(builtin_module, &["skip_iterator"]);
+        self.type_table.register_iterator_name(iterator_name);
+        self.type_table
+            .register_map_iterator_name(map_iterator_name);
+        self.type_table
+            .register_filter_iterator_name(filter_iterator_name);
+        self.type_table
+            .register_take_iterator_name(take_iterator_name);
+        self.type_table
+            .register_skip_iterator_name(skip_iterator_name);
     }
 
     /// Load prelude files (trait definitions and primitive type implementations)
@@ -556,6 +726,7 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
         self.register_primitive_name_ids(interner);
+        self.register_builtin_methods(interner);
 
         // Load prelude (trait definitions and primitive type implementations)
         // This makes stdlib methods like "hello".length() available without explicit imports
