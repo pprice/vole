@@ -16,6 +16,7 @@ use super::super::strings::compile_interpolated_string;
 use super::type_check::compile_type_pattern_check;
 use crate::codegen::RuntimeFn;
 use crate::codegen::calls::compile_string_literal;
+use crate::codegen::interface_vtable::box_interface_value;
 use crate::codegen::lambda::compile_lambda;
 use crate::codegen::stmt::construct_union;
 use crate::codegen::types::{
@@ -420,8 +421,13 @@ pub(crate) fn compile_expr(
         ExprKind::Assign(assign) => {
             match &assign.target {
                 AssignTarget::Variable(sym) => {
-                    let value = compile_expr(builder, &assign.value, variables, ctx)?;
+                    let mut value = compile_expr(builder, &assign.value, variables, ctx)?;
                     if let Some((var, var_type)) = variables.get(sym) {
+                        if matches!(var_type, Type::Interface(_))
+                            && !matches!(value.vole_type, Type::Interface(_))
+                        {
+                            value = box_interface_value(builder, ctx, value, var_type)?;
+                        }
                         // If variable is a union and value is not, wrap the value
                         let final_value = if matches!(var_type, Type::Union(_))
                             && !matches!(&value.vole_type, Type::Union(_))

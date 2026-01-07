@@ -22,7 +22,11 @@ use std::collections::HashMap;
 use cranelift::prelude::types as clif_types;
 
 use crate::codegen::types::{MethodInfo, TypeMetadata};
-use crate::codegen::{FunctionRegistry, JitContext, RuntimeFn};
+use std::cell::RefCell;
+
+use crate::codegen::{
+    FunctionRegistry, JitContext, RuntimeFn, interface_vtable::InterfaceVtableRegistry,
+};
 use crate::commands::common::AnalyzedProgram;
 use crate::frontend::{LetStmt, Symbol};
 use crate::identity::NameId;
@@ -48,6 +52,8 @@ pub struct Compiler<'a> {
     type_metadata: HashMap<Symbol, TypeMetadata>,
     /// Implement block method info keyed by (TypeId, method)
     impl_method_infos: HashMap<(TypeId, NameId), MethodInfo>,
+    /// Interface vtable registry for interface-typed values
+    interface_vtables: RefCell<InterfaceVtableRegistry>,
     /// Next type ID to assign
     next_type_id: u32,
     /// Opaque function identities and return types
@@ -82,6 +88,7 @@ impl<'a> Compiler<'a> {
             test_name_ids: Vec::new(),
             type_metadata: HashMap::new(),
             impl_method_infos: HashMap::new(),
+            interface_vtables: RefCell::new(InterfaceVtableRegistry::new()),
             next_type_id: 0,
             func_registry,
             native_registry,

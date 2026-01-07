@@ -11,11 +11,14 @@ use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext};
 use crate::errors::{LexerError, render_to_stderr, render_to_writer};
 use crate::frontend::{AstPrinter, Interner, NodeId, ParseError, Parser, Symbol, ast::Program};
-use crate::identity::NameTable;
+use crate::identity::{NameId, NameTable};
 use crate::runtime::set_stdout_capture;
 use crate::sema::generic::{GenericFuncDef, MonomorphCache, MonomorphKey};
 use crate::sema::interface_registry::InterfaceRegistry;
-use crate::sema::{Analyzer, ErrorTypeInfo, MethodResolutions, Type, TypeError, TypeTable};
+use crate::sema::{
+    Analyzer, ErrorTypeInfo, FunctionType, ImplementRegistry, MethodResolutions, Type, TypeError,
+    TypeTable,
+};
 use crate::transforms;
 
 /// Result of parsing and analyzing a source file.
@@ -25,6 +28,8 @@ pub struct AnalyzedProgram {
     pub type_aliases: HashMap<Symbol, Type>,
     pub expr_types: HashMap<NodeId, Type>,
     pub method_resolutions: MethodResolutions,
+    pub implement_registry: ImplementRegistry,
+    pub methods: HashMap<(NameId, NameId), FunctionType>,
     pub interface_registry: InterfaceRegistry,
     /// Tracks which interfaces each type implements: type_name -> [interface_names]
     pub type_implements: HashMap<Symbol, Vec<Symbol>>,
@@ -154,6 +159,8 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         type_aliases,
         expr_types,
         method_resolutions,
+        implement_registry,
+        methods,
         interface_registry,
         type_implements,
         error_types,
@@ -170,6 +177,8 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         type_aliases,
         expr_types,
         method_resolutions,
+        implement_registry,
+        methods,
         interface_registry,
         type_implements,
         error_types,
@@ -355,6 +364,8 @@ pub fn run_captured<W: Write + Send + 'static>(
         type_aliases,
         expr_types,
         method_resolutions,
+        implement_registry,
+        methods,
         interface_registry,
         type_implements,
         error_types,
@@ -372,6 +383,8 @@ pub fn run_captured<W: Write + Send + 'static>(
         type_aliases,
         expr_types,
         method_resolutions,
+        implement_registry,
+        methods,
         interface_registry,
         type_implements,
         error_types,

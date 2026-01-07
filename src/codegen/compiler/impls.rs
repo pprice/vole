@@ -389,6 +389,7 @@ impl Compiler<'_> {
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
+                interface_vtables: &self.interface_vtables,
                 current_function_return_type: method_return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
@@ -548,6 +549,7 @@ impl Compiler<'_> {
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
+                interface_vtables: &self.interface_vtables,
                 current_function_return_type: None, // Methods don't use raise statements yet
                 native_registry: &self.native_registry,
                 current_module: None,
@@ -710,6 +712,7 @@ impl Compiler<'_> {
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
+                interface_vtables: &self.interface_vtables,
                 current_function_return_type: None, // Default methods don't use raise statements yet
                 native_registry: &self.native_registry,
                 current_module: None,

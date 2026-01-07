@@ -336,22 +336,6 @@ impl Analyzer {
             return Ok(*func_type.return_type);
         }
 
-        // Check if object is a non-functional interface and method is defined
-        if let Type::Interface(iface) = &object_type
-            && let Some(iface_def) = self.interface_registry.get(iface.name, interner)
-        {
-            for method_def in &iface_def.methods {
-                if method_def.name == method_call.method {
-                    let func_type = FunctionType {
-                        params: method_def.params.clone(),
-                        return_type: Box::new(method_def.return_type.clone()),
-                        is_closure: false,
-                    };
-                    return Ok(*func_type.return_type);
-                }
-            }
-        }
-
         // No method found - report error
         self.add_error(
             SemanticError::UnknownMethod {

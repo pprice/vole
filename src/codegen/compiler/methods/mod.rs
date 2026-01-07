@@ -8,5 +8,6 @@ mod external;
 mod iterators;
 mod try_expr;
 
+pub(crate) use call::compile_interface_dispatch_args;
 pub(crate) use call::compile_method_call;
 pub(crate) use try_expr::compile_try_propagate;

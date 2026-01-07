@@ -1,4 +1,5 @@
 use super::super::*;
+use std::collections::HashSet;
 
 impl Analyzer {
     /// Resolve a method call to a normalized resolution for later validation/codegen.
@@ -21,18 +22,35 @@ impl Analyzer {
             });
         }
 
-        // 2. Functional interfaces
+        // 2. Interface methods (vtable dispatch)
         if let Type::Interface(iface) = object_type
-            && let Some(method_def) = self.interface_registry.is_functional(iface.name, interner)
-            && method_def.name == method_name
+            && let Some(interface_def) = self.interface_registry.get(iface.name, interner)
         {
-            return Some(ResolvedMethod::FunctionalInterface {
-                func_type: FunctionType {
-                    params: method_def.params.clone(),
-                    return_type: Box::new(method_def.return_type.clone()),
-                    is_closure: true,
-                },
-            });
+            let mut stack = vec![interface_def];
+            let mut seen = HashSet::new();
+            while let Some(def) = stack.pop() {
+                if !seen.insert(def.name) {
+                    continue;
+                }
+                for method_def in &def.methods {
+                    if method_def.name == method_name {
+                        return Some(ResolvedMethod::InterfaceMethod {
+                            interface_name: iface.name,
+                            method_name,
+                            func_type: FunctionType {
+                                params: method_def.params.clone(),
+                                return_type: Box::new(method_def.return_type.clone()),
+                                is_closure: false,
+                            },
+                        });
+                    }
+                }
+                for parent in &def.extends {
+                    if let Some(parent_def) = self.interface_registry.get(*parent, interner) {
+                        stack.push(parent_def);
+                    }
+                }
+            }
         }
 
         // 3. Direct methods on class/record

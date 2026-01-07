@@ -68,6 +68,18 @@ tests "interfaces" {
     }
 }
 
+tests "interface values" {
+    test "interface-typed variable dispatches to impl" {
+        let h: Hashable = User { id: 7 }
+        assert(h.hash() == 7)
+    }
+
+    test "implement block methods work through interface value" {
+        let d: Describable = Person { name: "Dana", age: 22 }
+        assert(d.describe() == "Dana")
+    }
+}
+
 tests "implement blocks" {
     test "implement block adds method to type" {
         let p = Person { name: "Bob", age: 25 }
@@ -116,6 +128,11 @@ tests "interface extends" {
         let e = ExtendedImpl { value: 10 }
         assert(e.base_method() == 10)
         assert(e.extended_method() == 20)
+    }
+
+    test "parent interface uses vtable dispatch" {
+        let b: Base = ExtendedImpl { value: 11 }
+        assert(b.base_method() == 11)
     }
 }
 

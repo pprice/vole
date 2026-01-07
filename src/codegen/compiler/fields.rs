@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use super::patterns::compile_expr;
 use crate::codegen::RuntimeFn;
+use crate::codegen::interface_vtable::box_interface_value;
 use crate::codegen::stmt::construct_union;
 use crate::codegen::structs::{
     convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type,
@@ -319,7 +320,12 @@ pub(crate) fn compile_field_assign(
     let value = compile_expr(builder, value_expr, variables, ctx)?;
 
     // Get slot from object's type
-    let (slot, _field_type) = get_field_slot_and_type(&obj.vole_type, field, ctx)?;
+    let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field, ctx)?;
+    let value = if matches!(field_type, Type::Interface(_)) {
+        box_interface_value(builder, ctx, value, &field_type)?
+    } else {
+        value
+    };
 
     let set_func_id = ctx
         .func_registry

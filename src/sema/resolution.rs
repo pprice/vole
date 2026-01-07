@@ -30,6 +30,13 @@ pub enum ResolvedMethod {
         method_name: Symbol,
         func_type: FunctionType,
     },
+
+    /// Method called through a non-functional interface value (vtable dispatch)
+    InterfaceMethod {
+        interface_name: Symbol,
+        method_name: Symbol,
+        func_type: FunctionType,
+    },
 }
 
 impl ResolvedMethod {
@@ -40,6 +47,7 @@ impl ResolvedMethod {
             ResolvedMethod::Implemented { func_type, .. } => func_type,
             ResolvedMethod::FunctionalInterface { func_type } => func_type,
             ResolvedMethod::DefaultMethod { func_type, .. } => func_type,
+            ResolvedMethod::InterfaceMethod { func_type, .. } => func_type,
         }
     }
 

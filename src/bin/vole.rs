@@ -15,6 +15,12 @@ use vole::commands::version::print_version;
 use vole::errors::set_color_mode;
 
 fn main() -> ExitCode {
+    unsafe {
+        std::env::set_var("RUST_BACKTRACE", "1");
+    }
+    if std::env::var_os("VOLE_DEBUG_IFACE").is_some() {
+        eprintln!("iface_debug: enabled");
+    }
     // Pre-scan args to determine color choice for clap's help output
     let color_choice = get_color_choice_from_args();
 

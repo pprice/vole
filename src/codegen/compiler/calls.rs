@@ -6,6 +6,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 use std::collections::HashMap;
 
+use super::methods::compile_interface_dispatch_args;
 use super::patterns::compile_expr;
 use crate::codegen::lambda::CaptureBinding;
 use crate::codegen::types::{
@@ -76,10 +77,24 @@ pub(crate) fn compile_call(
             let ft = FunctionType {
                 params: method_def.params.clone(),
                 return_type: Box::new(method_def.return_type.clone()),
-                is_closure: true, // Interface variables hold closures
+                is_closure: false,
             };
-            let var = *var;
-            return compile_indirect_call(builder, var, &ft, &call.args, variables, ctx);
+            let value = builder.use_var(*var);
+            let obj = CompiledValue {
+                value,
+                ty: type_to_cranelift(&Type::Interface(iface.clone()), ctx.pointer_type),
+                vole_type: Type::Interface(iface.clone()),
+            };
+            return compile_interface_dispatch_args(
+                builder,
+                &call.args,
+                variables,
+                ctx,
+                &obj,
+                iface.name,
+                method_def.name,
+                ft,
+            );
         }
     }
 
@@ -107,15 +122,17 @@ pub(crate) fn compile_call(
             let ft = FunctionType {
                 params: method_def.params.clone(),
                 return_type: Box::new(method_def.return_type.clone()),
-                is_closure: true,
+                is_closure: false,
             };
-            return compile_indirect_call_value(
+            return compile_interface_dispatch_args(
                 builder,
-                callee_value.value,
-                &ft,
                 &call.args,
                 variables,
                 ctx,
+                &callee_value,
+                iface.name,
+                method_def.name,
+                ft,
             );
         }
     }

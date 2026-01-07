@@ -10,6 +10,7 @@ use crate::frontend::{AssignTarget, Expr, ExprKind, MatchExpr, Pattern, UnaryOp}
 use crate::sema::Type;
 
 use super::context::Cg;
+use super::interface_vtable::box_interface_value;
 use super::structs::{convert_field_value, convert_to_i64_for_storage};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
@@ -150,7 +151,7 @@ impl Cg<'_, '_, '_> {
     fn assign(&mut self, assign: &crate::frontend::AssignExpr) -> Result<CompiledValue, String> {
         match &assign.target {
             AssignTarget::Variable(sym) => {
-                let value = self.expr(&assign.value)?;
+                let mut value = self.expr(&assign.value)?;
 
                 // Check for captured variable assignment
                 if let Some(binding) = self.get_capture(sym).cloned() {
@@ -162,6 +163,12 @@ impl Cg<'_, '_, '_> {
                 })?;
                 let var = *var;
                 let var_type = var_type.clone();
+
+                if matches!(&var_type, Type::Interface(_))
+                    && !matches!(value.vole_type, Type::Interface(_))
+                {
+                    value = box_interface_value(self.builder, self.ctx, value, &var_type)?;
+                }
 
                 let final_value = if matches!(&var_type, Type::Union(_))
                     && !matches!(&value.vole_type, Type::Union(_))

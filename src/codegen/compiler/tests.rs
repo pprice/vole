@@ -2,6 +2,7 @@ use super::*;
 use crate::commands::common::AnalyzedProgram;
 use crate::frontend::Parser;
 use crate::identity::NameTable;
+use crate::sema::ImplementRegistry;
 use crate::sema::TypeTable;
 use crate::sema::generic::MonomorphCache;
 use crate::sema::interface_registry::InterfaceRegistry;
@@ -18,6 +19,8 @@ fn compile_and_run(source: &str) -> i64 {
         type_aliases: HashMap::new(),
         expr_types: HashMap::new(),
         method_resolutions: MethodResolutions::new(),
+        implement_registry: ImplementRegistry::new(),
+        methods: HashMap::new(),
         interface_registry: InterfaceRegistry::new(),
         type_implements: HashMap::new(),
         error_types: HashMap::new(),

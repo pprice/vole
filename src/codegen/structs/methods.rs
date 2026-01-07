@@ -5,10 +5,15 @@ use cranelift_module::Module;
 
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
+use crate::codegen::interface_vtable::{
+    box_interface_value, iface_debug_enabled, interface_method_slot,
+};
 use crate::codegen::method_resolution::{
     MethodResolutionInput, MethodTarget, resolve_method_target,
 };
-use crate::codegen::types::{CompiledValue, method_name_id, module_name_id, type_to_cranelift};
+use crate::codegen::types::{
+    CompiledValue, method_name_id, module_name_id, type_to_cranelift, value_to_word, word_to_value,
+};
 use crate::frontend::{Expr, MethodCallExpr, NodeId};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::{FunctionType, Type};
@@ -203,6 +208,15 @@ impl Cg<'_, '_, '_> {
 
         let (method_info, return_type) = match target {
             MethodTarget::FunctionalInterface { func_type } => {
+                if let Type::Interface(interface_type) = &obj.vole_type {
+                    return self.interface_dispatch_call_args(
+                        &obj,
+                        &mc.args,
+                        interface_type.name,
+                        mc.method,
+                        func_type,
+                    );
+                }
                 // For functional interfaces, the object holds the function ptr or closure
                 // The actual is_closure status depends on the lambda's compilation.
                 let is_closure = if let Type::Function(ft) = &obj.vole_type {
@@ -221,12 +235,38 @@ impl Cg<'_, '_, '_> {
                 external_info,
                 return_type,
             } => {
+                let param_types = resolution.map(|resolved| resolved.func_type().params.clone());
                 let mut args = vec![obj.value];
-                for arg in &mc.args {
-                    let compiled = self.expr(arg)?;
-                    args.push(compiled.value);
+                if let Some(param_types) = &param_types {
+                    for (arg, param_type) in mc.args.iter().zip(param_types.iter()) {
+                        let compiled = self.expr(arg)?;
+                        let compiled = if matches!(param_type, Type::Interface(_)) {
+                            box_interface_value(self.builder, self.ctx, compiled, param_type)?
+                        } else {
+                            compiled
+                        };
+                        args.push(compiled.value);
+                    }
+                } else {
+                    for arg in &mc.args {
+                        let compiled = self.expr(arg)?;
+                        args.push(compiled.value);
+                    }
                 }
                 return self.call_external(&external_info, &args, &return_type);
+            }
+            MethodTarget::InterfaceDispatch {
+                interface_name,
+                method_name,
+                func_type,
+            } => {
+                return self.interface_dispatch_call(
+                    &obj,
+                    mc,
+                    interface_name,
+                    method_name,
+                    func_type,
+                );
             }
             MethodTarget::Direct {
                 method_info,
@@ -243,10 +283,23 @@ impl Cg<'_, '_, '_> {
         };
         let method_func_ref = self.func_ref(method_info.func_key)?;
 
+        let param_types = resolution.map(|resolved| resolved.func_type().params.clone());
         let mut args = vec![obj.value];
-        for arg in &mc.args {
-            let compiled = self.expr(arg)?;
-            args.push(compiled.value);
+        if let Some(param_types) = &param_types {
+            for (arg, param_type) in mc.args.iter().zip(param_types.iter()) {
+                let compiled = self.expr(arg)?;
+                let compiled = if matches!(param_type, Type::Interface(_)) {
+                    box_interface_value(self.builder, self.ctx, compiled, param_type)?
+                } else {
+                    compiled
+                };
+                args.push(compiled.value);
+            }
+        } else {
+            for arg in &mc.args {
+                let compiled = self.expr(arg)?;
+                args.push(compiled.value);
+            }
         }
 
         let call = self.builder.ins().call(method_func_ref, &args);
@@ -939,5 +992,121 @@ impl Cg<'_, '_, '_> {
                 })
             }
         }
+    }
+
+    pub(crate) fn interface_dispatch_call(
+        &mut self,
+        obj: &CompiledValue,
+        mc: &MethodCallExpr,
+        interface_name: crate::frontend::Symbol,
+        method_name: crate::frontend::Symbol,
+        func_type: FunctionType,
+    ) -> Result<CompiledValue, String> {
+        self.interface_dispatch_call_args(obj, &mc.args, interface_name, method_name, func_type)
+    }
+
+    pub(crate) fn interface_dispatch_call_args(
+        &mut self,
+        obj: &CompiledValue,
+        args: &[Expr],
+        interface_name: crate::frontend::Symbol,
+        method_name: crate::frontend::Symbol,
+        func_type: FunctionType,
+    ) -> Result<CompiledValue, String> {
+        let word_type = self.ctx.pointer_type;
+        let word_bytes = word_type.bytes() as i32;
+
+        let data_word = self
+            .builder
+            .ins()
+            .load(word_type, MemFlags::new(), obj.value, 0);
+        let vtable_ptr = self
+            .builder
+            .ins()
+            .load(word_type, MemFlags::new(), obj.value, word_bytes);
+
+        let slot = interface_method_slot(
+            interface_name,
+            method_name,
+            &self.ctx.analyzed.interface_registry,
+            self.ctx.interner,
+        )?;
+        let func_ptr = self.builder.ins().load(
+            word_type,
+            MemFlags::new(),
+            vtable_ptr,
+            (slot as i32) * word_bytes,
+        );
+
+        if iface_debug_enabled() {
+            let print_key = self
+                .ctx
+                .func_registry
+                .runtime_key(RuntimeFn::PrintlnI64)
+                .ok_or_else(|| "println_i64 not registered".to_string())?;
+            let print_ref = self.func_ref(print_key)?;
+            let to_i64 = |builder: &mut FunctionBuilder, val: Value| {
+                if word_type == types::I64 {
+                    val
+                } else {
+                    builder.ins().uextend(types::I64, val)
+                }
+            };
+            let slot_val = self.builder.ins().iconst(types::I64, slot as i64);
+            let data_i64 = to_i64(self.builder, data_word);
+            let vtable_i64 = to_i64(self.builder, vtable_ptr);
+            let func_i64 = to_i64(self.builder, func_ptr);
+            self.builder.ins().call(print_ref, &[slot_val]);
+            self.builder.ins().call(print_ref, &[data_i64]);
+            self.builder.ins().call(print_ref, &[vtable_i64]);
+            self.builder.ins().call(print_ref, &[func_i64]);
+        }
+
+        let mut sig = self.ctx.module.make_signature();
+        sig.params.push(AbiParam::new(word_type));
+        for _ in &func_type.params {
+            sig.params.push(AbiParam::new(word_type));
+        }
+        if func_type.return_type.as_ref() != &Type::Void {
+            sig.returns.push(AbiParam::new(word_type));
+        }
+        let sig_ref = self.builder.import_signature(sig);
+
+        let heap_alloc_ref = {
+            let key = self
+                .ctx
+                .func_registry
+                .runtime_key(RuntimeFn::HeapAlloc)
+                .ok_or_else(|| "heap allocator not registered".to_string())?;
+            self.func_ref(key)?
+        };
+
+        let mut call_args = vec![data_word];
+        for arg in args {
+            let compiled = self.expr(arg)?;
+            let word = value_to_word(self.builder, &compiled, word_type, Some(heap_alloc_ref))?;
+            call_args.push(word);
+        }
+
+        let call = self
+            .builder
+            .ins()
+            .call_indirect(sig_ref, func_ptr, &call_args);
+        let results = self.builder.inst_results(call);
+
+        if func_type.return_type.as_ref() == &Type::Void {
+            return Ok(self.void_value());
+        }
+
+        let word = results
+            .first()
+            .copied()
+            .ok_or_else(|| "interface call missing return value".to_string())?;
+        let value = word_to_value(self.builder, word, &func_type.return_type, word_type);
+        Ok(CompiledValue {
+            value,
+            ty: type_to_cranelift(&func_type.return_type, word_type),
+            vole_type: (*func_type.return_type).clone(),
+        })
     }
 }

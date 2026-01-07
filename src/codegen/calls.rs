@@ -11,6 +11,7 @@ use crate::runtime::native_registry::NativeType;
 use crate::sema::{FunctionType, Type};
 
 use super::context::Cg;
+use super::interface_vtable::box_interface_value;
 use super::types::{CompiledValue, native_type_to_cranelift, resolve_type_expr, type_to_cranelift};
 use super::{FunctionKey, FunctionRegistry, RuntimeFn};
 
@@ -198,9 +199,21 @@ impl Cg<'_, '_, '_> {
             let func_type = FunctionType {
                 params: method_def.params.clone(),
                 return_type: Box::new(method_def.return_type.clone()),
-                is_closure: true,
+                is_closure: false,
             };
-            return self.call_closure(*var, func_type, call);
+            let value = self.builder.use_var(*var);
+            let obj = CompiledValue {
+                value,
+                ty: type_to_cranelift(vole_type, self.ctx.pointer_type),
+                vole_type: vole_type.clone(),
+            };
+            return self.interface_dispatch_call_args(
+                &obj,
+                &call.args,
+                iface.name,
+                method_def.name,
+                func_type,
+            );
         }
 
         // Check if it's a global lambda or global functional interface
@@ -212,8 +225,7 @@ impl Cg<'_, '_, '_> {
             if let Some(ref ty_expr) = global.ty {
                 let declared_type = resolve_type_expr(ty_expr, self.ctx);
 
-                // If declared as functional interface, call using the lambda's actual type
-                // (the lambda might be a pure function or a closure depending on captures)
+                // If declared as functional interface, call via vtable dispatch
                 if let Type::Interface(iface) = &declared_type
                     && let Some(method_def) = self
                         .ctx
@@ -221,18 +233,18 @@ impl Cg<'_, '_, '_> {
                         .interface_registry
                         .is_functional(iface.name, self.ctx.interner)
                 {
-                    // Use the lambda's actual is_closure status from compilation
-                    let is_closure = if let Type::Function(ft) = &lambda_val.vole_type {
-                        ft.is_closure
-                    } else {
-                        true // Fallback to closure if unknown
-                    };
                     let func_type = FunctionType {
                         params: method_def.params.clone(),
                         return_type: Box::new(method_def.return_type.clone()),
-                        is_closure,
+                        is_closure: false,
                     };
-                    return self.call_closure_value(lambda_val.value, func_type, call);
+                    return self.interface_dispatch_call_args(
+                        &lambda_val,
+                        &call.args,
+                        iface.name,
+                        method_def.name,
+                        func_type,
+                    );
                 }
             }
 
@@ -241,7 +253,7 @@ impl Cg<'_, '_, '_> {
                 return self.call_closure_value(lambda_val.value, func_type.clone(), call);
             }
 
-            // If it's an interface type (functional interface), call as closure
+            // If it's an interface type (functional interface), call via vtable
             if let Type::Interface(iface) = &lambda_val.vole_type
                 && let Some(method_def) = self
                     .ctx
@@ -252,9 +264,15 @@ impl Cg<'_, '_, '_> {
                 let func_type = FunctionType {
                     params: method_def.params.clone(),
                     return_type: Box::new(method_def.return_type.clone()),
-                    is_closure: true,
+                    is_closure: false,
                 };
-                return self.call_closure_value(lambda_val.value, func_type, call);
+                return self.interface_dispatch_call_args(
+                    &lambda_val,
+                    &call.args,
+                    iface.name,
+                    method_def.name,
+                    func_type,
+                );
             }
         }
 
@@ -604,8 +622,13 @@ impl Cg<'_, '_, '_> {
         let sig_ref = self.builder.import_signature(sig);
 
         let mut args = Vec::new();
-        for arg in &call.args {
+        for (arg, param_type) in call.args.iter().zip(func_type.params.iter()) {
             let compiled = self.expr(arg)?;
+            let compiled = if matches!(param_type, Type::Interface(_)) {
+                box_interface_value(self.builder, self.ctx, compiled, param_type)?
+            } else {
+                compiled
+            };
             args.push(compiled.value);
         }
 
@@ -647,8 +670,13 @@ impl Cg<'_, '_, '_> {
         let sig_ref = self.builder.import_signature(sig);
 
         let mut args = vec![closure_ptr];
-        for arg in &call.args {
+        for (arg, param_type) in call.args.iter().zip(func_type.params.iter()) {
             let compiled = self.expr(arg)?;
+            let compiled = if matches!(param_type, Type::Interface(_)) {
+                box_interface_value(self.builder, self.ctx, compiled, param_type)?
+            } else {
+                compiled
+            };
             args.push(compiled.value);
         }
 

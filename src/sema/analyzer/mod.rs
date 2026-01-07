@@ -598,8 +598,7 @@ impl Analyzer {
         self.expr_types
     }
 
-    /// Take ownership of type aliases, expression types, method resolutions, interface registry,
-    /// type_implements, error_types, module_programs, generic_functions, monomorph_cache, and generic_calls (consuming self)
+    /// Take ownership of analysis results (consuming self)
     #[allow(clippy::type_complexity)]
     pub fn into_analysis_results(
         self,
@@ -607,6 +606,8 @@ impl Analyzer {
         HashMap<Symbol, Type>,
         HashMap<NodeId, Type>,
         MethodResolutions,
+        ImplementRegistry,
+        HashMap<(NameId, NameId), FunctionType>,
         InterfaceRegistry,
         HashMap<Symbol, Vec<Symbol>>,
         HashMap<Symbol, ErrorTypeInfo>,
@@ -621,6 +622,8 @@ impl Analyzer {
             self.type_aliases,
             self.expr_types,
             self.method_resolutions,
+            self.implement_registry,
+            self.methods,
             self.interface_registry,
             self.type_implements,
             self.error_types,

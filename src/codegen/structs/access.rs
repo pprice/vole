@@ -205,7 +205,17 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(object)?;
         let value = self.expr(value_expr)?;
 
-        let (slot, _field_type) = get_field_slot_and_type(&obj.vole_type, field, self.ctx)?;
+        let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field, self.ctx)?;
+        let value = if matches!(field_type, Type::Interface(_)) {
+            crate::codegen::interface_vtable::box_interface_value(
+                self.builder,
+                self.ctx,
+                value,
+                &field_type,
+            )?
+        } else {
+            value
+        };
 
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
         let store_value = convert_to_i64_for_storage(self.builder, &value);

@@ -1,4 +1,5 @@
 use super::super::*;
+use std::collections::HashSet;
 
 #[allow(dead_code)]
 impl Analyzer {
@@ -8,6 +9,19 @@ impl Analyzer {
             return true;
         }
 
+        // Non-functional interface compatibility
+        if let Type::Interface(iface) = to {
+            if let Type::Interface(from_iface) = from
+                && self.interface_extends(from_iface.name, iface.name, interner)
+            {
+                return true;
+            }
+
+            if self.satisfies_interface(from, iface.name, interner) {
+                return true;
+            }
+        }
+
         // Function type is compatible with functional interface if signatures match
         if let Type::Function(fn_type) = from
             && let Type::Interface(iface) = to
@@ -15,6 +29,31 @@ impl Analyzer {
             && function_compatible_with_interface(fn_type, &iface_fn)
         {
             return true;
+        }
+
+        false
+    }
+
+    fn interface_extends(&self, derived: Symbol, base: Symbol, interner: &Interner) -> bool {
+        if derived == base {
+            return true;
+        }
+
+        let mut stack = vec![derived];
+        let mut seen = HashSet::new();
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current) {
+                continue;
+            }
+            let Some(def) = self.interface_registry.get(current, interner) else {
+                continue;
+            };
+            for parent in &def.extends {
+                if *parent == base {
+                    return true;
+                }
+                stack.push(*parent);
+            }
         }
 
         false

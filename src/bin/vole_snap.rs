@@ -42,6 +42,9 @@ enum Commands {
 }
 
 fn main() -> ExitCode {
+    unsafe {
+        std::env::set_var("RUST_BACKTRACE", "1");
+    }
     let cli = Cli::parse();
     let use_color = std::io::stdout().is_terminal();
 

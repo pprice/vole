@@ -4,6 +4,7 @@ pub mod compiler;
 mod context;
 mod expr;
 mod function_registry;
+mod interface_vtable;
 pub mod jit;
 mod lambda;
 mod method_resolution;

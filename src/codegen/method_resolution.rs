@@ -29,6 +29,11 @@ pub(crate) enum MethodTarget {
         external_info: ExternalMethodInfo,
         return_type: Type,
     },
+    InterfaceDispatch {
+        interface_name: Symbol,
+        method_name: Symbol,
+        func_type: FunctionType,
+    },
 }
 
 pub(crate) struct MethodResolutionInput<'a, F>
@@ -146,6 +151,15 @@ where
                     return_type: (*func_type.return_type).clone(),
                 })
             }
+            ResolvedMethod::InterfaceMethod {
+                interface_name,
+                method_name,
+                func_type,
+            } => Ok(MethodTarget::InterfaceDispatch {
+                interface_name: *interface_name,
+                method_name: *method_name,
+                func_type: func_type.clone(),
+            }),
         };
     }
 

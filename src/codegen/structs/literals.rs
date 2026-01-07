@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use super::helpers::convert_to_i64_for_storage;
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
+use crate::codegen::interface_vtable::box_interface_value;
 use crate::codegen::types::CompiledValue;
 use crate::frontend::{StructLiteralExpr, Symbol};
 use crate::sema::Type;
@@ -63,6 +64,8 @@ impl Cg<'_, '_, '_> {
                     && !matches!(&value.vole_type, Type::Union(_))
                 {
                     self.construct_union(value, field_type)?
+                } else if matches!(field_type, Type::Interface(_)) {
+                    box_interface_value(self.builder, self.ctx, value, field_type)?
                 } else {
                     value
                 }

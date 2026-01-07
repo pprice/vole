@@ -4,6 +4,7 @@
 // This module contains shared type utilities used throughout the codegen module.
 
 use cranelift::prelude::*;
+use cranelift_codegen::ir::FuncRef;
 use cranelift_jit::JITModule;
 use std::collections::HashMap;
 
@@ -92,6 +93,9 @@ pub(crate) struct CompileCtx<'a> {
     pub type_metadata: &'a HashMap<Symbol, TypeMetadata>,
     /// Implement block method info for primitive and named types
     pub impl_method_infos: &'a HashMap<(TypeId, NameId), MethodInfo>,
+    /// Interface vtable registry (interface + concrete type -> data id)
+    pub interface_vtables:
+        &'a std::cell::RefCell<crate::codegen::interface_vtable::InterfaceVtableRegistry>,
     /// Current function's return type (needed for raise statements in fallible functions)
     pub current_function_return_type: Option<Type>,
     /// Registry of native functions for external method calls
@@ -411,6 +415,7 @@ pub(crate) fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::
         Type::F64 => types::F64,
         Type::Bool => types::I8,
         Type::String => pointer_type,
+        Type::Interface(_) => pointer_type,
         Type::Nil => types::I8,            // Nil uses minimal representation
         Type::Done => types::I8,           // Done uses minimal representation (like Nil)
         Type::Union(_) => pointer_type,    // Unions are passed by pointer
@@ -429,6 +434,7 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
         Type::I64 | Type::U64 | Type::F64 => 8,
         Type::I128 => 16,
         Type::String | Type::Array(_) => pointer_type.bytes(), // pointer size
+        Type::Interface(_) => pointer_type.bytes(),
         Type::Nil | Type::Done | Type::Void => 0,
         Type::Union(variants) => {
             // Tag (1 byte) + padding + max payload size, aligned to 8
@@ -594,6 +600,105 @@ pub(crate) fn convert_to_type(
     }
 
     val.value
+}
+
+/// Convert a value to a uniform word representation for interface dispatch.
+pub(crate) fn value_to_word(
+    builder: &mut FunctionBuilder,
+    value: &CompiledValue,
+    pointer_type: types::Type,
+    heap_alloc_ref: Option<FuncRef>,
+) -> Result<Value, String> {
+    let word_type = pointer_type;
+    let word_bytes = word_type.bytes();
+    let needs_box = type_size(&value.vole_type, pointer_type) > word_bytes;
+
+    if needs_box {
+        let Some(heap_alloc_ref) = heap_alloc_ref else {
+            return Err("heap allocator not available for interface boxing".to_string());
+        };
+        let size_val = builder.ins().iconst(
+            pointer_type,
+            type_size(&value.vole_type, pointer_type) as i64,
+        );
+        let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
+        let alloc_ptr = builder.inst_results(alloc_call)[0];
+        builder
+            .ins()
+            .store(MemFlags::new(), value.value, alloc_ptr, 0);
+        return Ok(alloc_ptr);
+    }
+
+    let word = match value.vole_type {
+        Type::F64 => builder
+            .ins()
+            .bitcast(types::I64, MemFlags::new(), value.value),
+        Type::F32 => {
+            let i32_val = builder
+                .ins()
+                .bitcast(types::I32, MemFlags::new(), value.value);
+            builder.ins().uextend(word_type, i32_val)
+        }
+        Type::Bool => builder.ins().uextend(word_type, value.value),
+        Type::I8 | Type::U8 => builder.ins().uextend(word_type, value.value),
+        Type::I16 | Type::U16 => builder.ins().uextend(word_type, value.value),
+        Type::I32 | Type::U32 => builder.ins().uextend(word_type, value.value),
+        Type::I64 | Type::U64 => value.value,
+        Type::I128 => {
+            let low = builder.ins().ireduce(types::I64, value.value);
+            if word_type == types::I64 {
+                low
+            } else {
+                builder.ins().uextend(word_type, low)
+            }
+        }
+        _ => value.value,
+    };
+
+    Ok(word)
+}
+
+/// Convert a uniform word representation back into a typed value.
+pub(crate) fn word_to_value(
+    builder: &mut FunctionBuilder,
+    word: Value,
+    vole_type: &Type,
+    pointer_type: types::Type,
+) -> Value {
+    let word_type = pointer_type;
+    let word_bytes = word_type.bytes();
+    let needs_unbox = type_size(vole_type, pointer_type) > word_bytes;
+
+    if needs_unbox {
+        return builder.ins().load(
+            type_to_cranelift(vole_type, pointer_type),
+            MemFlags::new(),
+            word,
+            0,
+        );
+    }
+
+    match vole_type {
+        Type::F64 => builder.ins().bitcast(types::F64, MemFlags::new(), word),
+        Type::F32 => {
+            let i32_val = builder.ins().ireduce(types::I32, word);
+            builder.ins().bitcast(types::F32, MemFlags::new(), i32_val)
+        }
+        Type::Bool => builder.ins().ireduce(types::I8, word),
+        Type::I8 | Type::U8 => builder.ins().ireduce(types::I8, word),
+        Type::I16 | Type::U16 => builder.ins().ireduce(types::I16, word),
+        Type::I32 | Type::U32 => builder.ins().ireduce(types::I32, word),
+        Type::I64 | Type::U64 => word,
+        Type::I128 => {
+            let low = if word_type == types::I64 {
+                word
+            } else {
+                builder.ins().ireduce(types::I64, word)
+            };
+            builder.ins().uextend(types::I128, low)
+        }
+        _ => word,
+    }
 }
 
 /// Get the runtime tag value for an array element type.

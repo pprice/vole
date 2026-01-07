@@ -12,6 +12,7 @@ use crate::sema::Type;
 
 use super::compiler::ControlFlowCtx;
 use super::context::{Cg, ControlFlow};
+use super::interface_vtable::box_interface_value;
 use super::structs::convert_to_i64_for_storage;
 use super::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
@@ -115,8 +116,10 @@ impl Cg<'_, '_, '_> {
             Stmt::Let(let_stmt) => {
                 let init = self.expr(&let_stmt.init)?;
 
-                let (final_value, final_type) = if let Some(ty_expr) = &let_stmt.ty {
+                let mut declared_type_opt = None;
+                let (mut final_value, mut final_type) = if let Some(ty_expr) = &let_stmt.ty {
                     let declared_type = resolve_type_expr(ty_expr, self.ctx);
+                    declared_type_opt = Some(declared_type.clone());
 
                     if matches!(&declared_type, Type::Union(_))
                         && !matches!(&init.vole_type, Type::Union(_))
@@ -144,17 +147,31 @@ impl Cg<'_, '_, '_> {
                     } else if let Type::Interface(_) = &declared_type {
                         // For functional interfaces, keep the actual function type from the lambda
                         // This preserves the is_closure flag for proper calling convention
-                        if matches!(&init.vole_type, Type::Function(_)) {
-                            (init.value, init.vole_type)
-                        } else {
-                            (init.value, declared_type)
-                        }
+                        (init.value, init.vole_type)
                     } else {
                         (init.value, declared_type)
                     }
                 } else {
                     (init.value, init.vole_type)
                 };
+
+                if let Some(declared_type) = declared_type_opt
+                    && matches!(declared_type, Type::Interface(_))
+                    && !matches!(final_type, Type::Interface(_))
+                {
+                    let boxed = box_interface_value(
+                        self.builder,
+                        self.ctx,
+                        CompiledValue {
+                            value: final_value,
+                            ty: type_to_cranelift(&final_type, self.ctx.pointer_type),
+                            vole_type: final_type.clone(),
+                        },
+                        &declared_type,
+                    )?;
+                    final_value = boxed.value;
+                    final_type = boxed.vole_type;
+                }
 
                 let cranelift_ty = type_to_cranelift(&final_type, self.ctx.pointer_type);
                 let var = self.builder.declare_var(cranelift_ty);
@@ -169,11 +186,23 @@ impl Cg<'_, '_, '_> {
             }
 
             Stmt::Return(ret) => {
+                let return_type = self.ctx.current_function_return_type.clone();
                 if let Some(value) = &ret.value {
                     let compiled = self.expr(value)?;
 
+                    if let Some(Type::Interface(_)) = &return_type
+                        && !matches!(compiled.vole_type, Type::Interface(_))
+                    {
+                        let return_type =
+                            return_type.as_ref().expect("return type should be present");
+                        let boxed =
+                            box_interface_value(self.builder, self.ctx, compiled, return_type)?;
+                        self.builder.ins().return_(&[boxed.value]);
+                        return Ok(true);
+                    }
+
                     // Check if the function has a fallible return type
-                    if let Some(Type::Fallible(ft)) = &self.ctx.current_function_return_type {
+                    if let Some(Type::Fallible(ft)) = &return_type {
                         // For fallible functions, wrap the success value in a fallible struct
                         let fallible_size =
                             type_size(&Type::Fallible(ft.clone()), self.ctx.pointer_type);
