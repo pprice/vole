@@ -5,6 +5,8 @@
 // and supports monomorphization of generic functions.
 
 use crate::frontend::Symbol;
+use crate::identity::NameId;
+use crate::sema::TypeKey;
 use crate::sema::types::{FunctionType, Type};
 use std::collections::HashMap;
 
@@ -82,23 +84,17 @@ pub struct GenericFuncDef {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MonomorphKey {
     /// Original generic function name
-    pub func_name: Symbol,
-    /// String representation of concrete types (for hashing)
-    pub type_key: String,
+    pub func_name: NameId,
+    /// Opaque type keys for concrete types
+    pub type_keys: Vec<TypeKey>,
 }
 
 impl MonomorphKey {
     /// Create a key from function name and concrete type arguments
-    pub fn new(func_name: Symbol, type_args: &[Type]) -> Self {
-        // Create a stable string representation of the types
-        let type_key = type_args
-            .iter()
-            .map(|t| format!("{:?}", t))
-            .collect::<Vec<_>>()
-            .join(",");
+    pub fn new(func_name: NameId, type_keys: Vec<TypeKey>) -> Self {
         Self {
             func_name,
-            type_key,
+            type_keys,
         }
     }
 }
@@ -117,7 +113,9 @@ pub struct MonomorphCache {
 #[derive(Debug, Clone)]
 pub struct MonomorphInstance {
     /// Original generic function name
-    pub original_name: Symbol,
+    pub original_name: NameId,
+    /// Mangled name for this instance
+    pub mangled_name: NameId,
     /// Unique ID for this instance (used to generate mangled name)
     pub instance_id: u32,
     /// The concrete function type after substitution
@@ -235,11 +233,15 @@ mod tests {
     #[test]
     fn test_monomorph_cache() {
         let mut cache = MonomorphCache::new();
-        let func_name = Symbol(0);
+        let mut names = crate::identity::NameTable::new();
+        let mut interner = crate::frontend::Interner::new();
+        let func_sym = interner.intern("foo");
+        let func_name = names.intern(names.main_module(), &[func_sym]);
+        let mut table = crate::sema::TypeTable::new();
 
-        let key1 = MonomorphKey::new(func_name, &[Type::I64]);
-        let key2 = MonomorphKey::new(func_name, &[Type::String]);
-        let key1_dup = MonomorphKey::new(func_name, &[Type::I64]);
+        let key1 = MonomorphKey::new(func_name, vec![table.key_for_type(&Type::I64)]);
+        let key2 = MonomorphKey::new(func_name, vec![table.key_for_type(&Type::String)]);
+        let key1_dup = MonomorphKey::new(func_name, vec![table.key_for_type(&Type::I64)]);
 
         assert!(!cache.contains(&key1));
 
@@ -247,6 +249,7 @@ mod tests {
             key1.clone(),
             MonomorphInstance {
                 original_name: func_name,
+                mangled_name: names.intern_raw(names.main_module(), &["foo__mono_0"]),
                 instance_id: 0,
                 func_type: FunctionType {
                     params: vec![Type::I64],

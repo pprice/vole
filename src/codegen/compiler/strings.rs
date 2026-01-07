@@ -20,7 +20,13 @@ pub(crate) fn compile_interpolated_string(
 ) -> Result<CompiledValue, String> {
     if parts.is_empty() {
         // Empty interpolated string - return empty string
-        return compile_string_literal(builder, "", ctx.pointer_type, ctx.module, ctx.func_ids);
+        return compile_string_literal(
+            builder,
+            "",
+            ctx.pointer_type,
+            ctx.module,
+            ctx.func_registry,
+        );
     }
 
     // Convert each part to a string value
@@ -28,7 +34,7 @@ pub(crate) fn compile_interpolated_string(
     for part in parts {
         let str_val = match part {
             StringPart::Literal(s) => {
-                compile_string_literal(builder, s, ctx.pointer_type, ctx.module, ctx.func_ids)?
+                compile_string_literal(builder, s, ctx.pointer_type, ctx.module, ctx.func_registry)?
                     .value
             }
             StringPart::Expr(expr) => {
@@ -38,7 +44,7 @@ pub(crate) fn compile_interpolated_string(
                     compiled,
                     ctx.pointer_type,
                     ctx.module,
-                    ctx.func_ids,
+                    ctx.func_registry,
                 )?
             }
         };
@@ -55,12 +61,13 @@ pub(crate) fn compile_interpolated_string(
     }
 
     let concat_func_id = ctx
-        .func_ids
-        .get("vole_string_concat")
+        .func_registry
+        .runtime_key(crate::codegen::RuntimeFn::StringConcat)
+        .and_then(|key| ctx.func_registry.func_id(key))
         .ok_or_else(|| "vole_string_concat not found".to_string())?;
     let concat_func_ref = ctx
         .module
-        .declare_func_in_func(*concat_func_id, builder.func);
+        .declare_func_in_func(concat_func_id, builder.func);
 
     let mut result = string_values[0];
     for &next in &string_values[1..] {

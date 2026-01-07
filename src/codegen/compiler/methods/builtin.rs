@@ -1,8 +1,16 @@
 use cranelift::prelude::*;
-use cranelift_module::Module;
+use cranelift_module::{FuncId, Module};
 
+use crate::codegen::RuntimeFn;
 use crate::codegen::types::{CompileCtx, CompiledValue};
 use crate::sema::Type;
+
+fn runtime_func_id(ctx: &CompileCtx, runtime: RuntimeFn) -> Result<FuncId, String> {
+    ctx.func_registry
+        .runtime_key(runtime)
+        .and_then(|key| ctx.func_registry.func_id(key))
+        .ok_or_else(|| format!("{} not found", runtime.name()))
+}
 
 /// Compile a built-in method call for primitive types
 /// Returns Some(CompiledValue) if handled, None if not a built-in
@@ -15,11 +23,8 @@ pub(crate) fn compile_builtin_method(
     match (&obj.vole_type, method_name) {
         // Array.length() -> i64
         (Type::Array(_), "length") => {
-            let func_id = ctx
-                .func_ids
-                .get("vole_array_len")
-                .ok_or_else(|| "vole_array_len not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::ArrayLen)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value]);
             let result = builder.inst_results(call)[0];
             Ok(Some(CompiledValue {
@@ -30,11 +35,8 @@ pub(crate) fn compile_builtin_method(
         }
         // Array.iter() -> Iterator<T>
         (Type::Array(elem_ty), "iter") => {
-            let func_id = ctx
-                .func_ids
-                .get("vole_array_iter")
-                .ok_or_else(|| "vole_array_iter not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::ArrayIter)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value]);
             let result = builder.inst_results(call)[0];
             Ok(Some(CompiledValue {
@@ -54,11 +56,8 @@ pub(crate) fn compile_builtin_method(
             let out_ptr = builder.ins().stack_addr(ctx.pointer_type, out_slot, 0);
 
             // Call runtime: has_value = vole_array_iter_next(iter, out_ptr)
-            let func_id = ctx
-                .func_ids
-                .get("vole_array_iter_next")
-                .ok_or_else(|| "vole_array_iter_next not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::ArrayIterNext)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value, out_ptr]);
             let has_value = builder.inst_results(call)[0];
 
@@ -100,11 +99,8 @@ pub(crate) fn compile_builtin_method(
         }
         // Iterator.collect() -> [T]
         (Type::Iterator(elem_ty), "collect") => {
-            let func_id = ctx
-                .func_ids
-                .get("vole_array_iter_collect")
-                .ok_or_else(|| "vole_array_iter_collect not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::ArrayIterCollect)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value]);
             let result = builder.inst_results(call)[0];
             Ok(Some(CompiledValue {
@@ -124,11 +120,8 @@ pub(crate) fn compile_builtin_method(
             let out_ptr = builder.ins().stack_addr(ctx.pointer_type, out_slot, 0);
 
             // Call runtime: has_value = vole_map_iter_next(iter, out_ptr)
-            let func_id = ctx
-                .func_ids
-                .get("vole_map_iter_next")
-                .ok_or_else(|| "vole_map_iter_next not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::MapIterNext)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value, out_ptr]);
             let has_value = builder.inst_results(call)[0];
 
@@ -170,11 +163,8 @@ pub(crate) fn compile_builtin_method(
         }
         // MapIterator.collect() -> [T]
         (Type::MapIterator(elem_ty), "collect") => {
-            let func_id = ctx
-                .func_ids
-                .get("vole_map_iter_collect")
-                .ok_or_else(|| "vole_map_iter_collect not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::MapIterCollect)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value]);
             let result = builder.inst_results(call)[0];
             Ok(Some(CompiledValue {
@@ -194,11 +184,8 @@ pub(crate) fn compile_builtin_method(
             let out_ptr = builder.ins().stack_addr(ctx.pointer_type, out_slot, 0);
 
             // Call runtime: has_value = vole_filter_iter_next(iter, out_ptr)
-            let func_id = ctx
-                .func_ids
-                .get("vole_filter_iter_next")
-                .ok_or_else(|| "vole_filter_iter_next not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::FilterIterNext)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value, out_ptr]);
             let has_value = builder.inst_results(call)[0];
 
@@ -240,11 +227,8 @@ pub(crate) fn compile_builtin_method(
         }
         // FilterIterator.collect() -> [T]
         (Type::FilterIterator(elem_ty), "collect") => {
-            let func_id = ctx
-                .func_ids
-                .get("vole_filter_iter_collect")
-                .ok_or_else(|| "vole_filter_iter_collect not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::FilterIterCollect)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value]);
             let result = builder.inst_results(call)[0];
             Ok(Some(CompiledValue {
@@ -264,11 +248,8 @@ pub(crate) fn compile_builtin_method(
             let out_ptr = builder.ins().stack_addr(ctx.pointer_type, out_slot, 0);
 
             // Call runtime: has_value = vole_take_iter_next(iter, out_ptr)
-            let func_id = ctx
-                .func_ids
-                .get("vole_take_iter_next")
-                .ok_or_else(|| "vole_take_iter_next not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::TakeIterNext)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value, out_ptr]);
             let has_value = builder.inst_results(call)[0];
 
@@ -302,11 +283,8 @@ pub(crate) fn compile_builtin_method(
         }
         // TakeIterator.collect() -> [T]
         (Type::TakeIterator(elem_ty), "collect") => {
-            let func_id = ctx
-                .func_ids
-                .get("vole_take_iter_collect")
-                .ok_or_else(|| "vole_take_iter_collect not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::TakeIterCollect)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value]);
             let result = builder.inst_results(call)[0];
             Ok(Some(CompiledValue {
@@ -326,11 +304,8 @@ pub(crate) fn compile_builtin_method(
             let out_ptr = builder.ins().stack_addr(ctx.pointer_type, out_slot, 0);
 
             // Call runtime: has_value = vole_skip_iter_next(iter, out_ptr)
-            let func_id = ctx
-                .func_ids
-                .get("vole_skip_iter_next")
-                .ok_or_else(|| "vole_skip_iter_next not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::SkipIterNext)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value, out_ptr]);
             let has_value = builder.inst_results(call)[0];
 
@@ -364,11 +339,8 @@ pub(crate) fn compile_builtin_method(
         }
         // SkipIterator.collect() -> [T]
         (Type::SkipIterator(elem_ty), "collect") => {
-            let func_id = ctx
-                .func_ids
-                .get("vole_skip_iter_collect")
-                .ok_or_else(|| "vole_skip_iter_collect not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::SkipIterCollect)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value]);
             let result = builder.inst_results(call)[0];
             Ok(Some(CompiledValue {
@@ -383,11 +355,8 @@ pub(crate) fn compile_builtin_method(
         | (Type::FilterIterator(_), "count")
         | (Type::TakeIterator(_), "count")
         | (Type::SkipIterator(_), "count") => {
-            let func_id = ctx
-                .func_ids
-                .get("vole_iter_count")
-                .ok_or_else(|| "vole_iter_count not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::IterCount)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value]);
             let result = builder.inst_results(call)[0];
             Ok(Some(CompiledValue {
@@ -402,11 +371,8 @@ pub(crate) fn compile_builtin_method(
         | (Type::FilterIterator(_), "sum")
         | (Type::TakeIterator(_), "sum")
         | (Type::SkipIterator(_), "sum") => {
-            let func_id = ctx
-                .func_ids
-                .get("vole_iter_sum")
-                .ok_or_else(|| "vole_iter_sum not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::IterSum)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value]);
             let result = builder.inst_results(call)[0];
             Ok(Some(CompiledValue {
@@ -417,11 +383,8 @@ pub(crate) fn compile_builtin_method(
         }
         // String.length() -> i64
         (Type::String, "length") => {
-            let func_id = ctx
-                .func_ids
-                .get("vole_string_len")
-                .ok_or_else(|| "vole_string_len not found".to_string())?;
-            let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+            let func_id = runtime_func_id(ctx, RuntimeFn::StringLen)?;
+            let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
             let call = builder.ins().call(func_ref, &[obj.value]);
             let result = builder.inst_results(call)[0];
             Ok(Some(CompiledValue {

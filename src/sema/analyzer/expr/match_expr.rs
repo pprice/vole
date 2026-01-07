@@ -71,9 +71,10 @@ impl Analyzer {
             if let Some(guard) = &arm.guard {
                 let guard_type = self.check_expr(guard, interner)?;
                 if guard_type != Type::Bool && !guard_type.is_numeric() {
+                    let found = self.type_display(&guard_type, interner);
                     self.add_error(
                         SemanticError::MatchGuardNotBool {
-                            found: guard_type.name().to_string(),
+                            found,
                             span: guard.span.into(),
                         },
                         guard.span,
@@ -94,10 +95,12 @@ impl Analyzer {
                     first_arm_span = Some(arm.span);
                 }
                 Some(expected) if *expected != body_type => {
+                    let expected_str = self.type_display(expected, interner);
+                    let found = self.type_display(&body_type, interner);
                     self.add_error(
                         SemanticError::MatchArmTypeMismatch {
-                            expected: expected.name().to_string(),
-                            found: body_type.name().to_string(),
+                            expected: expected_str,
+                            found,
                             first_arm: first_arm_span.unwrap().into(),
                             span: arm.body.span.into(),
                         },

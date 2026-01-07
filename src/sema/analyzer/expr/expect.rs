@@ -24,9 +24,10 @@ impl Analyzer {
             ExprKind::IntLiteral(value) => match expected {
                 Some(ty) if literal_fits(*value, ty) => Ok(ty.clone()),
                 Some(ty) => {
+                    let expected = self.type_display(ty, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
-                            expected: ty.name().to_string(),
+                            expected,
                             found: "integer literal".to_string(),
                             span: expr.span.into(),
                         },
@@ -39,9 +40,10 @@ impl Analyzer {
             ExprKind::TypeLiteral(_) => match expected {
                 Some(Type::Type) | None => Ok(Type::Type),
                 Some(ty) => {
+                    let expected = self.type_display(ty, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
-                            expected: ty.name().to_string(),
+                            expected,
                             found: "type".to_string(),
                             span: expr.span.into(),
                         },
@@ -56,9 +58,10 @@ impl Analyzer {
                 // Float literals can be assigned to unions containing f64
                 Some(Type::Union(variants)) if variants.contains(&Type::F64) => Ok(Type::F64),
                 Some(ty) => {
+                    let expected = self.type_display(ty, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
-                            expected: ty.name().to_string(),
+                            expected,
                             found: "f64".to_string(),
                             span: expr.span.into(),
                         },
@@ -91,10 +94,11 @@ impl Analyzer {
                             Ok(Type::I32)
                         }
                     } else {
+                        let found = self.type_display_pair(&left_ty, &right_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "numeric".to_string(),
-                                found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                found,
                                 span: expr.span.into(),
                             },
                             expr.span,
@@ -122,10 +126,11 @@ impl Analyzer {
                     if left_ty == Type::Bool && right_ty == Type::Bool {
                         Ok(Type::Bool)
                     } else {
+                        let found = self.type_display_pair(&left_ty, &right_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "bool".to_string(),
-                                found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                found,
                                 span: expr.span.into(),
                             },
                             expr.span,
@@ -155,10 +160,11 @@ impl Analyzer {
                             Ok(Type::I32)
                         }
                     } else {
+                        let found = self.type_display_pair(&left_ty, &right_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "integer".to_string(),
-                                found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                found,
                                 span: expr.span.into(),
                             },
                             expr.span,
@@ -174,10 +180,11 @@ impl Analyzer {
                     if operand_ty.is_numeric() {
                         Ok(operand_ty)
                     } else {
+                        let found = self.type_display(&operand_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "numeric".to_string(),
-                                found: operand_ty.name().to_string(),
+                                found,
                                 span: expr.span.into(),
                             },
                             expr.span,
@@ -192,10 +199,11 @@ impl Analyzer {
                     if operand_ty == Type::Bool {
                         Ok(Type::Bool)
                     } else {
+                        let found = self.type_display(&operand_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "bool".to_string(),
-                                found: operand_ty.name().to_string(),
+                                found,
                                 span: expr.span.into(),
                             },
                             expr.span,
@@ -209,10 +217,11 @@ impl Analyzer {
                     if operand_ty.is_integer() {
                         Ok(operand_ty)
                     } else {
+                        let found = self.type_display(&operand_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "integer".to_string(),
-                                found: operand_ty.name().to_string(),
+                                found,
                                 span: expr.span.into(),
                             },
                             expr.span,
@@ -268,10 +277,12 @@ impl Analyzer {
                 if let Some(expected_ty) = expected
                     && !self.types_compatible(&inferred, expected_ty, interner)
                 {
+                    let expected = self.type_display(expected_ty, interner);
+                    let found = self.type_display(&inferred, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
-                            expected: expected_ty.name().to_string(),
-                            found: inferred.name().to_string(),
+                            expected,
+                            found,
                             span: expr.span.into(),
                         },
                         expr.span,

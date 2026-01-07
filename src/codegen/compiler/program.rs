@@ -4,13 +4,60 @@ use std::io::Write;
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
 
 use super::{Compiler, ControlFlowCtx, TestInfo};
+use crate::codegen::FunctionKey;
 use crate::codegen::stmt::compile_block;
 use crate::codegen::types::{CompileCtx, resolve_type_expr_full, type_to_cranelift};
 use crate::frontend::{Decl, FuncDecl, Interner, LetStmt, Program, Symbol, TestCase, TestsDecl};
+use crate::identity::NameId;
 use crate::sema::Type;
 use crate::sema::generic::MonomorphInstance;
 
 impl Compiler<'_> {
+    fn main_function_key_and_name(&mut self, sym: Symbol) -> (FunctionKey, String) {
+        let display_name = self.analyzed.interner.resolve(sym).to_string();
+        let name_id = self
+            .analyzed
+            .name_table
+            .name_id(self.analyzed.name_table.main_module(), &[sym]);
+        let key = if let Some(name_id) = name_id {
+            self.func_registry.intern_name_id(name_id)
+        } else {
+            self.func_registry
+                .intern_qualified(self.func_registry.main_module(), &[sym])
+        };
+        (key, display_name)
+    }
+
+    fn test_function_key(&mut self, test_index: usize) -> (NameId, FunctionKey) {
+        if let Some(name_id) = self.test_name_ids.get(test_index).copied() {
+            let key = self.func_registry.intern_name_id(name_id);
+            return (name_id, key);
+        }
+
+        let segment = format!("__test_{}", test_index);
+        let key = self
+            .func_registry
+            .intern_raw_qualified(self.func_registry.builtin_module(), &[segment.as_str()]);
+        let name_id = self
+            .func_registry
+            .name_for_qualified(key)
+            .expect("test function name_id should be available");
+        if self.test_name_ids.len() == test_index {
+            self.test_name_ids.push(name_id);
+        } else if self.test_name_ids.len() < test_index {
+            self.test_name_ids.resize(test_index + 1, name_id);
+        } else {
+            self.test_name_ids[test_index] = name_id;
+        }
+        (name_id, key)
+    }
+
+    fn test_display_name(&self, name_id: NameId) -> String {
+        self.func_registry
+            .name_table()
+            .display(name_id, &self.analyzed.interner)
+    }
+
     /// Compile a complete program
     pub fn compile_program(&mut self, program: &Program) -> Result<(), String> {
         // Compile module functions first (before main program)
@@ -42,8 +89,9 @@ impl Compiler<'_> {
                         continue;
                     }
                     let sig = self.create_function_signature(func);
-                    let name = self.analyzed.interner.resolve(func.name);
-                    self.jit.declare_function(name, &sig);
+                    let (func_key, display_name) = self.main_function_key_and_name(func.name);
+                    let func_id = self.jit.declare_function(&display_name, &sig);
+                    self.func_registry.set_func_id(func_key, func_id);
                     // Record return type for use in call expressions
                     // Note: Use resolve_type_with_metadata so that record types (like
                     // generated generator records) are properly resolved from type_metadata
@@ -52,14 +100,17 @@ impl Compiler<'_> {
                         .as_ref()
                         .map(|t| self.resolve_type_with_metadata(t))
                         .unwrap_or(Type::Void);
-                    self.func_return_types.insert(name.to_string(), return_type);
+                    self.func_registry.set_return_type(func_key, return_type);
                 }
                 Decl::Tests(tests_decl) => {
-                    // Declare each test as __test_N with signature () -> i64
+                    // Declare each test with a generated name and signature () -> i64
                     for _ in &tests_decl.tests {
-                        let func_name = format!("__test_{}", test_count);
+                        let (name_id, func_key) = self.test_function_key(test_count);
+                        let func_name = self.test_display_name(name_id);
                         let sig = self.jit.create_signature(&[], Some(types::I64));
-                        self.jit.declare_function(&func_name, &sig);
+                        let func_id = self.jit.declare_function(&func_name, &sig);
+                        self.func_registry.set_return_type(func_key, Type::I64);
+                        self.func_registry.set_func_id(func_key, func_id);
                         test_count += 1;
                     }
                 }
@@ -163,12 +214,23 @@ impl Compiler<'_> {
             // First pass: declare pure Vole functions
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
-                    let func_name = module_interner.resolve(func.name);
-                    let mangled_name = format!("{}::{}", module_path, func_name);
+                    let module_id = self
+                        .analyzed
+                        .name_table
+                        .module_id_if_known(module_path)
+                        .unwrap_or_else(|| self.analyzed.name_table.main_module());
+                    let name_id = self
+                        .analyzed
+                        .name_table
+                        .name_id(module_id, &[func.name])
+                        .expect("module function name_id should be registered");
+                    let display_name = self.analyzed.name_table.display(name_id, module_interner);
 
                     // Create signature and declare function
                     let sig = self.create_function_signature(func);
-                    self.jit.declare_function(&mangled_name, &sig);
+                    let func_id = self.jit.declare_function(&display_name, &sig);
+                    let func_key = self.func_registry.intern_name_id(name_id);
+                    self.func_registry.set_func_id(func_key, func_id);
 
                     // Record return type
                     let return_type = func
@@ -180,22 +242,31 @@ impl Compiler<'_> {
                                 &self.analyzed.type_aliases,
                                 &self.analyzed.interface_registry,
                                 &self.analyzed.interner,
+                                &self.analyzed.name_table,
+                                module_id,
                             )
                         })
                         .unwrap_or(Type::Void);
-                    self.func_return_types
-                        .insert(mangled_name.clone(), return_type);
+                    self.func_registry.set_return_type(func_key, return_type);
                 }
             }
 
             // Second pass: compile pure Vole function bodies
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
-                    let func_name = module_interner.resolve(func.name);
-                    let mangled_name = format!("{}::{}", module_path, func_name);
+                    let module_id = self
+                        .analyzed
+                        .name_table
+                        .module_id_if_known(module_path)
+                        .unwrap_or_else(|| self.analyzed.name_table.main_module());
+                    let name_id = self
+                        .analyzed
+                        .name_table
+                        .name_id(module_id, &[func.name])
+                        .expect("module function name_id should be registered");
                     self.compile_module_function(
                         module_path,
-                        &mangled_name,
+                        name_id,
                         func,
                         module_interner,
                         &module_globals,
@@ -211,16 +282,22 @@ impl Compiler<'_> {
     fn compile_module_function(
         &mut self,
         module_path: &str,
-        mangled_name: &str,
+        name_id: NameId,
         func: &FuncDecl,
         module_interner: &Interner,
         module_globals: &[LetStmt],
     ) -> Result<(), String> {
-        let func_id = *self
-            .jit
-            .func_ids
-            .get(mangled_name)
-            .ok_or_else(|| format!("Module function {} not declared", mangled_name))?;
+        let func_key = self.func_registry.intern_name_id(name_id);
+        let display_name = self.analyzed.name_table.display(name_id, module_interner);
+        let func_id = self
+            .func_registry
+            .func_id(func_key)
+            .ok_or_else(|| format!("Module function {} not declared", display_name))?;
+        let module_id = self
+            .analyzed
+            .name_table
+            .module_id_if_known(module_path)
+            .unwrap_or_else(|| self.analyzed.name_table.main_module());
 
         // Create function signature
         let sig = self.create_function_signature(func);
@@ -237,6 +314,8 @@ impl Compiler<'_> {
                         &self.analyzed.type_aliases,
                         &self.analyzed.interface_registry,
                         &self.analyzed.interner,
+                        &self.analyzed.name_table,
+                        module_id,
                     ),
                     self.pointer_type,
                 )
@@ -251,6 +330,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 )
             })
             .collect();
@@ -263,6 +344,8 @@ impl Compiler<'_> {
                 &self.analyzed.type_aliases,
                 &self.analyzed.interface_registry,
                 &self.analyzed.interner,
+                &self.analyzed.name_table,
+                module_id,
             )
         });
 
@@ -301,12 +384,12 @@ impl Compiler<'_> {
                 interner: module_interner, // Use module's interner
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &mut self.jit.func_ids,
+                func_registry: &mut self.func_registry,
                 source_file_ptr,
                 globals: module_globals, // Use module's globals
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
-                func_return_types: &self.func_return_types,
+                impl_method_infos: &self.impl_method_infos,
                 current_function_return_type: return_type,
                 native_registry: &self.native_registry,
                 current_module: Some(module_path), // We're compiling module code
@@ -338,8 +421,12 @@ impl Compiler<'_> {
     }
 
     fn compile_function(&mut self, func: &FuncDecl) -> Result<(), String> {
-        let name = self.analyzed.interner.resolve(func.name);
-        let func_id = *self.jit.func_ids.get(name).unwrap();
+        let module_id = self.analyzed.name_table.main_module();
+        let (func_key, display_name) = self.main_function_key_and_name(func.name);
+        let func_id = self
+            .func_registry
+            .func_id(func_key)
+            .ok_or_else(|| format!("Function {} not declared", display_name))?;
 
         // Create function signature
         let sig = self.create_function_signature(func);
@@ -356,6 +443,8 @@ impl Compiler<'_> {
                         &self.analyzed.type_aliases,
                         &self.analyzed.interface_registry,
                         &self.analyzed.interner,
+                        &self.analyzed.name_table,
+                        module_id,
                     ),
                     self.pointer_type,
                 )
@@ -370,6 +459,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 )
             })
             .collect();
@@ -382,6 +473,8 @@ impl Compiler<'_> {
                 &self.analyzed.type_aliases,
                 &self.analyzed.interface_registry,
                 &self.analyzed.interner,
+                &self.analyzed.name_table,
+                module_id,
             )
         });
 
@@ -420,12 +513,12 @@ impl Compiler<'_> {
                 interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &mut self.jit.func_ids,
+                func_registry: &mut self.func_registry,
                 source_file_ptr,
                 globals: &self.globals,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
-                func_return_types: &self.func_return_types,
+                impl_method_infos: &self.impl_method_infos,
                 current_function_return_type: return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
@@ -463,8 +556,12 @@ impl Compiler<'_> {
         test_count: &mut usize,
     ) -> Result<(), String> {
         for test in &tests_decl.tests {
-            let func_name = format!("__test_{}", *test_count);
-            let func_id = *self.jit.func_ids.get(&func_name).unwrap();
+            let (name_id, func_key) = self.test_function_key(*test_count);
+            let func_name = self.test_display_name(name_id);
+            let func_id = self
+                .func_registry
+                .func_id(func_key)
+                .ok_or_else(|| format!("Test {} not declared", func_name))?;
 
             // Create function signature: () -> i64
             let sig = self.jit.create_signature(&[], Some(types::I64));
@@ -491,12 +588,12 @@ impl Compiler<'_> {
                     interner: &self.analyzed.interner,
                     pointer_type: self.pointer_type,
                     module: &mut self.jit.module,
-                    func_ids: &mut self.jit.func_ids,
+                    func_registry: &mut self.func_registry,
                     source_file_ptr,
                     globals: &self.globals,
                     lambda_counter: &mut self.lambda_counter,
                     type_metadata: &self.type_metadata,
-                    func_return_types: &self.func_return_types,
+                    impl_method_infos: &self.impl_method_infos,
                     current_function_return_type: None, // Tests don't have a declared return type
                     native_registry: &self.native_registry,
                     current_module: None,
@@ -529,7 +626,8 @@ impl Compiler<'_> {
             let line = test.span.line;
             self.tests.push(TestInfo {
                 name: test.name.clone(),
-                func_name: func_name.clone(),
+                func_name_id: name_id,
+                func_id,
                 file: self.source_file_str(),
                 line,
             });
@@ -548,14 +646,16 @@ impl Compiler<'_> {
         writer: &mut W,
         include_tests: bool,
     ) -> Result<(), String> {
+        let module_id = self.analyzed.name_table.main_module();
         // First pass: declare all functions so they can reference each other
         let mut test_count = 0usize;
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
                     let sig = self.create_function_signature(func);
-                    let name = self.analyzed.interner.resolve(func.name);
-                    self.jit.declare_function(name, &sig);
+                    let (func_key, display_name) = self.main_function_key_and_name(func.name);
+                    let func_id = self.jit.declare_function(&display_name, &sig);
+                    self.func_registry.set_func_id(func_key, func_id);
                     // Record return type for use in call expressions
                     let return_type = func
                         .return_type
@@ -566,16 +666,21 @@ impl Compiler<'_> {
                                 &self.analyzed.type_aliases,
                                 &self.analyzed.interface_registry,
                                 &self.analyzed.interner,
+                                &self.analyzed.name_table,
+                                module_id,
                             )
                         })
                         .unwrap_or(Type::Void);
-                    self.func_return_types.insert(name.to_string(), return_type);
+                    self.func_registry.set_return_type(func_key, return_type);
                 }
                 Decl::Tests(tests_decl) if include_tests => {
                     for _ in &tests_decl.tests {
-                        let func_name = format!("__test_{}", test_count);
+                        let (name_id, func_key) = self.test_function_key(test_count);
+                        let func_name = self.test_display_name(name_id);
                         let sig = self.jit.create_signature(&[], Some(types::I64));
-                        self.jit.declare_function(&func_name, &sig);
+                        let func_id = self.jit.declare_function(&func_name, &sig);
+                        self.func_registry.set_return_type(func_key, Type::I64);
+                        self.func_registry.set_func_id(func_key, func_id);
                         test_count += 1;
                     }
                 }
@@ -611,6 +716,7 @@ impl Compiler<'_> {
     /// Build IR for a single function without defining it.
     /// Similar to compile_function but doesn't call define_function.
     fn build_function_ir(&mut self, func: &FuncDecl) -> Result<(), String> {
+        let module_id = self.analyzed.name_table.main_module();
         // Create function signature
         let sig = self.create_function_signature(func);
         self.jit.ctx.func.signature = sig;
@@ -626,6 +732,8 @@ impl Compiler<'_> {
                         &self.analyzed.type_aliases,
                         &self.analyzed.interface_registry,
                         &self.analyzed.interner,
+                        &self.analyzed.name_table,
+                        module_id,
                     ),
                     self.pointer_type,
                 )
@@ -640,6 +748,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 )
             })
             .collect();
@@ -652,6 +762,8 @@ impl Compiler<'_> {
                 &self.analyzed.type_aliases,
                 &self.analyzed.interface_registry,
                 &self.analyzed.interner,
+                &self.analyzed.name_table,
+                module_id,
             )
         });
 
@@ -691,12 +803,12 @@ impl Compiler<'_> {
                 interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &mut self.jit.func_ids,
+                func_registry: &mut self.func_registry,
                 source_file_ptr,
                 globals: &[],
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &empty_type_metadata,
-                func_return_types: &self.func_return_types,
+                impl_method_infos: &self.impl_method_infos,
                 current_function_return_type: return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
@@ -755,12 +867,12 @@ impl Compiler<'_> {
                 interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &mut self.jit.func_ids,
+                func_registry: &mut self.func_registry,
                 source_file_ptr,
                 globals: &[],
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &empty_type_metadata,
-                func_return_types: &self.func_return_types,
+                impl_method_infos: &self.impl_method_infos,
                 current_function_return_type: None, // Tests don't have a declared return type
                 native_registry: &self.native_registry,
                 current_module: None,
@@ -802,8 +914,10 @@ impl Compiler<'_> {
             .collect();
 
         for (_key, instance) in instances {
-            let mangled_name =
-                self.mangle_monomorph_name(instance.original_name, instance.instance_id);
+            let mangled_name = self
+                .analyzed
+                .name_table
+                .display(instance.mangled_name, &self.analyzed.interner);
 
             // Create signature from the concrete function type
             let mut params = Vec::new();
@@ -819,11 +933,13 @@ impl Compiler<'_> {
                 ))
             };
             let sig = self.jit.create_signature(&params, ret);
-            self.jit.declare_function(&mangled_name, &sig);
+            let func_id = self.jit.declare_function(&mangled_name, &sig);
+            let func_key = self.func_registry.intern_name_id(instance.mangled_name);
+            self.func_registry.set_func_id(func_key, func_id);
 
             // Record return type for call expressions
-            self.func_return_types
-                .insert(mangled_name, (*instance.func_type.return_type).clone());
+            self.func_registry
+                .set_return_type(func_key, (*instance.func_type.return_type).clone());
         }
 
         Ok(())
@@ -832,14 +948,19 @@ impl Compiler<'_> {
     /// Compile all monomorphized function instances
     fn compile_monomorphized_instances(&mut self, program: &Program) -> Result<(), String> {
         // Build a map of generic function names to their ASTs
-        let generic_func_asts: HashMap<Symbol, &FuncDecl> = program
+        let generic_func_asts: HashMap<NameId, &FuncDecl> = program
             .declarations
             .iter()
             .filter_map(|decl| {
                 if let Decl::Function(func) = decl
                     && !func.type_params.is_empty()
                 {
-                    return Some((func.name, func));
+                    let name_id = self
+                        .analyzed
+                        .name_table
+                        .name_id(self.analyzed.name_table.main_module(), &[func.name])
+                        .expect("generic function name_id should be registered");
+                    return Some((name_id, func));
                 }
                 None
             })
@@ -858,8 +979,10 @@ impl Compiler<'_> {
                 .get(&instance.original_name)
                 .ok_or_else(|| {
                     format!(
-                        "Internal error: generic function AST not found for {:?}",
-                        instance.original_name
+                        "Internal error: generic function AST not found for {}",
+                        self.analyzed
+                            .name_table
+                            .display(instance.original_name, &self.analyzed.interner)
                     )
                 })?;
 
@@ -875,12 +998,14 @@ impl Compiler<'_> {
         func: &FuncDecl,
         instance: &MonomorphInstance,
     ) -> Result<(), String> {
-        let mangled_name = self.mangle_monomorph_name(instance.original_name, instance.instance_id);
-
-        let func_id = *self
-            .jit
-            .func_ids
-            .get(&mangled_name)
+        let mangled_name = self
+            .analyzed
+            .name_table
+            .display(instance.mangled_name, &self.analyzed.interner);
+        let func_key = self.func_registry.intern_name_id(instance.mangled_name);
+        let func_id = self
+            .func_registry
+            .func_id(func_key)
             .ok_or_else(|| format!("Monomorphized function {} not declared", mangled_name))?;
 
         // Create function signature from concrete types
@@ -947,12 +1072,12 @@ impl Compiler<'_> {
                 interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &mut self.jit.func_ids,
+                func_registry: &mut self.func_registry,
                 source_file_ptr,
                 globals: &self.globals,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
-                func_return_types: &self.func_return_types,
+                impl_method_infos: &self.impl_method_infos,
                 current_function_return_type: return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
@@ -981,11 +1106,5 @@ impl Compiler<'_> {
         self.jit.clear();
 
         Ok(())
-    }
-
-    /// Generate a mangled name for a monomorphized function instance
-    fn mangle_monomorph_name(&self, original_name: Symbol, instance_id: u32) -> String {
-        let name = self.analyzed.interner.resolve(original_name);
-        format!("{}__mono_{}", name, instance_id)
     }
 }

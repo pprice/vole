@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use cranelift::prelude::{AbiParam, FunctionBuilder, InstBuilder, Value, Variable, types};
 use cranelift_module::{FuncId, Module};
 
+use crate::codegen::{FunctionKey, RuntimeFn};
 use crate::frontend::Symbol;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::Type;
@@ -136,18 +137,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== Runtime function helpers ==========
 
-    /// Get a runtime function ID by name
-    pub fn func_id(&self, name: &str) -> Result<FuncId, String> {
+    /// Get a function ID by key
+    pub fn func_id(&self, key: FunctionKey) -> Result<FuncId, String> {
         self.ctx
-            .func_ids
-            .get(name)
-            .copied()
-            .ok_or_else(|| format!("{} not found", name))
+            .func_registry
+            .func_id(key)
+            .ok_or_else(|| "function id not found".to_string())
     }
 
-    /// Get a runtime function reference for calling
-    pub fn func_ref(&mut self, name: &str) -> Result<cranelift::codegen::ir::FuncRef, String> {
-        let func_id = self.func_id(name)?;
+    /// Get a function reference for calling
+    pub fn func_ref(
+        &mut self,
+        key: FunctionKey,
+    ) -> Result<cranelift::codegen::ir::FuncRef, String> {
+        let func_id = self.func_id(key)?;
         Ok(self
             .ctx
             .module
@@ -155,20 +158,30 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Call a runtime function and return the first result (or error if no results)
-    pub fn call_runtime(&mut self, name: &str, args: &[Value]) -> Result<Value, String> {
-        let func_ref = self.func_ref(name)?;
+    pub fn call_runtime(&mut self, runtime: RuntimeFn, args: &[Value]) -> Result<Value, String> {
+        let key = self
+            .ctx
+            .func_registry
+            .runtime_key(runtime)
+            .ok_or_else(|| format!("{} not registered", runtime.name()))?;
+        let func_ref = self.func_ref(key)?;
         let call = self.builder.ins().call(func_ref, args);
         let results = self.builder.inst_results(call);
         if results.is_empty() {
-            Err(format!("{} returned no value", name))
+            Err(format!("{} returned no value", runtime.name()))
         } else {
             Ok(results[0])
         }
     }
 
     /// Call a runtime function that returns void
-    pub fn call_runtime_void(&mut self, name: &str, args: &[Value]) -> Result<(), String> {
-        let func_ref = self.func_ref(name)?;
+    pub fn call_runtime_void(&mut self, runtime: RuntimeFn, args: &[Value]) -> Result<(), String> {
+        let key = self
+            .ctx
+            .func_registry
+            .runtime_key(runtime)
+            .ok_or_else(|| format!("{} not registered", runtime.name()))?;
+        let func_ref = self.func_ref(key)?;
         self.builder.ins().call(func_ref, args);
         Ok(())
     }

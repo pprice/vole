@@ -28,10 +28,11 @@ impl Analyzer {
 
             let arg_ty = self.check_expr(&call.args[0], interner)?;
             if arg_ty != Type::Bool && arg_ty != Type::Error {
+                let found = self.type_display(&arg_ty, interner);
                 self.add_error(
                     SemanticError::TypeMismatch {
                         expected: "bool".to_string(),
-                        found: arg_ty.name().to_string(),
+                        found,
                         span: call.args[0].span.into(),
                     },
                     call.args[0].span,
@@ -105,10 +106,12 @@ impl Analyzer {
                 {
                     let arg_ty = &arg_types[i];
                     if !types_compatible_core(arg_ty, expected) {
+                        let expected = self.type_display(expected, interner);
+                        let found = self.type_display(arg_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
-                                expected: format!("{}", expected),
-                                found: format!("{}", arg_ty),
+                                expected,
+                                found,
                                 span: arg.span.into(),
                             },
                             arg.span,
@@ -122,14 +125,23 @@ impl Analyzer {
                     .iter()
                     .filter_map(|tp| inferred.get(&tp.name).cloned())
                     .collect();
-                let key = MonomorphKey::new(*sym, &type_args);
+                let type_keys = type_args.iter().map(|ty| self.type_key_for(ty)).collect();
+                let name_id = self
+                    .name_table
+                    .intern(self.name_table.main_module(), &[*sym]);
+                let key = MonomorphKey::new(name_id, type_keys);
 
                 if !self.monomorph_cache.contains(&key) {
                     let id = self.monomorph_cache.next_unique_id();
+                    let module_id = self.name_table.module_of(name_id);
+                    let base_sym = self.name_table.last_symbol(name_id).unwrap_or(*sym);
+                    let mangled = format!("{}__mono_{}", interner.resolve(base_sym), id);
+                    let mangled_name = self.name_table.intern_raw(module_id, &[mangled.as_str()]);
                     self.monomorph_cache.insert(
                         key.clone(),
                         MonomorphInstance {
-                            original_name: *sym,
+                            original_name: name_id,
+                            mangled_name,
                             instance_id: id,
                             func_type: FunctionType {
                                 params: concrete_params,
@@ -196,9 +208,10 @@ impl Analyzer {
 
             // Check if it's a variable with a non-function type
             if let Some(var_ty) = self.get_variable_type(*sym) {
+                let ty = self.type_display(&var_ty, interner);
                 self.add_error(
                     SemanticError::NotCallable {
-                        ty: var_ty.name().to_string(),
+                        ty,
                         span: call.callee.span.into(),
                     },
                     call.callee.span,
@@ -237,9 +250,10 @@ impl Analyzer {
 
         // Non-callable type
         if callee_ty != Type::Error {
+            let ty = self.type_display(&callee_ty, interner);
             self.add_error(
                 SemanticError::NotCallable {
-                    ty: callee_ty.name().to_string(),
+                    ty,
                     span: call.callee.span.into(),
                 },
                 call.callee.span,

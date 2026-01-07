@@ -35,6 +35,15 @@ impl Interner {
     pub fn lookup(&self, s: &str) -> Option<Symbol> {
         self.map.get(s).copied()
     }
+
+    pub fn seed_builtin_symbols(&mut self) {
+        for name in [
+            "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "f32", "f64", "bool",
+            "string",
+        ] {
+            let _ = self.intern(name);
+        }
+    }
 }
 
 #[cfg(test)]

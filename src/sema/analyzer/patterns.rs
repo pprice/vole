@@ -22,10 +22,12 @@ impl Analyzer {
                     && !self.types_compatible(&lit_type, scrutinee_type, interner)
                     && !self.types_compatible(scrutinee_type, &lit_type, interner)
                 {
+                    let expected = self.type_display(scrutinee_type, interner);
+                    let found = self.type_display(&lit_type, interner);
                     self.add_error(
                         SemanticError::PatternTypeMismatch {
-                            expected: scrutinee_type.name().to_string(),
-                            found: lit_type.name().to_string(),
+                            expected,
+                            found,
                             span: expr.span.into(),
                         },
                         expr.span,
@@ -80,14 +82,17 @@ impl Analyzer {
             Pattern::Val { name, span } => {
                 // Val pattern compares against existing variable's value
                 if let Some(var) = self.scope.get(*name) {
+                    let var_ty = var.ty.clone();
                     // Check type compatibility
-                    if !self.types_compatible(&var.ty, scrutinee_type, interner)
-                        && !self.types_compatible(scrutinee_type, &var.ty, interner)
+                    if !self.types_compatible(&var_ty, scrutinee_type, interner)
+                        && !self.types_compatible(scrutinee_type, &var_ty, interner)
                     {
+                        let expected = self.type_display(scrutinee_type, interner);
+                        let found = self.type_display(&var_ty, interner);
                         self.add_error(
                             SemanticError::PatternTypeMismatch {
-                                expected: scrutinee_type.name().to_string(),
-                                found: var.ty.name().to_string(),
+                                expected,
+                                found,
                                 span: (*span).into(),
                             },
                             *span,
@@ -110,9 +115,10 @@ impl Analyzer {
                 let success_type = match scrutinee_type {
                     Type::Fallible(ft) => (*ft.success_type).clone(),
                     _ => {
+                        let found = self.type_display(scrutinee_type, interner);
                         self.add_error(
                             SemanticError::SuccessPatternOnNonFallible {
-                                found: scrutinee_type.name().to_string(),
+                                found,
                                 span: (*span).into(),
                             },
                             *span,
@@ -134,9 +140,10 @@ impl Analyzer {
                 let error_type = match scrutinee_type {
                     Type::Fallible(ft) => (*ft.error_type).clone(),
                     _ => {
+                        let found = self.type_display(scrutinee_type, interner);
                         self.add_error(
                             SemanticError::ErrorPatternOnNonFallible {
-                                found: scrutinee_type.name().to_string(),
+                                found,
                                 span: (*span).into(),
                             },
                             *span,
@@ -158,7 +165,7 @@ impl Analyzer {
 
     /// Check if a match expression is exhaustive
     pub(crate) fn check_match_exhaustiveness(
-        &self,
+        &mut self,
         arms: &[MatchArm],
         scrutinee_type: &Type,
         _span: Span,
@@ -226,10 +233,12 @@ impl Analyzer {
         // For union types, the pattern type must be one of the variants
         if let Type::Union(variants) = scrutinee_type {
             if !variants.iter().any(|v| v == pattern_type) {
+                let expected = self.type_display(scrutinee_type, interner);
+                let found = self.type_display(pattern_type, interner);
                 self.add_error(
                     SemanticError::PatternTypeMismatch {
-                        expected: scrutinee_type.name().to_string(),
-                        found: pattern_type.name().to_string(),
+                        expected,
+                        found,
                         span: span.into(),
                     },
                     span,
@@ -239,10 +248,12 @@ impl Analyzer {
             && !self.types_compatible(pattern_type, scrutinee_type, interner)
         {
             // For non-union types, pattern must match or be compatible
+            let expected = self.type_display(scrutinee_type, interner);
+            let found = self.type_display(pattern_type, interner);
             self.add_error(
                 SemanticError::PatternTypeMismatch {
-                    expected: scrutinee_type.name().to_string(),
-                    found: pattern_type.name().to_string(),
+                    expected,
+                    found,
                     span: span.into(),
                 },
                 span,

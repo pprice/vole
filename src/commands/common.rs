@@ -11,10 +11,11 @@ use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext};
 use crate::errors::{LexerError, render_to_stderr, render_to_writer};
 use crate::frontend::{AstPrinter, Interner, NodeId, ParseError, Parser, Symbol, ast::Program};
+use crate::identity::NameTable;
 use crate::runtime::set_stdout_capture;
 use crate::sema::generic::{GenericFuncDef, MonomorphCache, MonomorphKey};
 use crate::sema::interface_registry::InterfaceRegistry;
-use crate::sema::{Analyzer, ErrorTypeInfo, MethodResolutions, Type, TypeError};
+use crate::sema::{Analyzer, ErrorTypeInfo, MethodResolutions, Type, TypeError, TypeTable};
 use crate::transforms;
 
 /// Result of parsing and analyzing a source file.
@@ -37,6 +38,10 @@ pub struct AnalyzedProgram {
     pub monomorph_cache: MonomorphCache,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
     pub generic_calls: HashMap<NodeId, MonomorphKey>,
+    /// Qualified name interner for printable identities
+    pub name_table: NameTable,
+    /// Opaque type identities for named types
+    pub type_table: TypeTable,
 }
 
 /// Render a lexer error to stderr with source context
@@ -125,6 +130,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
     }
 
     let mut interner = parser.into_interner();
+    interner.seed_builtin_symbols();
 
     // Transform generators to state machines (before type checking)
     let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
@@ -155,6 +161,8 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         generic_functions,
         monomorph_cache,
         generic_calls,
+        name_table,
+        type_table,
     ) = analyzer.into_analysis_results();
     Ok(AnalyzedProgram {
         program,
@@ -169,6 +177,8 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         generic_functions,
         monomorph_cache,
         generic_calls,
+        name_table,
+        type_table,
     })
 }
 
@@ -265,6 +275,7 @@ pub fn check_captured<W: Write + Send + 'static>(
     }
 
     let mut interner = parser.into_interner();
+    interner.seed_builtin_symbols();
 
     // Transform generators to state machines (before type checking)
     let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
@@ -321,6 +332,7 @@ pub fn run_captured<W: Write + Send + 'static>(
     }
 
     let mut interner = parser.into_interner();
+    interner.seed_builtin_symbols();
 
     // Transform generators to state machines (before type checking)
     let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
@@ -350,6 +362,8 @@ pub fn run_captured<W: Write + Send + 'static>(
         generic_functions,
         monomorph_cache,
         generic_calls,
+        name_table,
+        type_table,
     ) = analyzer.into_analysis_results();
 
     let analyzed = AnalyzedProgram {
@@ -365,6 +379,8 @@ pub fn run_captured<W: Write + Send + 'static>(
         generic_functions,
         monomorph_cache,
         generic_calls,
+        name_table,
+        type_table,
     };
 
     // Compile

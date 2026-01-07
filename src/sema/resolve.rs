@@ -3,6 +3,7 @@
 // Type resolution: converts TypeExpr (AST representation) to Type (semantic representation)
 
 use crate::frontend::{Interner, Symbol, TypeExpr};
+use crate::identity::{ModuleId, NameTable};
 use crate::sema::generic::TypeParamScope;
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::types::{
@@ -19,11 +20,14 @@ pub struct TypeResolutionContext<'a> {
     pub error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
     pub interface_registry: &'a InterfaceRegistry,
     pub interner: &'a Interner,
+    pub name_table: &'a mut NameTable,
+    pub module_id: ModuleId,
     /// Type parameters in scope (for generic contexts)
     pub type_params: Option<&'a TypeParamScope>,
 }
 
 impl<'a> TypeResolutionContext<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         type_aliases: &'a HashMap<Symbol, Type>,
         classes: &'a HashMap<Symbol, ClassType>,
@@ -31,6 +35,8 @@ impl<'a> TypeResolutionContext<'a> {
         error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
         interface_registry: &'a InterfaceRegistry,
         interner: &'a Interner,
+        name_table: &'a mut NameTable,
+        module_id: ModuleId,
     ) -> Self {
         Self {
             type_aliases,
@@ -39,11 +45,14 @@ impl<'a> TypeResolutionContext<'a> {
             error_types,
             interface_registry,
             interner,
+            name_table,
+            module_id,
             type_params: None,
         }
     }
 
     /// Create a context with type parameters in scope
+    #[allow(clippy::too_many_arguments)]
     pub fn with_type_params(
         type_aliases: &'a HashMap<Symbol, Type>,
         classes: &'a HashMap<Symbol, ClassType>,
@@ -51,6 +60,8 @@ impl<'a> TypeResolutionContext<'a> {
         error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
         interface_registry: &'a InterfaceRegistry,
         interner: &'a Interner,
+        name_table: &'a mut NameTable,
+        module_id: ModuleId,
         type_params: &'a TypeParamScope,
     ) -> Self {
         Self {
@@ -60,6 +71,8 @@ impl<'a> TypeResolutionContext<'a> {
             error_types,
             interface_registry,
             interner,
+            name_table,
+            module_id,
             type_params: Some(type_params),
         }
     }
@@ -70,7 +83,7 @@ impl<'a> TypeResolutionContext<'a> {
 /// This converts AST type expressions (from parsing) to semantic types (for type checking).
 /// It handles primitives, named types (aliases, classes, records, interfaces), arrays,
 /// optionals, unions, and function types.
-pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
+pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type {
     match ty {
         TypeExpr::Primitive(p) => Type::from_primitive(*p),
         TypeExpr::Named(sym) => {
@@ -88,8 +101,10 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
             } else if let Some(class) = ctx.classes.get(sym) {
                 Type::Class(class.clone())
             } else if let Some(iface) = ctx.interface_registry.get(*sym, ctx.interner) {
+                let name_id = ctx.name_table.intern(ctx.module_id, &[*sym]);
                 Type::Interface(InterfaceType {
                     name: *sym,
+                    name_id,
                     methods: iface
                         .methods
                         .iter()
@@ -158,8 +173,9 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
         TypeExpr::Generic { name, args } => {
             // Resolve all type arguments
             let resolved_args: Vec<Type> = args.iter().map(|a| resolve_type(a, ctx)).collect();
+            let name_id = ctx.name_table.intern(ctx.module_id, &[*name]);
             Type::GenericInstance {
-                def: *name,
+                def: name_id,
                 args: resolved_args,
             }
         }
@@ -170,9 +186,13 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &TypeResolutionContext<'_>) -> Type {
 mod tests {
     use super::*;
     use crate::frontend::PrimitiveType;
+    use crate::identity::NameTable;
 
-    fn empty_context() -> TypeResolutionContext<'static> {
-        use crate::frontend::Interner;
+    fn with_empty_context<F, R>(interner: &Interner, f: F) -> R
+    where
+        F: FnOnce(&mut TypeResolutionContext<'_>) -> R,
+    {
+        use crate::identity::NameTable;
 
         static EMPTY_ALIASES: std::sync::LazyLock<HashMap<Symbol, Type>> =
             std::sync::LazyLock::new(HashMap::new);
@@ -184,78 +204,91 @@ mod tests {
             std::sync::LazyLock::new(HashMap::new);
         static EMPTY_INTERFACES: std::sync::LazyLock<InterfaceRegistry> =
             std::sync::LazyLock::new(InterfaceRegistry::new);
-        static EMPTY_INTERNER: std::sync::LazyLock<Interner> =
-            std::sync::LazyLock::new(Interner::new);
 
-        TypeResolutionContext::new(
+        let mut name_table = NameTable::new();
+        let module_id = name_table.main_module();
+        let mut ctx = TypeResolutionContext::new(
             &EMPTY_ALIASES,
             &EMPTY_CLASSES,
             &EMPTY_RECORDS,
             &EMPTY_ERRORS,
             &EMPTY_INTERFACES,
-            &EMPTY_INTERNER,
-        )
+            interner,
+            &mut name_table,
+            module_id,
+        );
+        f(&mut ctx)
     }
 
     #[test]
     fn resolve_primitive_types() {
-        let ctx = empty_context();
-        assert_eq!(
-            resolve_type(&TypeExpr::Primitive(PrimitiveType::I32), &ctx),
-            Type::I32
-        );
-        assert_eq!(
-            resolve_type(&TypeExpr::Primitive(PrimitiveType::Bool), &ctx),
-            Type::Bool
-        );
-        assert_eq!(
-            resolve_type(&TypeExpr::Primitive(PrimitiveType::String), &ctx),
-            Type::String
-        );
+        let interner = Interner::new();
+        with_empty_context(&interner, |ctx| {
+            assert_eq!(
+                resolve_type(&TypeExpr::Primitive(PrimitiveType::I32), ctx),
+                Type::I32
+            );
+            assert_eq!(
+                resolve_type(&TypeExpr::Primitive(PrimitiveType::Bool), ctx),
+                Type::Bool
+            );
+            assert_eq!(
+                resolve_type(&TypeExpr::Primitive(PrimitiveType::String), ctx),
+                Type::String
+            );
+        });
     }
 
     #[test]
     fn resolve_nil_type() {
-        let ctx = empty_context();
-        assert_eq!(resolve_type(&TypeExpr::Nil, &ctx), Type::Nil);
+        let interner = Interner::new();
+        with_empty_context(&interner, |ctx| {
+            assert_eq!(resolve_type(&TypeExpr::Nil, ctx), Type::Nil);
+        });
     }
 
     #[test]
     fn resolve_array_type() {
-        let ctx = empty_context();
-        let array_expr = TypeExpr::Array(Box::new(TypeExpr::Primitive(PrimitiveType::I64)));
-        let resolved = resolve_type(&array_expr, &ctx);
-        assert_eq!(resolved, Type::Array(Box::new(Type::I64)));
+        let interner = Interner::new();
+        with_empty_context(&interner, |ctx| {
+            let array_expr = TypeExpr::Array(Box::new(TypeExpr::Primitive(PrimitiveType::I64)));
+            let resolved = resolve_type(&array_expr, ctx);
+            assert_eq!(resolved, Type::Array(Box::new(Type::I64)));
+        });
     }
 
     #[test]
     fn resolve_optional_type() {
-        let ctx = empty_context();
-        let opt_expr = TypeExpr::Optional(Box::new(TypeExpr::Primitive(PrimitiveType::I32)));
-        let resolved = resolve_type(&opt_expr, &ctx);
-        assert!(resolved.is_optional());
+        let interner = Interner::new();
+        with_empty_context(&interner, |ctx| {
+            let opt_expr = TypeExpr::Optional(Box::new(TypeExpr::Primitive(PrimitiveType::I32)));
+            let resolved = resolve_type(&opt_expr, ctx);
+            assert!(resolved.is_optional());
+        });
     }
 
     #[test]
     fn resolve_function_type() {
-        let ctx = empty_context();
-        let func_expr = TypeExpr::Function {
-            params: vec![
-                TypeExpr::Primitive(PrimitiveType::I32),
-                TypeExpr::Primitive(PrimitiveType::I32),
-            ],
-            return_type: Box::new(TypeExpr::Primitive(PrimitiveType::Bool)),
-        };
-        let resolved = resolve_type(&func_expr, &ctx);
-        if let Type::Function(ft) = resolved {
-            assert_eq!(ft.params.len(), 2);
-            assert_eq!(ft.params[0], Type::I32);
-            assert_eq!(ft.params[1], Type::I32);
-            assert_eq!(*ft.return_type, Type::Bool);
-            assert!(!ft.is_closure);
-        } else {
-            panic!("Expected function type");
-        }
+        let interner = Interner::new();
+        with_empty_context(&interner, |ctx| {
+            let func_expr = TypeExpr::Function {
+                params: vec![
+                    TypeExpr::Primitive(PrimitiveType::I32),
+                    TypeExpr::Primitive(PrimitiveType::I32),
+                ],
+                return_type: Box::new(TypeExpr::Primitive(PrimitiveType::Bool)),
+            };
+            let resolved = resolve_type(&func_expr, ctx);
+            if let Type::Function(ft) = resolved {
+                assert_eq!(ft.params.len(), 2);
+                assert_eq!(ft.params[0], Type::I32);
+                assert_eq!(ft.params[1], Type::I32);
+                assert_eq!(*ft.return_type, Type::Bool);
+                assert!(!ft.is_closure);
+            } else {
+                panic!("Expected function type");
+            }
+        });
     }
 
     #[test]
@@ -279,31 +312,38 @@ mod tests {
             interner
         });
 
-        let ctx = TypeResolutionContext::new(
+        let mut name_table = NameTable::new();
+        let module_id = name_table.main_module();
+        let mut ctx = TypeResolutionContext::new(
             &EMPTY_ALIASES,
             &EMPTY_CLASSES,
             &EMPTY_RECORDS,
             &EMPTY_ERRORS,
             &EMPTY_INTERFACES,
             &TEST_INTERNER,
+            &mut name_table,
+            module_id,
         );
-        // Use Symbol(0) which corresponds to "UnknownType"
         let named = TypeExpr::Named(Symbol(0));
-        assert_eq!(resolve_type(&named, &ctx), Type::Error);
+        assert_eq!(resolve_type(&named, &mut ctx), Type::Error);
     }
 
     #[test]
     fn resolve_self_type() {
-        let ctx = empty_context();
-        // Self type is only valid in interface/implement context
-        assert_eq!(resolve_type(&TypeExpr::SelfType, &ctx), Type::Error);
+        let interner = Interner::new();
+        with_empty_context(&interner, |ctx| {
+            // Self type is only valid in interface/implement context
+            assert_eq!(resolve_type(&TypeExpr::SelfType, ctx), Type::Error);
+        });
     }
 
     #[test]
     fn resolve_iterator_type() {
-        let ctx = empty_context();
-        let iter_expr = TypeExpr::Iterator(Box::new(TypeExpr::Primitive(PrimitiveType::I32)));
-        let resolved = resolve_type(&iter_expr, &ctx);
-        assert_eq!(resolved, Type::Iterator(Box::new(Type::I32)));
+        let interner = Interner::new();
+        with_empty_context(&interner, |ctx| {
+            let iter_expr = TypeExpr::Iterator(Box::new(TypeExpr::Primitive(PrimitiveType::I32)));
+            let resolved = resolve_type(&iter_expr, ctx);
+            assert_eq!(resolved, Type::Iterator(Box::new(Type::I32)));
+        });
     }
 }

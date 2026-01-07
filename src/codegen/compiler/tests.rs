@@ -1,6 +1,8 @@
 use super::*;
 use crate::commands::common::AnalyzedProgram;
 use crate::frontend::Parser;
+use crate::identity::NameTable;
+use crate::sema::TypeTable;
 use crate::sema::generic::MonomorphCache;
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::resolution::MethodResolutions;
@@ -23,6 +25,8 @@ fn compile_and_run(source: &str) -> i64 {
         generic_functions: HashMap::new(),
         monomorph_cache: MonomorphCache::new(),
         generic_calls: HashMap::new(),
+        name_table: NameTable::new(),
+        type_table: TypeTable::new(),
     };
 
     let mut jit = JitContext::new();

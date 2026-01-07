@@ -34,10 +34,12 @@ impl Analyzer {
                         );
                     }
                     if !self.types_compatible(&value_ty, &var_ty, interner) {
+                        let expected = self.type_display(&var_ty, interner);
+                        let found = self.type_display(&value_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
-                                expected: var_ty.name().to_string(),
-                                found: value_ty.name().to_string(),
+                                expected,
+                                found,
                                 span: expr.span.into(),
                             },
                             expr.span,
@@ -67,10 +69,12 @@ impl Analyzer {
                     Type::Class(c) => {
                         if let Some(field_def) = c.fields.iter().find(|f| f.name == *field) {
                             if !self.types_compatible(&value_ty, &field_def.ty, interner) {
+                                let expected = self.type_display(&field_def.ty, interner);
+                                let found = self.type_display(&value_ty, interner);
                                 self.add_error(
                                     SemanticError::TypeMismatch {
-                                        expected: field_def.ty.name().to_string(),
-                                        found: value_ty.name().to_string(),
+                                        expected,
+                                        found,
                                         span: assign.value.span.into(),
                                     },
                                     assign.value.span,
@@ -103,9 +107,10 @@ impl Analyzer {
                     }
                     _ => {
                         if obj_ty != Type::Error {
+                            let ty = self.type_display(&obj_ty, interner);
                             self.add_error(
                                 SemanticError::UnknownField {
-                                    ty: obj_ty.name().to_string(),
+                                    ty,
                                     field: interner.resolve(*field).to_string(),
                                     span: (*field_span).into(),
                                 },
@@ -126,10 +131,11 @@ impl Analyzer {
                     idx_type,
                     Type::I32 | Type::I64 | Type::U8 | Type::U16 | Type::U32 | Type::U64
                 ) {
+                    let found = self.type_display(&idx_type, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "integer".to_string(),
-                            found: idx_type.name().to_string(),
+                            found,
                             span: index.span.into(),
                         },
                         index.span,
@@ -140,10 +146,12 @@ impl Analyzer {
                 match obj_type {
                     Type::Array(elem_ty) => {
                         if !self.types_compatible(&value_ty, &elem_ty, interner) {
+                            let expected = self.type_display(&elem_ty, interner);
+                            let found = self.type_display(&value_ty, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
-                                    expected: elem_ty.name().to_string(),
-                                    found: value_ty.name().to_string(),
+                                    expected,
+                                    found,
                                     span: assign.value.span.into(),
                                 },
                                 assign.value.span,
@@ -153,10 +161,11 @@ impl Analyzer {
                     }
                     _ => {
                         if obj_type != Type::Error {
+                            let found = self.type_display(&obj_type, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "array".to_string(),
-                                    found: obj_type.name().to_string(),
+                                    found,
                                     span: object.span.into(),
                                 },
                                 object.span,
@@ -222,10 +231,11 @@ impl Analyzer {
                     idx_type,
                     Type::I32 | Type::I64 | Type::U8 | Type::U16 | Type::U32 | Type::U64
                 ) {
+                    let found = self.type_display(&idx_type, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "integer".to_string(),
-                            found: idx_type.name().to_string(),
+                            found,
                             span: index.span.into(),
                         },
                         index.span,
@@ -237,10 +247,11 @@ impl Analyzer {
                     Type::Array(elem_ty) => *elem_ty,
                     _ => {
                         if obj_type != Type::Error {
+                            let found = self.type_display(&obj_type, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "array".to_string(),
-                                    found: obj_type.name().to_string(),
+                                    found,
                                     span: object.span.into(),
                                 },
                                 object.span,
@@ -287,9 +298,10 @@ impl Analyzer {
                     }
                     _ => {
                         if obj_ty != Type::Error {
+                            let ty = self.type_display(&obj_ty, interner);
                             self.add_error(
                                 SemanticError::UnknownField {
-                                    ty: obj_ty.name().to_string(),
+                                    ty,
                                     field: interner.resolve(*field).to_string(),
                                     span: (*field_span).into(),
                                 },
@@ -311,10 +323,11 @@ impl Analyzer {
             && value_type != Type::Error
             && (!target_type.is_numeric() || !value_type.is_numeric())
         {
+            let found = self.type_display_pair(&target_type, &value_type, interner);
             self.add_error(
                 SemanticError::TypeMismatch {
                     expected: "numeric".to_string(),
-                    found: format!("{} and {}", target_type.name(), value_type.name()),
+                    found,
                     span: expr.span.into(),
                 },
                 expr.span,

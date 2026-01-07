@@ -2,8 +2,6 @@
 //
 // Call-related codegen - impl Cg methods and standalone helpers.
 
-use std::collections::HashMap;
-
 use cranelift::prelude::*;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
@@ -14,6 +12,7 @@ use crate::sema::{FunctionType, Type};
 
 use super::context::Cg;
 use super::types::{CompiledValue, native_type_to_cranelift, resolve_type_expr, type_to_cranelift};
+use super::{FunctionKey, FunctionRegistry, RuntimeFn};
 
 /// Compile a string literal by calling vole_string_new
 pub(crate) fn compile_string_literal(
@@ -21,13 +20,14 @@ pub(crate) fn compile_string_literal(
     s: &str,
     pointer_type: types::Type,
     module: &mut JITModule,
-    func_ids: &HashMap<String, FuncId>,
+    func_registry: &FunctionRegistry,
 ) -> Result<CompiledValue, String> {
     // Get the vole_string_new function
-    let func_id = func_ids
-        .get("vole_string_new")
+    let func_id = func_registry
+        .runtime_key(RuntimeFn::StringNew)
+        .and_then(|key| func_registry.func_id(key))
         .ok_or_else(|| "vole_string_new not found".to_string())?;
-    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+    let func_ref = module.declare_func_in_func(func_id, builder.func);
 
     // Pass the string data pointer and length as constants
     // The string is a Rust &str, so we can get its pointer and length
@@ -55,17 +55,17 @@ pub(crate) fn value_to_string(
     val: CompiledValue,
     _pointer_type: types::Type,
     module: &mut JITModule,
-    func_ids: &HashMap<String, FuncId>,
+    func_registry: &FunctionRegistry,
 ) -> Result<Value, String> {
     // If already a string, return as-is
     if matches!(val.vole_type, Type::String) {
         return Ok(val.value);
     }
 
-    let (func_name, call_val) = if val.ty == types::F64 {
-        ("vole_f64_to_string", val.value)
+    let (runtime, call_val) = if val.ty == types::F64 {
+        (RuntimeFn::F64ToString, val.value)
     } else if val.ty == types::I8 {
-        ("vole_bool_to_string", val.value)
+        (RuntimeFn::BoolToString, val.value)
     } else {
         // Extend smaller integer types to I64
         let extended = if val.ty.is_int() && val.ty != types::I64 {
@@ -73,13 +73,14 @@ pub(crate) fn value_to_string(
         } else {
             val.value
         };
-        ("vole_i64_to_string", extended)
+        (RuntimeFn::I64ToString, extended)
     };
 
-    let func_id = func_ids
-        .get(func_name)
-        .ok_or_else(|| format!("{} not found", func_name))?;
-    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+    let func_id = func_registry
+        .runtime_key(runtime)
+        .and_then(|key| func_registry.func_id(key))
+        .ok_or_else(|| format!("{} not found", runtime.name()))?;
+    let func_ref = module.declare_func_in_func(func_id, builder.func);
 
     let call = builder.ins().call(func_ref, &[call_val]);
     Ok(builder.inst_results(call)[0])
@@ -93,7 +94,7 @@ impl Cg<'_, '_, '_> {
             s,
             self.ctx.pointer_type,
             self.ctx.module,
-            self.ctx.func_ids,
+            self.ctx.func_registry,
         )
     }
 
@@ -119,7 +120,12 @@ impl Cg<'_, '_, '_> {
             return Ok(self.string_value(string_values[0]));
         }
 
-        let concat_func_ref = self.func_ref("vole_string_concat")?;
+        let concat_key = self
+            .ctx
+            .func_registry
+            .runtime_key(RuntimeFn::StringConcat)
+            .ok_or_else(|| "vole_string_concat not found".to_string())?;
+        let concat_func_ref = self.func_ref(concat_key)?;
         let mut result = string_values[0];
         for &next in &string_values[1..] {
             let call = self.builder.ins().call(concat_func_ref, &[result, next]);
@@ -135,20 +141,20 @@ impl Cg<'_, '_, '_> {
             return Ok(val.value);
         }
 
-        let (func_name, call_val) = if val.ty == types::F64 {
-            ("vole_f64_to_string", val.value)
+        let (runtime, call_val) = if val.ty == types::F64 {
+            (RuntimeFn::F64ToString, val.value)
         } else if val.ty == types::I8 {
-            ("vole_bool_to_string", val.value)
+            (RuntimeFn::BoolToString, val.value)
         } else {
             let extended = if val.ty.is_int() && val.ty != types::I64 {
                 self.builder.ins().sextend(types::I64, val.value)
             } else {
                 val.value
             };
-            ("vole_i64_to_string", extended)
+            (RuntimeFn::I64ToString, extended)
         };
 
-        self.call_runtime(func_name, &[call_val])
+        self.call_runtime(runtime, &[call_val])
     }
 
     /// Compile a function call
@@ -256,14 +262,9 @@ impl Cg<'_, '_, '_> {
         if let Some(monomorph_key) = self.ctx.generic_calls.get(&call_expr_id)
             && let Some(instance) = self.ctx.monomorph_cache.get(monomorph_key)
         {
-            // Use the mangled function name
-            let mangled_name = format!(
-                "{}__mono_{}",
-                self.ctx.interner.resolve(instance.original_name),
-                instance.instance_id
-            );
-            if let Some(func_id) = self.ctx.func_ids.get(&mangled_name) {
-                return self.call_func_id(*func_id, &mangled_name, call);
+            let func_key = self.ctx.func_registry.intern_name_id(instance.mangled_name);
+            if let Some(func_id) = self.ctx.func_registry.func_id(func_key) {
+                return self.call_func_id(func_key, func_id, call);
             }
         }
 
@@ -271,17 +272,30 @@ impl Cg<'_, '_, '_> {
         // 1. Try direct function lookup
         // 2. If in module context, try mangled name
         // 3. If in module context, try FFI call
-        if let Some(func_id) = self.ctx.func_ids.get(callee_name) {
-            // Direct function found
-            return self.call_func_id(*func_id, callee_name, call);
+        let func_key = self
+            .ctx
+            .func_registry
+            .intern_qualified(self.ctx.func_registry.main_module(), &[callee_sym]);
+        if let Some(func_id) = self.ctx.func_registry.func_id(func_key) {
+            return self.call_func_id(func_key, func_id, call);
         }
 
         // Check module context for mangled name or FFI
         if let Some(module_path) = self.ctx.current_module {
-            let mangled_name = format!("{}::{}", module_path, callee_name);
-            if let Some(func_id) = self.ctx.func_ids.get(&mangled_name) {
-                // Found module function with mangled name
-                return self.call_func_id(*func_id, &mangled_name, call);
+            let module_id = self
+                .ctx
+                .analyzed
+                .name_table
+                .module_id_if_known(module_path)
+                .unwrap_or_else(|| self.ctx.analyzed.name_table.main_module());
+            let name_id =
+                crate::codegen::types::module_name_id(self.ctx.analyzed, module_id, callee_name);
+            if let Some(name_id) = name_id {
+                let func_key = self.ctx.func_registry.intern_name_id(name_id);
+                if let Some(func_id) = self.ctx.func_registry.func_id(func_key) {
+                    // Found module function with qualified name
+                    return self.call_func_id(func_key, func_id, call);
+                }
             }
 
             // Try FFI call for external module functions
@@ -347,8 +361,8 @@ impl Cg<'_, '_, '_> {
     /// Helper to call a function by its FuncId
     fn call_func_id(
         &mut self,
+        func_key: FunctionKey,
         func_id: FuncId,
-        func_name: &str,
         call: &CallExpr,
     ) -> Result<CompiledValue, String> {
         let func_ref = self
@@ -393,8 +407,8 @@ impl Cg<'_, '_, '_> {
 
         let return_type = self
             .ctx
-            .func_return_types
-            .get(func_name)
+            .func_registry
+            .return_type(func_key)
             .cloned()
             .unwrap_or(Type::Void);
 
@@ -418,12 +432,6 @@ impl Cg<'_, '_, '_> {
 
     /// Compile print/println - dispatches to correct vole_println_* based on argument type
     fn call_println(&mut self, call: &CallExpr, newline: bool) -> Result<CompiledValue, String> {
-        let prefix = if newline {
-            "vole_println"
-        } else {
-            "vole_print"
-        };
-
         if call.args.len() != 1 {
             return Err(format!(
                 "{} expects exactly one argument",
@@ -434,12 +442,33 @@ impl Cg<'_, '_, '_> {
         let arg = self.expr(&call.args[0])?;
 
         // Dispatch based on argument type
-        let (func_name, call_arg) = if matches!(arg.vole_type, Type::String) {
-            (format!("{}_string", prefix), arg.value)
+        let (runtime, call_arg) = if matches!(arg.vole_type, Type::String) {
+            (
+                if newline {
+                    RuntimeFn::PrintlnString
+                } else {
+                    RuntimeFn::PrintString
+                },
+                arg.value,
+            )
         } else if arg.ty == types::F64 {
-            (format!("{}_f64", prefix), arg.value)
+            (
+                if newline {
+                    RuntimeFn::PrintlnF64
+                } else {
+                    RuntimeFn::PrintF64
+                },
+                arg.value,
+            )
         } else if arg.ty == types::I8 {
-            (format!("{}_bool", prefix), arg.value)
+            (
+                if newline {
+                    RuntimeFn::PrintlnBool
+                } else {
+                    RuntimeFn::PrintBool
+                },
+                arg.value,
+            )
         } else {
             // Extend smaller integer types to I64
             let extended = if arg.ty.is_int() && arg.ty != types::I64 {
@@ -447,10 +476,17 @@ impl Cg<'_, '_, '_> {
             } else {
                 arg.value
             };
-            (format!("{}_i64", prefix), extended)
+            (
+                if newline {
+                    RuntimeFn::PrintlnI64
+                } else {
+                    RuntimeFn::PrintI64
+                },
+                extended,
+            )
         };
 
-        self.call_runtime_void(&func_name, &[call_arg])?;
+        self.call_runtime_void(runtime, &[call_arg])?;
         Ok(self.void_value())
     }
 
@@ -471,7 +507,7 @@ impl Cg<'_, '_, '_> {
             return Err("print_char expects an integer argument".to_string());
         };
 
-        self.call_runtime_void("vole_print_char", &[char_val])?;
+        self.call_runtime_void(RuntimeFn::PrintChar, &[char_val])?;
         Ok(self.void_value())
     }
 
@@ -506,7 +542,10 @@ impl Cg<'_, '_, '_> {
             .iconst(self.ctx.pointer_type, file_len as i64);
         let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
 
-        self.call_runtime_void("vole_assert_fail", &[file_ptr_val, file_len_val, line_val])?;
+        self.call_runtime_void(
+            RuntimeFn::AssertFail,
+            &[file_ptr_val, file_len_val, line_val],
+        )?;
         self.builder.ins().jump(pass_block, &[]);
 
         self.builder.switch_to_block(pass_block);
@@ -587,7 +626,7 @@ impl Cg<'_, '_, '_> {
         func_type: FunctionType,
         call: &CallExpr,
     ) -> Result<CompiledValue, String> {
-        let func_ptr = self.call_runtime("vole_closure_get_func", &[closure_ptr])?;
+        let func_ptr = self.call_runtime(RuntimeFn::ClosureGetFunc, &[closure_ptr])?;
 
         // Build signature (closure ptr + params)
         let mut sig = self.ctx.module.make_signature();

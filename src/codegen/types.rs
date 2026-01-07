@@ -5,16 +5,17 @@
 
 use cranelift::prelude::*;
 use cranelift_jit::JITModule;
-use cranelift_module::FuncId;
 use std::collections::HashMap;
 
+use crate::codegen::FunctionRegistry;
 use crate::commands::common::AnalyzedProgram;
 use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
+use crate::identity::{ModuleId, NameId, NameTable};
 use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::generic::{MonomorphCache, MonomorphKey};
 use crate::sema::interface_registry::InterfaceRegistry;
-use crate::sema::{ErrorTypeInfo, FunctionType, Type};
+use crate::sema::{ErrorTypeInfo, FunctionType, Type, TypeId, TypeKey};
 
 /// Compiled value with its type
 #[derive(Clone)]
@@ -51,6 +52,9 @@ impl CompiledValue {
 pub(crate) struct TypeMetadata {
     /// Unique type ID for runtime
     pub type_id: u32,
+    /// Opaque type key from semantic analysis (when available)
+    #[allow(dead_code)]
+    pub type_key: Option<TypeKey>,
     /// Map from field name to slot index
     pub field_slots: HashMap<Symbol, usize>,
     /// Whether this is a class (true) or record (false)
@@ -58,8 +62,15 @@ pub(crate) struct TypeMetadata {
     pub is_class: bool,
     /// The Vole type (Class or Record)
     pub vole_type: Type,
-    /// Method return types: method name -> return type
-    pub method_return_types: HashMap<Symbol, Type>,
+    /// Method info: method name -> method info
+    pub method_infos: HashMap<NameId, MethodInfo>,
+}
+
+/// Metadata for a compiled method (opaque function key + return type)
+#[derive(Debug, Clone)]
+pub(crate) struct MethodInfo {
+    pub func_key: crate::codegen::FunctionKey,
+    pub return_type: Type,
 }
 
 /// Context for compiling expressions and statements
@@ -71,7 +82,7 @@ pub(crate) struct CompileCtx<'a> {
     pub interner: &'a Interner,
     pub pointer_type: types::Type,
     pub module: &'a mut JITModule,
-    pub func_ids: &'a mut HashMap<String, FuncId>,
+    pub func_registry: &'a mut FunctionRegistry,
     pub source_file_ptr: (*const u8, usize),
     /// Global variable declarations for lookup when identifier not in local scope
     pub globals: &'a [LetStmt],
@@ -79,8 +90,8 @@ pub(crate) struct CompileCtx<'a> {
     pub lambda_counter: &'a mut usize,
     /// Class and record metadata for struct literals, field access, and method calls
     pub type_metadata: &'a HashMap<Symbol, TypeMetadata>,
-    /// Return types of compiled functions
-    pub func_return_types: &'a HashMap<String, Type>,
+    /// Implement block method info for primitive and named types
+    pub impl_method_infos: &'a HashMap<(TypeId, NameId), MethodInfo>,
     /// Current function's return type (needed for raise statements in fallible functions)
     pub current_function_return_type: Option<Type>,
     /// Registry of native functions for external method calls
@@ -96,6 +107,10 @@ pub(crate) struct CompileCtx<'a> {
 
 /// Resolve a type expression to a Vole Type (uses CompileCtx for full context)
 pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
+    let module_id = ctx
+        .current_module
+        .and_then(|path| ctx.analyzed.name_table.module_id_if_known(path))
+        .unwrap_or_else(|| ctx.analyzed.name_table.main_module());
     resolve_type_expr_with_metadata(
         ty,
         &ctx.analyzed.type_aliases,
@@ -103,11 +118,63 @@ pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
         &ctx.analyzed.error_types,
         ctx.type_metadata,
         ctx.interner,
+        &ctx.analyzed.name_table,
+        module_id,
     )
+}
+
+pub(crate) fn module_name_id(
+    analyzed: &AnalyzedProgram,
+    module_id: ModuleId,
+    name: &str,
+) -> Option<NameId> {
+    let module_path = analyzed.name_table.module_path(module_id);
+    let (_, module_interner) = analyzed.module_programs.get(module_path)?;
+    let sym = module_interner.lookup(name)?;
+    analyzed.name_table.name_id(module_id, &[sym])
+}
+
+pub(crate) fn method_name_id(
+    analyzed: &AnalyzedProgram,
+    interner: &Interner,
+    name: Symbol,
+) -> Option<NameId> {
+    let module_id = analyzed
+        .name_table
+        .builtin_module_id()
+        .unwrap_or_else(|| analyzed.name_table.main_module());
+    let name_str = interner.resolve(name);
+    analyzed.name_table.name_id_raw(module_id, &[name_str])
+}
+
+pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: &Type) -> String {
+    match ty {
+        Type::Class(class_type) => analyzed.name_table.display(class_type.name_id, interner),
+        Type::Record(record_type) => analyzed.name_table.display(record_type.name_id, interner),
+        Type::Interface(interface_type) => analyzed
+            .name_table
+            .display(interface_type.name_id, interner),
+        Type::ErrorType(error_type) => analyzed.name_table.display(error_type.name_id, interner),
+        Type::Module(module_type) => format!(
+            "module(\"{}\")",
+            analyzed.name_table.module_path(module_type.module_id)
+        ),
+        Type::GenericInstance { def, args } => {
+            let def_name = analyzed.name_table.display(*def, interner);
+            let arg_list = args
+                .iter()
+                .map(|arg| display_type(analyzed, interner, arg))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}<{}>", def_name, arg_list)
+        }
+        _ => ty.name().to_string(),
+    }
 }
 
 /// Resolve a type expression using aliases, interface registry, error types, and type metadata
 /// This is the full resolution function that handles all named types including classes/records
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_type_expr_with_metadata(
     ty: &TypeExpr,
     type_aliases: &HashMap<Symbol, Type>,
@@ -115,6 +182,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
     error_types: &HashMap<Symbol, ErrorTypeInfo>,
     type_metadata: &HashMap<Symbol, TypeMetadata>,
     interner: &Interner,
+    name_table: &NameTable,
+    module_id: ModuleId,
 ) -> Type {
     match ty {
         TypeExpr::Primitive(p) => Type::from_primitive(*p),
@@ -124,8 +193,12 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 aliased.clone()
             } else if let Some(iface) = interface_registry.get(*sym, interner) {
                 // Check interface registry
+                let name_id = name_table
+                    .name_id(module_id, &[*sym])
+                    .expect("interface name_id should be registered");
                 Type::Interface(crate::sema::types::InterfaceType {
                     name: *sym,
+                    name_id,
                     methods: iface
                         .methods
                         .iter()
@@ -156,6 +229,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 error_types,
                 type_metadata,
                 interner,
+                name_table,
+                module_id,
             );
             Type::Array(Box::new(elem_ty))
         }
@@ -167,6 +242,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 error_types,
                 type_metadata,
                 interner,
+                name_table,
+                module_id,
             );
             Type::Iterator(Box::new(elem_ty))
         }
@@ -179,6 +256,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 error_types,
                 type_metadata,
                 interner,
+                name_table,
+                module_id,
             );
             Type::Union(vec![inner_ty, Type::Nil])
         }
@@ -193,6 +272,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         error_types,
                         type_metadata,
                         interner,
+                        name_table,
+                        module_id,
                     )
                 })
                 .collect();
@@ -214,6 +295,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         error_types,
                         type_metadata,
                         interner,
+                        name_table,
+                        module_id,
                     )
                 })
                 .collect();
@@ -224,6 +307,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 error_types,
                 type_metadata,
                 interner,
+                name_table,
+                module_id,
             );
             Type::Function(FunctionType {
                 params: param_types,
@@ -246,6 +331,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 error_types,
                 type_metadata,
                 interner,
+                name_table,
+                module_id,
             );
             let error = resolve_type_expr_with_metadata(
                 error_type,
@@ -254,6 +341,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 error_types,
                 type_metadata,
                 interner,
+                name_table,
+                module_id,
             );
             Type::Fallible(crate::sema::types::FallibleType {
                 success_type: Box::new(success),
@@ -272,11 +361,16 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         error_types,
                         type_metadata,
                         interner,
+                        name_table,
+                        module_id,
                     )
                 })
                 .collect();
+            let Some(name_id) = name_table.name_id(module_id, &[*name]) else {
+                return Type::Error;
+            };
             Type::GenericInstance {
-                def: *name,
+                def: name_id,
                 args: resolved_args,
             }
         }
@@ -291,6 +385,8 @@ pub(crate) fn resolve_type_expr_full(
     type_aliases: &HashMap<Symbol, Type>,
     interface_registry: &InterfaceRegistry,
     interner: &Interner,
+    name_table: &NameTable,
+    module_id: ModuleId,
 ) -> Type {
     // Use empty maps for backward compatibility
     let empty_error_types = HashMap::new();
@@ -302,6 +398,8 @@ pub(crate) fn resolve_type_expr_full(
         &empty_error_types,
         &empty_type_metadata,
         interner,
+        name_table,
+        module_id,
     )
 }
 

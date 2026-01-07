@@ -8,6 +8,7 @@ use super::super::calls::compile_call_with_captures;
 use super::super::fields::{compile_field_assign, compile_index_assign};
 use super::super::ops::compile_binary_op;
 use super::expr::compile_expr;
+use crate::codegen::RuntimeFn;
 use crate::codegen::lambda::CaptureBinding;
 use crate::codegen::types::{CompileCtx, CompiledValue, type_to_cranelift};
 use crate::frontend::{AssignTarget, Expr, ExprKind, Symbol};
@@ -33,12 +34,13 @@ pub(crate) fn compile_expr_with_captures(
 
                 // Call vole_closure_get_capture(closure, index) -> *mut u8
                 let get_capture_id = ctx
-                    .func_ids
-                    .get("vole_closure_get_capture")
+                    .func_registry
+                    .runtime_key(RuntimeFn::ClosureGetCapture)
+                    .and_then(|key| ctx.func_registry.func_id(key))
                     .ok_or_else(|| "vole_closure_get_capture not found".to_string())?;
                 let get_capture_ref = ctx
                     .module
-                    .declare_func_in_func(*get_capture_id, builder.func);
+                    .declare_func_in_func(get_capture_id, builder.func);
                 let index_val = builder.ins().iconst(types::I64, binding.index as i64);
                 let call = builder
                     .ins()
@@ -107,12 +109,13 @@ pub(crate) fn compile_expr_with_captures(
                         let closure_ptr = builder.use_var(closure_var);
 
                         let get_capture_id = ctx
-                            .func_ids
-                            .get("vole_closure_get_capture")
+                            .func_registry
+                            .runtime_key(RuntimeFn::ClosureGetCapture)
+                            .and_then(|key| ctx.func_registry.func_id(key))
                             .ok_or_else(|| "vole_closure_get_capture not found".to_string())?;
                         let get_capture_ref = ctx
                             .module
-                            .declare_func_in_func(*get_capture_id, builder.func);
+                            .declare_func_in_func(get_capture_id, builder.func);
                         let index_val = builder.ins().iconst(types::I64, binding.index as i64);
                         let call = builder
                             .ins()

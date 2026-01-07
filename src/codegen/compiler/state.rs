@@ -1,11 +1,15 @@
 use cranelift::prelude::Block;
+use cranelift_module::FuncId;
+
+use crate::identity::NameId;
 
 /// Metadata about a compiled test
 #[derive(Debug, Clone)]
 pub struct TestInfo {
-    pub name: String,      // "basic math"
-    pub func_name: String, // "__test_0"
-    pub file: String,      // "test/unit/test_basic.vole"
+    pub name: String, // "basic math"
+    pub func_name_id: NameId,
+    pub func_id: FuncId,
+    pub file: String, // "test/unit/test_basic.vole"
     pub line: u32,
 }
 

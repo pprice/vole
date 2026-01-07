@@ -113,10 +113,12 @@ impl Analyzer {
                 match elem_ty.as_ref() {
                     Type::I64 | Type::I32 => Some(Type::I64),
                     _ => {
+                        let iterator_type = Type::Iterator(elem_ty.clone());
+                        let found = self.type_display(&iterator_type, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "numeric iterator (i64 or i32)".to_string(),
-                                found: format!("Iterator<{}>", elem_ty.name()),
+                                found,
                                 span: args.first().map(|a| a.span).unwrap_or_default().into(),
                             },
                             args.first().map(|a| a.span).unwrap_or_default(),
@@ -159,10 +161,11 @@ impl Analyzer {
 
                 // Verify it's a function
                 if !matches!(&arg_ty, Type::Function(_)) {
+                    let found = self.type_display(&arg_ty, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "function".to_string(),
-                            found: arg_ty.name().to_string(),
+                            found,
                             span: arg.span.into(),
                         },
                         arg.span,
@@ -211,10 +214,11 @@ impl Analyzer {
                 match &arg_ty {
                     Type::Function(ft) => {
                         if *ft.return_type != Type::Bool {
+                            let found = self.type_display(&ft.return_type, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "bool".to_string(),
-                                    found: ft.return_type.name().to_string(),
+                                    found,
                                     span: arg.span.into(),
                                 },
                                 arg.span,
@@ -222,10 +226,11 @@ impl Analyzer {
                         }
                     }
                     _ => {
+                        let found = self.type_display(&arg_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "function".to_string(),
-                                found: arg_ty.name().to_string(),
+                                found,
                                 span: arg.span.into(),
                             },
                             arg.span,
@@ -277,10 +282,11 @@ impl Analyzer {
                 let output_type = match &arg_ty {
                     Type::Function(ft) => (*ft.return_type).clone(),
                     _ => {
+                        let found = self.type_display(&arg_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "function".to_string(),
-                                found: arg_ty.name().to_string(),
+                                found,
                                 span: arg.span.into(),
                             },
                             arg.span,
@@ -316,10 +322,11 @@ impl Analyzer {
 
                 // Verify it's an integer type
                 if !arg_ty.is_integer() {
+                    let found = self.type_display(&arg_ty, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "i64".to_string(),
-                            found: arg_ty.name().to_string(),
+                            found,
                             span: arg.span.into(),
                         },
                         arg.span,
@@ -354,10 +361,11 @@ impl Analyzer {
 
                 // Verify it's an integer type
                 if !arg_ty.is_integer() {
+                    let found = self.type_display(&arg_ty, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "i64".to_string(),
-                            found: arg_ty.name().to_string(),
+                            found,
                             span: arg.span.into(),
                         },
                         arg.span,
@@ -422,10 +430,12 @@ impl Analyzer {
                         }
                         // Return type should match the accumulator type (init type)
                         if *ft.return_type != init_ty {
+                            let expected = self.type_display(&init_ty, interner);
+                            let found = self.type_display(&ft.return_type, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
-                                    expected: init_ty.name().to_string(),
-                                    found: ft.return_type.name().to_string(),
+                                    expected,
+                                    found,
                                     span: reducer_arg.span.into(),
                                 },
                                 reducer_arg.span,
@@ -433,10 +443,11 @@ impl Analyzer {
                         }
                     }
                     _ => {
+                        let found = self.type_display(&reducer_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "function".to_string(),
-                                found: reducer_ty.name().to_string(),
+                                found,
                                 span: reducer_arg.span.into(),
                             },
                             reducer_arg.span,

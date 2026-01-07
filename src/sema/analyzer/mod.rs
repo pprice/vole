@@ -8,22 +8,26 @@ mod stmt;
 
 use crate::errors::SemanticError;
 use crate::frontend::*;
+use crate::identity::{ModuleId, NameId, NameTable};
 use crate::module::ModuleLoader;
 use crate::sema::generic::{
     GenericFuncDef, MonomorphCache, MonomorphInstance, MonomorphKey, TypeParamInfo, TypeParamScope,
     substitute_type,
 };
-use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry, MethodImpl, TypeId};
+use crate::sema::implement_registry::{
+    ExternalMethodInfo, ImplementRegistry, MethodImpl, PrimitiveTypeId, TypeId,
+};
 use crate::sema::interface_registry::{
     InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
 };
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::types::{ConstantValue, ModuleType};
 use crate::sema::{
-    ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type,
+    ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type, TypeKey,
     compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
+    type_table::TypeTable,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -79,7 +83,7 @@ pub struct Analyzer {
     /// Registered error types (e.g., DivByZero, OutOfRange)
     error_types: HashMap<Symbol, ErrorTypeInfo>,
     /// Methods for classes/records: (type_symbol, method_name) -> FunctionType
-    methods: HashMap<(Symbol, Symbol), FunctionType>,
+    methods: HashMap<(NameId, NameId), FunctionType>,
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their resolved types, including narrowed types
     expr_types: HashMap<NodeId, Type>,
@@ -105,6 +109,10 @@ pub struct Analyzer {
     pub monomorph_cache: MonomorphCache,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
     generic_calls: HashMap<NodeId, MonomorphKey>,
+    /// Fully-qualified name interner for printable identities
+    name_table: NameTable,
+    /// Opaque type identities for named types
+    type_table: TypeTable,
 }
 
 impl Analyzer {
@@ -138,6 +146,8 @@ impl Analyzer {
             generic_functions: HashMap::new(),
             monomorph_cache: MonomorphCache::new(),
             generic_calls: HashMap::new(),
+            name_table: NameTable::new(),
+            type_table: TypeTable::new(),
         };
 
         // Register built-in interfaces and implementations
@@ -152,6 +162,34 @@ impl Analyzer {
     fn register_builtins(&mut self) {
         // For now, just set up the registries - actual builtin methods
         // will be registered when we have the interner available in a later task
+    }
+
+    fn register_primitive_name_ids(&mut self, interner: &Interner) {
+        let builtin_module = self.name_table.builtin_module();
+        for prim in [
+            PrimitiveTypeId::I8,
+            PrimitiveTypeId::I16,
+            PrimitiveTypeId::I32,
+            PrimitiveTypeId::I64,
+            PrimitiveTypeId::I128,
+            PrimitiveTypeId::U8,
+            PrimitiveTypeId::U16,
+            PrimitiveTypeId::U32,
+            PrimitiveTypeId::U64,
+            PrimitiveTypeId::F32,
+            PrimitiveTypeId::F64,
+            PrimitiveTypeId::Bool,
+            PrimitiveTypeId::String,
+        ] {
+            let name_id = if let Some(sym) = interner.lookup(prim.name()) {
+                self.name_table.intern(builtin_module, &[sym])
+            } else {
+                self.name_table.intern_raw(builtin_module, &[prim.name()])
+            };
+            self.type_table.register_primitive_name(prim, name_id);
+        }
+        let array_name = self.name_table.intern_raw(builtin_module, &["array"]);
+        self.type_table.register_array_name(array_name);
     }
 
     /// Load prelude files (trait definitions and primitive type implementations)
@@ -201,7 +239,8 @@ impl Analyzer {
             Err(_) => return, // Silently ignore parse errors in prelude
         };
 
-        let prelude_interner = parser.into_interner();
+        let mut prelude_interner = parser.into_interner();
+        prelude_interner.seed_builtin_symbols();
 
         // Create a sub-analyzer to analyze the prelude
         // Note: We don't call new() because that would try to load prelude again
@@ -234,10 +273,14 @@ impl Analyzer {
             generic_functions: HashMap::new(),
             monomorph_cache: MonomorphCache::new(),
             generic_calls: HashMap::new(),
+            name_table: NameTable::new(),
+            type_table: TypeTable::new(),
         };
 
         // Copy existing interface registry so prelude files can reference earlier definitions
         sub_analyzer.interface_registry = self.interface_registry.clone();
+        sub_analyzer.name_table = self.name_table.clone();
+        sub_analyzer.type_table = self.type_table.clone();
 
         // Analyze the prelude file
         if sub_analyzer.analyze(&program, &prelude_interner).is_ok() {
@@ -247,6 +290,9 @@ impl Analyzer {
             // Merge the implement registry
             self.implement_registry
                 .merge(&sub_analyzer.implement_registry);
+            // Keep name/type tables in sync with prelude interned ids.
+            self.name_table = sub_analyzer.name_table;
+            self.type_table = sub_analyzer.type_table;
         }
         // Silently ignore analysis errors in prelude
     }
@@ -254,6 +300,23 @@ impl Analyzer {
     /// Helper to add a type error
     fn add_error(&mut self, error: SemanticError, span: Span) {
         self.errors.push(TypeError::new(error, span));
+    }
+
+    fn type_key_for(&mut self, ty: &Type) -> TypeKey {
+        self.type_table.key_for_type(ty)
+    }
+
+    fn type_display(&mut self, ty: &Type, interner: &Interner) -> String {
+        self.type_table
+            .display_type(ty, &mut self.name_table, interner)
+    }
+
+    fn type_display_pair(&mut self, left: &Type, right: &Type, interner: &Interner) -> String {
+        format!(
+            "{} and {}",
+            self.type_display(left, interner),
+            self.type_display(right, interner)
+        )
     }
 
     /// Helper to add a type mismatch error
@@ -380,6 +443,8 @@ impl Analyzer {
         HashMap<Symbol, GenericFuncDef>,
         MonomorphCache,
         HashMap<NodeId, MonomorphKey>,
+        NameTable,
+        TypeTable,
     ) {
         (
             self.type_aliases,
@@ -392,6 +457,8 @@ impl Analyzer {
             self.generic_functions,
             self.monomorph_cache,
             self.generic_calls,
+            self.name_table,
+            self.type_table,
         )
     }
 
@@ -442,6 +509,31 @@ impl Analyzer {
         }
     }
 
+    fn register_named_type(&mut self, name: Symbol, ty: Type) {
+        let module = self.name_table.main_module();
+        let name_id = self.name_table.intern(module, &[name]);
+        self.type_table.insert_named(ty, name_id);
+    }
+
+    fn module_name_id(&self, module_id: ModuleId, name: &str) -> Option<NameId> {
+        let module_path = self.name_table.module_path(module_id);
+        let (_, module_interner) = self.module_programs.get(module_path)?;
+        let sym = module_interner.lookup(name)?;
+        self.name_table.name_id(module_id, &[sym])
+    }
+
+    fn method_name_id(&mut self, name: Symbol, interner: &Interner) -> NameId {
+        let module_id = self.name_table.builtin_module();
+        let name_str = interner.resolve(name);
+        self.name_table.intern_raw(module_id, &[name_str])
+    }
+
+    fn method_name_id_lookup(&self, name: Symbol, interner: &Interner) -> Option<NameId> {
+        let module_id = self.name_table.builtin_module_id()?;
+        let name_str = interner.resolve(name);
+        self.name_table.name_id_raw(module_id, &[name_str])
+    }
+
     /// Mark the current lambda as having side effects
     fn mark_lambda_has_side_effects(&mut self) {
         if let Some(flag) = self.lambda_side_effects.last_mut() {
@@ -464,6 +556,8 @@ impl Analyzer {
         program: &Program,
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
+        self.register_primitive_name_ids(interner);
+
         // Load prelude (trait definitions and primitive type implementations)
         // This makes stdlib methods like "hello".length() available without explicit imports
         self.load_prelude(interner);
@@ -475,7 +569,9 @@ impl Analyzer {
                 && let ExprKind::TypeLiteral(type_expr) = &let_stmt.init.kind
             {
                 let aliased_type = self.resolve_type(type_expr, interner);
-                self.type_aliases.insert(let_stmt.name, aliased_type);
+                self.type_aliases
+                    .insert(let_stmt.name, aliased_type.clone());
+                self.register_named_type(let_stmt.name, aliased_type);
             }
         }
 
@@ -483,6 +579,9 @@ impl Analyzer {
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
+                    let _ = self
+                        .name_table
+                        .intern(self.name_table.main_module(), &[func.name]);
                     if func.type_params.is_empty() {
                         // Non-generic function: resolve types normally
                         let params: Vec<Type> = func
@@ -521,24 +620,27 @@ impl Analyzer {
                             .collect();
 
                         // Resolve param types with type params in scope
-                        let ctx = TypeResolutionContext::with_type_params(
+                        let module_id = self.name_table.main_module();
+                        let mut ctx = TypeResolutionContext::with_type_params(
                             &self.type_aliases,
                             &self.classes,
                             &self.records,
                             &self.error_types,
                             &self.interface_registry,
                             interner,
+                            &mut self.name_table,
+                            module_id,
                             &type_param_scope,
                         );
                         let param_types: Vec<Type> = func
                             .params
                             .iter()
-                            .map(|p| resolve_type(&p.ty, &ctx))
+                            .map(|p| resolve_type(&p.ty, &mut ctx))
                             .collect();
                         let return_type = func
                             .return_type
                             .as_ref()
-                            .map(|t| resolve_type(t, &ctx))
+                            .map(|t| resolve_type(t, &mut ctx))
                             .unwrap_or(Type::Void);
 
                         self.generic_functions.insert(
@@ -558,6 +660,9 @@ impl Analyzer {
                     // Let declarations are processed before the second pass
                 }
                 Decl::Class(class) => {
+                    let name_id = self
+                        .name_table
+                        .intern(self.name_table.main_module(), &[class.name]);
                     let fields: Vec<StructField> = class
                         .fields
                         .iter()
@@ -568,13 +673,13 @@ impl Analyzer {
                             slot: i,
                         })
                         .collect();
-                    self.classes.insert(
-                        class.name,
-                        ClassType {
-                            name: class.name,
-                            fields,
-                        },
-                    );
+                    let class_type = ClassType {
+                        name: class.name,
+                        name_id,
+                        fields,
+                    };
+                    self.classes.insert(class.name, class_type.clone());
+                    self.register_named_type(class.name, Type::Class(class_type));
                     // Register and validate implements list
                     if !class.implements.is_empty() {
                         for iface_sym in &class.implements {
@@ -603,8 +708,13 @@ impl Analyzer {
                             .as_ref()
                             .map(|t| self.resolve_type(t, interner))
                             .unwrap_or(Type::Void);
+                        let type_id = self
+                            .name_table
+                            .name_id(self.name_table.main_module(), &[class.name])
+                            .expect("class name_id should be registered");
+                        let method_id = self.method_name_id(method.name, interner);
                         self.methods.insert(
-                            (class.name, method.name),
+                            (type_id, method_id),
                             FunctionType {
                                 params,
                                 return_type: Box::new(return_type),
@@ -614,6 +724,9 @@ impl Analyzer {
                     }
                 }
                 Decl::Record(record) => {
+                    let name_id = self
+                        .name_table
+                        .intern(self.name_table.main_module(), &[record.name]);
                     let fields: Vec<StructField> = record
                         .fields
                         .iter()
@@ -627,13 +740,13 @@ impl Analyzer {
                             }
                         })
                         .collect();
-                    self.records.insert(
-                        record.name,
-                        RecordType {
-                            name: record.name,
-                            fields,
-                        },
-                    );
+                    let record_type = RecordType {
+                        name: record.name,
+                        name_id,
+                        fields,
+                    };
+                    self.records.insert(record.name, record_type.clone());
+                    self.register_named_type(record.name, Type::Record(record_type));
                     // Register and validate implements list
                     if !record.implements.is_empty() {
                         for iface_sym in &record.implements {
@@ -662,8 +775,13 @@ impl Analyzer {
                             .as_ref()
                             .map(|t| self.resolve_type(t, interner))
                             .unwrap_or(Type::Void);
+                        let type_id = self
+                            .name_table
+                            .name_id(self.name_table.main_module(), &[record.name])
+                            .expect("record name_id should be registered");
+                        let method_id = self.method_name_id(method.name, interner);
                         self.methods.insert(
-                            (record.name, method.name),
+                            (type_id, method_id),
                             FunctionType {
                                 params,
                                 return_type: Box::new(return_type),
@@ -703,6 +821,16 @@ impl Analyzer {
                         })
                         .collect();
 
+                    let interface_methods: Vec<crate::sema::types::InterfaceMethodType> = methods
+                        .iter()
+                        .map(|method| crate::sema::types::InterfaceMethodType {
+                            name: method.name,
+                            params: method.params.clone(),
+                            return_type: Box::new(method.return_type.clone()),
+                            has_default: method.has_default,
+                        })
+                        .collect();
+
                     let def = InterfaceDef {
                         name: interface_decl.name,
                         name_str: interner.resolve(interface_decl.name).to_string(),
@@ -712,6 +840,18 @@ impl Analyzer {
                     };
 
                     self.interface_registry.register(def);
+                    let name_id = self
+                        .name_table
+                        .intern(self.name_table.main_module(), &[interface_decl.name]);
+                    self.register_named_type(
+                        interface_decl.name,
+                        Type::Interface(crate::sema::types::InterfaceType {
+                            name: interface_decl.name,
+                            name_id,
+                            methods: interface_methods,
+                            extends: interface_decl.extends.clone(),
+                        }),
+                    );
                 }
                 Decl::Implement(impl_block) => {
                     // Validate trait exists if specified
@@ -744,7 +884,7 @@ impl Analyzer {
                         );
                     }
 
-                    if let Some(type_id) = TypeId::from_type(&target_type) {
+                    if let Some(type_id) = TypeId::from_type(&target_type, &self.type_table) {
                         for method in &impl_block.methods {
                             let func_type = FunctionType {
                                 params: method
@@ -762,9 +902,10 @@ impl Analyzer {
                                 is_closure: false,
                             };
 
+                            let method_id = self.method_name_id(method.name, interner);
                             self.implement_registry.register_method(
-                                type_id.clone(),
-                                method.name,
+                                type_id,
+                                method_id,
                                 MethodImpl {
                                     trait_name: impl_block.trait_name,
                                     func_type,
@@ -850,7 +991,7 @@ impl Analyzer {
                     }
                     // Validate interface satisfaction
                     if let Some(interfaces) = self.type_implements.get(&class.name).cloned() {
-                        let type_methods = self.get_type_method_signatures(class.name);
+                        let type_methods = self.get_type_method_signatures(class.name, interner);
                         for iface_name in interfaces {
                             self.validate_interface_satisfaction(
                                 class.name,
@@ -868,7 +1009,7 @@ impl Analyzer {
                     }
                     // Validate interface satisfaction
                     if let Some(interfaces) = self.type_implements.get(&record.name).cloned() {
-                        let type_methods = self.get_type_method_signatures(record.name);
+                        let type_methods = self.get_type_method_signatures(record.name, interner);
                         for iface_name in interfaces {
                             self.validate_interface_satisfaction(
                                 record.name,
@@ -904,33 +1045,39 @@ impl Analyzer {
         }
     }
 
-    fn resolve_type(&self, ty: &TypeExpr, interner: &Interner) -> Type {
-        let ctx = TypeResolutionContext {
+    fn resolve_type(&mut self, ty: &TypeExpr, interner: &Interner) -> Type {
+        let module_id = self.name_table.main_module();
+        let mut ctx = TypeResolutionContext {
             type_aliases: &self.type_aliases,
             classes: &self.classes,
             records: &self.records,
             error_types: &self.error_types,
             interface_registry: &self.interface_registry,
             interner,
+            name_table: &mut self.name_table,
+            module_id,
             type_params: None,
         };
-        resolve_type(ty, &ctx)
+        resolve_type(ty, &mut ctx)
     }
 
     fn analyze_error_decl(&mut self, decl: &ErrorDecl, interner: &Interner) {
         let mut fields = Vec::new();
 
         for (slot, field) in decl.fields.iter().enumerate() {
-            let ctx = TypeResolutionContext {
+            let module_id = self.name_table.main_module();
+            let mut ctx = TypeResolutionContext {
                 type_aliases: &self.type_aliases,
                 classes: &self.classes,
                 records: &self.records,
                 error_types: &self.error_types,
                 interface_registry: &self.interface_registry,
                 interner,
+                name_table: &mut self.name_table,
+                module_id,
                 type_params: None,
             };
-            let ty = resolve_type(&field.ty, &ctx);
+            let ty = resolve_type(&field.ty, &mut ctx);
 
             fields.push(StructField {
                 name: field.name,
@@ -941,10 +1088,14 @@ impl Analyzer {
 
         let error_info = ErrorTypeInfo {
             name: decl.name,
+            name_id: self
+                .name_table
+                .intern(self.name_table.main_module(), &[decl.name]),
             fields,
         };
 
-        self.error_types.insert(decl.name, error_info);
+        self.error_types.insert(decl.name, error_info.clone());
+        self.register_named_type(decl.name, Type::ErrorType(error_info));
     }
 
     /// Analyze external block and register external methods in the implement registry
@@ -955,7 +1106,7 @@ impl Analyzer {
         trait_name: Option<Symbol>,
         interner: &Interner,
     ) {
-        let type_id = match TypeId::from_type(target_type) {
+        let type_id = match TypeId::from_type(target_type, &self.type_table) {
             Some(id) => id,
             None => return, // Skip non-registerable types
         };
@@ -987,9 +1138,10 @@ impl Analyzer {
                 .unwrap_or_else(|| interner.resolve(func.vole_name).to_string());
 
             // Register in implement registry
+            let method_id = self.method_name_id(func.vole_name, interner);
             self.implement_registry.register_method(
-                type_id.clone(),
-                func.vole_name,
+                type_id,
+                method_id,
                 MethodImpl {
                     trait_name,
                     func_type,
@@ -1074,7 +1226,12 @@ impl Analyzer {
         type_name: Symbol,
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
-        let method_key = (type_name, method.name);
+        let type_id = self
+            .name_table
+            .name_id(self.name_table.main_module(), &[type_name])
+            .expect("type name_id should be registered");
+        let method_id = self.method_name_id(method.name, interner);
+        let method_key = (type_id, method_id);
         let method_type = self.methods.get(&method_key).cloned().unwrap();
         let return_type = *method_type.return_type.clone();
         self.current_function_return = Some(return_type.clone());
@@ -1222,26 +1379,36 @@ impl Analyzer {
         let mut external_funcs = HashSet::new();
         let module_interner = parser.into_interner();
 
+        let module_id = self.name_table.module_id(import_path);
+
         for decl in &program.declarations {
             match decl {
                 Decl::Function(f) => {
                     // Build function type from signature
-                    let ctx = TypeResolutionContext {
-                        type_aliases: &self.type_aliases,
-                        classes: &self.classes,
-                        records: &self.records,
-                        error_types: &self.error_types,
-                        interface_registry: &self.interface_registry,
-                        interner: &module_interner,
-                        type_params: None,
+                    let (params, return_type) = {
+                        let mut ctx = TypeResolutionContext {
+                            type_aliases: &self.type_aliases,
+                            classes: &self.classes,
+                            records: &self.records,
+                            error_types: &self.error_types,
+                            interface_registry: &self.interface_registry,
+                            interner: &module_interner,
+                            name_table: &mut self.name_table,
+                            module_id,
+                            type_params: None,
+                        };
+                        let params: Vec<Type> = f
+                            .params
+                            .iter()
+                            .map(|p| resolve_type(&p.ty, &mut ctx))
+                            .collect();
+                        let return_type = f
+                            .return_type
+                            .as_ref()
+                            .map(|rt| resolve_type(rt, &mut ctx))
+                            .unwrap_or(Type::Void);
+                        (params, return_type)
                     };
-                    let params: Vec<Type> =
-                        f.params.iter().map(|p| resolve_type(&p.ty, &ctx)).collect();
-                    let return_type = f
-                        .return_type
-                        .as_ref()
-                        .map(|rt| resolve_type(rt, &ctx))
-                        .unwrap_or(Type::Void);
 
                     let func_type = Type::Function(FunctionType {
                         params,
@@ -1250,13 +1417,13 @@ impl Analyzer {
                     });
 
                     // Store export by name string
-                    let name_str = module_interner.resolve(f.name).to_string();
-                    exports.insert(name_str, func_type);
+                    let name_id = self.name_table.intern(module_id, &[f.name]);
+                    exports.insert(name_id, func_type);
                 }
                 Decl::Let(l) if !l.mutable => {
                     // Only export immutable let bindings
                     // Infer type from literal for constants and store the value
-                    let name_str = module_interner.resolve(l.name).to_string();
+                    let name_id = self.name_table.intern(module_id, &[l.name]);
                     let (ty, const_val) = match &l.init.kind {
                         ExprKind::FloatLiteral(v) => (Type::F64, Some(ConstantValue::F64(*v))),
                         ExprKind::IntLiteral(v) => (Type::I64, Some(ConstantValue::I64(*v))),
@@ -1266,33 +1433,38 @@ impl Analyzer {
                         }
                         _ => (Type::Unknown, None), // Complex expressions need full analysis
                     };
-                    exports.insert(name_str.clone(), ty);
+                    exports.insert(name_id, ty);
                     if let Some(cv) = const_val {
-                        constants.insert(name_str, cv);
+                        constants.insert(name_id, cv);
                     }
                 }
                 Decl::External(ext) => {
                     // External block functions become exports and are marked as external
-                    let ctx = TypeResolutionContext {
-                        type_aliases: &self.type_aliases,
-                        classes: &self.classes,
-                        records: &self.records,
-                        error_types: &self.error_types,
-                        interface_registry: &self.interface_registry,
-                        interner: &module_interner,
-                        type_params: None,
-                    };
                     for func in &ext.functions {
-                        let params: Vec<Type> = func
-                            .params
-                            .iter()
-                            .map(|p| resolve_type(&p.ty, &ctx))
-                            .collect();
-                        let return_type = func
-                            .return_type
-                            .as_ref()
-                            .map(|rt| resolve_type(rt, &ctx))
-                            .unwrap_or(Type::Void);
+                        let (params, return_type) = {
+                            let mut ctx = TypeResolutionContext {
+                                type_aliases: &self.type_aliases,
+                                classes: &self.classes,
+                                records: &self.records,
+                                error_types: &self.error_types,
+                                interface_registry: &self.interface_registry,
+                                interner: &module_interner,
+                                name_table: &mut self.name_table,
+                                module_id,
+                                type_params: None,
+                            };
+                            let params: Vec<Type> = func
+                                .params
+                                .iter()
+                                .map(|p| resolve_type(&p.ty, &mut ctx))
+                                .collect();
+                            let return_type = func
+                                .return_type
+                                .as_ref()
+                                .map(|rt| resolve_type(rt, &mut ctx))
+                                .unwrap_or(Type::Void);
+                            (params, return_type)
+                        };
 
                         let func_type = Type::Function(FunctionType {
                             params,
@@ -1300,10 +1472,10 @@ impl Analyzer {
                             is_closure: false,
                         });
 
-                        let name_str = module_interner.resolve(func.vole_name).to_string();
-                        exports.insert(name_str.clone(), func_type);
+                        let name_id = self.name_table.intern(module_id, &[func.vole_name]);
+                        exports.insert(name_id, func_type);
                         // Mark as external function (FFI)
-                        external_funcs.insert(name_str);
+                        external_funcs.insert(name_id);
                     }
                 }
                 _ => {} // Skip other declarations for now
@@ -1311,7 +1483,7 @@ impl Analyzer {
         }
 
         let module_type = ModuleType {
-            path: import_path.to_string(),
+            module_id,
             exports,
             constants,
             external_funcs,

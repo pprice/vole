@@ -10,6 +10,7 @@ use cranelift_module::Module;
 use crate::frontend::{BinaryOp, Expr, ExprKind, LambdaBody, LambdaExpr, Symbol};
 use crate::sema::{FunctionType, Type};
 
+use super::RuntimeFn;
 use super::context::{Captures, Cg, ControlFlow};
 use super::types::{CompileCtx, CompiledValue, resolve_type_expr, type_size, type_to_cranelift};
 
@@ -181,7 +182,7 @@ fn compile_pure_lambda(
     lambda: &LambdaExpr,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
-    let lambda_name = format!("__lambda_{}", *ctx.lambda_counter);
+    let lambda_segment = format!("__lambda_{}", *ctx.lambda_counter);
     *ctx.lambda_counter += 1;
 
     let param_types: Vec<types::Type> = lambda
@@ -225,12 +226,26 @@ fn compile_pure_lambda(
     }
     sig.returns.push(AbiParam::new(return_type));
 
+    let func_key = ctx.func_registry.intern_raw_qualified(
+        ctx.func_registry.builtin_module(),
+        &[lambda_segment.as_str()],
+    );
+    let name_id = ctx
+        .func_registry
+        .name_for_qualified(func_key)
+        .expect("lambda name_id should be registered");
+    let lambda_name = ctx
+        .func_registry
+        .name_table()
+        .display(name_id, ctx.interner);
     let func_id = ctx
         .module
         .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
         .map_err(|e| e.to_string())?;
 
-    ctx.func_ids.insert(lambda_name, func_id);
+    ctx.func_registry.set_func_id(func_key, func_id);
+    ctx.func_registry
+        .set_return_type(func_key, return_vole_type.clone());
 
     let mut lambda_ctx = ctx.module.make_context();
     lambda_ctx.func.signature = sig.clone();
@@ -300,7 +315,7 @@ fn compile_lambda_with_captures(
     let captures = lambda.captures.borrow();
     let num_captures = captures.len();
 
-    let lambda_name = format!("__lambda_{}", *ctx.lambda_counter);
+    let lambda_segment = format!("__lambda_{}", *ctx.lambda_counter);
     *ctx.lambda_counter += 1;
 
     let param_types: Vec<types::Type> = lambda
@@ -346,12 +361,26 @@ fn compile_lambda_with_captures(
     }
     sig.returns.push(AbiParam::new(return_type));
 
+    let func_key = ctx.func_registry.intern_raw_qualified(
+        ctx.func_registry.builtin_module(),
+        &[lambda_segment.as_str()],
+    );
+    let name_id = ctx
+        .func_registry
+        .name_for_qualified(func_key)
+        .expect("lambda name_id should be registered");
+    let lambda_name = ctx
+        .func_registry
+        .name_table()
+        .display(name_id, ctx.interner);
     let func_id = ctx
         .module
         .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
         .map_err(|e| e.to_string())?;
 
-    ctx.func_ids.insert(lambda_name, func_id);
+    ctx.func_registry.set_func_id(func_key, func_id);
+    ctx.func_registry
+        .set_return_type(func_key, return_vole_type.clone());
 
     let capture_bindings = build_capture_bindings(&captures, variables);
 
@@ -407,10 +436,11 @@ fn compile_lambda_with_captures(
 
     // Allocate closure
     let alloc_id = ctx
-        .func_ids
-        .get("vole_closure_alloc")
+        .func_registry
+        .runtime_key(RuntimeFn::ClosureAlloc)
+        .and_then(|key| ctx.func_registry.func_id(key))
         .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-    let alloc_ref = ctx.module.declare_func_in_func(*alloc_id, builder.func);
+    let alloc_ref = ctx.module.declare_func_in_func(alloc_id, builder.func);
     let num_captures_val = builder.ins().iconst(types::I64, num_captures as i64);
     let alloc_call = builder
         .ins()
@@ -419,20 +449,20 @@ fn compile_lambda_with_captures(
 
     // Set up each capture
     let set_capture_id = ctx
-        .func_ids
-        .get("vole_closure_set_capture")
+        .func_registry
+        .runtime_key(RuntimeFn::ClosureSetCapture)
+        .and_then(|key| ctx.func_registry.func_id(key))
         .ok_or_else(|| "vole_closure_set_capture not found".to_string())?;
     let set_capture_ref = ctx
         .module
-        .declare_func_in_func(*set_capture_id, builder.func);
+        .declare_func_in_func(set_capture_id, builder.func);
 
     let heap_alloc_id = ctx
-        .func_ids
-        .get("vole_heap_alloc")
+        .func_registry
+        .runtime_key(RuntimeFn::HeapAlloc)
+        .and_then(|key| ctx.func_registry.func_id(key))
         .ok_or_else(|| "vole_heap_alloc not found".to_string())?;
-    let heap_alloc_ref = ctx
-        .module
-        .declare_func_in_func(*heap_alloc_id, builder.func);
+    let heap_alloc_ref = ctx.module.declare_func_in_func(heap_alloc_id, builder.func);
 
     for (i, capture) in captures.iter().enumerate() {
         let (var, vole_type) = variables

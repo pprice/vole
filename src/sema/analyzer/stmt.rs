@@ -62,9 +62,10 @@ impl Analyzer {
             Stmt::While(while_stmt) => {
                 let cond_type = self.check_expr(&while_stmt.condition, interner)?;
                 if cond_type != Type::Bool && !cond_type.is_numeric() {
+                    let found = self.type_display(&cond_type, interner);
                     self.add_error(
                         SemanticError::ConditionNotBool {
-                            found: cond_type.name().to_string(),
+                            found,
                             span: while_stmt.condition.span.into(),
                         },
                         while_stmt.condition.span,
@@ -81,9 +82,10 @@ impl Analyzer {
             Stmt::If(if_stmt) => {
                 let cond_type = self.check_expr(&if_stmt.condition, interner)?;
                 if cond_type != Type::Bool && !cond_type.is_numeric() {
+                    let found = self.type_display(&cond_type, interner);
                     self.add_error(
                         SemanticError::ConditionNotBool {
-                            found: cond_type.name().to_string(),
+                            found,
                             span: if_stmt.condition.span.into(),
                         },
                         if_stmt.condition.span,
@@ -138,10 +140,11 @@ impl Analyzer {
                     Type::Range => Type::I64,
                     Type::Array(elem) => *elem,
                     _ => {
+                        let found = self.type_display(&iterable_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "iterable (range or array)".to_string(),
-                                found: iterable_ty.name().to_string(),
+                                found,
                                 span: for_stmt.iterable.span.into(),
                             },
                             for_stmt.iterable.span,
@@ -188,10 +191,12 @@ impl Analyzer {
                     };
 
                     if !self.types_compatible(&ret_type, &expected_value_type, interner) {
+                        let expected = self.type_display(&expected_value_type, interner);
+                        let found = self.type_display(&ret_type, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
-                                expected: expected_value_type.name().to_string(),
-                                found: ret_type.name().to_string(),
+                                expected,
+                                found,
                                 span: ret.span.into(),
                             },
                             ret.span,
@@ -258,10 +263,12 @@ impl Analyzer {
             if let Some(field) = error_info.fields.iter().find(|f| f.name == field_init.name) {
                 // Known field - check type compatibility
                 if !types_compatible_core(&value_type, &field.ty) {
+                    let expected = self.type_display(&field.ty, interner);
+                    let found = self.type_display(&value_type, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
-                            expected: format!("{}", field.ty),
-                            found: format!("{}", value_type),
+                            expected,
+                            found,
                             span: field_init.span.into(),
                         },
                         field_init.span,
@@ -296,25 +303,16 @@ impl Analyzer {
         };
 
         if !is_compatible {
-            // Format the declared error type for the error message
-            let declared_str = match &error_type {
-                Type::ErrorType(info) => interner.resolve(info.name).to_string(),
-                Type::Union(variants) => {
-                    let names: Vec<_> = variants
-                        .iter()
-                        .filter_map(|v| match v {
-                            Type::ErrorType(info) => Some(interner.resolve(info.name).to_string()),
-                            _ => None,
-                        })
-                        .collect();
-                    names.join(" | ")
-                }
-                _ => "unknown".to_string(),
+            let declared_str = self.type_display(&error_type, interner);
+            let raised_info = self.error_types.get(&stmt.error_name).cloned();
+            let raised_str = match raised_info {
+                Some(info) => self.type_display(&Type::ErrorType(info), interner),
+                None => interner.resolve(stmt.error_name).to_string(),
             };
 
             self.add_error(
                 SemanticError::IncompatibleRaiseError {
-                    raised: interner.resolve(stmt.error_name).to_string(),
+                    raised: raised_str,
                     declared: declared_str,
                     span: stmt.span.into(),
                 },
@@ -341,9 +339,10 @@ impl Analyzer {
         let (success_type, error_type) = match &inner_type {
             Type::Fallible(ft) => ((*ft.success_type).clone(), (*ft.error_type).clone()),
             _ => {
+                let found = self.type_display(&inner_type, interner);
                 self.add_error(
                     SemanticError::TryOnNonFallible {
-                        found: format!("{}", inner_type),
+                        found,
                         span: inner_expr.span.into(),
                     },
                     inner_expr.span,
@@ -362,13 +361,16 @@ impl Analyzer {
             );
             return Ok(success_type);
         };
+        let current_error = current_error.clone();
 
         // Check that the error type is compatible with the function's error type
-        if !self.error_type_compatible(&error_type, current_error) {
+        if !self.error_type_compatible(&error_type, &current_error) {
+            let try_error = self.type_display(&error_type, interner);
+            let func_error = self.type_display(&current_error, interner);
             self.add_error(
                 SemanticError::IncompatibleTryError {
-                    try_error: format!("{}", error_type),
-                    func_error: format!("{}", current_error),
+                    try_error,
+                    func_error,
                     span: inner_expr.span.into(),
                 },
                 inner_expr.span,

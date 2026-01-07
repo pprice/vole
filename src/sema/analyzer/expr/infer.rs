@@ -68,10 +68,11 @@ impl Analyzer {
                                 Ok(Type::I32)
                             }
                         } else {
+                            let found = self.type_display_pair(&left_ty, &right_ty, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "numeric".to_string(),
-                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    found,
                                     span: expr.span.into(),
                                 },
                                 expr.span,
@@ -89,10 +90,11 @@ impl Analyzer {
                         if left_ty == Type::Bool && right_ty == Type::Bool {
                             Ok(Type::Bool)
                         } else {
+                            let found = self.type_display_pair(&left_ty, &right_ty, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "bool".to_string(),
-                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    found,
                                     span: expr.span.into(),
                                 },
                                 expr.span,
@@ -112,10 +114,11 @@ impl Analyzer {
                                 Ok(Type::I32)
                             }
                         } else {
+                            let found = self.type_display_pair(&left_ty, &right_ty, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "integer".to_string(),
-                                    found: format!("{} and {}", left_ty.name(), right_ty.name()),
+                                    found,
                                     span: expr.span.into(),
                                 },
                                 expr.span,
@@ -133,10 +136,11 @@ impl Analyzer {
                         if operand_ty.is_numeric() {
                             Ok(operand_ty)
                         } else {
+                            let found = self.type_display(&operand_ty, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "numeric".to_string(),
-                                    found: operand_ty.name().to_string(),
+                                    found,
                                     span: expr.span.into(),
                                 },
                                 expr.span,
@@ -148,10 +152,11 @@ impl Analyzer {
                         if operand_ty == Type::Bool {
                             Ok(Type::Bool)
                         } else {
+                            let found = self.type_display(&operand_ty, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "bool".to_string(),
-                                    found: operand_ty.name().to_string(),
+                                    found,
                                     span: expr.span.into(),
                                 },
                                 expr.span,
@@ -163,10 +168,11 @@ impl Analyzer {
                         if operand_ty.is_integer() {
                             Ok(operand_ty)
                         } else {
+                            let found = self.type_display(&operand_ty, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "integer".to_string(),
-                                    found: operand_ty.name().to_string(),
+                                    found,
                                     span: expr.span.into(),
                                 },
                                 expr.span,
@@ -199,10 +205,12 @@ impl Analyzer {
                     for elem in elements.iter().skip(1) {
                         let ty = self.check_expr(elem, interner)?;
                         if !self.types_compatible(&ty, &elem_ty, interner) {
+                            let expected = self.type_display(&elem_ty, interner);
+                            let found = self.type_display(&ty, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
-                                    expected: elem_ty.name().to_string(),
-                                    found: ty.name().to_string(),
+                                    expected,
+                                    found,
                                     span: elem.span.into(),
                                 },
                                 elem.span,
@@ -220,10 +228,11 @@ impl Analyzer {
 
                 // Index must be integer
                 if !index_ty.is_integer() {
+                    let found = self.type_display(&index_ty, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "integer".to_string(),
-                            found: index_ty.name().to_string(),
+                            found,
                             span: idx.index.span.into(),
                         },
                         idx.index.span,
@@ -234,10 +243,11 @@ impl Analyzer {
                 match obj_ty {
                     Type::Array(elem_ty) => Ok(*elem_ty),
                     _ => {
+                        let found = self.type_display(&obj_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "array".to_string(),
-                                found: obj_ty.name().to_string(),
+                                found,
                                 span: idx.object.span.into(),
                             },
                             idx.object.span,
@@ -252,10 +262,11 @@ impl Analyzer {
                 let end_ty = self.check_expr(&range.end, interner)?;
 
                 if !start_ty.is_integer() || !end_ty.is_integer() {
+                    let found = self.type_display_pair(&start_ty, &end_ty, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "integer".to_string(),
-                            found: format!("{} and {}", start_ty.name(), end_ty.name()),
+                            found,
                             span: expr.span.into(),
                         },
                         expr.span,
@@ -275,9 +286,10 @@ impl Analyzer {
 
                 // Value must be an optional (union containing Nil)
                 if !value_type.is_optional() {
+                    let found = self.type_display(&value_type, interner);
                     self.add_error(
                         SemanticError::NullCoalesceNotOptional {
-                            found: format!("{}", value_type),
+                            found,
                             span: nc.value.span.into(),
                         },
                         nc.value.span,
@@ -304,10 +316,12 @@ impl Analyzer {
                 if let Type::Union(variants) = &value_type
                     && !variants.contains(&tested_type)
                 {
+                    let tested = self.type_display(&tested_type, interner);
+                    let union_type = self.type_display(&value_type, interner);
                     self.add_error(
                         SemanticError::IsNotVariant {
-                            tested: format!("{}", tested_type),
-                            union_type: format!("{}", value_type),
+                            tested,
+                            union_type,
                             span: is_expr.type_span.into(),
                         },
                         is_expr.type_span,
@@ -361,10 +375,11 @@ impl Analyzer {
                 // Check if we're inside a generator function (Iterator<T> return type)
                 let Some(element_type) = self.current_generator_element_type.clone() else {
                     // Not a generator - report error with actual return type
-                    let return_type = self.current_function_return.as_ref().unwrap();
+                    let return_type = self.current_function_return.clone().unwrap();
+                    let found = self.type_display(&return_type, interner);
                     self.add_error(
                         SemanticError::YieldInNonGenerator {
-                            found: format!("{}", return_type),
+                            found,
                             span: yield_expr.span.into(),
                         },
                         yield_expr.span,
@@ -378,10 +393,12 @@ impl Analyzer {
 
                 // Check type compatibility
                 if !self.types_compatible(&yield_type, &element_type, interner) {
+                    let expected = self.type_display(&element_type, interner);
+                    let found = self.type_display(&yield_type, interner);
                     self.add_error(
                         SemanticError::YieldTypeMismatch {
-                            expected: format!("{}", element_type),
-                            found: format!("{}", yield_type),
+                            expected,
+                            found,
                             span: yield_expr.value.span.into(),
                         },
                         yield_expr.value.span,

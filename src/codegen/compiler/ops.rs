@@ -7,6 +7,7 @@ use cranelift_module::Module;
 use std::collections::HashMap;
 
 use super::patterns::compile_expr;
+use crate::codegen::RuntimeFn;
 use crate::codegen::structs::{
     convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type,
 };
@@ -236,10 +237,11 @@ pub(crate) fn compile_compound_assign(
 
             // 2. Load current element value
             let get_value_id = ctx
-                .func_ids
-                .get("vole_array_get_value")
+                .func_registry
+                .runtime_key(RuntimeFn::ArrayGetValue)
+                .and_then(|key| ctx.func_registry.func_id(key))
                 .ok_or_else(|| "vole_array_get_value not found".to_string())?;
-            let get_value_ref = ctx.module.declare_func_in_func(*get_value_id, builder.func);
+            let get_value_ref = ctx.module.declare_func_in_func(get_value_id, builder.func);
             let call = builder.ins().call(get_value_ref, &[arr.value, idx.value]);
             let raw_value = builder.inst_results(call)[0];
 
@@ -271,10 +273,11 @@ pub(crate) fn compile_compound_assign(
 
             // 4. Store back to array
             let array_set_id = ctx
-                .func_ids
-                .get("vole_array_set")
+                .func_registry
+                .runtime_key(RuntimeFn::ArraySet)
+                .and_then(|key| ctx.func_registry.func_id(key))
                 .ok_or_else(|| "vole_array_set not found".to_string())?;
-            let array_set_ref = ctx.module.declare_func_in_func(*array_set_id, builder.func);
+            let array_set_ref = ctx.module.declare_func_in_func(array_set_id, builder.func);
 
             // Convert result to i64 for storage
             let store_value = match result.ty {
@@ -311,10 +314,11 @@ pub(crate) fn compile_compound_assign(
 
             // 3. Load current field value
             let get_field_id = ctx
-                .func_ids
-                .get("vole_instance_get_field")
+                .func_registry
+                .runtime_key(RuntimeFn::InstanceGetField)
+                .and_then(|key| ctx.func_registry.func_id(key))
                 .ok_or_else(|| "vole_instance_get_field not found".to_string())?;
-            let get_field_ref = ctx.module.declare_func_in_func(*get_field_id, builder.func);
+            let get_field_ref = ctx.module.declare_func_in_func(get_field_id, builder.func);
             let slot_val = builder.ins().iconst(types::I32, slot as i64);
             let call = builder.ins().call(get_field_ref, &[obj.value, slot_val]);
             let current_raw = builder.inst_results(call)[0];
@@ -338,10 +342,11 @@ pub(crate) fn compile_compound_assign(
 
             // 6. Store back to field
             let set_field_id = ctx
-                .func_ids
-                .get("vole_instance_set_field")
+                .func_registry
+                .runtime_key(RuntimeFn::InstanceSetField)
+                .and_then(|key| ctx.func_registry.func_id(key))
                 .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
-            let set_field_ref = ctx.module.declare_func_in_func(*set_field_id, builder.func);
+            let set_field_ref = ctx.module.declare_func_in_func(set_field_id, builder.func);
 
             // Convert result to i64 for storage
             let store_value = convert_to_i64_for_storage(builder, &result);

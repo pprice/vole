@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use super::helpers::convert_to_i64_for_storage;
+use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
 use crate::codegen::types::CompiledValue;
 use crate::frontend::{StructLiteralExpr, Symbol};
@@ -27,11 +28,16 @@ impl Cg<'_, '_, '_> {
         let runtime_type = self.builder.ins().iconst(types::I32, 7); // TYPE_INSTANCE
 
         let instance_ptr = self.call_runtime(
-            "vole_instance_new",
+            RuntimeFn::InstanceNew,
             &[type_id_val, field_count_val, runtime_type],
         )?;
 
-        let set_func_ref = self.func_ref("vole_instance_set_field")?;
+        let set_key = self
+            .ctx
+            .func_registry
+            .runtime_key(RuntimeFn::InstanceSetField)
+            .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
+        let set_func_ref = self.func_ref(set_key)?;
 
         // Get field types for wrapping optional values
         let field_types: HashMap<Symbol, Type> = match &vole_type {

@@ -4,8 +4,11 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use super::helpers::get_type_name_symbol;
+use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
-use crate::codegen::types::{CompiledValue, type_to_cranelift};
+use crate::codegen::types::{
+    CompiledValue, display_type, method_name_id, module_name_id, type_to_cranelift,
+};
 use crate::frontend::{Expr, MethodCallExpr, NodeId};
 use crate::sema::implement_registry::TypeId;
 use crate::sema::resolution::ResolvedMethod;
@@ -17,12 +20,37 @@ impl Cg<'_, '_, '_> {
         mc: &MethodCallExpr,
         expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
+        let display_type = |ty: &Type| display_type(self.ctx.analyzed, self.ctx.interner, ty);
+        let display_type_symbol = |sym: crate::frontend::Symbol| {
+            self.ctx
+                .type_metadata
+                .get(&sym)
+                .and_then(|meta| match &meta.vole_type {
+                    Type::Class(class_type) => Some(class_type.name_id),
+                    Type::Record(record_type) => Some(record_type.name_id),
+                    _ => None,
+                })
+                .map(|name_id| {
+                    self.ctx
+                        .analyzed
+                        .name_table
+                        .display(name_id, self.ctx.interner)
+                })
+                .unwrap_or_else(|| self.ctx.interner.resolve(sym).to_string())
+        };
+
         let obj = self.expr(&mc.object)?;
         let method_name_str = self.ctx.interner.resolve(mc.method);
 
         // Handle module method calls (e.g., math.sqrt(16.0), math.lerp(...))
         // These go to either external native functions or pure Vole module functions
         if let Type::Module(ref module_type) = obj.vole_type {
+            let module_path = self
+                .ctx
+                .analyzed
+                .name_table
+                .module_path(module_type.module_id);
+            let name_id = module_name_id(self.ctx.analyzed, module_type.module_id, method_name_str);
             // Get the method resolution
             let resolution = self.ctx.analyzed.method_resolutions.get(expr_id);
             if let Some(ResolvedMethod::Implemented {
@@ -45,13 +73,19 @@ impl Cg<'_, '_, '_> {
                     return self.call_external(ext_info, &args, &return_type);
                 } else {
                     // Pure Vole function - call by mangled name
-                    let mangled_name = format!("{}::{}", module_type.path, method_name_str);
-                    let func_id = self
-                        .ctx
-                        .func_ids
-                        .get(&mangled_name)
-                        .copied()
-                        .ok_or_else(|| format!("Module function {} not found", mangled_name))?;
+                    let name_id = name_id.ok_or_else(|| {
+                        format!(
+                            "Module method {}::{} not interned",
+                            module_path, method_name_str
+                        )
+                    })?;
+                    let func_key = self.ctx.func_registry.intern_name_id(name_id);
+                    let func_id = self.ctx.func_registry.func_id(func_key).ok_or_else(|| {
+                        format!(
+                            "Module function {}::{} not found",
+                            module_path, method_name_str
+                        )
+                    })?;
                     let func_ref = self
                         .ctx
                         .module
@@ -68,7 +102,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 return Err(format!(
                     "Module method {}::{} has no resolution",
-                    module_type.path, method_name_str
+                    module_path, method_name_str
                 ));
             }
         }
@@ -146,19 +180,38 @@ impl Cg<'_, '_, '_> {
             return self.iterator_reduce(&obj, &mc.args);
         }
 
+        let method_id = method_name_id(self.ctx.analyzed, self.ctx.interner, mc.method)
+            .ok_or_else(|| {
+                format!(
+                    "codegen error: method name not interned (method: {})",
+                    method_name_str
+                )
+            })?;
+
         // Look up method resolution to determine naming convention and return type
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
         let resolution = self.ctx.analyzed.method_resolutions.get(expr_id);
 
-        // Determine the method function name based on resolution type
-        let (full_name, return_type) = if let Some(resolution) = resolution {
+        // Determine the method function target based on resolution type
+        let (method_info, return_type) = if let Some(resolution) = resolution {
             match resolution {
                 ResolvedMethod::Direct { func_type } => {
                     // Direct method on class/record: use TypeName_methodName
                     let type_name = get_type_name_symbol(&obj.vole_type)?;
-                    let type_name_str = self.ctx.interner.resolve(type_name);
-                    let name = format!("{}_{}", type_name_str, method_name_str);
-                    (name, (*func_type.return_type).clone())
+                    let info = self
+                        .ctx
+                        .type_metadata
+                        .get(&type_name)
+                        .and_then(|meta| meta.method_infos.get(&method_id))
+                        .cloned()
+                        .ok_or_else(|| {
+                            format!(
+                                "Method {} not found on type {}",
+                                method_name_str,
+                                display_type_symbol(type_name)
+                            )
+                        })?;
+                    (Some(info), (*func_type.return_type).clone())
                 }
                 ResolvedMethod::Implemented {
                     func_type,
@@ -186,11 +239,11 @@ impl Cg<'_, '_, '_> {
                     }
 
                     // Implement block method: use TypeName::methodName
-                    let type_id = TypeId::from_type(&obj.vole_type)
-                        .ok_or_else(|| format!("Cannot get TypeId for {:?}", obj.vole_type))?;
-                    let type_name_str = type_id.type_name(self.ctx.interner);
-                    let name = format!("{}::{}", type_name_str, method_name_str);
-                    (name, (*func_type.return_type).clone())
+                    let type_id = TypeId::from_type(&obj.vole_type, &self.ctx.analyzed.type_table);
+                    let info = type_id
+                        .and_then(|type_id| self.ctx.impl_method_infos.get(&(type_id, method_id)))
+                        .cloned();
+                    (info, (*func_type.return_type).clone())
                 }
                 ResolvedMethod::FunctionalInterface { func_type } => {
                     // For functional interfaces, the object holds the function ptr or closure
@@ -217,9 +270,20 @@ impl Cg<'_, '_, '_> {
                 } => {
                     // Default method from interface, monomorphized for the concrete type
                     // Name format is TypeName_methodName (same as direct methods)
-                    let type_name_str = self.ctx.interner.resolve(*type_name);
-                    let name = format!("{}_{}", type_name_str, method_name_str);
-                    (name, (*func_type.return_type).clone())
+                    let info = self
+                        .ctx
+                        .type_metadata
+                        .get(type_name)
+                        .and_then(|meta| meta.method_infos.get(&method_id))
+                        .cloned()
+                        .ok_or_else(|| {
+                            format!(
+                                "Method {} not found on type {}",
+                                method_name_str,
+                                display_type_symbol(*type_name)
+                            )
+                        })?;
+                    (Some(info), (*func_type.return_type).clone())
                 }
             }
         } else {
@@ -227,26 +291,32 @@ impl Cg<'_, '_, '_> {
             // This handles method calls inside default method bodies where sema
             // doesn't analyze the interface body
             let type_name = get_type_name_symbol(&obj.vole_type)?;
-            let type_name_str = self.ctx.interner.resolve(type_name);
 
-            // Look up method return type from type metadata
-            let return_type = self
+            let info = self
                 .ctx
                 .type_metadata
                 .get(&type_name)
-                .and_then(|meta| meta.method_return_types.get(&mc.method).cloned())
+                .and_then(|meta| meta.method_infos.get(&method_id))
+                .cloned()
                 .ok_or_else(|| {
                     format!(
                         "Method {} not found on type {}",
-                        method_name_str, type_name_str
+                        method_name_str,
+                        display_type_symbol(type_name)
                     )
                 })?;
-
-            let name = format!("{}_{}", type_name_str, method_name_str);
-            (name, return_type)
+            let return_type = info.return_type.clone();
+            (Some(info), return_type)
         };
 
-        let method_func_ref = self.func_ref(&full_name)?;
+        let method_info = method_info.ok_or_else(|| {
+            format!(
+                "Unknown method {} on {}",
+                method_name_str,
+                display_type(&obj.vole_type)
+            )
+        })?;
+        let method_func_ref = self.func_ref(method_info.func_key)?;
 
         let mut args = vec![obj.value];
         for arg in &mc.args {
@@ -275,11 +345,11 @@ impl Cg<'_, '_, '_> {
     ) -> Result<Option<CompiledValue>, String> {
         match (&obj.vole_type, method_name) {
             (Type::Array(_), "length") => {
-                let result = self.call_runtime("vole_array_len", &[obj.value])?;
+                let result = self.call_runtime(RuntimeFn::ArrayLen, &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
             }
             (Type::Array(elem_ty), "iter") => {
-                let result = self.call_runtime("vole_array_iter", &[obj.value])?;
+                let result = self.call_runtime(RuntimeFn::ArrayIter, &[obj.value])?;
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
@@ -300,7 +370,8 @@ impl Cg<'_, '_, '_> {
                     .stack_addr(self.ctx.pointer_type, out_slot, 0);
 
                 // Call runtime: has_value = vole_array_iter_next(iter, out_ptr)
-                let has_value = self.call_runtime("vole_array_iter_next", &[obj.value, out_ptr])?;
+                let has_value =
+                    self.call_runtime(RuntimeFn::ArrayIterNext, &[obj.value, out_ptr])?;
 
                 // Load value from out_slot
                 let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
@@ -343,7 +414,7 @@ impl Cg<'_, '_, '_> {
             }
             // Iterator.collect() -> [T]
             (Type::Iterator(elem_ty), "collect") => {
-                let result = self.call_runtime("vole_array_iter_collect", &[obj.value])?;
+                let result = self.call_runtime(RuntimeFn::ArrayIterCollect, &[obj.value])?;
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
@@ -364,7 +435,7 @@ impl Cg<'_, '_, '_> {
                     .stack_addr(self.ctx.pointer_type, out_slot, 0);
 
                 // Call runtime: has_value = vole_map_iter_next(iter, out_ptr)
-                let has_value = self.call_runtime("vole_map_iter_next", &[obj.value, out_ptr])?;
+                let has_value = self.call_runtime(RuntimeFn::MapIterNext, &[obj.value, out_ptr])?;
 
                 // Load value from out_slot
                 let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
@@ -407,7 +478,7 @@ impl Cg<'_, '_, '_> {
             }
             // MapIterator.collect() -> [T]
             (Type::MapIterator(elem_ty), "collect") => {
-                let result = self.call_runtime("vole_map_iter_collect", &[obj.value])?;
+                let result = self.call_runtime(RuntimeFn::MapIterCollect, &[obj.value])?;
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
@@ -429,7 +500,7 @@ impl Cg<'_, '_, '_> {
 
                 // Call runtime: has_value = vole_filter_iter_next(iter, out_ptr)
                 let has_value =
-                    self.call_runtime("vole_filter_iter_next", &[obj.value, out_ptr])?;
+                    self.call_runtime(RuntimeFn::FilterIterNext, &[obj.value, out_ptr])?;
 
                 // Load value from out_slot
                 let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
@@ -472,7 +543,7 @@ impl Cg<'_, '_, '_> {
             }
             // FilterIterator.collect() -> [T]
             (Type::FilterIterator(elem_ty), "collect") => {
-                let result = self.call_runtime("vole_filter_iter_collect", &[obj.value])?;
+                let result = self.call_runtime(RuntimeFn::FilterIterCollect, &[obj.value])?;
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
@@ -491,7 +562,8 @@ impl Cg<'_, '_, '_> {
                     .ins()
                     .stack_addr(self.ctx.pointer_type, out_slot, 0);
 
-                let has_value = self.call_runtime("vole_take_iter_next", &[obj.value, out_ptr])?;
+                let has_value =
+                    self.call_runtime(RuntimeFn::TakeIterNext, &[obj.value, out_ptr])?;
 
                 let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
 
@@ -524,7 +596,7 @@ impl Cg<'_, '_, '_> {
             }
             // TakeIterator.collect() -> [T]
             (Type::TakeIterator(elem_ty), "collect") => {
-                let result = self.call_runtime("vole_take_iter_collect", &[obj.value])?;
+                let result = self.call_runtime(RuntimeFn::TakeIterCollect, &[obj.value])?;
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
@@ -543,7 +615,8 @@ impl Cg<'_, '_, '_> {
                     .ins()
                     .stack_addr(self.ctx.pointer_type, out_slot, 0);
 
-                let has_value = self.call_runtime("vole_skip_iter_next", &[obj.value, out_ptr])?;
+                let has_value =
+                    self.call_runtime(RuntimeFn::SkipIterNext, &[obj.value, out_ptr])?;
 
                 let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
 
@@ -576,7 +649,7 @@ impl Cg<'_, '_, '_> {
             }
             // SkipIterator.collect() -> [T]
             (Type::SkipIterator(elem_ty), "collect") => {
-                let result = self.call_runtime("vole_skip_iter_collect", &[obj.value])?;
+                let result = self.call_runtime(RuntimeFn::SkipIterCollect, &[obj.value])?;
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
@@ -589,7 +662,7 @@ impl Cg<'_, '_, '_> {
             | (Type::FilterIterator(_), "count")
             | (Type::TakeIterator(_), "count")
             | (Type::SkipIterator(_), "count") => {
-                let result = self.call_runtime("vole_iter_count", &[obj.value])?;
+                let result = self.call_runtime(RuntimeFn::IterCount, &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
             }
             // Iterator.sum() -> i64 (works on numeric iterators)
@@ -598,11 +671,11 @@ impl Cg<'_, '_, '_> {
             | (Type::FilterIterator(_), "sum")
             | (Type::TakeIterator(_), "sum")
             | (Type::SkipIterator(_), "sum") => {
-                let result = self.call_runtime("vole_iter_sum", &[obj.value])?;
+                let result = self.call_runtime(RuntimeFn::IterSum, &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
             }
             (Type::String, "length") => {
-                let result = self.call_runtime("vole_string_len", &[obj.value])?;
+                let result = self.call_runtime(RuntimeFn::StringLen, &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
             }
             _ => Ok(None),
@@ -640,11 +713,11 @@ impl Cg<'_, '_, '_> {
         } else {
             // Wrap pure function in a closure with 0 captures
             let zero = self.builder.ins().iconst(types::I64, 0);
-            self.call_runtime("vole_closure_alloc", &[transform.value, zero])?
+            self.call_runtime(RuntimeFn::ClosureAlloc, &[transform.value, zero])?
         };
 
         // Call vole_map_iter(source_iter, transform_closure)
-        let result = self.call_runtime("vole_map_iter", &[iter_obj.value, closure_ptr])?;
+        let result = self.call_runtime(RuntimeFn::MapIter, &[iter_obj.value, closure_ptr])?;
 
         Ok(CompiledValue {
             value: result,
@@ -684,11 +757,11 @@ impl Cg<'_, '_, '_> {
         } else {
             // Wrap pure function in a closure with 0 captures
             let zero = self.builder.ins().iconst(types::I64, 0);
-            self.call_runtime("vole_closure_alloc", &[predicate.value, zero])?
+            self.call_runtime(RuntimeFn::ClosureAlloc, &[predicate.value, zero])?
         };
 
         // Call vole_filter_iter(source_iter, predicate_closure)
-        let result = self.call_runtime("vole_filter_iter", &[iter_obj.value, closure_ptr])?;
+        let result = self.call_runtime(RuntimeFn::FilterIter, &[iter_obj.value, closure_ptr])?;
 
         // FilterIterator preserves element type
         Ok(CompiledValue {
@@ -712,7 +785,7 @@ impl Cg<'_, '_, '_> {
         let count = self.expr(&args[0])?;
 
         // Call vole_take_iter(source_iter, count)
-        let result = self.call_runtime("vole_take_iter", &[iter_obj.value, count.value])?;
+        let result = self.call_runtime(RuntimeFn::TakeIter, &[iter_obj.value, count.value])?;
 
         // TakeIterator preserves element type
         Ok(CompiledValue {
@@ -736,7 +809,7 @@ impl Cg<'_, '_, '_> {
         let count = self.expr(&args[0])?;
 
         // Call vole_skip_iter(source_iter, count)
-        let result = self.call_runtime("vole_skip_iter", &[iter_obj.value, count.value])?;
+        let result = self.call_runtime(RuntimeFn::SkipIter, &[iter_obj.value, count.value])?;
 
         // SkipIterator preserves element type
         Ok(CompiledValue {
@@ -776,11 +849,11 @@ impl Cg<'_, '_, '_> {
         } else {
             // Wrap pure function in a closure with 0 captures
             let zero = self.builder.ins().iconst(types::I64, 0);
-            self.call_runtime("vole_closure_alloc", &[callback.value, zero])?
+            self.call_runtime(RuntimeFn::ClosureAlloc, &[callback.value, zero])?
         };
 
         // Call vole_iter_for_each(iter, callback_closure)
-        self.call_runtime_void("vole_iter_for_each", &[iter_obj.value, closure_ptr])?;
+        self.call_runtime_void(RuntimeFn::IterForEach, &[iter_obj.value, closure_ptr])?;
 
         // for_each returns void
         Ok(self.void_value())
@@ -819,12 +892,12 @@ impl Cg<'_, '_, '_> {
         } else {
             // Wrap pure function in a closure with 0 captures
             let zero = self.builder.ins().iconst(types::I64, 0);
-            self.call_runtime("vole_closure_alloc", &[reducer.value, zero])?
+            self.call_runtime(RuntimeFn::ClosureAlloc, &[reducer.value, zero])?
         };
 
         // Call vole_iter_reduce(iter, init, reducer_closure)
         let result = self.call_runtime(
-            "vole_iter_reduce",
+            RuntimeFn::IterReduce,
             &[iter_obj.value, init.value, closure_ptr],
         )?;
 
@@ -860,7 +933,7 @@ impl Cg<'_, '_, '_> {
         // For now, trust that pure functions (is_closure=false) are called directly.
         if func_type.is_closure {
             // It's a closure - extract function pointer and pass closure
-            let func_ptr = self.call_runtime("vole_closure_get_func", &[func_ptr_or_closure])?;
+            let func_ptr = self.call_runtime(RuntimeFn::ClosureGetFunc, &[func_ptr_or_closure])?;
 
             // Build the Cranelift signature for the closure call
             // First param is the closure pointer, then the user params

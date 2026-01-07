@@ -250,7 +250,7 @@ fn execute_tests(tests: Vec<TestInfo>, jit: &JitContext, file: &Path) -> TestRes
     let file_path = file.to_path_buf();
 
     for test in tests {
-        let func_ptr = match jit.get_function_ptr(&test.func_name) {
+        let func_ptr = match jit.get_function_ptr_by_id(test.func_id) {
             Some(ptr) => ptr,
             None => {
                 results.add(TestResult {

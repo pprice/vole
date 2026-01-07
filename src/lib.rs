@@ -6,6 +6,7 @@ pub mod commands;
 pub mod errors;
 pub mod fmt;
 pub mod frontend;
+pub mod identity;
 pub mod module;
 pub mod runtime;
 pub mod sema;

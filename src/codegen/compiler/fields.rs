@@ -7,12 +7,13 @@ use cranelift_module::Module;
 use std::collections::HashMap;
 
 use super::patterns::compile_expr;
+use crate::codegen::RuntimeFn;
 use crate::codegen::stmt::construct_union;
 use crate::codegen::structs::{
     convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type,
 };
 use crate::codegen::types::type_to_cranelift;
-use crate::codegen::types::{CompileCtx, CompiledValue};
+use crate::codegen::types::{CompileCtx, CompiledValue, module_name_id};
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, StructLiteralExpr, Symbol};
 use crate::sema::Type;
 use crate::sema::types::ConstantValue;
@@ -36,10 +37,11 @@ pub(crate) fn compile_struct_literal(
 
     // Call vole_instance_new(type_id, field_count, TYPE_INSTANCE)
     let new_func_id = ctx
-        .func_ids
-        .get("vole_instance_new")
+        .func_registry
+        .runtime_key(RuntimeFn::InstanceNew)
+        .and_then(|key| ctx.func_registry.func_id(key))
         .ok_or_else(|| "vole_instance_new not found".to_string())?;
-    let new_func_ref = ctx.module.declare_func_in_func(*new_func_id, builder.func);
+    let new_func_ref = ctx.module.declare_func_in_func(new_func_id, builder.func);
 
     let type_id_val = builder.ins().iconst(types::I32, type_id as i64);
     let field_count_val = builder.ins().iconst(types::I32, field_count as i64);
@@ -52,10 +54,11 @@ pub(crate) fn compile_struct_literal(
 
     // Initialize each field
     let set_func_id = ctx
-        .func_ids
-        .get("vole_instance_set_field")
+        .func_registry
+        .runtime_key(RuntimeFn::InstanceSetField)
+        .and_then(|key| ctx.func_registry.func_id(key))
         .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
-    let set_func_ref = ctx.module.declare_func_in_func(*set_func_id, builder.func);
+    let set_func_ref = ctx.module.declare_func_in_func(set_func_id, builder.func);
 
     for init in &sl.fields {
         let slot = *field_slots.get(&init.name).ok_or_else(|| {
@@ -96,9 +99,12 @@ pub(crate) fn compile_field_access(
     // Handle module field access for constants (e.g., math.PI)
     if let Type::Module(ref module_type) = obj.vole_type {
         let field_name = ctx.interner.resolve(fa.field);
+        let name_id = module_name_id(ctx.analyzed, module_type.module_id, field_name);
 
         // Look up constant value in module
-        if let Some(const_val) = module_type.constants.get(field_name) {
+        if let Some(name_id) = name_id
+            && let Some(const_val) = module_type.constants.get(&name_id)
+        {
             return match const_val {
                 ConstantValue::F64(v) => {
                     let val = builder.ins().f64const(*v);
@@ -131,14 +137,16 @@ pub(crate) fn compile_field_access(
                         s,
                         ctx.pointer_type,
                         ctx.module,
-                        ctx.func_ids,
+                        ctx.func_registry,
                     )
                 }
             };
         }
 
         // Check if it's a function export (which would be accessed via method call, not field access)
-        if let Some(export_type) = module_type.exports.get(field_name) {
+        if let Some(name_id) = name_id
+            && let Some(export_type) = module_type.exports.get(&name_id)
+        {
             // For function types accessed as fields (e.g., storing a reference),
             // we need a function pointer - but this is typically done via method calls
             if matches!(export_type, Type::Function(_)) {
@@ -155,9 +163,10 @@ pub(crate) fn compile_field_access(
             ));
         }
 
+        let module_path = ctx.analyzed.name_table.module_path(module_type.module_id);
         return Err(format!(
             "Module {} has no export named {}",
-            module_type.path, field_name
+            module_path, field_name
         ));
     }
 
@@ -165,10 +174,11 @@ pub(crate) fn compile_field_access(
     let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, fa.field, ctx)?;
 
     let get_func_id = ctx
-        .func_ids
-        .get("vole_instance_get_field")
+        .func_registry
+        .runtime_key(RuntimeFn::InstanceGetField)
+        .and_then(|key| ctx.func_registry.func_id(key))
         .ok_or_else(|| "vole_instance_get_field not found".to_string())?;
-    let get_func_ref = ctx.module.declare_func_in_func(*get_func_id, builder.func);
+    let get_func_ref = ctx.module.declare_func_in_func(get_func_id, builder.func);
 
     let slot_val = builder.ins().iconst(types::I32, slot as i64);
     let call = builder.ins().call(get_func_ref, &[obj.value, slot_val]);
@@ -258,10 +268,11 @@ pub(crate) fn compile_optional_chain(
 
     // Get field from the inner object
     let get_func_id = ctx
-        .func_ids
-        .get("vole_instance_get_field")
+        .func_registry
+        .runtime_key(RuntimeFn::InstanceGetField)
+        .and_then(|key| ctx.func_registry.func_id(key))
         .ok_or_else(|| "vole_instance_get_field not found".to_string())?;
-    let get_func_ref = ctx.module.declare_func_in_func(*get_func_id, builder.func);
+    let get_func_ref = ctx.module.declare_func_in_func(get_func_id, builder.func);
     let slot_val = builder.ins().iconst(types::I32, slot as i64);
     let call = builder.ins().call(get_func_ref, &[inner_obj, slot_val]);
     let field_raw = builder.inst_results(call)[0];
@@ -311,10 +322,11 @@ pub(crate) fn compile_field_assign(
     let (slot, _field_type) = get_field_slot_and_type(&obj.vole_type, field, ctx)?;
 
     let set_func_id = ctx
-        .func_ids
-        .get("vole_instance_set_field")
+        .func_registry
+        .runtime_key(RuntimeFn::InstanceSetField)
+        .and_then(|key| ctx.func_registry.func_id(key))
         .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
-    let set_func_ref = ctx.module.declare_func_in_func(*set_func_id, builder.func);
+    let set_func_ref = ctx.module.declare_func_in_func(set_func_id, builder.func);
 
     let slot_val = builder.ins().iconst(types::I32, slot as i64);
 
@@ -349,10 +361,11 @@ pub(crate) fn compile_index_assign(
 
     // Call vole_array_set(arr, index, tag, value)
     let array_set_id = ctx
-        .func_ids
-        .get("vole_array_set")
+        .func_registry
+        .runtime_key(RuntimeFn::ArraySet)
+        .and_then(|key| ctx.func_registry.func_id(key))
         .ok_or_else(|| "vole_array_set not found".to_string())?;
-    let array_set_ref = ctx.module.declare_func_in_func(*array_set_id, builder.func);
+    let array_set_ref = ctx.module.declare_func_in_func(array_set_id, builder.func);
 
     // Convert value to i64 for storage
     let store_value = convert_to_i64_for_storage(builder, &value);

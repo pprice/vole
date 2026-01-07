@@ -76,6 +76,42 @@ pub extern "C" fn vole_println_bool(value: i8) {
     }
 }
 
+/// Print a string to stdout without newline
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_print_string(ptr: *const RcString) {
+    if ptr.is_null() {
+        write_stdout("");
+        return;
+    }
+    unsafe {
+        let s = (*ptr).as_str();
+        write_stdout(s);
+    }
+}
+
+/// Print an i64 to stdout without newline
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_print_i64(value: i64) {
+    write_stdout(&value.to_string());
+}
+
+/// Print an f64 to stdout without newline
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_print_f64(value: f64) {
+    write_stdout(&value.to_string());
+}
+
+/// Print a bool to stdout without newline
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_print_bool(value: i8) {
+    if value != 0 {
+        write_stdout("true");
+    } else {
+        write_stdout("false");
+    }
+}
+
 /// Concatenate two strings
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]

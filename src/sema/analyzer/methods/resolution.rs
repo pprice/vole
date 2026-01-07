@@ -31,24 +31,25 @@ impl Analyzer {
         }
 
         // 2. Check direct methods on type (classes/records)
-        let type_sym = match object_type {
-            Type::Class(c) => Some(c.name),
-            Type::Record(r) => Some(r.name),
+        let type_id = match object_type {
+            Type::Class(c) => Some(c.name_id),
+            Type::Record(r) => Some(r.name_id),
             _ => None,
         };
-
-        if let Some(ts) = type_sym
-            && let Some(func_type) = self.methods.get(&(ts, method_name)).cloned()
-        {
-            let resolved = ResolvedMethod::Direct { func_type };
-            self.method_resolutions
-                .insert(call_node_id, resolved.clone());
-            return Some(resolved);
+        if let Some(type_id) = type_id {
+            let method_id = self.method_name_id(method_name, interner);
+            if let Some(func_type) = self.methods.get(&(type_id, method_id)).cloned() {
+                let resolved = ResolvedMethod::Direct { func_type };
+                self.method_resolutions
+                    .insert(call_node_id, resolved.clone());
+                return Some(resolved);
+            }
         }
 
         // 3. Check implement registry
-        if let Some(type_id) = TypeId::from_type(object_type)
-            && let Some(impl_) = self.implement_registry.get_method(&type_id, method_name)
+        let method_id = self.method_name_id(method_name, interner);
+        if let Some(type_id) = TypeId::from_type(object_type, &self.type_table)
+            && let Some(impl_) = self.implement_registry.get_method(&type_id, method_id)
         {
             let resolved = ResolvedMethod::Implemented {
                 trait_name: impl_.trait_name,

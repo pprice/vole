@@ -5,6 +5,7 @@
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
 
+use crate::codegen::RuntimeFn;
 use crate::frontend::{AssignTarget, Expr, ExprKind, MatchExpr, Pattern, UnaryOp};
 use crate::sema::Type;
 
@@ -184,8 +185,13 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an array literal
     fn array_literal(&mut self, elements: &[Expr]) -> Result<CompiledValue, String> {
-        let arr_ptr = self.call_runtime("vole_array_new", &[])?;
-        let array_push_ref = self.func_ref("vole_array_push")?;
+        let arr_ptr = self.call_runtime(RuntimeFn::ArrayNew, &[])?;
+        let array_push_key = self
+            .ctx
+            .func_registry
+            .runtime_key(RuntimeFn::ArrayPush)
+            .ok_or_else(|| "vole_array_push not found".to_string())?;
+        let array_push_ref = self.func_ref(array_push_key)?;
 
         let mut elem_type = Type::Unknown;
 
@@ -224,7 +230,7 @@ impl Cg<'_, '_, '_> {
             _ => Type::I64,
         };
 
-        let raw_value = self.call_runtime("vole_array_get_value", &[arr.value, idx.value])?;
+        let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, idx.value])?;
         let (result_value, result_ty) = convert_field_value(self.builder, raw_value, &elem_type);
 
         Ok(CompiledValue {
@@ -245,7 +251,12 @@ impl Cg<'_, '_, '_> {
         let idx = self.expr(index)?;
         let val = self.expr(value)?;
 
-        let set_value_ref = self.func_ref("vole_array_set_value")?;
+        let set_value_key = self
+            .ctx
+            .func_registry
+            .runtime_key(RuntimeFn::ArraySet)
+            .ok_or_else(|| "vole_array_set not found".to_string())?;
+        let set_value_ref = self.func_ref(set_value_key)?;
         let tag_val = self
             .builder
             .ins()
@@ -410,7 +421,8 @@ impl Cg<'_, '_, '_> {
         let closure_ptr = self.builder.use_var(closure_var);
 
         let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);
-        let heap_ptr = self.call_runtime("vole_closure_get_capture", &[closure_ptr, index_val])?;
+        let heap_ptr =
+            self.call_runtime(RuntimeFn::ClosureGetCapture, &[closure_ptr, index_val])?;
 
         let cranelift_ty = type_to_cranelift(&binding.vole_type, self.ctx.pointer_type);
         let value = self
@@ -437,7 +449,8 @@ impl Cg<'_, '_, '_> {
         let closure_ptr = self.builder.use_var(closure_var);
 
         let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);
-        let heap_ptr = self.call_runtime("vole_closure_get_capture", &[closure_ptr, index_val])?;
+        let heap_ptr =
+            self.call_runtime(RuntimeFn::ClosureGetCapture, &[closure_ptr, index_val])?;
 
         let cranelift_ty = type_to_cranelift(&binding.vole_type, self.ctx.pointer_type);
         self.builder
@@ -523,9 +536,15 @@ impl Cg<'_, '_, '_> {
                                 .fcmp(FloatCC::Equal, scrutinee.value, lit_val.value)
                         }
                         _ => {
-                            if self.ctx.func_ids.contains_key("vole_string_eq") {
+                            if self
+                                .ctx
+                                .func_registry
+                                .runtime_key(RuntimeFn::StringEq)
+                                .and_then(|key| self.ctx.func_registry.func_id(key))
+                                .is_some()
+                            {
                                 self.call_runtime(
-                                    "vole_string_eq",
+                                    RuntimeFn::StringEq,
                                     &[scrutinee.value, lit_val.value],
                                 )?
                             } else {
@@ -554,8 +573,14 @@ impl Cg<'_, '_, '_> {
                                 .fcmp(FloatCC::Equal, scrutinee.value, var_val)
                         }
                         Type::String => {
-                            if self.ctx.func_ids.contains_key("vole_string_eq") {
-                                self.call_runtime("vole_string_eq", &[scrutinee.value, var_val])?
+                            if self
+                                .ctx
+                                .func_registry
+                                .runtime_key(RuntimeFn::StringEq)
+                                .and_then(|key| self.ctx.func_registry.func_id(key))
+                                .is_some()
+                            {
+                                self.call_runtime(RuntimeFn::StringEq, &[scrutinee.value, var_val])?
                             } else {
                                 self.builder
                                     .ins()

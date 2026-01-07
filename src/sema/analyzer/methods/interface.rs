@@ -28,7 +28,7 @@ impl Analyzer {
                 continue;
             }
 
-            if !self.type_has_method(ty, method) {
+            if !self.type_has_method(ty, method, interner) {
                 return false;
             }
         }
@@ -63,17 +63,25 @@ impl Analyzer {
     }
 
     /// Check if a type has a method that matches the interface method signature
-    pub(crate) fn type_has_method(&self, ty: &Type, interface_method: &InterfaceMethodDef) -> bool {
+    pub(crate) fn type_has_method(
+        &self,
+        ty: &Type,
+        interface_method: &InterfaceMethodDef,
+        interner: &Interner,
+    ) -> bool {
         // Get type symbol for method lookup
         let type_sym = match ty {
             Type::Record(r) => r.name,
             Type::Class(c) => c.name,
             _ => {
                 // For primitives/arrays, check implement registry
-                if let Some(type_id) = TypeId::from_type(ty) {
+                if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
+                    && let Some(method_id) =
+                        self.method_name_id_lookup(interface_method.name, interner)
+                {
                     return self
                         .implement_registry
-                        .get_method(&type_id, interface_method.name)
+                        .get_method(&type_id, method_id)
                         .is_some();
                 }
                 return false;
@@ -81,16 +89,27 @@ impl Analyzer {
         };
 
         // Check direct methods on the type
-        let method_key = (type_sym, interface_method.name);
-        if self.methods.contains_key(&method_key) {
-            return true;
+        if let Some(type_id) = self
+            .records
+            .get(&type_sym)
+            .map(|record| record.name_id)
+            .or_else(|| self.classes.get(&type_sym).map(|class| class.name_id))
+            && let Some(method_id) =
+                self.method_name_id_lookup(interface_method.name, interner)
+        {
+            let method_key = (type_id, method_id);
+            if self.methods.contains_key(&method_key) {
+                return true;
+            }
         }
 
         // Check implement registry
-        if let Some(type_id) = TypeId::from_type(ty)
+        if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
+            && let Some(method_id) =
+                self.method_name_id_lookup(interface_method.name, interner)
             && self
                 .implement_registry
-                .get_method(&type_id, interface_method.name)
+                .get_method(&type_id, method_id)
                 .is_some()
         {
             return true;
@@ -104,7 +123,7 @@ impl Analyzer {
         &mut self,
         type_name: Symbol,
         iface_name: Symbol,
-        type_methods: &HashMap<Symbol, FunctionType>,
+        type_methods: &HashMap<String, FunctionType>,
         span: Span,
         interner: &Interner,
     ) {
@@ -114,14 +133,15 @@ impl Analyzer {
                 if required.has_default {
                     continue;
                 }
-                match type_methods.get(&required.name) {
+                let required_name = interner.resolve(required.name);
+                match type_methods.get(required_name) {
                     None => {
                         // Method is missing entirely
                         self.add_error(
                             SemanticError::InterfaceNotSatisfied {
                                 type_name: interner.resolve(type_name).to_string(),
                                 interface_name: interner.resolve(iface_name).to_string(),
-                                method: interner.resolve(required.name).to_string(),
+                                method: required_name.to_string(),
                                 span: span.into(),
                             },
                             span,
@@ -130,18 +150,22 @@ impl Analyzer {
                     Some(found_sig) => {
                         // Method exists, check signature
                         if !Self::signatures_match(required, found_sig) {
+                            let expected = self.format_method_signature(
+                                &required.params,
+                                &required.return_type,
+                                interner,
+                            );
+                            let found = self.format_method_signature(
+                                &found_sig.params,
+                                &found_sig.return_type,
+                                interner,
+                            );
                             self.add_error(
                                 SemanticError::InterfaceSignatureMismatch {
                                     interface_name: interner.resolve(iface_name).to_string(),
-                                    method: interner.resolve(required.name).to_string(),
-                                    expected: Self::format_method_signature(
-                                        &required.params,
-                                        &required.return_type,
-                                    ),
-                                    found: Self::format_method_signature(
-                                        &found_sig.params,
-                                        &found_sig.return_type,
-                                    ),
+                                    method: required_name.to_string(),
+                                    expected,
+                                    found,
                                     span: span.into(),
                                 },
                                 span,
@@ -167,13 +191,27 @@ impl Analyzer {
     pub(crate) fn get_type_method_signatures(
         &self,
         type_name: Symbol,
-    ) -> HashMap<Symbol, FunctionType> {
+        interner: &Interner,
+    ) -> HashMap<String, FunctionType> {
         let mut method_sigs = HashMap::new();
 
+        let method_name_str = |method_id: NameId| {
+            self.name_table
+                .last_segment_str(method_id, interner)
+                .unwrap_or_default()
+        };
+
         // Methods defined directly on the type
-        for ((ty, method_name), func_type) in &self.methods {
-            if *ty == type_name {
-                method_sigs.insert(*method_name, func_type.clone());
+        let type_id = self
+            .records
+            .get(&type_name)
+            .map(|record| record.name_id)
+            .or_else(|| self.classes.get(&type_name).map(|class| class.name_id));
+        if let Some(type_id) = type_id {
+            for ((ty, method_name), func_type) in &self.methods {
+                if *ty == type_id {
+                    method_sigs.insert(method_name_str(*method_name), func_type.clone());
+                }
             }
         }
 
@@ -181,16 +219,16 @@ impl Analyzer {
         if let Some(type_id) = self
             .records
             .get(&type_name)
-            .map(|_| TypeId::Record(type_name))
+            .map(|record| TypeId::from_name_id(record.name_id))
             .or_else(|| {
                 self.classes
                     .get(&type_name)
-                    .map(|_| TypeId::Class(type_name))
+                    .map(|class| TypeId::from_name_id(class.name_id))
             })
         {
             for (method_name, method_impl) in self.implement_registry.get_methods_for_type(&type_id)
             {
-                method_sigs.insert(method_name, method_impl.func_type.clone());
+                method_sigs.insert(method_name_str(method_name), method_impl.func_type.clone());
             }
         }
 

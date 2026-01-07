@@ -1,6 +1,7 @@
 // src/sema/types.rs
 
 use crate::frontend::{PrimitiveType, Symbol};
+use crate::identity::{ModuleId, NameId};
 
 /// Resolved types in the type system
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,7 +76,7 @@ pub enum Type {
     /// Generic type instance (e.g., Box<i64>, Iterator<string>)
     GenericInstance {
         /// Name of the generic type definition
-        def: Symbol,
+        def: NameId,
         /// Concrete type arguments
         args: Vec<Type>,
     },
@@ -103,6 +104,7 @@ pub struct StructField {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassType {
     pub name: Symbol,
+    pub name_id: NameId,
     pub fields: Vec<StructField>,
 }
 
@@ -110,6 +112,7 @@ pub struct ClassType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordType {
     pub name: Symbol,
+    pub name_id: NameId,
     pub fields: Vec<StructField>,
 }
 
@@ -117,6 +120,7 @@ pub struct RecordType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceType {
     pub name: Symbol,
+    pub name_id: NameId,
     pub methods: Vec<InterfaceMethodType>,
     pub extends: Vec<Symbol>, // Parent interfaces
 }
@@ -134,6 +138,7 @@ pub struct InterfaceMethodType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErrorTypeInfo {
     pub name: Symbol,
+    pub name_id: NameId,
     pub fields: Vec<StructField>,
 }
 
@@ -158,13 +163,13 @@ impl Eq for ConstantValue {}
 /// Module type: represents an imported module with its exports
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleType {
-    pub path: String,
-    /// Exports keyed by name string (not Symbol, since modules have their own interners)
-    pub exports: std::collections::HashMap<String, Type>,
+    pub module_id: ModuleId,
+    /// Exports keyed by fully-qualified name id
+    pub exports: std::collections::HashMap<NameId, Type>,
     /// Constant values from the module (let PI = 3.14...)
-    pub constants: std::collections::HashMap<String, ConstantValue>,
+    pub constants: std::collections::HashMap<NameId, ConstantValue>,
     /// Names of functions that are external (FFI) - others are pure Vole
-    pub external_funcs: std::collections::HashSet<String>,
+    pub external_funcs: std::collections::HashSet<NameId>,
 }
 
 impl PartialEq for FunctionType {
@@ -428,7 +433,7 @@ impl std::fmt::Display for Type {
             Type::Fallible(ft) => {
                 write!(f, "fallible({}, {})", ft.success_type, ft.error_type)
             }
-            Type::Module(m) => write!(f, "module(\"{}\")", m.path),
+            Type::Module(m) => write!(f, "module(id:{})", m.module_id.index()),
             Type::TypeParam(sym) => write!(f, "{:?}", sym), // Symbol Debug shows interned string
             Type::GenericInstance { def, args } => {
                 write!(f, "{:?}<", def)?;

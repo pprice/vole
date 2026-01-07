@@ -11,6 +11,7 @@ use crate::codegen::lambda::CaptureBinding;
 use crate::codegen::types::{
     CompileCtx, CompiledValue, cranelift_to_vole_type, native_type_to_cranelift, type_to_cranelift,
 };
+use crate::codegen::{FunctionKey, RuntimeFn};
 use crate::frontend::{CallExpr, Expr, ExprKind, NodeId, Symbol};
 use crate::runtime::native_registry::{NativeFunction, NativeType};
 use crate::sema::{FunctionType, Type};
@@ -123,18 +124,24 @@ pub(crate) fn compile_call(
     if let Some(monomorph_key) = ctx.generic_calls.get(&call_expr_id) {
         // Look up the monomorphized instance
         if let Some(instance) = ctx.monomorph_cache.get(monomorph_key) {
-            // Use the mangled function name
-            let mangled_name = format!(
-                "{}__mono_{}",
-                ctx.interner.resolve(instance.original_name),
-                instance.instance_id
+            let mangled_name = ctx
+                .analyzed
+                .name_table
+                .display(instance.mangled_name, &ctx.analyzed.interner);
+            let func_key = ctx.func_registry.intern_name_id(instance.mangled_name);
+            return compile_function_call_with_key(
+                builder,
+                func_key,
+                &mangled_name,
+                &call.args,
+                variables,
+                ctx,
             );
-            return compile_user_function_call(builder, &mangled_name, &call.args, variables, ctx);
         }
     }
 
     // Fall back to named function call
-    compile_user_function_call(builder, callee_name, &call.args, variables, ctx)
+    compile_user_function_call(builder, callee_sym, callee_name, &call.args, variables, ctx)
 }
 
 /// Compile an indirect call through a function pointer variable
@@ -233,10 +240,11 @@ pub(crate) fn compile_closure_call(
 ) -> Result<CompiledValue, String> {
     // Extract the function pointer from the closure
     let get_func_id = ctx
-        .func_ids
-        .get("vole_closure_get_func")
+        .func_registry
+        .runtime_key(RuntimeFn::ClosureGetFunc)
+        .and_then(|key| ctx.func_registry.func_id(key))
         .ok_or_else(|| "vole_closure_get_func not found".to_string())?;
-    let get_func_ref = ctx.module.declare_func_in_func(*get_func_id, builder.func);
+    let get_func_ref = ctx.module.declare_func_in_func(get_func_id, builder.func);
     let get_func_call = builder.ins().call(get_func_ref, &[closure_ptr]);
     let func_ptr = builder.inst_results(get_func_call)[0];
 
@@ -302,12 +310,12 @@ pub(crate) fn compile_println(
 
     // Dispatch based on argument type
     // We use vole_type to distinguish strings from regular I64 values
-    let (func_name, call_arg) = if matches!(arg.vole_type, Type::String) {
-        ("vole_println_string", arg.value)
+    let (runtime, call_arg) = if matches!(arg.vole_type, Type::String) {
+        (RuntimeFn::PrintlnString, arg.value)
     } else if arg.ty == types::F64 {
-        ("vole_println_f64", arg.value)
+        (RuntimeFn::PrintlnF64, arg.value)
     } else if arg.ty == types::I8 {
-        ("vole_println_bool", arg.value)
+        (RuntimeFn::PrintlnBool, arg.value)
     } else {
         // Extend smaller integer types to I64
         let extended = if arg.ty.is_int() && arg.ty != types::I64 {
@@ -315,14 +323,15 @@ pub(crate) fn compile_println(
         } else {
             arg.value
         };
-        ("vole_println_i64", extended)
+        (RuntimeFn::PrintlnI64, extended)
     };
 
     let func_id = ctx
-        .func_ids
-        .get(func_name)
-        .ok_or_else(|| format!("{} not found", func_name))?;
-    let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+        .func_registry
+        .runtime_key(runtime)
+        .and_then(|key| ctx.func_registry.func_id(key))
+        .ok_or_else(|| format!("{} not found", runtime.name()))?;
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
 
     builder.ins().call(func_ref, &[call_arg]);
 
@@ -358,10 +367,11 @@ pub(crate) fn compile_print_char(
     };
 
     let func_id = ctx
-        .func_ids
-        .get("vole_print_char")
+        .func_registry
+        .runtime_key(RuntimeFn::PrintChar)
+        .and_then(|key| ctx.func_registry.func_id(key))
         .ok_or_else(|| "vole_print_char not found".to_string())?;
-    let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
 
     builder.ins().call(func_ref, &[char_val]);
 
@@ -404,10 +414,11 @@ pub(crate) fn compile_assert(
     {
         // Get vole_assert_fail function
         let func_id = ctx
-            .func_ids
-            .get("vole_assert_fail")
+            .func_registry
+            .runtime_key(RuntimeFn::AssertFail)
+            .and_then(|key| ctx.func_registry.func_id(key))
             .ok_or_else(|| "vole_assert_fail not found".to_string())?;
-        let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+        let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
 
         // Pass source file pointer and length from JitContext
         // The source_file_ptr points to memory in JitContext that lives as long as the JIT code
@@ -447,22 +458,41 @@ pub(crate) fn compile_assert(
 /// Compile a call to a user-defined function
 pub(crate) fn compile_user_function_call(
     builder: &mut FunctionBuilder,
-    name: &str,
+    callee_sym: Symbol,
+    callee_name: &str,
     args: &[Expr],
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     // Try to find the function directly first
-    let func_id = if let Some(id) = ctx.func_ids.get(name) {
-        *id
-    } else if let Some(module_path) = ctx.current_module {
+    let func_key = if let Some(module_path) = ctx.current_module {
         // We're compiling module code - try mangled name for module functions
-        let mangled_name = format!("{}::{}", module_path, name);
-        if let Some(id) = ctx.func_ids.get(&mangled_name) {
-            *id
+        let module_id = ctx
+            .analyzed
+            .name_table
+            .module_id_if_known(module_path)
+            .unwrap_or_else(|| ctx.analyzed.name_table.main_module());
+        let name_id = crate::codegen::types::module_name_id(ctx.analyzed, module_id, callee_name);
+        if let Some(name_id) = name_id {
+            let key = ctx.func_registry.intern_name_id(name_id);
+            if ctx.func_registry.func_id(key).is_some() {
+                key
+            } else {
+                // Try FFI call for external module functions
+                if let Some(native_func) = ctx.native_registry.lookup(module_path, callee_name) {
+                    // Compile arguments
+                    let mut arg_values = Vec::new();
+                    for arg in args {
+                        let compiled = compile_expr(builder, arg, variables, ctx)?;
+                        arg_values.push(compiled.value);
+                    }
+                    return compile_ffi_call(builder, ctx, native_func, &arg_values);
+                }
+                return Err(format!("{} not found", callee_name));
+            }
         } else {
             // Try FFI call for external module functions
-            if let Some(native_func) = ctx.native_registry.lookup(module_path, name) {
+            if let Some(native_func) = ctx.native_registry.lookup(module_path, callee_name) {
                 // Compile arguments
                 let mut arg_values = Vec::new();
                 for arg in args {
@@ -471,11 +501,34 @@ pub(crate) fn compile_user_function_call(
                 }
                 return compile_ffi_call(builder, ctx, native_func, &arg_values);
             }
-            return Err(format!("{} not found", name));
+            return Err(format!("{} not found", callee_name));
         }
     } else {
-        return Err(format!("undefined function: {}", name));
+        let key = ctx
+            .func_registry
+            .intern_qualified(ctx.func_registry.main_module(), &[callee_sym]);
+        if ctx.func_registry.func_id(key).is_some() {
+            key
+        } else {
+            return Err(format!("undefined function: {}", callee_name));
+        }
     };
+
+    compile_function_call_with_key(builder, func_key, callee_name, args, variables, ctx)
+}
+
+fn compile_function_call_with_key(
+    builder: &mut FunctionBuilder,
+    func_key: FunctionKey,
+    display_name: &str,
+    args: &[Expr],
+    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ctx: &mut CompileCtx,
+) -> Result<CompiledValue, String> {
+    let func_id = ctx
+        .func_registry
+        .func_id(func_key)
+        .ok_or_else(|| format!("{} not declared", display_name))?;
     let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
 
     // Get expected parameter types from the function's signature
@@ -527,8 +580,8 @@ pub(crate) fn compile_user_function_call(
         // This is important for record types where the Cranelift type is i64 (pointer)
         // but the Vole type is Record(...)
         let vole_type = ctx
-            .func_return_types
-            .get(name)
+            .func_registry
+            .return_type(func_key)
             .cloned()
             .unwrap_or_else(|| cranelift_to_vole_type(ty));
         Ok(CompiledValue {

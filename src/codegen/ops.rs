@@ -5,6 +5,7 @@
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
 
+use crate::codegen::RuntimeFn;
 use crate::frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr};
 use crate::sema::Type;
 
@@ -293,8 +294,14 @@ impl Cg<'_, '_, '_> {
 
     /// String equality comparison
     fn string_eq(&mut self, left: Value, right: Value) -> Result<Value, String> {
-        if self.ctx.func_ids.contains_key("vole_string_eq") {
-            self.call_runtime("vole_string_eq", &[left, right])
+        if self
+            .ctx
+            .func_registry
+            .runtime_key(RuntimeFn::StringEq)
+            .and_then(|key| self.ctx.func_registry.func_id(key))
+            .is_some()
+        {
+            self.call_runtime(RuntimeFn::StringEq, &[left, right])
         } else {
             Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
         }
@@ -356,7 +363,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Load current element
-        let raw_value = self.call_runtime("vole_array_get_value", &[arr.value, idx.value])?;
+        let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, idx.value])?;
         let (current_val, current_ty) = convert_field_value(self.builder, raw_value, &elem_type);
 
         let current = CompiledValue {
@@ -370,7 +377,12 @@ impl Cg<'_, '_, '_> {
         let result = self.binary_op(current, rhs, binary_op)?;
 
         // Store back
-        let array_set_ref = self.func_ref("vole_array_set")?;
+        let array_set_key = self
+            .ctx
+            .func_registry
+            .runtime_key(RuntimeFn::ArraySet)
+            .ok_or_else(|| "vole_array_set not found".to_string())?;
+        let array_set_ref = self.func_ref(array_set_key)?;
         let store_value = convert_to_i64_for_storage(self.builder, &result);
         let tag_val = self
             .builder
@@ -397,7 +409,7 @@ impl Cg<'_, '_, '_> {
 
         // Load current field
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-        let current_raw = self.call_runtime("vole_instance_get_field", &[obj.value, slot_val])?;
+        let current_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[obj.value, slot_val])?;
 
         let (current_val, cranelift_ty) =
             convert_field_value(self.builder, current_raw, &field_type);
@@ -416,7 +428,7 @@ impl Cg<'_, '_, '_> {
         let store_value = convert_to_i64_for_storage(self.builder, &result);
 
         self.call_runtime_void(
-            "vole_instance_set_field",
+            RuntimeFn::InstanceSetField,
             &[obj.value, slot_val, store_value],
         )?;
 

@@ -21,12 +21,13 @@ use std::collections::HashMap;
 
 use cranelift::prelude::types as clif_types;
 
-use crate::codegen::JitContext;
-use crate::codegen::types::TypeMetadata;
+use crate::codegen::types::{MethodInfo, TypeMetadata};
+use crate::codegen::{FunctionRegistry, JitContext, RuntimeFn};
 use crate::commands::common::AnalyzedProgram;
 use crate::frontend::{LetStmt, Symbol};
+use crate::identity::NameId;
 use crate::runtime::NativeRegistry;
-use crate::sema::Type;
+use crate::sema::TypeId;
 
 pub use state::{ControlFlowCtx, TestInfo};
 
@@ -41,12 +42,16 @@ pub struct Compiler<'a> {
     globals: Vec<LetStmt>,
     /// Counter for generating unique lambda names
     lambda_counter: usize,
+    /// NameIds for declared test functions by index
+    test_name_ids: Vec<NameId>,
     /// Class and record metadata: name -> TypeMetadata
     type_metadata: HashMap<Symbol, TypeMetadata>,
+    /// Implement block method info keyed by (TypeId, method)
+    impl_method_infos: HashMap<(TypeId, NameId), MethodInfo>,
     /// Next type ID to assign
     next_type_id: u32,
-    /// Return types of compiled functions
-    func_return_types: HashMap<String, Type>,
+    /// Opaque function identities and return types
+    func_registry: FunctionRegistry,
     /// Registry of native functions for external method calls
     native_registry: NativeRegistry,
 }
@@ -59,6 +64,14 @@ impl<'a> Compiler<'a> {
         let mut native_registry = NativeRegistry::new();
         crate::runtime::stdlib::register_stdlib(&mut native_registry);
 
+        let mut func_registry = FunctionRegistry::new(analyzed.name_table.clone());
+        for runtime in RuntimeFn::ALL {
+            if let Some(func_id) = jit.func_ids.get(runtime.name()) {
+                let key = func_registry.intern_runtime(*runtime);
+                func_registry.set_func_id(key, *func_id);
+            }
+        }
+
         Self {
             jit,
             analyzed,
@@ -66,9 +79,11 @@ impl<'a> Compiler<'a> {
             tests: Vec::new(),
             globals: Vec::new(),
             lambda_counter: 0,
+            test_name_ids: Vec::new(),
             type_metadata: HashMap::new(),
+            impl_method_infos: HashMap::new(),
             next_type_id: 0,
-            func_return_types: HashMap::new(),
+            func_registry,
             native_registry,
         }
     }

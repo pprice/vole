@@ -11,12 +11,18 @@ impl Analyzer {
         // Handle module field access
         if let Type::Module(ref module_type) = object_type {
             let field_name = interner.resolve(field_access.field);
-            if let Some(export_type) = module_type.exports.get(field_name) {
+            if let Some(name_id) = self.module_name_id(module_type.module_id, field_name)
+                && let Some(export_type) = module_type.exports.get(&name_id)
+            {
                 return Ok(export_type.clone());
             } else {
+                let module_path = self
+                    .name_table
+                    .module_path(module_type.module_id)
+                    .to_string();
                 self.add_error(
                     SemanticError::ModuleNoExport {
-                        module: module_type.path.clone(),
+                        module: module_path,
                         name: field_name.to_string(),
                         span: field_access.field_span.into(),
                     },
@@ -38,10 +44,11 @@ impl Analyzer {
             ),
             Type::Error => return Ok(Type::Error),
             _ => {
+                let found = self.type_display(&object_type, interner);
                 self.add_error(
                     SemanticError::TypeMismatch {
                         expected: "class or record".to_string(),
-                        found: object_type.name().to_string(),
+                        found,
                         span: field_access.object.span.into(),
                     },
                     field_access.object.span,
@@ -99,10 +106,11 @@ impl Analyzer {
             ),
             Type::Error => return Ok(Type::Error),
             _ => {
+                let found = self.type_display(&object_type, interner);
                 self.add_error(
                     SemanticError::TypeMismatch {
                         expected: "optional class or record".to_string(),
-                        found: object_type.name().to_string(),
+                        found,
                         span: opt_chain.object.span.into(),
                     },
                     opt_chain.object.span,
@@ -169,9 +177,12 @@ impl Analyzer {
         // Handle module method calls (e.g., math.sqrt(16.0))
         if let Type::Module(ref module_type) = object_type {
             let method_name_str = interner.resolve(method_call.method);
+            let name_id = self.module_name_id(module_type.module_id, method_name_str);
 
             // Look up the method in module exports
-            if let Some(export_type) = module_type.exports.get(method_name_str) {
+            if let Some(name_id) = name_id
+                && let Some(export_type) = module_type.exports.get(&name_id)
+            {
                 if let Type::Function(func_type) = export_type {
                     // Check argument count
                     if method_call.args.len() != func_type.params.len() {
@@ -189,10 +200,12 @@ impl Analyzer {
                     for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                         let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
                         if !self.types_compatible(&arg_ty, param_ty, interner) {
+                            let expected = self.type_display(param_ty, interner);
+                            let found = self.type_display(&arg_ty, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
-                                    expected: format!("{}", param_ty),
-                                    found: format!("{}", arg_ty),
+                                    expected,
+                                    found,
                                     span: arg.span.into(),
                                 },
                                 arg.span,
@@ -202,9 +215,12 @@ impl Analyzer {
 
                     // Record resolution for codegen
                     // Only set external_info for functions in the external_funcs set
-                    let external_info = if module_type.external_funcs.contains(method_name_str) {
+                    let external_info = if module_type.external_funcs.contains(&name_id) {
                         Some(ExternalMethodInfo {
-                            module_path: module_type.path.clone(),
+                            module_path: self
+                                .name_table
+                                .module_path(module_type.module_id)
+                                .to_string(),
                             native_name: method_name_str.to_string(),
                         })
                     } else {
@@ -223,10 +239,11 @@ impl Analyzer {
 
                     return Ok(*func_type.return_type.clone());
                 } else {
+                    let found = self.type_display(export_type, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "function".to_string(),
-                            found: export_type.name().to_string(),
+                            found,
                             span: method_call.method_span.into(),
                         },
                         method_call.method_span,
@@ -236,7 +253,10 @@ impl Analyzer {
             } else {
                 self.add_error(
                     SemanticError::ModuleNoExport {
-                        module: module_type.path.clone(),
+                        module: self
+                            .name_table
+                            .module_path(module_type.module_id)
+                            .to_string(),
                         name: method_name_str.to_string(),
                         span: method_call.method_span.into(),
                     },
@@ -247,18 +267,13 @@ impl Analyzer {
         }
 
         // Get a descriptive type name for error messages
-        let type_name = if let Some(type_id) = TypeId::from_type(&object_type) {
-            type_id.type_name(interner)
-        } else {
-            object_type.name().to_string()
-        };
+        let type_name = self.type_display(&object_type, interner);
 
         // First, check implement registry for ANY type (primitives, arrays, classes, records)
         // This allows implement blocks to work for all types
-        if let Some(type_id) = TypeId::from_type(&object_type)
-            && let Some(impl_) = self
-                .implement_registry
-                .get_method(&type_id, method_call.method)
+        let method_id = self.method_name_id(method_call.method, interner);
+        if let Some(type_id) = TypeId::from_type(&object_type, &self.type_table)
+            && let Some(impl_) = self.implement_registry.get_method(&type_id, method_id)
         {
             let func_type = impl_.func_type.clone();
 
@@ -294,10 +309,12 @@ impl Analyzer {
             for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                 let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
                 if !self.types_compatible(&arg_ty, param_ty, interner) {
+                    let expected = self.type_display(param_ty, interner);
+                    let found = self.type_display(&arg_ty, interner);
                     self.add_error(
                         SemanticError::TypeMismatch {
-                            expected: param_ty.name().to_string(),
-                            found: arg_ty.name().to_string(),
+                            expected,
+                            found,
                             span: arg.span.into(),
                         },
                         arg.span,
@@ -344,10 +361,12 @@ impl Analyzer {
                     for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                         let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
                         if !self.types_compatible(&arg_ty, param_ty, interner) {
+                            let expected = self.type_display(param_ty, interner);
+                            let found = self.type_display(&arg_ty, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
-                                    expected: param_ty.name().to_string(),
-                                    found: arg_ty.name().to_string(),
+                                    expected,
+                                    found,
                                     span: arg.span.into(),
                                 },
                                 arg.span,
@@ -388,10 +407,15 @@ impl Analyzer {
             Type::Record(record_type) => Some(record_type.name),
             _ => None,
         };
+        let type_id = match &object_type {
+            Type::Class(class_type) => Some(class_type.name_id),
+            Type::Record(record_type) => Some(record_type.name_id),
+            _ => None,
+        };
 
-        if let Some(type_sym) = type_sym {
-            let method_key = (type_sym, method_call.method);
-            if let Some(method_type) = self.methods.get(&method_key).cloned() {
+        if let Some(type_id) = type_id {
+            let method_id = self.method_name_id(method_call.method, interner);
+            if let Some(method_type) = self.methods.get(&(type_id, method_id)).cloned() {
                 // Mark side effects if inside lambda
                 if self.in_lambda() {
                     self.mark_lambda_has_side_effects();
@@ -413,10 +437,12 @@ impl Analyzer {
                 for (arg, param_ty) in method_call.args.iter().zip(method_type.params.iter()) {
                     let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
                     if !self.types_compatible(&arg_ty, param_ty, interner) {
+                        let expected = self.type_display(param_ty, interner);
+                        let found = self.type_display(&arg_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
-                                expected: param_ty.name().to_string(),
-                                found: arg_ty.name().to_string(),
+                                expected,
+                                found,
                                 span: arg.span.into(),
                             },
                             arg.span,
@@ -435,68 +461,75 @@ impl Analyzer {
                 return Ok(*method_type.return_type);
             }
 
-            // Check for default method from implemented interfaces
-            if let Some(interfaces) = self.type_implements.get(&type_sym).cloned() {
-                for interface_name in &interfaces {
-                    if let Some(interface_def) =
-                        self.interface_registry.get(*interface_name, interner)
-                    {
-                        // Look for a default method with matching name
-                        for method_def in &interface_def.methods {
-                            if method_def.name == method_call.method && method_def.has_default {
-                                let func_type = FunctionType {
-                                    params: method_def.params.clone(),
-                                    return_type: Box::new(method_def.return_type.clone()),
-                                    is_closure: false,
-                                };
+            if let Some(type_sym) = type_sym {
+                // Check for default method from implemented interfaces
+                if let Some(interfaces) = self.type_implements.get(&type_sym).cloned() {
+                    for interface_name in &interfaces {
+                        if let Some(interface_def) =
+                            self.interface_registry.get(*interface_name, interner)
+                        {
+                            // Look for a default method with matching name
+                            for method_def in &interface_def.methods {
+                                if method_def.name == method_call.method && method_def.has_default {
+                                    let func_type = FunctionType {
+                                        params: method_def.params.clone(),
+                                        return_type: Box::new(method_def.return_type.clone()),
+                                        is_closure: false,
+                                    };
 
-                                // Mark side effects if inside lambda
-                                if self.in_lambda() {
-                                    self.mark_lambda_has_side_effects();
-                                }
+                                    // Mark side effects if inside lambda
+                                    if self.in_lambda() {
+                                        self.mark_lambda_has_side_effects();
+                                    }
 
-                                // Check argument count
-                                if method_call.args.len() != func_type.params.len() {
-                                    self.add_error(
-                                        SemanticError::WrongArgumentCount {
-                                            expected: func_type.params.len(),
-                                            found: method_call.args.len(),
-                                            span: expr.span.into(),
-                                        },
-                                        expr.span,
-                                    );
-                                }
-
-                                // Check argument types
-                                for (arg, param_ty) in
-                                    method_call.args.iter().zip(func_type.params.iter())
-                                {
-                                    let arg_ty =
-                                        self.check_expr_expecting(arg, Some(param_ty), interner)?;
-                                    if !self.types_compatible(&arg_ty, param_ty, interner) {
+                                    // Check argument count
+                                    if method_call.args.len() != func_type.params.len() {
                                         self.add_error(
-                                            SemanticError::TypeMismatch {
-                                                expected: param_ty.name().to_string(),
-                                                found: arg_ty.name().to_string(),
-                                                span: arg.span.into(),
+                                            SemanticError::WrongArgumentCount {
+                                                expected: func_type.params.len(),
+                                                found: method_call.args.len(),
+                                                span: expr.span.into(),
                                             },
-                                            arg.span,
+                                            expr.span,
                                         );
                                     }
+
+                                    // Check argument types
+                                    for (arg, param_ty) in
+                                        method_call.args.iter().zip(func_type.params.iter())
+                                    {
+                                        let arg_ty = self.check_expr_expecting(
+                                            arg,
+                                            Some(param_ty),
+                                            interner,
+                                        )?;
+                                        if !self.types_compatible(&arg_ty, param_ty, interner) {
+                                            let expected = self.type_display(param_ty, interner);
+                                            let found = self.type_display(&arg_ty, interner);
+                                            self.add_error(
+                                                SemanticError::TypeMismatch {
+                                                    expected,
+                                                    found,
+                                                    span: arg.span.into(),
+                                                },
+                                                arg.span,
+                                            );
+                                        }
+                                    }
+
+                                    // Record resolution for default method
+                                    self.method_resolutions.insert(
+                                        expr.id,
+                                        ResolvedMethod::DefaultMethod {
+                                            interface_name: *interface_name,
+                                            type_name: type_sym,
+                                            method_name: method_call.method,
+                                            func_type: func_type.clone(),
+                                        },
+                                    );
+
+                                    return Ok(*func_type.return_type);
                                 }
-
-                                // Record resolution for default method
-                                self.method_resolutions.insert(
-                                    expr.id,
-                                    ResolvedMethod::DefaultMethod {
-                                        interface_name: *interface_name,
-                                        type_name: type_sym,
-                                        method_name: method_call.method,
-                                        func_type: func_type.clone(),
-                                    },
-                                );
-
-                                return Ok(*func_type.return_type);
                             }
                         }
                     }

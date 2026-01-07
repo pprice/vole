@@ -51,10 +51,12 @@ impl Analyzer {
             };
 
             if !self.types_compatible(&arg_ty, param_ty, interner) {
+                let expected = self.type_display(param_ty, interner);
+                let found = self.type_display(&arg_ty, interner);
                 self.add_error(
                     SemanticError::TypeMismatch {
-                        expected: param_ty.name().to_string(),
-                        found: arg_ty.name().to_string(),
+                        expected,
+                        found,
                         span: arg.span.into(),
                     },
                     arg.span,

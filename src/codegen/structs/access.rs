@@ -1,8 +1,9 @@
 // src/codegen/structs/access.rs
 
 use super::helpers::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
+use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
-use crate::codegen::types::{CompiledValue, type_to_cranelift};
+use crate::codegen::types::{CompiledValue, module_name_id, type_to_cranelift};
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
 use crate::sema::Type;
 use crate::sema::types::ConstantValue;
@@ -15,9 +16,17 @@ impl Cg<'_, '_, '_> {
         // Handle module field access for constants (e.g., math.PI)
         if let Type::Module(ref module_type) = obj.vole_type {
             let field_name = self.ctx.interner.resolve(fa.field);
+            let module_path = self
+                .ctx
+                .analyzed
+                .name_table
+                .module_path(module_type.module_id);
+            let name_id = module_name_id(self.ctx.analyzed, module_type.module_id, field_name);
 
             // Look up constant value in module
-            if let Some(const_val) = module_type.constants.get(field_name) {
+            if let Some(name_id) = name_id
+                && let Some(const_val) = module_type.constants.get(&name_id)
+            {
                 return match const_val {
                     ConstantValue::F64(v) => {
                         let val = self.builder.ins().f64const(*v);
@@ -48,7 +57,9 @@ impl Cg<'_, '_, '_> {
             }
 
             // Check if it's a function export
-            if let Some(export_type) = module_type.exports.get(field_name) {
+            if let Some(name_id) = name_id
+                && let Some(export_type) = module_type.exports.get(&name_id)
+            {
                 if matches!(export_type, Type::Function(_)) {
                     return Err(format!(
                         "Module function {} should be called, not accessed as a field. Use {}() instead.",
@@ -64,14 +75,14 @@ impl Cg<'_, '_, '_> {
 
             return Err(format!(
                 "Module {} has no export named {}",
-                module_type.path, field_name
+                module_path, field_name
             ));
         }
 
         let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, fa.field, self.ctx)?;
 
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-        let result_raw = self.call_runtime("vole_instance_get_field", &[obj.value, slot_val])?;
+        let result_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[obj.value, slot_val])?;
 
         let (result_val, cranelift_ty) = convert_field_value(self.builder, result_raw, &field_type);
 
@@ -151,7 +162,7 @@ impl Cg<'_, '_, '_> {
 
         // Get field from the inner object
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-        let field_raw = self.call_runtime("vole_instance_get_field", &[inner_obj, slot_val])?;
+        let field_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[inner_obj, slot_val])?;
         let (field_val, field_cranelift_ty) =
             convert_field_value(self.builder, field_raw, &field_type);
 
@@ -200,7 +211,7 @@ impl Cg<'_, '_, '_> {
         let store_value = convert_to_i64_for_storage(self.builder, &value);
 
         self.call_runtime_void(
-            "vole_instance_set_field",
+            RuntimeFn::InstanceSetField,
             &[obj.value, slot_val, store_value],
         )?;
 

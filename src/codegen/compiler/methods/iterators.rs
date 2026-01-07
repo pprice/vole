@@ -1,11 +1,19 @@
 use cranelift::prelude::*;
-use cranelift_module::Module;
+use cranelift_module::{FuncId, Module};
 use std::collections::HashMap;
 
 use super::super::patterns::compile_expr;
+use crate::codegen::RuntimeFn;
 use crate::codegen::types::{CompileCtx, CompiledValue};
 use crate::frontend::{Expr, Symbol};
 use crate::sema::Type;
+
+fn runtime_func_id(ctx: &CompileCtx, runtime: RuntimeFn) -> Result<FuncId, String> {
+    ctx.func_registry
+        .runtime_key(runtime)
+        .and_then(|key| ctx.func_registry.func_id(key))
+        .ok_or_else(|| format!("{} not found", runtime.name()))
+}
 
 /// Compile Iterator.map(fn) -> creates a MapIterator
 pub(super) fn compile_iterator_map(
@@ -40,22 +48,16 @@ pub(super) fn compile_iterator_map(
         transform.value
     } else {
         // Wrap pure function in a closure with 0 captures
-        let alloc_id = ctx
-            .func_ids
-            .get("vole_closure_alloc")
-            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-        let alloc_ref = ctx.module.declare_func_in_func(*alloc_id, builder.func);
+        let alloc_id = runtime_func_id(ctx, RuntimeFn::ClosureAlloc)?;
+        let alloc_ref = ctx.module.declare_func_in_func(alloc_id, builder.func);
         let zero = builder.ins().iconst(types::I64, 0);
         let alloc_call = builder.ins().call(alloc_ref, &[transform.value, zero]);
         builder.inst_results(alloc_call)[0]
     };
 
     // Call vole_map_iter(source_iter, transform_closure)
-    let func_id = ctx
-        .func_ids
-        .get("vole_map_iter")
-        .ok_or_else(|| "vole_map_iter not found".to_string())?;
-    let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+    let func_id = runtime_func_id(ctx, RuntimeFn::MapIter)?;
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
     let call = builder.ins().call(func_ref, &[iter_obj.value, closure_ptr]);
     let result = builder.inst_results(call)[0];
 
@@ -102,22 +104,16 @@ pub(super) fn compile_iterator_filter(
         predicate.value
     } else {
         // Wrap pure function in a closure with 0 captures
-        let alloc_id = ctx
-            .func_ids
-            .get("vole_closure_alloc")
-            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-        let alloc_ref = ctx.module.declare_func_in_func(*alloc_id, builder.func);
+        let alloc_id = runtime_func_id(ctx, RuntimeFn::ClosureAlloc)?;
+        let alloc_ref = ctx.module.declare_func_in_func(alloc_id, builder.func);
         let zero = builder.ins().iconst(types::I64, 0);
         let alloc_call = builder.ins().call(alloc_ref, &[predicate.value, zero]);
         builder.inst_results(alloc_call)[0]
     };
 
     // Call vole_filter_iter(source_iter, predicate_closure)
-    let func_id = ctx
-        .func_ids
-        .get("vole_filter_iter")
-        .ok_or_else(|| "vole_filter_iter not found".to_string())?;
-    let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+    let func_id = runtime_func_id(ctx, RuntimeFn::FilterIter)?;
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
     let call = builder.ins().call(func_ref, &[iter_obj.value, closure_ptr]);
     let result = builder.inst_results(call)[0];
 
@@ -146,11 +142,8 @@ pub(super) fn compile_iterator_take(
     let count = compile_expr(builder, &args[0], variables, ctx)?;
 
     // Call vole_take_iter(source_iter, count)
-    let func_id = ctx
-        .func_ids
-        .get("vole_take_iter")
-        .ok_or_else(|| "vole_take_iter not found".to_string())?;
-    let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+    let func_id = runtime_func_id(ctx, RuntimeFn::TakeIter)?;
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
     let call = builder.ins().call(func_ref, &[iter_obj.value, count.value]);
     let result = builder.inst_results(call)[0];
 
@@ -179,11 +172,8 @@ pub(super) fn compile_iterator_skip(
     let count = compile_expr(builder, &args[0], variables, ctx)?;
 
     // Call vole_skip_iter(source_iter, count)
-    let func_id = ctx
-        .func_ids
-        .get("vole_skip_iter")
-        .ok_or_else(|| "vole_skip_iter not found".to_string())?;
-    let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+    let func_id = runtime_func_id(ctx, RuntimeFn::SkipIter)?;
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
     let call = builder.ins().call(func_ref, &[iter_obj.value, count.value]);
     let result = builder.inst_results(call)[0];
 
@@ -227,22 +217,16 @@ pub(super) fn compile_iterator_for_each(
         callback.value
     } else {
         // Wrap pure function in a closure with 0 captures
-        let alloc_id = ctx
-            .func_ids
-            .get("vole_closure_alloc")
-            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-        let alloc_ref = ctx.module.declare_func_in_func(*alloc_id, builder.func);
+        let alloc_id = runtime_func_id(ctx, RuntimeFn::ClosureAlloc)?;
+        let alloc_ref = ctx.module.declare_func_in_func(alloc_id, builder.func);
         let zero = builder.ins().iconst(types::I64, 0);
         let alloc_call = builder.ins().call(alloc_ref, &[callback.value, zero]);
         builder.inst_results(alloc_call)[0]
     };
 
     // Call vole_iter_for_each(iter, callback_closure)
-    let func_id = ctx
-        .func_ids
-        .get("vole_iter_for_each")
-        .ok_or_else(|| "vole_iter_for_each not found".to_string())?;
-    let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+    let func_id = runtime_func_id(ctx, RuntimeFn::IterForEach)?;
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
     builder.ins().call(func_ref, &[iter_obj.value, closure_ptr]);
 
     // for_each returns void
@@ -288,22 +272,16 @@ pub(super) fn compile_iterator_reduce(
         reducer.value
     } else {
         // Wrap pure function in a closure with 0 captures
-        let alloc_id = ctx
-            .func_ids
-            .get("vole_closure_alloc")
-            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-        let alloc_ref = ctx.module.declare_func_in_func(*alloc_id, builder.func);
+        let alloc_id = runtime_func_id(ctx, RuntimeFn::ClosureAlloc)?;
+        let alloc_ref = ctx.module.declare_func_in_func(alloc_id, builder.func);
         let zero = builder.ins().iconst(types::I64, 0);
         let alloc_call = builder.ins().call(alloc_ref, &[reducer.value, zero]);
         builder.inst_results(alloc_call)[0]
     };
 
     // Call vole_iter_reduce(iter, init, reducer_closure)
-    let func_id = ctx
-        .func_ids
-        .get("vole_iter_reduce")
-        .ok_or_else(|| "vole_iter_reduce not found".to_string())?;
-    let func_ref = ctx.module.declare_func_in_func(*func_id, builder.func);
+    let func_id = runtime_func_id(ctx, RuntimeFn::IterReduce)?;
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
     let call = builder
         .ins()
         .call(func_ref, &[iter_obj.value, init.value, closure_ptr]);

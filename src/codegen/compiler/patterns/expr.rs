@@ -14,6 +14,7 @@ use super::super::methods::{compile_method_call, compile_try_propagate};
 use super::super::ops::compile_compound_assign;
 use super::super::strings::compile_interpolated_string;
 use super::type_check::compile_type_pattern_check;
+use crate::codegen::RuntimeFn;
 use crate::codegen::calls::compile_string_literal;
 use crate::codegen::lambda::compile_lambda;
 use crate::codegen::stmt::construct_union;
@@ -248,8 +249,12 @@ pub(crate) fn compile_expr(
                 BinaryOp::Eq => {
                     if matches!(left_vole_type, Type::String) {
                         // String comparison
-                        if let Some(cmp_id) = ctx.func_ids.get("vole_string_eq") {
-                            let cmp_ref = ctx.module.declare_func_in_func(*cmp_id, builder.func);
+                        if let Some(cmp_id) = ctx
+                            .func_registry
+                            .runtime_key(RuntimeFn::StringEq)
+                            .and_then(|key| ctx.func_registry.func_id(key))
+                        {
+                            let cmp_ref = ctx.module.declare_func_in_func(cmp_id, builder.func);
                             let call = builder.ins().call(cmp_ref, &[left_val, right_val]);
                             builder.inst_results(call)[0]
                         } else {
@@ -264,8 +269,12 @@ pub(crate) fn compile_expr(
                 BinaryOp::Ne => {
                     if matches!(left_vole_type, Type::String) {
                         // String comparison (negate the result of eq)
-                        if let Some(cmp_id) = ctx.func_ids.get("vole_string_eq") {
-                            let cmp_ref = ctx.module.declare_func_in_func(*cmp_id, builder.func);
+                        if let Some(cmp_id) = ctx
+                            .func_registry
+                            .runtime_key(RuntimeFn::StringEq)
+                            .and_then(|key| ctx.func_registry.func_id(key))
+                        {
+                            let cmp_ref = ctx.module.declare_func_in_func(cmp_id, builder.func);
                             let call = builder.ins().call(cmp_ref, &[left_val, right_val]);
                             let eq_result = builder.inst_results(call)[0];
                             // Negate: 1 - eq_result (since bool is 0 or 1)
@@ -449,7 +458,7 @@ pub(crate) fn compile_expr(
         }
         ExprKind::Grouping(inner) => compile_expr(builder, inner, variables, ctx),
         ExprKind::StringLiteral(s) => {
-            compile_string_literal(builder, s, ctx.pointer_type, ctx.module, ctx.func_ids)
+            compile_string_literal(builder, s, ctx.pointer_type, ctx.module, ctx.func_registry)
         }
         ExprKind::Call(call) => {
             compile_call(builder, call, expr.span.line, expr.id, variables, ctx)
@@ -464,22 +473,22 @@ pub(crate) fn compile_expr(
         ExprKind::ArrayLiteral(elements) => {
             // Call vole_array_new()
             let array_new_id = ctx
-                .func_ids
-                .get("vole_array_new")
+                .func_registry
+                .runtime_key(RuntimeFn::ArrayNew)
+                .and_then(|key| ctx.func_registry.func_id(key))
                 .ok_or_else(|| "vole_array_new not found".to_string())?;
-            let array_new_ref = ctx.module.declare_func_in_func(*array_new_id, builder.func);
+            let array_new_ref = ctx.module.declare_func_in_func(array_new_id, builder.func);
 
             let call = builder.ins().call(array_new_ref, &[]);
             let arr_ptr = builder.inst_results(call)[0];
 
             // Push each element
             let array_push_id = ctx
-                .func_ids
-                .get("vole_array_push")
+                .func_registry
+                .runtime_key(RuntimeFn::ArrayPush)
+                .and_then(|key| ctx.func_registry.func_id(key))
                 .ok_or_else(|| "vole_array_push not found".to_string())?;
-            let array_push_ref = ctx
-                .module
-                .declare_func_in_func(*array_push_id, builder.func);
+            let array_push_ref = ctx.module.declare_func_in_func(array_push_id, builder.func);
 
             // Track element type from first element
             let mut elem_type = Type::Unknown;
@@ -539,10 +548,11 @@ pub(crate) fn compile_expr(
 
             // Call vole_array_get_value(arr, index)
             let get_value_id = ctx
-                .func_ids
-                .get("vole_array_get_value")
+                .func_registry
+                .runtime_key(RuntimeFn::ArrayGetValue)
+                .and_then(|key| ctx.func_registry.func_id(key))
                 .ok_or_else(|| "vole_array_get_value not found".to_string())?;
-            let get_value_ref = ctx.module.declare_func_in_func(*get_value_id, builder.func);
+            let get_value_ref = ctx.module.declare_func_in_func(get_value_id, builder.func);
 
             let call = builder.ins().call(get_value_ref, &[arr.value, index.value]);
             let value = builder.inst_results(call)[0];
@@ -649,9 +659,13 @@ pub(crate) fn compile_expr(
                             }
                             _ => {
                                 // For strings, need to call comparison function
-                                if let Some(cmp_id) = ctx.func_ids.get("vole_string_eq") {
+                                if let Some(cmp_id) = ctx
+                                    .func_registry
+                                    .runtime_key(RuntimeFn::StringEq)
+                                    .and_then(|key| ctx.func_registry.func_id(key))
+                                {
                                     let cmp_ref =
-                                        ctx.module.declare_func_in_func(*cmp_id, builder.func);
+                                        ctx.module.declare_func_in_func(cmp_id, builder.func);
                                     let call = builder
                                         .ins()
                                         .call(cmp_ref, &[scrutinee.value, lit_val.value]);
@@ -678,9 +692,13 @@ pub(crate) fn compile_expr(
                                 builder.ins().fcmp(FloatCC::Equal, scrutinee.value, var_val)
                             }
                             Type::String => {
-                                if let Some(cmp_id) = ctx.func_ids.get("vole_string_eq") {
+                                if let Some(cmp_id) = ctx
+                                    .func_registry
+                                    .runtime_key(RuntimeFn::StringEq)
+                                    .and_then(|key| ctx.func_registry.func_id(key))
+                                {
                                     let cmp_ref =
-                                        ctx.module.declare_func_in_func(*cmp_id, builder.func);
+                                        ctx.module.declare_func_in_func(cmp_id, builder.func);
                                     let call =
                                         builder.ins().call(cmp_ref, &[scrutinee.value, var_val]);
                                     builder.inst_results(call)[0]

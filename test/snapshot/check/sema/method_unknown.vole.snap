@@ -1,7 +1,7 @@
 [stdout]
 
 [stderr]
-  x [E2023]: unknown method 'nonexistent' on type 'Point'
+  x [E2023]: unknown method 'nonexistent' on type 'main::Point'
     ,-[<path>/method_unknown.vole:9:7]
   8 |     let p = Point { x: 1, y: 2 }
   9 |     p.nonexistent()

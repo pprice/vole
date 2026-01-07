@@ -37,8 +37,20 @@ impl Analyzer {
     }
 
     /// Format a method signature for error messages
-    pub(crate) fn format_method_signature(params: &[Type], return_type: &Type) -> String {
-        let params_str: Vec<String> = params.iter().map(|t| t.to_string()).collect();
-        format!("({}) -> {}", params_str.join(", "), return_type)
+    pub(crate) fn format_method_signature(
+        &mut self,
+        params: &[Type],
+        return_type: &Type,
+        interner: &Interner,
+    ) -> String {
+        let params_str: Vec<String> = params
+            .iter()
+            .map(|t| self.type_display(t, interner))
+            .collect();
+        format!(
+            "({}) -> {}",
+            params_str.join(", "),
+            self.type_display(return_type, interner)
+        )
     }
 }

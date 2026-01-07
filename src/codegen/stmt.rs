@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use cranelift::prelude::*;
 
+use crate::codegen::RuntimeFn;
 use crate::frontend::{self, ExprKind, RaiseStmt, Stmt, Symbol};
 use crate::sema::Type;
 
@@ -383,7 +384,7 @@ impl Cg<'_, '_, '_> {
     fn for_array(&mut self, for_stmt: &frontend::ForStmt) -> Result<bool, String> {
         let arr = self.expr(&for_stmt.iterable)?;
 
-        let len_val = self.call_runtime("vole_array_len", &[arr.value])?;
+        let len_val = self.call_runtime(RuntimeFn::ArrayLen, &[arr.value])?;
 
         let idx_var = self.builder.declare_var(types::I64);
         let zero = self.builder.ins().iconst(types::I64, 0);
@@ -418,7 +419,7 @@ impl Cg<'_, '_, '_> {
         self.builder.switch_to_block(body_block);
 
         let current_idx = self.builder.use_var(idx_var);
-        let elem_val = self.call_runtime("vole_array_get_value", &[arr.value, current_idx])?;
+        let elem_val = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, current_idx])?;
         self.builder.def_var(elem_var, elem_val);
 
         self.cf.push_loop(exit_block, continue_block);

@@ -5,11 +5,14 @@ use cranelift_module::Module;
 
 use super::{Compiler, ControlFlowCtx};
 use crate::codegen::stmt::compile_block;
-use crate::codegen::types::{CompileCtx, TypeMetadata, resolve_type_expr_full, type_to_cranelift};
+use crate::codegen::types::{
+    CompileCtx, MethodInfo, TypeMetadata, method_name_id, resolve_type_expr_full, type_to_cranelift,
+};
 use crate::frontend::{
     ClassDecl, FuncDecl, ImplementBlock, InterfaceMethod, RecordDecl, Symbol, TypeExpr,
 };
-use crate::sema::Type;
+use crate::identity::ModuleId;
+use crate::sema::{Type, TypeId};
 
 impl Compiler<'_> {
     /// Compile methods for a class
@@ -92,6 +95,10 @@ impl Compiler<'_> {
     fn get_type_name_symbol(&self, ty: &TypeExpr) -> Option<Symbol> {
         match ty {
             TypeExpr::Named(sym) => Some(*sym),
+            TypeExpr::Primitive(p) => {
+                let type_name = Type::from_primitive(*p).name();
+                self.analyzed.interner.lookup(type_name)
+            }
             _ => None,
         }
     }
@@ -107,9 +114,16 @@ impl Compiler<'_> {
 
     /// Register implement block methods (first pass)
     pub(super) fn register_implement_block(&mut self, impl_block: &ImplementBlock) {
+        let module_id = self.analyzed.name_table.main_module();
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return; // Unsupported type for implement block
+        };
+        let type_sym = self.get_type_name_symbol(&impl_block.target_type);
+        let func_module = if matches!(&impl_block.target_type, TypeExpr::Primitive(_)) {
+            self.func_registry.builtin_module()
+        } else {
+            self.func_registry.main_module()
         };
 
         // Get the Vole type for the target (used for creating signature)
@@ -126,38 +140,61 @@ impl Compiler<'_> {
                 &self.analyzed.type_aliases,
                 &self.analyzed.interface_registry,
                 &self.analyzed.interner,
+                &self.analyzed.name_table,
+                module_id,
             ),
         };
 
-        // For named types (records/classes), add method return types to metadata
-        if let Some(type_sym) = self.get_type_name_symbol(&impl_block.target_type)
-            && let Some(metadata) = self.type_metadata.get_mut(&type_sym)
-        {
-            for method in &impl_block.methods {
-                let return_type = method
-                    .return_type
-                    .as_ref()
-                    .map(|t| {
-                        resolve_type_expr_full(
-                            t,
-                            &self.analyzed.type_aliases,
-                            &self.analyzed.interface_registry,
-                            &self.analyzed.interner,
-                        )
-                    })
-                    .unwrap_or(Type::Void);
-                metadata
-                    .method_return_types
-                    .insert(method.name, return_type);
-            }
-        }
+        let type_id = TypeId::from_type(&self_vole_type, &self.analyzed.type_table);
 
         // Declare methods as functions: TypeName::methodName (implement block convention)
         for method in &impl_block.methods {
-            let method_name_str = self.analyzed.interner.resolve(method.name);
-            let full_name = format!("{}::{}", type_name, method_name_str);
+            let return_type = method
+                .return_type
+                .as_ref()
+                .map(|t| {
+                    resolve_type_expr_full(
+                        t,
+                        &self.analyzed.type_aliases,
+                        &self.analyzed.interface_registry,
+                        &self.analyzed.interner,
+                        &self.analyzed.name_table,
+                        module_id,
+                    )
+                })
+                .unwrap_or(Type::Void);
             let sig = self.create_implement_method_signature(method, &self_vole_type);
-            self.jit.declare_function(&full_name, &sig);
+            let func_key = if let Some(type_sym) = type_sym {
+                self.func_registry
+                    .intern_qualified(func_module, &[type_sym, method.name])
+            } else if let Some(type_id) = type_id {
+                self.func_registry
+                    .intern_with_prefix(type_id.name_id(), method.name)
+            } else {
+                let full_name = format!(
+                    "{}::{}",
+                    type_name,
+                    self.analyzed.interner.resolve(method.name)
+                );
+                self.func_registry
+                    .intern_raw_qualified(func_module, &[&full_name])
+            };
+            let display_name = self
+                .func_registry
+                .display(func_key, &self.analyzed.interner);
+            let func_id = self.jit.declare_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, func_id);
+            if let Some(type_id) = type_id {
+                let method_id = method_name_id(self.analyzed, &self.analyzed.interner, method.name)
+                    .expect("implement method name_id should be registered");
+                self.impl_method_infos.insert(
+                    (type_id, method_id),
+                    MethodInfo {
+                        func_key,
+                        return_type,
+                    },
+                );
+            }
         }
     }
 
@@ -166,6 +203,7 @@ impl Compiler<'_> {
         &mut self,
         impl_block: &ImplementBlock,
     ) -> Result<(), String> {
+        let module_id = self.analyzed.name_table.main_module();
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return Ok(()); // Unsupported type for implement block
@@ -185,11 +223,32 @@ impl Compiler<'_> {
                 &self.analyzed.type_aliases,
                 &self.analyzed.interface_registry,
                 &self.analyzed.interner,
+                &self.analyzed.name_table,
+                module_id,
             ),
+        };
+        let type_sym = self.get_type_name_symbol(&impl_block.target_type);
+        let func_module = if matches!(&impl_block.target_type, TypeExpr::Primitive(_)) {
+            self.func_registry.builtin_module()
+        } else {
+            self.func_registry.main_module()
         };
 
         for method in &impl_block.methods {
-            self.compile_implement_method(method, &type_name, &self_vole_type)?;
+            let method_key = TypeId::from_type(&self_vole_type, &self.analyzed.type_table)
+                .and_then(|type_id| {
+                    let method_id =
+                        method_name_id(self.analyzed, &self.analyzed.interner, method.name)?;
+                    self.impl_method_infos.get(&(type_id, method_id)).cloned()
+                });
+            self.compile_implement_method(
+                method,
+                &type_name,
+                type_sym,
+                func_module,
+                &self_vole_type,
+                method_key,
+            )?;
         }
         Ok(())
     }
@@ -199,16 +258,32 @@ impl Compiler<'_> {
         &mut self,
         method: &FuncDecl,
         type_name: &str,
+        type_sym: Option<Symbol>,
+        func_module: ModuleId,
         self_vole_type: &Type,
+        method_info: Option<MethodInfo>,
     ) -> Result<(), String> {
-        let method_name_str = self.analyzed.interner.resolve(method.name);
-        let full_name = format!("{}::{}", type_name, method_name_str);
-
-        let func_id = *self
-            .jit
-            .func_ids
-            .get(&full_name)
-            .ok_or_else(|| format!("Internal error: method {} not declared", full_name))?;
+        let module_id = self.analyzed.name_table.main_module();
+        let func_key = if let Some(info) = method_info {
+            info.func_key
+        } else if let Some(type_sym) = type_sym {
+            self.func_registry
+                .intern_qualified(func_module, &[type_sym, method.name])
+        } else if let Some(type_id) = TypeId::from_type(self_vole_type, &self.analyzed.type_table) {
+            self.func_registry
+                .intern_with_prefix(type_id.name_id(), method.name)
+        } else {
+            let method_name_str = self.analyzed.interner.resolve(method.name);
+            let full_name = format!("{}::{}", type_name, method_name_str);
+            self.func_registry
+                .intern_raw_qualified(func_module, &[&full_name])
+        };
+        let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+            let display = self
+                .func_registry
+                .display(func_key, &self.analyzed.interner);
+            format!("Internal error: implement method {} not declared", display)
+        })?;
 
         // Create method signature with correct self type (primitives use their type, not pointer)
         let sig = self.create_implement_method_signature(method, self_vole_type);
@@ -228,6 +303,8 @@ impl Compiler<'_> {
                         &self.analyzed.type_aliases,
                         &self.analyzed.interface_registry,
                         &self.analyzed.interner,
+                        &self.analyzed.name_table,
+                        module_id,
                     ),
                     self.pointer_type,
                 )
@@ -242,6 +319,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 )
             })
             .collect();
@@ -297,6 +376,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 )
             });
 
@@ -307,12 +388,12 @@ impl Compiler<'_> {
                 interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &mut self.jit.func_ids,
+                func_registry: &mut self.func_registry,
                 source_file_ptr,
                 globals: &self.globals,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
-                func_return_types: &self.func_return_types,
+                impl_method_infos: &self.impl_method_infos,
                 current_function_return_type: method_return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
@@ -355,13 +436,27 @@ impl Compiler<'_> {
     ) -> Result<(), String> {
         let type_name_str = self.analyzed.interner.resolve(type_name);
         let method_name_str = self.analyzed.interner.resolve(method.name);
-        let full_name = format!("{}_{}", type_name_str, method_name_str);
+        let module_id = self.analyzed.name_table.main_module();
 
-        let func_id = *self
-            .jit
-            .func_ids
-            .get(&full_name)
-            .ok_or_else(|| format!("Internal error: method {} not declared", full_name))?;
+        let func_key = metadata
+            .method_infos
+            .get(
+                &method_name_id(self.analyzed, &self.analyzed.interner, method.name)
+                    .expect("method name_id should be registered"),
+            )
+            .map(|info| info.func_key)
+            .ok_or_else(|| {
+                format!(
+                    "Internal error: method {} not registered on {}",
+                    method_name_str, type_name_str
+                )
+            })?;
+        let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+            let display = self
+                .func_registry
+                .display(func_key, &self.analyzed.interner);
+            format!("Internal error: method {} not declared", display)
+        })?;
 
         // Create method signature (self + params)
         let sig = self.create_method_signature(method);
@@ -378,6 +473,8 @@ impl Compiler<'_> {
                         &self.analyzed.type_aliases,
                         &self.analyzed.interface_registry,
                         &self.analyzed.interner,
+                        &self.analyzed.name_table,
+                        module_id,
                     ),
                     self.pointer_type,
                 )
@@ -392,6 +489,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 )
             })
             .collect();
@@ -448,12 +547,12 @@ impl Compiler<'_> {
                 interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &mut self.jit.func_ids,
+                func_registry: &mut self.func_registry,
                 source_file_ptr,
                 globals: &self.globals,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
-                func_return_types: &self.func_return_types,
+                impl_method_infos: &self.impl_method_infos,
                 current_function_return_type: None, // Methods don't use raise statements yet
                 native_registry: &self.native_registry,
                 current_module: None,
@@ -493,12 +592,27 @@ impl Compiler<'_> {
     ) -> Result<(), String> {
         let type_name_str = self.analyzed.interner.resolve(type_name);
         let method_name_str = self.analyzed.interner.resolve(method.name);
-        let full_name = format!("{}_{}", type_name_str, method_name_str);
+        let module_id = self.analyzed.name_table.main_module();
 
-        let func_id =
-            *self.jit.func_ids.get(&full_name).ok_or_else(|| {
-                format!("Internal error: default method {} not declared", full_name)
+        let func_key = metadata
+            .method_infos
+            .get(
+                &method_name_id(self.analyzed, &self.analyzed.interner, method.name)
+                    .expect("method name_id should be registered"),
+            )
+            .map(|info| info.func_key)
+            .ok_or_else(|| {
+                format!(
+                    "Internal error: default method {} not registered on {}",
+                    method_name_str, type_name_str
+                )
             })?;
+        let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+            let display = self
+                .func_registry
+                .display(func_key, &self.analyzed.interner);
+            format!("Internal error: default method {} not declared", display)
+        })?;
 
         // Create method signature (self + params)
         let sig = self.create_interface_method_signature(method);
@@ -515,6 +629,8 @@ impl Compiler<'_> {
                         &self.analyzed.type_aliases,
                         &self.analyzed.interface_registry,
                         &self.analyzed.interner,
+                        &self.analyzed.name_table,
+                        module_id,
                     ),
                     self.pointer_type,
                 )
@@ -529,6 +645,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 )
             })
             .collect();
@@ -591,12 +709,12 @@ impl Compiler<'_> {
                 interner: &self.analyzed.interner,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
-                func_ids: &mut self.jit.func_ids,
+                func_registry: &mut self.func_registry,
                 source_file_ptr,
                 globals: &self.globals,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
-                func_return_types: &self.func_return_types,
+                impl_method_infos: &self.impl_method_infos,
                 current_function_return_type: None, // Default methods don't use raise statements yet
                 native_registry: &self.native_registry,
                 current_module: None,

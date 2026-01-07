@@ -87,6 +87,22 @@ impl JitContext {
         let sig = self.create_signature(&[types::I8], None);
         self.import_function("vole_println_bool", &sig);
 
+        // vole_print_string(ptr: *const RcString)
+        let sig = self.create_signature(&[ptr_ty], None);
+        self.import_function("vole_print_string", &sig);
+
+        // vole_print_i64(value: i64)
+        let sig = self.create_signature(&[types::I64], None);
+        self.import_function("vole_print_i64", &sig);
+
+        // vole_print_f64(value: f64)
+        let sig = self.create_signature(&[types::F64], None);
+        self.import_function("vole_print_f64", &sig);
+
+        // vole_print_bool(value: i8)
+        let sig = self.create_signature(&[types::I8], None);
+        self.import_function("vole_print_bool", &sig);
+
         // vole_print_char(c: u8)
         let sig = self.create_signature(&[types::I8], None);
         self.import_function("vole_print_char", &sig);
@@ -298,6 +314,22 @@ impl JitContext {
         builder.symbol(
             "vole_println_bool",
             crate::runtime::builtins::vole_println_bool as *const u8,
+        );
+        builder.symbol(
+            "vole_print_string",
+            crate::runtime::builtins::vole_print_string as *const u8,
+        );
+        builder.symbol(
+            "vole_print_i64",
+            crate::runtime::builtins::vole_print_i64 as *const u8,
+        );
+        builder.symbol(
+            "vole_print_f64",
+            crate::runtime::builtins::vole_print_f64 as *const u8,
+        );
+        builder.symbol(
+            "vole_print_bool",
+            crate::runtime::builtins::vole_print_bool as *const u8,
         );
         builder.symbol(
             "vole_print_char",
@@ -540,6 +572,11 @@ impl JitContext {
         self.func_ids
             .get(name)
             .map(|&func_id| self.module.get_finalized_function(func_id))
+    }
+
+    /// Get a function pointer by FuncId
+    pub fn get_function_ptr_by_id(&self, func_id: FuncId) -> Option<*const u8> {
+        Some(self.module.get_finalized_function(func_id))
     }
 
     /// Clear the context for reuse

@@ -113,6 +113,8 @@ pub fn inspect_files(
                     generic_functions,
                     monomorph_cache,
                     generic_calls,
+                    name_table,
+                    type_table,
                 ) = analyzer.into_analysis_results();
 
                 // Generate IR
@@ -129,6 +131,8 @@ pub fn inspect_files(
                     generic_functions,
                     monomorph_cache,
                     generic_calls,
+                    name_table,
+                    type_table,
                 };
                 let mut jit = JitContext::new();
                 let mut compiler = Compiler::new(&mut jit, &analyzed);

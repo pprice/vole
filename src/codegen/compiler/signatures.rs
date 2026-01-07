@@ -7,6 +7,7 @@ use crate::sema::Type;
 
 impl Compiler<'_> {
     pub(super) fn create_function_signature(&self, func: &FuncDecl) -> Signature {
+        let module_id = self.analyzed.name_table.main_module();
         let mut params = Vec::new();
         for param in &func.params {
             params.push(type_to_cranelift(
@@ -15,6 +16,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 ),
                 self.pointer_type,
             ));
@@ -27,6 +30,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 ),
                 self.pointer_type,
             )
@@ -37,6 +42,7 @@ impl Compiler<'_> {
 
     /// Create a method signature (with self as first parameter)
     pub(super) fn create_method_signature(&self, method: &FuncDecl) -> Signature {
+        let module_id = self.analyzed.name_table.main_module();
         // Methods have `self` as implicit first parameter (pointer to instance)
         let mut params = vec![self.pointer_type];
         for param in &method.params {
@@ -46,6 +52,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 ),
                 self.pointer_type,
             ));
@@ -58,6 +66,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 ),
                 self.pointer_type,
             )
@@ -72,6 +82,7 @@ impl Compiler<'_> {
         method: &FuncDecl,
         self_type: &Type,
     ) -> Signature {
+        let module_id = self.analyzed.name_table.main_module();
         // For implement blocks, `self` type depends on the target type
         // Primitives use their actual type, classes/records use pointer
         let self_cranelift_type = type_to_cranelift(self_type, self.pointer_type);
@@ -83,6 +94,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 ),
                 self.pointer_type,
             ));
@@ -95,6 +108,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 ),
                 self.pointer_type,
             )
@@ -105,6 +120,7 @@ impl Compiler<'_> {
 
     /// Create a method signature for an interface method (self as pointer + params)
     pub(super) fn create_interface_method_signature(&self, method: &InterfaceMethod) -> Signature {
+        let module_id = self.analyzed.name_table.main_module();
         // Methods have `self` as implicit first parameter (pointer to instance)
         let mut params = vec![self.pointer_type];
         for param in &method.params {
@@ -114,6 +130,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 ),
                 self.pointer_type,
             ));
@@ -126,6 +144,8 @@ impl Compiler<'_> {
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
                 ),
                 self.pointer_type,
             )
