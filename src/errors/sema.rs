@@ -353,4 +353,25 @@ pub enum SemanticError {
         #[label("expected {expected}")]
         span: SourceSpan,
     },
+
+    #[error("cannot call method '{method}' on optional type '{ty}'")]
+    #[diagnostic(
+        code(E2072),
+        help("unwrap the value or narrow the type before calling the method")
+    )]
+    MethodOnOptional {
+        ty: String,
+        method: String,
+        #[label("method call on optional type")]
+        span: SourceSpan,
+    },
+
+    #[error("cannot call method '{method}' on union type '{ty}'")]
+    #[diagnostic(code(E2073), help("narrow the type before calling the method"))]
+    MethodOnUnion {
+        ty: String,
+        method: String,
+        #[label("method call on union type")]
+        span: SourceSpan,
+    },
 }

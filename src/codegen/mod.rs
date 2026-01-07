@@ -6,6 +6,7 @@ mod expr;
 mod function_registry;
 pub mod jit;
 mod lambda;
+mod method_resolution;
 mod ops;
 mod stmt;
 mod structs;

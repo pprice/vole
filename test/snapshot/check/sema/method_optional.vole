@@ -1,0 +1,5 @@
+// Error: method call on optional type
+func main() {
+    let s: string? = nil
+    s.length()
+}

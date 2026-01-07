@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  x [E2072]: cannot call method 'length' on optional type 'string | nil'
+   ,-[<path>/method_optional.vole:4:7]
+ 3 |     let s: string? = nil
+ 4 |     s.length()
+   :       ^^^|^^
+   :          `-- method call on optional type
+ 5 | }
+   `----
+  help: unwrap the value or narrow the type before calling the method

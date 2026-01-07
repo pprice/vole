@@ -8,13 +8,14 @@ use super::iterators::{
     compile_iterator_filter, compile_iterator_for_each, compile_iterator_map,
     compile_iterator_reduce, compile_iterator_skip, compile_iterator_take,
 };
-use crate::codegen::structs::get_type_name_symbol;
+use crate::codegen::method_resolution::{
+    MethodResolutionInput, MethodTarget, resolve_method_target,
+};
 use crate::codegen::types::{
-    CompileCtx, CompiledValue, display_type, method_name_id, module_name_id, type_to_cranelift,
+    CompileCtx, CompiledValue, method_name_id, module_name_id, type_to_cranelift,
 };
 use crate::frontend::{MethodCallExpr, NodeId, Symbol};
 use crate::sema::Type;
-use crate::sema::implement_registry::TypeId;
 use crate::sema::resolution::ResolvedMethod;
 
 use super::super::calls::compile_closure_call;
@@ -28,7 +29,6 @@ pub(crate) fn compile_method_call(
     variables: &mut HashMap<Symbol, (Variable, Type)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
-    let display_type = |ty: &Type| display_type(ctx.analyzed, ctx.interner, ty);
     let display_type_symbol = |sym: Symbol| {
         ctx.type_metadata
             .get(&sym)
@@ -191,115 +191,45 @@ pub(crate) fn compile_method_call(
     // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
     let resolution = ctx.analyzed.method_resolutions.get(expr_id);
 
-    // Determine the method function target based on resolution type
-    let (method_info, return_type) = if let Some(resolution) = resolution {
-        match resolution {
-            ResolvedMethod::Direct { func_type } => {
-                // Direct method on class/record: use TypeName_methodName
-                let type_name = get_type_name_symbol(&obj.vole_type)?;
-                let info = ctx
-                    .type_metadata
-                    .get(&type_name)
-                    .and_then(|meta| meta.method_infos.get(&method_id))
-                    .cloned()
-                    .ok_or_else(|| {
-                        format!(
-                            "Method {} not found on type {}",
-                            method_name_str,
-                            display_type_symbol(type_name)
-                        )
-                    })?;
-                (Some(info), (*func_type.return_type).clone())
-            }
-            ResolvedMethod::Implemented {
-                func_type,
-                is_builtin,
-                external_info,
-                ..
-            } => {
-                if *is_builtin {
-                    // Built-in methods should have been handled above
-                    return Err(format!("Unhandled builtin method: {}", method_name_str));
-                }
-
-                // Check if this is an external native method
-                if let Some(ext_info) = external_info {
-                    // Compile the receiver and arguments
-                    let mut args = vec![obj.value];
-                    for arg in &mc.args {
-                        let compiled = compile_expr(builder, arg, variables, ctx)?;
-                        args.push(compiled.value);
-                    }
-
-                    // Call the external native function
-                    let return_type = (*func_type.return_type).clone();
-                    return compile_external_call(builder, ctx, ext_info, &args, &return_type);
-                }
-
-                // Implement block method: use TypeName::methodName
-                let type_id = TypeId::from_type(&obj.vole_type, &ctx.analyzed.type_table);
-                let info = type_id
-                    .and_then(|type_id| ctx.impl_method_infos.get(&(type_id, method_id)).cloned());
-                (info, (*func_type.return_type).clone())
-            }
-            ResolvedMethod::FunctionalInterface { func_type } => {
-                // For functional interfaces, the object IS the closure pointer
-                // Call it as a closure
-                return compile_closure_call(
-                    builder, obj.value, func_type, &mc.args, variables, ctx,
-                );
-            }
-            ResolvedMethod::DefaultMethod {
-                type_name,
-                func_type,
-                ..
-            } => {
-                // Default method from interface, monomorphized for the concrete type
-                // Name format is TypeName_methodName (same as direct methods)
-                let info = ctx
-                    .type_metadata
-                    .get(type_name)
-                    .and_then(|meta| meta.method_infos.get(&method_id))
-                    .cloned()
-                    .ok_or_else(|| {
-                        format!(
-                            "Method {} not found on type {}",
-                            method_name_str,
-                            display_type_symbol(*type_name)
-                        )
-                    })?;
-                (Some(info), (*func_type.return_type).clone())
-            }
-        }
-    } else {
-        // No resolution found - try to resolve directly from object type
-        // This handles method calls inside default method bodies where sema
-        // doesn't analyze the interface body
-        let type_name = get_type_name_symbol(&obj.vole_type)?;
-
-        let info = ctx
-            .type_metadata
-            .get(&type_name)
-            .and_then(|meta| meta.method_infos.get(&method_id))
-            .cloned()
-            .ok_or_else(|| {
-                format!(
-                    "Method {} not found on type {}",
-                    method_name_str,
-                    display_type_symbol(type_name)
-                )
-            })?;
-        let return_type = info.return_type.clone();
-        (Some(info), return_type)
-    };
-
-    let method_info = method_info.ok_or_else(|| {
-        format!(
-            "Unknown method {} on {}",
-            method_name_str,
-            display_type(&obj.vole_type)
-        )
+    let target = resolve_method_target(MethodResolutionInput {
+        analyzed: ctx.analyzed,
+        type_metadata: ctx.type_metadata,
+        impl_method_infos: ctx.impl_method_infos,
+        method_name_str,
+        object_type: &obj.vole_type,
+        method_id,
+        resolution,
+        display_type_symbol,
     })?;
+
+    let (method_info, return_type) = match target {
+        MethodTarget::FunctionalInterface { func_type } => {
+            return compile_closure_call(builder, obj.value, &func_type, &mc.args, variables, ctx);
+        }
+        MethodTarget::External {
+            external_info,
+            return_type,
+        } => {
+            let mut args = vec![obj.value];
+            for arg in &mc.args {
+                let compiled = compile_expr(builder, arg, variables, ctx)?;
+                args.push(compiled.value);
+            }
+            return compile_external_call(builder, ctx, &external_info, &args, &return_type);
+        }
+        MethodTarget::Direct {
+            method_info,
+            return_type,
+        }
+        | MethodTarget::Implemented {
+            method_info,
+            return_type,
+        }
+        | MethodTarget::Default {
+            method_info,
+            return_type,
+        } => (method_info, return_type),
+    };
     let method_func_id = ctx
         .func_registry
         .func_id(method_info.func_key)

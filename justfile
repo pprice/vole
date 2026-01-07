@@ -38,6 +38,10 @@ unit-release:
 clippy:
     cargo clippy -- -D warnings
 
+# Run clippy with auto-fix
+clippy-fix:
+    cargo clippy --fix --allow-dirty --allow-staged -- -D warnings
+
 # Format code
 fmt:
     cargo fmt
@@ -50,7 +54,7 @@ fmt-check:
 ci: fmt-check clippy build test snap
 
 # Pre-commit checks and fixes
-pre-commit: fmt clippy build test snap
+pre-commit: fmt clippy-fix clippy build test snap
 
 # Show next available error code for a category (lexer, parser, sema)
 dev-next-error category:

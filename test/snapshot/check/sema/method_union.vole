@@ -1,0 +1,5 @@
+// Error: method call on union type
+func main() {
+    let value: i64 | string = 42
+    value.length()
+}
