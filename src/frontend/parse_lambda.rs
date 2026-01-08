@@ -324,6 +324,14 @@ impl<'src> Parser<'src> {
     /// Continue parsing calls, indexes, field access, and method calls after we have the base expression
     fn continue_call(&mut self, mut expr: Expr) -> Result<Expr, ParseError> {
         loop {
+            // Allow method chains to span multiple lines
+            if self.check(TokenType::Newline) {
+                self.skip_newlines();
+                if !self.check(TokenType::Dot) && !self.check(TokenType::QuestionDot) {
+                    break;
+                }
+            }
+
             if self.match_token(TokenType::LParen) {
                 expr = self.finish_call(expr)?;
             } else if self.match_token(TokenType::LBracket) {

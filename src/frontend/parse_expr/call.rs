@@ -8,6 +8,19 @@ impl<'src> Parser<'src> {
         let mut expr = self.primary()?;
 
         loop {
+            // Allow method chains to span multiple lines:
+            // arr.iter()
+            //    .map(...)
+            //    .filter(...)
+            // Skip newlines if followed by . or ?. to continue the chain
+            if self.check(TokenType::Newline) {
+                self.skip_newlines();
+                // If not a continuation token, break out of the loop
+                if !self.check(TokenType::Dot) && !self.check(TokenType::QuestionDot) {
+                    break;
+                }
+            }
+
             if self.match_token(TokenType::LParen) {
                 expr = self.finish_call(expr)?;
             } else if self.match_token(TokenType::LBracket) {
