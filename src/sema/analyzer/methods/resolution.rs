@@ -1,5 +1,6 @@
 use super::super::*;
-use std::collections::HashSet;
+use crate::sema::generic::substitute_type;
+use std::collections::{HashMap, HashSet};
 
 impl Analyzer {
     /// Resolve a method call to a normalized resolution for later validation/codegen.
@@ -26,6 +27,11 @@ impl Analyzer {
         if let Type::Interface(iface) = object_type
             && let Some(interface_def) = self.interface_registry.get(iface.name, interner)
         {
+            let mut substitutions = HashMap::new();
+            for (param, arg) in interface_def.type_params.iter().zip(iface.type_args.iter()) {
+                substitutions.insert(*param, arg.clone());
+            }
+
             let mut stack = vec![interface_def];
             let mut seen = HashSet::new();
             while let Some(def) = stack.pop() {
@@ -34,14 +40,31 @@ impl Analyzer {
                 }
                 for method_def in &def.methods {
                     if method_def.name == method_name {
+                        let func_type = FunctionType {
+                            params: method_def
+                                .params
+                                .iter()
+                                .map(|t| substitute_type(t, &substitutions))
+                                .collect(),
+                            return_type: Box::new(substitute_type(
+                                &method_def.return_type,
+                                &substitutions,
+                            )),
+                            is_closure: false,
+                        };
+                        if let Some(external_info) = def.external_methods.get(&method_name).cloned()
+                        {
+                            return Some(ResolvedMethod::Implemented {
+                                trait_name: Some(def.name),
+                                func_type,
+                                is_builtin: false,
+                                external_info: Some(external_info),
+                            });
+                        }
                         return Some(ResolvedMethod::InterfaceMethod {
                             interface_name: iface.name,
                             method_name,
-                            func_type: FunctionType {
-                                params: method_def.params.clone(),
-                                return_type: Box::new(method_def.return_type.clone()),
-                                is_closure: false,
-                            },
+                            func_type,
                         });
                     }
                 }

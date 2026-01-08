@@ -14,7 +14,7 @@ use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
 use crate::identity::{ModuleId, NameId, NameTable, NamerLookup};
 use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
-use crate::sema::generic::{MonomorphCache, MonomorphKey};
+use crate::sema::generic::{MonomorphCache, MonomorphKey, substitute_type};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::{ErrorTypeInfo, FunctionType, Type, TypeId, TypeKey};
 
@@ -151,9 +151,22 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
     match ty {
         Type::Class(class_type) => analyzed.name_table.display(class_type.name_id, interner),
         Type::Record(record_type) => analyzed.name_table.display(record_type.name_id, interner),
-        Type::Interface(interface_type) => analyzed
-            .name_table
-            .display(interface_type.name_id, interner),
+        Type::Interface(interface_type) => {
+            let base = analyzed
+                .name_table
+                .display(interface_type.name_id, interner);
+            if interface_type.type_args.is_empty() {
+                base
+            } else {
+                let arg_list = interface_type
+                    .type_args
+                    .iter()
+                    .map(|arg| display_type(analyzed, interner, arg))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}<{}>", base, arg_list)
+            }
+        }
         Type::ErrorType(error_type) => analyzed.name_table.display(error_type.name_id, interner),
         Type::Module(module_type) => format!(
             "module(\"{}\")",
@@ -193,12 +206,16 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 aliased.clone()
             } else if let Some(iface) = interface_registry.get(*sym, interner) {
                 // Check interface registry
+                if !iface.type_params.is_empty() {
+                    return Type::Error;
+                }
                 let name_id = name_table
                     .name_id(module_id, &[*sym])
                     .expect("interface name_id should be registered");
                 Type::Interface(crate::sema::types::InterfaceType {
                     name: *sym,
                     name_id,
+                    type_args: Vec::new(),
                     methods: iface
                         .methods
                         .iter()
@@ -233,19 +250,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 module_id,
             );
             Type::Array(Box::new(elem_ty))
-        }
-        TypeExpr::Iterator(elem) => {
-            let elem_ty = resolve_type_expr_with_metadata(
-                elem,
-                type_aliases,
-                interface_registry,
-                error_types,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-            );
-            Type::Iterator(Box::new(elem_ty))
         }
         TypeExpr::Optional(inner) => {
             // T? desugars to T | nil
@@ -366,6 +370,39 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     )
                 })
                 .collect();
+            if let Some(iface) = interface_registry.get(*name, interner) {
+                if !iface.type_params.is_empty() && iface.type_params.len() != resolved_args.len() {
+                    return Type::Error;
+                }
+                let mut substitutions = HashMap::new();
+                for (param, arg) in iface.type_params.iter().zip(resolved_args.iter()) {
+                    substitutions.insert(*param, arg.clone());
+                }
+                let Some(name_id) = name_table.name_id(module_id, &[*name]) else {
+                    return Type::Error;
+                };
+                let methods = iface
+                    .methods
+                    .iter()
+                    .map(|method| crate::sema::types::InterfaceMethodType {
+                        name: method.name,
+                        params: method
+                            .params
+                            .iter()
+                            .map(|t| substitute_type(t, &substitutions))
+                            .collect(),
+                        return_type: Box::new(substitute_type(&method.return_type, &substitutions)),
+                        has_default: method.has_default,
+                    })
+                    .collect();
+                return Type::Interface(crate::sema::types::InterfaceType {
+                    name: *name,
+                    name_id,
+                    type_args: resolved_args,
+                    methods,
+                    extends: iface.extends.clone(),
+                });
+            }
             let Some(name_id) = name_table.name_id(module_id, &[*name]) else {
                 return Type::Error;
             };

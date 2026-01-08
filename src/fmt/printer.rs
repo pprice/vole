@@ -905,10 +905,6 @@ fn print_type_expr<'a>(
             .text("[")
             .append(print_type_expr(arena, inner, interner))
             .append(arena.text("]")),
-        TypeExpr::Iterator(inner) => arena
-            .text("Iterator<")
-            .append(print_type_expr(arena, inner, interner))
-            .append(arena.text(">")),
         TypeExpr::Optional(inner) => {
             print_type_expr(arena, inner, interner).append(arena.text("?"))
         }

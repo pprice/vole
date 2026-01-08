@@ -21,3 +21,33 @@ interface Hashable {
 interface Stringable {
     func to_string() -> string
 }
+
+interface Iterator<T> {
+    func next() -> T | Done
+    func map(f: (T) -> T) -> Iterator<T>
+    func filter(pred: (T) -> bool) -> Iterator<T>
+    func take(n: i64) -> Iterator<T>
+    func skip(n: i64) -> Iterator<T>
+    func collect() -> [T]
+    func for_each(f: (T) -> void) -> void
+    func reduce(init: T, f: (T, T) -> T) -> T
+    func count() -> i64
+    func sum() -> i64
+
+    external("std:intrinsics") {
+        func "iter_next" as next() -> T | Done
+        func "iter_map" as map(f: (T) -> T) -> Iterator<T>
+        func "iter_filter" as filter(pred: (T) -> bool) -> Iterator<T>
+        func "iter_take" as take(n: i64) -> Iterator<T>
+        func "iter_skip" as skip(n: i64) -> Iterator<T>
+        func "iter_collect" as collect() -> [T]
+        func "iter_for_each" as for_each(f: (T) -> void) -> void
+        func "iter_reduce" as reduce(init: T, f: (T, T) -> T) -> T
+        func "iter_count" as count() -> i64
+        func "iter_sum" as sum() -> i64
+    }
+}
+
+interface Iterable<T> {
+    func iter() -> Iterator<T>
+}

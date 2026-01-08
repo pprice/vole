@@ -5,6 +5,7 @@
 
 use crate::runtime::array::RcArray;
 use crate::runtime::closure::Closure;
+use std::alloc::{Layout, alloc};
 
 /// Enum discriminant for iterator sources
 #[repr(u8)]
@@ -187,6 +188,33 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
             vole_skip_iter_next(iter, out_value)
         }
     }
+}
+
+/// Get next value from any iterator and return a tagged union pointer.
+/// Layout: [tag:1][pad:7][payload:8], tag 0 = value, tag 1 = Done.
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_iter_next(iter: *mut UnifiedIterator) -> *mut u8 {
+    let mut value: i64 = 0;
+    let has_value = if iter.is_null() {
+        0
+    } else {
+        vole_array_iter_next(iter, &mut value)
+    };
+
+    let layout = Layout::from_size_align(16, 8).expect("valid union layout");
+    let ptr = unsafe { alloc(layout) };
+    if ptr.is_null() {
+        std::alloc::handle_alloc_error(layout);
+    }
+
+    let tag = if has_value == 0 { 1u8 } else { 0u8 };
+    unsafe {
+        std::ptr::write(ptr, tag);
+        let payload_ptr = ptr.add(8) as *mut i64;
+        std::ptr::write(payload_ptr, if has_value == 0 { 0 } else { value });
+    }
+
+    ptr
 }
 
 /// Collect all remaining iterator values into a new array

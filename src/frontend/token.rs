@@ -48,7 +48,6 @@ pub enum TokenType {
     KwAs,         // as keyword (for external func mapping)
     KwImport,     // import keyword
     KwDone,       // Done keyword (iterator termination sentinel)
-    KwIterator,   // Iterator keyword (parameterized iterator type)
     KwYield,      // yield keyword (generator yield expression)
 
     // Type keywords
@@ -166,7 +165,6 @@ impl TokenType {
             Self::KwAs => "as",
             Self::KwImport => "import",
             Self::KwDone => "Done",
-            Self::KwIterator => "Iterator",
             Self::KwYield => "yield",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",

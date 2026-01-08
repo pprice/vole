@@ -178,6 +178,18 @@ impl Analyzer {
                     },
                 );
             };
+            ($type_id:expr, $method_id:expr, $func_type:expr, $external_info:expr) => {
+                self.implement_registry.register_method(
+                    $type_id,
+                    $method_id,
+                    MethodImpl {
+                        trait_name: None,
+                        func_type: $func_type,
+                        is_builtin: true,
+                        external_info: $external_info,
+                    },
+                );
+            };
         }
 
         let builtin_module = self.name_table.builtin_module();
@@ -185,54 +197,11 @@ impl Analyzer {
         let mut method_id = |name: &str| namer.intern_raw(builtin_module, &[name]);
         let method_len = method_id("length");
         let method_iter = method_id("iter");
-        let method_next = method_id("next");
-        let method_collect = method_id("collect");
-        let method_count = method_id("count");
-        let method_sum = method_id("sum");
-        let method_for_each = method_id("for_each");
-        let method_filter = method_id("filter");
-        let method_map = method_id("map");
-        let method_take = method_id("take");
-        let method_skip = method_id("skip");
-        let method_reduce = method_id("reduce");
-
         let array_id = self.type_table.array_name_id().map(TypeId::from_name_id);
         let string_id = self
             .type_table
             .primitive_name_id(PrimitiveTypeId::String)
             .map(TypeId::from_name_id);
-        let iterator_id = self.type_table.iterator_name_id().map(TypeId::from_name_id);
-        let map_iterator_id = self
-            .type_table
-            .map_iterator_name_id()
-            .map(TypeId::from_name_id);
-        let filter_iterator_id = self
-            .type_table
-            .filter_iterator_name_id()
-            .map(TypeId::from_name_id);
-        let take_iterator_id = self
-            .type_table
-            .take_iterator_name_id()
-            .map(TypeId::from_name_id);
-        let skip_iterator_id = self
-            .type_table
-            .skip_iterator_name_id()
-            .map(TypeId::from_name_id);
-
-        let iter_type_ids = [
-            iterator_id,
-            map_iterator_id,
-            filter_iterator_id,
-            take_iterator_id,
-            skip_iterator_id,
-        ];
-
-        let unknown = Type::Unknown;
-        let unknown_fn = |params| FunctionType {
-            params,
-            return_type: Box::new(Type::Unknown),
-            is_closure: false,
-        };
 
         if let Some(type_id) = array_id {
             register_builtin!(
@@ -249,9 +218,13 @@ impl Analyzer {
                 method_iter,
                 FunctionType {
                     params: vec![],
-                    return_type: Box::new(unknown.clone()),
+                    return_type: Box::new(Type::Unknown),
                     is_closure: false,
-                }
+                },
+                Some(ExternalMethodInfo {
+                    module_path: "std:intrinsics".to_string(),
+                    native_name: "array_iter".to_string(),
+                })
             );
         }
 
@@ -267,57 +240,7 @@ impl Analyzer {
             );
         }
 
-        for maybe_id in iter_type_ids {
-            let Some(type_id) = maybe_id else {
-                continue;
-            };
-            register_builtin!(type_id, method_next, unknown_fn(vec![]));
-            register_builtin!(type_id, method_collect, unknown_fn(vec![]));
-            register_builtin!(
-                type_id,
-                method_count,
-                FunctionType {
-                    params: vec![],
-                    return_type: Box::new(Type::I64),
-                    is_closure: false,
-                }
-            );
-            register_builtin!(
-                type_id,
-                method_sum,
-                FunctionType {
-                    params: vec![],
-                    return_type: Box::new(Type::I64),
-                    is_closure: false,
-                }
-            );
-            register_builtin!(type_id, method_for_each, unknown_fn(vec![unknown.clone()]));
-            register_builtin!(type_id, method_filter, unknown_fn(vec![unknown.clone()]));
-            register_builtin!(type_id, method_map, unknown_fn(vec![unknown.clone()]));
-            register_builtin!(
-                type_id,
-                method_take,
-                FunctionType {
-                    params: vec![Type::I64],
-                    return_type: Box::new(unknown.clone()),
-                    is_closure: false,
-                }
-            );
-            register_builtin!(
-                type_id,
-                method_skip,
-                FunctionType {
-                    params: vec![Type::I64],
-                    return_type: Box::new(unknown.clone()),
-                    is_closure: false,
-                }
-            );
-            register_builtin!(
-                type_id,
-                method_reduce,
-                unknown_fn(vec![unknown.clone(), unknown.clone()])
-            );
-        }
+        // Iterator methods are resolved via interface declarations in the prelude.
     }
 
     fn register_primitive_name_ids(&mut self, interner: &Interner) {
@@ -347,20 +270,6 @@ impl Analyzer {
         }
         let array_name = namer.intern_raw(builtin_module, &["array"]);
         self.type_table.register_array_name(array_name);
-        let iterator_name = namer.intern_raw(builtin_module, &["iterator"]);
-        let map_iterator_name = namer.intern_raw(builtin_module, &["map_iterator"]);
-        let filter_iterator_name = namer.intern_raw(builtin_module, &["filter_iterator"]);
-        let take_iterator_name = namer.intern_raw(builtin_module, &["take_iterator"]);
-        let skip_iterator_name = namer.intern_raw(builtin_module, &["skip_iterator"]);
-        self.type_table.register_iterator_name(iterator_name);
-        self.type_table
-            .register_map_iterator_name(map_iterator_name);
-        self.type_table
-            .register_filter_iterator_name(filter_iterator_name);
-        self.type_table
-            .register_take_iterator_name(take_iterator_name);
-        self.type_table
-            .register_skip_iterator_name(skip_iterator_name);
     }
 
     /// Load prelude files (trait definitions and primitive type implementations)
@@ -543,13 +452,13 @@ impl Analyzer {
             (Type::Array(p_elem), Type::Array(a_elem)) => {
                 self.unify_types(p_elem, a_elem, type_params, inferred);
             }
-            // Iterator types: unify element types
-            (Type::Iterator(p_elem), Type::Iterator(a_elem))
-            | (Type::MapIterator(p_elem), Type::MapIterator(a_elem))
-            | (Type::FilterIterator(p_elem), Type::FilterIterator(a_elem))
-            | (Type::TakeIterator(p_elem), Type::TakeIterator(a_elem))
-            | (Type::SkipIterator(p_elem), Type::SkipIterator(a_elem)) => {
-                self.unify_types(p_elem, a_elem, type_params, inferred);
+            // Interface types: unify type args for the same interface
+            (Type::Interface(p_iface), Type::Interface(a_iface))
+                if p_iface.name == a_iface.name =>
+            {
+                for (p_arg, a_arg) in p_iface.type_args.iter().zip(a_iface.type_args.iter()) {
+                    self.unify_types(p_arg, a_arg, type_params, inferred);
+                }
             }
             // Union: try to match each pattern variant
             (Type::Union(p_types), Type::Union(a_types)) => {
@@ -694,6 +603,47 @@ impl Analyzer {
         let (_, module_interner) = self.module_programs.get(module_path)?;
         let sym = module_interner.lookup(name)?;
         self.name_table.name_id(module_id, &[sym])
+    }
+
+    fn interface_type(
+        &mut self,
+        name: &str,
+        type_args: Vec<Type>,
+        interner: &Interner,
+    ) -> Option<Type> {
+        let sym = interner.lookup(name)?;
+        let def = self.interface_registry.get(sym, interner)?;
+        if !def.type_params.is_empty() && def.type_params.len() != type_args.len() {
+            return Some(Type::Error);
+        }
+        let mut substitutions = HashMap::new();
+        for (param, arg) in def.type_params.iter().zip(type_args.iter()) {
+            substitutions.insert(*param, arg.clone());
+        }
+        let methods = def
+            .methods
+            .iter()
+            .map(|method| crate::sema::types::InterfaceMethodType {
+                name: method.name,
+                params: method
+                    .params
+                    .iter()
+                    .map(|t| substitute_type(t, &substitutions))
+                    .collect(),
+                return_type: Box::new(substitute_type(&method.return_type, &substitutions)),
+                has_default: method.has_default,
+            })
+            .collect();
+        let name_id = self
+            .name_table
+            .intern(self.name_table.main_module(), &[sym]);
+        Some(Type::Interface(crate::sema::types::InterfaceType {
+            name: sym,
+            name_id,
+            type_args,
+            methods,
+            extends: def.extends.clone(),
+        }))
     }
 
     fn method_name_id(&mut self, name: Symbol, interner: &Interner) -> NameId {
@@ -982,13 +932,58 @@ impl Analyzer {
                     }
                 }
                 Decl::Interface(interface_decl) => {
+                    let mut name_scope = TypeParamScope::new();
+                    for tp in &interface_decl.type_params {
+                        name_scope.add(TypeParamInfo {
+                            name: tp.name,
+                            constraint: None,
+                        });
+                    }
+
+                    let type_params: Vec<TypeParamInfo> = interface_decl
+                        .type_params
+                        .iter()
+                        .map(|tp| {
+                            let constraint = tp.constraint.as_ref().and_then(|c| {
+                                self.resolve_type_param_constraint(
+                                    c,
+                                    &name_scope,
+                                    interner,
+                                    tp.span,
+                                )
+                            });
+                            TypeParamInfo {
+                                name: tp.name,
+                                constraint,
+                            }
+                        })
+                        .collect();
+
+                    let mut type_param_scope = TypeParamScope::new();
+                    for info in &type_params {
+                        type_param_scope.add(info.clone());
+                    }
+
+                    let module_id = self.name_table.main_module();
+                    let mut type_ctx = TypeResolutionContext::with_type_params(
+                        &self.type_aliases,
+                        &self.classes,
+                        &self.records,
+                        &self.error_types,
+                        &self.interface_registry,
+                        interner,
+                        &mut self.name_table,
+                        module_id,
+                        &type_param_scope,
+                    );
+
                     // Convert AST fields to InterfaceFieldDef
                     let fields: Vec<InterfaceFieldDef> = interface_decl
                         .fields
                         .iter()
                         .map(|f| InterfaceFieldDef {
                             name: f.name,
-                            ty: self.resolve_type(&f.ty, interner),
+                            ty: resolve_type(&f.ty, &mut type_ctx),
                         })
                         .collect();
 
@@ -1001,12 +996,12 @@ impl Analyzer {
                             params: m
                                 .params
                                 .iter()
-                                .map(|p| self.resolve_type(&p.ty, interner))
+                                .map(|p| resolve_type(&p.ty, &mut type_ctx))
                                 .collect(),
                             return_type: m
                                 .return_type
                                 .as_ref()
-                                .map(|t| self.resolve_type(t, interner))
+                                .map(|t| resolve_type(t, &mut type_ctx))
                                 .unwrap_or(Type::Void),
                             has_default: m.body.is_some(),
                         })
@@ -1022,12 +1017,48 @@ impl Analyzer {
                         })
                         .collect();
 
+                    let mut external_methods = HashMap::new();
+                    if let Some(external) = &interface_decl.external {
+                        for func in &external.functions {
+                            if !methods.iter().any(|method| method.name == func.vole_name) {
+                                let ty = interner.resolve(interface_decl.name).to_string();
+                                let method = interner.resolve(func.vole_name).to_string();
+                                self.add_error(
+                                    SemanticError::UnknownMethod {
+                                        ty,
+                                        method,
+                                        span: func.span.into(),
+                                    },
+                                    func.span,
+                                );
+                                continue;
+                            }
+                            let native_name = func
+                                .native_name
+                                .clone()
+                                .unwrap_or_else(|| interner.resolve(func.vole_name).to_string());
+                            external_methods.insert(
+                                func.vole_name,
+                                ExternalMethodInfo {
+                                    module_path: external.module_path.clone(),
+                                    native_name,
+                                },
+                            );
+                        }
+                    }
+
                     let def = InterfaceDef {
                         name: interface_decl.name,
                         name_str: interner.resolve(interface_decl.name).to_string(),
+                        type_params: interface_decl
+                            .type_params
+                            .iter()
+                            .map(|param| param.name)
+                            .collect(),
                         extends: interface_decl.extends.clone(),
                         fields,
                         methods,
+                        external_methods,
                     };
 
                     self.interface_registry.register(def);
@@ -1039,6 +1070,7 @@ impl Analyzer {
                         Type::Interface(crate::sema::types::InterfaceType {
                             name: interface_decl.name,
                             name_id,
+                            type_args: Vec::new(),
                             methods: interface_methods,
                             extends: interface_decl.extends.clone(),
                         }),
@@ -1458,7 +1490,8 @@ impl Analyzer {
         }
 
         // Set generator context if return type is Iterator<T>
-        self.current_generator_element_type = self.extract_iterator_element_type(&return_type);
+        self.current_generator_element_type =
+            self.extract_iterator_element_type(&return_type, interner);
 
         // Create new scope with parameters
         let parent_scope = std::mem::take(&mut self.scope);
@@ -1489,15 +1522,14 @@ impl Analyzer {
     }
 
     /// Extract the element type from an Iterator<T> type, or None if not an iterator type
-    fn extract_iterator_element_type(&self, ty: &Type) -> Option<Type> {
-        match ty {
-            Type::Iterator(elem) => Some((**elem).clone()),
-            Type::MapIterator(elem) => Some((**elem).clone()),
-            Type::FilterIterator(elem) => Some((**elem).clone()),
-            Type::TakeIterator(elem) => Some((**elem).clone()),
-            Type::SkipIterator(elem) => Some((**elem).clone()),
-            _ => None,
+    fn extract_iterator_element_type(&self, ty: &Type, interner: &Interner) -> Option<Type> {
+        let Type::Interface(interface_type) = ty else {
+            return None;
+        };
+        if interner.resolve(interface_type.name) != "Iterator" {
+            return None;
         }
+        interface_type.type_args.first().cloned()
     }
 
     fn check_method(
@@ -1524,7 +1556,8 @@ impl Analyzer {
         }
 
         // Set generator context if return type is Iterator<T>
-        self.current_generator_element_type = self.extract_iterator_element_type(&return_type);
+        self.current_generator_element_type =
+            self.extract_iterator_element_type(&return_type, interner);
 
         // Create scope with 'self' and parameters
         let parent_scope = std::mem::take(&mut self.scope);

@@ -188,11 +188,6 @@ impl<'a> AstPrinter<'a> {
                 self.write_type_inline(out, elem_ty);
                 out.push(']');
             }
-            TypeExpr::Iterator(elem_ty) => {
-                out.push_str("Iterator<");
-                self.write_type_inline(out, elem_ty);
-                out.push('>');
-            }
             TypeExpr::Optional(inner) => {
                 self.write_type_inline(out, inner);
                 out.push('?');
@@ -710,11 +705,6 @@ impl<'a> AstPrinter<'a> {
                 out.push('[');
                 self.write_type_expr_inline(out, inner);
                 out.push(']');
-            }
-            TypeExpr::Iterator(inner) => {
-                out.push_str("Iterator<");
-                self.write_type_expr_inline(out, inner);
-                out.push('>');
             }
             TypeExpr::Optional(inner) => {
                 self.write_type_expr_inline(out, inner);

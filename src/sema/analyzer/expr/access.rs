@@ -285,15 +285,29 @@ impl Analyzer {
 
         if let Some(resolved) = self.resolve_method(&object_type, method_call.method, interner) {
             if resolved.is_builtin()
-                && let Some(return_type) = self.check_builtin_method(
+                && let Some(func_type) = self.check_builtin_method(
                     &object_type,
                     method_name,
                     &method_call.args,
                     interner,
                 )
             {
-                self.method_resolutions.insert(expr.id, resolved);
-                return Ok(return_type);
+                let updated = match resolved {
+                    ResolvedMethod::Implemented {
+                        trait_name,
+                        is_builtin,
+                        external_info,
+                        ..
+                    } => ResolvedMethod::Implemented {
+                        trait_name,
+                        func_type: func_type.clone(),
+                        is_builtin,
+                        external_info,
+                    },
+                    other => other,
+                };
+                self.method_resolutions.insert(expr.id, updated);
+                return Ok(*func_type.return_type);
             }
 
             let func_type = resolved.func_type().clone();

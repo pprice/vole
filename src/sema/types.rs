@@ -29,7 +29,7 @@ pub enum Type {
     /// Distinct from Void (which is only for function returns)
     Nil,
     /// Done type - sentinel for iterator termination
-    /// Used in Iterator.next() returning T | Done
+    /// Used in iterator next() returning T | Done
     Done,
     /// Union type - value can be any of the variant types
     /// Represented at runtime as tagged union (discriminant + payload)
@@ -39,16 +39,6 @@ pub enum Type {
     Range,
     /// Array type (e.g., [i32], [string])
     Array(Box<Type>),
-    /// Iterator type (e.g., Iterator<i32>) - direct array iterator
-    Iterator(Box<Type>),
-    /// Mapped iterator type - wraps another iterator with a transform function
-    MapIterator(Box<Type>),
-    /// Filter iterator type - wraps another iterator with a predicate function
-    FilterIterator(Box<Type>),
-    /// Take iterator type - returns first n elements then Done
-    TakeIterator(Box<Type>),
-    /// Skip iterator type - skips first n elements, returns rest
-    SkipIterator(Box<Type>),
     /// Function type
     Function(FunctionType),
     /// Unknown (for type inference)
@@ -73,7 +63,7 @@ pub enum Type {
     /// Type parameter (e.g., T in func identity<T>(x: T) -> T)
     /// Only valid within generic context during type checking
     TypeParam(Symbol),
-    /// Generic type instance (e.g., Box<i64>, Iterator<string>)
+    /// Generic type instance (e.g., Box<i64>, Result<string, i64>)
     GenericInstance {
         /// Name of the generic type definition
         def: NameId,
@@ -121,6 +111,7 @@ pub struct RecordType {
 pub struct InterfaceType {
     pub name: Symbol,
     pub name_id: NameId,
+    pub type_args: Vec<Type>,
     pub methods: Vec<InterfaceMethodType>,
     pub extends: Vec<Symbol>, // Parent interfaces
 }
@@ -311,11 +302,6 @@ impl Type {
             Type::Union(_) => "union", // Display impl handles full representation
             Type::Range => "range",
             Type::Array(_) => "array",
-            Type::Iterator(_) => "iterator",
-            Type::MapIterator(_) => "iterator",
-            Type::FilterIterator(_) => "iterator",
-            Type::TakeIterator(_) => "iterator",
-            Type::SkipIterator(_) => "iterator",
             Type::Function(_) => "function",
             Type::Unknown => "unknown",
             Type::Error => "error",
@@ -420,11 +406,6 @@ impl std::fmt::Display for Type {
                 write!(f, "{}", parts.join(" | "))
             }
             Type::Array(elem) => write!(f, "[{}]", elem),
-            Type::Iterator(elem) => write!(f, "Iterator<{}>", elem),
-            Type::MapIterator(elem) => write!(f, "Iterator<{}>", elem),
-            Type::FilterIterator(elem) => write!(f, "Iterator<{}>", elem),
-            Type::TakeIterator(elem) => write!(f, "Iterator<{}>", elem),
-            Type::SkipIterator(elem) => write!(f, "Iterator<{}>", elem),
             Type::Class(_) => write!(f, "class"),
             Type::Record(_) => write!(f, "record"),
             Type::ErrorType(_) => {

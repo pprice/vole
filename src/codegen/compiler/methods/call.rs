@@ -4,10 +4,6 @@ use std::collections::HashMap;
 
 use super::builtin::compile_builtin_method;
 use super::external::compile_external_call;
-use super::iterators::{
-    compile_iterator_filter, compile_iterator_for_each, compile_iterator_map,
-    compile_iterator_reduce, compile_iterator_skip, compile_iterator_take,
-};
 use crate::codegen::RuntimeFn;
 use crate::codegen::interface_vtable::{
     box_interface_value, iface_debug_enabled, interface_method_slot,
@@ -129,74 +125,6 @@ pub(crate) fn compile_method_call(
     ) && let Some(result) = compile_builtin_method(builder, &obj, method_name_str, ctx)?
     {
         return Ok(result);
-    }
-
-    // Handle iterator.map(fn) -> creates a MapIterator
-    // Also handle MapIterator.map(fn), FilterIterator.map(fn), TakeIterator.map(fn), SkipIterator.map(fn) for chained maps
-    if let Type::Iterator(elem_ty)
-    | Type::MapIterator(elem_ty)
-    | Type::FilterIterator(elem_ty)
-    | Type::TakeIterator(elem_ty)
-    | Type::SkipIterator(elem_ty) = &obj.vole_type
-        && method_name_str == "map"
-    {
-        return compile_iterator_map(builder, &obj, elem_ty.as_ref(), &mc.args, variables, ctx);
-    }
-
-    // Handle iterator.filter(fn) -> creates a FilterIterator
-    // Also handle MapIterator.filter(fn), FilterIterator.filter(fn), TakeIterator.filter(fn), SkipIterator.filter(fn) for chained filters
-    if let Type::Iterator(elem_ty)
-    | Type::MapIterator(elem_ty)
-    | Type::FilterIterator(elem_ty)
-    | Type::TakeIterator(elem_ty)
-    | Type::SkipIterator(elem_ty) = &obj.vole_type
-        && method_name_str == "filter"
-    {
-        return compile_iterator_filter(builder, &obj, elem_ty.as_ref(), &mc.args, variables, ctx);
-    }
-
-    // Handle iterator.take(n) -> creates a TakeIterator
-    if let Type::Iterator(elem_ty)
-    | Type::MapIterator(elem_ty)
-    | Type::FilterIterator(elem_ty)
-    | Type::TakeIterator(elem_ty)
-    | Type::SkipIterator(elem_ty) = &obj.vole_type
-        && method_name_str == "take"
-    {
-        return compile_iterator_take(builder, &obj, elem_ty.as_ref(), &mc.args, variables, ctx);
-    }
-
-    // Handle iterator.skip(n) -> creates a SkipIterator
-    if let Type::Iterator(elem_ty)
-    | Type::MapIterator(elem_ty)
-    | Type::FilterIterator(elem_ty)
-    | Type::TakeIterator(elem_ty)
-    | Type::SkipIterator(elem_ty) = &obj.vole_type
-        && method_name_str == "skip"
-    {
-        return compile_iterator_skip(builder, &obj, elem_ty.as_ref(), &mc.args, variables, ctx);
-    }
-
-    // Handle iterator.for_each(fn) -> calls function for each element
-    if let Type::Iterator(_)
-    | Type::MapIterator(_)
-    | Type::FilterIterator(_)
-    | Type::TakeIterator(_)
-    | Type::SkipIterator(_) = &obj.vole_type
-        && method_name_str == "for_each"
-    {
-        return compile_iterator_for_each(builder, &obj, &mc.args, variables, ctx);
-    }
-
-    // Handle iterator.reduce(init, fn) -> reduces iterator to single value
-    if let Type::Iterator(_)
-    | Type::MapIterator(_)
-    | Type::FilterIterator(_)
-    | Type::TakeIterator(_)
-    | Type::SkipIterator(_) = &obj.vole_type
-        && method_name_str == "reduce"
-    {
-        return compile_iterator_reduce(builder, &obj, &mc.args, variables, ctx);
     }
 
     // Look up method resolution to determine naming convention and return type

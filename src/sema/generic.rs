@@ -166,19 +166,30 @@ pub fn substitute_type(ty: &Type, substitutions: &HashMap<Symbol, Type>) -> Type
     match ty {
         Type::TypeParam(sym) => substitutions.get(sym).cloned().unwrap_or(ty.clone()),
         Type::Array(elem) => Type::Array(Box::new(substitute_type(elem, substitutions))),
-        Type::Iterator(elem) => Type::Iterator(Box::new(substitute_type(elem, substitutions))),
-        Type::MapIterator(elem) => {
-            Type::MapIterator(Box::new(substitute_type(elem, substitutions)))
-        }
-        Type::FilterIterator(elem) => {
-            Type::FilterIterator(Box::new(substitute_type(elem, substitutions)))
-        }
-        Type::TakeIterator(elem) => {
-            Type::TakeIterator(Box::new(substitute_type(elem, substitutions)))
-        }
-        Type::SkipIterator(elem) => {
-            Type::SkipIterator(Box::new(substitute_type(elem, substitutions)))
-        }
+        Type::Interface(interface_type) => Type::Interface(crate::sema::types::InterfaceType {
+            name: interface_type.name,
+            name_id: interface_type.name_id,
+            type_args: interface_type
+                .type_args
+                .iter()
+                .map(|t| substitute_type(t, substitutions))
+                .collect(),
+            methods: interface_type
+                .methods
+                .iter()
+                .map(|method| crate::sema::types::InterfaceMethodType {
+                    name: method.name,
+                    params: method
+                        .params
+                        .iter()
+                        .map(|t| substitute_type(t, substitutions))
+                        .collect(),
+                    return_type: Box::new(substitute_type(&method.return_type, substitutions)),
+                    has_default: method.has_default,
+                })
+                .collect(),
+            extends: interface_type.extends.clone(),
+        }),
         Type::Union(types) => Type::Union(
             types
                 .iter()

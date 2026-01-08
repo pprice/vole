@@ -1,6 +1,7 @@
 // src/sema/interface_registry.rs
 
 use crate::frontend::Symbol;
+use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::types::Type;
 use std::collections::HashMap;
 
@@ -26,9 +27,11 @@ pub struct InterfaceDef {
     pub name: Symbol,
     /// String name for cross-interner lookups
     pub name_str: String,
+    pub type_params: Vec<Symbol>,
     pub extends: Vec<Symbol>,
     pub fields: Vec<InterfaceFieldDef>,
     pub methods: Vec<InterfaceMethodDef>,
+    pub external_methods: HashMap<Symbol, ExternalMethodInfo>,
 }
 
 /// Registry of all interface definitions
@@ -58,6 +61,34 @@ impl InterfaceRegistry {
     pub fn get(&self, name: Symbol, interner: &crate::frontend::Interner) -> Option<&InterfaceDef> {
         let name_str = interner.resolve(name);
         self.interfaces.get(name_str)
+    }
+
+    /// Look up an external binding for an interface method
+    pub fn external_method(
+        &self,
+        interface: Symbol,
+        method: Symbol,
+        interner: &crate::frontend::Interner,
+    ) -> Option<&ExternalMethodInfo> {
+        let interface = self.get(interface, interner)?;
+        interface.external_methods.get(&method)
+    }
+
+    /// Check if every interface method is bound to an external function
+    pub fn is_external_only(
+        &self,
+        interface: Symbol,
+        interner: &crate::frontend::Interner,
+    ) -> bool {
+        let Some(def) = self.get(interface, interner) else {
+            return false;
+        };
+        if def.methods.is_empty() || def.external_methods.len() != def.methods.len() {
+            return false;
+        }
+        def.methods
+            .iter()
+            .all(|method| def.external_methods.contains_key(&method.name) && !method.has_default)
     }
 
     /// Merge another registry into this one
@@ -112,6 +143,7 @@ mod tests {
         let def = InterfaceDef {
             name: sym(1),
             name_str: "TestInterface".to_string(),
+            type_params: Vec::new(),
             extends: vec![],
             fields: vec![],
             methods: vec![InterfaceMethodDef {
@@ -120,6 +152,7 @@ mod tests {
                 return_type: Type::I64,
                 has_default: false,
             }],
+            external_methods: HashMap::new(),
         };
         registry.register(def);
 
@@ -136,6 +169,7 @@ mod tests {
         let def = InterfaceDef {
             name: name_sym,
             name_str: "Runnable".to_string(),
+            type_params: Vec::new(),
             extends: vec![],
             fields: vec![],
             methods: vec![InterfaceMethodDef {
@@ -144,6 +178,7 @@ mod tests {
                 return_type: Type::Bool,
                 has_default: false,
             }],
+            external_methods: HashMap::new(),
         };
         registry.register(def);
 
@@ -158,6 +193,7 @@ mod tests {
         let def = InterfaceDef {
             name: name_sym,
             name_str: "HasField".to_string(),
+            type_params: Vec::new(),
             extends: vec![],
             fields: vec![InterfaceFieldDef {
                 name: sym(3),
@@ -169,6 +205,7 @@ mod tests {
                 return_type: Type::I64,
                 has_default: false,
             }],
+            external_methods: HashMap::new(),
         };
         registry.register(def);
 
@@ -183,6 +220,7 @@ mod tests {
         let def = InterfaceDef {
             name: name_sym,
             name_str: "MultiMethod".to_string(),
+            type_params: Vec::new(),
             extends: vec![],
             fields: vec![],
             methods: vec![
@@ -199,6 +237,7 @@ mod tests {
                     has_default: false,
                 },
             ],
+            external_methods: HashMap::new(),
         };
         registry.register(def);
 
@@ -213,6 +252,7 @@ mod tests {
         let def = InterfaceDef {
             name: name_sym,
             name_str: "WithDefault".to_string(),
+            type_params: Vec::new(),
             extends: vec![],
             fields: vec![],
             methods: vec![
@@ -229,6 +269,7 @@ mod tests {
                     has_default: true, // default method
                 },
             ],
+            external_methods: HashMap::new(),
         };
         registry.register(def);
 
@@ -244,6 +285,7 @@ mod tests {
         registry1.register(InterfaceDef {
             name: sym(1),
             name_str: "Interface1".to_string(),
+            type_params: Vec::new(),
             extends: vec![],
             fields: vec![],
             methods: vec![InterfaceMethodDef {
@@ -252,11 +294,13 @@ mod tests {
                 return_type: Type::Bool,
                 has_default: false,
             }],
+            external_methods: HashMap::new(),
         });
 
         registry2.register(InterfaceDef {
             name: sym(2),
             name_str: "Interface2".to_string(),
+            type_params: Vec::new(),
             extends: vec![],
             fields: vec![],
             methods: vec![InterfaceMethodDef {
@@ -265,6 +309,7 @@ mod tests {
                 return_type: Type::String,
                 has_default: false,
             }],
+            external_methods: HashMap::new(),
         });
 
         registry1.merge(&registry2);

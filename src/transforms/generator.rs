@@ -229,7 +229,11 @@ impl<'a> GeneratorTransformer<'a> {
     ) -> Option<(RecordDecl, ImplementBlock, FuncDecl)> {
         // Extract the element type from Iterator<T>
         let element_type = match &func.return_type {
-            Some(TypeExpr::Iterator(elem_type)) => (**elem_type).clone(),
+            Some(TypeExpr::Generic { name, args })
+                if self.interner.resolve(*name) == "Iterator" && args.len() == 1 =>
+            {
+                args[0].clone()
+            }
             _ => return None, // Not a generator function (should have been caught earlier)
         };
 
@@ -545,7 +549,6 @@ impl<'a> GeneratorTransformer<'a> {
             TypeExpr::Done => "Done".to_string(),
             TypeExpr::Optional(inner) => format!("{}?", self.type_expr_to_string(inner)),
             TypeExpr::Array(inner) => format!("[{}]", self.type_expr_to_string(inner)),
-            TypeExpr::Iterator(inner) => format!("Iterator<{}>", self.type_expr_to_string(inner)),
             TypeExpr::Union(variants) => variants
                 .iter()
                 .map(|v| self.type_expr_to_string(v))

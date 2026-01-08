@@ -5,7 +5,6 @@
 mod builtin;
 mod call;
 mod external;
-mod iterators;
 mod try_expr;
 
 pub(crate) use call::compile_interface_dispatch_args;

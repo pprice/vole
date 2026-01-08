@@ -4,7 +4,7 @@
 
 use crate::frontend::{Interner, Symbol, TypeExpr};
 use crate::identity::{ModuleId, NameTable};
-use crate::sema::generic::TypeParamScope;
+use crate::sema::generic::{TypeParamScope, substitute_type};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::types::{
     ClassType, ErrorTypeInfo, FallibleType, FunctionType, InterfaceMethodType, InterfaceType,
@@ -24,6 +24,45 @@ pub struct TypeResolutionContext<'a> {
     pub module_id: ModuleId,
     /// Type parameters in scope (for generic contexts)
     pub type_params: Option<&'a TypeParamScope>,
+}
+
+fn interface_instance(
+    name: Symbol,
+    type_args: Vec<Type>,
+    ctx: &mut TypeResolutionContext<'_>,
+) -> Option<Type> {
+    let def = ctx.interface_registry.get(name, ctx.interner)?;
+    if !def.type_params.is_empty() && def.type_params.len() != type_args.len() {
+        return Some(Type::Error);
+    }
+
+    let mut substitutions = HashMap::new();
+    for (param, arg) in def.type_params.iter().zip(type_args.iter()) {
+        substitutions.insert(*param, arg.clone());
+    }
+
+    let methods = def
+        .methods
+        .iter()
+        .map(|method| InterfaceMethodType {
+            name: method.name,
+            params: method
+                .params
+                .iter()
+                .map(|t| substitute_type(t, &substitutions))
+                .collect(),
+            return_type: Box::new(substitute_type(&method.return_type, &substitutions)),
+            has_default: method.has_default,
+        })
+        .collect();
+    let name_id = ctx.name_table.intern(ctx.module_id, &[name]);
+    Some(Type::Interface(InterfaceType {
+        name,
+        name_id,
+        type_args,
+        methods,
+        extends: def.extends.clone(),
+    }))
 }
 
 impl<'a> TypeResolutionContext<'a> {
@@ -100,23 +139,8 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                 Type::Record(record.clone())
             } else if let Some(class) = ctx.classes.get(sym) {
                 Type::Class(class.clone())
-            } else if let Some(iface) = ctx.interface_registry.get(*sym, ctx.interner) {
-                let name_id = ctx.name_table.intern(ctx.module_id, &[*sym]);
-                Type::Interface(InterfaceType {
-                    name: *sym,
-                    name_id,
-                    methods: iface
-                        .methods
-                        .iter()
-                        .map(|m| InterfaceMethodType {
-                            name: m.name,
-                            params: m.params.clone(),
-                            return_type: Box::new(m.return_type.clone()),
-                            has_default: m.has_default,
-                        })
-                        .collect(),
-                    extends: iface.extends.clone(),
-                })
+            } else if let Some(interface) = interface_instance(*sym, Vec::new(), ctx) {
+                interface
             } else if let Some(error_info) = ctx.error_types.get(sym) {
                 // Check if it's an error type
                 Type::ErrorType(error_info.clone())
@@ -127,10 +151,6 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
         TypeExpr::Array(elem) => {
             let elem_ty = resolve_type(elem, ctx);
             Type::Array(Box::new(elem_ty))
-        }
-        TypeExpr::Iterator(elem) => {
-            let elem_ty = resolve_type(elem, ctx);
-            Type::Iterator(Box::new(elem_ty))
         }
         TypeExpr::Nil => Type::Nil,
         TypeExpr::Done => Type::Done,
@@ -173,6 +193,9 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
         TypeExpr::Generic { name, args } => {
             // Resolve all type arguments
             let resolved_args: Vec<Type> = args.iter().map(|a| resolve_type(a, ctx)).collect();
+            if let Some(interface) = interface_instance(*name, resolved_args.clone(), ctx) {
+                return interface;
+            }
             let name_id = ctx.name_table.intern(ctx.module_id, &[*name]);
             Type::GenericInstance {
                 def: name_id,
@@ -334,16 +357,6 @@ mod tests {
         with_empty_context(&interner, |ctx| {
             // Self type is only valid in interface/implement context
             assert_eq!(resolve_type(&TypeExpr::SelfType, ctx), Type::Error);
-        });
-    }
-
-    #[test]
-    fn resolve_iterator_type() {
-        let interner = Interner::new();
-        with_empty_context(&interner, |ctx| {
-            let iter_expr = TypeExpr::Iterator(Box::new(TypeExpr::Primitive(PrimitiveType::I32)));
-            let resolved = resolve_type(&iter_expr, ctx);
-            assert_eq!(resolved, Type::Iterator(Box::new(Type::I32)));
         });
     }
 }

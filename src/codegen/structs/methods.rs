@@ -15,6 +15,7 @@ use crate::codegen::types::{
     CompiledValue, method_name_id, module_name_id, type_to_cranelift, value_to_word, word_to_value,
 };
 use crate::frontend::{Expr, MethodCallExpr, NodeId};
+use crate::sema::generic::substitute_type;
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::{FunctionType, Type};
 
@@ -113,74 +114,6 @@ impl Cg<'_, '_, '_> {
         // Handle built-in methods
         if let Some(result) = self.builtin_method(&obj, method_name_str)? {
             return Ok(result);
-        }
-
-        // Handle iterator.map(fn) -> creates a MapIterator
-        // Also handle MapIterator.map(fn), FilterIterator.map(fn), TakeIterator.map(fn), SkipIterator.map(fn) for chained maps
-        if let Type::Iterator(elem_ty)
-        | Type::MapIterator(elem_ty)
-        | Type::FilterIterator(elem_ty)
-        | Type::TakeIterator(elem_ty)
-        | Type::SkipIterator(elem_ty) = &obj.vole_type
-            && method_name_str == "map"
-        {
-            return self.iterator_map(&obj, elem_ty, &mc.args);
-        }
-
-        // Handle iterator.filter(fn) -> creates a FilterIterator
-        // Also handle MapIterator.filter(fn), FilterIterator.filter(fn), TakeIterator.filter(fn), SkipIterator.filter(fn) for chained filters
-        if let Type::Iterator(elem_ty)
-        | Type::MapIterator(elem_ty)
-        | Type::FilterIterator(elem_ty)
-        | Type::TakeIterator(elem_ty)
-        | Type::SkipIterator(elem_ty) = &obj.vole_type
-            && method_name_str == "filter"
-        {
-            return self.iterator_filter(&obj, elem_ty, &mc.args);
-        }
-
-        // Handle iterator.take(n) -> creates a TakeIterator
-        if let Type::Iterator(elem_ty)
-        | Type::MapIterator(elem_ty)
-        | Type::FilterIterator(elem_ty)
-        | Type::TakeIterator(elem_ty)
-        | Type::SkipIterator(elem_ty) = &obj.vole_type
-            && method_name_str == "take"
-        {
-            return self.iterator_take(&obj, elem_ty, &mc.args);
-        }
-
-        // Handle iterator.skip(n) -> creates a SkipIterator
-        if let Type::Iterator(elem_ty)
-        | Type::MapIterator(elem_ty)
-        | Type::FilterIterator(elem_ty)
-        | Type::TakeIterator(elem_ty)
-        | Type::SkipIterator(elem_ty) = &obj.vole_type
-            && method_name_str == "skip"
-        {
-            return self.iterator_skip(&obj, elem_ty, &mc.args);
-        }
-
-        // Handle iterator.for_each(fn) -> calls function for each element
-        if let Type::Iterator(_)
-        | Type::MapIterator(_)
-        | Type::FilterIterator(_)
-        | Type::TakeIterator(_)
-        | Type::SkipIterator(_) = &obj.vole_type
-            && method_name_str == "for_each"
-        {
-            return self.iterator_for_each(&obj, &mc.args);
-        }
-
-        // Handle iterator.reduce(init, fn) -> reduces iterator to single value
-        if let Type::Iterator(_)
-        | Type::MapIterator(_)
-        | Type::FilterIterator(_)
-        | Type::TakeIterator(_)
-        | Type::SkipIterator(_) = &obj.vole_type
-            && method_name_str == "reduce"
-        {
-            return self.iterator_reduce(&obj, &mc.args);
         }
 
         let method_id = method_name_id(self.ctx.analyzed, self.ctx.interner, mc.method)
@@ -328,329 +261,12 @@ impl Cg<'_, '_, '_> {
             }
             (Type::Array(elem_ty), "iter") => {
                 let result = self.call_runtime(RuntimeFn::ArrayIter, &[obj.value])?;
+                let iter_type = self.interface_type("Iterator", vec![*elem_ty.clone()])?;
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
-                    vole_type: Type::Iterator(elem_ty.clone()),
+                    vole_type: iter_type,
                 }))
-            }
-            // Iterator.next() -> T | Done
-            (Type::Iterator(elem_ty), "next") => {
-                // Create stack slot for output value (8 bytes for i64)
-                let out_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    8,
-                    0,
-                ));
-                let out_ptr = self
-                    .builder
-                    .ins()
-                    .stack_addr(self.ctx.pointer_type, out_slot, 0);
-
-                // Call runtime: has_value = vole_array_iter_next(iter, out_ptr)
-                let has_value =
-                    self.call_runtime(RuntimeFn::ArrayIterNext, &[obj.value, out_ptr])?;
-
-                // Load value from out_slot
-                let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
-
-                // Build union result: T | Done
-                // Union layout: [tag:1][padding:7][payload:8] = 16 bytes
-                // Tag 0 = element type (T), Tag 1 = Done
-                let union_type = Type::Union(vec![*elem_ty.clone(), Type::Done]);
-                let union_size = 16u32; // tag(1) + padding(7) + payload(8)
-                let union_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    union_size,
-                    0,
-                ));
-
-                // Determine tag based on has_value:
-                // has_value != 0 => tag = 0 (element type)
-                // has_value == 0 => tag = 1 (Done)
-                let zero = self.builder.ins().iconst(types::I64, 0);
-                let is_done = self.builder.ins().icmp(IntCC::Equal, has_value, zero);
-                let tag_done = self.builder.ins().iconst(types::I8, 1);
-                let tag_value = self.builder.ins().iconst(types::I8, 0);
-                let tag = self.builder.ins().select(is_done, tag_done, tag_value);
-
-                // Store tag at offset 0
-                self.builder.ins().stack_store(tag, union_slot, 0);
-
-                // Store payload at offset 8 (value if has_value, 0 if done)
-                self.builder.ins().stack_store(value, union_slot, 8);
-
-                let union_ptr = self
-                    .builder
-                    .ins()
-                    .stack_addr(self.ctx.pointer_type, union_slot, 0);
-                Ok(Some(CompiledValue {
-                    value: union_ptr,
-                    ty: self.ctx.pointer_type,
-                    vole_type: union_type,
-                }))
-            }
-            // Iterator.collect() -> [T]
-            (Type::Iterator(elem_ty), "collect") => {
-                let result = self.call_runtime(RuntimeFn::ArrayIterCollect, &[obj.value])?;
-                Ok(Some(CompiledValue {
-                    value: result,
-                    ty: self.ctx.pointer_type,
-                    vole_type: Type::Array(elem_ty.clone()),
-                }))
-            }
-            // MapIterator.next() -> T | Done
-            (Type::MapIterator(elem_ty), "next") => {
-                // Create stack slot for output value (8 bytes for i64)
-                let out_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    8,
-                    0,
-                ));
-                let out_ptr = self
-                    .builder
-                    .ins()
-                    .stack_addr(self.ctx.pointer_type, out_slot, 0);
-
-                // Call runtime: has_value = vole_map_iter_next(iter, out_ptr)
-                let has_value = self.call_runtime(RuntimeFn::MapIterNext, &[obj.value, out_ptr])?;
-
-                // Load value from out_slot
-                let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
-
-                // Build union result: T | Done
-                // Union layout: [tag:1][padding:7][payload:8] = 16 bytes
-                // Tag 0 = element type (T), Tag 1 = Done
-                let union_type = Type::Union(vec![*elem_ty.clone(), Type::Done]);
-                let union_size = 16u32; // tag(1) + padding(7) + payload(8)
-                let union_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    union_size,
-                    0,
-                ));
-
-                // Determine tag based on has_value:
-                // has_value != 0 => tag = 0 (element type)
-                // has_value == 0 => tag = 1 (Done)
-                let zero = self.builder.ins().iconst(types::I64, 0);
-                let is_done = self.builder.ins().icmp(IntCC::Equal, has_value, zero);
-                let tag_done = self.builder.ins().iconst(types::I8, 1);
-                let tag_value = self.builder.ins().iconst(types::I8, 0);
-                let tag = self.builder.ins().select(is_done, tag_done, tag_value);
-
-                // Store tag at offset 0
-                self.builder.ins().stack_store(tag, union_slot, 0);
-
-                // Store payload at offset 8 (value if has_value, 0 if done)
-                self.builder.ins().stack_store(value, union_slot, 8);
-
-                let union_ptr = self
-                    .builder
-                    .ins()
-                    .stack_addr(self.ctx.pointer_type, union_slot, 0);
-                Ok(Some(CompiledValue {
-                    value: union_ptr,
-                    ty: self.ctx.pointer_type,
-                    vole_type: union_type,
-                }))
-            }
-            // MapIterator.collect() -> [T]
-            (Type::MapIterator(elem_ty), "collect") => {
-                let result = self.call_runtime(RuntimeFn::MapIterCollect, &[obj.value])?;
-                Ok(Some(CompiledValue {
-                    value: result,
-                    ty: self.ctx.pointer_type,
-                    vole_type: Type::Array(elem_ty.clone()),
-                }))
-            }
-            // FilterIterator.next() -> T | Done
-            (Type::FilterIterator(elem_ty), "next") => {
-                // Create stack slot for output value (8 bytes for i64)
-                let out_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    8,
-                    0,
-                ));
-                let out_ptr = self
-                    .builder
-                    .ins()
-                    .stack_addr(self.ctx.pointer_type, out_slot, 0);
-
-                // Call runtime: has_value = vole_filter_iter_next(iter, out_ptr)
-                let has_value =
-                    self.call_runtime(RuntimeFn::FilterIterNext, &[obj.value, out_ptr])?;
-
-                // Load value from out_slot
-                let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
-
-                // Build union result: T | Done
-                // Union layout: [tag:1][padding:7][payload:8] = 16 bytes
-                // Tag 0 = element type (T), Tag 1 = Done
-                let union_type = Type::Union(vec![*elem_ty.clone(), Type::Done]);
-                let union_size = 16u32; // tag(1) + padding(7) + payload(8)
-                let union_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    union_size,
-                    0,
-                ));
-
-                // Determine tag based on has_value:
-                // has_value != 0 => tag = 0 (element type)
-                // has_value == 0 => tag = 1 (Done)
-                let zero = self.builder.ins().iconst(types::I64, 0);
-                let is_done = self.builder.ins().icmp(IntCC::Equal, has_value, zero);
-                let tag_done = self.builder.ins().iconst(types::I8, 1);
-                let tag_value = self.builder.ins().iconst(types::I8, 0);
-                let tag = self.builder.ins().select(is_done, tag_done, tag_value);
-
-                // Store tag at offset 0
-                self.builder.ins().stack_store(tag, union_slot, 0);
-
-                // Store payload at offset 8 (value if has_value, 0 if done)
-                self.builder.ins().stack_store(value, union_slot, 8);
-
-                let union_ptr = self
-                    .builder
-                    .ins()
-                    .stack_addr(self.ctx.pointer_type, union_slot, 0);
-                Ok(Some(CompiledValue {
-                    value: union_ptr,
-                    ty: self.ctx.pointer_type,
-                    vole_type: union_type,
-                }))
-            }
-            // FilterIterator.collect() -> [T]
-            (Type::FilterIterator(elem_ty), "collect") => {
-                let result = self.call_runtime(RuntimeFn::FilterIterCollect, &[obj.value])?;
-                Ok(Some(CompiledValue {
-                    value: result,
-                    ty: self.ctx.pointer_type,
-                    vole_type: Type::Array(elem_ty.clone()),
-                }))
-            }
-            // TakeIterator.next() -> T | Done
-            (Type::TakeIterator(elem_ty), "next") => {
-                let out_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    8,
-                    0,
-                ));
-                let out_ptr = self
-                    .builder
-                    .ins()
-                    .stack_addr(self.ctx.pointer_type, out_slot, 0);
-
-                let has_value =
-                    self.call_runtime(RuntimeFn::TakeIterNext, &[obj.value, out_ptr])?;
-
-                let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
-
-                let union_type = Type::Union(vec![*elem_ty.clone(), Type::Done]);
-                let union_size = 16u32;
-                let union_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    union_size,
-                    0,
-                ));
-
-                let zero = self.builder.ins().iconst(types::I64, 0);
-                let is_done = self.builder.ins().icmp(IntCC::Equal, has_value, zero);
-                let tag_done = self.builder.ins().iconst(types::I8, 1);
-                let tag_value = self.builder.ins().iconst(types::I8, 0);
-                let tag = self.builder.ins().select(is_done, tag_done, tag_value);
-
-                self.builder.ins().stack_store(tag, union_slot, 0);
-                self.builder.ins().stack_store(value, union_slot, 8);
-
-                let union_ptr = self
-                    .builder
-                    .ins()
-                    .stack_addr(self.ctx.pointer_type, union_slot, 0);
-                Ok(Some(CompiledValue {
-                    value: union_ptr,
-                    ty: self.ctx.pointer_type,
-                    vole_type: union_type,
-                }))
-            }
-            // TakeIterator.collect() -> [T]
-            (Type::TakeIterator(elem_ty), "collect") => {
-                let result = self.call_runtime(RuntimeFn::TakeIterCollect, &[obj.value])?;
-                Ok(Some(CompiledValue {
-                    value: result,
-                    ty: self.ctx.pointer_type,
-                    vole_type: Type::Array(elem_ty.clone()),
-                }))
-            }
-            // SkipIterator.next() -> T | Done
-            (Type::SkipIterator(elem_ty), "next") => {
-                let out_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    8,
-                    0,
-                ));
-                let out_ptr = self
-                    .builder
-                    .ins()
-                    .stack_addr(self.ctx.pointer_type, out_slot, 0);
-
-                let has_value =
-                    self.call_runtime(RuntimeFn::SkipIterNext, &[obj.value, out_ptr])?;
-
-                let value = self.builder.ins().stack_load(types::I64, out_slot, 0);
-
-                let union_type = Type::Union(vec![*elem_ty.clone(), Type::Done]);
-                let union_size = 16u32;
-                let union_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    union_size,
-                    0,
-                ));
-
-                let zero = self.builder.ins().iconst(types::I64, 0);
-                let is_done = self.builder.ins().icmp(IntCC::Equal, has_value, zero);
-                let tag_done = self.builder.ins().iconst(types::I8, 1);
-                let tag_value = self.builder.ins().iconst(types::I8, 0);
-                let tag = self.builder.ins().select(is_done, tag_done, tag_value);
-
-                self.builder.ins().stack_store(tag, union_slot, 0);
-                self.builder.ins().stack_store(value, union_slot, 8);
-
-                let union_ptr = self
-                    .builder
-                    .ins()
-                    .stack_addr(self.ctx.pointer_type, union_slot, 0);
-                Ok(Some(CompiledValue {
-                    value: union_ptr,
-                    ty: self.ctx.pointer_type,
-                    vole_type: union_type,
-                }))
-            }
-            // SkipIterator.collect() -> [T]
-            (Type::SkipIterator(elem_ty), "collect") => {
-                let result = self.call_runtime(RuntimeFn::SkipIterCollect, &[obj.value])?;
-                Ok(Some(CompiledValue {
-                    value: result,
-                    ty: self.ctx.pointer_type,
-                    vole_type: Type::Array(elem_ty.clone()),
-                }))
-            }
-            // Iterator.count() -> i64 (works on any iterator type)
-            (Type::Iterator(_), "count")
-            | (Type::MapIterator(_), "count")
-            | (Type::FilterIterator(_), "count")
-            | (Type::TakeIterator(_), "count")
-            | (Type::SkipIterator(_), "count") => {
-                let result = self.call_runtime(RuntimeFn::IterCount, &[obj.value])?;
-                Ok(Some(self.i64_value(result)))
-            }
-            // Iterator.sum() -> i64 (works on numeric iterators)
-            (Type::Iterator(_), "sum")
-            | (Type::MapIterator(_), "sum")
-            | (Type::FilterIterator(_), "sum")
-            | (Type::TakeIterator(_), "sum")
-            | (Type::SkipIterator(_), "sum") => {
-                let result = self.call_runtime(RuntimeFn::IterSum, &[obj.value])?;
-                Ok(Some(self.i64_value(result)))
             }
             (Type::String, "length") => {
                 let result = self.call_runtime(RuntimeFn::StringLen, &[obj.value])?;
@@ -660,231 +276,52 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    fn iterator_map(
-        &mut self,
-        iter_obj: &CompiledValue,
-        _elem_ty: &Type,
-        args: &[Expr],
-    ) -> Result<CompiledValue, String> {
-        if args.len() != 1 {
-            return Err(format!("map expects 1 argument, got {}", args.len()));
+    fn interface_type(&mut self, name: &str, type_args: Vec<Type>) -> Result<Type, String> {
+        let sym = self
+            .ctx
+            .interner
+            .lookup(name)
+            .ok_or_else(|| format!("interface {} not interned", name))?;
+        let def = self
+            .ctx
+            .analyzed
+            .interface_registry
+            .get(sym, self.ctx.interner)
+            .ok_or_else(|| format!("unknown interface {}", name))?;
+        if !def.type_params.is_empty() && def.type_params.len() != type_args.len() {
+            return Ok(Type::Error);
         }
-
-        // Compile the transform function (should be a lambda/closure)
-        let transform = self.expr(&args[0])?;
-
-        // The transform should be a function
-        let (output_type, is_closure) = match &transform.vole_type {
-            Type::Function(ft) => ((*ft.return_type).clone(), ft.is_closure),
-            _ => {
-                return Err(format!(
-                    "map argument must be a function, got {:?}",
-                    transform.vole_type
-                ));
-            }
-        };
-
-        // If it's a pure function (not a closure), wrap it in a closure structure
-        // so the runtime can uniformly call it as a closure
-        let closure_ptr = if is_closure {
-            transform.value
-        } else {
-            // Wrap pure function in a closure with 0 captures
-            let zero = self.builder.ins().iconst(types::I64, 0);
-            self.call_runtime(RuntimeFn::ClosureAlloc, &[transform.value, zero])?
-        };
-
-        // Call vole_map_iter(source_iter, transform_closure)
-        let result = self.call_runtime(RuntimeFn::MapIter, &[iter_obj.value, closure_ptr])?;
-
-        Ok(CompiledValue {
-            value: result,
-            ty: self.ctx.pointer_type,
-            vole_type: Type::MapIterator(Box::new(output_type)),
-        })
-    }
-
-    fn iterator_filter(
-        &mut self,
-        iter_obj: &CompiledValue,
-        elem_ty: &Type,
-        args: &[Expr],
-    ) -> Result<CompiledValue, String> {
-        if args.len() != 1 {
-            return Err(format!("filter expects 1 argument, got {}", args.len()));
+        let mut substitutions = std::collections::HashMap::new();
+        for (param, arg) in def.type_params.iter().zip(type_args.iter()) {
+            substitutions.insert(*param, arg.clone());
         }
-
-        // Compile the predicate function (should be a lambda/closure)
-        let predicate = self.expr(&args[0])?;
-
-        // The predicate should be a function returning bool
-        let is_closure = match &predicate.vole_type {
-            Type::Function(ft) => ft.is_closure,
-            _ => {
-                return Err(format!(
-                    "filter argument must be a function, got {:?}",
-                    predicate.vole_type
-                ));
-            }
-        };
-
-        // If it's a pure function (not a closure), wrap it in a closure structure
-        // so the runtime can uniformly call it as a closure
-        let closure_ptr = if is_closure {
-            predicate.value
-        } else {
-            // Wrap pure function in a closure with 0 captures
-            let zero = self.builder.ins().iconst(types::I64, 0);
-            self.call_runtime(RuntimeFn::ClosureAlloc, &[predicate.value, zero])?
-        };
-
-        // Call vole_filter_iter(source_iter, predicate_closure)
-        let result = self.call_runtime(RuntimeFn::FilterIter, &[iter_obj.value, closure_ptr])?;
-
-        // FilterIterator preserves element type
-        Ok(CompiledValue {
-            value: result,
-            ty: self.ctx.pointer_type,
-            vole_type: Type::FilterIterator(Box::new(elem_ty.clone())),
-        })
-    }
-
-    fn iterator_take(
-        &mut self,
-        iter_obj: &CompiledValue,
-        elem_ty: &Type,
-        args: &[Expr],
-    ) -> Result<CompiledValue, String> {
-        if args.len() != 1 {
-            return Err(format!("take expects 1 argument, got {}", args.len()));
-        }
-
-        // Compile the count argument (should be an integer)
-        let count = self.expr(&args[0])?;
-
-        // Call vole_take_iter(source_iter, count)
-        let result = self.call_runtime(RuntimeFn::TakeIter, &[iter_obj.value, count.value])?;
-
-        // TakeIterator preserves element type
-        Ok(CompiledValue {
-            value: result,
-            ty: self.ctx.pointer_type,
-            vole_type: Type::TakeIterator(Box::new(elem_ty.clone())),
-        })
-    }
-
-    fn iterator_skip(
-        &mut self,
-        iter_obj: &CompiledValue,
-        elem_ty: &Type,
-        args: &[Expr],
-    ) -> Result<CompiledValue, String> {
-        if args.len() != 1 {
-            return Err(format!("skip expects 1 argument, got {}", args.len()));
-        }
-
-        // Compile the count argument (should be an integer)
-        let count = self.expr(&args[0])?;
-
-        // Call vole_skip_iter(source_iter, count)
-        let result = self.call_runtime(RuntimeFn::SkipIter, &[iter_obj.value, count.value])?;
-
-        // SkipIterator preserves element type
-        Ok(CompiledValue {
-            value: result,
-            ty: self.ctx.pointer_type,
-            vole_type: Type::SkipIterator(Box::new(elem_ty.clone())),
-        })
-    }
-
-    fn iterator_for_each(
-        &mut self,
-        iter_obj: &CompiledValue,
-        args: &[Expr],
-    ) -> Result<CompiledValue, String> {
-        if args.len() != 1 {
-            return Err(format!("for_each expects 1 argument, got {}", args.len()));
-        }
-
-        // Compile the callback function (should be a lambda/closure)
-        let callback = self.expr(&args[0])?;
-
-        // The callback should be a function
-        let is_closure = match &callback.vole_type {
-            Type::Function(ft) => ft.is_closure,
-            _ => {
-                return Err(format!(
-                    "for_each argument must be a function, got {:?}",
-                    callback.vole_type
-                ));
-            }
-        };
-
-        // If it's a pure function (not a closure), wrap it in a closure structure
-        // so the runtime can uniformly call it as a closure
-        let closure_ptr = if is_closure {
-            callback.value
-        } else {
-            // Wrap pure function in a closure with 0 captures
-            let zero = self.builder.ins().iconst(types::I64, 0);
-            self.call_runtime(RuntimeFn::ClosureAlloc, &[callback.value, zero])?
-        };
-
-        // Call vole_iter_for_each(iter, callback_closure)
-        self.call_runtime_void(RuntimeFn::IterForEach, &[iter_obj.value, closure_ptr])?;
-
-        // for_each returns void
-        Ok(self.void_value())
-    }
-
-    fn iterator_reduce(
-        &mut self,
-        iter_obj: &CompiledValue,
-        args: &[Expr],
-    ) -> Result<CompiledValue, String> {
-        if args.len() != 2 {
-            return Err(format!("reduce expects 2 arguments, got {}", args.len()));
-        }
-
-        // Compile the initial value
-        let init = self.expr(&args[0])?;
-
-        // Compile the reducer function (should be a lambda/closure)
-        let reducer = self.expr(&args[1])?;
-
-        // The reducer should be a function
-        let is_closure = match &reducer.vole_type {
-            Type::Function(ft) => ft.is_closure,
-            _ => {
-                return Err(format!(
-                    "reduce argument must be a function, got {:?}",
-                    reducer.vole_type
-                ));
-            }
-        };
-
-        // If it's a pure function (not a closure), wrap it in a closure structure
-        // so the runtime can uniformly call it as a closure
-        let closure_ptr = if is_closure {
-            reducer.value
-        } else {
-            // Wrap pure function in a closure with 0 captures
-            let zero = self.builder.ins().iconst(types::I64, 0);
-            self.call_runtime(RuntimeFn::ClosureAlloc, &[reducer.value, zero])?
-        };
-
-        // Call vole_iter_reduce(iter, init, reducer_closure)
-        let result = self.call_runtime(
-            RuntimeFn::IterReduce,
-            &[iter_obj.value, init.value, closure_ptr],
-        )?;
-
-        // reduce returns the same type as init
-        Ok(CompiledValue {
-            value: result,
-            ty: init.ty,
-            vole_type: init.vole_type,
-        })
+        let methods = def
+            .methods
+            .iter()
+            .map(|method| crate::sema::types::InterfaceMethodType {
+                name: method.name,
+                params: method
+                    .params
+                    .iter()
+                    .map(|t| substitute_type(t, &substitutions))
+                    .collect(),
+                return_type: Box::new(substitute_type(&method.return_type, &substitutions)),
+                has_default: method.has_default,
+            })
+            .collect();
+        let name_id = self
+            .ctx
+            .analyzed
+            .name_table
+            .name_id(self.ctx.analyzed.name_table.main_module(), &[sym])
+            .ok_or_else(|| format!("interface {} missing name id", name))?;
+        Ok(Type::Interface(crate::sema::types::InterfaceType {
+            name: sym,
+            name_id,
+            type_args,
+            methods,
+            extends: def.extends.clone(),
+        }))
     }
 
     fn functional_interface_call(

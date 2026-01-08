@@ -434,6 +434,21 @@ pub(crate) fn box_interface_value(
         return Ok(value);
     }
 
+    if ctx
+        .analyzed
+        .interface_registry
+        .is_external_only(interface.name, ctx.interner)
+    {
+        if iface_debug_enabled() {
+            eprintln!("iface_box: external-only interface, skip boxing");
+        }
+        return Ok(CompiledValue {
+            value: value.value,
+            ty: ctx.pointer_type,
+            vole_type: interface_type.clone(),
+        });
+    }
+
     let heap_alloc_ref = runtime_heap_alloc_ref(ctx, builder)?;
     let data_word = value_to_word(builder, &value, ctx.pointer_type, Some(heap_alloc_ref))?;
     let vtable_id =

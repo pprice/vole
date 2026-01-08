@@ -93,13 +93,6 @@ impl<'src> Parser<'src> {
                 self.advance();
                 Ok(TypeExpr::Done)
             }
-            TokenType::KwIterator => {
-                self.advance(); // consume 'Iterator'
-                self.consume(TokenType::Lt, "expected '<' after Iterator")?;
-                let elem_type = self.parse_type()?;
-                self.consume(TokenType::Gt, "expected '>' after Iterator element type")?;
-                Ok(TypeExpr::Iterator(Box::new(elem_type)))
-            }
             TokenType::KwI8 => {
                 self.advance();
                 Ok(TypeExpr::Primitive(PrimitiveType::I8))

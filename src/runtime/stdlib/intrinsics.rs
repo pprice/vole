@@ -2,6 +2,7 @@
 //! Native intrinsic functions for primitive types.
 
 use crate::runtime::RcString;
+use crate::runtime::iterator;
 use crate::runtime::native_registry::{NativeModule, NativeSignature, NativeType};
 
 /// Create the std:intrinsics native module
@@ -113,6 +114,96 @@ pub fn module() -> NativeModule {
         NativeSignature {
             params: vec![NativeType::Bool],
             return_type: NativeType::String,
+        },
+    );
+
+    // Iterator intrinsics
+    m.register(
+        "array_iter",
+        iterator::vole_array_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::Array(Box::new(NativeType::I64))],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_map",
+        iterator::vole_map_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_next",
+        iterator::vole_iter_next as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_filter",
+        iterator::vole_filter_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_take",
+        iterator::vole_take_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_skip",
+        iterator::vole_skip_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_collect",
+        iterator::vole_array_iter_collect as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::Array(Box::new(NativeType::I64)),
+        },
+    );
+    m.register(
+        "iter_count",
+        iterator::vole_iter_count as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_sum",
+        iterator::vole_iter_sum as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_for_each",
+        iterator::vole_iter_for_each as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::Nil,
+        },
+    );
+    m.register(
+        "iter_reduce",
+        iterator::vole_iter_reduce as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64,
         },
     );
 
