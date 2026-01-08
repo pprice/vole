@@ -238,8 +238,11 @@ impl Cg<'_, '_, '_> {
                         return_type: Box::new(method_def.return_type.clone()),
                         is_closure: false,
                     };
+                    // Box the lambda value to create the interface representation
+                    let boxed =
+                        box_interface_value(self.builder, self.ctx, lambda_val, &declared_type)?;
                     return self.interface_dispatch_call_args(
-                        &lambda_val,
+                        &boxed,
                         &call.args,
                         iface.name,
                         method_def.name,

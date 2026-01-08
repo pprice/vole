@@ -118,7 +118,18 @@ impl Cg<'_, '_, '_> {
         } else if let Some(global) = self.ctx.globals.iter().find(|g| g.name == sym) {
             // Compile global's initializer inline
             let global_init = global.init.clone();
-            self.expr(&global_init)
+            let mut value = self.expr(&global_init)?;
+
+            // If the global has a declared interface type, box the value
+            if let Some(ref ty_expr) = global.ty {
+                let declared_type = resolve_type_expr(ty_expr, self.ctx);
+                if matches!(&declared_type, Type::Interface(_))
+                    && !matches!(&value.vole_type, Type::Interface(_))
+                {
+                    value = box_interface_value(self.builder, self.ctx, value, &declared_type)?;
+                }
+            }
+            Ok(value)
         } else {
             Err(format!(
                 "undefined variable: {}",
