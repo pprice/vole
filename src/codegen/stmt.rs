@@ -490,19 +490,8 @@ impl Cg<'_, '_, '_> {
     /// Check if a type is an Iterator<T> type
     fn is_iterator_type(&self, ty: &Type) -> bool {
         match ty {
-            Type::Interface(iface) => {
-                let name = self.ctx.interner.resolve(iface.name);
-                name == "Iterator"
-            }
-            Type::GenericInstance { def, .. } => {
-                // Check if the name resolves to "Iterator"
-                let name = self
-                    .ctx
-                    .analyzed
-                    .name_table
-                    .display(*def, self.ctx.interner);
-                name == "Iterator" || name.ends_with("::Iterator")
-            }
+            Type::Interface(iface) => self.ctx.analyzed.well_known.is_iterator(iface.name_id),
+            Type::GenericInstance { def, .. } => self.ctx.analyzed.well_known.is_iterator(*def),
             _ => false,
         }
     }

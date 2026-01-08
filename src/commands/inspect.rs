@@ -117,6 +117,7 @@ pub fn inspect_files(
                     generic_calls,
                     name_table,
                     type_table,
+                    well_known,
                 ) = analyzer.into_analysis_results();
 
                 // Generate IR
@@ -137,6 +138,7 @@ pub fn inspect_files(
                     generic_calls,
                     name_table,
                     type_table,
+                    well_known,
                 };
                 let mut jit = JitContext::new();
                 let mut compiler = Compiler::new(&mut jit, &analyzed);

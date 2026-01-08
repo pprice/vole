@@ -17,7 +17,7 @@ use crate::sema::generic::{GenericFuncDef, MonomorphCache, MonomorphKey};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::{
     Analyzer, ErrorTypeInfo, FunctionType, ImplementRegistry, MethodResolutions, Type, TypeError,
-    TypeTable,
+    TypeTable, WellKnownTypes,
 };
 use crate::transforms;
 
@@ -47,6 +47,8 @@ pub struct AnalyzedProgram {
     pub name_table: NameTable,
     /// Opaque type identities for named types
     pub type_table: TypeTable,
+    /// Well-known stdlib type NameIds for fast comparison
+    pub well_known: WellKnownTypes,
 }
 
 /// Render a lexer error to stderr with source context
@@ -170,6 +172,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         generic_calls,
         name_table,
         type_table,
+        well_known,
     ) = analyzer.into_analysis_results();
     Ok(AnalyzedProgram {
         program,
@@ -188,6 +191,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         generic_calls,
         name_table,
         type_table,
+        well_known,
     })
 }
 
@@ -375,6 +379,7 @@ pub fn run_captured<W: Write + Send + 'static>(
         generic_calls,
         name_table,
         type_table,
+        well_known,
     ) = analyzer.into_analysis_results();
 
     let analyzed = AnalyzedProgram {
@@ -394,6 +399,7 @@ pub fn run_captured<W: Write + Send + 'static>(
         generic_calls,
         name_table,
         type_table,
+        well_known,
     };
 
     // Compile
