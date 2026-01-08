@@ -12,6 +12,7 @@ use crate::codegen::types::{
 use crate::errors::CodegenError;
 use crate::frontend::{Interner, Symbol};
 use crate::identity::NameId;
+use crate::sema::generic::substitute_type;
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::interface_registry::InterfaceMethodDef;
 use crate::sema::{FunctionType, Type};
@@ -65,6 +66,7 @@ impl InterfaceVtableRegistry {
         &mut self,
         ctx: &mut CompileCtx,
         interface_name: Symbol,
+        interface_type_args: &[Type],
         concrete_type: &Type,
     ) -> Result<DataId, String> {
         let concrete_key = match concrete_type {
@@ -101,12 +103,37 @@ impl InterfaceVtableRegistry {
                 )
             })?;
         let interface_name_id = iface_def.name_id;
+
+        // Build substitution map from interface type params to concrete type args
+        let substitutions: HashMap<Symbol, Type> = iface_def
+            .type_params
+            .iter()
+            .zip(interface_type_args.iter())
+            .map(|(param, arg)| (*param, arg.clone()))
+            .collect();
+
         let methods = collect_interface_methods(
             interface_name,
             &ctx.analyzed.interface_registry,
             ctx.interner,
         )
         .ok_or_else(|| "failed to collect interface methods".to_string())?;
+
+        // Specialize methods with concrete type arguments
+        let methods: Vec<InterfaceMethodDef> = methods
+            .into_iter()
+            .map(|method| InterfaceMethodDef {
+                name: method.name,
+                name_str: method.name_str.clone(),
+                params: method
+                    .params
+                    .iter()
+                    .map(|t| substitute_type(t, &substitutions))
+                    .collect(),
+                return_type: substitute_type(&method.return_type, &substitutions),
+                has_default: method.has_default,
+            })
+            .collect();
         let word_bytes = ctx.pointer_type.bytes() as usize;
 
         if iface_debug_enabled() {
@@ -461,10 +488,12 @@ pub(crate) fn box_interface_value(
 
     let heap_alloc_ref = runtime_heap_alloc_ref(ctx, builder)?;
     let data_word = value_to_word(builder, &value, ctx.pointer_type, Some(heap_alloc_ref))?;
-    let vtable_id =
-        ctx.interface_vtables
-            .borrow_mut()
-            .get_or_create(ctx, interface.name, &value.vole_type)?;
+    let vtable_id = ctx.interface_vtables.borrow_mut().get_or_create(
+        ctx,
+        interface.name,
+        &interface.type_args,
+        &value.vole_type,
+    )?;
     let vtable_gv = ctx.module.declare_data_in_func(vtable_id, builder.func);
     let vtable_ptr = builder.ins().global_value(ctx.pointer_type, vtable_gv);
 

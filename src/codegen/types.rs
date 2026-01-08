@@ -646,6 +646,12 @@ pub(crate) fn value_to_word(
     let needs_box = type_size(&value.vole_type, pointer_type) > word_bytes;
 
     if needs_box {
+        // If the Cranelift type is already a pointer and the Vole type needs boxing,
+        // then the value is already a pointer to boxed data (e.g., from external functions
+        // returning unions). Just return it directly - don't double-box.
+        if value.ty == pointer_type {
+            return Ok(value.value);
+        }
         let Some(heap_alloc_ref) = heap_alloc_ref else {
             return Err(
                 CodegenError::missing_resource("heap allocator for interface boxing").into(),
@@ -704,12 +710,13 @@ pub(crate) fn word_to_value(
     let needs_unbox = type_size(vole_type, pointer_type) > word_bytes;
 
     if needs_unbox {
-        return builder.ins().load(
-            type_to_cranelift(vole_type, pointer_type),
-            MemFlags::new(),
-            word,
-            0,
-        );
+        // If the target Cranelift type is pointer_type (e.g., unions), the word is
+        // already a pointer to the data - just return it, don't load from it.
+        let target_type = type_to_cranelift(vole_type, pointer_type);
+        if target_type == pointer_type {
+            return word;
+        }
+        return builder.ins().load(target_type, MemFlags::new(), word, 0);
     }
 
     match vole_type {
