@@ -41,43 +41,51 @@ impl std::error::Error for PathError {}
 /// - A directory (expands to **/*.vole recursively)
 /// - A glob pattern (e.g., "src/**/*.vole", "tests/*.vole")
 ///
-/// Returns deduplicated, sorted paths. Empty result is valid (not an error).
+/// Path ordering:
+/// - Explicit file paths preserve their input order
+/// - Glob/directory expansions are sorted and appended after explicit files
+/// - Duplicates are removed (glob results matching explicit files are excluded)
+///
+/// Returns deduplicated paths. Empty result is valid (not an error).
 pub fn expand_paths(patterns: &[String]) -> Result<Vec<PathBuf>, PathError> {
-    let mut files = Vec::new();
+    let mut explicit_files = Vec::new();
+    let mut glob_files = Vec::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();
 
     for pattern in patterns {
-        expand_pattern(pattern, &mut files, &mut seen)?;
+        expand_pattern(pattern, &mut explicit_files, &mut glob_files, &mut seen)?;
     }
 
-    // Sort for deterministic ordering
-    files.sort();
+    // Combine: explicit files first (preserving order), then glob files (unsorted)
+    // Duplicates already handled by the `seen` HashSet
+    explicit_files.extend(glob_files);
 
-    Ok(files)
+    Ok(explicit_files)
 }
 
 /// Expand a single pattern into file paths
 fn expand_pattern(
     pattern: &str,
-    files: &mut Vec<PathBuf>,
+    explicit_files: &mut Vec<PathBuf>,
+    glob_files: &mut Vec<PathBuf>,
     seen: &mut HashSet<PathBuf>,
 ) -> Result<(), PathError> {
     let path = PathBuf::from(pattern);
 
     if path.is_file() {
-        // Direct file path - must have .vole extension
+        // Direct file path - add to explicit files (preserves order)
         if has_vole_extension(&path) {
-            add_unique(path, files, seen);
+            add_unique(path, explicit_files, seen);
         }
         // Silently skip non-.vole files when explicitly named
         // (commands can validate this if they want stricter behavior)
     } else if path.is_dir() {
-        // Directory - expand to **/*.vole
+        // Directory - expand to **/*.vole and add to glob files
         let glob_pattern = format!("{}/**/*.vole", pattern);
-        expand_glob(&glob_pattern, files, seen)?;
+        expand_glob(&glob_pattern, glob_files, seen)?;
     } else {
-        // Treat as glob pattern
-        expand_glob(pattern, files, seen)?;
+        // Treat as glob pattern and add to glob files
+        expand_glob(pattern, glob_files, seen)?;
     }
 
     Ok(())

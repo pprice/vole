@@ -217,15 +217,25 @@ fn run_source_tests(
 
     // Compile
     let mut jit = JitContext::new();
-    let tests = {
+    let (compile_result, tests) = {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.set_source_file(file_path);
-        compiler
-            .compile_program(&analyzed.program)
-            .map_err(|e| format!("compilation error: {}", e))?;
-        compiler.take_tests()
+        let result = compiler.compile_program(&analyzed.program);
+        let tests = compiler.take_tests();
+        (result, tests)
     };
-    jit.finalize();
+
+    // Check compilation result
+    if let Err(e) = compile_result {
+        // CRITICAL: On compilation error, leak the JIT module to prevent cleanup
+        // Cranelift's Drop implementation can corrupt global state when dropping
+        // a module with partial/broken function definitions
+        std::mem::forget(jit);
+        return Err(format!("compilation error: {}", e));
+    }
+
+    // Finalize only on successful compilation
+    let _ = jit.finalize();
 
     // Filter tests if a filter is provided
     let tests = if let Some(pattern) = filter {

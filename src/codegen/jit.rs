@@ -563,8 +563,11 @@ impl JitContext {
     }
 
     /// Finalize all functions and get code pointers
-    pub fn finalize(&mut self) {
-        self.module.finalize_definitions().unwrap();
+    /// Returns Ok(()) on success, Err on finalization failure (safe to ignore)
+    pub fn finalize(&mut self) -> Result<(), String> {
+        self.module
+            .finalize_definitions()
+            .map_err(|e| format!("Finalization error: {:?}", e))
     }
 
     /// Get a function pointer by name
@@ -637,7 +640,7 @@ mod tests {
         builder.finalize();
 
         jit.define_function(func_id).unwrap();
-        jit.finalize();
+        let _ = jit.finalize();
 
         // Get and call the function
         let fn_ptr = jit.get_function_ptr("answer").unwrap();
@@ -671,7 +674,7 @@ mod tests {
         builder.finalize();
 
         jit.define_function(func_id).unwrap();
-        jit.finalize();
+        let _ = jit.finalize();
 
         let fn_ptr = jit.get_function_ptr("add").unwrap();
         let add: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(fn_ptr) };

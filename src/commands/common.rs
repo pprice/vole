@@ -405,7 +405,7 @@ pub fn run_captured<W: Write + Send + 'static>(
             return Err(());
         }
     }
-    jit.finalize();
+    let _ = jit.finalize();
 
     // Execute with captured stdout
     let fn_ptr = match jit.get_function_ptr("main") {

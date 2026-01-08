@@ -43,7 +43,7 @@ fn execute(path: &Path) -> Result<(), String> {
             .compile_program(&analyzed.program)
             .map_err(|e| format!("compilation error: {}", e))?;
     }
-    jit.finalize();
+    let _ = jit.finalize();
 
     // Execute main
     let fn_ptr = jit

@@ -37,7 +37,7 @@ fn compile_and_run(source: &str) -> i64 {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.compile_program(&analyzed.program).unwrap();
     }
-    jit.finalize();
+    let _ = jit.finalize();
 
     let fn_ptr = jit.get_function_ptr("main").unwrap();
     let main: extern "C" fn() -> i64 = unsafe { std::mem::transmute(fn_ptr) };
