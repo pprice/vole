@@ -72,6 +72,22 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
         return true;
     }
 
+    // Interface is compatible with GenericInstance (and vice versa) when they have same def and args
+    // This handles cases like Iterator<i64> (Interface) matching Iterator<T> instantiated as Iterator<i64> (GenericInstance)
+    match (from, to) {
+        (Type::Interface(iface), Type::GenericInstance { def, args }) => {
+            if iface.name_id == *def && iface.type_args == *args {
+                return true;
+            }
+        }
+        (Type::GenericInstance { def, args }, Type::Interface(iface)) => {
+            if *def == iface.name_id && *args == iface.type_args {
+                return true;
+            }
+        }
+        _ => {}
+    }
+
     false
 }
 

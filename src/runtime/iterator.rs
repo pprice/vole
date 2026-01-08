@@ -16,9 +16,10 @@ pub enum IteratorKind {
     Filter = 2,
     Take = 3,
     Skip = 4,
+    Chain = 5,
 }
 
-/// Unified iterator source - can be either an array, map, filter, take, or skip iterator
+/// Unified iterator source - can be either an array, map, filter, take, skip, or chain iterator
 /// This allows chaining (e.g., arr.iter().map(f).filter(p).take(5))
 #[repr(C)]
 pub union IteratorSource {
@@ -27,6 +28,7 @@ pub union IteratorSource {
     pub filter: FilterSource,
     pub take: TakeSource,
     pub skip: SkipSource,
+    pub chain: ChainSource,
 }
 
 /// Source data for array iteration
@@ -79,6 +81,18 @@ pub struct SkipSource {
     pub skipped: i64,
 }
 
+/// Source data for chain iteration (concatenates two iterators)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ChainSource {
+    /// First iterator to consume
+    pub first: *mut UnifiedIterator,
+    /// Second iterator to consume after first is exhausted
+    pub second: *mut UnifiedIterator,
+    /// Whether we've exhausted the first iterator (0 = on first, 1 = on second)
+    pub on_second: i64,
+}
+
 /// Unified iterator structure
 /// The kind field tells us which variant is active
 #[repr(C)]
@@ -93,6 +107,7 @@ pub type MapIterator = UnifiedIterator;
 pub type FilterIterator = UnifiedIterator;
 pub type TakeIterator = UnifiedIterator;
 pub type SkipIterator = UnifiedIterator;
+pub type ChainIterator = UnifiedIterator;
 
 /// Create a new array iterator
 /// Returns pointer to heap-allocated iterator
@@ -159,6 +174,13 @@ pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
                 let source = iter_ref.source.skip.source;
                 vole_array_iter_free(source);
             }
+            IteratorKind::Chain => {
+                // Recursively free both source iterators
+                let first = iter_ref.source.chain.first;
+                let second = iter_ref.source.chain.second;
+                vole_array_iter_free(first);
+                vole_array_iter_free(second);
+            }
         }
 
         // Free this iterator
@@ -208,6 +230,10 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
         IteratorKind::Skip => {
             // For skip iterators, delegate to skip_next logic
             vole_skip_iter_next(iter, out_value)
+        }
+        IteratorKind::Chain => {
+            // For chain iterators, delegate to chain_next logic
+            vole_chain_iter_next(iter, out_value)
         }
     }
 }
@@ -1132,4 +1158,102 @@ pub extern "C" fn vole_iter_all(iter: *mut UnifiedIterator, predicate: *const Cl
     vole_array_iter_free(iter);
 
     1 // true - all elements matched
+}
+
+// =============================================================================
+// ChainIterator - lazy concatenation of two iterators
+// =============================================================================
+
+/// Create a new chain iterator that yields elements from first, then second
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_chain_iter(
+    first: *mut UnifiedIterator,
+    second: *mut UnifiedIterator,
+) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Chain,
+        source: IteratorSource {
+            chain: ChainSource {
+                first,
+                second,
+                on_second: 0, // Start with first iterator
+            },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next value from chain iterator
+/// First exhausts the first iterator, then yields from the second
+/// Returns 1 and stores value in out_value if available
+/// Returns 0 if both iterators exhausted (Done)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_chain_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    // This function should only be called for Chain iterators
+    if iter_ref.kind != IteratorKind::Chain {
+        return 0;
+    }
+
+    let chain_src = unsafe { &mut iter_ref.source.chain };
+
+    // If we're still on the first iterator
+    if chain_src.on_second == 0 {
+        let has_value = vole_array_iter_next(chain_src.first, out_value);
+        if has_value != 0 {
+            return 1; // Got value from first
+        }
+        // First exhausted, switch to second
+        chain_src.on_second = 1;
+    }
+
+    // Now try the second iterator
+    vole_array_iter_next(chain_src.second, out_value)
+}
+
+/// Collect all remaining chain iterator values into a new array
+/// Returns pointer to newly allocated array
+/// Frees the iterator after collecting.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_chain_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
+    use crate::runtime::value::TaggedValue;
+
+    let result = RcArray::new();
+
+    if iter.is_null() {
+        return result;
+    }
+
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_chain_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+
+        unsafe {
+            RcArray::push(
+                result,
+                TaggedValue {
+                    tag: 0,
+                    value: value as u64,
+                },
+            );
+        }
+    }
+
+    // Free the iterator chain
+    vole_array_iter_free(iter);
+
+    result
 }

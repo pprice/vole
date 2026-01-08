@@ -39,6 +39,7 @@ interface Iterator<T> {
     func find(pred: (T) -> bool) -> T?
     func any(pred: (T) -> bool) -> bool
     func all(pred: (T) -> bool) -> bool
+    func chain(other: Iterator<T>) -> Iterator<T>
 
     external("std:intrinsics") {
         func "iter_next" as next() -> T | Done
@@ -57,6 +58,7 @@ interface Iterator<T> {
         func "iter_find" as find(pred: (T) -> bool) -> T?
         func "iter_any" as any(pred: (T) -> bool) -> bool
         func "iter_all" as all(pred: (T) -> bool) -> bool
+        func "iter_chain" as chain(other: Iterator<T>) -> Iterator<T>
     }
 }
 

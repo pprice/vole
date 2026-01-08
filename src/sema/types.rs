@@ -107,7 +107,7 @@ pub struct RecordType {
 }
 
 /// Interface type information
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct InterfaceType {
     pub name: Symbol,
     /// Canonical name ID for cross-interner lookups
@@ -115,6 +115,15 @@ pub struct InterfaceType {
     pub type_args: Vec<Type>,
     pub methods: Vec<InterfaceMethodType>,
     pub extends: Vec<Symbol>, // Parent interfaces
+}
+
+// Custom PartialEq to compare only name_id and type_args
+// This is needed because Symbol is interner-specific and methods can differ
+// when interfaces are loaded from different contexts
+impl PartialEq for InterfaceType {
+    fn eq(&self, other: &Self) -> bool {
+        self.name_id == other.name_id && self.type_args == other.type_args
+    }
 }
 
 /// Method signature in an interface
