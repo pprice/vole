@@ -196,6 +196,18 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty, types::I64, ptr_ty], Some(types::I64));
         self.import_function("vole_iter_reduce", &sig);
 
+        // vole_iter_first(iter: *mut UnifiedIterator) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_iter_first", &sig);
+
+        // vole_iter_last(iter: *mut UnifiedIterator) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_iter_last", &sig);
+
+        // vole_iter_nth(iter: *mut UnifiedIterator, n: i64) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
+        let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
+        self.import_function("vole_iter_nth", &sig);
+
         // vole_take_iter(source: *mut UnifiedIterator, count: i64) -> *mut TakeIterator
         let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
         self.import_function("vole_take_iter", &sig);
@@ -428,6 +440,18 @@ impl JitContext {
         builder.symbol(
             "vole_iter_reduce",
             crate::runtime::iterator::vole_iter_reduce as *const u8,
+        );
+        builder.symbol(
+            "vole_iter_first",
+            crate::runtime::iterator::vole_iter_first as *const u8,
+        );
+        builder.symbol(
+            "vole_iter_last",
+            crate::runtime::iterator::vole_iter_last as *const u8,
+        );
+        builder.symbol(
+            "vole_iter_nth",
+            crate::runtime::iterator::vole_iter_nth as *const u8,
         );
         builder.symbol(
             "vole_take_iter",

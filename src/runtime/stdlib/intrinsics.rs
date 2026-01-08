@@ -206,6 +206,54 @@ pub fn module() -> NativeModule {
             return_type: NativeType::I64,
         },
     );
+    m.register(
+        "iter_first",
+        iterator::vole_iter_first as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64, // Returns pointer to optional
+        },
+    );
+    m.register(
+        "iter_last",
+        iterator::vole_iter_last as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64, // Returns pointer to optional
+        },
+    );
+    m.register(
+        "iter_nth",
+        iterator::vole_iter_nth as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64, // Returns pointer to optional
+        },
+    );
+    m.register(
+        "iter_find",
+        iterator::vole_iter_find as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64, // Returns pointer to optional
+        },
+    );
+    m.register(
+        "iter_any",
+        iterator::vole_iter_any as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::Bool,
+        },
+    );
+    m.register(
+        "iter_all",
+        iterator::vole_iter_all as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::Bool,
+        },
+    );
 
     m
 }

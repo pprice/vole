@@ -106,6 +106,19 @@ impl Cg<'_, '_, '_> {
         right: CompiledValue,
         op: BinaryOp,
     ) -> Result<CompiledValue, String> {
+        // Handle optional/nil comparisons specially
+        // When comparing optional == nil or optional != nil, we need to check the tag
+        if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
+            // Check if left is optional and right is nil
+            if left.vole_type.is_optional() && matches!(right.vole_type, Type::Nil) {
+                return self.optional_nil_compare(left, op);
+            }
+            // Check if right is optional and left is nil
+            if right.vole_type.is_optional() && matches!(left.vole_type, Type::Nil) {
+                return self.optional_nil_compare(right, op);
+            }
+        }
+
         // Determine result type - original behavior: use left's type for integers
         // This matches the original compiler.rs behavior
         let result_ty = if left.ty == types::F64 || right.ty == types::F64 {
@@ -305,6 +318,46 @@ impl Cg<'_, '_, '_> {
         } else {
             Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
         }
+    }
+
+    /// Compare an optional value with nil
+    /// Returns true if the optional's tag matches the nil tag
+    fn optional_nil_compare(
+        &mut self,
+        optional: CompiledValue,
+        op: BinaryOp,
+    ) -> Result<CompiledValue, String> {
+        let Type::Union(variants) = &optional.vole_type else {
+            return Err("optional_nil_compare called on non-union type".into());
+        };
+
+        // Find the position of nil in the variants (this is the nil tag value)
+        let nil_tag = variants
+            .iter()
+            .position(|v| v == &Type::Nil)
+            .unwrap_or(usize::MAX);
+
+        // Load the tag from the optional (first byte)
+        let tag = self
+            .builder
+            .ins()
+            .load(types::I8, MemFlags::new(), optional.value, 0);
+
+        // Compare tag with nil_tag
+        let nil_tag_val = self.builder.ins().iconst(types::I8, nil_tag as i64);
+        let is_nil = self.builder.ins().icmp(IntCC::Equal, tag, nil_tag_val);
+
+        // For != nil, we need to invert the result
+        let result = match op {
+            BinaryOp::Eq => is_nil,
+            BinaryOp::Ne => {
+                let one = self.builder.ins().iconst(types::I8, 1);
+                self.builder.ins().isub(one, is_nil)
+            }
+            _ => unreachable!("optional_nil_compare only handles Eq and Ne"),
+        };
+
+        Ok(self.bool_value(result))
     }
 
     /// Compile compound assignment (+=, -=, etc.)

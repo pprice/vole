@@ -33,6 +33,12 @@ interface Iterator<T> {
     func reduce(init: T, f: (T, T) -> T) -> T
     func count() -> i64
     func sum() -> i64
+    func first() -> T?
+    func last() -> T?
+    func nth(n: i64) -> T?
+    func find(pred: (T) -> bool) -> T?
+    func any(pred: (T) -> bool) -> bool
+    func all(pred: (T) -> bool) -> bool
 
     external("std:intrinsics") {
         func "iter_next" as next() -> T | Done
@@ -45,6 +51,12 @@ interface Iterator<T> {
         func "iter_reduce" as reduce(init: T, f: (T, T) -> T) -> T
         func "iter_count" as count() -> i64
         func "iter_sum" as sum() -> i64
+        func "iter_first" as first() -> T?
+        func "iter_last" as last() -> T?
+        func "iter_nth" as nth(n: i64) -> T?
+        func "iter_find" as find(pred: (T) -> bool) -> T?
+        func "iter_any" as any(pred: (T) -> bool) -> bool
+        func "iter_all" as all(pred: (T) -> bool) -> bool
     }
 }
 
