@@ -266,6 +266,9 @@ impl<'src> Parser<'src> {
         let mut external = None;
 
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            // Check for 'default' keyword prefix
+            let is_default = self.match_token(TokenType::KwDefault);
+
             if self.check(TokenType::KwExternal) {
                 if external.is_some() {
                     return Err(ParseError::new(
@@ -275,9 +278,21 @@ impl<'src> Parser<'src> {
                         self.current.span,
                     ));
                 }
-                external = Some(self.parse_external_block()?);
+                let mut block = self.parse_external_block()?;
+                block.is_default = is_default;
+                external = Some(block);
             } else if self.check(TokenType::KwFunc) {
-                methods.push(self.interface_method()?);
+                methods.push(self.interface_method(is_default)?);
+            } else if is_default {
+                // 'default' keyword without 'func' or 'external'
+                return Err(ParseError::new(
+                    ParserError::ExpectedToken {
+                        expected: "'func' or 'external' after 'default'".to_string(),
+                        found: self.current.ty.as_str().to_string(),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
             } else if self.check(TokenType::Identifier) {
                 // Field: name: type
                 let field_span = self.current.span;
@@ -325,7 +340,8 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse interface method: func name(params) -> Type or func name(params) -> Type { body }
-    fn interface_method(&mut self) -> Result<InterfaceMethod, ParseError> {
+    /// The is_default flag indicates whether the method was preceded by 'default' keyword.
+    fn interface_method(&mut self, is_default: bool) -> Result<InterfaceMethod, ParseError> {
         let start_span = self.current.span;
         self.consume(TokenType::KwFunc, "expected 'func' in interface method")?;
 
@@ -369,6 +385,7 @@ impl<'src> Parser<'src> {
             params,
             return_type,
             body,
+            is_default,
             span,
         })
     }

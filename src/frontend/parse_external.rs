@@ -56,6 +56,7 @@ impl<'src> Parser<'src> {
         Ok(ExternalBlock {
             module_path,
             functions,
+            is_default: false, // Caller sets to true if 'default' keyword was present
             span,
         })
     }

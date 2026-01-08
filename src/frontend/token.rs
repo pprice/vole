@@ -49,6 +49,7 @@ pub enum TokenType {
     KwImport,     // import keyword
     KwDone,       // Done keyword (iterator termination sentinel)
     KwYield,      // yield keyword (generator yield expression)
+    KwDefault,    // default keyword (interface default methods)
 
     // Type keywords
     KwI8,
@@ -166,6 +167,7 @@ impl TokenType {
             Self::KwImport => "import",
             Self::KwDone => "Done",
             Self::KwYield => "yield",
+            Self::KwDefault => "default",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",

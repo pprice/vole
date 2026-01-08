@@ -1,0 +1,9 @@
+// Test that 'default external' parses correctly
+// This tests syntax only - sema errors are expected due to missing method declarations
+interface Formatter {
+    func format(s: string) -> string
+
+    default external("std:format") {
+        func "fmt_upper" as upper(s: string) -> string
+    }
+}

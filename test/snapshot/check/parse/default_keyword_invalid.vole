@@ -1,0 +1,4 @@
+// Test that 'default' without func or external is an error
+interface Invalid {
+    default x: i64
+}

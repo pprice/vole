@@ -137,6 +137,7 @@ pub struct InterfaceMethod {
     pub params: Vec<Param>,
     pub return_type: Option<TypeExpr>,
     pub body: Option<Block>, // None = abstract, Some = default implementation
+    pub is_default: bool,    // true if marked with 'default' keyword
     pub span: Span,
 }
 
@@ -155,6 +156,7 @@ pub struct ImplementBlock {
 pub struct ExternalBlock {
     pub module_path: String,
     pub functions: Vec<ExternalFunc>,
+    pub is_default: bool, // true if marked with 'default' keyword (interface default methods)
     pub span: Span,
 }
 

@@ -1,0 +1,41 @@
+// Test 'default' keyword syntax for interface methods
+// This tests the parsing of 'default func' and 'default external'
+
+interface Counter {
+    // Abstract method - no default keyword, no body
+    func value() -> i64
+
+    // Default method - has 'default' keyword and body
+    default func increment() -> i64 {
+        return self.value() + 1
+    }
+
+    // Another default method
+    default func decrement() -> i64 {
+        return self.value() - 1
+    }
+
+    // Abstract method - no default keyword, no body
+    func reset() -> i64
+}
+
+record SimpleCounter implements Counter {
+    current: i64,
+
+    func value() -> i64 {
+        return self.current
+    }
+
+    func reset() -> i64 {
+        return 0
+    }
+}
+
+tests "default keyword parsing" {
+    test "default method can call abstract method" {
+        let c = SimpleCounter { current: 10 }
+        assert(c.value() == 10)
+        assert(c.increment() == 11)
+        assert(c.decrement() == 9)
+    }
+}
