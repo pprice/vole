@@ -4,6 +4,7 @@ use cranelift::prelude::*;
 
 use crate::codegen::types::CompileCtx;
 use crate::codegen::types::CompiledValue;
+use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::sema::Type;
 
@@ -19,10 +20,11 @@ pub(crate) fn get_field_slot_and_type(
                     return Ok((sf.slot, sf.ty.clone()));
                 }
             }
-            Err(format!(
-                "Field {} not found in class",
-                ctx.interner.resolve(field)
-            ))
+            Err(CodegenError::not_found(
+                "field",
+                format!("{} in class", ctx.interner.resolve(field)),
+            )
+            .into())
         }
         Type::Record(record_type) => {
             for sf in &record_type.fields {
@@ -30,16 +32,18 @@ pub(crate) fn get_field_slot_and_type(
                     return Ok((sf.slot, sf.ty.clone()));
                 }
             }
-            Err(format!(
-                "Field {} not found in record",
-                ctx.interner.resolve(field)
-            ))
+            Err(CodegenError::not_found(
+                "field",
+                format!("{} in record", ctx.interner.resolve(field)),
+            )
+            .into())
         }
-        _ => Err(format!(
-            "Cannot access field {} on non-class/record type {:?}",
-            ctx.interner.resolve(field),
-            vole_type
-        )),
+        _ => Err(CodegenError::type_mismatch(
+            "field access",
+            "class or record",
+            format!("{:?}", vole_type),
+        )
+        .into()),
     }
 }
 
@@ -47,10 +51,12 @@ pub(crate) fn get_type_name_symbol(vole_type: &Type) -> Result<Symbol, String> {
     match vole_type {
         Type::Class(class_type) => Ok(class_type.name),
         Type::Record(record_type) => Ok(record_type.name),
-        _ => Err(format!(
-            "Cannot get type name from non-class/record type {:?}",
-            vole_type
-        )),
+        _ => Err(CodegenError::type_mismatch(
+            "type name extraction",
+            "class or record",
+            format!("{:?}", vole_type),
+        )
+        .into()),
     }
 }
 

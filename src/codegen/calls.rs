@@ -6,6 +6,7 @@ use cranelift::prelude::*;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 
+use crate::errors::CodegenError;
 use crate::frontend::{CallExpr, ExprKind, NodeId, StringPart};
 use crate::runtime::native_registry::NativeType;
 use crate::sema::{FunctionType, Type};
@@ -27,7 +28,9 @@ pub(crate) fn compile_string_literal(
     let func_id = func_registry
         .runtime_key(RuntimeFn::StringNew)
         .and_then(|key| func_registry.func_id(key))
-        .ok_or_else(|| "vole_string_new not found".to_string())?;
+        .ok_or_else(|| {
+            CodegenError::not_found("runtime function", "vole_string_new").to_string()
+        })?;
     let func_ref = module.declare_func_in_func(func_id, builder.func);
 
     // Pass the string data pointer and length as constants
@@ -372,11 +375,11 @@ impl Cg<'_, '_, '_> {
                 }
             }
 
-            return Err(format!("{} not found", callee_name));
+            return Err(CodegenError::not_found("function", callee_name).into());
         }
 
         // No module context - just fail
-        Err(format!("undefined function: {}", callee_name))
+        Err(CodegenError::not_found("function", callee_name).into())
     }
 
     /// Helper to call a function by its FuncId
@@ -448,16 +451,14 @@ impl Cg<'_, '_, '_> {
             return self.call_closure_value(callee.value, func_type.clone(), call);
         }
 
-        Err("Cannot call non-function value".to_string())
+        Err(CodegenError::type_mismatch("call expression", "function", "non-function").into())
     }
 
     /// Compile print/println - dispatches to correct vole_println_* based on argument type
     fn call_println(&mut self, call: &CallExpr, newline: bool) -> Result<CompiledValue, String> {
         if call.args.len() != 1 {
-            return Err(format!(
-                "{} expects exactly one argument",
-                if newline { "println" } else { "print" }
-            ));
+            let fn_name = if newline { "println" } else { "print" };
+            return Err(CodegenError::arg_count(fn_name, 1, call.args.len()).into());
         }
 
         let arg = self.expr(&call.args[0])?;
@@ -514,7 +515,7 @@ impl Cg<'_, '_, '_> {
     /// Compile print_char builtin for ASCII output
     fn call_print_char(&mut self, call: &CallExpr) -> Result<CompiledValue, String> {
         if call.args.len() != 1 {
-            return Err("print_char expects exactly one argument".to_string());
+            return Err(CodegenError::arg_count("print_char", 1, call.args.len()).into());
         }
 
         let arg = self.expr(&call.args[0])?;
@@ -525,7 +526,12 @@ impl Cg<'_, '_, '_> {
         } else if arg.ty == types::I8 {
             arg.value
         } else {
-            return Err("print_char expects an integer argument".to_string());
+            return Err(CodegenError::type_mismatch(
+                "print_char argument",
+                "i32 or i64",
+                "non-integer",
+            )
+            .into());
         };
 
         self.call_runtime_void(RuntimeFn::PrintChar, &[char_val])?;
@@ -535,7 +541,7 @@ impl Cg<'_, '_, '_> {
     /// Compile assert
     fn call_assert(&mut self, call: &CallExpr, call_line: u32) -> Result<CompiledValue, String> {
         if call.args.is_empty() {
-            return Err("assert requires at least one argument".to_string());
+            return Err(CodegenError::arg_count("assert", 1, 0).into());
         }
 
         let cond = self.expr(&call.args[0])?;

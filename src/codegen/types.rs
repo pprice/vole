@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use crate::codegen::FunctionRegistry;
 use crate::commands::common::AnalyzedProgram;
+use crate::errors::CodegenError;
 use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
 use crate::identity::{ModuleId, NameId, NameTable, NamerLookup};
 use crate::runtime::NativeRegistry;
@@ -652,7 +653,9 @@ pub(crate) fn value_to_word(
 
     if needs_box {
         let Some(heap_alloc_ref) = heap_alloc_ref else {
-            return Err("heap allocator not available for interface boxing".to_string());
+            return Err(
+                CodegenError::missing_resource("heap allocator for interface boxing").into(),
+            );
         };
         let size_val = builder.ins().iconst(
             pointer_type,

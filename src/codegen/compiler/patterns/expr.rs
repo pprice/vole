@@ -23,6 +23,7 @@ use crate::codegen::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
     convert_to_type, fallible_error_tag, resolve_type_expr, type_to_cranelift,
 };
+use crate::errors::CodegenError;
 use crate::frontend::{AssignTarget, BinaryOp, Expr, ExprKind, Pattern, Symbol, UnaryOp};
 use crate::sema::Type;
 
@@ -95,10 +96,7 @@ pub(crate) fn compile_expr(
                     // a more sophisticated approach would be needed
                     compile_expr(builder, &global.init, variables, ctx)
                 } else {
-                    Err(format!(
-                        "undefined variable: {}",
-                        ctx.interner.resolve(*sym)
-                    ))
+                    Err(CodegenError::not_found("variable", ctx.interner.resolve(*sym)).into())
                 }
             }
         }
@@ -445,10 +443,7 @@ pub(crate) fn compile_expr(
                         builder.def_var(*var, final_value);
                         Ok(value)
                     } else {
-                        Err(format!(
-                            "undefined variable: {}",
-                            ctx.interner.resolve(*sym)
-                        ))
+                        Err(CodegenError::not_found("variable", ctx.interner.resolve(*sym)).into())
                     }
                 }
                 AssignTarget::Field { object, field, .. } => {
@@ -474,7 +469,7 @@ pub(crate) fn compile_expr(
         }
         ExprKind::Range(_) => {
             // Range expressions are only supported in for-in context
-            Err("Range expressions only supported in for-in context".to_string())
+            Err(CodegenError::unsupported("range expressions outside for-in").into())
         }
         ExprKind::ArrayLiteral(elements) => {
             // Call vole_array_new()
@@ -979,7 +974,12 @@ pub(crate) fn compile_expr(
 
             // Get nil tag for this union
             let Type::Union(variants) = &value.vole_type else {
-                return Err("Expected union for ??".to_string());
+                return Err(CodegenError::type_mismatch(
+                    "null coalesce",
+                    "optional/union type",
+                    "non-union",
+                )
+                .into());
             };
             let nil_tag = variants
                 .iter()
@@ -1054,7 +1054,7 @@ pub(crate) fn compile_expr(
         ExprKind::TypeLiteral(_) => {
             // Type values are compile-time only and have no runtime representation.
             // If we reach here, the semantic analyzer should have caught this.
-            Err("type expressions cannot be used as runtime values".to_string())
+            Err(CodegenError::unsupported("type expressions as runtime values").into())
         }
 
         ExprKind::StructLiteral(sl) => compile_struct_literal(builder, sl, variables, ctx),
@@ -1086,7 +1086,7 @@ pub(crate) fn compile_expr(
         }
         ExprKind::Yield(_) => {
             // Yield should be caught in semantic analysis
-            Err("yield expression not supported outside generator context".to_string())
+            Err(CodegenError::unsupported("yield expression outside generator context").into())
         }
     }
 }

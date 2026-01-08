@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::codegen::structs::get_type_name_symbol;
 use crate::codegen::types::MethodInfo;
 use crate::commands::common::AnalyzedProgram;
+use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::identity::NameId;
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
@@ -106,10 +107,11 @@ where
                 ..
             } => {
                 if *is_builtin {
-                    return Err(format!(
-                        "Unhandled builtin method: {}",
-                        input.method_name_str
-                    ));
+                    return Err(CodegenError::internal_with_context(
+                        "unhandled builtin method",
+                        input.method_name_str,
+                    )
+                    .into());
                 }
                 if let Some(ext_info) = external_info {
                     return Ok(MethodTarget::External {
@@ -119,15 +121,19 @@ where
                 }
                 let type_id = TypeId::from_type(input.object_type, &input.analyzed.type_table)
                     .ok_or_else(|| {
-                        format!(
-                            "Unknown method {} on {}",
-                            input.method_name_str,
-                            crate::codegen::types::display_type(
-                                input.analyzed,
-                                &input.analyzed.interner,
-                                input.object_type
-                            )
+                        CodegenError::not_found(
+                            "method",
+                            format!(
+                                "{} on {}",
+                                input.method_name_str,
+                                crate::codegen::types::display_type(
+                                    input.analyzed,
+                                    &input.analyzed.interner,
+                                    input.object_type
+                                )
+                            ),
                         )
+                        .to_string()
                     })?;
                 let method_info = lookup_impl_method(type_id)?;
                 Ok(MethodTarget::Implemented {

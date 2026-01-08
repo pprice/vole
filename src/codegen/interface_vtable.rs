@@ -9,6 +9,7 @@ use crate::codegen::types::{
     CompileCtx, CompiledValue, MethodInfo, method_name_id, type_to_cranelift, value_to_word,
     word_to_value,
 };
+use crate::errors::CodegenError;
 use crate::frontend::{Interner, Symbol};
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::interface_registry::InterfaceMethodDef;
@@ -361,7 +362,9 @@ impl InterfaceVtableRegistry {
                 builder.ins().return_(&[]);
             } else {
                 let Some(result) = results.first().copied() else {
-                    return Err("interface wrapper missing return value".to_string());
+                    return Err(
+                        CodegenError::internal("interface wrapper missing return value").into(),
+                    );
                 };
                 let heap_alloc_ref = runtime_heap_alloc_ref(ctx, &mut builder)?;
                 let word = value_to_word(
@@ -605,11 +608,15 @@ fn resolve_vtable_target(
         });
     }
 
-    Err(format!(
-        "no method implementation for {} on {:?}",
-        ctx.interner.resolve(method_def.name),
-        concrete_type
-    ))
+    Err(CodegenError::not_found(
+        "method implementation",
+        format!(
+            "{} on {:?}",
+            ctx.interner.resolve(method_def.name),
+            concrete_type
+        ),
+    )
+    .into())
 }
 
 fn runtime_heap_alloc_ref(

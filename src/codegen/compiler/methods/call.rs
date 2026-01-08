@@ -15,6 +15,7 @@ use crate::codegen::types::{
     CompileCtx, CompiledValue, method_name_id, module_name_id, type_to_cranelift, value_to_word,
     word_to_value,
 };
+use crate::errors::CodegenError;
 use crate::frontend::{Expr, MethodCallExpr, NodeId, Symbol};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::{FunctionType, Type};
@@ -101,18 +102,20 @@ pub(crate) fn compile_method_call(
                 }
             }
         } else {
-            return Err(format!(
-                "Module method {}::{} has no resolution",
-                module_path, method_name_str
-            ));
+            return Err(CodegenError::not_found(
+                "module method",
+                format!("{}::{}", module_path, method_name_str),
+            )
+            .into());
         }
     }
 
     let method_id = method_name_id(ctx.analyzed, ctx.interner, mc.method).ok_or_else(|| {
-        format!(
-            "codegen error: method name not interned (method: {})",
-            method_name_str
+        CodegenError::internal_with_context(
+            "method name not interned",
+            format!("method: {}", method_name_str),
         )
+        .to_string()
     })?;
 
     let resolution = ctx.analyzed.method_resolutions.get(expr_id);

@@ -151,7 +151,10 @@ pub(crate) fn compile_binary_op(
             }
         }
         BinaryOp::And | BinaryOp::Or => {
-            return Err("And/Or should be handled with short-circuit evaluation".to_string());
+            return Err(crate::errors::CodegenError::internal(
+                "And/Or should be handled with short-circuit evaluation",
+            )
+            .into());
         }
         BinaryOp::BitAnd => builder.ins().band(left_val, right_val),
         BinaryOp::BitOr => builder.ins().bor(left_val, right_val),

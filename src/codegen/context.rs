@@ -9,6 +9,7 @@ use cranelift::prelude::{AbiParam, FunctionBuilder, InstBuilder, Value, Variable
 use cranelift_module::{FuncId, Module};
 
 use crate::codegen::{FunctionKey, RuntimeFn};
+use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::Type;
@@ -159,16 +160,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Call a runtime function and return the first result (or error if no results)
     pub fn call_runtime(&mut self, runtime: RuntimeFn, args: &[Value]) -> Result<Value, String> {
-        let key = self
-            .ctx
-            .func_registry
-            .runtime_key(runtime)
-            .ok_or_else(|| format!("{} not registered", runtime.name()))?;
+        let key = self.ctx.func_registry.runtime_key(runtime).ok_or_else(|| {
+            CodegenError::not_found("runtime function", runtime.name()).to_string()
+        })?;
         let func_ref = self.func_ref(key)?;
         let call = self.builder.ins().call(func_ref, args);
         let results = self.builder.inst_results(call);
         if results.is_empty() {
-            Err(format!("{} returned no value", runtime.name()))
+            Err(CodegenError::internal_with_context(
+                "runtime function returned no value",
+                runtime.name(),
+            )
+            .into())
         } else {
             Ok(results[0])
         }

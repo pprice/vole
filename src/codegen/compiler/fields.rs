@@ -15,6 +15,7 @@ use crate::codegen::structs::{
 };
 use crate::codegen::types::type_to_cranelift;
 use crate::codegen::types::{CompileCtx, CompiledValue, module_name_id};
+use crate::errors::CodegenError;
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, StructLiteralExpr, Symbol};
 use crate::sema::Type;
 use crate::sema::types::ConstantValue;
@@ -151,24 +152,27 @@ pub(crate) fn compile_field_access(
             // For function types accessed as fields (e.g., storing a reference),
             // we need a function pointer - but this is typically done via method calls
             if matches!(export_type, Type::Function(_)) {
-                return Err(format!(
-                    "Module function {} should be called, not accessed as a field. Use {}() instead.",
-                    field_name, field_name
-                ));
+                return Err(CodegenError::unsupported_with_context(
+                    "function as field value",
+                    format!("use {}() to call the function", field_name),
+                )
+                .into());
             }
 
             // Non-constant export that we don't have a value for
-            return Err(format!(
-                "Module export {} is not a constant literal and cannot be accessed at compile time",
-                field_name
-            ));
+            return Err(CodegenError::unsupported_with_context(
+                "non-constant module export",
+                format!("{} cannot be accessed at compile time", field_name),
+            )
+            .into());
         }
 
         let module_path = ctx.analyzed.name_table.module_path(module_type.module_id);
-        return Err(format!(
-            "Module {} has no export named {}",
-            module_path, field_name
-        ));
+        return Err(CodegenError::not_found(
+            "module export",
+            format!("{}.{}", module_path, field_name),
+        )
+        .into());
     }
 
     // Get slot and type from object's type (for classes/records)
@@ -207,7 +211,9 @@ pub(crate) fn compile_optional_chain(
 
     // The object should be an optional type (union with nil)
     let Type::Union(variants) = &obj.vole_type else {
-        return Err("Expected optional type for ?.".to_string());
+        return Err(
+            CodegenError::type_mismatch("optional chain", "optional type", "non-optional").into(),
+        );
     };
 
     // Find the nil tag

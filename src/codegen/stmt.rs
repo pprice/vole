@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use cranelift::prelude::*;
 
 use crate::codegen::RuntimeFn;
+use crate::errors::CodegenError;
 use crate::frontend::{self, ExprKind, RaiseStmt, Stmt, Symbol};
 use crate::sema::Type;
 
@@ -42,7 +43,9 @@ pub(super) fn construct_union(
     pointer_type: types::Type,
 ) -> Result<CompiledValue, String> {
     let Type::Union(variants) = union_type else {
-        return Err("Expected union type".to_string());
+        return Err(
+            CodegenError::type_mismatch("union construction", "union type", "non-union").into(),
+        );
     };
 
     let (tag, actual_value, actual_type) =
@@ -67,10 +70,12 @@ pub(super) fn construct_union(
                     (pos, narrowed, variant_type.clone())
                 }
                 None => {
-                    return Err(format!(
-                        "Type {:?} not in union {:?}",
-                        value.vole_type, variants
-                    ));
+                    return Err(CodegenError::type_mismatch(
+                        "union variant",
+                        format!("one of {:?}", variants),
+                        format!("{:?}", value.vole_type),
+                    )
+                    .into());
                 }
             }
         };
@@ -482,7 +487,12 @@ impl Cg<'_, '_, '_> {
         union_type: &Type,
     ) -> Result<CompiledValue, String> {
         let Type::Union(variants) = union_type else {
-            return Err("Expected union type".to_string());
+            return Err(CodegenError::type_mismatch(
+                "union construction",
+                "union type",
+                "non-union",
+            )
+            .into());
         };
 
         let (tag, actual_value, actual_type) = if let Some(pos) =
@@ -508,10 +518,12 @@ impl Cg<'_, '_, '_> {
                     (pos, narrowed, variant_type.clone())
                 }
                 None => {
-                    return Err(format!(
-                        "Type {:?} not in union {:?}",
-                        value.vole_type, variants
-                    ));
+                    return Err(CodegenError::type_mismatch(
+                        "union variant",
+                        format!("one of {:?}", variants),
+                        format!("{:?}", value.vole_type),
+                    )
+                    .into());
                 }
             }
         };
@@ -559,10 +571,12 @@ impl Cg<'_, '_, '_> {
         let fallible_type = match return_type {
             Type::Fallible(ft) => ft,
             _ => {
-                return Err(format!(
-                    "raise statement used in function with non-fallible return type: {:?}",
-                    return_type
-                ));
+                return Err(CodegenError::type_mismatch(
+                    "raise statement",
+                    "fallible return type",
+                    format!("{:?}", return_type),
+                )
+                .into());
             }
         };
 

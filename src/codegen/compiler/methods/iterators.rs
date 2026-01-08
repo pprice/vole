@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use super::super::patterns::compile_expr;
 use crate::codegen::RuntimeFn;
 use crate::codegen::types::{CompileCtx, CompiledValue};
+use crate::errors::CodegenError;
 use crate::frontend::{Expr, Symbol};
 use crate::sema::Type;
 
@@ -12,7 +13,7 @@ fn runtime_func_id(ctx: &CompileCtx, runtime: RuntimeFn) -> Result<FuncId, Strin
     ctx.func_registry
         .runtime_key(runtime)
         .and_then(|key| ctx.func_registry.func_id(key))
-        .ok_or_else(|| format!("{} not found", runtime.name()))
+        .ok_or_else(|| CodegenError::not_found("runtime function", runtime.name()).to_string())
 }
 
 /// Compile Iterator.map(fn) -> creates a MapIterator
@@ -25,7 +26,7 @@ pub(super) fn compile_iterator_map(
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
-        return Err(format!("map expects 1 argument, got {}", args.len()));
+        return Err(CodegenError::arg_count("map", 1, args.len()).into());
     }
 
     // Compile the transform function (should be a lambda/closure)
@@ -35,10 +36,11 @@ pub(super) fn compile_iterator_map(
     let (output_type, is_closure) = match &transform.vole_type {
         Type::Function(ft) => ((*ft.return_type).clone(), ft.is_closure),
         _ => {
-            return Err(format!(
-                "map argument must be a function, got {:?}",
-                transform.vole_type
-            ));
+            return Err(CodegenError::type_mismatch(
+                "map argument",
+                "function",
+                format!("{:?}", transform.vole_type),
+            ).into());
         }
     };
 
@@ -81,7 +83,7 @@ pub(super) fn compile_iterator_filter(
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
-        return Err(format!("filter expects 1 argument, got {}", args.len()));
+        return Err(CodegenError::arg_count("filter", 1, args.len()).into());
     }
 
     // Compile the predicate function (should be a lambda/closure)
@@ -91,10 +93,11 @@ pub(super) fn compile_iterator_filter(
     let is_closure = match &predicate.vole_type {
         Type::Function(ft) => ft.is_closure,
         _ => {
-            return Err(format!(
-                "filter argument must be a function, got {:?}",
-                predicate.vole_type
-            ));
+            return Err(CodegenError::type_mismatch(
+                "filter argument",
+                "function",
+                format!("{:?}", predicate.vole_type),
+            ).into());
         }
     };
 
@@ -135,7 +138,7 @@ pub(super) fn compile_iterator_take(
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
-        return Err(format!("take expects 1 argument, got {}", args.len()));
+        return Err(CodegenError::arg_count("take", 1, args.len()).into());
     }
 
     // Compile the count argument (should be an integer)
@@ -165,7 +168,7 @@ pub(super) fn compile_iterator_skip(
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
-        return Err(format!("skip expects 1 argument, got {}", args.len()));
+        return Err(CodegenError::arg_count("skip", 1, args.len()).into());
     }
 
     // Compile the count argument (should be an integer)
@@ -194,7 +197,7 @@ pub(super) fn compile_iterator_for_each(
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
-        return Err(format!("for_each expects 1 argument, got {}", args.len()));
+        return Err(CodegenError::arg_count("for_each", 1, args.len()).into());
     }
 
     // Compile the callback function (should be a lambda/closure)
@@ -204,10 +207,11 @@ pub(super) fn compile_iterator_for_each(
     let is_closure = match &callback.vole_type {
         Type::Function(ft) => ft.is_closure,
         _ => {
-            return Err(format!(
-                "for_each argument must be a function, got {:?}",
-                callback.vole_type
-            ));
+            return Err(CodegenError::type_mismatch(
+                "for_each argument",
+                "function",
+                format!("{:?}", callback.vole_type),
+            ).into());
         }
     };
 
@@ -246,7 +250,7 @@ pub(super) fn compile_iterator_reduce(
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if args.len() != 2 {
-        return Err(format!("reduce expects 2 arguments, got {}", args.len()));
+        return Err(CodegenError::arg_count("reduce", 2, args.len()).into());
     }
 
     // Compile the initial value
@@ -259,10 +263,11 @@ pub(super) fn compile_iterator_reduce(
     let is_closure = match &reducer.vole_type {
         Type::Function(ft) => ft.is_closure,
         _ => {
-            return Err(format!(
-                "reduce argument must be a function, got {:?}",
-                reducer.vole_type
-            ));
+            return Err(CodegenError::type_mismatch(
+                "reduce argument",
+                "function",
+                format!("{:?}", reducer.vole_type),
+            ).into());
         }
     };
 

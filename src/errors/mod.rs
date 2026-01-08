@@ -3,11 +3,13 @@
 //!
 //! This module provides error types using miette for fancy diagnostics.
 
+pub mod codegen;
 pub mod lexer;
 pub mod parser;
 pub mod report;
 pub mod sema;
 
+pub use codegen::CodegenError;
 pub use lexer::LexerError;
 pub use parser::ParserError;
 pub use report::{

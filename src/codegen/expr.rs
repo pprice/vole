@@ -6,6 +6,7 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
 
 use crate::codegen::RuntimeFn;
+use crate::errors::CodegenError;
 use crate::frontend::{AssignTarget, Expr, ExprKind, MatchExpr, Pattern, UnaryOp};
 use crate::sema::Type;
 
@@ -41,9 +42,11 @@ impl Cg<'_, '_, '_> {
             ExprKind::StringLiteral(s) => self.string_literal(s),
             ExprKind::Call(call) => self.call(call, expr.span.line, expr.id),
             ExprKind::InterpolatedString(parts) => self.interpolated_string(parts),
-            ExprKind::Range(_) => {
-                Err("Range expressions only supported in for-in context".to_string())
-            }
+            ExprKind::Range(_) => Err(CodegenError::unsupported_with_context(
+                "range expression",
+                "only supported in for-in context",
+            )
+            .into()),
             ExprKind::ArrayLiteral(elements) => self.array_literal(elements),
             ExprKind::Index(idx) => self.index(&idx.object, &idx.index),
             ExprKind::Match(match_expr) => self.match_expr(match_expr),
@@ -53,7 +56,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::NullCoalesce(nc) => self.null_coalesce(nc),
             ExprKind::Lambda(lambda) => self.lambda(lambda),
             ExprKind::TypeLiteral(_) => {
-                Err("type expressions cannot be used as runtime values".to_string())
+                Err(CodegenError::unsupported("type expressions as runtime values").into())
             }
             ExprKind::StructLiteral(sl) => self.struct_literal(sl),
             ExprKind::FieldAccess(fa) => self.field_access(fa),
@@ -80,7 +83,7 @@ impl Cg<'_, '_, '_> {
             }
             ExprKind::Yield(_) => {
                 // Yield should be caught in semantic analysis
-                Err("yield expression not supported outside generator context".to_string())
+                Err(CodegenError::unsupported("yield expression outside generator context").into())
             }
         }
     }
@@ -131,10 +134,7 @@ impl Cg<'_, '_, '_> {
             }
             Ok(value)
         } else {
-            Err(format!(
-                "undefined variable: {}",
-                self.ctx.interner.resolve(sym)
-            ))
+            Err(CodegenError::not_found("variable", self.ctx.interner.resolve(sym)).into())
         }
     }
 
@@ -359,7 +359,12 @@ impl Cg<'_, '_, '_> {
         let value = self.expr(&nc.value)?;
 
         let Type::Union(variants) = &value.vole_type else {
-            return Err("Expected union for ??".to_string());
+            return Err(CodegenError::type_mismatch(
+                "null coalesce operator",
+                "optional type",
+                "non-optional",
+            )
+            .into());
         };
         let nil_tag = variants
             .iter()
@@ -815,7 +820,14 @@ impl Cg<'_, '_, '_> {
         // Get type info
         let success_type = match &fallible.vole_type {
             Type::Fallible(ft) => (*ft.success_type).clone(),
-            _ => return Err("try on non-fallible type".to_string()),
+            _ => {
+                return Err(CodegenError::type_mismatch(
+                    "try operator",
+                    "fallible type",
+                    "non-fallible",
+                )
+                .into());
+            }
         };
 
         // Load the tag

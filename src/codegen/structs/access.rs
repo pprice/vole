@@ -4,6 +4,7 @@ use super::helpers::{convert_field_value, convert_to_i64_for_storage, get_field_
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
 use crate::codegen::types::{CompiledValue, module_name_id, type_to_cranelift};
+use crate::errors::CodegenError;
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
 use crate::sema::Type;
 use crate::sema::types::ConstantValue;
@@ -61,22 +62,25 @@ impl Cg<'_, '_, '_> {
                 && let Some(export_type) = module_type.exports.get(&name_id)
             {
                 if matches!(export_type, Type::Function(_)) {
-                    return Err(format!(
-                        "Module function {} should be called, not accessed as a field. Use {}() instead.",
-                        field_name, field_name
-                    ));
+                    return Err(CodegenError::unsupported_with_context(
+                        "function as field value",
+                        format!("use {}() to call the function", field_name),
+                    )
+                    .into());
                 }
 
-                return Err(format!(
-                    "Module export {} is not a constant literal and cannot be accessed at compile time",
-                    field_name
-                ));
+                return Err(CodegenError::unsupported_with_context(
+                    "non-constant module export",
+                    format!("{} cannot be accessed at compile time", field_name),
+                )
+                .into());
             }
 
-            return Err(format!(
-                "Module {} has no export named {}",
-                module_path, field_name
-            ));
+            return Err(CodegenError::not_found(
+                "module export",
+                format!("{}.{}", module_path, field_name),
+            )
+            .into());
         }
 
         let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, fa.field, self.ctx)?;
@@ -98,7 +102,12 @@ impl Cg<'_, '_, '_> {
 
         // The object should be an optional type (union with nil)
         let Type::Union(variants) = &obj.vole_type else {
-            return Err("Expected optional type for ?.".to_string());
+            return Err(CodegenError::type_mismatch(
+                "optional chain",
+                "optional type",
+                "non-optional",
+            )
+            .into());
         };
 
         // Find the nil tag

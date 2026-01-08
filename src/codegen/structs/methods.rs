@@ -14,6 +14,7 @@ use crate::codegen::method_resolution::{
 use crate::codegen::types::{
     CompiledValue, method_name_id, module_name_id, type_to_cranelift, value_to_word, word_to_value,
 };
+use crate::errors::CodegenError;
 use crate::frontend::{Expr, MethodCallExpr, NodeId};
 use crate::sema::generic::substitute_type;
 use crate::sema::resolution::ResolvedMethod;
@@ -104,10 +105,11 @@ impl Cg<'_, '_, '_> {
                     }
                 }
             } else {
-                return Err(format!(
-                    "Module method {}::{} has no resolution",
-                    module_path, method_name_str
-                ));
+                return Err(CodegenError::not_found(
+                    "module method",
+                    format!("{}::{}", module_path, method_name_str),
+                )
+                .into());
             }
         }
 

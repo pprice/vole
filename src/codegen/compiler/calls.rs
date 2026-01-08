@@ -13,6 +13,7 @@ use crate::codegen::types::{
     CompileCtx, CompiledValue, cranelift_to_vole_type, native_type_to_cranelift, type_to_cranelift,
 };
 use crate::codegen::{FunctionKey, RuntimeFn};
+use crate::errors::CodegenError;
 use crate::frontend::{CallExpr, Expr, ExprKind, NodeId, Symbol};
 use crate::runtime::native_registry::{NativeFunction, NativeType};
 use crate::sema::{FunctionType, Type};
@@ -45,7 +46,7 @@ pub(crate) fn compile_call(
     // Get the callee symbol - must be an identifier for now
     let callee_sym = match &call.callee.kind {
         ExprKind::Identifier(sym) => *sym,
-        _ => return Err("only simple function calls are supported".to_string()),
+        _ => return Err(CodegenError::unsupported("complex call expressions").into()),
     };
 
     let callee_name = ctx.interner.resolve(callee_sym);
@@ -320,7 +321,7 @@ pub(crate) fn compile_println(
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
-        return Err("println expects exactly one argument".to_string());
+        return Err(CodegenError::arg_count("println", 1, args.len()).into());
     }
 
     let arg = compile_expr(builder, &args[0], variables, ctx)?;
@@ -369,7 +370,7 @@ pub(crate) fn compile_print_char(
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
-        return Err("print_char expects exactly one argument".to_string());
+        return Err(CodegenError::arg_count("print_char", 1, args.len()).into());
     }
 
     let arg = compile_expr(builder, &args[0], variables, ctx)?;
@@ -380,7 +381,9 @@ pub(crate) fn compile_print_char(
     } else if arg.ty == types::I8 {
         arg.value
     } else {
-        return Err("print_char expects an integer argument".to_string());
+        return Err(
+            CodegenError::type_mismatch("print_char argument", "integer", "non-integer").into(),
+        );
     };
 
     let func_id = ctx
@@ -410,7 +413,7 @@ pub(crate) fn compile_assert(
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     if args.len() != 1 {
-        return Err("assert expects exactly one argument".to_string());
+        return Err(CodegenError::arg_count("assert", 1, args.len()).into());
     }
 
     // Compile the condition
@@ -505,7 +508,7 @@ pub(crate) fn compile_user_function_call(
                     }
                     return compile_ffi_call(builder, ctx, native_func, &arg_values);
                 }
-                return Err(format!("{} not found", callee_name));
+                return Err(CodegenError::not_found("function", callee_name).into());
             }
         } else {
             // Try FFI call for external module functions
@@ -518,7 +521,7 @@ pub(crate) fn compile_user_function_call(
                 }
                 return compile_ffi_call(builder, ctx, native_func, &arg_values);
             }
-            return Err(format!("{} not found", callee_name));
+            return Err(CodegenError::not_found("function", callee_name).into());
         }
     } else {
         let key = ctx
@@ -527,7 +530,7 @@ pub(crate) fn compile_user_function_call(
         if ctx.func_registry.func_id(key).is_some() {
             key
         } else {
-            return Err(format!("undefined function: {}", callee_name));
+            return Err(CodegenError::not_found("function", callee_name).into());
         }
     };
 

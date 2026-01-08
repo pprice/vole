@@ -11,6 +11,7 @@ use super::expr::compile_expr;
 use crate::codegen::RuntimeFn;
 use crate::codegen::lambda::CaptureBinding;
 use crate::codegen::types::{CompileCtx, CompiledValue, type_to_cranelift};
+use crate::errors::CodegenError;
 use crate::frontend::{AssignTarget, Expr, ExprKind, Symbol};
 use crate::sema::Type;
 
@@ -81,10 +82,7 @@ pub(crate) fn compile_expr_with_captures(
                         ctx,
                     )
                 } else {
-                    Err(format!(
-                        "undefined variable: {}",
-                        ctx.interner.resolve(*sym)
-                    ))
+                    Err(CodegenError::not_found("variable", ctx.interner.resolve(*sym)).into())
                 }
             }
         }
@@ -104,7 +102,10 @@ pub(crate) fn compile_expr_with_captures(
 
                         // Get the capture pointer
                         let closure_var = closure_var.ok_or_else(|| {
-                            "Closure variable not available for capture access".to_string()
+                            CodegenError::internal(
+                                "closure variable not available for capture access",
+                            )
+                            .to_string()
                         })?;
                         let closure_ptr = builder.use_var(closure_var);
 
@@ -143,10 +144,7 @@ pub(crate) fn compile_expr_with_captures(
                         builder.def_var(*var, value.value);
                         Ok(value)
                     } else {
-                        Err(format!(
-                            "undefined variable: {}",
-                            ctx.interner.resolve(*sym)
-                        ))
+                        Err(CodegenError::not_found("variable", ctx.interner.resolve(*sym)).into())
                     }
                 }
                 AssignTarget::Field { object, field, .. } => {

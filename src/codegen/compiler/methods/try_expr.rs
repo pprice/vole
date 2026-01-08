@@ -7,6 +7,7 @@ use crate::codegen::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
     type_to_cranelift,
 };
+use crate::errors::CodegenError;
 use crate::frontend::{Expr, Symbol};
 use crate::sema::Type;
 
@@ -22,7 +23,14 @@ pub(crate) fn compile_try_propagate(
     // Get type info
     let success_type = match &fallible.vole_type {
         Type::Fallible(ft) => (*ft.success_type).clone(),
-        _ => return Err("try on non-fallible type".to_string()),
+        _ => {
+            return Err(CodegenError::type_mismatch(
+                "try operator",
+                "fallible type",
+                "non-fallible",
+            )
+            .into());
+        }
     };
 
     // Load the tag
