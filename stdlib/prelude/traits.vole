@@ -23,10 +23,7 @@ interface Stringable {
 }
 
 interface Iterator<T> {
-    // Abstract method - must be implemented by Iterator types
     func next() -> T | Done
-
-    // Default methods - backed by runtime, optional to implement
     func map(f: (T) -> T) -> Iterator<T>
     func filter(pred: (T) -> bool) -> Iterator<T>
     func take(n: i64) -> Iterator<T>
@@ -37,7 +34,8 @@ interface Iterator<T> {
     func count() -> i64
     func sum() -> i64
 
-    default external("std:intrinsics") {
+    external("std:intrinsics") {
+        func "iter_next" as next() -> T | Done
         func "iter_map" as map(f: (T) -> T) -> Iterator<T>
         func "iter_filter" as filter(pred: (T) -> bool) -> Iterator<T>
         func "iter_take" as take(n: i64) -> Iterator<T>
