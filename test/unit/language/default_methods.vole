@@ -3,11 +3,11 @@
 interface Comparable {
     func compare(other: i64) -> i64
 
-    func lessThan(other: i64) -> bool {
+    default func lessThan(other: i64) -> bool {
         return self.compare(other) < 0
     }
 
-    func greaterThan(other: i64) -> bool {
+    default func greaterThan(other: i64) -> bool {
         return self.compare(other) > 0
     }
 }
