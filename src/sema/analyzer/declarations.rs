@@ -326,7 +326,9 @@ impl Analyzer {
         let body_without_default_errors: Vec<_> = interface_decl
             .methods
             .iter()
-            .filter(|m| m.body.is_some() && !m.is_default && !default_external_methods.contains(&m.name))
+            .filter(|m| {
+                m.body.is_some() && !m.is_default && !default_external_methods.contains(&m.name)
+            })
             .map(|m| (interner.resolve(m.name).to_string(), m.span))
             .collect();
 

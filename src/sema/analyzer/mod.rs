@@ -628,8 +628,11 @@ impl Analyzer {
         type_args: Vec<Type>,
         interner: &Interner,
     ) -> Option<Type> {
-        let sym = interner.lookup(name)?;
-        let def = self.interface_registry.get(sym, interner)?;
+        // Use string-based lookup since the interface may be defined in a different
+        // interner (e.g., stdlib prelude) than the current file being analyzed
+        let def = self.interface_registry.get_by_str(name)?;
+        // Use interface's symbol if not interned locally
+        let sym = interner.lookup(name).unwrap_or(def.name);
         if !def.type_params.is_empty() && def.type_params.len() != type_args.len() {
             return Some(Type::Error);
         }

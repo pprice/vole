@@ -71,6 +71,12 @@ impl InterfaceRegistry {
             .find(|def| def.name_str == name_str)
     }
 
+    /// Look up an interface by string name directly (cross-interner safe)
+    /// Use this when you have a string name but may not have the Symbol interned locally
+    pub fn get_by_str(&self, name: &str) -> Option<&InterfaceDef> {
+        self.interfaces.values().find(|def| def.name_str == name)
+    }
+
     /// Look up an external binding for an interface method
     pub fn external_method(
         &self,

@@ -8,10 +8,10 @@ interface Equatable {
 interface Comparable {
     func compare(other: Self) -> i32
 
-    func lt(other: Self) -> bool { return self.compare(other) < 0 }
-    func gt(other: Self) -> bool { return self.compare(other) > 0 }
-    func lte(other: Self) -> bool { return self.compare(other) <= 0 }
-    func gte(other: Self) -> bool { return self.compare(other) >= 0 }
+    default func lt(other: Self) -> bool { return self.compare(other) < 0 }
+    default func gt(other: Self) -> bool { return self.compare(other) > 0 }
+    default func lte(other: Self) -> bool { return self.compare(other) <= 0 }
+    default func gte(other: Self) -> bool { return self.compare(other) >= 0 }
 }
 
 interface Hashable {
