@@ -136,14 +136,33 @@ impl Analyzer {
             Stmt::For(for_stmt) => {
                 let iterable_ty = self.check_expr(&for_stmt.iterable, interner)?;
 
-                let elem_ty = match iterable_ty {
+                let elem_ty = match &iterable_ty {
                     Type::Range => Type::I64,
-                    Type::Array(elem) => *elem,
+                    Type::Array(elem) => *elem.clone(),
+                    // Accept Iterator<T> directly - extract element type
+                    Type::Interface(_) => {
+                        if let Some(elem) =
+                            self.extract_iterator_element_type(&iterable_ty, interner)
+                        {
+                            elem
+                        } else {
+                            let found = self.type_display(&iterable_ty, interner);
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "iterable (range, array, or Iterator<T>)".to_string(),
+                                    found,
+                                    span: for_stmt.iterable.span.into(),
+                                },
+                                for_stmt.iterable.span,
+                            );
+                            Type::Error
+                        }
+                    }
                     _ => {
                         let found = self.type_display(&iterable_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
-                                expected: "iterable (range or array)".to_string(),
+                                expected: "iterable (range, array, or Iterator<T>)".to_string(),
                                 found,
                                 span: for_stmt.iterable.span.into(),
                             },

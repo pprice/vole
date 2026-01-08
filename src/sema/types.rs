@@ -110,6 +110,7 @@ pub struct RecordType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceType {
     pub name: Symbol,
+    /// Canonical name ID for cross-interner lookups
     pub name_id: NameId,
     pub type_args: Vec<Type>,
     pub methods: Vec<InterfaceMethodType>,

@@ -210,12 +210,9 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 if !iface.type_params.is_empty() {
                     return Type::Error;
                 }
-                let name_id = name_table
-                    .name_id(module_id, &[*sym])
-                    .expect("interface name_id should be registered");
                 Type::Interface(crate::sema::types::InterfaceType {
                     name: *sym,
-                    name_id,
+                    name_id: iface.name_id,
                     type_args: Vec::new(),
                     methods: iface
                         .methods
@@ -379,9 +376,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 for (param, arg) in iface.type_params.iter().zip(resolved_args.iter()) {
                     substitutions.insert(*param, arg.clone());
                 }
-                let Some(name_id) = name_table.name_id(module_id, &[*name]) else {
-                    return Type::Error;
-                };
                 let methods = iface
                     .methods
                     .iter()
@@ -398,7 +392,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     .collect();
                 return Type::Interface(crate::sema::types::InterfaceType {
                     name: *name,
-                    name_id,
+                    name_id: iface.name_id,
                     type_args: resolved_args,
                     methods,
                     extends: iface.extends.clone(),

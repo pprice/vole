@@ -24,11 +24,17 @@ impl Analyzer {
         }
 
         // 2. Interface methods (vtable dispatch)
-        if let Type::Interface(iface) = object_type
-            && let Some(interface_def) = self.interface_registry.get(iface.name, interner)
+        // Handle both Type::Interface and Type::GenericInstance (for self-referential interface types)
+        let (interface_name_id, type_args) = match object_type {
+            Type::Interface(iface) => (Some(iface.name_id), iface.type_args.as_slice()),
+            Type::GenericInstance { def, args } => (Some(*def), args.as_slice()),
+            _ => (None, &[] as &[Type]),
+        };
+        if let Some(name_id) = interface_name_id
+            && let Some(interface_def) = self.interface_registry.get_by_name_id(name_id)
         {
             let mut substitutions = HashMap::new();
-            for (param, arg) in interface_def.type_params.iter().zip(iface.type_args.iter()) {
+            for (param, arg) in interface_def.type_params.iter().zip(type_args.iter()) {
                 substitutions.insert(*param, arg.clone());
             }
 
@@ -38,8 +44,11 @@ impl Analyzer {
                 if !seen.insert(def.name) {
                     continue;
                 }
+                // Resolve method name to string for cross-interner comparison
+                let method_name_str = interner.resolve(method_name);
                 for method_def in &def.methods {
-                    if method_def.name == method_name {
+                    // Compare by string since interface was registered with different interner
+                    if method_def.name_str == method_name_str {
                         let func_type = FunctionType {
                             params: method_def
                                 .params
@@ -52,7 +61,8 @@ impl Analyzer {
                             )),
                             is_closure: false,
                         };
-                        if let Some(external_info) = def.external_methods.get(&method_name).cloned()
+                        if let Some(external_info) =
+                            def.external_methods.get(method_name_str).cloned()
                         {
                             return Some(ResolvedMethod::Implemented {
                                 trait_name: Some(def.name),
@@ -62,7 +72,7 @@ impl Analyzer {
                             });
                         }
                         return Some(ResolvedMethod::InterfaceMethod {
-                            interface_name: iface.name,
+                            interface_name: interface_def.name,
                             method_name,
                             func_type,
                         });

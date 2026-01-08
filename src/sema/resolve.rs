@@ -55,10 +55,9 @@ fn interface_instance(
             has_default: method.has_default,
         })
         .collect();
-    let name_id = ctx.name_table.intern(ctx.module_id, &[name]);
     Some(Type::Interface(InterfaceType {
         name,
-        name_id,
+        name_id: def.name_id,
         type_args,
         methods,
         extends: def.extends.clone(),
@@ -196,7 +195,9 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
             if let Some(interface) = interface_instance(*name, resolved_args.clone(), ctx) {
                 return interface;
             }
-            let name_id = ctx.name_table.intern(ctx.module_id, &[*name]);
+            // Use string-based interning for consistent NameIds across different interners
+            let name_str = ctx.interner.resolve(*name);
+            let name_id = ctx.name_table.intern_raw(ctx.module_id, &[name_str]);
             Type::GenericInstance {
                 def: name_id,
                 args: resolved_args,

@@ -11,6 +11,7 @@ use crate::codegen::types::{
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Interner, Symbol};
+use crate::identity::NameId;
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::interface_registry::InterfaceMethodDef;
 use crate::sema::{FunctionType, Type};
@@ -89,17 +90,23 @@ impl InterfaceVtableRegistry {
             return Ok(*data_id);
         }
 
+        let iface_def = ctx
+            .analyzed
+            .interface_registry
+            .get(interface_name, ctx.interner)
+            .ok_or_else(|| {
+                format!(
+                    "unknown interface {:?}",
+                    ctx.interner.resolve(interface_name)
+                )
+            })?;
+        let interface_name_id = iface_def.name_id;
         let methods = collect_interface_methods(
             interface_name,
             &ctx.analyzed.interface_registry,
             ctx.interner,
         )
-        .ok_or_else(|| {
-            format!(
-                "unknown interface {:?}",
-                ctx.interner.resolve(interface_name)
-            )
-        })?;
+        .ok_or_else(|| "failed to collect interface methods".to_string())?;
         let word_bytes = ctx.pointer_type.bytes() as usize;
 
         if iface_debug_enabled() {
@@ -139,7 +146,7 @@ impl InterfaceVtableRegistry {
         data.set_align(word_bytes as u64);
 
         for (index, method_def) in methods.iter().enumerate() {
-            let target = resolve_vtable_target(ctx, interface_name, concrete_type, method_def)?;
+            let target = resolve_vtable_target(ctx, interface_name_id, concrete_type, method_def)?;
             let wrapper_id =
                 self.compile_wrapper(ctx, interface_name, method_def.name, concrete_type, &target)?;
             let func_ref = ctx.module.declare_func_in_data(wrapper_id, &mut data);
@@ -440,7 +447,7 @@ pub(crate) fn box_interface_value(
     if ctx
         .analyzed
         .interface_registry
-        .is_external_only(interface.name, ctx.interner)
+        .is_external_only(interface.name_id)
     {
         if iface_debug_enabled() {
             eprintln!("iface_box: external-only interface, skip boxing");
@@ -531,7 +538,7 @@ fn collect_interface_methods_inner(
 
 fn resolve_vtable_target(
     ctx: &CompileCtx,
-    interface_name: Symbol,
+    interface_name_id: NameId,
     concrete_type: &Type,
     method_def: &InterfaceMethodDef,
 ) -> Result<VtableMethodTarget, String> {
@@ -612,11 +619,11 @@ fn resolve_vtable_target(
     // Fall back to interface default if method has one
     if method_def.has_default {
         // Check for default external binding
-        if let Some(external_info) = ctx
-            .analyzed
-            .interface_registry
-            .external_method(interface_name, method_def.name, ctx.interner)
-        {
+        if let Some(external_info) = ctx.analyzed.interface_registry.external_method(
+            interface_name_id,
+            method_def.name,
+            ctx.interner,
+        ) {
             return Ok(VtableMethodTarget::External {
                 external_info: external_info.clone(),
                 func_type: FunctionType {

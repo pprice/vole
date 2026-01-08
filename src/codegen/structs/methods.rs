@@ -311,15 +311,9 @@ impl Cg<'_, '_, '_> {
                 has_default: method.has_default,
             })
             .collect();
-        let name_id = self
-            .ctx
-            .analyzed
-            .name_table
-            .name_id(self.ctx.analyzed.name_table.main_module(), &[sym])
-            .ok_or_else(|| format!("interface {} missing name id", name))?;
         Ok(Type::Interface(crate::sema::types::InterfaceType {
             name: sym,
-            name_id,
+            name_id: def.name_id,
             type_args,
             methods,
             extends: def.extends.clone(),

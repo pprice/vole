@@ -634,12 +634,9 @@ impl Analyzer {
                 has_default: method.has_default,
             })
             .collect();
-        let name_id = self
-            .name_table
-            .intern(self.name_table.main_module(), &[sym]);
         Some(Type::Interface(crate::sema::types::InterfaceType {
             name: sym,
-            name_id,
+            name_id: def.name_id,
             type_args,
             methods,
             extends: def.extends.clone(),
@@ -1009,6 +1006,7 @@ impl Analyzer {
                         .iter()
                         .map(|m| InterfaceMethodDef {
                             name: m.name,
+                            name_str: interner.resolve(m.name).to_string(),
                             params: m
                                 .params
                                 .iter()
@@ -1035,7 +1033,7 @@ impl Analyzer {
                         })
                         .collect();
 
-                    let mut external_methods = HashMap::new();
+                    let mut external_methods: HashMap<String, ExternalMethodInfo> = HashMap::new();
                     if let Some(external) = &interface_decl.external {
                         for func in &external.functions {
                             if !methods.iter().any(|method| method.name == func.vole_name) {
@@ -1055,8 +1053,9 @@ impl Analyzer {
                                 .native_name
                                 .clone()
                                 .unwrap_or_else(|| interner.resolve(func.vole_name).to_string());
+                            let method_name_str = interner.resolve(func.vole_name).to_string();
                             external_methods.insert(
-                                func.vole_name,
+                                method_name_str,
                                 ExternalMethodInfo {
                                     module_path: external.module_path.clone(),
                                     native_name,
@@ -1065,9 +1064,15 @@ impl Analyzer {
                         }
                     }
 
+                    // Use string-based interning for consistent NameIds across different interners
+                    let name_str = interner.resolve(interface_decl.name).to_string();
+                    let name_id = self
+                        .name_table
+                        .intern_raw(self.name_table.main_module(), &[&name_str]);
                     let def = InterfaceDef {
                         name: interface_decl.name,
-                        name_str: interner.resolve(interface_decl.name).to_string(),
+                        name_id,
+                        name_str,
                         type_params: interface_decl
                             .type_params
                             .iter()
@@ -1080,9 +1085,6 @@ impl Analyzer {
                     };
 
                     self.interface_registry.register(def);
-                    let name_id = self
-                        .name_table
-                        .intern(self.name_table.main_module(), &[interface_decl.name]);
                     self.register_named_type(
                         interface_decl.name,
                         Type::Interface(crate::sema::types::InterfaceType {
