@@ -664,9 +664,10 @@ impl Analyzer {
         namer.method(name)
     }
 
-    fn method_name_id_lookup(&self, name: Symbol, interner: &Interner) -> Option<NameId> {
+    /// Look up a method NameId by string name (cross-interner safe)
+    fn method_name_id_by_str(&self, name_str: &str, interner: &Interner) -> Option<NameId> {
         let namer = NamerLookup::new(&self.name_table, interner);
-        namer.method(name)
+        namer.method_by_str(name_str)
     }
 
     /// Mark the current lambda as having side effects

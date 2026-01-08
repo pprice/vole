@@ -65,4 +65,10 @@ impl<'a> NamerLookup<'a> {
         let name_str = self.interner.resolve(name);
         self.names.name_id_raw(module, &[name_str])
     }
+
+    /// Look up a method by String name (cross-interner safe)
+    pub fn method_by_str(&self, name_str: &str) -> Option<NameId> {
+        let module = self.names.builtin_module_id()?;
+        self.names.name_id_raw(module, &[name_str])
+    }
 }

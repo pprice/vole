@@ -1,20 +1,8 @@
 // src/codegen/compiler/mod.rs
-//
-// NOTE: This file contains legacy code being migrated to split impl blocks.
-// The new code is in expr.rs, stmt.rs, calls.rs, ops.rs, structs.rs, lambda.rs.
-// Functions here are kept for backward compatibility during migration.
-
-#![allow(dead_code)]
-mod calls;
-mod fields;
 mod impls;
-mod methods;
-mod ops;
-mod patterns;
 mod program;
 mod signatures;
 mod state;
-mod strings;
 mod type_registry;
 
 use std::collections::HashMap;

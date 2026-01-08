@@ -77,7 +77,7 @@ impl Analyzer {
                 // For primitives/arrays, check implement registry
                 if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
                     && let Some(method_id) =
-                        self.method_name_id_lookup(interface_method.name, interner)
+                        self.method_name_id_by_str(&interface_method.name_str, interner)
                 {
                     return self
                         .implement_registry
@@ -94,7 +94,8 @@ impl Analyzer {
             .get(&type_sym)
             .map(|record| record.name_id)
             .or_else(|| self.classes.get(&type_sym).map(|class| class.name_id))
-            && let Some(method_id) = self.method_name_id_lookup(interface_method.name, interner)
+            && let Some(method_id) =
+                self.method_name_id_by_str(&interface_method.name_str, interner)
         {
             let method_key = (type_id, method_id);
             if self.methods.contains_key(&method_key) {
@@ -104,7 +105,8 @@ impl Analyzer {
 
         // Check implement registry
         if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
-            && let Some(method_id) = self.method_name_id_lookup(interface_method.name, interner)
+            && let Some(method_id) =
+                self.method_name_id_by_str(&interface_method.name_str, interner)
             && self
                 .implement_registry
                 .get_method(&type_id, method_id)

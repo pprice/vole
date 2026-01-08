@@ -138,10 +138,6 @@ mod tests {
     use crate::frontend::Interner;
     use crate::identity::NameTable;
 
-    fn sym(id: u32) -> Symbol {
-        Symbol(id)
-    }
-
     #[test]
     fn register_and_get_interface() {
         let mut registry = InterfaceRegistry::new();
