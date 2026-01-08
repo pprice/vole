@@ -384,4 +384,12 @@ pub enum SemanticError {
         #[label("found '{found}'")]
         span: SourceSpan,
     },
+
+    #[error("interface method '{method}' has a body but is not marked 'default'")]
+    #[diagnostic(code(E2075), help("add 'default' keyword: default func {method}(...)"))]
+    InterfaceMethodBodyWithoutDefault {
+        method: String,
+        #[label("missing 'default' keyword")]
+        span: SourceSpan,
+    },
 }

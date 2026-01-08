@@ -322,6 +322,14 @@ impl Analyzer {
                 HashSet::new()
             };
 
+        // Collect errors for methods with bodies that aren't marked as default
+        let body_without_default_errors: Vec<_> = interface_decl
+            .methods
+            .iter()
+            .filter(|m| m.body.is_some() && !m.is_default && !default_external_methods.contains(&m.name))
+            .map(|m| (interner.resolve(m.name).to_string(), m.span))
+            .collect();
+
         // Convert AST methods to InterfaceMethodDef
         let methods: Vec<InterfaceMethodDef> = interface_decl
             .methods
@@ -354,6 +362,17 @@ impl Analyzer {
                 has_default: method.has_default,
             })
             .collect();
+
+        // Emit errors for methods with bodies that aren't marked as default
+        for (method_name, span) in body_without_default_errors {
+            self.add_error(
+                SemanticError::InterfaceMethodBodyWithoutDefault {
+                    method: method_name,
+                    span: span.into(),
+                },
+                span,
+            );
+        }
 
         let mut external_methods: HashMap<String, ExternalMethodInfo> = HashMap::new();
         if let Some(external) = &interface_decl.external {
