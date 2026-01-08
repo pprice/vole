@@ -1,0 +1,34 @@
+// Test 'default external' block for interface methods
+// Methods in a default external block should be treated as having defaults
+
+interface Greeter {
+    // Abstract method - must be implemented
+    func name() -> string
+
+    // Methods that have default external implementations
+    func greet() -> string
+    func formal_greet() -> string
+
+    // Mark external block as default - these are optional to implement
+    default external("std:intrinsics") {
+        func "string_concat" as greet() -> string
+        func "string_concat" as formal_greet() -> string
+    }
+}
+
+// SimpleGreeter only implements the abstract method
+record SimpleGreeter implements Greeter {
+    person_name: string,
+
+    func name() -> string {
+        return self.person_name
+    }
+}
+
+tests "default external" {
+    test "record implementing interface with default external" {
+        let g = SimpleGreeter { person_name: "Alice" }
+        assert(g.name() == "Alice")
+        // greet() and formal_greet() should resolve to interface defaults
+    }
+}

@@ -139,7 +139,7 @@ impl InterfaceVtableRegistry {
         data.set_align(word_bytes as u64);
 
         for (index, method_def) in methods.iter().enumerate() {
-            let target = resolve_vtable_target(ctx, concrete_type, method_def)?;
+            let target = resolve_vtable_target(ctx, interface_name, concrete_type, method_def)?;
             let wrapper_id =
                 self.compile_wrapper(ctx, interface_name, method_def.name, concrete_type, &target)?;
             let func_ref = ctx.module.declare_func_in_data(wrapper_id, &mut data);
@@ -531,6 +531,7 @@ fn collect_interface_methods_inner(
 
 fn resolve_vtable_target(
     ctx: &CompileCtx,
+    interface_name: Symbol,
     concrete_type: &Type,
     method_def: &InterfaceMethodDef,
 ) -> Result<VtableMethodTarget, String> {
@@ -606,6 +607,26 @@ fn resolve_vtable_target(
             method_info,
             func_type,
         });
+    }
+
+    // Fall back to interface default if method has one
+    if method_def.has_default {
+        // Check for default external binding
+        if let Some(external_info) = ctx
+            .analyzed
+            .interface_registry
+            .external_method(interface_name, method_def.name, ctx.interner)
+        {
+            return Ok(VtableMethodTarget::External {
+                external_info: external_info.clone(),
+                func_type: FunctionType {
+                    params: method_def.params.clone(),
+                    return_type: Box::new(method_def.return_type.clone()),
+                    is_closure: false,
+                },
+            });
+        }
+        // TODO: Handle Vole body defaults when interface method bodies are supported
     }
 
     Err(CodegenError::not_found(

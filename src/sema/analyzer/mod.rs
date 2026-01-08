@@ -987,7 +987,23 @@ impl Analyzer {
                         })
                         .collect();
 
+                    // Collect method names with default external bindings (from `default external` blocks)
+                    let default_external_methods: HashSet<Symbol> =
+                        if let Some(external) = &interface_decl.external {
+                            if external.is_default {
+                                external.functions.iter().map(|f| f.vole_name).collect()
+                            } else {
+                                HashSet::new()
+                            }
+                        } else {
+                            HashSet::new()
+                        };
+
                     // Convert AST methods to InterfaceMethodDef
+                    // A method has_default if:
+                    // - it has `default` keyword (is_default)
+                    // - it has a Vole body
+                    // - it's in a `default external` block
                     let methods: Vec<InterfaceMethodDef> = interface_decl
                         .methods
                         .iter()
@@ -1003,7 +1019,9 @@ impl Analyzer {
                                 .as_ref()
                                 .map(|t| resolve_type(t, &mut type_ctx))
                                 .unwrap_or(Type::Void),
-                            has_default: m.body.is_some(),
+                            has_default: m.is_default
+                                || m.body.is_some()
+                                || default_external_methods.contains(&m.name),
                         })
                         .collect();
 

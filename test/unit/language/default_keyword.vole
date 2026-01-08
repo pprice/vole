@@ -38,4 +38,12 @@ tests "default keyword parsing" {
         assert(c.increment() == 11)
         assert(c.decrement() == 9)
     }
+
+    test "default method through interface type" {
+        // Call default method through interface-typed variable (vtable dispatch)
+        let c: Counter = SimpleCounter { current: 5 }
+        assert(c.value() == 5)
+        assert(c.increment() == 6)
+        assert(c.decrement() == 4)
+    }
 }
