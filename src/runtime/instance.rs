@@ -1,5 +1,8 @@
 // src/runtime/instance.rs
 
+use crate::runtime::array::RcArray;
+use crate::runtime::string::RcString;
+use crate::runtime::type_registry::{FieldTypeTag, get_instance_type_info};
 use crate::runtime::value::RcHeader;
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
@@ -92,11 +95,10 @@ impl RcInstance {
     /// # Safety
     /// The pointer must be null or point to a valid, properly initialized `RcInstance`.
     ///
-    /// # Known Limitation
-    /// This does not decrement reference counts of nested reference-typed fields
-    /// (strings, other instances). For Phase 1 with simple numeric types this is
-    /// acceptable, but adding string or nested instance fields will leak memory
-    /// until field cleanup is implemented.
+    /// When the reference count reaches zero, this function:
+    /// 1. Looks up field types from the runtime type registry
+    /// 2. Decrements reference counts for any reference-typed fields (strings, arrays, instances)
+    /// 3. Frees the instance memory
     pub unsafe fn dec_ref(ptr: *mut Self) {
         if ptr.is_null() {
             return;
@@ -105,8 +107,38 @@ impl RcInstance {
         unsafe {
             let prev = (*ptr).header.dec();
             if prev == 1 {
-                // TODO: Walk fields and dec_ref any reference-typed values
+                let type_id = (*ptr).type_id;
                 let field_count = (*ptr).field_count as usize;
+
+                // Look up field types and clean up reference-typed fields
+                if let Some(type_info) = get_instance_type_info(type_id) {
+                    let fields_ptr = Self::fields_ptr(ptr);
+                    for (slot, field_type) in type_info.field_types.iter().enumerate() {
+                        if slot >= field_count {
+                            break;
+                        }
+                        let field_value = *fields_ptr.add(slot);
+                        if field_value == 0 {
+                            continue; // Null pointer, skip
+                        }
+                        match field_type {
+                            FieldTypeTag::String => {
+                                RcString::dec_ref(field_value as *mut RcString);
+                            }
+                            FieldTypeTag::Array => {
+                                RcArray::dec_ref(field_value as *mut RcArray);
+                            }
+                            FieldTypeTag::Instance => {
+                                // Recursive cleanup for nested instances
+                                Self::dec_ref(field_value as *mut Self);
+                            }
+                            FieldTypeTag::Value => {
+                                // No cleanup needed for value types
+                            }
+                        }
+                    }
+                }
+
                 let layout = Self::layout_for_fields(field_count);
                 dealloc(ptr as *mut u8, layout);
             }

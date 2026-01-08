@@ -8,6 +8,7 @@ pub mod iterator;
 pub mod native_registry;
 pub mod stdlib;
 pub mod string;
+pub mod type_registry;
 pub mod value;
 
 pub use assert::{

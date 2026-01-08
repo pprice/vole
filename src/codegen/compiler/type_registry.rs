@@ -3,7 +3,29 @@ use std::collections::HashMap;
 use super::Compiler;
 use crate::codegen::types::{MethodInfo, TypeMetadata, method_name_id};
 use crate::frontend::{ClassDecl, Decl, InterfaceDecl, Program, RecordDecl, Symbol, TypeExpr};
+use crate::runtime::type_registry::{FieldTypeTag, register_instance_type};
 use crate::sema::{ClassType, RecordType, StructField, Type};
+
+/// Convert a Vole Type to a FieldTypeTag for runtime cleanup
+fn type_to_field_tag(ty: &Type) -> FieldTypeTag {
+    match ty {
+        Type::String => FieldTypeTag::String,
+        Type::Array(_) => FieldTypeTag::Array,
+        Type::Class(_) | Type::Record(_) => FieldTypeTag::Instance,
+        // Optional types containing reference types also need cleanup
+        Type::Union(variants) => {
+            // If any variant is a reference type, mark as needing cleanup
+            for variant in variants {
+                let tag = type_to_field_tag(variant);
+                if tag.needs_cleanup() {
+                    return tag;
+                }
+            }
+            FieldTypeTag::Value
+        }
+        _ => FieldTypeTag::Value,
+    }
+}
 
 impl Compiler<'_> {
     /// Find an interface declaration by name in the program
@@ -87,14 +109,20 @@ impl Compiler<'_> {
         // Build field slots map and StructField list
         let mut field_slots = HashMap::new();
         let mut struct_fields = Vec::new();
+        let mut field_type_tags = Vec::new();
         for (i, field) in class.fields.iter().enumerate() {
             field_slots.insert(field.name, i);
+            let field_type = self.resolve_type_with_metadata(&field.ty);
+            field_type_tags.push(type_to_field_tag(&field_type));
             struct_fields.push(StructField {
                 name: field.name,
-                ty: self.resolve_type_with_metadata(&field.ty),
+                ty: field_type,
                 slot: i,
             });
         }
+
+        // Register field types in runtime type registry for cleanup
+        register_instance_type(type_id, field_type_tags);
 
         // Create the Vole type
         let vole_type = Type::Class(ClassType {
@@ -258,14 +286,20 @@ impl Compiler<'_> {
         // Build field slots map and StructField list
         let mut field_slots = HashMap::new();
         let mut struct_fields = Vec::new();
+        let mut field_type_tags = Vec::new();
         for (i, field) in record.fields.iter().enumerate() {
             field_slots.insert(field.name, i);
+            let field_type = self.resolve_type_with_metadata(&field.ty);
+            field_type_tags.push(type_to_field_tag(&field_type));
             struct_fields.push(StructField {
                 name: field.name,
-                ty: self.resolve_type_with_metadata(&field.ty),
+                ty: field_type,
                 slot: i,
             });
         }
+
+        // Register field types in runtime type registry for cleanup
+        register_instance_type(type_id, field_type_tags);
 
         // Create the Vole type
         let vole_type = Type::Record(RecordType {
