@@ -329,7 +329,14 @@ impl Cg<'_, '_, '_> {
                 if let ExprKind::Range(range) = &for_stmt.iterable.kind {
                     self.for_range(for_stmt, range)
                 } else {
-                    self.for_array(for_stmt)
+                    // Check if iterable is an Iterator type
+                    let iterable_type = self.ctx.analyzed.expr_types.get(&for_stmt.iterable.id);
+                    let is_iterator = iterable_type.is_some_and(|ty| self.is_iterator_type(ty));
+                    if is_iterator {
+                        self.for_iterator(for_stmt)
+                    } else {
+                        self.for_array(for_stmt)
+                    }
                 }
             }
 
@@ -468,6 +475,102 @@ impl Cg<'_, '_, '_> {
         let current_idx = self.builder.use_var(idx_var);
         let next_idx = self.builder.ins().iadd_imm(current_idx, 1);
         self.builder.def_var(idx_var, next_idx);
+        self.builder.ins().jump(header, &[]);
+
+        self.builder.switch_to_block(exit_block);
+
+        self.builder.seal_block(header);
+        self.builder.seal_block(body_block);
+        self.builder.seal_block(continue_block);
+        self.builder.seal_block(exit_block);
+
+        Ok(false)
+    }
+
+    /// Check if a type is an Iterator<T> type
+    fn is_iterator_type(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Interface(iface) => {
+                let name = self.ctx.interner.resolve(iface.name);
+                name == "Iterator"
+            }
+            Type::GenericInstance { def, .. } => {
+                // Check if the name resolves to "Iterator"
+                let name = self
+                    .ctx
+                    .analyzed
+                    .name_table
+                    .display(*def, self.ctx.interner);
+                name == "Iterator" || name.ends_with("::Iterator")
+            }
+            _ => false,
+        }
+    }
+
+    /// Extract element type from Iterator<T>
+    fn iterator_element_type(&self, ty: &Type) -> Type {
+        match ty {
+            Type::Interface(iface) => iface.type_args.first().cloned().unwrap_or(Type::I64),
+            Type::GenericInstance { args, .. } => args.first().cloned().unwrap_or(Type::I64),
+            _ => Type::I64,
+        }
+    }
+
+    /// Compile a for loop over an iterator
+    fn for_iterator(&mut self, for_stmt: &frontend::ForStmt) -> Result<bool, String> {
+        let iter = self.expr(&for_stmt.iterable)?;
+        let elem_type = self.iterator_element_type(&iter.vole_type);
+
+        // Create a stack slot for the out_value parameter
+        let slot_data = self.builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            8,
+            0,
+        ));
+        let slot_addr = self
+            .builder
+            .ins()
+            .stack_addr(self.ctx.pointer_type, slot_data, 0);
+
+        // Initialize element variable
+        let elem_var = self.builder.declare_var(types::I64);
+        let zero = self.builder.ins().iconst(types::I64, 0);
+        self.builder.def_var(elem_var, zero);
+        self.vars.insert(for_stmt.var_name, (elem_var, elem_type));
+
+        let header = self.builder.create_block();
+        let body_block = self.builder.create_block();
+        let continue_block = self.builder.create_block();
+        let exit_block = self.builder.create_block();
+
+        self.builder.ins().jump(header, &[]);
+
+        // Header: call iter_next, check result
+        self.builder.switch_to_block(header);
+        let has_value = self.call_runtime(RuntimeFn::ArrayIterNext, &[iter.value, slot_addr])?;
+        let is_done = self.builder.ins().icmp_imm(IntCC::Equal, has_value, 0);
+        self.builder
+            .ins()
+            .brif(is_done, exit_block, &[], body_block, &[]);
+
+        // Body: load value from stack slot, run body
+        self.builder.switch_to_block(body_block);
+        let elem_val = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), slot_addr, 0);
+        self.builder.def_var(elem_var, elem_val);
+
+        self.cf.push_loop(exit_block, continue_block);
+        let body_terminated = self.block(&for_stmt.body)?;
+        self.cf.pop_loop();
+
+        if !body_terminated {
+            self.builder.ins().jump(continue_block, &[]);
+        }
+
+        // Continue: jump back to header
+        self.builder.switch_to_block(continue_block);
         self.builder.ins().jump(header, &[]);
 
         self.builder.switch_to_block(exit_block);
