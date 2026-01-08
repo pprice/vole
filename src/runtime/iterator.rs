@@ -330,21 +330,11 @@ pub extern "C" fn vole_map_iter_next(iter: *mut UnifiedIterator, out_value: *mut
     }
 
     // Apply transform function
-    // Check if this is a closure (has captures) or a pure function (no captures)
+    // All lambdas now use closure calling convention (closure ptr as first arg)
     unsafe {
         let func_ptr = Closure::get_func(map_src.transform);
-        let num_captures = (*map_src.transform).num_captures;
-
-        let result = if num_captures == 0 {
-            // Pure function - call with just the value
-            let transform_fn: extern "C" fn(i64) -> i64 = std::mem::transmute(func_ptr);
-            transform_fn(source_value)
-        } else {
-            // Closure - pass closure pointer as first arg
-            let transform_fn: extern "C" fn(*const Closure, i64) -> i64 =
-                std::mem::transmute(func_ptr);
-            transform_fn(map_src.transform, source_value)
-        };
+        let transform_fn: extern "C" fn(*const Closure, i64) -> i64 = std::mem::transmute(func_ptr);
+        let result = transform_fn(map_src.transform, source_value);
         *out_value = result;
     }
 
@@ -446,20 +436,12 @@ pub extern "C" fn vole_filter_iter_next(iter: *mut UnifiedIterator, out_value: *
         // Apply predicate function
         // Check if this is a closure (has captures) or a pure function (no captures)
         // Note: Vole bools are i8, so predicate returns i8 (0 or 1)
+        // All lambdas now use closure calling convention (closure ptr as first arg)
         let passes: i8 = unsafe {
             let func_ptr = Closure::get_func(filter_src.predicate);
-            let num_captures = (*filter_src.predicate).num_captures;
-
-            if num_captures == 0 {
-                // Pure function - call with just the value
-                let predicate_fn: extern "C" fn(i64) -> i8 = std::mem::transmute(func_ptr);
-                predicate_fn(source_value)
-            } else {
-                // Closure - pass closure pointer as first arg
-                let predicate_fn: extern "C" fn(*const Closure, i64) -> i8 =
-                    std::mem::transmute(func_ptr);
-                predicate_fn(filter_src.predicate, source_value)
-            }
+            let predicate_fn: extern "C" fn(*const Closure, i64) -> i8 =
+                std::mem::transmute(func_ptr);
+            predicate_fn(filter_src.predicate, source_value)
         };
 
         // If predicate returns non-zero (true), yield this value
@@ -589,19 +571,11 @@ pub extern "C" fn vole_iter_for_each(iter: *mut UnifiedIterator, callback: *cons
         }
 
         // Call the callback closure with the value
+        // All lambdas now use closure calling convention (closure ptr as first arg)
         unsafe {
             let func_ptr = Closure::get_func(callback);
-            let num_captures = (*callback).num_captures;
-
-            if num_captures == 0 {
-                // Pure function - call with just the value
-                let callback_fn: extern "C" fn(i64) = std::mem::transmute(func_ptr);
-                callback_fn(value);
-            } else {
-                // Closure - pass closure pointer as first arg
-                let callback_fn: extern "C" fn(*const Closure, i64) = std::mem::transmute(func_ptr);
-                callback_fn(callback, value);
-            }
+            let callback_fn: extern "C" fn(*const Closure, i64) = std::mem::transmute(func_ptr);
+            callback_fn(callback, value);
         }
     }
 
@@ -634,20 +608,12 @@ pub extern "C" fn vole_iter_reduce(
         }
 
         // Call the reducer closure with (acc, value) -> new_acc
+        // All lambdas now use closure calling convention (closure ptr as first arg)
         unsafe {
             let func_ptr = Closure::get_func(reducer);
-            let num_captures = (*reducer).num_captures;
-
-            acc = if num_captures == 0 {
-                // Pure function - call with (acc, value)
-                let reducer_fn: extern "C" fn(i64, i64) -> i64 = std::mem::transmute(func_ptr);
-                reducer_fn(acc, value)
-            } else {
-                // Closure - pass closure pointer as first arg, then (acc, value)
-                let reducer_fn: extern "C" fn(*const Closure, i64, i64) -> i64 =
-                    std::mem::transmute(func_ptr);
-                reducer_fn(reducer, acc, value)
-            };
+            let reducer_fn: extern "C" fn(*const Closure, i64, i64) -> i64 =
+                std::mem::transmute(func_ptr);
+            acc = reducer_fn(reducer, acc, value);
         }
     }
 

@@ -592,65 +592,20 @@ impl Cg<'_, '_, '_> {
         self.call_closure_value(func_ptr_or_closure, func_type, call)
     }
 
-    /// Call a function via value (dispatches to closure or pure function call)
+    /// Call a function via value (always uses closure calling convention now that
+    /// all lambdas are wrapped in Closure structs for consistent behavior)
     fn call_closure_value(
         &mut self,
         func_ptr_or_closure: Value,
         func_type: FunctionType,
         call: &CallExpr,
     ) -> Result<CompiledValue, String> {
-        if func_type.is_closure {
-            self.call_actual_closure(func_ptr_or_closure, func_type, call)
-        } else {
-            self.call_pure_function(func_ptr_or_closure, func_type, call)
-        }
+        // Always use closure calling convention since all lambdas are now
+        // wrapped in Closure structs for consistency with interface dispatch
+        self.call_actual_closure(func_ptr_or_closure, func_type, call)
     }
 
     /// Call a pure function (no closure)
-    fn call_pure_function(
-        &mut self,
-        func_ptr: Value,
-        func_type: FunctionType,
-        call: &CallExpr,
-    ) -> Result<CompiledValue, String> {
-        // Build signature for pure function call
-        let mut sig = self.ctx.module.make_signature();
-        for param_type in &func_type.params {
-            sig.params.push(AbiParam::new(type_to_cranelift(
-                param_type,
-                self.ctx.pointer_type,
-            )));
-        }
-        if func_type.return_type.as_ref() != &Type::Void {
-            sig.returns.push(AbiParam::new(type_to_cranelift(
-                &func_type.return_type,
-                self.ctx.pointer_type,
-            )));
-        }
-
-        let sig_ref = self.builder.import_signature(sig);
-
-        let mut args = Vec::new();
-        for (arg, param_type) in call.args.iter().zip(func_type.params.iter()) {
-            let compiled = self.expr(arg)?;
-            let compiled = if matches!(param_type, Type::Interface(_)) {
-                box_interface_value(self.builder, self.ctx, compiled, param_type)?
-            } else {
-                compiled
-            };
-            args.push(compiled.value);
-        }
-
-        let call_inst = self.builder.ins().call_indirect(sig_ref, func_ptr, &args);
-        let results = self.builder.inst_results(call_inst);
-
-        if results.is_empty() {
-            Ok(self.void_value())
-        } else {
-            Ok(self.typed_value(results[0], (*func_type.return_type).clone()))
-        }
-    }
-
     /// Call an actual closure (with closure pointer)
     fn call_actual_closure(
         &mut self,
