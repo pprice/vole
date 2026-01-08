@@ -1,0 +1,58 @@
+// Test multi-line method chaining
+
+record Counter {
+    value: i64,
+
+    func add(n: i64) -> Counter {
+        return Counter { value: self.value + n }
+    }
+
+    func mul(n: i64) -> Counter {
+        return Counter { value: self.value * n }
+    }
+
+    func get() -> i64 {
+        return self.value
+    }
+}
+
+record Wrapper {
+    inner: Counter,
+}
+
+tests "multi-line chains" {
+    test "field access spans lines" {
+        let c = Counter { value: 10 }
+        let v = c
+            .value
+        assert(v == 10)
+    }
+
+    test "method chain spans lines" {
+        let c = Counter { value: 1 }
+        let result = c
+            .add(2)
+            .mul(3)
+            .add(1)
+            .get()
+        assert(result == 10)  // ((1 + 2) * 3) + 1 = 10
+    }
+
+    test "nested field access spans lines" {
+        let w = Wrapper { inner: Counter { value: 42 } }
+        let v = w
+            .inner
+            .value
+        assert(v == 42)
+    }
+
+    test "mixed field and method spans lines" {
+        let w = Wrapper { inner: Counter { value: 5 } }
+        let result = w
+            .inner
+            .add(5)
+            .mul(2)
+            .get()
+        assert(result == 20)  // (5 + 5) * 2 = 20
+    }
+}
