@@ -31,6 +31,24 @@ record SimpleCounter implements Counter {
     }
 }
 
+// Counter that overrides a default method
+record CustomCounter implements Counter {
+    current: i64,
+
+    func value() -> i64 {
+        return self.current
+    }
+
+    func reset() -> i64 {
+        return 0
+    }
+
+    // Override the default increment to add 10 instead of 1
+    func increment() -> i64 {
+        return self.value() + 10
+    }
+}
+
 tests "default keyword parsing" {
     test "default method can call abstract method" {
         let c = SimpleCounter { current: 10 }
@@ -45,5 +63,21 @@ tests "default keyword parsing" {
         assert(c.value() == 5)
         assert(c.increment() == 6)
         assert(c.decrement() == 4)
+    }
+
+    test "override default method" {
+        // CustomCounter overrides increment() to add 10 instead of 1
+        let c = CustomCounter { current: 5 }
+        assert(c.value() == 5)
+        assert(c.increment() == 15)  // Overridden: +10
+        assert(c.decrement() == 4)   // Still uses default: -1
+    }
+
+    test "override default method through interface type" {
+        // Vtable should use the overridden implementation
+        let c: Counter = CustomCounter { current: 5 }
+        assert(c.value() == 5)
+        assert(c.increment() == 15)  // Overridden: +10
+        assert(c.decrement() == 4)   // Still uses default: -1
     }
 }
