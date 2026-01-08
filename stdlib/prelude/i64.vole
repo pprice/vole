@@ -13,7 +13,9 @@ implement Comparable for i64 {
 }
 
 implement Hashable for i64 {
-    func hash() -> i64 { return self }
+    external("std:intrinsics") {
+        func "i64_hash" as hash() -> i64
+    }
 }
 
 implement Stringable for i64 {

@@ -1,0 +1,61 @@
+// Test Hashable implementations
+
+tests {
+    test "i64 hash is not identity" {
+        let h0 = 0.hash()
+        let h1 = 1.hash()
+        let h2 = 2.hash()
+
+        // Hashes should not equal the input values (good mixing)
+        assert(h0 != 0)
+        assert(h1 != 1)
+        assert(h2 != 2)
+    }
+
+    test "i64 hash distributes sequential values" {
+        let h0 = 0.hash()
+        let h1 = 1.hash()
+        let h2 = 2.hash()
+        let h3 = 3.hash()
+
+        // All different
+        assert(h0 != h1)
+        assert(h1 != h2)
+        assert(h2 != h3)
+        assert(h0 != h3)
+    }
+
+    test "i64 hash is consistent" {
+        let a = 42.hash()
+        let b = 42.hash()
+        assert(a == b)
+    }
+
+    test "i64 hash works with negatives" {
+        let h_neg = (-1).hash()
+        let h_pos = 1.hash()
+        assert(h_neg != h_pos)
+    }
+
+    test "i32 hash distributes values" {
+        let x: i32 = 0
+        let y: i32 = 1
+        let z: i32 = 2
+
+        let hx = x.hash()
+        let hy = y.hash()
+        let hz = z.hash()
+
+        assert(hx != hy)
+        assert(hy != hz)
+    }
+
+    test "string hash works" {
+        let h1 = "hello".hash()
+        let h2 = "world".hash()
+        let h3 = "hello".hash()
+
+        assert(h1 != h2)
+        assert(h1 == h3)  // Same string = same hash
+    }
+}

@@ -39,6 +39,16 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // i64_hash: (i64) -> i64 (Thomas Wang hash)
+    m.register(
+        "i64_hash",
+        i64_hash as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+
     // i32 functions
     m.register(
         "i32_equals",
@@ -318,10 +328,29 @@ pub extern "C" fn i32_to_string(n: i32) -> *const RcString {
     RcString::new(&n.to_string())
 }
 
-/// Hash an i32 value (just extend to i64)
+/// Thomas Wang's 64-bit integer hash function (from V8/Wren)
+/// Provides excellent bit mixing for hash table distribution
+#[inline]
+fn hash_bits(mut hash: u64) -> i64 {
+    hash = (!hash).wrapping_add(hash << 18);
+    hash ^= hash >> 31;
+    hash = hash.wrapping_mul(21);
+    hash ^= hash >> 11;
+    hash = hash.wrapping_add(hash << 6);
+    hash ^= hash >> 22;
+    hash as i64
+}
+
+/// Hash an i64 value using Thomas Wang's hash
+#[unsafe(no_mangle)]
+pub extern "C" fn i64_hash(n: i64) -> i64 {
+    hash_bits(n as u64)
+}
+
+/// Hash an i32 value using Thomas Wang's hash
 #[unsafe(no_mangle)]
 pub extern "C" fn i32_hash(n: i32) -> i64 {
-    n as i64
+    hash_bits(n as u64)
 }
 
 // =============================================================================
@@ -431,6 +460,59 @@ mod tests {
             assert_eq!((*s).as_str(), "42");
             RcString::dec_ref(s as *mut RcString);
         }
+    }
+
+    // =========================================================================
+    // Hash function tests (Thomas Wang)
+    // =========================================================================
+
+    #[test]
+    fn test_i64_hash_distribution() {
+        // Sequential integers should produce different hashes
+        let h0 = i64_hash(0);
+        let h1 = i64_hash(1);
+        let h2 = i64_hash(2);
+        let h3 = i64_hash(3);
+
+        // All hashes should be different
+        assert_ne!(h0, h1);
+        assert_ne!(h1, h2);
+        assert_ne!(h2, h3);
+        assert_ne!(h0, h2);
+
+        // Hashes should be well-distributed (not sequential)
+        assert_ne!(h1 - h0, h2 - h1); // Not linear
+    }
+
+    #[test]
+    fn test_i64_hash_consistency() {
+        // Same input should always produce same hash
+        assert_eq!(i64_hash(42), i64_hash(42));
+        assert_eq!(i64_hash(-1), i64_hash(-1));
+        assert_eq!(i64_hash(i64::MAX), i64_hash(i64::MAX));
+    }
+
+    #[test]
+    fn test_i32_hash_distribution() {
+        let h0 = i32_hash(0);
+        let h1 = i32_hash(1);
+        let h2 = i32_hash(2);
+
+        assert_ne!(h0, h1);
+        assert_ne!(h1, h2);
+        assert_ne!(h0, h2);
+    }
+
+    #[test]
+    fn test_hash_bits_known_values() {
+        // Verify the hash function produces expected mixing
+        // Zero should not hash to zero (good mixing)
+        assert_ne!(i64_hash(0), 0);
+
+        // Negative numbers should work
+        let h_neg = i64_hash(-1);
+        let h_pos = i64_hash(1);
+        assert_ne!(h_neg, h_pos);
     }
 
     // =========================================================================
