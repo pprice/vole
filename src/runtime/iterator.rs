@@ -115,11 +115,11 @@ pub extern "C" fn vole_array_iter(array: *const RcArray) -> *mut UnifiedIterator
     Box::into_raw(iter)
 }
 
-/// Free an array iterator
+/// Free an iterator and its source chain recursively.
 ///
-/// TODO: Iterator cleanup is currently deferred. When Vole adds drop semantics,
-/// iterators should call vole_array_iter_free when they go out of scope.
-/// For now, iterators leak - this is acceptable for short-lived test programs.
+/// This function handles all iterator kinds (Array, Map, Filter, Take, Skip)
+/// and recursively frees nested source iterators. Closures (for Map, Filter)
+/// are NOT freed since they are owned by the calling context.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
@@ -129,17 +129,39 @@ pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
 
     unsafe {
         let iter_ref = &*iter;
-        if iter_ref.kind == IteratorKind::Array {
-            // Decrement ref count on array
-            let array = iter_ref.source.array.array;
-            if !array.is_null() {
-                RcArray::dec_ref(array as *mut RcArray);
+        match iter_ref.kind {
+            IteratorKind::Array => {
+                // Decrement ref count on array
+                let array = iter_ref.source.array.array;
+                if !array.is_null() {
+                    RcArray::dec_ref(array as *mut RcArray);
+                }
+            }
+            IteratorKind::Map => {
+                // Recursively free the source iterator
+                // Note: we don't free the transform closure - it's owned by calling context
+                let source = iter_ref.source.map.source;
+                vole_array_iter_free(source);
+            }
+            IteratorKind::Filter => {
+                // Recursively free the source iterator
+                // Note: we don't free the predicate closure - it's owned by calling context
+                let source = iter_ref.source.filter.source;
+                vole_array_iter_free(source);
+            }
+            IteratorKind::Take => {
+                // Recursively free the source iterator
+                let source = iter_ref.source.take.source;
+                vole_array_iter_free(source);
+            }
+            IteratorKind::Skip => {
+                // Recursively free the source iterator
+                let source = iter_ref.source.skip.source;
+                vole_array_iter_free(source);
             }
         }
-        // For map iterators, we'd need to recursively free the source
-        // This is deferred until we have proper cleanup semantics
 
-        // Free the iterator
+        // Free this iterator
         drop(Box::from_raw(iter));
     }
 }
@@ -219,6 +241,7 @@ pub extern "C" fn vole_iter_next(iter: *mut UnifiedIterator) -> *mut u8 {
 
 /// Collect all remaining iterator values into a new array
 /// Returns pointer to newly allocated array (empty if iterator is null)
+/// Frees the iterator after collecting.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
@@ -249,6 +272,9 @@ pub extern "C" fn vole_array_iter_collect(iter: *mut UnifiedIterator) -> *mut Rc
             );
         }
     }
+
+    // Free the iterator chain
+    vole_array_iter_free(iter);
 
     result
 }
@@ -327,6 +353,7 @@ pub extern "C" fn vole_map_iter_next(iter: *mut UnifiedIterator, out_value: *mut
 
 /// Collect all remaining map iterator values into a new array
 /// Returns pointer to newly allocated array
+/// Frees the iterator after collecting.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_map_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
@@ -358,6 +385,9 @@ pub extern "C" fn vole_map_iter_collect(iter: *mut UnifiedIterator) -> *mut RcAr
             );
         }
     }
+
+    // Free the iterator chain
+    vole_array_iter_free(iter);
 
     result
 }
@@ -443,6 +473,7 @@ pub extern "C" fn vole_filter_iter_next(iter: *mut UnifiedIterator, out_value: *
 
 /// Collect all remaining filter iterator values into a new array
 /// Returns pointer to newly allocated array
+/// Frees the iterator after collecting.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_filter_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
@@ -475,6 +506,9 @@ pub extern "C" fn vole_filter_iter_collect(iter: *mut UnifiedIterator) -> *mut R
         }
     }
 
+    // Free the iterator chain
+    vole_array_iter_free(iter);
+
     result
 }
 
@@ -484,6 +518,7 @@ pub extern "C" fn vole_filter_iter_collect(iter: *mut UnifiedIterator) -> *mut R
 
 /// Count the number of elements in any iterator
 /// Returns the count as i64
+/// Frees the iterator after counting.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_count(iter: *mut UnifiedIterator) -> i64 {
@@ -502,11 +537,15 @@ pub extern "C" fn vole_iter_count(iter: *mut UnifiedIterator) -> i64 {
         count += 1;
     }
 
+    // Free the iterator chain
+    vole_array_iter_free(iter);
+
     count
 }
 
 /// Sum all elements in any iterator (assumes i64 elements)
 /// Returns the sum as i64
+/// Frees the iterator after summing.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_sum(iter: *mut UnifiedIterator) -> i64 {
@@ -525,11 +564,15 @@ pub extern "C" fn vole_iter_sum(iter: *mut UnifiedIterator) -> i64 {
         sum += value;
     }
 
+    // Free the iterator chain
+    vole_array_iter_free(iter);
+
     sum
 }
 
 /// Call a function for each element in any iterator
 /// The callback is a closure that takes one i64 argument and returns nothing
+/// Frees the iterator after iteration.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_for_each(iter: *mut UnifiedIterator, callback: *const Closure) {
@@ -561,11 +604,15 @@ pub extern "C" fn vole_iter_for_each(iter: *mut UnifiedIterator, callback: *cons
             }
         }
     }
+
+    // Free the iterator chain
+    vole_array_iter_free(iter);
 }
 
 /// Reduce all elements in any iterator using an accumulator function
 /// Takes initial value and a reducer closure (acc, value) -> new_acc
 /// Returns the final accumulated value
+/// Frees the iterator after reduction.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_reduce(
@@ -603,6 +650,9 @@ pub extern "C" fn vole_iter_reduce(
             };
         }
     }
+
+    // Free the iterator chain
+    vole_array_iter_free(iter);
 
     acc
 }
@@ -669,6 +719,7 @@ pub extern "C" fn vole_take_iter_next(iter: *mut UnifiedIterator, out_value: *mu
 
 /// Collect all remaining take iterator values into a new array
 /// Returns pointer to newly allocated array
+/// Frees the iterator after collecting.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_take_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
@@ -698,6 +749,9 @@ pub extern "C" fn vole_take_iter_collect(iter: *mut UnifiedIterator) -> *mut RcA
             );
         }
     }
+
+    // Free the iterator chain
+    vole_array_iter_free(iter);
 
     result
 }
@@ -765,6 +819,7 @@ pub extern "C" fn vole_skip_iter_next(iter: *mut UnifiedIterator, out_value: *mu
 
 /// Collect all remaining skip iterator values into a new array
 /// Returns pointer to newly allocated array
+/// Frees the iterator after collecting.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_skip_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
@@ -794,6 +849,9 @@ pub extern "C" fn vole_skip_iter_collect(iter: *mut UnifiedIterator) -> *mut RcA
             );
         }
     }
+
+    // Free the iterator chain
+    vole_array_iter_free(iter);
 
     result
 }
