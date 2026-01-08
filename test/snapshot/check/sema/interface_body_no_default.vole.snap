@@ -1,0 +1,13 @@
+[stdout]
+
+[stderr]
+  x [E2075]: interface method 'greet' has a body but is not marked 'default'
+   ,-[<path>/interface_body_no_default.vole:3:5]
+ 2 |     interface Greeter {
+ 3 | ,->     func greet() -> string {
+ 4 | |           return "hello"
+ 5 | |->     }
+   : `---- missing 'default' keyword
+ 6 |     }
+   `----
+  help: add 'default' keyword: default func greet(...)

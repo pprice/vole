@@ -1,0 +1,6 @@
+// Interface method has body but missing 'default' keyword
+interface Greeter {
+    func greet() -> string {
+        return "hello"
+    }
+}
