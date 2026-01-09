@@ -74,6 +74,15 @@ pub enum Type {
         /// Concrete type arguments
         args: Vec<Type>,
     },
+    /// Tuple type - heterogeneous fixed-size collection
+    /// e.g., [i32, string, bool] - different types per position
+    Tuple(Vec<Type>),
+    /// Fixed-size array - homogeneous fixed-size array
+    /// e.g., [i32; 10] - single element type, compile-time known size
+    FixedArray {
+        element: Box<Type>,
+        size: usize,
+    },
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -328,6 +337,8 @@ impl Type {
             Type::TypeParam(_) => "type parameter",
             Type::GenericInstance { .. } => "generic",
             Type::RuntimeIterator(_) => "iterator",
+            Type::Tuple(_) => "tuple",
+            Type::FixedArray { .. } => "fixed array",
         }
     }
 
@@ -439,6 +450,19 @@ impl std::fmt::Display for Type {
                     write!(f, "{}", arg)?;
                 }
                 write!(f, ">")
+            }
+            Type::Tuple(elements) => {
+                write!(f, "[")?;
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", elem)?;
+                }
+                write!(f, "]")
+            }
+            Type::FixedArray { element, size } => {
+                write!(f, "[{}; {}]", element, size)
             }
             _ => write!(f, "{}", self.name()),
         }

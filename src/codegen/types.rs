@@ -206,6 +206,17 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
                 .join(", ");
             format!("{}<{}>", def_name, arg_list)
         }
+        Type::Tuple(elements) => {
+            let elem_list = elements
+                .iter()
+                .map(|elem| display_type(analyzed, interner, elem))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("[{}]", elem_list)
+        }
+        Type::FixedArray { element, size } => {
+            format!("[{}; {}]", display_type(analyzed, interner, element), size)
+        }
         _ => ty.name().to_string(),
     }
 }

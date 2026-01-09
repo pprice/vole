@@ -67,6 +67,11 @@ enum TypeFingerprint {
         args: Vec<TypeKey>,
     },
     RuntimeIterator(TypeKey),
+    Tuple(Vec<TypeKey>),
+    FixedArray {
+        element: TypeKey,
+        size: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -265,6 +270,23 @@ impl TypeTable {
             Type::RuntimeIterator(elem) => {
                 let elem_key = self.key_for_type(elem);
                 self.intern_fingerprint(TypeFingerprint::RuntimeIterator(elem_key), ty.clone())
+            }
+            Type::Tuple(elements) => {
+                let elem_keys = elements
+                    .iter()
+                    .map(|elem| self.key_for_type(elem))
+                    .collect();
+                self.intern_fingerprint(TypeFingerprint::Tuple(elem_keys), ty.clone())
+            }
+            Type::FixedArray { element, size } => {
+                let elem_key = self.key_for_type(element);
+                self.intern_fingerprint(
+                    TypeFingerprint::FixedArray {
+                        element: elem_key,
+                        size: *size,
+                    },
+                    ty.clone(),
+                )
             }
         }
     }
