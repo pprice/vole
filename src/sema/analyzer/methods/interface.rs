@@ -59,6 +59,27 @@ impl Analyzer {
         true
     }
 
+    /// Check if a type structurally satisfies an interface by NameId
+    /// (EntityRegistry-first version with fallback)
+    ///
+    /// Tries EntityRegistry lookup first for better performance,
+    /// falling back to the traditional approach if EntityRegistry
+    /// doesn't have the interface registered.
+    pub fn satisfies_interface_via_entity_registry(
+        &self,
+        ty: &Type,
+        interface_name_id: NameId,
+        interner: &Interner,
+    ) -> bool {
+        // Try EntityRegistry first
+        if let Some(type_def_id) = self.entity_registry.type_by_name(interface_name_id) {
+            return self.satisfies_interface_by_type_def_id(ty, type_def_id, interner);
+        }
+
+        // Fall back to traditional approach
+        self.satisfies_interface_by_name_id(ty, interface_name_id, interner)
+    }
+
     /// Check if a type has a field with the given name (string) and compatible type
     fn type_has_field_by_str(
         &self,
@@ -199,11 +220,11 @@ impl Analyzer {
     pub fn satisfies_stringable(&self, ty: &Type, interner: &Interner) -> bool {
         // Use the well-known Stringable NameId if available
         if let Some(stringable_id) = self.well_known.stringable {
-            return self.satisfies_interface_by_name_id(ty, stringable_id, interner);
+            return self.satisfies_interface_via_entity_registry(ty, stringable_id, interner);
         }
         // Fallback: try to find "Stringable" by string lookup
         if let Some(def) = self.interface_registry.get_by_str("Stringable") {
-            return self.satisfies_interface_by_name_id(ty, def.name_id, interner);
+            return self.satisfies_interface_via_entity_registry(ty, def.name_id, interner);
         }
         false
     }

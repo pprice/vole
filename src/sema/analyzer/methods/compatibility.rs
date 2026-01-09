@@ -17,7 +17,7 @@ impl Analyzer {
                 return true;
             }
 
-            if self.satisfies_interface_by_name_id(from, iface.name_id, interner) {
+            if self.satisfies_interface_via_entity_registry(from, iface.name_id, interner) {
                 return true;
             }
         }

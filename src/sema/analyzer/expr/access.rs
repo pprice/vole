@@ -297,7 +297,9 @@ impl Analyzer {
         // Get a descriptive type name for error messages
         let type_name = self.type_display(&object_type);
 
-        if let Some(resolved) = self.resolve_method(&object_type, method_call.method, interner) {
+        if let Some(resolved) =
+            self.resolve_method_via_entity_registry(&object_type, method_call.method, interner)
+        {
             if resolved.is_builtin()
                 && let Some(func_type) = self.check_builtin_method(
                     &object_type,
