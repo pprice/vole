@@ -104,6 +104,8 @@ pub struct RecordType {
     pub name: Symbol,
     pub name_id: NameId,
     pub fields: Vec<StructField>,
+    /// Type arguments for generic records (empty for non-generic records)
+    pub type_args: Vec<Type>,
 }
 
 /// Interface type information

@@ -195,70 +195,221 @@ impl Analyzer {
 
     fn collect_record_signature(&mut self, record: &RecordDecl, interner: &Interner) {
         let name_id = self.name_table.intern(self.current_module, &[record.name]);
-        let fields: Vec<StructField> = record
-            .fields
-            .iter()
-            .enumerate()
-            .map(|(i, f)| {
-                let ty = self.resolve_type(&f.ty, interner);
-                StructField {
-                    name: f.name,
-                    ty,
-                    slot: i,
-                }
-            })
-            .collect();
-        let record_type = RecordType {
-            name: record.name,
-            name_id,
-            fields,
-        };
-        self.records.insert(record.name, record_type.clone());
-        self.register_named_type(record.name, Type::Record(record_type.clone()));
 
-        // Register and validate implements list
-        if !record.implements.is_empty() {
-            for iface_sym in &record.implements {
-                if self.interface_registry.get(*iface_sym, interner).is_none() {
-                    self.add_error(
-                        SemanticError::UnknownInterface {
-                            name: interner.resolve(*iface_sym).to_string(),
-                            span: record.span.into(),
-                        },
-                        record.span,
-                    );
-                }
-            }
-            self.type_implements
-                .insert(record.name, record.implements.clone());
-        }
-
-        // Register methods (with Self type resolved to the record type)
-        let self_type = Some(Type::Record(record_type));
-        for method in &record.methods {
-            let params: Vec<Type> = method
-                .params
+        // Handle generic records vs non-generic records
+        if record.type_params.is_empty() {
+            // Non-generic record: resolve types normally
+            let fields: Vec<StructField> = record
+                .fields
                 .iter()
-                .map(|p| self.resolve_type_with_self(&p.ty, interner, self_type.clone()))
+                .enumerate()
+                .map(|(i, f)| {
+                    let ty = self.resolve_type(&f.ty, interner);
+                    StructField {
+                        name: f.name,
+                        ty,
+                        slot: i,
+                    }
+                })
                 .collect();
-            let return_type = method
-                .return_type
-                .as_ref()
-                .map(|t| self.resolve_type_with_self(t, interner, self_type.clone()))
-                .unwrap_or(Type::Void);
-            let type_id = self
-                .name_table
-                .name_id(self.current_module, &[record.name])
-                .expect("record name_id should be registered");
-            let method_id = self.method_name_id(method.name, interner);
-            self.methods.insert(
-                (type_id, method_id),
-                FunctionType {
-                    params,
-                    return_type: Box::new(return_type),
-                    is_closure: false,
+            let record_type = RecordType {
+                name: record.name,
+                name_id,
+                fields,
+                type_args: vec![],
+            };
+            self.records.insert(record.name, record_type.clone());
+            self.register_named_type(record.name, Type::Record(record_type.clone()));
+
+            // Register and validate implements list
+            if !record.implements.is_empty() {
+                for iface_sym in &record.implements {
+                    if self.interface_registry.get(*iface_sym, interner).is_none() {
+                        self.add_error(
+                            SemanticError::UnknownInterface {
+                                name: interner.resolve(*iface_sym).to_string(),
+                                span: record.span.into(),
+                            },
+                            record.span,
+                        );
+                    }
+                }
+                self.type_implements
+                    .insert(record.name, record.implements.clone());
+            }
+
+            // Register methods (with Self type resolved to the record type)
+            let self_type = Some(Type::Record(record_type));
+            for method in &record.methods {
+                let params: Vec<Type> = method
+                    .params
+                    .iter()
+                    .map(|p| self.resolve_type_with_self(&p.ty, interner, self_type.clone()))
+                    .collect();
+                let return_type = method
+                    .return_type
+                    .as_ref()
+                    .map(|t| self.resolve_type_with_self(t, interner, self_type.clone()))
+                    .unwrap_or(Type::Void);
+                let type_id = self
+                    .name_table
+                    .name_id(self.current_module, &[record.name])
+                    .expect("record name_id should be registered");
+                let method_id = self.method_name_id(method.name, interner);
+                self.methods.insert(
+                    (type_id, method_id),
+                    FunctionType {
+                        params,
+                        return_type: Box::new(return_type),
+                        is_closure: false,
+                    },
+                );
+            }
+        } else {
+            // Generic record: store with type params as placeholders
+            let mut name_scope = TypeParamScope::new();
+            for tp in &record.type_params {
+                name_scope.add(TypeParamInfo {
+                    name: tp.name,
+                    constraint: None, // TODO: handle constraints
+                });
+            }
+
+            let type_params: Vec<TypeParamInfo> = record
+                .type_params
+                .iter()
+                .map(|tp| TypeParamInfo {
+                    name: tp.name,
+                    constraint: None,
+                })
+                .collect();
+
+            let mut type_param_scope = TypeParamScope::new();
+            for info in &type_params {
+                type_param_scope.add(info.clone());
+            }
+
+            // Resolve field types with type params in scope
+            let module_id = self.current_module;
+            let mut ctx = TypeResolutionContext::with_type_params(
+                &self.type_aliases,
+                &self.classes,
+                &self.records,
+                &self.error_types,
+                &self.interface_registry,
+                interner,
+                &mut self.name_table,
+                module_id,
+                &type_param_scope,
+            );
+
+            let field_names: Vec<Symbol> = record.fields.iter().map(|f| f.name).collect();
+            let field_types: Vec<Type> = record
+                .fields
+                .iter()
+                .map(|f| resolve_type(&f.ty, &mut ctx))
+                .collect();
+
+            self.generic_records.insert(
+                record.name,
+                GenericRecordDef {
+                    type_params,
+                    field_names,
+                    field_types,
                 },
             );
+
+            // Also register in regular records with TypeParam placeholders
+            // This allows struct literal checking to find the record definition
+            let fields: Vec<StructField> = record
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(i, f)| {
+                    let mut ctx = TypeResolutionContext::with_type_params(
+                        &self.type_aliases,
+                        &self.classes,
+                        &self.records,
+                        &self.error_types,
+                        &self.interface_registry,
+                        interner,
+                        &mut self.name_table,
+                        module_id,
+                        &type_param_scope,
+                    );
+                    StructField {
+                        name: f.name,
+                        ty: resolve_type(&f.ty, &mut ctx),
+                        slot: i,
+                    }
+                })
+                .collect();
+            let record_type = RecordType {
+                name: record.name,
+                name_id,
+                fields,
+                type_args: vec![], // Generic record base has no type args yet
+            };
+            self.records.insert(record.name, record_type.clone());
+            self.register_named_type(record.name, Type::Record(record_type.clone()));
+
+            // Register and validate implements list
+            if !record.implements.is_empty() {
+                for iface_sym in &record.implements {
+                    if self.interface_registry.get(*iface_sym, interner).is_none() {
+                        self.add_error(
+                            SemanticError::UnknownInterface {
+                                name: interner.resolve(*iface_sym).to_string(),
+                                span: record.span.into(),
+                            },
+                            record.span,
+                        );
+                    }
+                }
+                self.type_implements
+                    .insert(record.name, record.implements.clone());
+            }
+
+            // Register methods (with Self type resolved and type params in scope)
+            let self_type = Type::Record(record_type);
+            for method in &record.methods {
+                let mut ctx = TypeResolutionContext::with_type_params(
+                    &self.type_aliases,
+                    &self.classes,
+                    &self.records,
+                    &self.error_types,
+                    &self.interface_registry,
+                    interner,
+                    &mut self.name_table,
+                    module_id,
+                    &type_param_scope,
+                );
+                // Set self_type so TypeExpr::SelfType resolves correctly
+                ctx.self_type = Some(self_type.clone());
+                let params: Vec<Type> = method
+                    .params
+                    .iter()
+                    .map(|p| resolve_type(&p.ty, &mut ctx))
+                    .collect();
+                let return_type = method
+                    .return_type
+                    .as_ref()
+                    .map(|t| resolve_type(t, &mut ctx))
+                    .unwrap_or(Type::Void);
+                let type_id = self
+                    .name_table
+                    .name_id(self.current_module, &[record.name])
+                    .expect("record name_id should be registered");
+                let method_id = self.method_name_id(method.name, interner);
+                self.methods.insert(
+                    (type_id, method_id),
+                    FunctionType {
+                        params,
+                        return_type: Box::new(return_type),
+                        is_closure: false,
+                    },
+                );
+            }
         }
     }
 

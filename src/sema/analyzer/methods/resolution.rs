@@ -87,14 +87,46 @@ impl Analyzer {
         }
 
         // 3. Direct methods on class/record
-        let type_id = match object_type {
-            Type::Class(c) => Some(c.name_id),
-            Type::Record(r) => Some(r.name_id),
-            _ => None,
+        let (type_id, record_type_args, record_name) = match object_type {
+            Type::Class(c) => (Some(c.name_id), None, None),
+            Type::Record(r) => (
+                Some(r.name_id),
+                if r.type_args.is_empty() {
+                    None
+                } else {
+                    Some(r.type_args.as_slice())
+                },
+                Some(r.name),
+            ),
+            _ => (None, None, None),
         };
         if let Some(type_id) = type_id {
             let method_id = self.method_name_id(method_name, interner);
             if let Some(func_type) = self.methods.get(&(type_id, method_id)).cloned() {
+                // For generic records, substitute type args in the method signature
+                if let (Some(type_args), Some(name)) = (record_type_args, record_name)
+                    && let Some(generic_def) = self.generic_records.get(&name)
+                {
+                    let mut substitutions = HashMap::new();
+                    for (param, arg) in generic_def.type_params.iter().zip(type_args.iter()) {
+                        substitutions.insert(param.name, arg.clone());
+                    }
+                    let substituted_func_type = FunctionType {
+                        params: func_type
+                            .params
+                            .iter()
+                            .map(|t| substitute_type(t, &substitutions))
+                            .collect(),
+                        return_type: Box::new(substitute_type(
+                            &func_type.return_type,
+                            &substitutions,
+                        )),
+                        is_closure: func_type.is_closure,
+                    };
+                    return Some(ResolvedMethod::Direct {
+                        func_type: substituted_func_type,
+                    });
+                }
                 return Some(ResolvedMethod::Direct { func_type });
             }
         }

@@ -79,6 +79,17 @@ pub struct GenericFuncDef {
     pub return_type: Type,
 }
 
+/// Information about a generic record definition
+#[derive(Debug, Clone)]
+pub struct GenericRecordDef {
+    /// The record's type parameters (e.g., T, K, V)
+    pub type_params: Vec<TypeParamInfo>,
+    /// Field names
+    pub field_names: Vec<Symbol>,
+    /// Field types with TypeParam placeholders (e.g., [TypeParam(T), i64])
+    pub field_types: Vec<Type>,
+}
+
 /// Key for looking up monomorphized function instances.
 /// Uses a string representation for hashability since Type doesn't implement Hash.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

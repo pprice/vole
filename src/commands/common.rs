@@ -13,7 +13,7 @@ use crate::errors::{LexerError, render_to_stderr, render_to_writer};
 use crate::frontend::{AstPrinter, Interner, NodeId, ParseError, Parser, Symbol, ast::Program};
 use crate::identity::{NameId, NameTable};
 use crate::runtime::set_stdout_capture;
-use crate::sema::generic::{GenericFuncDef, MonomorphCache, MonomorphKey};
+use crate::sema::generic::{GenericFuncDef, GenericRecordDef, MonomorphCache, MonomorphKey};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::{
     Analyzer, ErrorTypeInfo, FunctionType, ImplementRegistry, MethodResolutions, Type, TypeError,
@@ -39,6 +39,8 @@ pub struct AnalyzedProgram {
     pub module_programs: HashMap<String, (Program, Interner)>,
     /// Generic function definitions (for monomorphization)
     pub generic_functions: HashMap<Symbol, GenericFuncDef>,
+    /// Generic record definitions (for type inference in struct literals)
+    pub generic_records: HashMap<Symbol, GenericRecordDef>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: MonomorphCache,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
@@ -170,6 +172,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         error_types,
         module_programs,
         generic_functions,
+        generic_records,
         monomorph_cache,
         generic_calls,
         external_func_info,
@@ -190,6 +193,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         error_types,
         module_programs,
         generic_functions,
+        generic_records,
         monomorph_cache,
         generic_calls,
         external_func_info,
@@ -379,6 +383,7 @@ pub fn run_captured<W: Write + Send + 'static>(
         error_types,
         module_programs,
         generic_functions,
+        generic_records,
         monomorph_cache,
         generic_calls,
         external_func_info,
@@ -400,6 +405,7 @@ pub fn run_captured<W: Write + Send + 'static>(
         error_types,
         module_programs,
         generic_functions,
+        generic_records,
         monomorph_cache,
         generic_calls,
         external_func_info,

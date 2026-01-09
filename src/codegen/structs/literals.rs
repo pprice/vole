@@ -7,12 +7,16 @@ use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
 use crate::codegen::interface_vtable::box_interface_value;
 use crate::codegen::types::CompiledValue;
-use crate::frontend::{StructLiteralExpr, Symbol};
+use crate::frontend::{Expr, StructLiteralExpr, Symbol};
 use crate::sema::Type;
 use cranelift::prelude::*;
 
 impl Cg<'_, '_, '_> {
-    pub fn struct_literal(&mut self, sl: &StructLiteralExpr) -> Result<CompiledValue, String> {
+    pub fn struct_literal(
+        &mut self,
+        sl: &StructLiteralExpr,
+        expr: &Expr,
+    ) -> Result<CompiledValue, String> {
         let metadata = self
             .ctx
             .type_metadata
@@ -21,7 +25,14 @@ impl Cg<'_, '_, '_> {
 
         let type_id = metadata.type_id;
         let field_count = metadata.field_slots.len() as u32;
-        let vole_type = metadata.vole_type.clone();
+        // Prefer the type from semantic analysis (handles generic instantiation)
+        let vole_type = self
+            .ctx
+            .analyzed
+            .expr_types
+            .get(&expr.id)
+            .cloned()
+            .unwrap_or_else(|| metadata.vole_type.clone());
         let field_slots = metadata.field_slots.clone();
 
         let type_id_val = self.builder.ins().iconst(types::I32, type_id as i64);

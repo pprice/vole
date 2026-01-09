@@ -12,8 +12,8 @@ use crate::frontend::*;
 use crate::identity::{ModuleId, NameId, NameTable, Namer, NamerLookup};
 use crate::module::ModuleLoader;
 use crate::sema::generic::{
-    GenericFuncDef, MonomorphCache, MonomorphInstance, MonomorphKey, TypeParamInfo, TypeParamScope,
-    substitute_type,
+    GenericFuncDef, GenericRecordDef, MonomorphCache, MonomorphInstance, MonomorphKey,
+    TypeParamInfo, TypeParamScope, substitute_type,
 };
 use crate::sema::implement_registry::{
     ExternalMethodInfo, ImplementRegistry, MethodImpl, PrimitiveTypeId, TypeId,
@@ -110,6 +110,8 @@ pub struct Analyzer {
     loading_prelude: bool,
     /// Generic function definitions (with type params)
     generic_functions: HashMap<Symbol, GenericFuncDef>,
+    /// Generic record definitions (with type params)
+    generic_records: HashMap<Symbol, GenericRecordDef>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: MonomorphCache,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
@@ -159,6 +161,7 @@ impl Analyzer {
             module_programs: HashMap::new(),
             loading_prelude: false,
             generic_functions: HashMap::new(),
+            generic_records: HashMap::new(),
             monomorph_cache: MonomorphCache::new(),
             generic_calls: HashMap::new(),
             name_table,
@@ -409,6 +412,7 @@ impl Analyzer {
             module_programs: HashMap::new(),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
             generic_functions: HashMap::new(),
+            generic_records: HashMap::new(),
             monomorph_cache: MonomorphCache::new(),
             generic_calls: HashMap::new(),
             name_table: NameTable::new(),
@@ -591,6 +595,7 @@ impl Analyzer {
         HashMap<Symbol, ErrorTypeInfo>,
         HashMap<String, (Program, Interner)>,
         HashMap<Symbol, GenericFuncDef>,
+        HashMap<Symbol, GenericRecordDef>,
         MonomorphCache,
         HashMap<NodeId, MonomorphKey>,
         HashMap<String, ExternalMethodInfo>,
@@ -609,6 +614,7 @@ impl Analyzer {
             self.error_types,
             self.module_programs,
             self.generic_functions,
+            self.generic_records,
             self.monomorph_cache,
             self.generic_calls,
             self.external_func_info,

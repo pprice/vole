@@ -259,6 +259,7 @@ impl Compiler<'_> {
             name: record.name,
             name_id,
             fields: vec![],
+            type_args: vec![],
         });
 
         self.type_metadata.insert(
@@ -310,6 +311,7 @@ impl Compiler<'_> {
                 .name_id(self.analyzed.name_table.main_module(), &[record.name])
                 .expect("record name_id should be registered"),
             fields: struct_fields,
+            type_args: vec![],
         });
 
         // Collect method return types
