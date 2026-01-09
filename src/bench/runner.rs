@@ -169,6 +169,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
         name_table,
         type_table,
         well_known,
+        entity_registry,
     ) = analyzer.into_analysis_results();
     let sema_ns = sema_start.elapsed().as_nanos() as u64;
 
@@ -192,6 +193,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
         name_table,
         type_table,
         well_known,
+        entity_registry,
     };
 
     // Codegen phase
@@ -260,6 +262,7 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
         name_table,
         type_table,
         well_known,
+        entity_registry,
     ) = analyzer.into_analysis_results();
 
     let analyzed = AnalyzedProgram {
@@ -282,6 +285,7 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
         name_table,
         type_table,
         well_known,
+        entity_registry,
     };
 
     // Compile

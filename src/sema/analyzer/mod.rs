@@ -11,6 +11,7 @@ use crate::errors::SemanticError;
 use crate::frontend::*;
 use crate::identity::{ModuleId, NameId, NameTable, Namer, NamerLookup};
 use crate::module::ModuleLoader;
+use crate::sema::EntityRegistry;
 use crate::sema::generic::{
     GenericFuncDef, GenericRecordDef, MonomorphCache, MonomorphInstance, MonomorphKey,
     TypeParamInfo, TypeParamScope, substitute_type,
@@ -124,6 +125,8 @@ pub struct Analyzer {
     current_module: ModuleId,
     /// Well-known stdlib type NameIds for fast comparison
     pub well_known: WellKnownTypes,
+    /// Entity registry for first-class type/method/field/function identity
+    pub entity_registry: EntityRegistry,
 }
 
 impl Analyzer {
@@ -168,6 +171,7 @@ impl Analyzer {
             type_table: TypeTable::new(),
             current_module: main_module,
             well_known: WellKnownTypes::new(),
+            entity_registry: EntityRegistry::new(),
         };
 
         // Register built-in interfaces and implementations
@@ -419,6 +423,7 @@ impl Analyzer {
             type_table: TypeTable::new(),
             current_module: prelude_module, // Use the prelude module path!
             well_known: WellKnownTypes::new(),
+            entity_registry: EntityRegistry::new(),
         };
 
         // Copy existing interface registry so prelude files can reference earlier definitions
@@ -601,6 +606,7 @@ impl Analyzer {
         NameTable,
         TypeTable,
         WellKnownTypes,
+        EntityRegistry,
     ) {
         (
             self.type_aliases,
@@ -620,6 +626,7 @@ impl Analyzer {
             self.name_table,
             self.type_table,
             self.well_known,
+            self.entity_registry,
         )
     }
 

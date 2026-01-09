@@ -120,6 +120,7 @@ pub fn inspect_files(
                     name_table,
                     type_table,
                     well_known,
+                    entity_registry,
                 ) = analyzer.into_analysis_results();
 
                 // Generate IR
@@ -143,6 +144,7 @@ pub fn inspect_files(
                     name_table,
                     type_table,
                     well_known,
+                    entity_registry,
                 };
                 let mut jit = JitContext::new();
                 let mut compiler = Compiler::new(&mut jit, &analyzed);

@@ -14,6 +14,8 @@ pub mod types;
 pub mod well_known;
 
 pub use analyzer::{Analyzer, TypeError};
+pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
+pub use entity_registry::EntityRegistry;
 pub use implement_registry::{ImplementRegistry, MethodImpl, MethodKey, PrimitiveTypeId, TypeId};
 pub use interface_registry::{
     InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
@@ -24,5 +26,3 @@ pub use types::{
     ClassType, ErrorTypeInfo, FunctionType, ModuleType, RecordType, StructField, Type,
 };
 pub use well_known::{WellKnownMethods, WellKnownTypes};
-pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
-pub use entity_registry::EntityRegistry;

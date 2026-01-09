@@ -16,8 +16,8 @@ use crate::runtime::set_stdout_capture;
 use crate::sema::generic::{GenericFuncDef, GenericRecordDef, MonomorphCache, MonomorphKey};
 use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::{
-    Analyzer, ErrorTypeInfo, FunctionType, ImplementRegistry, MethodResolutions, Type, TypeError,
-    TypeTable, WellKnownTypes,
+    Analyzer, EntityRegistry, ErrorTypeInfo, FunctionType, ImplementRegistry, MethodResolutions,
+    Type, TypeError, TypeTable, WellKnownTypes,
 };
 use crate::transforms;
 
@@ -53,6 +53,8 @@ pub struct AnalyzedProgram {
     pub type_table: TypeTable,
     /// Well-known stdlib type NameIds for fast comparison
     pub well_known: WellKnownTypes,
+    /// Entity registry for first-class type/method/field/function identity
+    pub entity_registry: EntityRegistry,
 }
 
 /// Render a lexer error to stderr with source context
@@ -179,6 +181,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         name_table,
         type_table,
         well_known,
+        entity_registry,
     ) = analyzer.into_analysis_results();
     Ok(AnalyzedProgram {
         program,
@@ -200,6 +203,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         name_table,
         type_table,
         well_known,
+        entity_registry,
     })
 }
 
@@ -390,6 +394,7 @@ pub fn run_captured<W: Write + Send + 'static>(
         name_table,
         type_table,
         well_known,
+        entity_registry,
     ) = analyzer.into_analysis_results();
 
     let analyzed = AnalyzedProgram {
@@ -412,6 +417,7 @@ pub fn run_captured<W: Write + Send + 'static>(
         name_table,
         type_table,
         well_known,
+        entity_registry,
     };
 
     // Compile

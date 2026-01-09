@@ -106,7 +106,9 @@ impl EntityRegistry {
             .get_mut(&defining_type)
             .expect("type must be registered before adding methods")
             .insert(name_id, id);
-        self.type_defs[defining_type.index() as usize].methods.push(id);
+        self.type_defs[defining_type.index() as usize]
+            .methods
+            .push(id);
         id
     }
 
@@ -117,7 +119,10 @@ impl EntityRegistry {
 
     /// Get all methods defined directly on a type (not inherited)
     pub fn methods_on_type(&self, type_id: TypeDefId) -> impl Iterator<Item = MethodId> + '_ {
-        self.type_defs[type_id.index() as usize].methods.iter().copied()
+        self.type_defs[type_id.index() as usize]
+            .methods
+            .iter()
+            .copied()
     }
 
     /// Find a method on a type by its short name (not inherited)
@@ -150,7 +155,9 @@ impl EntityRegistry {
             .get_mut(&defining_type)
             .expect("type must be registered before adding fields")
             .insert(name_id, id);
-        self.type_defs[defining_type.index() as usize].fields.push(id);
+        self.type_defs[defining_type.index() as usize]
+            .fields
+            .push(id);
         id
     }
 
@@ -161,7 +168,10 @@ impl EntityRegistry {
 
     /// Get all fields defined directly on a type
     pub fn fields_on_type(&self, type_id: TypeDefId) -> impl Iterator<Item = FieldId> + '_ {
-        self.type_defs[type_id.index() as usize].fields.iter().copied()
+        self.type_defs[type_id.index() as usize]
+            .fields
+            .iter()
+            .copied()
     }
 
     /// Find a field on a type by its short name
@@ -313,17 +323,18 @@ mod tests {
             is_closure: false,
         };
 
-        let method_id = registry.register_method(
-            type_id,
-            method_name,
-            full_method_name,
-            signature,
-            false,
-        );
+        let method_id =
+            registry.register_method(type_id, method_name, full_method_name, signature, false);
 
-        assert_eq!(registry.find_method_on_type(type_id, method_name), Some(method_id));
+        assert_eq!(
+            registry.find_method_on_type(type_id, method_name),
+            Some(method_id)
+        );
         assert_eq!(registry.get_method(method_id).defining_type, type_id);
-        assert_eq!(registry.methods_on_type(type_id).collect::<Vec<_>>(), vec![method_id]);
+        assert_eq!(
+            registry.methods_on_type(type_id).collect::<Vec<_>>(),
+            vec![method_id]
+        );
     }
 
     #[test]
@@ -338,18 +349,18 @@ mod tests {
         let mut registry = EntityRegistry::new();
         let type_id = registry.register_type(type_name, TypeDefKind::Record, main_mod);
 
-        let field_id = registry.register_field(
-            type_id,
-            field_name,
-            full_field_name,
-            Type::I32,
-            0,
-        );
+        let field_id = registry.register_field(type_id, field_name, full_field_name, Type::I32, 0);
 
-        assert_eq!(registry.find_field_on_type(type_id, field_name), Some(field_id));
+        assert_eq!(
+            registry.find_field_on_type(type_id, field_name),
+            Some(field_id)
+        );
         assert_eq!(registry.get_field(field_id).defining_type, type_id);
         assert_eq!(registry.get_field(field_id).slot, 0);
-        assert_eq!(registry.fields_on_type(type_id).collect::<Vec<_>>(), vec![field_id]);
+        assert_eq!(
+            registry.fields_on_type(type_id).collect::<Vec<_>>(),
+            vec![field_id]
+        );
     }
 
     #[test]
@@ -367,10 +378,8 @@ mod tests {
         };
 
         let func_id = registry.register_function(
-            func_name,
-            func_name, // For simple functions, name_id == full_name_id
-            math_mod,
-            signature,
+            func_name, func_name, // For simple functions, name_id == full_name_id
+            math_mod, signature,
         );
 
         assert_eq!(registry.function_by_name(func_name), Some(func_id));

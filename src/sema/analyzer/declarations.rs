@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::frontend::ast::TypeExpr;
+use crate::sema::entity_defs::TypeDefKind;
 
 /// Extract the base interface name from a TypeExpr.
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
@@ -620,6 +621,43 @@ impl Analyzer {
         let name_id = self
             .name_table
             .intern_raw(self.current_module, &[&name_str]);
+
+        // Register in EntityRegistry BEFORE moving methods into InterfaceDef
+        // (parallel migration)
+        let entity_type_id = self.entity_registry.register_type(
+            name_id,
+            TypeDefKind::Interface,
+            self.current_module,
+        );
+
+        // Register extends relationships
+        // Note: extends contains Symbols, we need to look up their TypeDefIds
+        // For now, skip - this will be filled in when we have full integration
+
+        // Register methods in EntityRegistry
+        for method in &methods {
+            let method_name_str = &method.name_str;
+            let builtin_module = self.name_table.builtin_module();
+            let method_name_id = self
+                .name_table
+                .intern_raw(builtin_module, &[method_name_str]);
+            let full_method_name_id = self
+                .name_table
+                .intern_raw(self.current_module, &[&name_str, method_name_str]);
+            let signature = FunctionType {
+                params: method.params.clone(),
+                return_type: Box::new(method.return_type.clone()),
+                is_closure: false,
+            };
+            self.entity_registry.register_method(
+                entity_type_id,
+                method_name_id,
+                full_method_name_id,
+                signature,
+                method.has_default,
+            );
+        }
+
         let def = InterfaceDef {
             name: interface_decl.name,
             name_id,
@@ -636,6 +674,7 @@ impl Analyzer {
         };
 
         self.interface_registry.register(def);
+
         self.register_named_type(
             interface_decl.name,
             Type::Interface(crate::sema::types::InterfaceType {

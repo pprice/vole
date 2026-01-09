@@ -2,6 +2,7 @@ use super::*;
 use crate::commands::common::AnalyzedProgram;
 use crate::frontend::Parser;
 use crate::identity::NameTable;
+use crate::sema::EntityRegistry;
 use crate::sema::ImplementRegistry;
 use crate::sema::TypeTable;
 use crate::sema::WellKnownTypes;
@@ -34,6 +35,7 @@ fn compile_and_run(source: &str) -> i64 {
         name_table: NameTable::new(),
         type_table: TypeTable::new(),
         well_known: WellKnownTypes::new(),
+        entity_registry: EntityRegistry::new(),
     };
 
     let mut jit = JitContext::new();
