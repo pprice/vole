@@ -3,7 +3,7 @@
 //! EntityRegistry stores type definitions, methods, fields, and functions,
 //! providing type-safe lookups by ID and name.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
@@ -200,6 +200,74 @@ impl EntityRegistry {
     pub fn function_by_name(&self, full_name_id: NameId) -> Option<FunctionId> {
         self.function_by_name.get(&full_name_id).copied()
     }
+
+    /// Add an extends relationship (derived extends base)
+    pub fn add_extends(&mut self, derived: TypeDefId, base: TypeDefId) {
+        self.type_defs[derived.index() as usize].extends.push(base);
+    }
+
+    /// Check if derived extends base (transitive)
+    pub fn type_extends(&self, derived: TypeDefId, base: TypeDefId) -> bool {
+        if derived == base {
+            return true;
+        }
+        let mut stack = vec![derived];
+        let mut seen = HashSet::new();
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current) {
+                continue;
+            }
+            for parent in &self.type_defs[current.index() as usize].extends {
+                if *parent == base {
+                    return true;
+                }
+                stack.push(*parent);
+            }
+        }
+        false
+    }
+
+    /// Resolve a method on a type, checking inherited methods too
+    pub fn resolve_method(&self, type_id: TypeDefId, method_name: NameId) -> Option<MethodId> {
+        // Check direct methods first
+        if let Some(method_id) = self.find_method_on_type(type_id, method_name) {
+            return Some(method_id);
+        }
+        // Check parent types
+        for parent in &self.type_defs[type_id.index() as usize].extends.clone() {
+            if let Some(method_id) = self.resolve_method(*parent, method_name) {
+                return Some(method_id);
+            }
+        }
+        None
+    }
+
+    /// Get all methods on a type including inherited
+    pub fn all_methods(&self, type_id: TypeDefId) -> Vec<MethodId> {
+        let mut result = Vec::new();
+        let mut seen_names = HashSet::new();
+        self.collect_all_methods(type_id, &mut result, &mut seen_names);
+        result
+    }
+
+    fn collect_all_methods(
+        &self,
+        type_id: TypeDefId,
+        result: &mut Vec<MethodId>,
+        seen_names: &mut HashSet<NameId>,
+    ) {
+        // Add direct methods first (they override inherited)
+        for method_id in &self.type_defs[type_id.index() as usize].methods {
+            let method = self.get_method(*method_id);
+            if seen_names.insert(method.name_id) {
+                result.push(*method_id);
+            }
+        }
+        // Then check parents
+        for parent in self.type_defs[type_id.index() as usize].extends.clone() {
+            self.collect_all_methods(parent, result, seen_names);
+        }
+    }
 }
 
 impl Default for EntityRegistry {
@@ -307,5 +375,64 @@ mod tests {
 
         assert_eq!(registry.function_by_name(func_name), Some(func_id));
         assert_eq!(registry.get_function(func_id).module, math_mod);
+    }
+
+    #[test]
+    fn hierarchy_extends() {
+        let mut names = NameTable::new();
+        let main_mod = names.main_module();
+        let base_name = names.intern_raw(main_mod, &["Base"]);
+        let derived_name = names.intern_raw(main_mod, &["Derived"]);
+
+        let mut registry = EntityRegistry::new();
+        let base_id = registry.register_type(base_name, TypeDefKind::Interface, main_mod);
+        let derived_id = registry.register_type(derived_name, TypeDefKind::Interface, main_mod);
+
+        registry.add_extends(derived_id, base_id);
+
+        assert!(registry.type_extends(derived_id, base_id));
+        assert!(registry.type_extends(derived_id, derived_id)); // reflexive
+        assert!(!registry.type_extends(base_id, derived_id)); // not reverse
+    }
+
+    #[test]
+    fn resolve_inherited_method() {
+        let mut names = NameTable::new();
+        let main_mod = names.main_module();
+        let builtin_mod = names.builtin_module();
+
+        let base_name = names.intern_raw(main_mod, &["Base"]);
+        let derived_name = names.intern_raw(main_mod, &["Derived"]);
+        let method_name = names.intern_raw(builtin_mod, &["foo"]);
+        let full_method_name = names.intern_raw(main_mod, &["Base", "foo"]);
+
+        let mut registry = EntityRegistry::new();
+        let base_id = registry.register_type(base_name, TypeDefKind::Interface, main_mod);
+        let derived_id = registry.register_type(derived_name, TypeDefKind::Interface, main_mod);
+
+        let signature = FunctionType {
+            params: vec![],
+            return_type: Box::new(Type::Void),
+            is_closure: false,
+        };
+
+        let method_id =
+            registry.register_method(base_id, method_name, full_method_name, signature, false);
+        registry.add_extends(derived_id, base_id);
+
+        // Method should be found on base directly
+        assert_eq!(
+            registry.find_method_on_type(base_id, method_name),
+            Some(method_id)
+        );
+        // Method should NOT be found directly on derived
+        assert_eq!(registry.find_method_on_type(derived_id, method_name), None);
+        // But resolve_method should find it via inheritance
+        assert_eq!(
+            registry.resolve_method(derived_id, method_name),
+            Some(method_id)
+        );
+        // all_methods should include inherited
+        assert_eq!(registry.all_methods(derived_id), vec![method_id]);
     }
 }
