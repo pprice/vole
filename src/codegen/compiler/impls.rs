@@ -287,45 +287,40 @@ impl Compiler<'_> {
         // Get the Cranelift type for self
         let self_cranelift_type = type_to_cranelift(self_vole_type, self.pointer_type);
 
-        // Collect param types (not including self)
-        let param_types: Vec<types::Type> = method
-            .params
-            .iter()
-            .map(|p| {
-                type_to_cranelift(
-                    &resolve_type_expr_full(
-                        &p.ty,
-                        &self.analyzed.type_aliases,
-                        &self.analyzed.interface_registry,
-                        &self.analyzed.interner,
-                        &self.analyzed.name_table,
-                        module_id,
-                    ),
-                    self.pointer_type,
-                )
-            })
-            .collect();
-        let param_vole_types: Vec<Type> = method
-            .params
-            .iter()
-            .map(|p| {
+        // Clone type for the closure
+        let self_type = self_vole_type.clone();
+
+        // Helper to resolve param type, substituting Self with the concrete type
+        let resolve_param_type = |ty: &TypeExpr| -> Type {
+            if matches!(ty, TypeExpr::SelfType) {
+                self_type.clone()
+            } else {
                 resolve_type_expr_full(
-                    &p.ty,
+                    ty,
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
                     module_id,
                 )
-            })
+            }
+        };
+
+        // Collect param types (not including self)
+        let param_types: Vec<types::Type> = method
+            .params
+            .iter()
+            .map(|p| type_to_cranelift(&resolve_param_type(&p.ty), self.pointer_type))
+            .collect();
+        let param_vole_types: Vec<Type> = method
+            .params
+            .iter()
+            .map(|p| resolve_param_type(&p.ty))
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
-
-        // Clone type for the closure
-        let self_type = self_vole_type.clone();
 
         // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -458,45 +453,40 @@ impl Compiler<'_> {
         let sig = self.create_method_signature(method);
         self.jit.ctx.func.signature = sig;
 
-        // Collect param types (not including self)
-        let param_types: Vec<types::Type> = method
-            .params
-            .iter()
-            .map(|p| {
-                type_to_cranelift(
-                    &resolve_type_expr_full(
-                        &p.ty,
-                        &self.analyzed.type_aliases,
-                        &self.analyzed.interface_registry,
-                        &self.analyzed.interner,
-                        &self.analyzed.name_table,
-                        module_id,
-                    ),
-                    self.pointer_type,
-                )
-            })
-            .collect();
-        let param_vole_types: Vec<Type> = method
-            .params
-            .iter()
-            .map(|p| {
+        // Clone metadata for the closure (needs to be before resolve_param_type closure)
+        let self_vole_type = metadata.vole_type.clone();
+
+        // Helper to resolve param type, substituting Self with the concrete type
+        let resolve_param_type = |ty: &TypeExpr| -> Type {
+            if matches!(ty, TypeExpr::SelfType) {
+                self_vole_type.clone()
+            } else {
                 resolve_type_expr_full(
-                    &p.ty,
+                    ty,
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
                     module_id,
                 )
-            })
+            }
+        };
+
+        // Collect param types (not including self)
+        let param_types: Vec<types::Type> = method
+            .params
+            .iter()
+            .map(|p| type_to_cranelift(&resolve_param_type(&p.ty), self.pointer_type))
+            .collect();
+        let param_vole_types: Vec<Type> = method
+            .params
+            .iter()
+            .map(|p| resolve_param_type(&p.ty))
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
-
-        // Clone metadata for the closure
-        let self_vole_type = metadata.vole_type.clone();
 
         // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -615,45 +605,40 @@ impl Compiler<'_> {
         let sig = self.create_interface_method_signature(method);
         self.jit.ctx.func.signature = sig;
 
-        // Collect param types (not including self)
-        let param_types: Vec<types::Type> = method
-            .params
-            .iter()
-            .map(|p| {
-                type_to_cranelift(
-                    &resolve_type_expr_full(
-                        &p.ty,
-                        &self.analyzed.type_aliases,
-                        &self.analyzed.interface_registry,
-                        &self.analyzed.interner,
-                        &self.analyzed.name_table,
-                        module_id,
-                    ),
-                    self.pointer_type,
-                )
-            })
-            .collect();
-        let param_vole_types: Vec<Type> = method
-            .params
-            .iter()
-            .map(|p| {
+        // Clone metadata for the closure - self has the concrete type!
+        let self_vole_type = metadata.vole_type.clone();
+
+        // Helper to resolve param type, substituting Self with the concrete type
+        let resolve_param_type = |ty: &TypeExpr| -> Type {
+            if matches!(ty, TypeExpr::SelfType) {
+                self_vole_type.clone()
+            } else {
                 resolve_type_expr_full(
-                    &p.ty,
+                    ty,
                     &self.analyzed.type_aliases,
                     &self.analyzed.interface_registry,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
                     module_id,
                 )
-            })
+            }
+        };
+
+        // Collect param types (not including self)
+        let param_types: Vec<types::Type> = method
+            .params
+            .iter()
+            .map(|p| type_to_cranelift(&resolve_param_type(&p.ty), self.pointer_type))
+            .collect();
+        let param_vole_types: Vec<Type> = method
+            .params
+            .iter()
+            .map(|p| resolve_param_type(&p.ty))
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
-
-        // Clone metadata for the closure - self has the concrete type!
-        let self_vole_type = metadata.vole_type.clone();
 
         // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();

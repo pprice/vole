@@ -145,7 +145,7 @@ impl Analyzer {
             fields,
         };
         self.classes.insert(class.name, class_type.clone());
-        self.register_named_type(class.name, Type::Class(class_type));
+        self.register_named_type(class.name, Type::Class(class_type.clone()));
 
         // Register and validate implements list
         if !class.implements.is_empty() {
@@ -164,17 +164,18 @@ impl Analyzer {
                 .insert(class.name, class.implements.clone());
         }
 
-        // Register methods
+        // Register methods (with Self type resolved to the class type)
+        let self_type = Some(Type::Class(class_type));
         for method in &class.methods {
             let params: Vec<Type> = method
                 .params
                 .iter()
-                .map(|p| self.resolve_type(&p.ty, interner))
+                .map(|p| self.resolve_type_with_self(&p.ty, interner, self_type.clone()))
                 .collect();
             let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| self.resolve_type(t, interner))
+                .map(|t| self.resolve_type_with_self(t, interner, self_type.clone()))
                 .unwrap_or(Type::Void);
             let type_id = self
                 .name_table
@@ -213,7 +214,7 @@ impl Analyzer {
             fields,
         };
         self.records.insert(record.name, record_type.clone());
-        self.register_named_type(record.name, Type::Record(record_type));
+        self.register_named_type(record.name, Type::Record(record_type.clone()));
 
         // Register and validate implements list
         if !record.implements.is_empty() {
@@ -232,17 +233,18 @@ impl Analyzer {
                 .insert(record.name, record.implements.clone());
         }
 
-        // Register methods
+        // Register methods (with Self type resolved to the record type)
+        let self_type = Some(Type::Record(record_type));
         for method in &record.methods {
             let params: Vec<Type> = method
                 .params
                 .iter()
-                .map(|p| self.resolve_type(&p.ty, interner))
+                .map(|p| self.resolve_type_with_self(&p.ty, interner, self_type.clone()))
                 .collect();
             let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| self.resolve_type(t, interner))
+                .map(|t| self.resolve_type_with_self(t, interner, self_type.clone()))
                 .unwrap_or(Type::Void);
             let type_id = self
                 .name_table

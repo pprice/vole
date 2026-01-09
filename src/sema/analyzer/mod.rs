@@ -781,6 +781,16 @@ impl Analyzer {
     }
 
     fn resolve_type(&mut self, ty: &TypeExpr, interner: &Interner) -> Type {
+        self.resolve_type_with_self(ty, interner, None)
+    }
+
+    /// Resolve a type expression with an optional Self type for method signatures
+    fn resolve_type_with_self(
+        &mut self,
+        ty: &TypeExpr,
+        interner: &Interner,
+        self_type: Option<Type>,
+    ) -> Type {
         let module_id = self.current_module;
         let mut ctx = TypeResolutionContext {
             type_aliases: &self.type_aliases,
@@ -792,6 +802,7 @@ impl Analyzer {
             name_table: &mut self.name_table,
             module_id,
             type_params: None,
+            self_type,
         };
         resolve_type(ty, &mut ctx)
     }
@@ -941,6 +952,7 @@ impl Analyzer {
                 name_table: &mut self.name_table,
                 module_id,
                 type_params: None,
+                self_type: None,
             };
             let ty = resolve_type(&field.ty, &mut ctx);
 
@@ -1349,6 +1361,7 @@ impl Analyzer {
                             name_table: &mut self.name_table,
                             module_id,
                             type_params: None,
+                            self_type: None,
                         };
                         let params: Vec<Type> = f
                             .params
@@ -1405,6 +1418,7 @@ impl Analyzer {
                                 name_table: &mut self.name_table,
                                 module_id,
                                 type_params: None,
+                                self_type: None,
                             };
                             let params: Vec<Type> = func
                                 .params

@@ -60,19 +60,34 @@ impl Analyzer {
     }
 
     /// Check if a method signature matches an interface requirement
-    pub(crate) fn signatures_match(required: &InterfaceMethodDef, found: &FunctionType) -> bool {
+    /// The `implementing_type` is used to substitute Self (Type::Error) in interface definitions
+    pub(crate) fn signatures_match(
+        required: &InterfaceMethodDef,
+        found: &FunctionType,
+        implementing_type: &Type,
+    ) -> bool {
         // Check parameter count
         if required.params.len() != found.params.len() {
             return false;
         }
-        // Check parameter types
+        // Check parameter types, substituting Self (Type::Error) with implementing_type
         for (req_param, found_param) in required.params.iter().zip(found.params.iter()) {
-            if req_param != found_param {
+            let effective_req = if matches!(req_param, Type::Error) {
+                implementing_type
+            } else {
+                req_param
+            };
+            if effective_req != found_param {
                 return false;
             }
         }
-        // Check return type
-        required.return_type == *found.return_type
+        // Check return type, substituting Self (Type::Error) with implementing_type
+        let effective_return = if matches!(required.return_type, Type::Error) {
+            implementing_type
+        } else {
+            &required.return_type
+        };
+        effective_return == &*found.return_type
     }
 
     /// Format a method signature for error messages

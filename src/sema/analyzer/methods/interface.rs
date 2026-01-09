@@ -187,6 +187,15 @@ impl Analyzer {
         span: Span,
         interner: &Interner,
     ) {
+        // Get the implementing type for Self substitution
+        let implementing_type = if let Some(class_type) = self.classes.get(&type_name) {
+            Type::Class(class_type.clone())
+        } else if let Some(record_type) = self.records.get(&type_name) {
+            Type::Record(record_type.clone())
+        } else {
+            return; // Unknown type, can't validate
+        };
+
         if let Some(iface) = self.interface_registry.get(iface_name, interner).cloned() {
             // Check methods required by this interface
             for required in &iface.methods {
@@ -208,8 +217,8 @@ impl Analyzer {
                         );
                     }
                     Some(found_sig) => {
-                        // Method exists, check signature
-                        if !Self::signatures_match(required, found_sig) {
+                        // Method exists, check signature (substituting Self with implementing type)
+                        if !Self::signatures_match(required, found_sig, &implementing_type) {
                             let expected = self.format_method_signature(
                                 &required.params,
                                 &required.return_type,

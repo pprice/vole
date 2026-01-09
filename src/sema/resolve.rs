@@ -24,6 +24,8 @@ pub struct TypeResolutionContext<'a> {
     pub module_id: ModuleId,
     /// Type parameters in scope (for generic contexts)
     pub type_params: Option<&'a TypeParamScope>,
+    /// The concrete type that `Self` resolves to (for method signatures)
+    pub self_type: Option<Type>,
 }
 
 fn interface_instance(
@@ -86,6 +88,7 @@ impl<'a> TypeResolutionContext<'a> {
             name_table,
             module_id,
             type_params: None,
+            self_type: None,
         }
     }
 
@@ -112,6 +115,7 @@ impl<'a> TypeResolutionContext<'a> {
             name_table,
             module_id,
             type_params: Some(type_params),
+            self_type: None,
         }
     }
 }
@@ -174,9 +178,13 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
             })
         }
         TypeExpr::SelfType => {
-            // Self is resolved during interface/implement checking
-            // For now, return Error to indicate it can't be used outside that context
-            Type::Error
+            // Self resolves to the implementing type when in a method context
+            if let Some(ref self_type) = ctx.self_type {
+                self_type.clone()
+            } else {
+                // Return Error to indicate Self can't be used outside method context
+                Type::Error
+            }
         }
         TypeExpr::Fallible {
             success_type,
