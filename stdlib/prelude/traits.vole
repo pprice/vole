@@ -48,7 +48,7 @@ interface Iterator<T> {
     func chunks(size: i64) -> Iterator<[T]>
     func windows(size: i64) -> Iterator<[T]>
 
-    external("std:intrinsics") {
+    default external("std:intrinsics") {
         func "iter_next" as next() -> T | Done
         func "iter_map" as map(f: (T) -> T) -> Iterator<T>
         func "iter_filter" as filter(pred: (T) -> bool) -> Iterator<T>
