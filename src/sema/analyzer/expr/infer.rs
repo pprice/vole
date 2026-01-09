@@ -53,11 +53,52 @@ impl Analyzer {
                 let right_ty = self.check_expr(&bin.right, interner)?;
 
                 match bin.op {
-                    BinaryOp::Add
-                    | BinaryOp::Sub
-                    | BinaryOp::Mul
-                    | BinaryOp::Div
-                    | BinaryOp::Mod => {
+                    BinaryOp::Add => {
+                        // Handle string concatenation: string + Stringable
+                        if matches!(left_ty, Type::String) {
+                            // Left is string - check if right implements Stringable
+                            if matches!(right_ty, Type::String) {
+                                // string + string is always valid
+                                Ok(Type::String)
+                            } else if self.satisfies_stringable(&right_ty, interner) {
+                                // Right implements Stringable, so string + X is valid
+                                Ok(Type::String)
+                            } else {
+                                // Right doesn't implement Stringable
+                                let found = self.type_display(&right_ty, interner);
+                                self.add_error(
+                                    SemanticError::TypeMismatch {
+                                        expected: "Stringable".to_string(),
+                                        found,
+                                        span: bin.right.span.into(),
+                                    },
+                                    bin.right.span,
+                                );
+                                Ok(Type::Error)
+                            }
+                        } else if left_ty.is_numeric() && right_ty.is_numeric() {
+                            // Numeric addition
+                            if left_ty == Type::F64 || right_ty == Type::F64 {
+                                Ok(Type::F64)
+                            } else if left_ty == Type::I64 || right_ty == Type::I64 {
+                                Ok(Type::I64)
+                            } else {
+                                Ok(Type::I32)
+                            }
+                        } else {
+                            let found = self.type_display_pair(&left_ty, &right_ty, interner);
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "numeric or string".to_string(),
+                                    found,
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    }
+                    BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                         if left_ty.is_numeric() && right_ty.is_numeric() {
                             // Return wider type
                             if left_ty == Type::F64 || right_ty == Type::F64 {

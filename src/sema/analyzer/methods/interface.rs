@@ -1,6 +1,66 @@
+use crate::identity::NameId;
+
 use super::super::*;
 
 impl Analyzer {
+    /// Check if a type structurally satisfies an interface by NameId
+    ///
+    /// This implements duck typing: a type satisfies an interface if it has
+    /// all required fields and methods, regardless of explicit `implements`.
+    pub fn satisfies_interface_by_name_id(
+        &self,
+        ty: &Type,
+        interface_name_id: NameId,
+        interner: &Interner,
+    ) -> bool {
+        let Some(interface) = self.interface_registry.get_by_name_id(interface_name_id) else {
+            return false;
+        };
+
+        // Check required fields
+        for field in &interface.fields {
+            if !self.type_has_field(ty, field.name, &field.ty, interner) {
+                return false;
+            }
+        }
+
+        // Check required methods (skip those with defaults)
+        for method in &interface.methods {
+            if method.has_default {
+                continue;
+            }
+
+            if !self.type_has_method(ty, method, interner) {
+                return false;
+            }
+        }
+
+        // Check parent interfaces (extends) - need to look up each parent's NameId
+        for parent in &interface.extends {
+            // Get the parent's NameId from the registry
+            if let Some(parent_def) = self.interface_registry.get(*parent, interner)
+                && !self.satisfies_interface_by_name_id(ty, parent_def.name_id, interner)
+            {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if a type implements Stringable (has to_string() -> string method)
+    pub fn satisfies_stringable(&self, ty: &Type, interner: &Interner) -> bool {
+        // Use the well-known Stringable NameId if available
+        if let Some(stringable_id) = self.well_known.stringable {
+            return self.satisfies_interface_by_name_id(ty, stringable_id, interner);
+        }
+        // Fallback: try to find "Stringable" by string lookup
+        if let Some(def) = self.interface_registry.get_by_str("Stringable") {
+            return self.satisfies_interface_by_name_id(ty, def.name_id, interner);
+        }
+        false
+    }
+
     /// Check if a type structurally satisfies an interface
     ///
     /// This implements duck typing: a type satisfies an interface if it has

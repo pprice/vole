@@ -72,8 +72,61 @@ impl Analyzer {
                 None => Ok(Type::F64),
             },
             ExprKind::Binary(bin) => match bin.op {
-                // Arithmetic ops: propagate expected type to both operands
-                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                // Add handles both numeric addition and string concatenation
+                BinaryOp::Add => {
+                    let left_ty = self.check_expr_expecting(&bin.left, expected, interner)?;
+                    let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
+
+                    // Handle string concatenation: string + Stringable
+                    if matches!(left_ty, Type::String) {
+                        if matches!(right_ty, Type::String) {
+                            // string + string is always valid
+                            Ok(Type::String)
+                        } else if self.satisfies_stringable(&right_ty, interner) {
+                            // Right implements Stringable
+                            Ok(Type::String)
+                        } else {
+                            let found = self.type_display(&right_ty, interner);
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "Stringable".to_string(),
+                                    found,
+                                    span: bin.right.span.into(),
+                                },
+                                bin.right.span,
+                            );
+                            Ok(Type::Error)
+                        }
+                    } else if left_ty.is_numeric() && right_ty.is_numeric() {
+                        // Numeric addition
+                        if let Some(exp) = expected
+                            && self.types_compatible(&left_ty, exp, interner)
+                            && self.types_compatible(&right_ty, exp, interner)
+                        {
+                            return Ok(exp.clone());
+                        }
+                        if left_ty == Type::F64 || right_ty == Type::F64 {
+                            Ok(Type::F64)
+                        } else if left_ty == Type::I64 || right_ty == Type::I64 {
+                            Ok(Type::I64)
+                        } else {
+                            Ok(Type::I32)
+                        }
+                    } else {
+                        let found = self.type_display_pair(&left_ty, &right_ty, interner);
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "numeric or string".to_string(),
+                                found,
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        Ok(Type::Error)
+                    }
+                }
+                // Arithmetic ops (except Add): propagate expected type to both operands
+                BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                     let left_ty = self.check_expr_expecting(&bin.left, expected, interner)?;
                     let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
 

@@ -7,7 +7,9 @@ use cranelift::prelude::*;
 
 use crate::codegen::RuntimeFn;
 use crate::frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr};
+use crate::identity::NamerLookup;
 use crate::sema::Type;
+use crate::sema::implement_registry::TypeId;
 
 use super::context::Cg;
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
@@ -24,9 +26,91 @@ impl Cg<'_, '_, '_> {
         }
 
         let left = self.expr(&bin.left)?;
+
+        // Handle string concatenation: string + Stringable
+        if bin.op == BinaryOp::Add && matches!(left.vole_type, Type::String) {
+            let right = self.expr(&bin.right)?;
+            return self.string_concat(left, right);
+        }
+
         let right = self.expr(&bin.right)?;
 
         self.binary_op(left, right, bin.op)
+    }
+
+    /// Concatenate two values as strings.
+    /// Left must be a string, right will be converted via to_string() if not already string.
+    fn string_concat(
+        &mut self,
+        left: CompiledValue,
+        right: CompiledValue,
+    ) -> Result<CompiledValue, String> {
+        // Get the right operand as a string
+        let right_string = if matches!(right.vole_type, Type::String) {
+            // Right is already a string, use it directly
+            right.value
+        } else {
+            // Right is not a string, call to_string() on it
+            self.call_to_string(&right)?
+        };
+
+        // Call vole_string_concat(left, right_string)
+        let concat_result =
+            self.call_runtime(RuntimeFn::StringConcat, &[left.value, right_string])?;
+
+        Ok(self.string_value(concat_result))
+    }
+
+    /// Call to_string() on a value via the Stringable interface.
+    /// Returns the resulting string value.
+    fn call_to_string(&mut self, val: &CompiledValue) -> Result<Value, String> {
+        // Look up the to_string method in the implement registry
+        let type_id = TypeId::from_type(&val.vole_type, &self.ctx.analyzed.type_table)
+            .ok_or_else(|| format!("Cannot find TypeId for {:?}", val.vole_type))?;
+
+        // Use NamerLookup to find the method by string name (cross-interner safe)
+        let namer = NamerLookup::new(&self.ctx.analyzed.name_table, self.ctx.interner);
+        let method_id = namer
+            .method_by_str("to_string")
+            .ok_or_else(|| "to_string method not found in name table".to_string())?;
+
+        let method_impl = self
+            .ctx
+            .analyzed
+            .implement_registry
+            .get_method(&type_id, method_id)
+            .ok_or_else(|| {
+                format!(
+                    "to_string method not implemented for type {:?}",
+                    val.vole_type
+                )
+            })?;
+
+        // Check if it's an external (native) method
+        if let Some(ref external_info) = method_impl.external_info {
+            // Call the external function directly
+            let result = self.call_external(external_info, &[val.value], &Type::String)?;
+            return Ok(result.value);
+        }
+
+        // Otherwise, it's a Vole method - look up the compiled function
+        // Get the method key from impl_method_infos
+        let method_info = self
+            .ctx
+            .impl_method_infos
+            .get(&(type_id, method_id))
+            .ok_or_else(|| "to_string method info not found in impl_method_infos".to_string())?;
+
+        let func_ref = self.func_ref(method_info.func_key)?;
+
+        // Call the method with `self` (the value) as the only argument
+        let call = self.builder.ins().call(func_ref, &[val.value]);
+        let results = self.builder.inst_results(call);
+
+        results
+            .first()
+            .copied()
+            .ok_or_else(|| "to_string method did not return a value".to_string())
     }
 
     /// Short-circuit AND evaluation
