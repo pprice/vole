@@ -199,32 +199,35 @@ impl Analyzer {
                 // Could validate we're in a loop, skip for now
             }
             Stmt::Return(ret) => {
+                // Determine expected type for bidirectional type checking
+                let expected_value_type = self.current_function_return.as_ref().map(|expected| {
+                    // If expected is fallible, extract success type for comparison
+                    // A `return value` statement returns the success type, not the full fallible type
+                    match expected {
+                        Type::Fallible(ft) => (*ft.success_type).clone(),
+                        other => other.clone(),
+                    }
+                });
+
                 let ret_type = if let Some(value) = &ret.value {
-                    self.check_expr(value, interner)?
+                    self.check_expr_expecting(value, expected_value_type.as_ref(), interner)?
                 } else {
                     Type::Void
                 };
 
-                if let Some(expected) = &self.current_function_return {
-                    // If expected is fallible, extract success type for comparison
-                    // A `return value` statement returns the success type, not the full fallible type
-                    let expected_value_type = match expected {
-                        Type::Fallible(ft) => (*ft.success_type).clone(),
-                        other => other.clone(),
-                    };
-
-                    if !self.types_compatible(&ret_type, &expected_value_type, interner) {
-                        let expected = self.type_display(&expected_value_type, interner);
-                        let found = self.type_display(&ret_type, interner);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected,
-                                found,
-                                span: ret.span.into(),
-                            },
-                            ret.span,
-                        );
-                    }
+                if let Some(expected) = &expected_value_type
+                    && !self.types_compatible(&ret_type, expected, interner)
+                {
+                    let expected_str = self.type_display(expected, interner);
+                    let found = self.type_display(&ret_type, interner);
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: expected_str,
+                            found,
+                            span: ret.span.into(),
+                        },
+                        ret.span,
+                    );
                 }
             }
             Stmt::Raise(raise_stmt) => {

@@ -221,9 +221,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Create an I64 constant
+    #[allow(dead_code)]
     pub fn i64_const(&mut self, n: i64) -> CompiledValue {
         let value = self.builder.ins().iconst(types::I64, n);
         self.i64_value(value)
+    }
+
+    /// Create an integer constant with a specific Vole type
+    pub fn int_const(&mut self, n: i64, vole_type: Type) -> CompiledValue {
+        let ty = type_to_cranelift(&vole_type, self.ctx.pointer_type);
+        let value = self.builder.ins().iconst(ty, n);
+        CompiledValue {
+            value,
+            ty,
+            vole_type,
+        }
     }
 
     /// Wrap a Cranelift value as an F64 CompiledValue

@@ -30,7 +30,17 @@ impl Cg<'_, '_, '_> {
         }
 
         match &expr.kind {
-            ExprKind::IntLiteral(n) => Ok(self.i64_const(*n)),
+            ExprKind::IntLiteral(n) => {
+                // Look up inferred type from semantic analysis for bidirectional type inference
+                let vole_type = self
+                    .ctx
+                    .analyzed
+                    .expr_types
+                    .get(&expr.id)
+                    .cloned()
+                    .unwrap_or(Type::I64);
+                Ok(self.int_const(*n, vole_type))
+            }
             ExprKind::FloatLiteral(n) => Ok(self.f64_const(*n)),
             ExprKind::BoolLiteral(b) => Ok(self.bool_const(*b)),
             ExprKind::Identifier(sym) => self.identifier(*sym, expr),

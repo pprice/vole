@@ -7,45 +7,11 @@ impl Analyzer {
         assign: &AssignExpr,
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
-        let value_ty = self.check_expr(&assign.value, interner)?;
-
-        match &assign.target {
+        // First, determine the expected type from the target (bidirectional type checking)
+        let (target_ty, is_mutable, target_valid) = match &assign.target {
             AssignTarget::Variable(sym) => {
                 if let Some(var) = self.scope.get(*sym) {
-                    let is_mutable = var.mutable;
-                    let var_ty = var.ty.clone();
-
-                    // Check if this is a mutation of a captured variable
-                    if self.in_lambda() && !self.is_lambda_local(*sym) {
-                        // Record as capture and mark as mutated
-                        self.record_capture(*sym, is_mutable);
-                        self.mark_capture_mutated(*sym);
-                    }
-
-                    if !is_mutable {
-                        let name = interner.resolve(*sym);
-                        self.add_error(
-                            SemanticError::ImmutableAssignment {
-                                name: name.to_string(),
-                                span: expr.span.into(),
-                                declaration: expr.span.into(), // TODO: track declaration span
-                            },
-                            expr.span,
-                        );
-                    }
-                    if !self.types_compatible(&value_ty, &var_ty, interner) {
-                        let expected = self.type_display(&var_ty, interner);
-                        let found = self.type_display(&value_ty, interner);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected,
-                                found,
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                    }
-                    Ok(var_ty)
+                    (var.ty.clone(), var.mutable, true)
                 } else {
                     let name = interner.resolve(*sym);
                     self.add_error(
@@ -55,7 +21,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    Ok(Type::Error)
+                    (Type::Error, false, false)
                 }
             }
             AssignTarget::Field {
@@ -68,19 +34,7 @@ impl Analyzer {
                 match &obj_ty {
                     Type::Class(c) => {
                         if let Some(field_def) = c.fields.iter().find(|f| f.name == *field) {
-                            if !self.types_compatible(&value_ty, &field_def.ty, interner) {
-                                let expected = self.type_display(&field_def.ty, interner);
-                                let found = self.type_display(&value_ty, interner);
-                                self.add_error(
-                                    SemanticError::TypeMismatch {
-                                        expected,
-                                        found,
-                                        span: assign.value.span.into(),
-                                    },
-                                    assign.value.span,
-                                );
-                            }
-                            Ok(field_def.ty.clone())
+                            (field_def.ty.clone(), true, true)
                         } else {
                             self.add_error(
                                 SemanticError::UnknownField {
@@ -90,7 +44,7 @@ impl Analyzer {
                                 },
                                 *field_span,
                             );
-                            Ok(Type::Error)
+                            (Type::Error, false, false)
                         }
                     }
                     Type::Record(r) => {
@@ -103,7 +57,7 @@ impl Analyzer {
                             },
                             *field_span,
                         );
-                        Ok(Type::Error)
+                        (Type::Error, false, false)
                     }
                     _ => {
                         if obj_ty != Type::Error {
@@ -117,7 +71,7 @@ impl Analyzer {
                                 *field_span,
                             );
                         }
-                        Ok(Type::Error)
+                        (Type::Error, false, false)
                     }
                 }
             }
@@ -142,23 +96,9 @@ impl Analyzer {
                     );
                 }
 
-                // Get element type and check assignment compatibility
+                // Get element type
                 match obj_type {
-                    Type::Array(elem_ty) => {
-                        if !self.types_compatible(&value_ty, &elem_ty, interner) {
-                            let expected = self.type_display(&elem_ty, interner);
-                            let found = self.type_display(&value_ty, interner);
-                            self.add_error(
-                                SemanticError::TypeMismatch {
-                                    expected,
-                                    found,
-                                    span: assign.value.span.into(),
-                                },
-                                assign.value.span,
-                            );
-                        }
-                        Ok(*elem_ty)
-                    }
+                    Type::Array(elem_ty) => (*elem_ty, true, true),
                     _ => {
                         if obj_type != Type::Error {
                             let found = self.type_display(&obj_type, interner);
@@ -171,11 +111,59 @@ impl Analyzer {
                                 object.span,
                             );
                         }
-                        Ok(Type::Error)
+                        (Type::Error, false, false)
                     }
                 }
             }
+        };
+
+        // Now check the value expression with expected type context
+        let expected_ty = if target_valid && target_ty != Type::Error {
+            Some(&target_ty)
+        } else {
+            None
+        };
+        let value_ty = self.check_expr_expecting(&assign.value, expected_ty, interner)?;
+
+        // Handle mutability and capture checks for variable targets
+        if let AssignTarget::Variable(sym) = &assign.target
+            && target_valid
+        {
+            // Check if this is a mutation of a captured variable
+            if self.in_lambda() && !self.is_lambda_local(*sym) {
+                // Record as capture and mark as mutated
+                self.record_capture(*sym, is_mutable);
+                self.mark_capture_mutated(*sym);
+            }
+
+            if !is_mutable {
+                let name = interner.resolve(*sym);
+                self.add_error(
+                    SemanticError::ImmutableAssignment {
+                        name: name.to_string(),
+                        span: expr.span.into(),
+                        declaration: expr.span.into(), // TODO: track declaration span
+                    },
+                    expr.span,
+                );
+            }
         }
+
+        // Check type compatibility (for non-literal types that couldn't be inferred)
+        if target_valid && !self.types_compatible(&value_ty, &target_ty, interner) {
+            let expected = self.type_display(&target_ty, interner);
+            let found = self.type_display(&value_ty, interner);
+            self.add_error(
+                SemanticError::TypeMismatch {
+                    expected,
+                    found,
+                    span: assign.value.span.into(),
+                },
+                assign.value.span,
+            );
+        }
+
+        Ok(target_ty)
     }
 
     pub(super) fn check_compound_assign_expr(
@@ -314,8 +302,13 @@ impl Analyzer {
             }
         };
 
-        // Type-check the value expression
-        let value_type = self.check_expr(&compound.value, interner)?;
+        // Type-check the value expression with expected type context
+        let expected = if target_type != Type::Error {
+            Some(&target_type)
+        } else {
+            None
+        };
+        let value_type = self.check_expr_expecting(&compound.value, expected, interner)?;
 
         // Check operator compatibility - compound assignment operators are arithmetic
         // For +=, -=, *=, /=, %= both operands must be numeric
