@@ -4,6 +4,7 @@
 //! The corresponding ID types (TypeDefId, etc.) are indices into vectors of these.
 
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
+use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::{FunctionType, Type};
 
 /// What kind of type definition this is
@@ -37,6 +38,8 @@ pub struct MethodDef {
     pub defining_type: TypeDefId,
     pub signature: FunctionType,
     pub has_default: bool,
+    /// External binding for this method (if any)
+    pub external_binding: Option<ExternalMethodInfo>,
 }
 
 /// A field definition (always belongs to a type)

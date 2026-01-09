@@ -765,7 +765,7 @@ impl Analyzer {
         // Note: extends contains Symbols, we need to look up their TypeDefIds
         // For now, skip - this will be filled in when we have full integration
 
-        // Register methods in EntityRegistry
+        // Register methods in EntityRegistry (with external bindings)
         for method in &methods {
             let method_name_str = &method.name_str;
             let builtin_module = self.name_table.builtin_module();
@@ -780,12 +780,15 @@ impl Analyzer {
                 return_type: Box::new(method.return_type.clone()),
                 is_closure: false,
             };
-            self.entity_registry.register_method(
+            // Look up external binding for this method
+            let external_binding = external_methods.get(method_name_str).cloned();
+            self.entity_registry.register_method_with_binding(
                 entity_type_id,
                 method_name_id,
                 full_method_name_id,
                 signature,
                 method.has_default,
+                external_binding,
             );
         }
 

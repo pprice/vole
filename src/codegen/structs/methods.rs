@@ -5,10 +5,7 @@ use cranelift_module::Module;
 
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
-use crate::codegen::interface_vtable::{
-    box_interface_value, iface_debug_enabled, interface_method_slot,
-    interface_method_slot_by_name_id,
-};
+use crate::codegen::interface_vtable::{box_interface_value, iface_debug_enabled};
 use crate::codegen::method_resolution::{
     MethodResolutionInput, MethodTarget, resolve_method_target,
 };
@@ -147,12 +144,21 @@ impl Cg<'_, '_, '_> {
 
         let (method_info, return_type) = match target {
             MethodTarget::FunctionalInterface { func_type } => {
-                if let Type::Interface(interface_type) = &obj.vole_type {
-                    return self.interface_dispatch_call_args_by_name_id(
+                // Convert to TypeDefId and NameId for EntityRegistry-based dispatch
+                if let Type::Interface(interface_type) = &obj.vole_type
+                    && let Some(type_def_id) = self
+                        .ctx
+                        .analyzed
+                        .entity_registry
+                        .type_by_name(interface_type.name_id)
+                    && let Some(method_name_id) =
+                        method_name_id(self.ctx.analyzed, self.ctx.interner, mc.method)
+                {
+                    return self.interface_dispatch_call_args_by_type_def_id(
                         &obj,
                         &mc.args,
-                        interface_type.name_id,
-                        mc.method,
+                        type_def_id,
+                        method_name_id,
                         func_type,
                     );
                 }
@@ -195,15 +201,15 @@ impl Cg<'_, '_, '_> {
                 return self.call_external(&external_info, &args, &return_type);
             }
             MethodTarget::InterfaceDispatch {
-                interface_name,
-                method_name,
+                interface_type_id,
+                method_name_id,
                 func_type,
             } => {
-                return self.interface_dispatch_call(
+                return self.interface_dispatch_call_args_by_type_def_id(
                     &obj,
-                    mc,
-                    interface_name,
-                    method_name,
+                    &mc.args,
+                    interface_type_id,
+                    method_name_id,
                     func_type,
                 );
             }
@@ -492,48 +498,19 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    pub(crate) fn interface_dispatch_call(
-        &mut self,
-        obj: &CompiledValue,
-        mc: &MethodCallExpr,
-        interface_name: crate::frontend::Symbol,
-        method_name: crate::frontend::Symbol,
-        func_type: FunctionType,
-    ) -> Result<CompiledValue, String> {
-        self.interface_dispatch_call_args(obj, &mc.args, interface_name, method_name, func_type)
-    }
-
-    pub(crate) fn interface_dispatch_call_args(
+    /// Dispatch an interface method call by TypeDefId (EntityRegistry-based)
+    pub(crate) fn interface_dispatch_call_args_by_type_def_id(
         &mut self,
         obj: &CompiledValue,
         args: &[Expr],
-        interface_name: crate::frontend::Symbol,
-        method_name: crate::frontend::Symbol,
+        interface_type_id: crate::identity::TypeDefId,
+        method_name_id: NameId,
         func_type: FunctionType,
     ) -> Result<CompiledValue, String> {
-        let slot = interface_method_slot(
-            interface_name,
-            method_name,
-            &self.ctx.analyzed.interface_registry,
-            self.ctx.interner,
-        )?;
-        self.interface_dispatch_call_args_inner(obj, args, slot, func_type)
-    }
-
-    /// Dispatch an interface method call by NameId (cross-interner safe)
-    pub(crate) fn interface_dispatch_call_args_by_name_id(
-        &mut self,
-        obj: &CompiledValue,
-        args: &[Expr],
-        interface_name_id: NameId,
-        method_name: crate::frontend::Symbol,
-        func_type: FunctionType,
-    ) -> Result<CompiledValue, String> {
-        let slot = interface_method_slot_by_name_id(
-            interface_name_id,
-            method_name,
-            &self.ctx.analyzed.interface_registry,
-            self.ctx.interner,
+        let slot = crate::codegen::interface_vtable::interface_method_slot_by_type_def_id(
+            interface_type_id,
+            method_name_id,
+            &self.ctx.analyzed.entity_registry,
         )?;
         self.interface_dispatch_call_args_inner(obj, args, slot, func_type)
     }

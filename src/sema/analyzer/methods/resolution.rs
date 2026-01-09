@@ -317,12 +317,12 @@ impl Analyzer {
         &self,
         interface_name_id: NameId,
     ) -> Option<FunctionType> {
-        let method = self
-            .interface_registry
-            .is_functional_by_name_id(interface_name_id)?;
+        let type_def_id = self.entity_registry.type_by_name(interface_name_id)?;
+        let method_id = self.entity_registry.is_functional(type_def_id)?;
+        let method = self.entity_registry.get_method(method_id);
         Some(FunctionType {
-            params: method.params.clone(),
-            return_type: Box::new(method.return_type.clone()),
+            params: method.signature.params.clone(),
+            return_type: method.signature.return_type.clone(),
             is_closure: true,
         })
     }

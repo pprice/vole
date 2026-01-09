@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
+use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::{FunctionType, Type};
 
 /// Central registry for all language entities
@@ -92,6 +93,26 @@ impl EntityRegistry {
         signature: FunctionType,
         has_default: bool,
     ) -> MethodId {
+        self.register_method_with_binding(
+            defining_type,
+            name_id,
+            full_name_id,
+            signature,
+            has_default,
+            None,
+        )
+    }
+
+    /// Register a new method on a type with optional external binding
+    pub fn register_method_with_binding(
+        &mut self,
+        defining_type: TypeDefId,
+        name_id: NameId,
+        full_name_id: NameId,
+        signature: FunctionType,
+        has_default: bool,
+        external_binding: Option<ExternalMethodInfo>,
+    ) -> MethodId {
         let id = MethodId::new(self.method_defs.len() as u32);
         self.method_defs.push(MethodDef {
             id,
@@ -100,6 +121,7 @@ impl EntityRegistry {
             defining_type,
             signature,
             has_default,
+            external_binding,
         });
         self.method_by_full_name.insert(full_name_id, id);
         self.methods_by_type
@@ -277,6 +299,49 @@ impl EntityRegistry {
         for parent in self.type_defs[type_id.index() as usize].extends.clone() {
             self.collect_all_methods(parent, result, seen_names);
         }
+    }
+
+    /// Check if a type is a functional interface (single abstract method, no fields).
+    /// Returns the single abstract method's ID if it's a functional interface.
+    pub fn is_functional(&self, type_id: TypeDefId) -> Option<MethodId> {
+        let type_def = self.get_type(type_id);
+
+        // Must have no fields
+        if !type_def.fields.is_empty() {
+            return None;
+        }
+
+        // Count abstract methods (no default)
+        let abstract_methods: Vec<MethodId> = type_def
+            .methods
+            .iter()
+            .copied()
+            .filter(|&method_id| !self.get_method(method_id).has_default)
+            .collect();
+
+        // Exactly one abstract method = functional interface
+        if abstract_methods.len() == 1 {
+            Some(abstract_methods[0])
+        } else {
+            None
+        }
+    }
+
+    /// Get the external binding for a method (if any)
+    pub fn get_external_binding(&self, method_id: MethodId) -> Option<&ExternalMethodInfo> {
+        self.get_method(method_id).external_binding.as_ref()
+    }
+
+    /// Check if all methods on a type have external bindings
+    pub fn is_external_only(&self, type_id: TypeDefId) -> bool {
+        let type_def = self.get_type(type_id);
+        if type_def.methods.is_empty() {
+            return false;
+        }
+        type_def.methods.iter().all(|&method_id| {
+            let method = self.get_method(method_id);
+            method.external_binding.is_some() && !method.has_default
+        })
     }
 }
 

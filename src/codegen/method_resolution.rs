@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use crate::codegen::structs::get_type_name_id;
-use crate::codegen::types::{MethodInfo, type_metadata_by_name_id};
+use crate::codegen::types::{MethodInfo, method_name_id_by_str, type_metadata_by_name_id};
 use crate::commands::common::AnalyzedProgram;
 use crate::errors::CodegenError;
 use crate::frontend::Symbol;
-use crate::identity::NameId;
+use crate::identity::{NameId, TypeDefId};
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::{FunctionType, Type};
@@ -32,8 +32,8 @@ pub(crate) enum MethodTarget {
         return_type: Type,
     },
     InterfaceDispatch {
-        interface_name: Symbol,
-        method_name: Symbol,
+        interface_type_id: TypeDefId,
+        method_name_id: NameId,
         func_type: FunctionType,
     },
 }
@@ -109,34 +109,28 @@ pub(crate) fn resolve_method_target(
                 // the default implementation, but the concrete type may override it
                 if let Type::Interface(interface_type) = input.object_type {
                     // Look up interface by name_id to get the correct symbol for the current interner
-                    let iface_def = input
+                    // Look up TypeDefId and method NameId for EntityRegistry-based dispatch
+                    let interface_type_id = input
                         .analyzed
-                        .interface_registry
-                        .get_by_name_id(interface_type.name_id)
+                        .entity_registry
+                        .type_by_name(interface_type.name_id)
                         .ok_or_else(|| {
                             format!(
-                                "interface {:?} not found by name_id",
+                                "interface {:?} not found in entity_registry",
                                 interface_type.name_id
                             )
                         })?;
-                    // Look up interface name symbol in current interner
-                    let interface_name_sym = input
-                        .analyzed
-                        .interner
-                        .lookup(&iface_def.name_str)
-                        .ok_or_else(|| {
-                            format!("interface name {} not interned", iface_def.name_str)
-                        })?;
-                    let method_name_sym = input
-                        .analyzed
-                        .interner
-                        .lookup(input.method_name_str)
-                        .ok_or_else(|| {
-                            format!("method name {} not interned", input.method_name_str)
-                        })?;
+                    let method_name_id = method_name_id_by_str(
+                        input.analyzed,
+                        &input.analyzed.interner,
+                        input.method_name_str,
+                    )
+                    .ok_or_else(|| {
+                        format!("method name {} not found as NameId", input.method_name_str)
+                    })?;
                     return Ok(MethodTarget::InterfaceDispatch {
-                        interface_name: interface_name_sym,
-                        method_name: method_name_sym,
+                        interface_type_id,
+                        method_name_id,
                         func_type: func_type.clone(),
                     });
                 }
@@ -189,35 +183,29 @@ pub(crate) fn resolve_method_target(
                 method_name: _,
                 func_type,
             } => {
-                // Use object type's interface info for cross-interner safety
+                // Use object type's interface info for EntityRegistry-based dispatch
                 if let Type::Interface(interface_type) = input.object_type {
-                    let iface_def = input
+                    let interface_type_id = input
                         .analyzed
-                        .interface_registry
-                        .get_by_name_id(interface_type.name_id)
+                        .entity_registry
+                        .type_by_name(interface_type.name_id)
                         .ok_or_else(|| {
                             format!(
-                                "interface {:?} not found by name_id",
+                                "interface {:?} not found in entity_registry",
                                 interface_type.name_id
                             )
                         })?;
-                    let interface_name_sym = input
-                        .analyzed
-                        .interner
-                        .lookup(&iface_def.name_str)
-                        .ok_or_else(|| {
-                            format!("interface name {} not interned", iface_def.name_str)
-                        })?;
-                    let method_name_sym = input
-                        .analyzed
-                        .interner
-                        .lookup(input.method_name_str)
-                        .ok_or_else(|| {
-                            format!("method name {} not interned", input.method_name_str)
-                        })?;
+                    let method_name_id = method_name_id_by_str(
+                        input.analyzed,
+                        &input.analyzed.interner,
+                        input.method_name_str,
+                    )
+                    .ok_or_else(|| {
+                        format!("method name {} not found as NameId", input.method_name_str)
+                    })?;
                     Ok(MethodTarget::InterfaceDispatch {
-                        interface_name: interface_name_sym,
-                        method_name: method_name_sym,
+                        interface_type_id,
+                        method_name_id,
                         func_type: func_type.clone(),
                     })
                 } else {

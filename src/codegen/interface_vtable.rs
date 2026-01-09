@@ -464,53 +464,9 @@ impl InterfaceVtableRegistry {
     }
 }
 
-pub(crate) fn interface_method_slot(
-    interface_name: Symbol,
-    method_name: Symbol,
-    registry: &crate::sema::interface_registry::InterfaceRegistry,
-    interner: &Interner,
-) -> Result<usize, String> {
-    if iface_debug_enabled() {
-        eprintln!(
-            "interface_method_slot: looking up interface={} method={}",
-            interner.resolve(interface_name),
-            interner.resolve(method_name)
-        );
-    }
-    let methods = collect_interface_methods(interface_name, registry, interner)
-        .ok_or_else(|| format!("unknown interface {}", interner.resolve(interface_name)))?;
-    // Use string comparison for cross-interner safety
-    let method_name_str = interner.resolve(method_name);
-    methods
-        .iter()
-        .position(|m| m.name_str == method_name_str)
-        .ok_or_else(|| {
-            format!(
-                "method {} not found on interface {}",
-                method_name_str,
-                interner.resolve(interface_name)
-            )
-        })
-}
-
-/// Look up an interface method slot by NameId (cross-interner safe)
-pub(crate) fn interface_method_slot_by_name_id(
-    interface_name_id: NameId,
-    method_name: Symbol,
-    registry: &crate::sema::interface_registry::InterfaceRegistry,
-    interner: &Interner,
-) -> Result<usize, String> {
-    let interface_def = registry
-        .get_by_name_id(interface_name_id)
-        .ok_or_else(|| format!("unknown interface with name_id {:?}", interface_name_id))?;
-    interface_method_slot(interface_def.name, method_name, registry, interner)
-}
-
 /// Look up an interface method slot using EntityRegistry (TypeDefId-based)
 ///
-/// This is the EntityRegistry version of interface_method_slot. It uses TypeDefId
-/// and MethodId to locate methods without string comparisons.
-#[allow(dead_code)] // Part of parallel migration - will be used when callers are migrated
+/// This uses TypeDefId and NameId to locate methods without string comparisons.
 pub(crate) fn interface_method_slot_by_type_def_id(
     interface_id: TypeDefId,
     method_name_id: NameId,

@@ -193,28 +193,31 @@ impl Cg<'_, '_, '_> {
         // Check if it's a functional interface variable
         if let Some((var, vole_type)) = self.vars.get(&callee_sym)
             && let Type::Interface(iface) = vole_type
-            && let Some(method_def) = self
+            && let Some(type_def_id) = self
                 .ctx
                 .analyzed
-                .interface_registry
-                .is_functional_by_name_id(iface.name_id)
+                .entity_registry
+                .type_by_name(iface.name_id)
+            && let Some(method_id) = self.ctx.analyzed.entity_registry.is_functional(type_def_id)
         {
+            let method = self.ctx.analyzed.entity_registry.get_method(method_id);
             let func_type = FunctionType {
-                params: method_def.params.clone(),
-                return_type: Box::new(method_def.return_type.clone()),
+                params: method.signature.params.clone(),
+                return_type: method.signature.return_type.clone(),
                 is_closure: false,
             };
+            let method_name_id = method.name_id;
             let value = self.builder.use_var(*var);
             let obj = CompiledValue {
                 value,
                 ty: type_to_cranelift(vole_type, self.ctx.pointer_type),
                 vole_type: vole_type.clone(),
             };
-            return self.interface_dispatch_call_args_by_name_id(
+            return self.interface_dispatch_call_args_by_type_def_id(
                 &obj,
                 &call.args,
-                iface.name_id,
-                method_def.name,
+                type_def_id,
+                method_name_id,
                 func_type,
             );
         }
@@ -230,25 +233,29 @@ impl Cg<'_, '_, '_> {
 
                 // If declared as functional interface, call via vtable dispatch
                 if let Type::Interface(iface) = &declared_type
-                    && let Some(method_def) = self
+                    && let Some(type_def_id) = self
                         .ctx
                         .analyzed
-                        .interface_registry
-                        .is_functional_by_name_id(iface.name_id)
+                        .entity_registry
+                        .type_by_name(iface.name_id)
+                    && let Some(method_id) =
+                        self.ctx.analyzed.entity_registry.is_functional(type_def_id)
                 {
+                    let method = self.ctx.analyzed.entity_registry.get_method(method_id);
                     let func_type = FunctionType {
-                        params: method_def.params.clone(),
-                        return_type: Box::new(method_def.return_type.clone()),
+                        params: method.signature.params.clone(),
+                        return_type: method.signature.return_type.clone(),
                         is_closure: false,
                     };
+                    let method_name_id = method.name_id;
                     // Box the lambda value to create the interface representation
                     let boxed =
                         box_interface_value(self.builder, self.ctx, lambda_val, &declared_type)?;
-                    return self.interface_dispatch_call_args_by_name_id(
+                    return self.interface_dispatch_call_args_by_type_def_id(
                         &boxed,
                         &call.args,
-                        iface.name_id,
-                        method_def.name,
+                        type_def_id,
+                        method_name_id,
                         func_type,
                     );
                 }
@@ -261,22 +268,26 @@ impl Cg<'_, '_, '_> {
 
             // If it's an interface type (functional interface), call via vtable
             if let Type::Interface(iface) = &lambda_val.vole_type
-                && let Some(method_def) = self
+                && let Some(type_def_id) = self
                     .ctx
                     .analyzed
-                    .interface_registry
-                    .is_functional_by_name_id(iface.name_id)
+                    .entity_registry
+                    .type_by_name(iface.name_id)
+                && let Some(method_id) =
+                    self.ctx.analyzed.entity_registry.is_functional(type_def_id)
             {
+                let method = self.ctx.analyzed.entity_registry.get_method(method_id);
                 let func_type = FunctionType {
-                    params: method_def.params.clone(),
-                    return_type: Box::new(method_def.return_type.clone()),
+                    params: method.signature.params.clone(),
+                    return_type: method.signature.return_type.clone(),
                     is_closure: false,
                 };
-                return self.interface_dispatch_call_args_by_name_id(
+                let method_name_id = method.name_id;
+                return self.interface_dispatch_call_args_by_type_def_id(
                     &lambda_val,
                     &call.args,
-                    iface.name_id,
-                    method_def.name,
+                    type_def_id,
+                    method_name_id,
                     func_type,
                 );
             }
