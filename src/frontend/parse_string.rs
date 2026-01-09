@@ -94,7 +94,7 @@ impl<'src> Parser<'src> {
     /// Process escape sequences in a string
     fn process_escapes(&self, s: &str) -> String {
         let mut result = String::new();
-        let mut chars = s.chars();
+        let mut chars = s.chars().peekable();
 
         while let Some(c) = chars.next() {
             if c == '\\' {
@@ -112,6 +112,14 @@ impl<'src> Parser<'src> {
                     }
                     None => result.push('\\'),
                 }
+            } else if c == '{' && chars.peek() == Some(&'{') {
+                // {{ is an escape for literal {
+                chars.next();
+                result.push('{');
+            } else if c == '}' && chars.peek() == Some(&'}') {
+                // }} is an escape for literal }
+                chars.next();
+                result.push('}');
             } else {
                 result.push(c);
             }
