@@ -145,34 +145,62 @@ cargo run --bin vole -- test <path>  # After test changes
 ### Subagent Requirements
 When dispatching subagents, they MUST run `cargo check` and verify exit code 0 before reporting success.
 
-## String Interners - CRITICAL
+## Name Identity System
 
-There are **multiple interners** (AST interner, sema interner). This is a common source of bugs.
+The compiler has two identifier systems:
 
-### The Problem
+| Type | Scope | Use |
+|------|-------|-----|
+| **Symbol** | AST layer only | Parser output, local variables |
+| **NameId** | sema/codegen | Module-qualified canonical identity |
+
+### Key Architecture
+
+- **Symbol** (`frontend/intern.rs`): u32 index into a specific Interner. NOT stable across interners.
+- **NameId** (`identity.rs`): u32 index into NameTable. Stores strings directly, self-contained.
+- **NameTable**: Central registry for all named items (types, functions, methods). Stores strings internally.
+
+### Type Structs Use NameId Only
+
 ```rust
-// WRONG - symbol might be from different interner
-let name = some_type.name;
-registry.lookup(name);  // May fail silently or return wrong result
-
-// WRONG - comparing symbols from different interners
-if type1.name == type2.name { ... }  // May be false even for same string
+// Type structs have name_id, NOT Symbol
+pub struct RecordType {
+    pub name_id: NameId,  // Canonical identifier
+    pub fields: Vec<StructField>,
+}
 ```
 
 ### Safe Patterns
-```rust
-// RIGHT - resolve to string when crossing boundaries
-let name_str = interner.resolve(some_type.name);
-registry.lookup_by_str(name_str);
 
-// RIGHT - use NameId for cross-interner compatibility
-let name_id = NameId::from_symbol(some_type.name, interner);
+```rust
+// Display without needing interner
+let display = name_table.display(some_type.name_id);
+
+// Lookup using NameId (cross-module safe)
+let method = methods.get(&(type_name_id, method_name_id));
+
+// Record definition location for diagnostics
+name_table.set_location(name_id, file, span);
 ```
 
-### When This Bites You
-- Implementing interface methods (interface name from different interner)
-- Looking up types across module boundaries
-- Generator transforms (builds AST with fresh symbols)
+### When Symbol Is Still Used
+
+- **Parser output**: AST nodes use Symbol for names
+- **Local variables**: Function-scoped names stay as Symbol
+- **Within single interner**: Symbol comparisons are safe within same interner
+
+### Diagnostic Locations
+
+NameTable stores `DefLocation` for "defined here" error notes:
+```rust
+// Set when defining a name
+name_table.set_location(name_id, &file, span);
+
+// Retrieve for error messages
+if let Some(loc) = name_table.location(name_id) {
+    // Add "defined here" secondary label
+}
+```
 
 ## Common Pitfalls
 
