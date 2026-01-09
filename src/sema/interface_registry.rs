@@ -89,16 +89,6 @@ impl InterfaceRegistry {
         interface.external_methods.get(method_str)
     }
 
-    /// Look up an external binding for an interface method by string name (cross-interner safe)
-    pub fn external_method_by_str(
-        &self,
-        interface_name_id: NameId,
-        method_str: &str,
-    ) -> Option<&ExternalMethodInfo> {
-        let interface = self.get_by_name_id(interface_name_id)?;
-        interface.external_methods.get(method_str)
-    }
-
     /// Check if every interface method is bound to an external function
     pub fn is_external_only(&self, interface_name_id: NameId) -> bool {
         let Some(def) = self.get_by_name_id(interface_name_id) else {
