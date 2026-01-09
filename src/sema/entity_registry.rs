@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
-use crate::sema::FunctionType;
+use crate::sema::{FunctionType, Type};
 
 /// Central registry for all language entities
 #[derive(Debug, Clone)]
@@ -126,6 +126,50 @@ impl EntityRegistry {
             .get(&type_id)
             .and_then(|methods| methods.get(&name_id).copied())
     }
+
+    /// Register a new field on a type
+    pub fn register_field(
+        &mut self,
+        defining_type: TypeDefId,
+        name_id: NameId,
+        full_name_id: NameId,
+        ty: Type,
+        slot: usize,
+    ) -> FieldId {
+        let id = FieldId::new(self.field_defs.len() as u32);
+        self.field_defs.push(FieldDef {
+            id,
+            name_id,
+            full_name_id,
+            defining_type,
+            ty,
+            slot,
+        });
+        self.field_by_full_name.insert(full_name_id, id);
+        self.fields_by_type
+            .get_mut(&defining_type)
+            .expect("type must be registered before adding fields")
+            .insert(name_id, id);
+        self.type_defs[defining_type.index() as usize].fields.push(id);
+        id
+    }
+
+    /// Get a field definition by ID
+    pub fn get_field(&self, id: FieldId) -> &FieldDef {
+        &self.field_defs[id.index() as usize]
+    }
+
+    /// Get all fields defined directly on a type
+    pub fn fields_on_type(&self, type_id: TypeDefId) -> impl Iterator<Item = FieldId> + '_ {
+        self.type_defs[type_id.index() as usize].fields.iter().copied()
+    }
+
+    /// Find a field on a type by its short name
+    pub fn find_field_on_type(&self, type_id: TypeDefId, name_id: NameId) -> Option<FieldId> {
+        self.fields_by_type
+            .get(&type_id)
+            .and_then(|fields| fields.get(&name_id).copied())
+    }
 }
 
 impl Default for EntityRegistry {
@@ -182,5 +226,31 @@ mod tests {
         assert_eq!(registry.find_method_on_type(type_id, method_name), Some(method_id));
         assert_eq!(registry.get_method(method_id).defining_type, type_id);
         assert_eq!(registry.methods_on_type(type_id).collect::<Vec<_>>(), vec![method_id]);
+    }
+
+    #[test]
+    fn register_and_lookup_field() {
+        let mut names = NameTable::new();
+        let main_mod = names.main_module();
+        let builtin_mod = names.builtin_module();
+        let type_name = names.intern_raw(main_mod, &["Point"]);
+        let field_name = names.intern_raw(builtin_mod, &["x"]);
+        let full_field_name = names.intern_raw(main_mod, &["Point", "x"]);
+
+        let mut registry = EntityRegistry::new();
+        let type_id = registry.register_type(type_name, TypeDefKind::Record, main_mod);
+
+        let field_id = registry.register_field(
+            type_id,
+            field_name,
+            full_field_name,
+            Type::I32,
+            0,
+        );
+
+        assert_eq!(registry.find_field_on_type(type_id, field_name), Some(field_id));
+        assert_eq!(registry.get_field(field_id).defining_type, type_id);
+        assert_eq!(registry.get_field(field_id).slot, 0);
+        assert_eq!(registry.fields_on_type(type_id).collect::<Vec<_>>(), vec![field_id]);
     }
 }
