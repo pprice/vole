@@ -464,11 +464,29 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 Some('{') => {
-                    // String interpolation start
-                    self.advance();
-                    self.in_interp_string = true;
-                    self.interp_brace_depth = 1;
-                    return self.make_token(TokenType::StringInterpStart);
+                    // Check for escaped brace {{
+                    if self.peek_next() == Some('{') {
+                        // Escaped brace - consume both and continue
+                        self.advance();
+                        self.advance();
+                    } else {
+                        // String interpolation start
+                        self.advance();
+                        self.in_interp_string = true;
+                        self.interp_brace_depth = 1;
+                        return self.make_token(TokenType::StringInterpStart);
+                    }
+                }
+                Some('}') => {
+                    // Check for escaped brace }}
+                    if self.peek_next() == Some('}') {
+                        // Escaped brace - consume both and continue
+                        self.advance();
+                        self.advance();
+                    } else {
+                        // Stray } in string - just include it
+                        self.advance();
+                    }
                 }
                 Some('\n') => {
                     return self.error_unterminated_string();
@@ -493,9 +511,27 @@ impl<'src> Lexer<'src> {
                     return self.make_token(TokenType::StringInterpEnd);
                 }
                 Some('{') => {
-                    self.advance();
-                    self.interp_brace_depth = 1;
-                    return self.make_token(TokenType::StringInterpMiddle);
+                    // Check for escaped brace {{
+                    if self.peek_next() == Some('{') {
+                        // Escaped brace - consume both and continue
+                        self.advance();
+                        self.advance();
+                    } else {
+                        self.advance();
+                        self.interp_brace_depth = 1;
+                        return self.make_token(TokenType::StringInterpMiddle);
+                    }
+                }
+                Some('}') => {
+                    // Check for escaped brace }}
+                    if self.peek_next() == Some('}') {
+                        // Escaped brace - consume both and continue
+                        self.advance();
+                        self.advance();
+                    } else {
+                        // Stray } in string - just include it
+                        self.advance();
+                    }
                 }
                 Some('\n') | None => {
                     return self.error_unterminated_string();
