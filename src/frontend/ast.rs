@@ -203,6 +203,13 @@ pub enum TypeExpr {
         name: Symbol,
         args: Vec<TypeExpr>,
     },
+    /// Tuple type: [K, V], [A, B, C] - heterogeneous fixed-size collection
+    Tuple(Vec<TypeExpr>),
+    /// Fixed-size array: [T; 10] - homogeneous fixed-size array
+    FixedArray {
+        element: Box<TypeExpr>,
+        size: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

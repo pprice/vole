@@ -1134,3 +1134,106 @@ fn test_parse_triple_nested_generic() {
         }
     }
 }
+
+#[test]
+fn test_parse_tuple_type() {
+    // Tuple type: [i32, string]
+    let source = "func foo(x: [i32, string]) { }";
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("should parse tuple type");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        if let TypeExpr::Tuple(elements) = &f.params[0].ty {
+            assert_eq!(elements.len(), 2, "tuple should have 2 elements");
+            assert!(matches!(
+                elements[0],
+                TypeExpr::Primitive(PrimitiveType::I32)
+            ));
+            assert!(matches!(
+                elements[1],
+                TypeExpr::Primitive(PrimitiveType::String)
+            ));
+        } else {
+            panic!("expected tuple type, got {:?}", f.params[0].ty);
+        }
+    }
+}
+
+#[test]
+fn test_parse_tuple_type_three_elements() {
+    // Tuple type with 3 elements
+    let source = "func foo(x: [i64, bool, f64]) { }";
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .expect("should parse 3-element tuple");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        if let TypeExpr::Tuple(elements) = &f.params[0].ty {
+            assert_eq!(elements.len(), 3);
+        } else {
+            panic!("expected tuple type");
+        }
+    }
+}
+
+#[test]
+fn test_parse_fixed_array_type() {
+    // Fixed array type: [i32; 10]
+    let source = "func foo(x: [i32; 10]) { }";
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .expect("should parse fixed array type");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        if let TypeExpr::FixedArray { element, size } = &f.params[0].ty {
+            assert_eq!(*size, 10);
+            assert!(matches!(
+                element.as_ref(),
+                TypeExpr::Primitive(PrimitiveType::I32)
+            ));
+        } else {
+            panic!("expected fixed array type, got {:?}", f.params[0].ty);
+        }
+    }
+}
+
+#[test]
+fn test_parse_array_type_unchanged() {
+    // Regular array type: [i32] - should still work
+    let source = "func foo(x: [i32]) { }";
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .expect("should parse dynamic array type");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        if let TypeExpr::Array(element) = &f.params[0].ty {
+            assert!(matches!(
+                element.as_ref(),
+                TypeExpr::Primitive(PrimitiveType::I32)
+            ));
+        } else {
+            panic!("expected array type, got {:?}", f.params[0].ty);
+        }
+    }
+}
+
+#[test]
+fn test_parse_tuple_trailing_comma() {
+    // Tuple with trailing comma
+    let source = "func foo(x: [i32, string,]) { }";
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .expect("should parse tuple with trailing comma");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        if let TypeExpr::Tuple(elements) = &f.params[0].ty {
+            assert_eq!(elements.len(), 2);
+        } else {
+            panic!("expected tuple type");
+        }
+    }
+}

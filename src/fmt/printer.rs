@@ -952,6 +952,22 @@ fn print_type_expr<'a>(
                 .append(arena.intersperse(arg_docs, arena.text(", ")))
                 .append(arena.text(">"))
         }
+        TypeExpr::Tuple(elements) => {
+            let elem_docs: Vec<_> = elements
+                .iter()
+                .map(|t| print_type_expr(arena, t, interner))
+                .collect();
+            arena
+                .text("[")
+                .append(arena.intersperse(elem_docs, arena.text(", ")))
+                .append(arena.text("]"))
+        }
+        TypeExpr::FixedArray { element, size } => arena
+            .text("[")
+            .append(print_type_expr(arena, element, interner))
+            .append(arena.text("; "))
+            .append(arena.text(size.to_string()))
+            .append(arena.text("]")),
     }
 }
 

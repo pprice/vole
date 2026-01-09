@@ -89,6 +89,7 @@ impl<'src> Lexer<'src> {
             '[' => self.make_token(TokenType::LBracket),
             ']' => self.make_token(TokenType::RBracket),
             ',' => self.make_token(TokenType::Comma),
+            ';' => self.make_token(TokenType::Semicolon),
             ':' => self.make_token(TokenType::Colon),
             '+' => {
                 if self.match_char('=') {

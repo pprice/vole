@@ -210,6 +210,18 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                 args: resolved_args,
             }
         }
+        TypeExpr::Tuple(elements) => {
+            let resolved_elements: Vec<Type> =
+                elements.iter().map(|e| resolve_type(e, ctx)).collect();
+            Type::Tuple(resolved_elements)
+        }
+        TypeExpr::FixedArray { element, size } => {
+            let elem_ty = resolve_type(element, ctx);
+            Type::FixedArray {
+                element: Box::new(elem_ty),
+                size: *size,
+            }
+        }
     }
 }
 

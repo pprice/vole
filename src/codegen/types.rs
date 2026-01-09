@@ -439,6 +439,40 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 args: resolved_args,
             }
         }
+        TypeExpr::Tuple(elements) => {
+            let resolved_elements: Vec<Type> = elements
+                .iter()
+                .map(|e| {
+                    resolve_type_expr_with_metadata(
+                        e,
+                        type_aliases,
+                        interface_registry,
+                        error_types,
+                        type_metadata,
+                        interner,
+                        name_table,
+                        module_id,
+                    )
+                })
+                .collect();
+            Type::Tuple(resolved_elements)
+        }
+        TypeExpr::FixedArray { element, size } => {
+            let elem_ty = resolve_type_expr_with_metadata(
+                element,
+                type_aliases,
+                interface_registry,
+                error_types,
+                type_metadata,
+                interner,
+                name_table,
+                module_id,
+            );
+            Type::FixedArray {
+                element: Box::new(elem_ty),
+                size: *size,
+            }
+        }
     }
 }
 

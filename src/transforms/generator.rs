@@ -759,6 +759,17 @@ impl<'a> GeneratorTransformer<'a> {
                     .join(", ");
                 format!("{}<{}>", self.interner.resolve(*name), args_str)
             }
+            TypeExpr::Tuple(elements) => {
+                let elems_str = elements
+                    .iter()
+                    .map(|e| self.type_expr_to_string(e))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("[{}]", elems_str)
+            }
+            TypeExpr::FixedArray { element, size } => {
+                format!("[{}; {}]", self.type_expr_to_string(element), size)
+            }
         }
     }
 

@@ -81,9 +81,47 @@ impl<'src> Parser<'src> {
             }
             TokenType::LBracket => {
                 self.advance(); // consume '['
-                let elem_type = self.parse_type()?;
-                self.consume(TokenType::RBracket, "expected ']' after array element type")?;
-                Ok(TypeExpr::Array(Box::new(elem_type)))
+                let first_type = self.parse_type()?;
+
+                // Check what follows the first type
+                match self.current.ty {
+                    TokenType::RBracket => {
+                        // [T] - dynamic array
+                        self.advance(); // consume ']'
+                        Ok(TypeExpr::Array(Box::new(first_type)))
+                    }
+                    TokenType::Semicolon => {
+                        // [T; N] - fixed-size array
+                        self.advance(); // consume ';'
+                        let size = self.parse_fixed_array_size()?;
+                        self.consume(TokenType::RBracket, "expected ']' after fixed array size")?;
+                        Ok(TypeExpr::FixedArray {
+                            element: Box::new(first_type),
+                            size,
+                        })
+                    }
+                    TokenType::Comma => {
+                        // [T, U, ...] - tuple
+                        let mut elements = vec![first_type];
+                        while self.check(TokenType::Comma) {
+                            self.advance(); // consume ','
+                            // Allow trailing comma
+                            if self.check(TokenType::RBracket) {
+                                break;
+                            }
+                            elements.push(self.parse_type()?);
+                        }
+                        self.consume(TokenType::RBracket, "expected ']' after tuple types")?;
+                        Ok(TypeExpr::Tuple(elements))
+                    }
+                    _ => {
+                        self.consume(
+                            TokenType::RBracket,
+                            "expected ']', ';', or ',' in bracket type",
+                        )?;
+                        Ok(TypeExpr::Array(Box::new(first_type))) // unreachable
+                    }
+                }
             }
             TokenType::KwNil => {
                 self.advance();
@@ -188,5 +226,31 @@ impl<'src> Parser<'src> {
                 token.span,
             )),
         }
+    }
+
+    /// Parse the size part of a fixed array type [T; SIZE]
+    fn parse_fixed_array_size(&mut self) -> Result<usize, ParseError> {
+        let token = self.current.clone();
+        if token.ty != TokenType::IntLiteral {
+            return Err(ParseError::new(
+                ParserError::ExpectedExpression {
+                    found: token.ty.as_str().to_string(),
+                    span: token.span.into(),
+                },
+                token.span,
+            ));
+        }
+        self.advance(); // consume the integer literal
+
+        // Parse the integer value
+        token.lexeme.parse::<usize>().map_err(|_| {
+            ParseError::new(
+                ParserError::ExpectedExpression {
+                    found: token.lexeme.clone(),
+                    span: token.span.into(),
+                },
+                token.span,
+            )
+        })
     }
 }

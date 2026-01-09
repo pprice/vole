@@ -244,6 +244,23 @@ impl<'a> AstPrinter<'a> {
                 }
                 out.push('>');
             }
+            TypeExpr::Tuple(elements) => {
+                out.push('[');
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    self.write_type_inline(out, elem);
+                }
+                out.push(']');
+            }
+            TypeExpr::FixedArray { element, size } => {
+                out.push('[');
+                self.write_type_inline(out, element);
+                out.push_str("; ");
+                out.push_str(&size.to_string());
+                out.push(']');
+            }
         }
     }
 
@@ -755,6 +772,23 @@ impl<'a> AstPrinter<'a> {
                     self.write_type_expr_inline(out, arg);
                 }
                 out.push('>');
+            }
+            TypeExpr::Tuple(elements) => {
+                out.push('[');
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    self.write_type_expr_inline(out, elem);
+                }
+                out.push(']');
+            }
+            TypeExpr::FixedArray { element, size } => {
+                out.push('[');
+                self.write_type_expr_inline(out, element);
+                out.push_str("; ");
+                out.push_str(&size.to_string());
+                out.push(']');
             }
         }
     }

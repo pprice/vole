@@ -107,6 +107,7 @@ pub enum TokenType {
     LBracket, // [
     RBracket, // ]
     Comma,
+    Semicolon, // ;
     Colon,
     Dot,
     DotDot,      // ..
@@ -217,6 +218,7 @@ impl TokenType {
             Self::LBracket => "[",
             Self::RBracket => "]",
             Self::Comma => ",",
+            Self::Semicolon => ";",
             Self::Colon => ":",
             Self::Dot => ".",
             Self::DotDot => "..",
