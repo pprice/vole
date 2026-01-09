@@ -5,38 +5,29 @@ use cranelift::prelude::*;
 use crate::codegen::types::CompileCtx;
 use crate::codegen::types::CompiledValue;
 use crate::errors::CodegenError;
-use crate::frontend::Symbol;
 use crate::sema::Type;
 
 pub(crate) fn get_field_slot_and_type(
     vole_type: &Type,
-    field: Symbol,
-    ctx: &CompileCtx,
+    field_name: &str,
+    _ctx: &CompileCtx,
 ) -> Result<(usize, Type), String> {
     match vole_type {
         Type::Class(class_type) => {
             for sf in &class_type.fields {
-                if sf.name == field {
+                if sf.name == field_name {
                     return Ok((sf.slot, sf.ty.clone()));
                 }
             }
-            Err(CodegenError::not_found(
-                "field",
-                format!("{} in class", ctx.interner.resolve(field)),
-            )
-            .into())
+            Err(CodegenError::not_found("field", format!("{} in class", field_name)).into())
         }
         Type::Record(record_type) => {
             for sf in &record_type.fields {
-                if sf.name == field {
+                if sf.name == field_name {
                     return Ok((sf.slot, sf.ty.clone()));
                 }
             }
-            Err(CodegenError::not_found(
-                "field",
-                format!("{} in record", ctx.interner.resolve(field)),
-            )
-            .into())
+            Err(CodegenError::not_found("field", format!("{} in record", field_name)).into())
         }
         _ => Err(CodegenError::type_mismatch(
             "field access",

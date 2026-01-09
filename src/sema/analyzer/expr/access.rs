@@ -51,8 +51,9 @@ impl Analyzer {
         };
 
         // Try to find the field (for class/record types)
+        let field_name = interner.resolve(field_access.field);
         if let Some(fields) = fields
-            && let Some(field) = fields.iter().find(|f| f.name == field_access.field)
+            && let Some(field) = fields.iter().find(|f| f.name == field_name)
         {
             return Ok(field.ty.clone());
         }
@@ -132,7 +133,8 @@ impl Analyzer {
         };
 
         // Find the field
-        if let Some(field) = fields.iter().find(|f| f.name == opt_chain.field) {
+        let field_name = interner.resolve(opt_chain.field);
+        if let Some(field) = fields.iter().find(|f| f.name == field_name) {
             // Result is always optional (field_type | nil)
             // But if field type is already optional, don't double-wrap
             if field.ty.is_optional() {

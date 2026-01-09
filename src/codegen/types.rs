@@ -58,7 +58,7 @@ pub(crate) struct TypeMetadata {
     #[allow(dead_code)]
     pub type_key: Option<TypeKey>,
     /// Map from field name to slot index
-    pub field_slots: HashMap<Symbol, usize>,
+    pub field_slots: HashMap<String, usize>,
     /// Whether this is a class (true) or record (false)
     #[allow(dead_code)]
     pub is_class: bool,

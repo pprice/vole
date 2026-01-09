@@ -804,13 +804,8 @@ impl Cg<'_, '_, '_> {
             let field_init = raise_stmt
                 .fields
                 .iter()
-                .find(|f| f.name == field_def.name)
-                .ok_or_else(|| {
-                    format!(
-                        "Missing field {} in raise statement",
-                        self.ctx.interner.resolve(field_def.name)
-                    )
-                })?;
+                .find(|f| self.ctx.interner.resolve(f.name) == field_def.name)
+                .ok_or_else(|| format!("Missing field {} in raise statement", &field_def.name))?;
 
             // Compile the field value expression
             let field_value = self.expr(&field_init.value)?;

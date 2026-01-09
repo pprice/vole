@@ -83,7 +83,8 @@ impl Cg<'_, '_, '_> {
             .into());
         }
 
-        let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, fa.field, self.ctx)?;
+        let field_name = self.ctx.interner.resolve(fa.field);
+        let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field_name, self.ctx)?;
 
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
         let result_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[obj.value, slot_val])?;
@@ -133,7 +134,8 @@ impl Cg<'_, '_, '_> {
         let inner_type = obj.vole_type.unwrap_optional().unwrap_or(Type::Error);
 
         // Get the field type from the inner type
-        let (slot, field_type) = get_field_slot_and_type(&inner_type, oc.field, self.ctx)?;
+        let field_name = self.ctx.interner.resolve(oc.field);
+        let (slot, field_type) = get_field_slot_and_type(&inner_type, field_name, self.ctx)?;
 
         // Result type is field_type | nil (optional)
         // But if field type is already optional, don't double-wrap
@@ -214,7 +216,8 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(object)?;
         let value = self.expr(value_expr)?;
 
-        let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field, self.ctx)?;
+        let field_name = self.ctx.interner.resolve(field);
+        let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field_name, self.ctx)?;
         let value = if matches!(field_type, Type::Interface(_)) {
             crate::codegen::interface_vtable::box_interface_value(
                 self.builder,

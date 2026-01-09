@@ -162,7 +162,7 @@ impl Analyzer {
             .iter()
             .enumerate()
             .map(|(i, f)| StructField {
-                name: f.name,
+                name: interner.resolve(f.name).to_string(),
                 ty: self.resolve_type(&f.ty, interner),
                 slot: i,
             })
@@ -243,7 +243,7 @@ impl Analyzer {
                 .map(|(i, f)| {
                     let ty = self.resolve_type(&f.ty, interner);
                     StructField {
-                        name: f.name,
+                        name: interner.resolve(f.name).to_string(),
                         ty,
                         slot: i,
                     }
@@ -386,7 +386,7 @@ impl Analyzer {
                         &type_param_scope,
                     );
                     StructField {
-                        name: f.name,
+                        name: interner.resolve(f.name).to_string(),
                         ty: resolve_type(&f.ty, &mut ctx),
                         slot: i,
                     }

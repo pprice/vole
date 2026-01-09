@@ -30,10 +30,11 @@ impl Analyzer {
                 field_span,
             } => {
                 let obj_ty = self.check_expr(object, interner)?;
+                let field_name = interner.resolve(*field);
 
                 match &obj_ty {
                     Type::Class(c) => {
-                        if let Some(field_def) = c.fields.iter().find(|f| f.name == *field) {
+                        if let Some(field_def) = c.fields.iter().find(|f| f.name == field_name) {
                             (field_def.ty.clone(), true, true)
                         } else {
                             self.add_error(
@@ -42,7 +43,7 @@ impl Analyzer {
                                         .name_table
                                         .last_segment_str(c.name_id)
                                         .unwrap_or_else(|| "class".to_string()),
-                                    field: interner.resolve(*field).to_string(),
+                                    field: field_name.to_string(),
                                     span: (*field_span).into(),
                                 },
                                 *field_span,
@@ -261,10 +262,11 @@ impl Analyzer {
                 field_span,
             } => {
                 let obj_ty = self.check_expr(object, interner)?;
+                let field_name = interner.resolve(*field);
 
                 match &obj_ty {
                     Type::Class(c) => {
-                        if let Some(field_def) = c.fields.iter().find(|f| f.name == *field) {
+                        if let Some(field_def) = c.fields.iter().find(|f| f.name == field_name) {
                             field_def.ty.clone()
                         } else {
                             self.add_error(
@@ -273,7 +275,7 @@ impl Analyzer {
                                         .name_table
                                         .last_segment_str(c.name_id)
                                         .unwrap_or_else(|| "class".to_string()),
-                                    field: interner.resolve(*field).to_string(),
+                                    field: field_name.to_string(),
                                     span: (*field_span).into(),
                                 },
                                 *field_span,
@@ -289,7 +291,7 @@ impl Analyzer {
                                     .name_table
                                     .last_segment_str(r.name_id)
                                     .unwrap_or_else(|| "record".to_string()),
-                                field: interner.resolve(*field).to_string(),
+                                field: field_name.to_string(),
                                 span: (*field_span).into(),
                             },
                             *field_span,

@@ -117,11 +117,12 @@ impl Compiler<'_> {
         let mut struct_fields = Vec::new();
         let mut field_type_tags = Vec::new();
         for (i, field) in class.fields.iter().enumerate() {
-            field_slots.insert(field.name, i);
+            let field_name = self.analyzed.interner.resolve(field.name).to_string();
+            field_slots.insert(field_name.clone(), i);
             let field_type = self.resolve_type_with_metadata(&field.ty);
             field_type_tags.push(type_to_field_tag(&field_type));
             struct_fields.push(StructField {
-                name: field.name,
+                name: field_name,
                 ty: field_type,
                 slot: i,
             });
@@ -309,11 +310,12 @@ impl Compiler<'_> {
         let mut struct_fields = Vec::new();
         let mut field_type_tags = Vec::new();
         for (i, field) in record.fields.iter().enumerate() {
-            field_slots.insert(field.name, i);
+            let field_name = self.analyzed.interner.resolve(field.name).to_string();
+            field_slots.insert(field_name.clone(), i);
             let field_type = self.resolve_type_with_metadata(&field.ty);
             field_type_tags.push(type_to_field_tag(&field_type));
             struct_fields.push(StructField {
-                name: field.name,
+                name: field_name,
                 ty: field_type,
                 slot: i,
             });

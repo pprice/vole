@@ -111,12 +111,13 @@ impl Analyzer {
         expected_type: &Type,
         interner: &Interner,
     ) -> bool {
+        let field_name_str = interner.resolve(field_name);
         match ty {
             Type::Record(r) => r.fields.iter().any(|f| {
-                f.name == field_name && self.types_compatible(&f.ty, expected_type, interner)
+                f.name == field_name_str && self.types_compatible(&f.ty, expected_type, interner)
             }),
             Type::Class(c) => c.fields.iter().any(|f| {
-                f.name == field_name && self.types_compatible(&f.ty, expected_type, interner)
+                f.name == field_name_str && self.types_compatible(&f.ty, expected_type, interner)
             }),
             _ => false,
         }

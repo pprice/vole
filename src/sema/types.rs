@@ -89,7 +89,7 @@ pub struct FunctionType {
 /// Field information for a class/record
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructField {
-    pub name: Symbol,
+    pub name: String,
     pub ty: Type,
     pub slot: usize, // Compile-time slot index
 }
@@ -382,7 +382,7 @@ impl Type {
     }
 
     /// Get a field from a class or record type by name
-    pub fn get_field(&self, field: Symbol) -> Option<&StructField> {
+    pub fn get_field(&self, field: &str) -> Option<&StructField> {
         match self {
             Type::Class(c) => c.fields.iter().find(|f| f.name == field),
             Type::Record(r) => r.fields.iter().find(|f| f.name == field),

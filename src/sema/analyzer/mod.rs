@@ -975,7 +975,7 @@ impl Analyzer {
             let ty = resolve_type(&field.ty, &mut ctx);
 
             fields.push(StructField {
-                name: field.name,
+                name: interner.resolve(field.name).to_string(),
                 ty,
                 slot,
             });

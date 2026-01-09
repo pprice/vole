@@ -7,7 +7,7 @@ use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
 use crate::codegen::interface_vtable::box_interface_value;
 use crate::codegen::types::CompiledValue;
-use crate::frontend::{Expr, StructLiteralExpr, Symbol};
+use crate::frontend::{Expr, StructLiteralExpr};
 use crate::sema::Type;
 use cranelift::prelude::*;
 
@@ -52,17 +52,26 @@ impl Cg<'_, '_, '_> {
         let set_func_ref = self.func_ref(set_key)?;
 
         // Get field types for wrapping optional values
-        let field_types: HashMap<Symbol, Type> = match &vole_type {
-            Type::Record(rt) => rt.fields.iter().map(|f| (f.name, f.ty.clone())).collect(),
-            Type::Class(ct) => ct.fields.iter().map(|f| (f.name, f.ty.clone())).collect(),
+        let field_types: HashMap<String, Type> = match &vole_type {
+            Type::Record(rt) => rt
+                .fields
+                .iter()
+                .map(|f| (f.name.clone(), f.ty.clone()))
+                .collect(),
+            Type::Class(ct) => ct
+                .fields
+                .iter()
+                .map(|f| (f.name.clone(), f.ty.clone()))
+                .collect(),
             _ => HashMap::new(),
         };
 
         for init in &sl.fields {
-            let slot = *field_slots.get(&init.name).ok_or_else(|| {
+            let init_name = self.ctx.interner.resolve(init.name);
+            let slot = *field_slots.get(init_name).ok_or_else(|| {
                 format!(
                     "Unknown field: {} in type {}",
-                    self.ctx.interner.resolve(init.name),
+                    init_name,
                     self.ctx.interner.resolve(sl.name)
                 )
             })?;
@@ -70,7 +79,7 @@ impl Cg<'_, '_, '_> {
             let value = self.expr(&init.value)?;
 
             // If field type is optional (union) and value type is not a union, wrap it
-            let final_value = if let Some(field_type) = field_types.get(&init.name) {
+            let final_value = if let Some(field_type) = field_types.get(init_name) {
                 if matches!(field_type, Type::Union(_))
                     && !matches!(&value.vole_type, Type::Union(_))
                 {

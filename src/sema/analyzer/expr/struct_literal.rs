@@ -38,14 +38,18 @@ impl Analyzer {
             };
 
         // Check that all required fields are present
-        let provided_fields: HashSet<Symbol> = struct_lit.fields.iter().map(|f| f.name).collect();
+        let provided_fields: HashSet<String> = struct_lit
+            .fields
+            .iter()
+            .map(|f| interner.resolve(f.name).to_string())
+            .collect();
 
         for field in &fields {
             if !provided_fields.contains(&field.name) {
                 self.add_error(
                     SemanticError::MissingField {
                         ty: type_name.clone(),
-                        field: interner.resolve(field.name).to_string(),
+                        field: field.name.clone(),
                         span: expr.span.into(),
                     },
                     expr.span,
@@ -55,7 +59,8 @@ impl Analyzer {
 
         // Check each provided field
         for field_init in &struct_lit.fields {
-            if let Some(expected_field) = fields.iter().find(|f| f.name == field_init.name) {
+            let field_init_name = interner.resolve(field_init.name);
+            if let Some(expected_field) = fields.iter().find(|f| f.name == field_init_name) {
                 // check_expr_expecting will report errors if types don't match
                 self.check_expr_expecting(&field_init.value, Some(&expected_field.ty), interner)?;
             } else {
@@ -145,7 +150,7 @@ impl Analyzer {
 
         // Check each provided field against the concrete (substituted) type
         for field_init in &struct_lit.fields {
-            // Find the field index
+            // Find the field index - compare Symbols directly since field_names is Vec<Symbol>
             if let Some(idx) = generic_def
                 .field_names
                 .iter()
@@ -186,7 +191,7 @@ impl Analyzer {
                 .iter()
                 .enumerate()
                 .map(|(i, name)| StructField {
-                    name: *name,
+                    name: interner.resolve(*name).to_string(),
                     ty: concrete_field_types[i].clone(),
                     slot: i,
                 })

@@ -266,13 +266,17 @@ impl Analyzer {
         let error_type_name = interner.resolve(error_info.name).to_string();
 
         // Check for missing fields (fields in error type but not provided in raise)
-        let provided_fields: HashSet<Symbol> = stmt.fields.iter().map(|f| f.name).collect();
+        let provided_fields: HashSet<String> = stmt
+            .fields
+            .iter()
+            .map(|f| interner.resolve(f.name).to_string())
+            .collect();
         for field in &error_info.fields {
             if !provided_fields.contains(&field.name) {
                 self.add_error(
                     SemanticError::MissingField {
                         ty: error_type_name.clone(),
-                        field: interner.resolve(field.name).to_string(),
+                        field: field.name.clone(),
                         span: stmt.span.into(),
                     },
                     stmt.span,
@@ -286,7 +290,8 @@ impl Analyzer {
                 Ok(ty) => ty,
                 Err(_) => Type::Error,
             };
-            if let Some(field) = error_info.fields.iter().find(|f| f.name == field_init.name) {
+            let field_init_name = interner.resolve(field_init.name);
+            if let Some(field) = error_info.fields.iter().find(|f| f.name == field_init_name) {
                 // Known field - check type compatibility
                 if !types_compatible_core(&value_type, &field.ty) {
                     let expected = self.type_display(&field.ty);

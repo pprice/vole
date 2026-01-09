@@ -542,7 +542,8 @@ impl Cg<'_, '_, '_> {
     ) -> Result<CompiledValue, String> {
         let obj = self.expr(object)?;
 
-        let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field, self.ctx)?;
+        let field_name = self.ctx.interner.resolve(field);
+        let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field_name, self.ctx)?;
 
         // Load current field
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
