@@ -6,7 +6,7 @@ use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
 use crate::codegen::RuntimeFn;
 use crate::codegen::types::{
-    CompileCtx, CompiledValue, MethodInfo, method_name_id, type_to_cranelift, value_to_word,
+    CompileCtx, CompiledValue, MethodInfo, method_name_id_by_str, type_to_cranelift, value_to_word,
     word_to_value,
 };
 use crate::errors::CodegenError;
@@ -172,18 +172,22 @@ impl InterfaceVtableRegistry {
         data.define_zeroinit(word_bytes * methods.len());
         data.set_align(word_bytes as u64);
 
+        let interface_name_str = ctx.interner.resolve(interface_name);
         for (index, method_def) in methods.iter().enumerate() {
             let target = resolve_vtable_target(ctx, interface_name_id, concrete_type, method_def)?;
-            let wrapper_id =
-                self.compile_wrapper(ctx, interface_name, method_def.name, concrete_type, &target)?;
+            let wrapper_id = self.compile_wrapper(
+                ctx,
+                interface_name_str,
+                &method_def.name_str,
+                concrete_type,
+                &target,
+            )?;
             let func_ref = ctx.module.declare_func_in_data(wrapper_id, &mut data);
             data.write_function_addr((index * word_bytes) as u32, func_ref);
             if iface_debug_enabled() {
                 eprintln!(
                     "iface_vtable: slot={} method={} wrapper={:?}",
-                    index,
-                    ctx.interner.resolve(method_def.name),
-                    wrapper_id
+                    index, &method_def.name_str, wrapper_id
                 );
             }
         }
@@ -198,8 +202,8 @@ impl InterfaceVtableRegistry {
     fn compile_wrapper(
         &mut self,
         ctx: &mut CompileCtx,
-        interface_name: Symbol,
-        method_name: Symbol,
+        interface_name: &str,
+        method_name: &str,
         concrete_type: &Type,
         target: &VtableMethodTarget,
     ) -> Result<cranelift_module::FuncId, String> {
@@ -222,9 +226,7 @@ impl InterfaceVtableRegistry {
 
         let wrapper_name = format!(
             "__vole_iface_wrap_{}_{}_{}",
-            ctx.interner.resolve(interface_name),
-            ctx.interner.resolve(method_name),
-            self.wrapper_counter
+            interface_name, method_name, self.wrapper_counter
         );
         self.wrapper_counter += 1;
 
@@ -580,79 +582,78 @@ fn resolve_vtable_target(
     let type_id = TypeId::from_type(concrete_type, &ctx.analyzed.type_table).ok_or_else(|| {
         format!(
             "cannot resolve interface method {} on {:?}",
-            ctx.interner.resolve(method_def.name),
+            &method_def.name_str,
             concrete_type
         )
     })?;
-    let method_id =
-        method_name_id(ctx.analyzed, ctx.interner, method_def.name).ok_or_else(|| {
-            format!(
-                "method name not interned: {}",
-                ctx.interner.resolve(method_def.name)
-            )
-        })?;
 
-    if let Some(impl_) = ctx
-        .analyzed
-        .implement_registry
-        .get_method(&type_id, method_id)
-    {
-        if let Some(external_info) = impl_.external_info.clone() {
-            return Ok(VtableMethodTarget::External {
-                external_info,
+    // Try string-based lookup for cross-interner safety (interface methods may come from prelude)
+    // For default methods that aren't used, this may fail - that's OK, we'll fall back to defaults
+    if let Some(method_id) = method_name_id_by_str(ctx.analyzed, &method_def.name_str) {
+        // Check implement registry for explicit implementation
+        if let Some(impl_) = ctx
+            .analyzed
+            .implement_registry
+            .get_method(&type_id, method_id)
+        {
+            if let Some(external_info) = impl_.external_info.clone() {
+                return Ok(VtableMethodTarget::External {
+                    external_info,
+                    func_type: impl_.func_type.clone(),
+                });
+            }
+            let method_info = ctx
+                .impl_method_infos
+                .get(&(type_id, method_id))
+                .cloned()
+                .ok_or_else(|| "implement method info not found".to_string())?;
+            return Ok(VtableMethodTarget::Implemented {
+                method_info,
                 func_type: impl_.func_type.clone(),
             });
         }
-        let method_info = ctx
-            .impl_method_infos
-            .get(&(type_id, method_id))
-            .cloned()
-            .ok_or_else(|| "implement method info not found".to_string())?;
-        return Ok(VtableMethodTarget::Implemented {
-            method_info,
-            func_type: impl_.func_type.clone(),
-        });
-    }
 
-    if let Some(type_sym) = match concrete_type {
-        Type::Class(class_type) => Some(class_type.name),
-        Type::Record(record_type) => Some(record_type.name),
-        _ => None,
-    } && let Some(meta) = ctx.type_metadata.get(&type_sym)
-        && let Some(method_info) = meta.method_infos.get(&method_id).cloned()
-    {
-        let func_type = match &meta.vole_type {
-            Type::Class(class_type) => ctx
-                .analyzed
-                .methods
-                .get(&(class_type.name_id, method_id))
-                .cloned(),
-            Type::Record(record_type) => ctx
-                .analyzed
-                .methods
-                .get(&(record_type.name_id, method_id))
-                .cloned(),
+        // Check type metadata for direct method
+        if let Some(type_sym) = match concrete_type {
+            Type::Class(class_type) => Some(class_type.name),
+            Type::Record(record_type) => Some(record_type.name),
             _ => None,
-        };
-        let func_type = func_type.unwrap_or_else(|| FunctionType {
-            params: method_def.params.clone(),
-            return_type: Box::new(method_def.return_type.clone()),
-            is_closure: false,
-        });
-        return Ok(VtableMethodTarget::Direct {
-            method_info,
-            func_type,
-        });
+        } && let Some(meta) = ctx.type_metadata.get(&type_sym)
+            && let Some(method_info) = meta.method_infos.get(&method_id).cloned()
+        {
+            let func_type = match &meta.vole_type {
+                Type::Class(class_type) => ctx
+                    .analyzed
+                    .methods
+                    .get(&(class_type.name_id, method_id))
+                    .cloned(),
+                Type::Record(record_type) => ctx
+                    .analyzed
+                    .methods
+                    .get(&(record_type.name_id, method_id))
+                    .cloned(),
+                _ => None,
+            };
+            let func_type = func_type.unwrap_or_else(|| FunctionType {
+                params: method_def.params.clone(),
+                return_type: Box::new(method_def.return_type.clone()),
+                is_closure: false,
+            });
+            return Ok(VtableMethodTarget::Direct {
+                method_info,
+                func_type,
+            });
+        }
     }
 
     // Fall back to interface default if method has one
     if method_def.has_default {
-        // Check for default external binding
-        if let Some(external_info) = ctx.analyzed.interface_registry.external_method(
-            interface_name_id,
-            method_def.name,
-            ctx.interner,
-        ) {
+        // Check for default external binding (use string-based lookup for cross-interner safety)
+        if let Some(external_info) = ctx
+            .analyzed
+            .interface_registry
+            .external_method_by_str(interface_name_id, &method_def.name_str)
+        {
             return Ok(VtableMethodTarget::External {
                 external_info: external_info.clone(),
                 func_type: FunctionType {
@@ -667,11 +668,7 @@ fn resolve_vtable_target(
 
     Err(CodegenError::not_found(
         "method implementation",
-        format!(
-            "{} on {:?}",
-            ctx.interner.resolve(method_def.name),
-            concrete_type
-        ),
+        format!("{} on {:?}", &method_def.name_str, concrete_type),
     )
     .into())
 }

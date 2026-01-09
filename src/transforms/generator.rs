@@ -72,6 +72,8 @@ struct GeneratorTransformer<'a> {
     generator_count: u32,
     /// Type errors found during transformation
     errors: Vec<TypeError>,
+    /// Counter for generating unique node IDs (starts high to avoid conflicts with parser)
+    next_node_id: u32,
 }
 
 impl<'a> GeneratorTransformer<'a> {
@@ -80,7 +82,16 @@ impl<'a> GeneratorTransformer<'a> {
             interner,
             generator_count: 0,
             errors: Vec::new(),
+            // Start at a high value to avoid conflicts with parser-generated IDs
+            next_node_id: 0x8000_0000,
         }
+    }
+
+    /// Generate a unique node ID for generated AST nodes
+    fn next_id(&mut self) -> NodeId {
+        let id = NodeId(self.next_node_id);
+        self.next_node_id += 1;
+        id
     }
 
     fn transform(&mut self, program: &mut Program) -> (usize, Vec<TypeError>) {
@@ -286,11 +297,12 @@ impl<'a> GeneratorTransformer<'a> {
             });
         }
 
-        // Create the record declaration
+        // Create the record declaration with Iterator<T> implementation
+        let iterator_sym = self.interner.intern("Iterator");
         let record_decl = RecordDecl {
             name: record_name,
             type_params: Vec::new(),
-            implements: Vec::new(),
+            implements: vec![iterator_sym],
             fields,
             external: None,
             methods: Vec::new(),
@@ -306,7 +318,8 @@ impl<'a> GeneratorTransformer<'a> {
             func.span,
         );
 
-        // Create the implement block
+        // Create the implement block for Iterator<T>
+        // Note: trait_name is None because the record's `implements` clause declares the interface
         let impl_block = ImplementBlock {
             trait_name: None,
             target_type: TypeExpr::Named(record_name),
@@ -666,12 +679,12 @@ impl<'a> GeneratorTransformer<'a> {
 
             // Create: self.__state
             let self_expr = Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::Identifier(self_sym),
                 span: dummy_span,
             };
             let state_access = Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
                     object: self_expr.clone(),
                     field: state_sym,
@@ -682,12 +695,12 @@ impl<'a> GeneratorTransformer<'a> {
 
             // Create: self.__state == i
             let condition = Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::Binary(Box::new(BinaryExpr {
                     left: state_access.clone(),
                     op: BinaryOp::Eq,
                     right: Expr {
-                        id: NodeId::default(),
+                        id: self.next_id(),
                         kind: ExprKind::IntLiteral(i as i64),
                         span: dummy_span,
                     },
@@ -698,7 +711,7 @@ impl<'a> GeneratorTransformer<'a> {
             // Create: self.__state = i + 1
             let state_assign = Stmt::Expr(ExprStmt {
                 expr: Expr {
-                    id: NodeId::default(),
+                    id: self.next_id(),
                     kind: ExprKind::Assign(Box::new(AssignExpr {
                         target: AssignTarget::Field {
                             object: Box::new(self_expr.clone()),
@@ -706,7 +719,7 @@ impl<'a> GeneratorTransformer<'a> {
                             field_span: dummy_span,
                         },
                         value: Expr {
-                            id: NodeId::default(),
+                            id: self.next_id(),
                             kind: ExprKind::IntLiteral((i + 1) as i64),
                             span: dummy_span,
                         },
@@ -739,7 +752,7 @@ impl<'a> GeneratorTransformer<'a> {
         // Final: return Done
         let done_return = Stmt::Return(ReturnStmt {
             value: Some(Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::Done,
                 span: dummy_span,
             }),
@@ -782,7 +795,7 @@ impl<'a> GeneratorTransformer<'a> {
         fields.push(StructFieldInit {
             name: state_sym,
             value: Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::IntLiteral(0),
                 span: dummy_span,
             },
@@ -794,7 +807,7 @@ impl<'a> GeneratorTransformer<'a> {
             fields.push(StructFieldInit {
                 name: param.name,
                 value: Expr {
-                    id: NodeId::default(),
+                    id: self.next_id(),
                     kind: ExprKind::Identifier(param.name),
                     span: dummy_span,
                 },
@@ -815,7 +828,7 @@ impl<'a> GeneratorTransformer<'a> {
         // return RecordName { fields }
         let return_stmt = Stmt::Return(ReturnStmt {
             value: Some(Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::StructLiteral(Box::new(StructLiteralExpr {
                     name: record_name,
                     fields,
@@ -829,8 +842,8 @@ impl<'a> GeneratorTransformer<'a> {
             name: original.name,
             type_params: Vec::new(),
             params: original.params.clone(),
-            // Return type is the generated record (not the original Iterator<T>)
-            return_type: Some(TypeExpr::Named(record_name)),
+            // Keep the original Iterator<T> return type
+            return_type: original.return_type.clone(),
             body: Block {
                 stmts: vec![return_stmt],
                 span: original.body.span,
@@ -840,7 +853,7 @@ impl<'a> GeneratorTransformer<'a> {
     }
 
     /// Get a default value expression for a type.
-    fn default_value_for_type(&self, ty: &TypeExpr) -> Expr {
+    fn default_value_for_type(&mut self, ty: &TypeExpr) -> Expr {
         let dummy_span = Span::default();
         match ty {
             TypeExpr::Primitive(PrimitiveType::I8)
@@ -852,29 +865,29 @@ impl<'a> GeneratorTransformer<'a> {
             | TypeExpr::Primitive(PrimitiveType::U16)
             | TypeExpr::Primitive(PrimitiveType::U32)
             | TypeExpr::Primitive(PrimitiveType::U64) => Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::IntLiteral(0),
                 span: dummy_span,
             },
             TypeExpr::Primitive(PrimitiveType::F32) | TypeExpr::Primitive(PrimitiveType::F64) => {
                 Expr {
-                    id: NodeId::default(),
+                    id: self.next_id(),
                     kind: ExprKind::FloatLiteral(0.0),
                     span: dummy_span,
                 }
             }
             TypeExpr::Primitive(PrimitiveType::Bool) => Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::BoolLiteral(false),
                 span: dummy_span,
             },
             TypeExpr::Primitive(PrimitiveType::String) => Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::StringLiteral(String::new()),
                 span: dummy_span,
             },
             _ => Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::IntLiteral(0),
                 span: dummy_span,
             },

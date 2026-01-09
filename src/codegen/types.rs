@@ -148,6 +148,12 @@ pub(crate) fn method_name_id(
     namer.method(name)
 }
 
+/// Look up a method name ID by string (cross-interner safe)
+pub(crate) fn method_name_id_by_str(analyzed: &AnalyzedProgram, name: &str) -> Option<NameId> {
+    let module = analyzed.name_table.builtin_module_id()?;
+    analyzed.name_table.name_id_raw(module, &[name])
+}
+
 pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: &Type) -> String {
     match ty {
         Type::Class(class_type) => analyzed.name_table.display(class_type.name_id, interner),
