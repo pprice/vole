@@ -43,12 +43,7 @@ impl Cg<'_, '_, '_> {
                     Type::Record(record_type) => Some(record_type.name_id),
                     _ => None,
                 })
-                .map(|name_id| {
-                    self.ctx
-                        .analyzed
-                        .name_table
-                        .display(name_id, self.ctx.interner)
-                })
+                .map(|name_id| self.ctx.analyzed.name_table.display(name_id))
                 .unwrap_or_else(|| self.ctx.interner.resolve(sym).to_string())
         };
 

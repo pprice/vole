@@ -62,7 +62,7 @@ impl Analyzer {
             Stmt::While(while_stmt) => {
                 let cond_type = self.check_expr(&while_stmt.condition, interner)?;
                 if cond_type != Type::Bool && !cond_type.is_numeric() {
-                    let found = self.type_display(&cond_type, interner);
+                    let found = self.type_display(&cond_type);
                     self.add_error(
                         SemanticError::ConditionNotBool {
                             found,
@@ -82,7 +82,7 @@ impl Analyzer {
             Stmt::If(if_stmt) => {
                 let cond_type = self.check_expr(&if_stmt.condition, interner)?;
                 if cond_type != Type::Bool && !cond_type.is_numeric() {
-                    let found = self.type_display(&cond_type, interner);
+                    let found = self.type_display(&cond_type);
                     self.add_error(
                         SemanticError::ConditionNotBool {
                             found,
@@ -148,7 +148,7 @@ impl Analyzer {
                         {
                             elem
                         } else {
-                            let found = self.type_display(&iterable_ty, interner);
+                            let found = self.type_display(&iterable_ty);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "iterable (range, array, string, or Iterator<T>)"
@@ -162,7 +162,7 @@ impl Analyzer {
                         }
                     }
                     _ => {
-                        let found = self.type_display(&iterable_ty, interner);
+                        let found = self.type_display(&iterable_ty);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "iterable (range, array, string, or Iterator<T>)"
@@ -218,8 +218,8 @@ impl Analyzer {
                 if let Some(expected) = &expected_value_type
                     && !self.types_compatible(&ret_type, expected, interner)
                 {
-                    let expected_str = self.type_display(expected, interner);
-                    let found = self.type_display(&ret_type, interner);
+                    let expected_str = self.type_display(expected);
+                    let found = self.type_display(&ret_type);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: expected_str,
@@ -289,8 +289,8 @@ impl Analyzer {
             if let Some(field) = error_info.fields.iter().find(|f| f.name == field_init.name) {
                 // Known field - check type compatibility
                 if !types_compatible_core(&value_type, &field.ty) {
-                    let expected = self.type_display(&field.ty, interner);
-                    let found = self.type_display(&value_type, interner);
+                    let expected = self.type_display(&field.ty);
+                    let found = self.type_display(&value_type);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected,
@@ -329,10 +329,10 @@ impl Analyzer {
         };
 
         if !is_compatible {
-            let declared_str = self.type_display(&error_type, interner);
+            let declared_str = self.type_display(&error_type);
             let raised_info = self.error_types.get(&stmt.error_name).cloned();
             let raised_str = match raised_info {
-                Some(info) => self.type_display(&Type::ErrorType(info), interner),
+                Some(info) => self.type_display(&Type::ErrorType(info)),
                 None => interner.resolve(stmt.error_name).to_string(),
             };
 
@@ -365,7 +365,7 @@ impl Analyzer {
         let (success_type, error_type) = match &inner_type {
             Type::Fallible(ft) => ((*ft.success_type).clone(), (*ft.error_type).clone()),
             _ => {
-                let found = self.type_display(&inner_type, interner);
+                let found = self.type_display(&inner_type);
                 self.add_error(
                     SemanticError::TryOnNonFallible {
                         found,
@@ -391,8 +391,8 @@ impl Analyzer {
 
         // Check that the error type is compatible with the function's error type
         if !self.error_type_compatible(&error_type, &current_error) {
-            let try_error = self.type_display(&error_type, interner);
-            let func_error = self.type_display(&current_error, interner);
+            let try_error = self.type_display(&error_type);
+            let func_error = self.type_display(&current_error);
             self.add_error(
                 SemanticError::IncompatibleTryError {
                     try_error,

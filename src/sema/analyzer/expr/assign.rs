@@ -61,7 +61,7 @@ impl Analyzer {
                     }
                     _ => {
                         if obj_ty != Type::Error {
-                            let ty = self.type_display(&obj_ty, interner);
+                            let ty = self.type_display(&obj_ty);
                             self.add_error(
                                 SemanticError::UnknownField {
                                     ty,
@@ -85,7 +85,7 @@ impl Analyzer {
                     idx_type,
                     Type::I32 | Type::I64 | Type::U8 | Type::U16 | Type::U32 | Type::U64
                 ) {
-                    let found = self.type_display(&idx_type, interner);
+                    let found = self.type_display(&idx_type);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "integer".to_string(),
@@ -101,7 +101,7 @@ impl Analyzer {
                     Type::Array(elem_ty) => (*elem_ty, true, true),
                     _ => {
                         if obj_type != Type::Error {
-                            let found = self.type_display(&obj_type, interner);
+                            let found = self.type_display(&obj_type);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "array".to_string(),
@@ -151,8 +151,8 @@ impl Analyzer {
 
         // Check type compatibility (for non-literal types that couldn't be inferred)
         if target_valid && !self.types_compatible(&value_ty, &target_ty, interner) {
-            let expected = self.type_display(&target_ty, interner);
-            let found = self.type_display(&value_ty, interner);
+            let expected = self.type_display(&target_ty);
+            let found = self.type_display(&value_ty);
             self.add_error(
                 SemanticError::TypeMismatch {
                     expected,
@@ -219,7 +219,7 @@ impl Analyzer {
                     idx_type,
                     Type::I32 | Type::I64 | Type::U8 | Type::U16 | Type::U32 | Type::U64
                 ) {
-                    let found = self.type_display(&idx_type, interner);
+                    let found = self.type_display(&idx_type);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "integer".to_string(),
@@ -235,7 +235,7 @@ impl Analyzer {
                     Type::Array(elem_ty) => *elem_ty,
                     _ => {
                         if obj_type != Type::Error {
-                            let found = self.type_display(&obj_type, interner);
+                            let found = self.type_display(&obj_type);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "array".to_string(),
@@ -286,7 +286,7 @@ impl Analyzer {
                     }
                     _ => {
                         if obj_ty != Type::Error {
-                            let ty = self.type_display(&obj_ty, interner);
+                            let ty = self.type_display(&obj_ty);
                             self.add_error(
                                 SemanticError::UnknownField {
                                     ty,
@@ -316,7 +316,7 @@ impl Analyzer {
             && value_type != Type::Error
             && (!target_type.is_numeric() || !value_type.is_numeric())
         {
-            let found = self.type_display_pair(&target_type, &value_type, interner);
+            let found = self.type_display_pair(&target_type, &value_type);
             self.add_error(
                 SemanticError::TypeMismatch {
                     expected: "numeric".to_string(),

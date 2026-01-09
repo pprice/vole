@@ -20,8 +20,11 @@ impl Compiler<'_> {
         let key = if let Some(name_id) = name_id {
             self.func_registry.intern_name_id(name_id)
         } else {
-            self.func_registry
-                .intern_qualified(self.func_registry.main_module(), &[sym])
+            self.func_registry.intern_qualified(
+                self.func_registry.main_module(),
+                &[sym],
+                &self.analyzed.interner,
+            )
         };
         (key, display_name)
     }
@@ -44,9 +47,7 @@ impl Compiler<'_> {
     }
 
     fn test_display_name(&self, name_id: NameId) -> String {
-        self.func_registry
-            .name_table()
-            .display(name_id, &self.analyzed.interner)
+        self.func_registry.name_table().display(name_id)
     }
 
     /// Compile a complete program
@@ -213,7 +214,7 @@ impl Compiler<'_> {
                     let name_id = NamerLookup::new(&self.analyzed.name_table, module_interner)
                         .function(module_id, func.name)
                         .expect("module function name_id should be registered");
-                    let display_name = self.analyzed.name_table.display(name_id, module_interner);
+                    let display_name = self.analyzed.name_table.display(name_id);
 
                     // Create signature and declare function
                     let sig = self.create_function_signature(func);
@@ -276,7 +277,7 @@ impl Compiler<'_> {
         module_globals: &[LetStmt],
     ) -> Result<(), String> {
         let func_key = self.func_registry.intern_name_id(name_id);
-        let display_name = self.analyzed.name_table.display(name_id, module_interner);
+        let display_name = self.analyzed.name_table.display(name_id);
         let func_id = self
             .func_registry
             .func_id(func_key)
@@ -917,10 +918,7 @@ impl Compiler<'_> {
             .collect();
 
         for (_key, instance) in instances {
-            let mangled_name = self
-                .analyzed
-                .name_table
-                .display(instance.mangled_name, &self.analyzed.interner);
+            let mangled_name = self.analyzed.name_table.display(instance.mangled_name);
 
             // Create signature from the concrete function type
             let mut params = Vec::new();
@@ -983,9 +981,7 @@ impl Compiler<'_> {
                 .ok_or_else(|| {
                     format!(
                         "Internal error: generic function AST not found for {}",
-                        self.analyzed
-                            .name_table
-                            .display(instance.original_name, &self.analyzed.interner)
+                        self.analyzed.name_table.display(instance.original_name)
                     )
                 })?;
 
@@ -1001,10 +997,7 @@ impl Compiler<'_> {
         func: &FuncDecl,
         instance: &MonomorphInstance,
     ) -> Result<(), String> {
-        let mangled_name = self
-            .analyzed
-            .name_table
-            .display(instance.mangled_name, &self.analyzed.interner);
+        let mangled_name = self.analyzed.name_table.display(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
         let func_id = self
             .func_registry

@@ -161,7 +161,7 @@ mod tests {
         let mut name_table = NameTable::new();
         let module_id = name_table.main_module();
         let name_sym = interner.intern("TestInterface");
-        let name_id = name_table.intern(module_id, &[name_sym]);
+        let name_id = name_table.intern(module_id, &[name_sym], &interner);
         let method_sym = interner.intern("test_method");
         let def = InterfaceDef {
             name: name_sym,
@@ -193,7 +193,7 @@ mod tests {
         let mut name_table = NameTable::new();
         let module_id = name_table.main_module();
         let name_sym = interner.intern("Runnable");
-        let name_id = name_table.intern(module_id, &[name_sym]);
+        let name_id = name_table.intern(module_id, &[name_sym], &interner);
         let method_sym = interner.intern("run");
         let def = InterfaceDef {
             name: name_sym,
@@ -223,7 +223,7 @@ mod tests {
         let mut name_table = NameTable::new();
         let module_id = name_table.main_module();
         let name_sym = interner.intern("HasField");
-        let name_id = name_table.intern(module_id, &[name_sym]);
+        let name_id = name_table.intern(module_id, &[name_sym], &interner);
         let field_sym = interner.intern("field");
         let method_sym = interner.intern("method");
         let def = InterfaceDef {
@@ -257,7 +257,7 @@ mod tests {
         let mut name_table = NameTable::new();
         let module_id = name_table.main_module();
         let name_sym = interner.intern("MultiMethod");
-        let name_id = name_table.intern(module_id, &[name_sym]);
+        let name_id = name_table.intern(module_id, &[name_sym], &interner);
         let method1_sym = interner.intern("method1");
         let method2_sym = interner.intern("method2");
         let def = InterfaceDef {
@@ -297,7 +297,7 @@ mod tests {
         let mut name_table = NameTable::new();
         let module_id = name_table.main_module();
         let name_sym = interner.intern("WithDefault");
-        let name_id = name_table.intern(module_id, &[name_sym]);
+        let name_id = name_table.intern(module_id, &[name_sym], &interner);
         let method1_sym = interner.intern("abstractMethod");
         let method2_sym = interner.intern("defaultMethod");
         let def = InterfaceDef {
@@ -340,7 +340,7 @@ mod tests {
         let module_id = name_table.main_module();
 
         let name1_sym = interner.intern("Interface1");
-        let name1_id = name_table.intern(module_id, &[name1_sym]);
+        let name1_id = name_table.intern(module_id, &[name1_sym], &interner);
         let method1_sym = interner.intern("method1");
         registry1.register(InterfaceDef {
             name: name1_sym,
@@ -360,7 +360,7 @@ mod tests {
         });
 
         let name2_sym = interner.intern("Interface2");
-        let name2_id = name_table.intern(module_id, &[name2_sym]);
+        let name2_id = name_table.intern(module_id, &[name2_sym], &interner);
         let method2_sym = interner.intern("method2");
         registry2.register(InterfaceDef {
             name: name2_sym,

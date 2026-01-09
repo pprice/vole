@@ -267,9 +267,7 @@ impl Analyzer {
         let mut method_sigs = HashMap::new();
 
         let method_name_str = |method_id: NameId| {
-            self.name_table
-                .last_segment_str(method_id, interner)
-                .unwrap_or_default()
+            self.name_table.last_segment_str(method_id).unwrap_or_default()
         };
 
         // Methods defined directly on the type

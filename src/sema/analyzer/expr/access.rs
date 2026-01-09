@@ -43,7 +43,7 @@ impl Analyzer {
                 Some(&record_type.fields),
             ),
             Type::Error => return Ok(Type::Error),
-            _ => (self.type_display(&object_type, interner), None),
+            _ => (self.type_display(&object_type), None),
         };
 
         // Try to find the field (for class/record types)
@@ -64,7 +64,7 @@ impl Analyzer {
                 field_access.field_span,
             );
         } else {
-            let found = self.type_display(&object_type, interner);
+            let found = self.type_display(&object_type);
             self.add_error(
                 SemanticError::TypeMismatch {
                     expected: "class or record".to_string(),
@@ -110,7 +110,7 @@ impl Analyzer {
             ),
             Type::Error => return Ok(Type::Error),
             _ => {
-                let found = self.type_display(&object_type, interner);
+                let found = self.type_display(&object_type);
                 self.add_error(
                     SemanticError::TypeMismatch {
                         expected: "optional class or record".to_string(),
@@ -161,7 +161,7 @@ impl Analyzer {
 
         // Optional/union method calls require explicit narrowing.
         if object_type.is_optional() {
-            let ty = self.type_display(&object_type, interner);
+            let ty = self.type_display(&object_type);
             self.add_error(
                 SemanticError::MethodOnOptional {
                     ty,
@@ -177,7 +177,7 @@ impl Analyzer {
         }
 
         if matches!(object_type, Type::Union(_)) {
-            let ty = self.type_display(&object_type, interner);
+            let ty = self.type_display(&object_type);
             self.add_error(
                 SemanticError::MethodOnUnion {
                     ty,
@@ -218,8 +218,8 @@ impl Analyzer {
                     for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                         let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
                         if !self.types_compatible(&arg_ty, param_ty, interner) {
-                            let expected = self.type_display(param_ty, interner);
-                            let found = self.type_display(&arg_ty, interner);
+                            let expected = self.type_display(param_ty);
+                            let found = self.type_display(&arg_ty);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected,
@@ -257,7 +257,7 @@ impl Analyzer {
 
                     return Ok(*func_type.return_type.clone());
                 } else {
-                    let found = self.type_display(export_type, interner);
+                    let found = self.type_display(export_type);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "function".to_string(),
@@ -285,7 +285,7 @@ impl Analyzer {
         }
 
         // Get a descriptive type name for error messages
-        let type_name = self.type_display(&object_type, interner);
+        let type_name = self.type_display(&object_type);
 
         if let Some(resolved) = self.resolve_method(&object_type, method_call.method, interner) {
             if resolved.is_builtin()
@@ -337,8 +337,8 @@ impl Analyzer {
             for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                 let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
                 if !self.types_compatible(&arg_ty, param_ty, interner) {
-                    let expected = self.type_display(param_ty, interner);
-                    let found = self.type_display(&arg_ty, interner);
+                    let expected = self.type_display(param_ty);
+                    let found = self.type_display(&arg_ty);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected,

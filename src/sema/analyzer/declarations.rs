@@ -65,7 +65,7 @@ impl Analyzer {
     }
 
     fn collect_function_signature(&mut self, func: &FuncDecl, interner: &Interner) {
-        let _ = self.name_table.intern(self.current_module, &[func.name]);
+        let _ = self.name_table.intern(self.current_module, &[func.name], interner);
         if func.type_params.is_empty() {
             // Non-generic function: resolve types normally
             let params: Vec<Type> = func
@@ -152,7 +152,7 @@ impl Analyzer {
     }
 
     fn collect_class_signature(&mut self, class: &ClassDecl, interner: &Interner) {
-        let name_id = self.name_table.intern(self.current_module, &[class.name]);
+        let name_id = self.name_table.intern(self.current_module, &[class.name], interner);
         let fields: Vec<StructField> = class
             .fields
             .iter()
@@ -169,7 +169,7 @@ impl Analyzer {
             fields,
         };
         self.classes.insert(class.name, class_type.clone());
-        self.register_named_type(class.name, Type::Class(class_type.clone()));
+        self.register_named_type(class.name, Type::Class(class_type.clone()), interner);
 
         // Register and validate implements list
         if !class.implements.is_empty() {
@@ -214,7 +214,7 @@ impl Analyzer {
                 .unwrap_or(Type::Void);
             let type_id = self
                 .name_table
-                .name_id(self.current_module, &[class.name])
+                .name_id(self.current_module, &[class.name], interner)
                 .expect("class name_id should be registered");
             let method_id = self.method_name_id(method.name, interner);
             self.methods.insert(
@@ -229,7 +229,7 @@ impl Analyzer {
     }
 
     fn collect_record_signature(&mut self, record: &RecordDecl, interner: &Interner) {
-        let name_id = self.name_table.intern(self.current_module, &[record.name]);
+        let name_id = self.name_table.intern(self.current_module, &[record.name], interner);
 
         // Handle generic records vs non-generic records
         if record.type_params.is_empty() {
@@ -254,7 +254,7 @@ impl Analyzer {
                 type_args: vec![],
             };
             self.records.insert(record.name, record_type.clone());
-            self.register_named_type(record.name, Type::Record(record_type.clone()));
+            self.register_named_type(record.name, Type::Record(record_type.clone()), interner);
 
             // Register and validate implements list
             if !record.implements.is_empty() {
@@ -299,7 +299,7 @@ impl Analyzer {
                     .unwrap_or(Type::Void);
                 let type_id = self
                     .name_table
-                    .name_id(self.current_module, &[record.name])
+                    .name_id(self.current_module, &[record.name], interner)
                     .expect("record name_id should be registered");
                 let method_id = self.method_name_id(method.name, interner);
                 self.methods.insert(
@@ -397,7 +397,7 @@ impl Analyzer {
                 type_args: vec![], // Generic record base has no type args yet
             };
             self.records.insert(record.name, record_type.clone());
-            self.register_named_type(record.name, Type::Record(record_type.clone()));
+            self.register_named_type(record.name, Type::Record(record_type.clone()), interner);
 
             // Register and validate implements list
             if !record.implements.is_empty() {
@@ -455,7 +455,7 @@ impl Analyzer {
                     .unwrap_or(Type::Void);
                 let type_id = self
                     .name_table
-                    .name_id(self.current_module, &[record.name])
+                    .name_id(self.current_module, &[record.name], interner)
                     .expect("record name_id should be registered");
                 let method_id = self.method_name_id(method.name, interner);
                 self.methods.insert(
@@ -644,6 +644,7 @@ impl Analyzer {
                 methods: interface_methods,
                 extends: interface_decl.extends.clone(),
             }),
+            interner,
         );
     }
 

@@ -155,8 +155,8 @@ impl Analyzer {
                 let expected_ty = &concrete_field_types[idx];
 
                 if !self.types_compatible(actual_ty, expected_ty, interner) {
-                    let expected = self.type_display(expected_ty, interner);
-                    let found = self.type_display(actual_ty, interner);
+                    let expected = self.type_display(expected_ty);
+                    let found = self.type_display(actual_ty);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected,

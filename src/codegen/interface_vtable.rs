@@ -146,10 +146,9 @@ impl InterfaceVtableRegistry {
         }
 
         let type_name = match concrete_key {
-            InterfaceConcreteType::TypeId(type_id) => ctx
-                .analyzed
-                .name_table
-                .display(type_id.name_id(), ctx.interner),
+            InterfaceConcreteType::TypeId(type_id) => {
+                ctx.analyzed.name_table.display(type_id.name_id())
+            }
             InterfaceConcreteType::Function { is_closure } => {
                 if is_closure {
                     "closure".to_string()

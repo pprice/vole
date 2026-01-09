@@ -149,22 +149,17 @@ impl TypeTable {
         &self.types[key.0 as usize]
     }
 
-    pub fn display(&self, key: TypeKey, names: &NameTable, interner: &Interner) -> String {
+    pub fn display(&self, key: TypeKey, names: &NameTable) -> String {
         let info = self.info(key);
         match info.name_id {
-            Some(name_id) => names.display(name_id, interner),
+            Some(name_id) => names.display(name_id),
             None => info.ty.to_string(),
         }
     }
 
-    pub fn display_type(
-        &mut self,
-        ty: &Type,
-        names: &mut NameTable,
-        interner: &Interner,
-    ) -> String {
+    pub fn display_type(&mut self, ty: &Type, names: &mut NameTable) -> String {
         let _ = self.key_for_type(ty);
-        self.display_type_inner(ty, names, interner)
+        self.display_type_inner(ty, names)
     }
 
     pub fn key_for_type(&mut self, ty: &Type) -> TypeKey {
@@ -309,60 +304,64 @@ impl TypeTable {
         }
     }
 
-    fn display_type_inner(&self, ty: &Type, names: &NameTable, interner: &Interner) -> String {
+    fn display_type_inner(&self, ty: &Type, names: &NameTable) -> String {
         match ty {
             Type::Function(ft) => {
                 let params = ft
                     .params
                     .iter()
-                    .map(|param| self.display_type_inner(param, names, interner))
+                    .map(|param| self.display_type_inner(param, names))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!(
                     "({}) -> {}",
                     params,
-                    self.display_type_inner(&ft.return_type, names, interner)
+                    self.display_type_inner(&ft.return_type, names)
                 )
             }
             Type::Union(variants) => variants
                 .iter()
-                .map(|variant| self.display_type_inner(variant, names, interner))
+                .map(|variant| self.display_type_inner(variant, names))
                 .collect::<Vec<_>>()
                 .join(" | "),
             Type::Array(elem) => {
-                format!("[{}]", self.display_type_inner(elem, names, interner))
+                format!("[{}]", self.display_type_inner(elem, names))
             }
-            Type::Class(class_type) => names.display(class_type.name_id, interner),
-            Type::Record(record_type) => names.display(record_type.name_id, interner),
+            Type::Class(class_type) => names.display(class_type.name_id),
+            Type::Record(record_type) => names.display(record_type.name_id),
             Type::Interface(interface_type) => {
-                let base = names.display(interface_type.name_id, interner);
+                let base = names.display(interface_type.name_id);
                 if interface_type.type_args.is_empty() {
                     base
                 } else {
                     let arg_list = interface_type
                         .type_args
                         .iter()
-                        .map(|arg| self.display_type_inner(arg, names, interner))
+                        .map(|arg| self.display_type_inner(arg, names))
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!("{}<{}>", base, arg_list)
                 }
             }
-            Type::ErrorType(error_type) => names.display(error_type.name_id, interner),
+            Type::ErrorType(error_type) => names.display(error_type.name_id),
             Type::Fallible(ft) => format!(
                 "fallible({}, {})",
-                self.display_type_inner(&ft.success_type, names, interner),
-                self.display_type_inner(&ft.error_type, names, interner)
+                self.display_type_inner(&ft.success_type, names),
+                self.display_type_inner(&ft.error_type, names)
             ),
             Type::Module(module_type) => {
                 format!("module(\"{}\")", names.module_path(module_type.module_id))
             }
-            Type::TypeParam(sym) => interner.resolve(*sym).to_string(),
+            Type::TypeParam(sym) => {
+                // For TypeParam, we just use the symbol index as a fallback
+                // In practice, TypeParams should be substituted before display
+                format!("T{}", sym.0)
+            }
             Type::GenericInstance { def, args } => {
-                let def_name = names.display(*def, interner);
+                let def_name = names.display(*def);
                 let arg_list = args
                     .iter()
-                    .map(|arg| self.display_type_inner(arg, names, interner))
+                    .map(|arg| self.display_type_inner(arg, names))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{}<{}>", def_name, arg_list)
@@ -389,7 +388,7 @@ mod tests {
         let foo = interner.intern("Foo");
 
         let mut names = NameTable::new();
-        let name_id = names.intern(names.main_module(), &[foo]);
+        let name_id = names.intern(names.main_module(), &[foo], &interner);
 
         let mut types = TypeTable::new();
         let key = types.insert_named(
@@ -401,6 +400,6 @@ mod tests {
             name_id,
         );
 
-        assert_eq!(types.display(key, &names, &interner), "main::Foo");
+        assert_eq!(types.display(key, &names), "main::Foo");
     }
 }

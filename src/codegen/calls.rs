@@ -296,10 +296,11 @@ impl Cg<'_, '_, '_> {
         // 1. Try direct function lookup
         // 2. If in module context, try mangled name
         // 3. If in module context, try FFI call
-        let func_key = self
-            .ctx
-            .func_registry
-            .intern_qualified(self.ctx.func_registry.main_module(), &[callee_sym]);
+        let func_key = self.ctx.func_registry.intern_qualified(
+            self.ctx.func_registry.main_module(),
+            &[callee_sym],
+            self.ctx.interner,
+        );
         if let Some(func_id) = self.ctx.func_registry.func_id(func_key) {
             return self.call_func_id(func_key, func_id, call);
         }

@@ -258,7 +258,7 @@ mod tests {
         let mut names = crate::identity::NameTable::new();
         let mut interner = crate::frontend::Interner::new();
         let func_sym = interner.intern("foo");
-        let func_name = names.intern(names.main_module(), &[func_sym]);
+        let func_name = names.intern(names.main_module(), &[func_sym], &interner);
         let mut table = crate::sema::TypeTable::new();
 
         let key1 = MonomorphKey::new(func_name, vec![table.key_for_type(&Type::I64)]);

@@ -203,11 +203,7 @@ impl Cg<'_, '_, '_> {
         // Create wrapper function
         let (wrapper_name_id, wrapper_func_key) =
             self.ctx.func_registry.intern_lambda_name(wrapper_index);
-        let wrapper_name = self
-            .ctx
-            .func_registry
-            .name_table()
-            .display(wrapper_name_id, self.ctx.interner);
+        let wrapper_name = self.ctx.func_registry.name_table().display(wrapper_name_id);
         let wrapper_func_id = self
             .ctx
             .module

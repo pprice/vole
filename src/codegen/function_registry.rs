@@ -236,8 +236,13 @@ impl FunctionRegistry {
         self.names.module_id(path)
     }
 
-    pub fn intern_qualified(&mut self, module: ModuleId, segments: &[Symbol]) -> FunctionKey {
-        let name_id = self.names.intern(module, segments);
+    pub fn intern_qualified(
+        &mut self,
+        module: ModuleId,
+        segments: &[Symbol],
+        interner: &Interner,
+    ) -> FunctionKey {
+        let name_id = self.names.intern(module, segments, interner);
         self.intern_name_id(name_id)
     }
 
@@ -250,8 +255,13 @@ impl FunctionRegistry {
         key
     }
 
-    pub fn intern_with_prefix(&mut self, prefix: NameId, segment: Symbol) -> FunctionKey {
-        let name_id = self.names.intern_with_symbol(prefix, segment);
+    pub fn intern_with_prefix(
+        &mut self,
+        prefix: NameId,
+        segment: Symbol,
+        interner: &Interner,
+    ) -> FunctionKey {
+        let name_id = self.names.intern_with_symbol(prefix, segment, interner);
         self.intern_name_id(name_id)
     }
 
@@ -311,9 +321,9 @@ impl FunctionRegistry {
         self.entries.get(key.0 as usize)?.return_type.as_ref()
     }
 
-    pub fn display(&self, key: FunctionKey, interner: &Interner) -> String {
+    pub fn display(&self, key: FunctionKey) -> String {
         match &self.entries[key.0 as usize].name {
-            FunctionName::Qualified(name_id) => self.names.display(*name_id, interner),
+            FunctionName::Qualified(name_id) => self.names.display(*name_id),
             FunctionName::Runtime(runtime) => runtime.name().to_string(),
         }
     }

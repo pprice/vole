@@ -68,12 +68,20 @@ impl Compiler<'_> {
         let type_key = self
             .analyzed
             .name_table
-            .name_id(self.analyzed.name_table.main_module(), &[class.name])
+            .name_id(
+                self.analyzed.name_table.main_module(),
+                &[class.name],
+                &self.analyzed.interner,
+            )
             .and_then(|name_id| self.analyzed.type_table.by_name(name_id));
         let name_id = self
             .analyzed
             .name_table
-            .name_id(self.analyzed.name_table.main_module(), &[class.name])
+            .name_id(
+                self.analyzed.name_table.main_module(),
+                &[class.name],
+                &self.analyzed.interner,
+            )
             .expect("class name_id should be registered");
 
         // Create a placeholder vole_type (will be replaced in finalize_class)
@@ -129,7 +137,11 @@ impl Compiler<'_> {
             name_id: self
                 .analyzed
                 .name_table
-                .name_id(self.analyzed.name_table.main_module(), &[class.name])
+                .name_id(
+                    self.analyzed.name_table.main_module(),
+                    &[class.name],
+                    &self.analyzed.interner,
+                )
                 .expect("class name_id should be registered"),
             fields: struct_fields,
         });
@@ -146,10 +158,8 @@ impl Compiler<'_> {
             let sig = self.create_method_signature(method);
             let func_key = self
                 .func_registry
-                .intern_qualified(module_id, &[class.name, method.name]);
-            let display_name = self
-                .func_registry
-                .display(func_key, &self.analyzed.interner);
+                .intern_qualified(module_id, &[class.name, method.name], &self.analyzed.interner);
+            let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
             let method_id = method_name_id(self.analyzed, &self.analyzed.interner, method.name)
@@ -186,12 +196,12 @@ impl Compiler<'_> {
                                 .map(|t| self.resolve_type_with_metadata(t))
                                 .unwrap_or(Type::Void);
                             let sig = self.create_interface_method_signature(method);
-                            let func_key = self
-                                .func_registry
-                                .intern_qualified(module_id, &[class.name, method.name]);
-                            let display_name = self
-                                .func_registry
-                                .display(func_key, &self.analyzed.interner);
+                            let func_key = self.func_registry.intern_qualified(
+                                module_id,
+                                &[class.name, method.name],
+                                &self.analyzed.interner,
+                            );
+                            let display_name = self.func_registry.display(func_key);
                             let func_id = self.jit.declare_function(&display_name, &sig);
                             self.func_registry.set_func_id(func_key, func_id);
                             let method_id =
@@ -226,7 +236,11 @@ impl Compiler<'_> {
                 type_key: self
                     .analyzed
                     .name_table
-                    .name_id(self.analyzed.name_table.main_module(), &[class.name])
+                    .name_id(
+                        self.analyzed.name_table.main_module(),
+                        &[class.name],
+                        &self.analyzed.interner,
+                    )
                     .and_then(|name_id| self.analyzed.type_table.by_name(name_id)),
                 field_slots,
                 is_class: true,
@@ -245,12 +259,20 @@ impl Compiler<'_> {
         let type_key = self
             .analyzed
             .name_table
-            .name_id(self.analyzed.name_table.main_module(), &[record.name])
+            .name_id(
+                self.analyzed.name_table.main_module(),
+                &[record.name],
+                &self.analyzed.interner,
+            )
             .and_then(|name_id| self.analyzed.type_table.by_name(name_id));
         let name_id = self
             .analyzed
             .name_table
-            .name_id(self.analyzed.name_table.main_module(), &[record.name])
+            .name_id(
+                self.analyzed.name_table.main_module(),
+                &[record.name],
+                &self.analyzed.interner,
+            )
             .expect("record name_id should be registered");
 
         // Create a placeholder vole_type (will be replaced in finalize_record)
@@ -307,7 +329,11 @@ impl Compiler<'_> {
             name_id: self
                 .analyzed
                 .name_table
-                .name_id(self.analyzed.name_table.main_module(), &[record.name])
+                .name_id(
+                    self.analyzed.name_table.main_module(),
+                    &[record.name],
+                    &self.analyzed.interner,
+                )
                 .expect("record name_id should be registered"),
             fields: struct_fields,
             type_args: vec![],
@@ -325,10 +351,8 @@ impl Compiler<'_> {
             let sig = self.create_method_signature(method);
             let func_key = self
                 .func_registry
-                .intern_qualified(module_id, &[record.name, method.name]);
-            let display_name = self
-                .func_registry
-                .display(func_key, &self.analyzed.interner);
+                .intern_qualified(module_id, &[record.name, method.name], &self.analyzed.interner);
+            let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
             let method_id = method_name_id(self.analyzed, &self.analyzed.interner, method.name)
@@ -365,12 +389,12 @@ impl Compiler<'_> {
                                 .map(|t| self.resolve_type_with_metadata(t))
                                 .unwrap_or(Type::Void);
                             let sig = self.create_interface_method_signature(method);
-                            let func_key = self
-                                .func_registry
-                                .intern_qualified(module_id, &[record.name, method.name]);
-                            let display_name = self
-                                .func_registry
-                                .display(func_key, &self.analyzed.interner);
+                            let func_key = self.func_registry.intern_qualified(
+                                module_id,
+                                &[record.name, method.name],
+                                &self.analyzed.interner,
+                            );
+                            let display_name = self.func_registry.display(func_key);
                             let func_id = self.jit.declare_function(&display_name, &sig);
                             self.func_registry.set_func_id(func_key, func_id);
                             let method_id =
@@ -405,7 +429,11 @@ impl Compiler<'_> {
                 type_key: self
                     .analyzed
                     .name_table
-                    .name_id(self.analyzed.name_table.main_module(), &[record.name])
+                    .name_id(
+                        self.analyzed.name_table.main_module(),
+                        &[record.name],
+                        &self.analyzed.interner,
+                    )
                     .and_then(|name_id| self.analyzed.type_table.by_name(name_id)),
                 field_slots,
                 is_class: false,

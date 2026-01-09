@@ -17,7 +17,7 @@ impl<'a> Namer<'a> {
     }
 
     pub fn intern_symbol(&mut self, module: ModuleId, name: Symbol) -> NameId {
-        self.names.intern(module, &[name])
+        self.names.intern(module, &[name], self.interner)
     }
 
     pub fn intern_raw(&mut self, module: ModuleId, segments: &[&str]) -> NameId {
@@ -25,7 +25,7 @@ impl<'a> Namer<'a> {
     }
 
     pub fn function(&mut self, module: ModuleId, name: Symbol) -> NameId {
-        self.names.intern(module, &[name])
+        self.names.intern(module, &[name], self.interner)
     }
 
     pub fn method(&mut self, name: Symbol) -> NameId {
@@ -46,6 +46,10 @@ impl<'a> Namer<'a> {
 
     pub fn monomorph(&mut self, module: ModuleId, base: Symbol, id: u32) -> NameId {
         let base_name = self.interner.resolve(base);
+        self.monomorph_str(module, base_name, id)
+    }
+
+    pub fn monomorph_str(&mut self, module: ModuleId, base_name: &str, id: u32) -> NameId {
         let mangled = format!("{}__mono_{}", base_name, id);
         self.names.intern_raw(module, &[mangled.as_str()])
     }
@@ -57,7 +61,7 @@ impl<'a> NamerLookup<'a> {
     }
 
     pub fn function(&self, module: ModuleId, name: Symbol) -> Option<NameId> {
-        self.names.name_id(module, &[name])
+        self.names.name_id(module, &[name], self.interner)
     }
 
     pub fn method(&self, name: Symbol) -> Option<NameId> {

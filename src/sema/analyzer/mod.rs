@@ -459,17 +459,12 @@ impl Analyzer {
         self.type_table.key_for_type(ty)
     }
 
-    fn type_display(&mut self, ty: &Type, interner: &Interner) -> String {
-        self.type_table
-            .display_type(ty, &mut self.name_table, interner)
+    fn type_display(&mut self, ty: &Type) -> String {
+        self.type_table.display_type(ty, &mut self.name_table)
     }
 
-    fn type_display_pair(&mut self, left: &Type, right: &Type, interner: &Interner) -> String {
-        format!(
-            "{} and {}",
-            self.type_display(left, interner),
-            self.type_display(right, interner)
-        )
+    fn type_display_pair(&mut self, left: &Type, right: &Type) -> String {
+        format!("{} and {}", self.type_display(left), self.type_display(right))
     }
 
     /// Helper to add a type mismatch error
@@ -671,8 +666,8 @@ impl Analyzer {
         }
     }
 
-    fn register_named_type(&mut self, name: Symbol, ty: Type) {
-        let name_id = self.name_table.intern(self.current_module, &[name]);
+    fn register_named_type(&mut self, name: Symbol, ty: Type, interner: &Interner) {
+        let name_id = self.name_table.intern(self.current_module, &[name], interner);
         self.type_table.insert_named(ty, name_id);
     }
 
@@ -680,7 +675,7 @@ impl Analyzer {
         let module_path = self.name_table.module_path(module_id);
         let (_, module_interner) = self.module_programs.get(module_path)?;
         let sym = module_interner.lookup(name)?;
-        self.name_table.name_id(module_id, &[sym])
+        self.name_table.name_id(module_id, &[sym], module_interner)
     }
 
     fn interface_type(
@@ -834,7 +829,7 @@ impl Analyzer {
                 let aliased_type = self.resolve_type(type_expr, interner);
                 self.type_aliases
                     .insert(let_stmt.name, aliased_type.clone());
-                self.register_named_type(let_stmt.name, aliased_type);
+                self.register_named_type(let_stmt.name, aliased_type, interner);
             }
         }
     }
@@ -983,12 +978,12 @@ impl Analyzer {
 
         let error_info = ErrorTypeInfo {
             name: decl.name,
-            name_id: self.name_table.intern(self.current_module, &[decl.name]),
+            name_id: self.name_table.intern(self.current_module, &[decl.name], interner),
             fields,
         };
 
         self.error_types.insert(decl.name, error_info.clone());
-        self.register_named_type(decl.name, Type::ErrorType(error_info));
+        self.register_named_type(decl.name, Type::ErrorType(error_info), interner);
     }
 
     fn resolve_type_param_constraint(
@@ -1048,7 +1043,7 @@ impl Analyzer {
             match constraint {
                 crate::sema::generic::TypeConstraint::Interface(interface_name) => {
                     if !self.satisfies_interface(found, *interface_name, interner) {
-                        let found_display = self.type_display(found, interner);
+                        let found_display = self.type_display(found);
                         self.add_error(
                             SemanticError::TypeParamConstraintMismatch {
                                 type_param: interner.resolve(param.name).to_string(),
@@ -1063,8 +1058,8 @@ impl Analyzer {
                 crate::sema::generic::TypeConstraint::Union(variants) => {
                     let expected = Type::normalize_union(variants.clone());
                     if !types_compatible_core(found, &expected) {
-                        let expected_display = self.type_display(&expected, interner);
-                        let found_display = self.type_display(found, interner);
+                        let expected_display = self.type_display(&expected);
+                        let found_display = self.type_display(found);
                         self.add_error(
                             SemanticError::TypeParamConstraintMismatch {
                                 type_param: interner.resolve(param.name).to_string(),
@@ -1210,7 +1205,7 @@ impl Analyzer {
     ) -> Result<(), Vec<TypeError>> {
         let type_id = self
             .name_table
-            .name_id(self.current_module, &[type_name])
+            .name_id(self.current_module, &[type_name], interner)
             .expect("type name_id should be registered");
         let method_id = self.method_name_id(method.name, interner);
         let method_key = (type_id, method_id);
@@ -1401,13 +1396,13 @@ impl Analyzer {
                     });
 
                     // Store export by name string
-                    let name_id = self.name_table.intern(module_id, &[f.name]);
+                    let name_id = self.name_table.intern(module_id, &[f.name], &module_interner);
                     exports.insert(name_id, func_type);
                 }
                 Decl::Let(l) if !l.mutable => {
                     // Only export immutable let bindings
                     // Infer type from literal for constants and store the value
-                    let name_id = self.name_table.intern(module_id, &[l.name]);
+                    let name_id = self.name_table.intern(module_id, &[l.name], &module_interner);
                     let (ty, const_val) = match &l.init.kind {
                         ExprKind::FloatLiteral(v) => (Type::F64, Some(ConstantValue::F64(*v))),
                         ExprKind::IntLiteral(v) => (Type::I64, Some(ConstantValue::I64(*v))),
@@ -1457,7 +1452,7 @@ impl Analyzer {
                             is_closure: false,
                         });
 
-                        let name_id = self.name_table.intern(module_id, &[func.vole_name]);
+                        let name_id = self.name_table.intern(module_id, &[func.vole_name], &module_interner);
                         exports.insert(name_id, func_type);
                         // Mark as external function (FFI)
                         external_funcs.insert(name_id);

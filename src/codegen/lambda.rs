@@ -232,7 +232,7 @@ fn compile_pure_lambda(
     let lambda_name = ctx
         .func_registry
         .name_table()
-        .display(name_id, ctx.interner);
+        .display(name_id);
     let func_id = ctx
         .module
         .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
@@ -373,7 +373,7 @@ fn compile_lambda_with_captures(
     let lambda_name = ctx
         .func_registry
         .name_table()
-        .display(name_id, ctx.interner);
+        .display(name_id);
     let func_id = ctx
         .module
         .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)

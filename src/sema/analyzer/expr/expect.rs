@@ -31,7 +31,7 @@ impl Analyzer {
                     {
                         Ok(int_variant.clone())
                     } else {
-                        let expected = self.type_display(&Type::Union(variants.clone()), interner);
+                        let expected = self.type_display(&Type::Union(variants.clone()));
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected,
@@ -45,7 +45,7 @@ impl Analyzer {
                 }
                 Some(ty) if literal_fits(*value, ty) => Ok(ty.clone()),
                 Some(ty) => {
-                    let expected = self.type_display(ty, interner);
+                    let expected = self.type_display(ty);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected,
@@ -61,7 +61,7 @@ impl Analyzer {
             ExprKind::TypeLiteral(_) => match expected {
                 Some(Type::Type) | None => Ok(Type::Type),
                 Some(ty) => {
-                    let expected = self.type_display(ty, interner);
+                    let expected = self.type_display(ty);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected,
@@ -79,7 +79,7 @@ impl Analyzer {
                 // Float literals can be assigned to unions containing f64
                 Some(Type::Union(variants)) if variants.contains(&Type::F64) => Ok(Type::F64),
                 Some(ty) => {
-                    let expected = self.type_display(ty, interner);
+                    let expected = self.type_display(ty);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected,
@@ -107,7 +107,7 @@ impl Analyzer {
                             // Right implements Stringable
                             Ok(Type::String)
                         } else {
-                            let found = self.type_display(&right_ty, interner);
+                            let found = self.type_display(&right_ty);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "Stringable".to_string(),
@@ -134,7 +134,7 @@ impl Analyzer {
                             Ok(Type::I32)
                         }
                     } else {
-                        let found = self.type_display_pair(&left_ty, &right_ty, interner);
+                        let found = self.type_display_pair(&left_ty, &right_ty);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "numeric or string".to_string(),
@@ -168,7 +168,7 @@ impl Analyzer {
                             Ok(Type::I32)
                         }
                     } else {
-                        let found = self.type_display_pair(&left_ty, &right_ty, interner);
+                        let found = self.type_display_pair(&left_ty, &right_ty);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "numeric".to_string(),
@@ -200,7 +200,7 @@ impl Analyzer {
                     if left_ty == Type::Bool && right_ty == Type::Bool {
                         Ok(Type::Bool)
                     } else {
-                        let found = self.type_display_pair(&left_ty, &right_ty, interner);
+                        let found = self.type_display_pair(&left_ty, &right_ty);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "bool".to_string(),
@@ -234,7 +234,7 @@ impl Analyzer {
                             Ok(Type::I32)
                         }
                     } else {
-                        let found = self.type_display_pair(&left_ty, &right_ty, interner);
+                        let found = self.type_display_pair(&left_ty, &right_ty);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "integer".to_string(),
@@ -254,7 +254,7 @@ impl Analyzer {
                     if operand_ty.is_numeric() {
                         Ok(operand_ty)
                     } else {
-                        let found = self.type_display(&operand_ty, interner);
+                        let found = self.type_display(&operand_ty);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "numeric".to_string(),
@@ -273,7 +273,7 @@ impl Analyzer {
                     if operand_ty == Type::Bool {
                         Ok(Type::Bool)
                     } else {
-                        let found = self.type_display(&operand_ty, interner);
+                        let found = self.type_display(&operand_ty);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "bool".to_string(),
@@ -291,7 +291,7 @@ impl Analyzer {
                     if operand_ty.is_integer() {
                         Ok(operand_ty)
                     } else {
-                        let found = self.type_display(&operand_ty, interner);
+                        let found = self.type_display(&operand_ty);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "integer".to_string(),
@@ -351,8 +351,8 @@ impl Analyzer {
                 if let Some(expected_ty) = expected
                     && !self.types_compatible(&inferred, expected_ty, interner)
                 {
-                    let expected = self.type_display(expected_ty, interner);
-                    let found = self.type_display(&inferred, interner);
+                    let expected = self.type_display(expected_ty);
+                    let found = self.type_display(&inferred);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected,

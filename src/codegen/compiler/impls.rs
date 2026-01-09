@@ -168,18 +168,16 @@ impl Compiler<'_> {
             let sig = self.create_implement_method_signature(method, &self_vole_type);
             let func_key = if let Some(type_sym) = type_sym {
                 self.func_registry
-                    .intern_qualified(func_module, &[type_sym, method.name])
+                    .intern_qualified(func_module, &[type_sym, method.name], &self.analyzed.interner)
             } else if let Some(type_id) = type_id {
                 self.func_registry
-                    .intern_with_prefix(type_id.name_id(), method.name)
+                    .intern_with_prefix(type_id.name_id(), method.name, &self.analyzed.interner)
             } else {
                 let method_name_str = self.analyzed.interner.resolve(method.name);
                 self.func_registry
                     .intern_raw_qualified(func_module, &[type_name.as_str(), method_name_str])
             };
-            let display_name = self
-                .func_registry
-                .display(func_key, &self.analyzed.interner);
+            let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
             if let Some(type_id) = type_id {
@@ -267,19 +265,17 @@ impl Compiler<'_> {
             info.func_key
         } else if let Some(type_sym) = type_sym {
             self.func_registry
-                .intern_qualified(func_module, &[type_sym, method.name])
+                .intern_qualified(func_module, &[type_sym, method.name], &self.analyzed.interner)
         } else if let Some(type_id) = TypeId::from_type(self_vole_type, &self.analyzed.type_table) {
             self.func_registry
-                .intern_with_prefix(type_id.name_id(), method.name)
+                .intern_with_prefix(type_id.name_id(), method.name, &self.analyzed.interner)
         } else {
             let method_name_str = self.analyzed.interner.resolve(method.name);
             self.func_registry
                 .intern_raw_qualified(func_module, &[type_name, method_name_str])
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            let display = self
-                .func_registry
-                .display(func_key, &self.analyzed.interner);
+            let display = self.func_registry.display(func_key);
             format!("Internal error: implement method {} not declared", display)
         })?;
 
@@ -448,9 +444,7 @@ impl Compiler<'_> {
                 )
             })?;
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            let display = self
-                .func_registry
-                .display(func_key, &self.analyzed.interner);
+            let display = self.func_registry.display(func_key);
             format!("Internal error: method {} not declared", display)
         })?;
 
@@ -601,9 +595,7 @@ impl Compiler<'_> {
                 )
             })?;
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            let display = self
-                .func_registry
-                .display(func_key, &self.analyzed.interner);
+            let display = self.func_registry.display(func_key);
             format!("Internal error: default method {} not declared", display)
         })?;
 

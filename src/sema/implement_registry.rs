@@ -81,12 +81,8 @@ impl TypeId {
     }
 
     /// Get the string name for method mangling (e.g., "i32" or record name)
-    pub fn type_name(
-        &self,
-        names: &crate::identity::NameTable,
-        interner: &crate::frontend::Interner,
-    ) -> String {
-        names.display(self.0, interner)
+    pub fn type_name(&self, names: &crate::identity::NameTable) -> String {
+        names.display(self.0)
     }
 
     pub fn name_id(self) -> NameId {
@@ -177,7 +173,7 @@ mod tests {
         let length_sym = interner.intern("length");
         let mut names = crate::identity::NameTable::new();
         let builtin = names.builtin_module();
-        let method_id = names.intern(builtin, &[length_sym]);
+        let method_id = names.intern(builtin, &[length_sym], &interner);
 
         let mut registry = ImplementRegistry::new();
         let mut types = TypeTable::new();
@@ -211,7 +207,7 @@ mod tests {
         let length_sym = interner.intern("length");
         let mut names = crate::identity::NameTable::new();
         let builtin = names.builtin_module();
-        let method_id = names.intern(builtin, &[length_sym]);
+        let method_id = names.intern(builtin, &[length_sym], &interner);
 
         let registry = ImplementRegistry::new();
         let mut types = TypeTable::new();
@@ -252,8 +248,8 @@ mod tests {
         let mut types = TypeTable::new();
         let builtin = names.builtin_module();
         let string_name = names.intern_raw(builtin, &["string"]);
-        let length_id = names.intern(builtin, &[length_sym]);
-        let to_upper_id = names.intern(builtin, &[to_upper_sym]);
+        let length_id = names.intern(builtin, &[length_sym], &interner);
+        let to_upper_id = names.intern(builtin, &[to_upper_sym], &interner);
         types.register_primitive_name(PrimitiveTypeId::String, string_name);
         let type_id = TypeId(string_name);
 
@@ -308,8 +304,8 @@ mod tests {
         types.register_primitive_name(PrimitiveTypeId::I64, i64_name);
         types.register_primitive_name(PrimitiveTypeId::String, string_name);
 
-        let equals_id = names.intern(builtin, &[equals_sym]);
-        let length_id = names.intern(builtin, &[length_sym]);
+        let equals_id = names.intern(builtin, &[equals_sym], &interner);
+        let length_id = names.intern(builtin, &[length_sym], &interner);
 
         registry1.register_method(
             TypeId(i64_name),

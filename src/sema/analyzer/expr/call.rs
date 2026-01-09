@@ -29,7 +29,7 @@ impl Analyzer {
 
             let arg_ty = self.check_expr(&call.args[0], interner)?;
             if arg_ty != Type::Bool && arg_ty != Type::Error {
-                let found = self.type_display(&arg_ty, interner);
+                let found = self.type_display(&arg_ty);
                 self.add_error(
                     SemanticError::TypeMismatch {
                         expected: "bool".to_string(),
@@ -118,8 +118,8 @@ impl Analyzer {
                 {
                     let arg_ty = &arg_types[i];
                     if !types_compatible_core(arg_ty, expected) {
-                        let expected = self.type_display(expected, interner);
-                        let found = self.type_display(arg_ty, interner);
+                        let expected = self.type_display(expected);
+                        let found = self.type_display(arg_ty);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected,
@@ -148,10 +148,13 @@ impl Analyzer {
                 if !self.monomorph_cache.contains(&key) {
                     let id = self.monomorph_cache.next_unique_id();
                     let module_id = self.name_table.module_of(name_id);
-                    let base_sym = self.name_table.last_symbol(name_id).unwrap_or(*sym);
+                    let base_str = self
+                        .name_table
+                        .last_segment_str(name_id)
+                        .unwrap_or_else(|| interner.resolve(*sym).to_string());
                     let mangled_name = {
                         let mut namer = Namer::new(&mut self.name_table, interner);
-                        namer.monomorph(module_id, base_sym, id)
+                        namer.monomorph_str(module_id, &base_str, id)
                     };
                     self.monomorph_cache.insert(
                         key.clone(),
@@ -224,7 +227,7 @@ impl Analyzer {
 
             // Check if it's a variable with a non-function type
             if let Some(var_ty) = self.get_variable_type(*sym) {
-                let ty = self.type_display(&var_ty, interner);
+                let ty = self.type_display(&var_ty);
                 self.add_error(
                     SemanticError::NotCallable {
                         ty,
@@ -266,7 +269,7 @@ impl Analyzer {
 
         // Non-callable type
         if callee_ty != Type::Error {
-            let ty = self.type_display(&callee_ty, interner);
+            let ty = self.type_display(&callee_ty);
             self.add_error(
                 SemanticError::NotCallable {
                     ty,

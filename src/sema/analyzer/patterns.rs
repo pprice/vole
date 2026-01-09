@@ -22,8 +22,8 @@ impl Analyzer {
                     && !self.types_compatible(&lit_type, scrutinee_type, interner)
                     && !self.types_compatible(scrutinee_type, &lit_type, interner)
                 {
-                    let expected = self.type_display(scrutinee_type, interner);
-                    let found = self.type_display(&lit_type, interner);
+                    let expected = self.type_display(scrutinee_type);
+                    let found = self.type_display(&lit_type);
                     self.add_error(
                         SemanticError::PatternTypeMismatch {
                             expected,
@@ -87,8 +87,8 @@ impl Analyzer {
                     if !self.types_compatible(&var_ty, scrutinee_type, interner)
                         && !self.types_compatible(scrutinee_type, &var_ty, interner)
                     {
-                        let expected = self.type_display(scrutinee_type, interner);
-                        let found = self.type_display(&var_ty, interner);
+                        let expected = self.type_display(scrutinee_type);
+                        let found = self.type_display(&var_ty);
                         self.add_error(
                             SemanticError::PatternTypeMismatch {
                                 expected,
@@ -115,7 +115,7 @@ impl Analyzer {
                 let success_type = match scrutinee_type {
                     Type::Fallible(ft) => (*ft.success_type).clone(),
                     _ => {
-                        let found = self.type_display(scrutinee_type, interner);
+                        let found = self.type_display(scrutinee_type);
                         self.add_error(
                             SemanticError::SuccessPatternOnNonFallible {
                                 found,
@@ -140,7 +140,7 @@ impl Analyzer {
                 let error_type = match scrutinee_type {
                     Type::Fallible(ft) => (*ft.error_type).clone(),
                     _ => {
-                        let found = self.type_display(scrutinee_type, interner);
+                        let found = self.type_display(scrutinee_type);
                         self.add_error(
                             SemanticError::ErrorPatternOnNonFallible {
                                 found,
@@ -233,8 +233,8 @@ impl Analyzer {
         // For union types, the pattern type must be one of the variants
         if let Type::Union(variants) = scrutinee_type {
             if !variants.iter().any(|v| v == pattern_type) {
-                let expected = self.type_display(scrutinee_type, interner);
-                let found = self.type_display(pattern_type, interner);
+                let expected = self.type_display(scrutinee_type);
+                let found = self.type_display(pattern_type);
                 self.add_error(
                     SemanticError::PatternTypeMismatch {
                         expected,
@@ -248,8 +248,8 @@ impl Analyzer {
             && !self.types_compatible(pattern_type, scrutinee_type, interner)
         {
             // For non-union types, pattern must match or be compatible
-            let expected = self.type_display(scrutinee_type, interner);
-            let found = self.type_display(pattern_type, interner);
+            let expected = self.type_display(scrutinee_type);
+            let found = self.type_display(pattern_type);
             self.add_error(
                 SemanticError::PatternTypeMismatch {
                     expected,

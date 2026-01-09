@@ -68,7 +68,7 @@ impl Analyzer {
                                 Ok(Type::String)
                             } else {
                                 // Right doesn't implement Stringable
-                                let found = self.type_display(&right_ty, interner);
+                                let found = self.type_display(&right_ty);
                                 self.add_error(
                                     SemanticError::TypeMismatch {
                                         expected: "Stringable".to_string(),
@@ -89,7 +89,7 @@ impl Analyzer {
                                 Ok(Type::I32)
                             }
                         } else {
-                            let found = self.type_display_pair(&left_ty, &right_ty, interner);
+                            let found = self.type_display_pair(&left_ty, &right_ty);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "numeric or string".to_string(),
@@ -112,7 +112,7 @@ impl Analyzer {
                                 Ok(Type::I32)
                             }
                         } else {
-                            let found = self.type_display_pair(&left_ty, &right_ty, interner);
+                            let found = self.type_display_pair(&left_ty, &right_ty);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "numeric".to_string(),
@@ -134,7 +134,7 @@ impl Analyzer {
                         if left_ty == Type::Bool && right_ty == Type::Bool {
                             Ok(Type::Bool)
                         } else {
-                            let found = self.type_display_pair(&left_ty, &right_ty, interner);
+                            let found = self.type_display_pair(&left_ty, &right_ty);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "bool".to_string(),
@@ -158,7 +158,7 @@ impl Analyzer {
                                 Ok(Type::I32)
                             }
                         } else {
-                            let found = self.type_display_pair(&left_ty, &right_ty, interner);
+                            let found = self.type_display_pair(&left_ty, &right_ty);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "integer".to_string(),
@@ -180,7 +180,7 @@ impl Analyzer {
                         if operand_ty.is_numeric() {
                             Ok(operand_ty)
                         } else {
-                            let found = self.type_display(&operand_ty, interner);
+                            let found = self.type_display(&operand_ty);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "numeric".to_string(),
@@ -196,7 +196,7 @@ impl Analyzer {
                         if operand_ty == Type::Bool {
                             Ok(Type::Bool)
                         } else {
-                            let found = self.type_display(&operand_ty, interner);
+                            let found = self.type_display(&operand_ty);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "bool".to_string(),
@@ -212,7 +212,7 @@ impl Analyzer {
                         if operand_ty.is_integer() {
                             Ok(operand_ty)
                         } else {
-                            let found = self.type_display(&operand_ty, interner);
+                            let found = self.type_display(&operand_ty);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected: "integer".to_string(),
@@ -249,8 +249,8 @@ impl Analyzer {
                     for elem in elements.iter().skip(1) {
                         let ty = self.check_expr(elem, interner)?;
                         if !self.types_compatible(&ty, &elem_ty, interner) {
-                            let expected = self.type_display(&elem_ty, interner);
-                            let found = self.type_display(&ty, interner);
+                            let expected = self.type_display(&elem_ty);
+                            let found = self.type_display(&ty);
                             self.add_error(
                                 SemanticError::TypeMismatch {
                                     expected,
@@ -272,7 +272,7 @@ impl Analyzer {
 
                 // Index must be integer
                 if !index_ty.is_integer() {
-                    let found = self.type_display(&index_ty, interner);
+                    let found = self.type_display(&index_ty);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "integer".to_string(),
@@ -287,7 +287,7 @@ impl Analyzer {
                 match obj_ty {
                     Type::Array(elem_ty) => Ok(*elem_ty),
                     _ => {
-                        let found = self.type_display(&obj_ty, interner);
+                        let found = self.type_display(&obj_ty);
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected: "array".to_string(),
@@ -306,7 +306,7 @@ impl Analyzer {
                 let end_ty = self.check_expr(&range.end, interner)?;
 
                 if !start_ty.is_integer() || !end_ty.is_integer() {
-                    let found = self.type_display_pair(&start_ty, &end_ty, interner);
+                    let found = self.type_display_pair(&start_ty, &end_ty);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "integer".to_string(),
@@ -330,7 +330,7 @@ impl Analyzer {
 
                 // Value must be an optional (union containing Nil)
                 if !value_type.is_optional() {
-                    let found = self.type_display(&value_type, interner);
+                    let found = self.type_display(&value_type);
                     self.add_error(
                         SemanticError::NullCoalesceNotOptional {
                             found,
@@ -360,8 +360,8 @@ impl Analyzer {
                 if let Type::Union(variants) = &value_type
                     && !variants.contains(&tested_type)
                 {
-                    let tested = self.type_display(&tested_type, interner);
-                    let union_type = self.type_display(&value_type, interner);
+                    let tested = self.type_display(&tested_type);
+                    let union_type = self.type_display(&value_type);
                     self.add_error(
                         SemanticError::IsNotVariant {
                             tested,
@@ -420,7 +420,7 @@ impl Analyzer {
                 let Some(element_type) = self.current_generator_element_type.clone() else {
                     // Not a generator - report error with actual return type
                     let return_type = self.current_function_return.clone().unwrap();
-                    let found = self.type_display(&return_type, interner);
+                    let found = self.type_display(&return_type);
                     self.add_error(
                         SemanticError::YieldInNonGenerator {
                             found,
@@ -437,8 +437,8 @@ impl Analyzer {
 
                 // Check type compatibility
                 if !self.types_compatible(&yield_type, &element_type, interner) {
-                    let expected = self.type_display(&element_type, interner);
-                    let found = self.type_display(&yield_type, interner);
+                    let expected = self.type_display(&element_type);
+                    let found = self.type_display(&yield_type);
                     self.add_error(
                         SemanticError::YieldTypeMismatch {
                             expected,

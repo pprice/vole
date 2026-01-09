@@ -99,12 +99,12 @@ impl Analyzer {
     ) -> String {
         let params_str: Vec<String> = params
             .iter()
-            .map(|t| self.type_display(t, interner))
+            .map(|t| self.type_display(t))
             .collect();
         format!(
             "({}) -> {}",
             params_str.join(", "),
-            self.type_display(return_type, interner)
+            self.type_display(return_type)
         )
     }
 }

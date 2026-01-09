@@ -136,7 +136,7 @@ pub(crate) fn module_name_id(
     let module_path = analyzed.name_table.module_path(module_id);
     let (_, module_interner) = analyzed.module_programs.get(module_path)?;
     let sym = module_interner.lookup(name)?;
-    analyzed.name_table.name_id(module_id, &[sym])
+    analyzed.name_table.name_id(module_id, &[sym], module_interner)
 }
 
 pub(crate) fn method_name_id(
@@ -160,12 +160,10 @@ pub(crate) fn method_name_id_by_str(
 
 pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: &Type) -> String {
     match ty {
-        Type::Class(class_type) => analyzed.name_table.display(class_type.name_id, interner),
-        Type::Record(record_type) => analyzed.name_table.display(record_type.name_id, interner),
+        Type::Class(class_type) => analyzed.name_table.display(class_type.name_id),
+        Type::Record(record_type) => analyzed.name_table.display(record_type.name_id),
         Type::Interface(interface_type) => {
-            let base = analyzed
-                .name_table
-                .display(interface_type.name_id, interner);
+            let base = analyzed.name_table.display(interface_type.name_id);
             if interface_type.type_args.is_empty() {
                 base
             } else {
@@ -178,13 +176,13 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
                 format!("{}<{}>", base, arg_list)
             }
         }
-        Type::ErrorType(error_type) => analyzed.name_table.display(error_type.name_id, interner),
+        Type::ErrorType(error_type) => analyzed.name_table.display(error_type.name_id),
         Type::Module(module_type) => format!(
             "module(\"{}\")",
             analyzed.name_table.module_path(module_type.module_id)
         ),
         Type::GenericInstance { def, args } => {
-            let def_name = analyzed.name_table.display(*def, interner);
+            let def_name = analyzed.name_table.display(*def);
             let arg_list = args
                 .iter()
                 .map(|arg| display_type(analyzed, interner, arg))
@@ -408,7 +406,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     extends: iface.extends.clone(),
                 });
             }
-            let Some(name_id) = name_table.name_id(module_id, &[*name]) else {
+            let Some(name_id) = name_table.name_id(module_id, &[*name], interner) else {
                 return Type::Error;
             };
             Type::GenericInstance {
