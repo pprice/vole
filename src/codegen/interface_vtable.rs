@@ -11,11 +11,12 @@ use crate::codegen::types::{
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Interner, Symbol};
-use crate::identity::NameId;
+use crate::identity::{MethodId, NameId, TypeDefId};
+use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::interface_registry::InterfaceMethodDef;
-use crate::sema::{FunctionType, Type};
+use crate::sema::{EntityRegistry, FunctionType, Type};
 
 pub(crate) fn iface_debug_enabled() -> bool {
     std::env::var_os("VOLE_DEBUG_IFACE").is_some()
@@ -503,6 +504,103 @@ pub(crate) fn interface_method_slot_by_name_id(
         .get_by_name_id(interface_name_id)
         .ok_or_else(|| format!("unknown interface with name_id {:?}", interface_name_id))?;
     interface_method_slot(interface_def.name, method_name, registry, interner)
+}
+
+/// Look up an interface method slot using EntityRegistry (TypeDefId-based)
+///
+/// This is the EntityRegistry version of interface_method_slot. It uses TypeDefId
+/// and MethodId to locate methods without string comparisons.
+#[allow(dead_code)] // Part of parallel migration - will be used when callers are migrated
+pub(crate) fn interface_method_slot_by_type_def_id(
+    interface_id: TypeDefId,
+    method_name_id: NameId,
+    entity_registry: &EntityRegistry,
+) -> Result<usize, String> {
+    // Collect all methods from the interface and its parents
+    let methods = collect_interface_methods_via_entity_registry(interface_id, entity_registry)?;
+
+    // Find the method by its name_id
+    methods
+        .iter()
+        .position(|method_id| {
+            let method = entity_registry.get_method(*method_id);
+            method.name_id == method_name_id
+        })
+        .ok_or_else(|| {
+            format!(
+                "method with name_id {:?} not found on interface {:?}",
+                method_name_id, interface_id
+            )
+        })
+}
+
+/// Collect all methods from an interface and its parent interfaces using EntityRegistry
+///
+/// Returns methods in a consistent order for vtable slot assignment.
+/// Parent interface methods come first, then the interface's own methods.
+/// This matches the order used by collect_interface_methods.
+#[allow(dead_code)] // Part of parallel migration - will be used when callers are migrated
+pub(crate) fn collect_interface_methods_via_entity_registry(
+    interface_id: TypeDefId,
+    entity_registry: &EntityRegistry,
+) -> Result<Vec<MethodId>, String> {
+    let interface = entity_registry.get_type(interface_id);
+
+    // Verify this is an interface
+    if interface.kind != TypeDefKind::Interface {
+        return Err(format!(
+            "TypeDefId {:?} is not an interface (kind: {:?})",
+            interface_id, interface.kind
+        ));
+    }
+
+    let mut methods = Vec::new();
+    let mut seen_interfaces = HashSet::new();
+    let mut seen_methods = HashSet::new();
+
+    collect_interface_methods_inner_entity_registry(
+        interface_id,
+        entity_registry,
+        &mut methods,
+        &mut seen_interfaces,
+        &mut seen_methods,
+    );
+
+    Ok(methods)
+}
+
+#[allow(dead_code)] // Part of parallel migration - called by collect_interface_methods_via_entity_registry
+fn collect_interface_methods_inner_entity_registry(
+    interface_id: TypeDefId,
+    entity_registry: &EntityRegistry,
+    methods: &mut Vec<MethodId>,
+    seen_interfaces: &mut HashSet<TypeDefId>,
+    seen_methods: &mut HashSet<NameId>,
+) {
+    if !seen_interfaces.insert(interface_id) {
+        return;
+    }
+
+    let interface = entity_registry.get_type(interface_id);
+
+    // Process parent interfaces first (to match the order of collect_interface_methods)
+    for parent_id in interface.extends.clone() {
+        collect_interface_methods_inner_entity_registry(
+            parent_id,
+            entity_registry,
+            methods,
+            seen_interfaces,
+            seen_methods,
+        );
+    }
+
+    // Add this interface's methods
+    for method_id in &interface.methods {
+        let method = entity_registry.get_method(*method_id);
+        if seen_methods.insert(method.name_id) {
+            methods.push(*method_id);
+        }
+    }
 }
 
 pub(crate) fn box_interface_value(
