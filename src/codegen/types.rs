@@ -173,6 +173,7 @@ pub(crate) fn method_name_id_by_str(
     namer.method_by_str(name_str)
 }
 
+#[allow(clippy::only_used_in_recursion)]
 pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: &Type) -> String {
     match ty {
         Type::Class(class_type) => analyzed.name_table.display(class_type.name_id),

@@ -13,11 +13,13 @@ const MAX_CONTEXT_LEN: usize = 256;
 
 /// Context stack - each entry describes what we're doing
 /// e.g., ["running foo.vole", "executing function main", "calling method bar"]
+#[allow(clippy::declare_interior_mutable_const)]
 static CONTEXT_STACK: [[std::sync::atomic::AtomicU8; MAX_CONTEXT_LEN]; MAX_CONTEXT_DEPTH] = {
     const INIT_BYTE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
     const INIT_ENTRY: [std::sync::atomic::AtomicU8; MAX_CONTEXT_LEN] = [INIT_BYTE; MAX_CONTEXT_LEN];
     [INIT_ENTRY; MAX_CONTEXT_DEPTH]
 };
+#[allow(clippy::declare_interior_mutable_const)]
 static CONTEXT_LENS: [AtomicUsize; MAX_CONTEXT_DEPTH] = {
     const INIT: AtomicUsize = AtomicUsize::new(0);
     [INIT; MAX_CONTEXT_DEPTH]

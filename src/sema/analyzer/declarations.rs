@@ -172,6 +172,32 @@ impl Analyzer {
         self.classes.insert(class.name, class_type.clone());
         self.register_named_type(class.name, Type::Class(class_type.clone()), interner);
 
+        // Register in EntityRegistry (parallel migration)
+        let entity_type_id =
+            self.entity_registry
+                .register_type(name_id, TypeDefKind::Class, self.current_module);
+
+        // Register fields in EntityRegistry
+        let builtin_module = self.name_table.builtin_module();
+        for (i, field) in class.fields.iter().enumerate() {
+            let field_name_str = interner.resolve(field.name);
+            let field_name_id = self
+                .name_table
+                .intern_raw(builtin_module, &[field_name_str]);
+            let full_field_name_id = self.name_table.intern_raw(
+                self.current_module,
+                &[interner.resolve(class.name), field_name_str],
+            );
+            let field_ty = self.resolve_type(&field.ty, interner);
+            self.entity_registry.register_field(
+                entity_type_id,
+                field_name_id,
+                full_field_name_id,
+                field_ty,
+                i,
+            );
+        }
+
         // Register and validate implements list
         if !class.implements.is_empty() {
             let mut iface_names = Vec::new();
@@ -227,6 +253,41 @@ impl Analyzer {
                 },
             );
         }
+
+        // Register methods in EntityRegistry
+        let builtin_module = self.name_table.builtin_module();
+        for method in &class.methods {
+            let method_name_str = interner.resolve(method.name);
+            let method_name_id = self
+                .name_table
+                .intern_raw(builtin_module, &[method_name_str]);
+            let full_method_name_id = self.name_table.intern_raw(
+                self.current_module,
+                &[interner.resolve(class.name), method_name_str],
+            );
+            let params: Vec<Type> = method
+                .params
+                .iter()
+                .map(|p| self.resolve_type(&p.ty, interner))
+                .collect();
+            let return_type = method
+                .return_type
+                .as_ref()
+                .map(|t| self.resolve_type(t, interner))
+                .unwrap_or(Type::Void);
+            let signature = FunctionType {
+                params,
+                return_type: Box::new(return_type),
+                is_closure: false,
+            };
+            self.entity_registry.register_method(
+                entity_type_id,
+                method_name_id,
+                full_method_name_id,
+                signature,
+                false, // class methods don't have defaults
+            );
+        }
     }
 
     fn collect_record_signature(&mut self, record: &RecordDecl, interner: &Interner) {
@@ -257,6 +318,34 @@ impl Analyzer {
             };
             self.records.insert(record.name, record_type.clone());
             self.register_named_type(record.name, Type::Record(record_type.clone()), interner);
+
+            // Register in EntityRegistry (parallel migration)
+            let entity_type_id = self.entity_registry.register_type(
+                name_id,
+                TypeDefKind::Record,
+                self.current_module,
+            );
+
+            // Register fields in EntityRegistry
+            let builtin_module = self.name_table.builtin_module();
+            for (i, field) in record.fields.iter().enumerate() {
+                let field_name_str = interner.resolve(field.name);
+                let field_name_id = self
+                    .name_table
+                    .intern_raw(builtin_module, &[field_name_str]);
+                let full_field_name_id = self.name_table.intern_raw(
+                    self.current_module,
+                    &[interner.resolve(record.name), field_name_str],
+                );
+                let field_ty = self.resolve_type(&field.ty, interner);
+                self.entity_registry.register_field(
+                    entity_type_id,
+                    field_name_id,
+                    full_field_name_id,
+                    field_ty,
+                    i,
+                );
+            }
 
             // Register and validate implements list
             if !record.implements.is_empty() {
@@ -311,6 +400,41 @@ impl Analyzer {
                         return_type: Box::new(return_type),
                         is_closure: false,
                     },
+                );
+            }
+
+            // Register methods in EntityRegistry
+            let builtin_module = self.name_table.builtin_module();
+            for method in &record.methods {
+                let method_name_str = interner.resolve(method.name);
+                let method_name_id = self
+                    .name_table
+                    .intern_raw(builtin_module, &[method_name_str]);
+                let full_method_name_id = self.name_table.intern_raw(
+                    self.current_module,
+                    &[interner.resolve(record.name), method_name_str],
+                );
+                let params: Vec<Type> = method
+                    .params
+                    .iter()
+                    .map(|p| self.resolve_type(&p.ty, interner))
+                    .collect();
+                let return_type = method
+                    .return_type
+                    .as_ref()
+                    .map(|t| self.resolve_type(t, interner))
+                    .unwrap_or(Type::Void);
+                let signature = FunctionType {
+                    params,
+                    return_type: Box::new(return_type),
+                    is_closure: false,
+                };
+                self.entity_registry.register_method(
+                    entity_type_id,
+                    method_name_id,
+                    full_method_name_id,
+                    signature,
+                    false,
                 );
             }
         } else {
