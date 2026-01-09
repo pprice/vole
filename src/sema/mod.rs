@@ -2,6 +2,7 @@
 pub mod analyzer;
 pub mod compatibility;
 pub mod entity_defs;
+pub mod entity_registry;
 pub mod generic;
 pub mod implement_registry;
 pub mod interface_registry;
@@ -24,3 +25,4 @@ pub use types::{
 };
 pub use well_known::WellKnownTypes;
 pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
+pub use entity_registry::EntityRegistry;
