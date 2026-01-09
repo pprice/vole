@@ -237,3 +237,28 @@ vole inspect ir file.vole        # Show Cranelift IR
 ### When to Use
 - **AST**: Parser bugs, transform issues, syntax questions
 - **IR**: Codegen bugs, wrong output, type layout issues
+
+## Debugging Segfaults
+
+For crashes in JIT-compiled code:
+
+```bash
+just dev-debug-test file.vole    # Run test under lldb (interactive)
+just dev-debug-run file.vole     # Run program under lldb (interactive)
+just dev-backtrace-test file.vole  # Get backtrace non-interactively
+just dev-disasm 0x12345          # Disassemble around crash address
+```
+
+### Signal Handler Context
+The runtime installs a signal handler that prints context on SIGSEGV/SIGBUS:
+```
+SEGFAULT in test/unit/foo.vole :: test name here
+```
+
+This shows which file and test was running when the crash occurred.
+
+### Debugging Workflow
+1. Run failing test with `just dev-backtrace-test` to get crash location
+2. Use `vole inspect ir` to see generated code
+3. Use `just dev-disasm <addr>` to examine crash site
+4. Check union tag/payload layout if crash is in type checks
