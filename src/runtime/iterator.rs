@@ -17,9 +17,11 @@ pub enum IteratorKind {
     Take = 3,
     Skip = 4,
     Chain = 5,
+    Flatten = 6,
+    FlatMap = 7,
 }
 
-/// Unified iterator source - can be either an array, map, filter, take, skip, or chain iterator
+/// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, or flat_map iterator
 /// This allows chaining (e.g., arr.iter().map(f).filter(p).take(5))
 #[repr(C)]
 pub union IteratorSource {
@@ -29,6 +31,8 @@ pub union IteratorSource {
     pub take: TakeSource,
     pub skip: SkipSource,
     pub chain: ChainSource,
+    pub flatten: FlattenSource,
+    pub flat_map: FlatMapSource,
 }
 
 /// Source data for array iteration
@@ -93,6 +97,28 @@ pub struct ChainSource {
     pub on_second: i64,
 }
 
+/// Source data for flatten iteration (flattens nested iterables)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FlattenSource {
+    /// Outer iterator that yields arrays
+    pub outer: *mut UnifiedIterator,
+    /// Current inner iterator (null if not started or exhausted)
+    pub inner: *mut UnifiedIterator,
+}
+
+/// Source data for flat_map iteration (map then flatten)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FlatMapSource {
+    /// Source iterator
+    pub source: *mut UnifiedIterator,
+    /// Transform closure that returns an array
+    pub transform: *const Closure,
+    /// Current inner iterator (null if not started or exhausted)
+    pub inner: *mut UnifiedIterator,
+}
+
 /// Unified iterator structure
 /// The kind field tells us which variant is active
 #[repr(C)]
@@ -108,6 +134,8 @@ pub type FilterIterator = UnifiedIterator;
 pub type TakeIterator = UnifiedIterator;
 pub type SkipIterator = UnifiedIterator;
 pub type ChainIterator = UnifiedIterator;
+pub type FlattenIterator = UnifiedIterator;
+pub type FlatMapIterator = UnifiedIterator;
 
 /// Create a new array iterator
 /// Returns pointer to heap-allocated iterator
@@ -181,6 +209,25 @@ pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
                 vole_array_iter_free(first);
                 vole_array_iter_free(second);
             }
+            IteratorKind::Flatten => {
+                // Recursively free outer iterator and current inner iterator
+                let outer = iter_ref.source.flatten.outer;
+                let inner = iter_ref.source.flatten.inner;
+                vole_array_iter_free(outer);
+                if !inner.is_null() {
+                    vole_array_iter_free(inner);
+                }
+            }
+            IteratorKind::FlatMap => {
+                // Recursively free source iterator and current inner iterator
+                // Note: we don't free the transform closure - it's owned by calling context
+                let source = iter_ref.source.flat_map.source;
+                let inner = iter_ref.source.flat_map.inner;
+                vole_array_iter_free(source);
+                if !inner.is_null() {
+                    vole_array_iter_free(inner);
+                }
+            }
         }
 
         // Free this iterator
@@ -234,6 +281,14 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
         IteratorKind::Chain => {
             // For chain iterators, delegate to chain_next logic
             vole_chain_iter_next(iter, out_value)
+        }
+        IteratorKind::Flatten => {
+            // For flatten iterators, delegate to flatten_next logic
+            vole_flatten_iter_next(iter, out_value)
+        }
+        IteratorKind::FlatMap => {
+            // For flat_map iterators, delegate to flat_map_next logic
+            vole_flat_map_iter_next(iter, out_value)
         }
     }
 }
@@ -1253,6 +1308,235 @@ pub extern "C" fn vole_chain_iter_collect(iter: *mut UnifiedIterator) -> *mut Rc
     }
 
     // Free the iterator chain
+    vole_array_iter_free(iter);
+
+    result
+}
+
+// =============================================================================
+// FlattenIterator - lazy flattening of nested iterables
+// =============================================================================
+
+/// Create a new flatten iterator wrapping any source iterator that yields arrays
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_flatten_iter(source: *mut UnifiedIterator) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Flatten,
+        source: IteratorSource {
+            flatten: FlattenSource {
+                outer: source,
+                inner: std::ptr::null_mut(),
+            },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next value from flatten iterator
+/// Yields elements from each inner array until all are exhausted
+/// Returns 1 and stores value in out_value if available
+/// Returns 0 if iterator exhausted (Done)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_flatten_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    // This function should only be called for Flatten iterators
+    if iter_ref.kind != IteratorKind::Flatten {
+        return 0;
+    }
+
+    let flatten_src = unsafe { &mut iter_ref.source.flatten };
+
+    loop {
+        // If we have an inner iterator, try to get the next value from it
+        if !flatten_src.inner.is_null() {
+            let mut value: i64 = 0;
+            let has_value = vole_array_iter_next(flatten_src.inner, &mut value);
+            if has_value != 0 {
+                unsafe { *out_value = value };
+                return 1;
+            }
+            // Inner iterator exhausted, free it and get next outer element
+            vole_array_iter_free(flatten_src.inner);
+            flatten_src.inner = std::ptr::null_mut();
+        }
+
+        // Get next array from outer iterator
+        let mut array_ptr: i64 = 0;
+        let has_array = vole_array_iter_next(flatten_src.outer, &mut array_ptr);
+        if has_array == 0 {
+            return 0; // Outer iterator exhausted
+        }
+
+        // Create an iterator for the inner array
+        let inner_array = array_ptr as *const RcArray;
+        flatten_src.inner = vole_array_iter(inner_array);
+        // Continue loop to get first element from this inner iterator
+    }
+}
+
+/// Collect all remaining flatten iterator values into a new array
+/// Returns pointer to newly allocated array
+/// Frees the iterator after collecting.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_flatten_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
+    use crate::runtime::value::TaggedValue;
+
+    let result = RcArray::new();
+
+    if iter.is_null() {
+        return result;
+    }
+
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_flatten_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+
+        unsafe {
+            RcArray::push(
+                result,
+                TaggedValue {
+                    tag: 0,
+                    value: value as u64,
+                },
+            );
+        }
+    }
+
+    // Free the flatten iterator chain
+    vole_array_iter_free(iter);
+
+    result
+}
+
+// =============================================================================
+// FlatMapIterator - lazy map then flatten
+// =============================================================================
+
+/// Create a new flat_map iterator wrapping any source iterator
+/// Takes a transform function that returns an array
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_flat_map_iter(
+    source: *mut UnifiedIterator,
+    transform: *const Closure,
+) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::FlatMap,
+        source: IteratorSource {
+            flat_map: FlatMapSource {
+                source,
+                transform,
+                inner: std::ptr::null_mut(),
+            },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next value from flat_map iterator
+/// Applies transform to each source element, then yields elements from resulting arrays
+/// Returns 1 and stores value in out_value if available
+/// Returns 0 if iterator exhausted (Done)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_flat_map_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    // This function should only be called for FlatMap iterators
+    if iter_ref.kind != IteratorKind::FlatMap {
+        return 0;
+    }
+
+    let flat_map_src = unsafe { &mut iter_ref.source.flat_map };
+
+    loop {
+        // If we have an inner iterator, try to get the next value from it
+        if !flat_map_src.inner.is_null() {
+            let mut value: i64 = 0;
+            let has_value = vole_array_iter_next(flat_map_src.inner, &mut value);
+            if has_value != 0 {
+                unsafe { *out_value = value };
+                return 1;
+            }
+            // Inner iterator exhausted, free it and get next source element
+            vole_array_iter_free(flat_map_src.inner);
+            flat_map_src.inner = std::ptr::null_mut();
+        }
+
+        // Get next value from source iterator
+        let mut source_value: i64 = 0;
+        let has_source = vole_array_iter_next(flat_map_src.source, &mut source_value);
+        if has_source == 0 {
+            return 0; // Source iterator exhausted
+        }
+
+        // Apply transform function to get an array
+        let array_ptr: i64 = unsafe {
+            let func_ptr = Closure::get_func(flat_map_src.transform);
+            let transform_fn: extern "C" fn(*const Closure, i64) -> i64 =
+                std::mem::transmute(func_ptr);
+            transform_fn(flat_map_src.transform, source_value)
+        };
+
+        // Create an iterator for the resulting array
+        let inner_array = array_ptr as *const RcArray;
+        flat_map_src.inner = vole_array_iter(inner_array);
+        // Continue loop to get first element from this inner iterator
+    }
+}
+
+/// Collect all remaining flat_map iterator values into a new array
+/// Returns pointer to newly allocated array
+/// Frees the iterator after collecting.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_flat_map_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
+    use crate::runtime::value::TaggedValue;
+
+    let result = RcArray::new();
+
+    if iter.is_null() {
+        return result;
+    }
+
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_flat_map_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+
+        unsafe {
+            RcArray::push(
+                result,
+                TaggedValue {
+                    tag: 0,
+                    value: value as u64,
+                },
+            );
+        }
+    }
+
+    // Free the flat_map iterator chain
     vole_array_iter_free(iter);
 
     result

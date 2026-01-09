@@ -40,6 +40,8 @@ interface Iterator<T> {
     func any(pred: (T) -> bool) -> bool
     func all(pred: (T) -> bool) -> bool
     func chain(other: Iterator<T>) -> Iterator<T>
+    func flatten() -> Iterator<T>
+    func flat_map(f: (T) -> [T]) -> Iterator<T>
 
     external("std:intrinsics") {
         func "iter_next" as next() -> T | Done
@@ -59,6 +61,8 @@ interface Iterator<T> {
         func "iter_any" as any(pred: (T) -> bool) -> bool
         func "iter_all" as all(pred: (T) -> bool) -> bool
         func "iter_chain" as chain(other: Iterator<T>) -> Iterator<T>
+        func "iter_flatten" as flatten() -> Iterator<T>
+        func "iter_flat_map" as flat_map(f: (T) -> [T]) -> Iterator<T>
     }
 }
 
