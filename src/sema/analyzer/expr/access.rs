@@ -3,6 +3,7 @@ use super::super::*;
 impl Analyzer {
     pub(super) fn check_field_access_expr(
         &mut self,
+        expr: &Expr,
         field_access: &FieldAccessExpr,
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
@@ -36,31 +37,37 @@ impl Analyzer {
         let (type_name, fields) = match &object_type {
             Type::Class(class_type) => (
                 interner.resolve(class_type.name).to_string(),
-                &class_type.fields,
+                Some(&class_type.fields),
             ),
             Type::Record(record_type) => (
                 interner.resolve(record_type.name).to_string(),
-                &record_type.fields,
+                Some(&record_type.fields),
             ),
             Type::Error => return Ok(Type::Error),
-            _ => {
-                let found = self.type_display(&object_type, interner);
-                self.add_error(
-                    SemanticError::TypeMismatch {
-                        expected: "class or record".to_string(),
-                        found,
-                        span: field_access.object.span.into(),
-                    },
-                    field_access.object.span,
-                );
-                return Ok(Type::Error);
-            }
+            _ => (self.type_display(&object_type, interner), None),
         };
 
-        // Find the field
-        if let Some(field) = fields.iter().find(|f| f.name == field_access.field) {
-            Ok(field.ty.clone())
-        } else {
+        // Try to find the field first (for class/record types)
+        if let Some(fields) = fields
+            && let Some(field) = fields.iter().find(|f| f.name == field_access.field)
+        {
+            return Ok(field.ty.clone());
+        }
+
+        // Property-style method call: try resolving as a zero-arg method
+        // This allows `s.length` to be syntactic sugar for `s.length()`
+        if let Some(resolved) = self.resolve_method(&object_type, field_access.field, interner) {
+            let func_type = resolved.func_type();
+            // Only allow zero-argument methods as properties
+            if func_type.params.is_empty() {
+                let return_type = (*func_type.return_type).clone();
+                self.method_resolutions.insert(expr.id, resolved);
+                return Ok(return_type);
+            }
+        }
+
+        // No field and no zero-arg method found - report appropriate error
+        if fields.is_some() {
             self.add_error(
                 SemanticError::UnknownField {
                     ty: type_name,
@@ -69,8 +76,18 @@ impl Analyzer {
                 },
                 field_access.field_span,
             );
-            Ok(Type::Error)
+        } else {
+            let found = self.type_display(&object_type, interner);
+            self.add_error(
+                SemanticError::TypeMismatch {
+                    expected: "class or record".to_string(),
+                    found,
+                    span: field_access.object.span.into(),
+                },
+                field_access.object.span,
+            );
         }
+        Ok(Type::Error)
     }
 
     pub(super) fn check_optional_chain_expr(

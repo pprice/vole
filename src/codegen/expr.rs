@@ -55,7 +55,7 @@ impl Cg<'_, '_, '_> {
                 Err(CodegenError::unsupported("type expressions as runtime values").into())
             }
             ExprKind::StructLiteral(sl) => self.struct_literal(sl),
-            ExprKind::FieldAccess(fa) => self.field_access(fa),
+            ExprKind::FieldAccess(fa) => self.field_access(fa, expr.id),
             ExprKind::OptionalChain(oc) => self.optional_chain(oc),
             ExprKind::MethodCall(mc) => self.method_call(mc, expr.id),
             ExprKind::Try(inner) => self.try_propagate(inner),

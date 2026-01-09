@@ -343,7 +343,7 @@ impl Analyzer {
             }
 
             ExprKind::FieldAccess(field_access) => {
-                self.check_field_access_expr(field_access, interner)
+                self.check_field_access_expr(expr, field_access, interner)
             }
 
             ExprKind::OptionalChain(opt_chain) => {

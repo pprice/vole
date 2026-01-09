@@ -284,7 +284,7 @@ impl Cg<'_, '_, '_> {
         })
     }
 
-    fn builtin_method(
+    pub(crate) fn builtin_method(
         &mut self,
         obj: &CompiledValue,
         method_name: &str,

@@ -3,15 +3,38 @@
 use super::helpers::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
-use crate::codegen::types::{CompiledValue, module_name_id, type_to_cranelift};
+use crate::codegen::method_resolution::{
+    MethodResolutionInput, MethodTarget, resolve_method_target,
+};
+use crate::codegen::types::{CompiledValue, method_name_id, module_name_id, type_to_cranelift};
 use crate::errors::CodegenError;
-use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
+use crate::frontend::{Expr, FieldAccessExpr, NodeId, OptionalChainExpr, Symbol};
 use crate::sema::Type;
+use crate::sema::resolution::ResolvedMethod;
 use crate::sema::types::ConstantValue;
 use cranelift::prelude::*;
 
 impl Cg<'_, '_, '_> {
-    pub fn field_access(&mut self, fa: &FieldAccessExpr) -> Result<CompiledValue, String> {
+    pub fn field_access(
+        &mut self,
+        fa: &FieldAccessExpr,
+        expr_id: NodeId,
+    ) -> Result<CompiledValue, String> {
+        // Check if this field access was resolved as a property-style method call
+        // (e.g., `s.length` calling `s.length()`)
+        if let Some(resolved) = self.ctx.analyzed.method_resolutions.get(expr_id) {
+            let obj = self.expr(&fa.object)?;
+            let method_name = self.ctx.interner.resolve(fa.field);
+
+            // First check if it's a builtin method (like string.length)
+            if let Some(result) = self.builtin_method(&obj, method_name)? {
+                return Ok(result);
+            }
+
+            // Otherwise, use method resolution to call the method
+            return self.property_style_method_call(&obj, fa.field, expr_id, resolved);
+        }
+
         let obj = self.expr(&fa.object)?;
 
         // Handle module field access for constants (e.g., math.PI)
@@ -235,5 +258,99 @@ impl Cg<'_, '_, '_> {
         )?;
 
         Ok(value)
+    }
+
+    /// Handle property-style method calls (e.g., `s.length` -> `s.length()`)
+    /// This is called when sema resolved a field access as a zero-arg method call.
+    fn property_style_method_call(
+        &mut self,
+        obj: &CompiledValue,
+        method_sym: Symbol,
+        _expr_id: NodeId,
+        resolved: &ResolvedMethod,
+    ) -> Result<CompiledValue, String> {
+        let method_name_str = self.ctx.interner.resolve(method_sym);
+        let method_id = method_name_id(self.ctx.analyzed, self.ctx.interner, method_sym)
+            .ok_or_else(|| {
+                format!(
+                    "codegen error: method name not interned (method: {})",
+                    method_name_str
+                )
+            })?;
+
+        let display_type_symbol = |sym: Symbol| {
+            self.ctx
+                .type_metadata
+                .get(&sym)
+                .and_then(|meta| match &meta.vole_type {
+                    Type::Class(class_type) => Some(class_type.name_id),
+                    Type::Record(record_type) => Some(record_type.name_id),
+                    _ => None,
+                })
+                .map(|name_id| {
+                    self.ctx
+                        .analyzed
+                        .name_table
+                        .display(name_id, self.ctx.interner)
+                })
+                .unwrap_or_else(|| self.ctx.interner.resolve(sym).to_string())
+        };
+
+        let target = resolve_method_target(MethodResolutionInput {
+            analyzed: self.ctx.analyzed,
+            type_metadata: self.ctx.type_metadata,
+            impl_method_infos: self.ctx.impl_method_infos,
+            method_name_str,
+            object_type: &obj.vole_type,
+            method_id,
+            resolution: Some(resolved),
+            display_type_symbol,
+        })?;
+
+        let (method_info, return_type) = match target {
+            MethodTarget::External {
+                external_info,
+                return_type,
+            } => {
+                // Call external method with receiver as first argument (no other args for property)
+                let args = vec![obj.value];
+                return self.call_external(&external_info, &args, &return_type);
+            }
+            MethodTarget::Direct {
+                method_info,
+                return_type,
+            }
+            | MethodTarget::Implemented {
+                method_info,
+                return_type,
+            }
+            | MethodTarget::Default {
+                method_info,
+                return_type,
+            } => (method_info, return_type),
+            MethodTarget::FunctionalInterface { .. } | MethodTarget::InterfaceDispatch { .. } => {
+                return Err(CodegenError::unsupported(
+                    "property-style access for interface methods",
+                )
+                .into());
+            }
+        };
+
+        let method_func_ref = self.func_ref(method_info.func_key)?;
+
+        // For property-style method calls, the only argument is the receiver
+        let args = vec![obj.value];
+        let call = self.builder.ins().call(method_func_ref, &args);
+        let results = self.builder.inst_results(call);
+
+        if results.is_empty() {
+            Ok(self.void_value())
+        } else {
+            Ok(CompiledValue {
+                value: results[0],
+                ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
+                vole_type: return_type,
+            })
+        }
     }
 }
