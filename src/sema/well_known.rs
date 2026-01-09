@@ -3,7 +3,7 @@
 // Cached NameIds for well-known stdlib types.
 // These are looked up once after prelude loading and cached for fast comparison.
 
-use crate::identity::{NameId, NameTable};
+use crate::identity::{MethodId, NameId, NameTable};
 
 /// Well-known type NameIds from the stdlib prelude.
 /// These are populated after prelude loading for fast type identification.
@@ -50,5 +50,29 @@ impl WellKnownTypes {
     /// Check if a NameId is the Iterable interface
     pub fn is_iterable(&self, name_id: NameId) -> bool {
         self.iterable == Some(name_id)
+    }
+}
+
+/// Well-known method MethodIds from the stdlib prelude.
+/// These are populated after EntityRegistry integration for fast method identification.
+#[derive(Debug, Clone, Default)]
+pub struct WellKnownMethods {
+    /// Iterator::next
+    pub iterator_next: Option<MethodId>,
+    /// Iterable::iter
+    pub iterable_iter: Option<MethodId>,
+    /// Stringable::to_string
+    pub stringable_to_string: Option<MethodId>,
+    /// Equatable::equals
+    pub equatable_equals: Option<MethodId>,
+    /// Comparable::compare
+    pub comparable_compare: Option<MethodId>,
+    /// Hashable::hash
+    pub hashable_hash: Option<MethodId>,
+}
+
+impl WellKnownMethods {
+    pub fn new() -> Self {
+        Self::default()
     }
 }

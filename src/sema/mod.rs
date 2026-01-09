@@ -23,6 +23,6 @@ pub use type_table::{TypeInfo, TypeKey, TypeTable};
 pub use types::{
     ClassType, ErrorTypeInfo, FunctionType, ModuleType, RecordType, StructField, Type,
 };
-pub use well_known::WellKnownTypes;
+pub use well_known::{WellKnownMethods, WellKnownTypes};
 pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 pub use entity_registry::EntityRegistry;
