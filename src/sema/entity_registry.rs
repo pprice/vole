@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
+use crate::sema::FunctionType;
 
 /// Central registry for all language entities
 #[derive(Debug, Clone)]
@@ -81,6 +82,50 @@ impl EntityRegistry {
     pub fn type_by_name(&self, name_id: NameId) -> Option<TypeDefId> {
         self.type_by_name.get(&name_id).copied()
     }
+
+    /// Register a new method on a type
+    pub fn register_method(
+        &mut self,
+        defining_type: TypeDefId,
+        name_id: NameId,
+        full_name_id: NameId,
+        signature: FunctionType,
+        has_default: bool,
+    ) -> MethodId {
+        let id = MethodId::new(self.method_defs.len() as u32);
+        self.method_defs.push(MethodDef {
+            id,
+            name_id,
+            full_name_id,
+            defining_type,
+            signature,
+            has_default,
+        });
+        self.method_by_full_name.insert(full_name_id, id);
+        self.methods_by_type
+            .get_mut(&defining_type)
+            .expect("type must be registered before adding methods")
+            .insert(name_id, id);
+        self.type_defs[defining_type.index() as usize].methods.push(id);
+        id
+    }
+
+    /// Get a method definition by ID
+    pub fn get_method(&self, id: MethodId) -> &MethodDef {
+        &self.method_defs[id.index() as usize]
+    }
+
+    /// Get all methods defined directly on a type (not inherited)
+    pub fn methods_on_type(&self, type_id: TypeDefId) -> impl Iterator<Item = MethodId> + '_ {
+        self.type_defs[type_id.index() as usize].methods.iter().copied()
+    }
+
+    /// Find a method on a type by its short name (not inherited)
+    pub fn find_method_on_type(&self, type_id: TypeDefId, name_id: NameId) -> Option<MethodId> {
+        self.methods_by_type
+            .get(&type_id)
+            .and_then(|methods| methods.get(&name_id).copied())
+    }
 }
 
 impl Default for EntityRegistry {
@@ -93,6 +138,7 @@ impl Default for EntityRegistry {
 mod tests {
     use super::*;
     use crate::identity::NameTable;
+    use crate::sema::Type;
 
     #[test]
     fn register_and_lookup_type() {
@@ -105,5 +151,36 @@ mod tests {
         assert_eq!(registry.type_by_name(name_id), Some(type_id));
         assert_eq!(registry.get_type(type_id).name_id, name_id);
         assert_eq!(registry.get_type(type_id).kind, TypeDefKind::Record);
+    }
+
+    #[test]
+    fn register_and_lookup_method() {
+        let mut names = NameTable::new();
+        let main_mod = names.main_module();
+        let builtin_mod = names.builtin_module();
+        let type_name = names.intern_raw(main_mod, &["Iterator"]);
+        let method_name = names.intern_raw(builtin_mod, &["next"]);
+        let full_method_name = names.intern_raw(main_mod, &["Iterator", "next"]);
+
+        let mut registry = EntityRegistry::new();
+        let type_id = registry.register_type(type_name, TypeDefKind::Interface, main_mod);
+
+        let signature = FunctionType {
+            params: vec![],
+            return_type: Box::new(Type::I32),
+            is_closure: false,
+        };
+
+        let method_id = registry.register_method(
+            type_id,
+            method_name,
+            full_method_name,
+            signature,
+            false,
+        );
+
+        assert_eq!(registry.find_method_on_type(type_id, method_name), Some(method_id));
+        assert_eq!(registry.get_method(method_id).defining_type, type_id);
+        assert_eq!(registry.methods_on_type(type_id).collect::<Vec<_>>(), vec![method_id]);
     }
 }
