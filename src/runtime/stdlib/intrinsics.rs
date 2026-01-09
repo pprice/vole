@@ -373,6 +373,16 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // String chars iterator: string_chars_iter(string) -> Iterator<string>
+    m.register(
+        "string_chars_iter",
+        iterator::vole_string_chars_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::String],
+            return_type: NativeType::I64,
+        },
+    );
+
     m
 }
 

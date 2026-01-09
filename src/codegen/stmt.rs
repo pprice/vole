@@ -329,11 +329,14 @@ impl Cg<'_, '_, '_> {
                 if let ExprKind::Range(range) = &for_stmt.iterable.kind {
                     self.for_range(for_stmt, range)
                 } else {
-                    // Check if iterable is an Iterator type
+                    // Check if iterable is an Iterator type or string type
                     let iterable_type = self.ctx.analyzed.expr_types.get(&for_stmt.iterable.id);
                     let is_iterator = iterable_type.is_some_and(|ty| self.is_iterator_type(ty));
+                    let is_string = iterable_type.is_some_and(|ty| matches!(ty, Type::String));
                     if is_iterator {
                         self.for_iterator(for_stmt)
+                    } else if is_string {
+                        self.for_string(for_stmt)
                     } else {
                         self.for_array(for_stmt)
                     }
@@ -537,6 +540,77 @@ impl Cg<'_, '_, '_> {
         // Header: call iter_next, check result
         self.builder.switch_to_block(header);
         let has_value = self.call_runtime(RuntimeFn::ArrayIterNext, &[iter.value, slot_addr])?;
+        let is_done = self.builder.ins().icmp_imm(IntCC::Equal, has_value, 0);
+        self.builder
+            .ins()
+            .brif(is_done, exit_block, &[], body_block, &[]);
+
+        // Body: load value from stack slot, run body
+        self.builder.switch_to_block(body_block);
+        let elem_val = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), slot_addr, 0);
+        self.builder.def_var(elem_var, elem_val);
+
+        self.cf.push_loop(exit_block, continue_block);
+        let body_terminated = self.block(&for_stmt.body)?;
+        self.cf.pop_loop();
+
+        if !body_terminated {
+            self.builder.ins().jump(continue_block, &[]);
+        }
+
+        // Continue: jump back to header
+        self.builder.switch_to_block(continue_block);
+        self.builder.ins().jump(header, &[]);
+
+        self.builder.switch_to_block(exit_block);
+
+        self.builder.seal_block(header);
+        self.builder.seal_block(body_block);
+        self.builder.seal_block(continue_block);
+        self.builder.seal_block(exit_block);
+
+        Ok(false)
+    }
+
+    /// Compile a for loop over a string (iterating characters)
+    fn for_string(&mut self, for_stmt: &frontend::ForStmt) -> Result<bool, String> {
+        // Compile the string expression
+        let string_val = self.expr(&for_stmt.iterable)?;
+
+        // Create a string chars iterator from the string
+        let iter_val = self.call_runtime(RuntimeFn::StringCharsIter, &[string_val.value])?;
+
+        // Create a stack slot for the out_value parameter
+        let slot_data = self.builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            8,
+            0,
+        ));
+        let slot_addr = self
+            .builder
+            .ins()
+            .stack_addr(self.ctx.pointer_type, slot_data, 0);
+
+        // Initialize element variable (each character is returned as a string)
+        let elem_var = self.builder.declare_var(types::I64);
+        let zero = self.builder.ins().iconst(types::I64, 0);
+        self.builder.def_var(elem_var, zero);
+        self.vars
+            .insert(for_stmt.var_name, (elem_var, Type::String));
+
+        let header = self.builder.create_block();
+        let body_block = self.builder.create_block();
+        let continue_block = self.builder.create_block();
+        let exit_block = self.builder.create_block();
+
+        self.builder.ins().jump(header, &[]);
+
+        // Header: call iter_next, check result
+        self.builder.switch_to_block(header);
+        let has_value = self.call_runtime(RuntimeFn::ArrayIterNext, &[iter_val, slot_addr])?;
         let is_done = self.builder.ins().icmp_imm(IntCC::Equal, has_value, 0);
         self.builder
             .ins()

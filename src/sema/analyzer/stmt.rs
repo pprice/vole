@@ -139,6 +139,8 @@ impl Analyzer {
                 let elem_ty = match &iterable_ty {
                     Type::Range => Type::I64,
                     Type::Array(elem) => *elem.clone(),
+                    // String is iterable - yields string (individual characters)
+                    Type::String => Type::String,
                     // Accept Iterator<T> directly - extract element type
                     Type::Interface(_) => {
                         if let Some(elem) =
@@ -149,7 +151,8 @@ impl Analyzer {
                             let found = self.type_display(&iterable_ty, interner);
                             self.add_error(
                                 SemanticError::TypeMismatch {
-                                    expected: "iterable (range, array, or Iterator<T>)".to_string(),
+                                    expected: "iterable (range, array, string, or Iterator<T>)"
+                                        .to_string(),
                                     found,
                                     span: for_stmt.iterable.span.into(),
                                 },
@@ -162,7 +165,8 @@ impl Analyzer {
                         let found = self.type_display(&iterable_ty, interner);
                         self.add_error(
                             SemanticError::TypeMismatch {
-                                expected: "iterable (range, array, or Iterator<T>)".to_string(),
+                                expected: "iterable (range, array, string, or Iterator<T>)"
+                                    .to_string(),
                                 found,
                                 span: for_stmt.iterable.span.into(),
                             },

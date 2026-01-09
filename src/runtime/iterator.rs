@@ -5,6 +5,7 @@
 
 use crate::runtime::array::RcArray;
 use crate::runtime::closure::Closure;
+use crate::runtime::string::RcString;
 use std::alloc::{Layout, alloc};
 
 /// Enum discriminant for iterator sources
@@ -27,9 +28,10 @@ pub enum IteratorKind {
     Empty = 13,
     FromFn = 14,
     Range = 15,
+    StringChars = 16,
 }
 
-/// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, unique, chunks, windows, repeat, once, empty, or from_fn iterator
+/// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, unique, chunks, windows, repeat, once, empty, from_fn, range, or string_chars iterator
 /// This allows chaining (e.g., arr.iter().map(f).filter(p).take(5))
 #[repr(C)]
 pub union IteratorSource {
@@ -49,6 +51,7 @@ pub union IteratorSource {
     pub empty: EmptySource,
     pub from_fn: FromFnSource,
     pub range: RangeSource,
+    pub string_chars: StringCharsSource,
 }
 
 /// Source data for array iteration
@@ -215,6 +218,16 @@ pub struct RangeSource {
     pub end: i64,
 }
 
+/// Source data for string character iteration (yields each unicode character as a string)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct StringCharsSource {
+    /// Pointer to the source string
+    pub string: *const RcString,
+    /// Current byte position in the string (not character position)
+    pub byte_pos: i64,
+}
+
 /// Unified iterator structure
 /// The kind field tells us which variant is active
 #[repr(C)]
@@ -240,6 +253,7 @@ pub type OnceIterator = UnifiedIterator;
 pub type EmptyIterator = UnifiedIterator;
 pub type FromFnIterator = UnifiedIterator;
 pub type RangeIterator = UnifiedIterator;
+pub type StringCharsIterator = UnifiedIterator;
 
 /// Create a new array iterator
 /// Returns pointer to heap-allocated iterator
@@ -366,6 +380,13 @@ pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
             IteratorKind::Range => {
                 // No resources to free - just start/current/end values
             }
+            IteratorKind::StringChars => {
+                // Decrement ref count on string
+                let string = iter_ref.source.string_chars.string;
+                if !string.is_null() {
+                    RcString::dec_ref(string as *mut RcString);
+                }
+            }
         }
 
         // Free this iterator
@@ -459,6 +480,10 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
         IteratorKind::Range => {
             // For range iterators, delegate to range_next logic
             vole_range_iter_next(iter, out_value)
+        }
+        IteratorKind::StringChars => {
+            // For string chars iterators, delegate to string_chars_next logic
+            vole_string_chars_iter_next(iter, out_value)
         }
     }
 }
@@ -2384,4 +2409,96 @@ pub extern "C" fn vole_range_iter_next(iter: *mut UnifiedIterator, out_value: *m
     unsafe { *out_value = range_src.current };
     range_src.current += 1;
     1 // Has value
+}
+
+// =============================================================================
+// StringCharsIterator - iterator over unicode characters of a string
+// =============================================================================
+
+/// Create a new string chars iterator that yields each unicode character as a string
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_string_chars_iter(string: *const RcString) -> *mut UnifiedIterator {
+    // Increment ref count on string so it stays alive while iterator exists
+    unsafe {
+        if !string.is_null() {
+            RcString::inc_ref(string as *mut RcString);
+        }
+    }
+
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::StringChars,
+        source: IteratorSource {
+            string_chars: StringCharsSource {
+                string,
+                byte_pos: 0,
+            },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next character from string chars iterator
+/// Returns 1 and stores the character string pointer in out_value if available
+/// Returns 0 if iterator exhausted (Done)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_string_chars_iter_next(
+    iter: *mut UnifiedIterator,
+    out_value: *mut i64,
+) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    if iter_ref.kind != IteratorKind::StringChars {
+        return 0;
+    }
+
+    let string_chars_src = unsafe { &mut iter_ref.source.string_chars };
+
+    if string_chars_src.string.is_null() {
+        return 0;
+    }
+
+    unsafe {
+        let string_ref = &*string_chars_src.string;
+        let byte_len = string_ref.len as i64;
+
+        // Check if we've exhausted the string
+        if string_chars_src.byte_pos >= byte_len {
+            return 0; // Done
+        }
+
+        // Get the string data starting at current byte position
+        let data = string_ref.data();
+        let remaining = &data[string_chars_src.byte_pos as usize..];
+
+        // Get the next UTF-8 character
+        // Safety: RcString stores valid UTF-8
+        let remaining_str = std::str::from_utf8_unchecked(remaining);
+        let next_char = remaining_str.chars().next();
+
+        if let Some(ch) = next_char {
+            // Get the byte length of this character
+            let char_len = ch.len_utf8();
+
+            // Create a new RcString containing just this character
+            let mut char_buf = [0u8; 4]; // Max UTF-8 bytes per char
+            let char_str = ch.encode_utf8(&mut char_buf);
+            let new_string = RcString::new(char_str);
+
+            // Update byte position
+            string_chars_src.byte_pos += char_len as i64;
+
+            // Return the new string pointer as i64
+            *out_value = new_string as i64;
+            1 // Has value
+        } else {
+            0 // Done - should not happen if byte_pos < byte_len
+        }
+    }
 }

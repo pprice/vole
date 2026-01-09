@@ -76,6 +76,21 @@ impl Analyzer {
                 }
                 Some(method_type(vec![], Type::I64))
             }
+            // String.iter() -> Iterator<string>
+            (Type::String, "iter") => {
+                if !args.is_empty() {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 0,
+                            found: args.len(),
+                            span: args[0].span.into(),
+                        },
+                        args[0].span,
+                    );
+                }
+                let iter_type = self.interface_type("Iterator", vec![Type::String], interner)?;
+                Some(method_type(vec![], iter_type))
+            }
             _ => None,
         }
     }

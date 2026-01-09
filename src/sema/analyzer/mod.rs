@@ -255,6 +255,19 @@ impl Analyzer {
                     is_closure: false,
                 }
             );
+            register_builtin!(
+                type_id,
+                method_iter,
+                FunctionType {
+                    params: vec![],
+                    return_type: Box::new(Type::Unknown), // Will be refined by check_builtin_method
+                    is_closure: false,
+                },
+                Some(ExternalMethodInfo {
+                    module_path: "std:intrinsics".to_string(),
+                    native_name: "string_chars_iter".to_string(),
+                })
+            );
         }
 
         // Range.iter() -> Iterator<i64>

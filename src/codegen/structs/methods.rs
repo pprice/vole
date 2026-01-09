@@ -307,6 +307,15 @@ impl Cg<'_, '_, '_> {
                 let result = self.call_runtime(RuntimeFn::StringLen, &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
             }
+            (Type::String, "iter") => {
+                let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
+                let iter_type = self.interface_type("Iterator", vec![Type::String])?;
+                Ok(Some(CompiledValue {
+                    value: result,
+                    ty: self.ctx.pointer_type,
+                    vole_type: iter_type,
+                }))
+            }
             (Type::Range, "iter") => {
                 // Load start and end from the range struct (pointer to [start, end])
                 let start = self
