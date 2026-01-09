@@ -1093,14 +1093,14 @@ fn print_class_decl<'a>(
     let implements = if class.implements.is_empty() {
         arena.nil()
     } else {
-        let impl_names: Vec<_> = class
+        let impl_types: Vec<_> = class
             .implements
             .iter()
-            .map(|s| arena.text(interner.resolve(*s).to_string()))
+            .map(|ty| print_type_expr(arena, ty, interner))
             .collect();
         arena
             .text(" implements ")
-            .append(arena.intersperse(impl_names, arena.text(", ")))
+            .append(arena.intersperse(impl_types, arena.text(", ")))
     };
 
     print_class_like_body(
@@ -1126,14 +1126,14 @@ fn print_record_decl<'a>(
     let implements = if record.implements.is_empty() {
         arena.nil()
     } else {
-        let impl_names: Vec<_> = record
+        let impl_types: Vec<_> = record
             .implements
             .iter()
-            .map(|s| arena.text(interner.resolve(*s).to_string()))
+            .map(|ty| print_type_expr(arena, ty, interner))
             .collect();
         arena
             .text(" implements ")
-            .append(arena.intersperse(impl_names, arena.text(", ")))
+            .append(arena.intersperse(impl_types, arena.text(", ")))
     };
 
     print_class_like_body(

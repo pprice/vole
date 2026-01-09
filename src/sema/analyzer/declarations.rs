@@ -2,6 +2,30 @@
 //! Declaration signature collection (Pass 1 of semantic analysis).
 
 use super::*;
+use crate::frontend::ast::TypeExpr;
+
+/// Extract the base interface name from a TypeExpr.
+/// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
+fn interface_base_name(type_expr: &TypeExpr) -> Option<Symbol> {
+    match type_expr {
+        TypeExpr::Named(sym) => Some(*sym),
+        TypeExpr::Generic { name, .. } => Some(*name),
+        _ => None,
+    }
+}
+
+/// Format a TypeExpr for error messages.
+fn format_type_expr(type_expr: &TypeExpr, interner: &Interner) -> String {
+    match type_expr {
+        TypeExpr::Named(sym) => interner.resolve(*sym).to_string(),
+        TypeExpr::Generic { name, args } => {
+            let args_str: Vec<String> =
+                args.iter().map(|a| format_type_expr(a, interner)).collect();
+            format!("{}<{}>", interner.resolve(*name), args_str.join(", "))
+        }
+        _ => "unknown".to_string(),
+    }
+}
 
 impl Analyzer {
     /// Pass 1: Collect signatures for functions, classes, records, interfaces, and implement blocks
@@ -149,19 +173,30 @@ impl Analyzer {
 
         // Register and validate implements list
         if !class.implements.is_empty() {
-            for iface_sym in &class.implements {
-                if self.interface_registry.get(*iface_sym, interner).is_none() {
+            let mut iface_names = Vec::new();
+            for iface_type in &class.implements {
+                if let Some(iface_sym) = interface_base_name(iface_type) {
+                    if self.interface_registry.get(iface_sym, interner).is_none() {
+                        self.add_error(
+                            SemanticError::UnknownInterface {
+                                name: format_type_expr(iface_type, interner),
+                                span: class.span.into(),
+                            },
+                            class.span,
+                        );
+                    }
+                    iface_names.push(iface_sym);
+                } else {
                     self.add_error(
                         SemanticError::UnknownInterface {
-                            name: interner.resolve(*iface_sym).to_string(),
+                            name: format_type_expr(iface_type, interner),
                             span: class.span.into(),
                         },
                         class.span,
                     );
                 }
             }
-            self.type_implements
-                .insert(class.name, class.implements.clone());
+            self.type_implements.insert(class.name, iface_names);
         }
 
         // Register methods (with Self type resolved to the class type)
@@ -223,19 +258,30 @@ impl Analyzer {
 
             // Register and validate implements list
             if !record.implements.is_empty() {
-                for iface_sym in &record.implements {
-                    if self.interface_registry.get(*iface_sym, interner).is_none() {
+                let mut iface_names = Vec::new();
+                for iface_type in &record.implements {
+                    if let Some(iface_sym) = interface_base_name(iface_type) {
+                        if self.interface_registry.get(iface_sym, interner).is_none() {
+                            self.add_error(
+                                SemanticError::UnknownInterface {
+                                    name: format_type_expr(iface_type, interner),
+                                    span: record.span.into(),
+                                },
+                                record.span,
+                            );
+                        }
+                        iface_names.push(iface_sym);
+                    } else {
                         self.add_error(
                             SemanticError::UnknownInterface {
-                                name: interner.resolve(*iface_sym).to_string(),
+                                name: format_type_expr(iface_type, interner),
                                 span: record.span.into(),
                             },
                             record.span,
                         );
                     }
                 }
-                self.type_implements
-                    .insert(record.name, record.implements.clone());
+                self.type_implements.insert(record.name, iface_names);
             }
 
             // Register methods (with Self type resolved to the record type)
@@ -355,19 +401,30 @@ impl Analyzer {
 
             // Register and validate implements list
             if !record.implements.is_empty() {
-                for iface_sym in &record.implements {
-                    if self.interface_registry.get(*iface_sym, interner).is_none() {
+                let mut iface_names = Vec::new();
+                for iface_type in &record.implements {
+                    if let Some(iface_sym) = interface_base_name(iface_type) {
+                        if self.interface_registry.get(iface_sym, interner).is_none() {
+                            self.add_error(
+                                SemanticError::UnknownInterface {
+                                    name: format_type_expr(iface_type, interner),
+                                    span: record.span.into(),
+                                },
+                                record.span,
+                            );
+                        }
+                        iface_names.push(iface_sym);
+                    } else {
                         self.add_error(
                             SemanticError::UnknownInterface {
-                                name: interner.resolve(*iface_sym).to_string(),
+                                name: format_type_expr(iface_type, interner),
                                 span: record.span.into(),
                             },
                             record.span,
                         );
                     }
                 }
-                self.type_implements
-                    .insert(record.name, record.implements.clone());
+                self.type_implements.insert(record.name, iface_names);
             }
 
             // Register methods (with Self type resolved and type params in scope)

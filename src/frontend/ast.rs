@@ -98,7 +98,7 @@ pub struct FieldDef {
 pub struct ClassDecl {
     pub name: Symbol,
     pub type_params: Vec<TypeParam>,
-    pub implements: Vec<Symbol>, // Interfaces this class implements
+    pub implements: Vec<TypeExpr>, // Interfaces this class implements (may include generics)
     pub fields: Vec<FieldDef>,
     pub external: Option<ExternalBlock>, // External methods from native code
     pub methods: Vec<FuncDecl>,
@@ -110,7 +110,7 @@ pub struct ClassDecl {
 pub struct RecordDecl {
     pub name: Symbol,
     pub type_params: Vec<TypeParam>,
-    pub implements: Vec<Symbol>, // Interfaces this record implements
+    pub implements: Vec<TypeExpr>, // Interfaces this record implements (may include generics)
     pub fields: Vec<FieldDef>,
     pub external: Option<ExternalBlock>, // External methods from native code
     pub methods: Vec<FuncDecl>,

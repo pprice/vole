@@ -217,14 +217,12 @@ impl<'src> Parser<'src> {
         Ok(Decl::Error(ErrorDecl { name, fields, span }))
     }
 
-    /// Parse: implements Interface1, Interface2, ...
-    fn parse_implements_clause(&mut self) -> Result<Vec<Symbol>, ParseError> {
+    /// Parse: implements Interface1, Interface2<T>, ...
+    fn parse_implements_clause(&mut self) -> Result<Vec<TypeExpr>, ParseError> {
         let mut implements = Vec::new();
         if self.match_token(TokenType::KwImplements) {
             loop {
-                let iface_token = self.current.clone();
-                self.consume(TokenType::Identifier, "expected interface name")?;
-                implements.push(self.interner.intern(&iface_token.lexeme));
+                implements.push(self.parse_type()?);
                 if !self.match_token(TokenType::Comma) {
                     break;
                 }

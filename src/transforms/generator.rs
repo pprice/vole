@@ -49,6 +49,163 @@ use crate::frontend::ast::*;
 use crate::frontend::{Interner, Span};
 use crate::sema::TypeError;
 
+/// Find the maximum NodeId used in a program to avoid collisions with generated nodes
+fn find_max_node_id(program: &Program) -> u32 {
+    let mut max_id: u32 = 0;
+    for decl in &program.declarations {
+        max_id = max_id.max(find_max_node_id_in_decl(decl));
+    }
+    max_id
+}
+
+fn find_max_node_id_in_decl(decl: &Decl) -> u32 {
+    match decl {
+        Decl::Function(f) => find_max_node_id_in_block(&f.body),
+        Decl::Record(r) => r
+            .methods
+            .iter()
+            .map(|m| find_max_node_id_in_block(&m.body))
+            .max()
+            .unwrap_or(0),
+        Decl::Implement(i) => i
+            .methods
+            .iter()
+            .map(|m| find_max_node_id_in_block(&m.body))
+            .max()
+            .unwrap_or(0),
+        Decl::Tests(t) => t
+            .tests
+            .iter()
+            .map(|t| find_max_node_id_in_block(&t.body))
+            .max()
+            .unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn find_max_node_id_in_block(block: &Block) -> u32 {
+    let mut max_id: u32 = 0;
+    for stmt in &block.stmts {
+        max_id = max_id.max(find_max_node_id_in_stmt(stmt));
+    }
+    max_id
+}
+
+fn find_max_node_id_in_stmt(stmt: &Stmt) -> u32 {
+    match stmt {
+        Stmt::Expr(e) => find_max_node_id_in_expr(&e.expr),
+        Stmt::Let(l) => find_max_node_id_in_expr(&l.init),
+        Stmt::Return(r) => r.value.as_ref().map(find_max_node_id_in_expr).unwrap_or(0),
+        Stmt::If(i) => {
+            let cond = find_max_node_id_in_expr(&i.condition);
+            let then_b = find_max_node_id_in_block(&i.then_branch);
+            let else_b = i
+                .else_branch
+                .as_ref()
+                .map(find_max_node_id_in_block)
+                .unwrap_or(0);
+            cond.max(then_b).max(else_b)
+        }
+        Stmt::While(w) => {
+            find_max_node_id_in_expr(&w.condition).max(find_max_node_id_in_block(&w.body))
+        }
+        Stmt::For(f) => {
+            find_max_node_id_in_expr(&f.iterable).max(find_max_node_id_in_block(&f.body))
+        }
+        Stmt::Raise(r) => r
+            .fields
+            .iter()
+            .map(|f| find_max_node_id_in_expr(&f.value))
+            .max()
+            .unwrap_or(0),
+        Stmt::Break(_) | Stmt::Continue(_) => 0,
+    }
+}
+
+fn find_max_node_id_in_expr(expr: &Expr) -> u32 {
+    let mut max_id = expr.id.0;
+    match &expr.kind {
+        ExprKind::Binary(b) => {
+            max_id = max_id.max(find_max_node_id_in_expr(&b.left));
+            max_id = max_id.max(find_max_node_id_in_expr(&b.right));
+        }
+        ExprKind::Unary(u) => max_id = max_id.max(find_max_node_id_in_expr(&u.operand)),
+        ExprKind::Call(c) => {
+            max_id = max_id.max(find_max_node_id_in_expr(&c.callee));
+            for arg in &c.args {
+                max_id = max_id.max(find_max_node_id_in_expr(arg));
+            }
+        }
+        ExprKind::MethodCall(m) => {
+            max_id = max_id.max(find_max_node_id_in_expr(&m.object));
+            for arg in &m.args {
+                max_id = max_id.max(find_max_node_id_in_expr(arg));
+            }
+        }
+        ExprKind::FieldAccess(f) => max_id = max_id.max(find_max_node_id_in_expr(&f.object)),
+        ExprKind::Index(i) => {
+            max_id = max_id.max(find_max_node_id_in_expr(&i.object));
+            max_id = max_id.max(find_max_node_id_in_expr(&i.index));
+        }
+        ExprKind::ArrayLiteral(a) => {
+            for el in a {
+                max_id = max_id.max(find_max_node_id_in_expr(el));
+            }
+        }
+        ExprKind::StructLiteral(s) => {
+            for f in &s.fields {
+                max_id = max_id.max(find_max_node_id_in_expr(&f.value));
+            }
+        }
+        ExprKind::Match(m) => {
+            max_id = max_id.max(find_max_node_id_in_expr(&m.scrutinee));
+            for arm in &m.arms {
+                max_id = max_id.max(find_max_node_id_in_expr(&arm.body));
+            }
+        }
+        ExprKind::Lambda(l) => {
+            if let LambdaBody::Expr(e) = &l.body {
+                max_id = max_id.max(find_max_node_id_in_expr(e));
+            } else if let LambdaBody::Block(b) = &l.body {
+                max_id = max_id.max(find_max_node_id_in_block(b));
+            }
+        }
+        ExprKind::Assign(a) => max_id = max_id.max(find_max_node_id_in_expr(&a.value)),
+        ExprKind::Range(r) => {
+            max_id = max_id.max(find_max_node_id_in_expr(&r.start));
+            max_id = max_id.max(find_max_node_id_in_expr(&r.end));
+        }
+        ExprKind::Try(t) => max_id = max_id.max(find_max_node_id_in_expr(t)),
+        ExprKind::Yield(y) => max_id = max_id.max(find_max_node_id_in_expr(&y.value)),
+        ExprKind::InterpolatedString(s) => {
+            for part in s {
+                if let StringPart::Expr(e) = part {
+                    max_id = max_id.max(find_max_node_id_in_expr(e));
+                }
+            }
+        }
+        ExprKind::Grouping(g) => max_id = max_id.max(find_max_node_id_in_expr(g)),
+        ExprKind::NullCoalesce(nc) => {
+            max_id = max_id.max(find_max_node_id_in_expr(&nc.value));
+            max_id = max_id.max(find_max_node_id_in_expr(&nc.default));
+        }
+        ExprKind::Is(is) => max_id = max_id.max(find_max_node_id_in_expr(&is.value)),
+        ExprKind::OptionalChain(oc) => max_id = max_id.max(find_max_node_id_in_expr(&oc.object)),
+        ExprKind::CompoundAssign(ca) => max_id = max_id.max(find_max_node_id_in_expr(&ca.value)),
+        // Leaf nodes
+        ExprKind::IntLiteral(_)
+        | ExprKind::FloatLiteral(_)
+        | ExprKind::BoolLiteral(_)
+        | ExprKind::StringLiteral(_)
+        | ExprKind::Identifier(_)
+        | ExprKind::Nil
+        | ExprKind::Done
+        | ExprKind::TypeLiteral(_)
+        | ExprKind::Import(_) => {}
+    }
+    max_id
+}
+
 /// Transform all generator functions in a program to state machines.
 ///
 /// This function:
@@ -70,6 +227,8 @@ struct GeneratorTransformer<'a> {
     interner: &'a mut Interner,
     /// Counter for generating unique state machine names
     generator_count: u32,
+    /// Counter for generating unique NodeIds for generated AST nodes
+    next_node_id: u32,
     /// Type errors found during transformation
     errors: Vec<TypeError>,
 }
@@ -79,11 +238,22 @@ impl<'a> GeneratorTransformer<'a> {
         Self {
             interner,
             generator_count: 0,
+            next_node_id: 0, // Will be set in transform()
             errors: Vec::new(),
         }
     }
 
+    /// Generate a unique NodeId for generated AST nodes
+    fn next_id(&mut self) -> NodeId {
+        let id = NodeId(self.next_node_id);
+        self.next_node_id += 1;
+        id
+    }
+
     fn transform(&mut self, program: &mut Program) -> (usize, Vec<TypeError>) {
+        // Find the maximum NodeId in the existing program to avoid collisions
+        self.next_node_id = find_max_node_id(program) + 1;
+
         // Collect indices of generator functions and their info
         let mut generators_info = Vec::new();
 
@@ -287,10 +457,16 @@ impl<'a> GeneratorTransformer<'a> {
         }
 
         // Create the record declaration
+        // Note: implements uses TypeExpr - for Iterator<T>, we use the element type
+        let iterator_sym = self.interner.intern("Iterator");
+        let iterator_type = TypeExpr::Generic {
+            name: iterator_sym,
+            args: vec![element_type.clone()],
+        };
         let record_decl = RecordDecl {
             name: record_name,
             type_params: Vec::new(),
-            implements: Vec::new(),
+            implements: vec![iterator_type],
             fields,
             external: None,
             methods: Vec::new(),
@@ -306,9 +482,9 @@ impl<'a> GeneratorTransformer<'a> {
             func.span,
         );
 
-        // Create the implement block
+        // Create the implement block for Iterator
         let impl_block = ImplementBlock {
-            trait_name: None,
+            trait_name: Some(iterator_sym),
             target_type: TypeExpr::Named(record_name),
             external: None,
             methods: vec![next_method],
@@ -666,12 +842,12 @@ impl<'a> GeneratorTransformer<'a> {
 
             // Create: self.__state
             let self_expr = Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::Identifier(self_sym),
                 span: dummy_span,
             };
             let state_access = Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
                     object: self_expr.clone(),
                     field: state_sym,
@@ -682,12 +858,12 @@ impl<'a> GeneratorTransformer<'a> {
 
             // Create: self.__state == i
             let condition = Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::Binary(Box::new(BinaryExpr {
                     left: state_access.clone(),
                     op: BinaryOp::Eq,
                     right: Expr {
-                        id: NodeId::default(),
+                        id: self.next_id(),
                         kind: ExprKind::IntLiteral(i as i64),
                         span: dummy_span,
                     },
@@ -698,7 +874,7 @@ impl<'a> GeneratorTransformer<'a> {
             // Create: self.__state = i + 1
             let state_assign = Stmt::Expr(ExprStmt {
                 expr: Expr {
-                    id: NodeId::default(),
+                    id: self.next_id(),
                     kind: ExprKind::Assign(Box::new(AssignExpr {
                         target: AssignTarget::Field {
                             object: Box::new(self_expr.clone()),
@@ -706,7 +882,7 @@ impl<'a> GeneratorTransformer<'a> {
                             field_span: dummy_span,
                         },
                         value: Expr {
-                            id: NodeId::default(),
+                            id: self.next_id(),
                             kind: ExprKind::IntLiteral((i + 1) as i64),
                             span: dummy_span,
                         },
@@ -739,7 +915,7 @@ impl<'a> GeneratorTransformer<'a> {
         // Final: return Done
         let done_return = Stmt::Return(ReturnStmt {
             value: Some(Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::Done,
                 span: dummy_span,
             }),
@@ -782,7 +958,7 @@ impl<'a> GeneratorTransformer<'a> {
         fields.push(StructFieldInit {
             name: state_sym,
             value: Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::IntLiteral(0),
                 span: dummy_span,
             },
@@ -794,7 +970,7 @@ impl<'a> GeneratorTransformer<'a> {
             fields.push(StructFieldInit {
                 name: param.name,
                 value: Expr {
-                    id: NodeId::default(),
+                    id: self.next_id(),
                     kind: ExprKind::Identifier(param.name),
                     span: dummy_span,
                 },
@@ -815,7 +991,7 @@ impl<'a> GeneratorTransformer<'a> {
         // return RecordName { fields }
         let return_stmt = Stmt::Return(ReturnStmt {
             value: Some(Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::StructLiteral(Box::new(StructLiteralExpr {
                     name: record_name,
                     fields,
@@ -829,8 +1005,8 @@ impl<'a> GeneratorTransformer<'a> {
             name: original.name,
             type_params: Vec::new(),
             params: original.params.clone(),
-            // Return type is the generated record (not the original Iterator<T>)
-            return_type: Some(TypeExpr::Named(record_name)),
+            // Return type is the original Iterator<T> - codegen will box the record
+            return_type: original.return_type.clone(),
             body: Block {
                 stmts: vec![return_stmt],
                 span: original.body.span,
@@ -840,7 +1016,7 @@ impl<'a> GeneratorTransformer<'a> {
     }
 
     /// Get a default value expression for a type.
-    fn default_value_for_type(&self, ty: &TypeExpr) -> Expr {
+    fn default_value_for_type(&mut self, ty: &TypeExpr) -> Expr {
         let dummy_span = Span::default();
         match ty {
             TypeExpr::Primitive(PrimitiveType::I8)
@@ -852,29 +1028,29 @@ impl<'a> GeneratorTransformer<'a> {
             | TypeExpr::Primitive(PrimitiveType::U16)
             | TypeExpr::Primitive(PrimitiveType::U32)
             | TypeExpr::Primitive(PrimitiveType::U64) => Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::IntLiteral(0),
                 span: dummy_span,
             },
             TypeExpr::Primitive(PrimitiveType::F32) | TypeExpr::Primitive(PrimitiveType::F64) => {
                 Expr {
-                    id: NodeId::default(),
+                    id: self.next_id(),
                     kind: ExprKind::FloatLiteral(0.0),
                     span: dummy_span,
                 }
             }
             TypeExpr::Primitive(PrimitiveType::Bool) => Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::BoolLiteral(false),
                 span: dummy_span,
             },
             TypeExpr::Primitive(PrimitiveType::String) => Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::StringLiteral(String::new()),
                 span: dummy_span,
             },
             _ => Expr {
-                id: NodeId::default(),
+                id: self.next_id(),
                 kind: ExprKind::IntLiteral(0),
                 span: dummy_span,
             },
