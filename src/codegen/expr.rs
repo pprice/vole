@@ -716,7 +716,8 @@ impl Cg<'_, '_, '_> {
                                     // Specific error type: error DivByZero => ...
                                     // Get the fallible type to look up the tag
                                     if let Type::Fallible(ft) = &scrutinee.vole_type {
-                                        let error_tag = fallible_error_tag(ft, *name);
+                                        let error_tag =
+                                            fallible_error_tag(ft, *name, self.ctx.interner);
                                         if let Some(error_tag) = error_tag {
                                             let is_this_error = self.builder.ins().icmp_imm(
                                                 IntCC::Equal,

@@ -409,25 +409,25 @@ pub(crate) fn resolve_type_expr_with_metadata(
     }
 }
 
-/// Resolve a type expression using aliases and interface registry
+/// Resolve a type expression using aliases, interface registry, and error types
 /// This is used when CompileCtx is not available (e.g., during Compiler setup)
 /// Note: This does NOT resolve class/record types from type_metadata - use resolve_type_expr for that
 pub(crate) fn resolve_type_expr_full(
     ty: &TypeExpr,
     type_aliases: &HashMap<Symbol, Type>,
     interface_registry: &InterfaceRegistry,
+    error_types: &HashMap<Symbol, ErrorTypeInfo>,
     interner: &Interner,
     name_table: &NameTable,
     module_id: ModuleId,
 ) -> Type {
-    // Use empty maps for backward compatibility
-    let empty_error_types = HashMap::new();
+    // Use empty type_metadata for backward compatibility
     let empty_type_metadata = HashMap::new();
     resolve_type_expr_with_metadata(
         ty,
         type_aliases,
         interface_registry,
-        &empty_error_types,
+        error_types,
         &empty_type_metadata,
         interner,
         name_table,
@@ -549,13 +549,21 @@ pub(crate) const FALLIBLE_TAG_SIZE: u32 = 8;
 
 /// Get the error tag for a specific error type within a fallible type.
 /// Returns the 1-based index (tag 0 is reserved for success).
+///
+/// Uses string comparison via the Interner to handle cross-interner Symbol lookup.
+/// This is necessary because error types in the fallible type may have Symbols from
+/// the analyzed program's interner, while the error_name may come from a different
+/// interner (e.g., when compiling module code).
 pub(crate) fn fallible_error_tag(
     fallible: &crate::sema::types::FallibleType,
     error_name: Symbol,
+    interner: &Interner,
 ) -> Option<i64> {
+    let error_name_str = interner.resolve(error_name);
     match fallible.error_type.as_ref() {
         Type::ErrorType(info) => {
-            if info.name == error_name {
+            let info_name_str = interner.resolve(info.name);
+            if info_name_str == error_name_str {
                 Some(1) // Single error type always gets tag 1
             } else {
                 None
@@ -564,10 +572,11 @@ pub(crate) fn fallible_error_tag(
         Type::Union(variants) => {
             // Find the 1-based index of the error type in the union
             for (idx, variant) in variants.iter().enumerate() {
-                if let Type::ErrorType(info) = variant
-                    && info.name == error_name
-                {
-                    return Some((idx + 1) as i64);
+                if let Type::ErrorType(info) = variant {
+                    let info_name_str = interner.resolve(info.name);
+                    if info_name_str == error_name_str {
+                        return Some((idx + 1) as i64);
+                    }
                 }
             }
             None

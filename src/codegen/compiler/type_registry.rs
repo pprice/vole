@@ -47,12 +47,11 @@ impl Compiler<'_> {
     /// Resolve a type expression using type_metadata (for record/class field types)
     /// This allows resolving types like `Person?` where Person is another record/class
     pub(super) fn resolve_type_with_metadata(&self, ty: &TypeExpr) -> Type {
-        let empty_error_types = HashMap::new();
         crate::codegen::types::resolve_type_expr_with_metadata(
             ty,
             &self.analyzed.type_aliases,
             &self.analyzed.interface_registry,
-            &empty_error_types,
+            &self.analyzed.error_types,
             &self.type_metadata,
             &self.analyzed.interner,
             &self.analyzed.name_table,

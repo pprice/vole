@@ -757,8 +757,8 @@ impl Cg<'_, '_, '_> {
         };
 
         // Get the error tag for this error type
-        let error_tag =
-            fallible_error_tag(fallible_type, raise_stmt.error_name).ok_or_else(|| {
+        let error_tag = fallible_error_tag(fallible_type, raise_stmt.error_name, self.ctx.interner)
+            .ok_or_else(|| {
                 format!(
                     "Error type {} not found in fallible type",
                     self.ctx.interner.resolve(raise_stmt.error_name)
