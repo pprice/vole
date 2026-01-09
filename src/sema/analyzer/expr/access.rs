@@ -3,7 +3,6 @@ use super::super::*;
 impl Analyzer {
     pub(super) fn check_field_access_expr(
         &mut self,
-        expr: &Expr,
         field_access: &FieldAccessExpr,
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
@@ -47,26 +46,14 @@ impl Analyzer {
             _ => (self.type_display(&object_type, interner), None),
         };
 
-        // Try to find the field first (for class/record types)
+        // Try to find the field (for class/record types)
         if let Some(fields) = fields
             && let Some(field) = fields.iter().find(|f| f.name == field_access.field)
         {
             return Ok(field.ty.clone());
         }
 
-        // Property-style method call: try resolving as a zero-arg method
-        // This allows `s.length` to be syntactic sugar for `s.length()`
-        if let Some(resolved) = self.resolve_method(&object_type, field_access.field, interner) {
-            let func_type = resolved.func_type();
-            // Only allow zero-argument methods as properties
-            if func_type.params.is_empty() {
-                let return_type = (*func_type.return_type).clone();
-                self.method_resolutions.insert(expr.id, resolved);
-                return Ok(return_type);
-            }
-        }
-
-        // No field and no zero-arg method found - report appropriate error
+        // No field found - report appropriate error
         if fields.is_some() {
             self.add_error(
                 SemanticError::UnknownField {

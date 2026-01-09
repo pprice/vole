@@ -27,7 +27,7 @@ tests "string interpolation" {
 
     test "nested expressions" {
         let arr = [1, 2, 3]
-        let s = "first: {arr[0]}, length: {arr.length}"
+        let s = "first: {arr[0]}, length: {arr.length()}"
         assert(s == "first: 1, length: 3")
     }
 
@@ -80,7 +80,7 @@ tests "string interpolation" {
 
     test "method call in interpolation" {
         let arr = [1, 2, 3, 4, 5]
-        let s = "length: {arr.length}"
+        let s = "length: {arr.length()}"
         assert(s == "length: 5")
     }
 }

@@ -8,12 +8,12 @@ tests "strings" {
 
     test "length" {
         let s = "hello"
-        assert(s.length == 5)
+        assert(s.length() == 5)
     }
 
     test "empty string" {
         let s = ""
-        assert(s.length == 0)
+        assert(s.length() == 0)
     }
 
     test "concatenation" {
