@@ -48,6 +48,11 @@ pub(super) fn construct_union(
         );
     };
 
+    // If the value is already the same union type, just return it
+    if &value.vole_type == union_type {
+        return Ok(value);
+    }
+
     let (tag, actual_value, actual_type) =
         if let Some(pos) = variants.iter().position(|v| v == &value.vole_type) {
             (pos, value.value, value.vole_type.clone())
@@ -660,6 +665,11 @@ impl Cg<'_, '_, '_> {
             )
             .into());
         };
+
+        // If the value is already the same union type, just return it
+        if &value.vole_type == union_type {
+            return Ok(value);
+        }
 
         let (tag, actual_value, actual_type) = if let Some(pos) =
             variants.iter().position(|v| v == &value.vole_type)
