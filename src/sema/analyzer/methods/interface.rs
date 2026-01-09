@@ -1,8 +1,155 @@
-use crate::identity::NameId;
+use crate::identity::{NameId, TypeDefId};
+use crate::sema::entity_defs::TypeDefKind;
 
 use super::super::*;
 
 impl Analyzer {
+    /// Check if a type structurally satisfies an interface by TypeDefId
+    ///
+    /// This is the EntityRegistry-based version of interface satisfaction checking.
+    /// Uses TypeDefId and MethodId instead of string-based lookups.
+    pub fn satisfies_interface_by_type_def_id(
+        &self,
+        ty: &Type,
+        interface_id: TypeDefId,
+        interner: &Interner,
+    ) -> bool {
+        let interface = self.entity_registry.get_type(interface_id);
+
+        // Verify this is actually an interface
+        if interface.kind != TypeDefKind::Interface {
+            return false;
+        }
+
+        // Check required fields
+        for field_id in &interface.fields {
+            let field = self.entity_registry.get_field(*field_id);
+            let field_name_str = self
+                .name_table
+                .last_segment_str(field.name_id)
+                .unwrap_or_default();
+            if !self.type_has_field_by_str(ty, &field_name_str, &field.ty, interner) {
+                return false;
+            }
+        }
+
+        // Check required methods (skip those with defaults)
+        for method_id in &interface.methods {
+            let method = self.entity_registry.get_method(*method_id);
+            if method.has_default {
+                continue;
+            }
+
+            let method_name_str = self
+                .name_table
+                .last_segment_str(method.name_id)
+                .unwrap_or_default();
+            if !self.type_has_method_by_str(ty, &method_name_str, &method.signature, interner) {
+                return false;
+            }
+        }
+
+        // Check parent interfaces (extends)
+        for parent_id in &interface.extends.clone() {
+            if !self.satisfies_interface_by_type_def_id(ty, *parent_id, interner) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if a type has a field with the given name (string) and compatible type
+    fn type_has_field_by_str(
+        &self,
+        ty: &Type,
+        field_name: &str,
+        expected_type: &Type,
+        interner: &Interner,
+    ) -> bool {
+        match ty {
+            Type::Record(r) => r.fields.iter().any(|f| {
+                f.name == field_name && self.types_compatible(&f.ty, expected_type, interner)
+            }),
+            Type::Class(c) => c.fields.iter().any(|f| {
+                f.name == field_name && self.types_compatible(&f.ty, expected_type, interner)
+            }),
+            _ => false,
+        }
+    }
+
+    /// Check if a type has a method matching the given name and signature
+    fn type_has_method_by_str(
+        &self,
+        ty: &Type,
+        method_name: &str,
+        expected_sig: &FunctionType,
+        interner: &Interner,
+    ) -> bool {
+        // Get type name_id for method lookup
+        let type_name_id = match ty {
+            Type::Record(r) => Some(r.name_id),
+            Type::Class(c) => Some(c.name_id),
+            _ => None,
+        };
+
+        // For primitives/arrays, check implement registry
+        if type_name_id.is_none() {
+            if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
+                && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
+            {
+                return self
+                    .implement_registry
+                    .get_method(&type_id, method_id)
+                    .is_some();
+            }
+            return false;
+        }
+
+        let type_name_id = type_name_id.unwrap();
+
+        // Check direct methods on the type
+        if let Some(method_id) = self.method_name_id_by_str(method_name, interner) {
+            let method_key = (type_name_id, method_id);
+            if let Some(found_sig) = self.methods.get(&method_key) {
+                // Check signature compatibility
+                if self.signatures_compatible(expected_sig, found_sig, ty) {
+                    return true;
+                }
+            }
+        }
+
+        // Check implement registry
+        if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
+            && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
+            && self
+                .implement_registry
+                .get_method(&type_id, method_id)
+                .is_some()
+        {
+            return true;
+        }
+
+        false
+    }
+
+    /// Check if two function signatures are compatible (for interface satisfaction)
+    fn signatures_compatible(
+        &self,
+        expected: &FunctionType,
+        found: &FunctionType,
+        _implementing_type: &Type,
+    ) -> bool {
+        // Check param count
+        if expected.params.len() != found.params.len() {
+            return false;
+        }
+
+        // For now, just check that params and return type match
+        // TODO: Handle Self type substitution properly
+        expected.params == found.params && *expected.return_type == *found.return_type
+    }
+
     /// Check if a type structurally satisfies an interface by NameId
     ///
     /// This implements duck typing: a type satisfies an interface if it has
