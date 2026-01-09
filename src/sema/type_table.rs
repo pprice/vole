@@ -393,7 +393,6 @@ mod tests {
         let mut types = TypeTable::new();
         let key = types.insert_named(
             Type::Class(crate::sema::ClassType {
-                name: foo,
                 name_id,
                 fields: vec![],
             }),

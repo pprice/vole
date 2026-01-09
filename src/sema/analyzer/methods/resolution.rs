@@ -87,8 +87,8 @@ impl Analyzer {
         }
 
         // 3. Direct methods on class/record
-        let (type_id, record_type_args, record_name) = match object_type {
-            Type::Class(c) => (Some(c.name_id), None, None),
+        let (type_id, record_type_args) = match object_type {
+            Type::Class(c) => (Some(c.name_id), None),
             Type::Record(r) => (
                 Some(r.name_id),
                 if r.type_args.is_empty() {
@@ -96,17 +96,19 @@ impl Analyzer {
                 } else {
                     Some(r.type_args.as_slice())
                 },
-                Some(r.name),
             ),
-            _ => (None, None, None),
+            _ => (None, None),
         };
         if let Some(type_id) = type_id {
             let method_id = self.method_name_id(method_name, interner);
             if let Some(func_type) = self.methods.get(&(type_id, method_id)).cloned() {
                 // For generic records, substitute type args in the method signature
-                if let (Some(type_args), Some(name)) = (record_type_args, record_name)
-                    && let Some(generic_def) = self.generic_records.get(&name)
-                {
+                // Find the generic record def by matching name_id
+                let generic_def = self
+                    .generic_records
+                    .values()
+                    .find(|def| def.name_id == type_id);
+                if let (Some(type_args), Some(generic_def)) = (record_type_args, generic_def) {
                     let mut substitutions = HashMap::new();
                     for (param, arg) in generic_def.type_params.iter().zip(type_args.iter()) {
                         substitutions.insert(param.name, arg.clone());
@@ -132,9 +134,18 @@ impl Analyzer {
         }
 
         // 4. Default methods from implemented interfaces
+        // Find the type symbol by matching name_id (classes/records are keyed by Symbol)
         let type_sym = match object_type {
-            Type::Class(class_type) => Some(class_type.name),
-            Type::Record(record_type) => Some(record_type.name),
+            Type::Class(class_type) => self
+                .classes
+                .iter()
+                .find(|(_, c)| c.name_id == class_type.name_id)
+                .map(|(sym, _)| *sym),
+            Type::Record(record_type) => self
+                .records
+                .iter()
+                .find(|(_, r)| r.name_id == record_type.name_id)
+                .map(|(sym, _)| *sym),
             _ => None,
         };
         if let Some(type_sym) = type_sym
@@ -164,15 +175,14 @@ impl Analyzer {
         None
     }
 
-    /// Get the function type for a functional interface (single abstract method, no fields)
-    pub(crate) fn get_functional_interface_type(
+    /// Get the function type for a functional interface by NameId (cross-interner safe)
+    pub(crate) fn get_functional_interface_type_by_name_id(
         &self,
-        interface_name: Symbol,
-        interner: &Interner,
+        interface_name_id: NameId,
     ) -> Option<FunctionType> {
         let method = self
             .interface_registry
-            .is_functional(interface_name, interner)?;
+            .is_functional_by_name_id(interface_name_id)?;
         Some(FunctionType {
             params: method.params.clone(),
             return_type: Box::new(method.return_type.clone()),

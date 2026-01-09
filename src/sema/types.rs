@@ -97,7 +97,6 @@ pub struct StructField {
 /// Class type information
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassType {
-    pub name: Symbol,
     pub name_id: NameId,
     pub fields: Vec<StructField>,
 }
@@ -105,7 +104,6 @@ pub struct ClassType {
 /// Record type information
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordType {
-    pub name: Symbol,
     pub name_id: NameId,
     pub fields: Vec<StructField>,
     /// Type arguments for generic records (empty for non-generic records)
@@ -115,7 +113,6 @@ pub struct RecordType {
 /// Interface type information
 #[derive(Debug, Clone, Eq)]
 pub struct InterfaceType {
-    pub name: Symbol,
     /// Canonical name ID for cross-interner lookups
     pub name_id: NameId,
     pub type_args: Vec<Type>,

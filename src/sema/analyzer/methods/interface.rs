@@ -129,35 +129,32 @@ impl Analyzer {
         interface_method: &InterfaceMethodDef,
         interner: &Interner,
     ) -> bool {
-        // Get type symbol for method lookup
-        let type_sym = match ty {
-            Type::Record(r) => r.name,
-            Type::Class(c) => c.name,
-            _ => {
-                // For primitives/arrays, check implement registry
-                if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
-                    && let Some(method_id) =
-                        self.method_name_id_by_str(&interface_method.name_str, interner)
-                {
-                    return self
-                        .implement_registry
-                        .get_method(&type_id, method_id)
-                        .is_some();
-                }
-                return false;
-            }
+        // Get type name_id for method lookup
+        let type_name_id = match ty {
+            Type::Record(r) => Some(r.name_id),
+            Type::Class(c) => Some(c.name_id),
+            _ => None,
         };
 
+        // For primitives/arrays, check implement registry
+        if type_name_id.is_none() {
+            if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
+                && let Some(method_id) =
+                    self.method_name_id_by_str(&interface_method.name_str, interner)
+            {
+                return self
+                    .implement_registry
+                    .get_method(&type_id, method_id)
+                    .is_some();
+            }
+            return false;
+        }
+
+        let type_name_id = type_name_id.unwrap();
+
         // Check direct methods on the type
-        if let Some(type_id) = self
-            .records
-            .get(&type_sym)
-            .map(|record| record.name_id)
-            .or_else(|| self.classes.get(&type_sym).map(|class| class.name_id))
-            && let Some(method_id) =
-                self.method_name_id_by_str(&interface_method.name_str, interner)
-        {
-            let method_key = (type_id, method_id);
+        if let Some(method_id) = self.method_name_id_by_str(&interface_method.name_str, interner) {
+            let method_key = (type_name_id, method_id);
             if self.methods.contains_key(&method_key) {
                 return true;
             }
@@ -267,7 +264,9 @@ impl Analyzer {
         let mut method_sigs = HashMap::new();
 
         let method_name_str = |method_id: NameId| {
-            self.name_table.last_segment_str(method_id).unwrap_or_default()
+            self.name_table
+                .last_segment_str(method_id)
+                .unwrap_or_default()
         };
 
         // Methods defined directly on the type

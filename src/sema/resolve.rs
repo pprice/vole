@@ -58,7 +58,6 @@ fn interface_instance(
         })
         .collect();
     Some(Type::Interface(InterfaceType {
-        name,
         name_id: def.name_id,
         type_args,
         methods,

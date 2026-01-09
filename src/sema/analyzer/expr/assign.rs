@@ -38,7 +38,10 @@ impl Analyzer {
                         } else {
                             self.add_error(
                                 SemanticError::UnknownField {
-                                    ty: interner.resolve(c.name).to_string(),
+                                    ty: self
+                                        .name_table
+                                        .last_segment_str(c.name_id)
+                                        .unwrap_or_else(|| "class".to_string()),
                                     field: interner.resolve(*field).to_string(),
                                     span: (*field_span).into(),
                                 },
@@ -51,7 +54,10 @@ impl Analyzer {
                         // Records are immutable - reject field assignment
                         self.add_error(
                             SemanticError::RecordFieldMutation {
-                                record: interner.resolve(r.name).to_string(),
+                                record: self
+                                    .name_table
+                                    .last_segment_str(r.name_id)
+                                    .unwrap_or_else(|| "record".to_string()),
                                 field: interner.resolve(*field).to_string(),
                                 span: (*field_span).into(),
                             },
@@ -263,7 +269,10 @@ impl Analyzer {
                         } else {
                             self.add_error(
                                 SemanticError::UnknownField {
-                                    ty: interner.resolve(c.name).to_string(),
+                                    ty: self
+                                        .name_table
+                                        .last_segment_str(c.name_id)
+                                        .unwrap_or_else(|| "class".to_string()),
                                     field: interner.resolve(*field).to_string(),
                                     span: (*field_span).into(),
                                 },
@@ -276,7 +285,10 @@ impl Analyzer {
                         // Records are immutable - reject field assignment
                         self.add_error(
                             SemanticError::RecordFieldMutation {
-                                record: interner.resolve(r.name).to_string(),
+                                record: self
+                                    .name_table
+                                    .last_segment_str(r.name_id)
+                                    .unwrap_or_else(|| "record".to_string()),
                                 field: interner.resolve(*field).to_string(),
                                 span: (*field_span).into(),
                             },

@@ -7,6 +7,7 @@ use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
 use crate::codegen::interface_vtable::{
     box_interface_value, iface_debug_enabled, interface_method_slot,
+    interface_method_slot_by_name_id,
 };
 use crate::codegen::method_resolution::{
     MethodResolutionInput, MethodTarget, resolve_method_target,
@@ -16,6 +17,7 @@ use crate::codegen::types::{
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId};
+use crate::identity::NameId;
 use crate::sema::generic::substitute_type;
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::{FunctionType, Type};
@@ -33,19 +35,6 @@ impl Cg<'_, '_, '_> {
                 return self.range_iter(range);
             }
         }
-
-        let display_type_symbol = |sym: crate::frontend::Symbol| {
-            self.ctx
-                .type_metadata
-                .get(&sym)
-                .and_then(|meta| match &meta.vole_type {
-                    Type::Class(class_type) => Some(class_type.name_id),
-                    Type::Record(record_type) => Some(record_type.name_id),
-                    _ => None,
-                })
-                .map(|name_id| self.ctx.analyzed.name_table.display(name_id))
-                .unwrap_or_else(|| self.ctx.interner.resolve(sym).to_string())
-        };
 
         let obj = self.expr(&mc.object)?;
         let method_name_str = self.ctx.interner.resolve(mc.method);
@@ -154,16 +143,15 @@ impl Cg<'_, '_, '_> {
             object_type: &obj.vole_type,
             method_id,
             resolution,
-            display_type_symbol,
         })?;
 
         let (method_info, return_type) = match target {
             MethodTarget::FunctionalInterface { func_type } => {
                 if let Type::Interface(interface_type) = &obj.vole_type {
-                    return self.interface_dispatch_call_args(
+                    return self.interface_dispatch_call_args_by_name_id(
                         &obj,
                         &mc.args,
-                        interface_type.name,
+                        interface_type.name_id,
                         mc.method,
                         func_type,
                     );
@@ -523,6 +511,40 @@ impl Cg<'_, '_, '_> {
         method_name: crate::frontend::Symbol,
         func_type: FunctionType,
     ) -> Result<CompiledValue, String> {
+        let slot = interface_method_slot(
+            interface_name,
+            method_name,
+            &self.ctx.analyzed.interface_registry,
+            self.ctx.interner,
+        )?;
+        self.interface_dispatch_call_args_inner(obj, args, slot, func_type)
+    }
+
+    /// Dispatch an interface method call by NameId (cross-interner safe)
+    pub(crate) fn interface_dispatch_call_args_by_name_id(
+        &mut self,
+        obj: &CompiledValue,
+        args: &[Expr],
+        interface_name_id: NameId,
+        method_name: crate::frontend::Symbol,
+        func_type: FunctionType,
+    ) -> Result<CompiledValue, String> {
+        let slot = interface_method_slot_by_name_id(
+            interface_name_id,
+            method_name,
+            &self.ctx.analyzed.interface_registry,
+            self.ctx.interner,
+        )?;
+        self.interface_dispatch_call_args_inner(obj, args, slot, func_type)
+    }
+
+    fn interface_dispatch_call_args_inner(
+        &mut self,
+        obj: &CompiledValue,
+        args: &[Expr],
+        slot: usize,
+        func_type: FunctionType,
+    ) -> Result<CompiledValue, String> {
         let word_type = self.ctx.pointer_type;
         let word_bytes = word_type.bytes() as i32;
 
@@ -534,13 +556,6 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .load(word_type, MemFlags::new(), obj.value, word_bytes);
-
-        let slot = interface_method_slot(
-            interface_name,
-            method_name,
-            &self.ctx.analyzed.interface_registry,
-            self.ctx.interner,
-        )?;
         let func_ptr = self.builder.ins().load(
             word_type,
             MemFlags::new(),

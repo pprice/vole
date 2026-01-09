@@ -167,11 +167,17 @@ impl Compiler<'_> {
                 .unwrap_or(Type::Void);
             let sig = self.create_implement_method_signature(method, &self_vole_type);
             let func_key = if let Some(type_sym) = type_sym {
-                self.func_registry
-                    .intern_qualified(func_module, &[type_sym, method.name], &self.analyzed.interner)
+                self.func_registry.intern_qualified(
+                    func_module,
+                    &[type_sym, method.name],
+                    &self.analyzed.interner,
+                )
             } else if let Some(type_id) = type_id {
-                self.func_registry
-                    .intern_with_prefix(type_id.name_id(), method.name, &self.analyzed.interner)
+                self.func_registry.intern_with_prefix(
+                    type_id.name_id(),
+                    method.name,
+                    &self.analyzed.interner,
+                )
             } else {
                 let method_name_str = self.analyzed.interner.resolve(method.name);
                 self.func_registry
@@ -264,11 +270,17 @@ impl Compiler<'_> {
         let func_key = if let Some(info) = method_info {
             info.func_key
         } else if let Some(type_sym) = type_sym {
-            self.func_registry
-                .intern_qualified(func_module, &[type_sym, method.name], &self.analyzed.interner)
+            self.func_registry.intern_qualified(
+                func_module,
+                &[type_sym, method.name],
+                &self.analyzed.interner,
+            )
         } else if let Some(type_id) = TypeId::from_type(self_vole_type, &self.analyzed.type_table) {
-            self.func_registry
-                .intern_with_prefix(type_id.name_id(), method.name, &self.analyzed.interner)
+            self.func_registry.intern_with_prefix(
+                type_id.name_id(),
+                method.name,
+                &self.analyzed.interner,
+            )
         } else {
             let method_name_str = self.analyzed.interner.resolve(method.name);
             self.func_registry

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::codegen::structs::get_type_name_symbol;
-use crate::codegen::types::MethodInfo;
+use crate::codegen::structs::get_type_name_id;
+use crate::codegen::types::{MethodInfo, type_metadata_by_name_id};
 use crate::commands::common::AnalyzedProgram;
 use crate::errors::CodegenError;
 use crate::frontend::Symbol;
@@ -38,10 +38,7 @@ pub(crate) enum MethodTarget {
     },
 }
 
-pub(crate) struct MethodResolutionInput<'a, F>
-where
-    F: Fn(Symbol) -> String,
-{
+pub(crate) struct MethodResolutionInput<'a> {
     pub analyzed: &'a AnalyzedProgram,
     pub type_metadata: &'a HashMap<Symbol, crate::codegen::types::TypeMetadata>,
     pub impl_method_infos: &'a HashMap<(TypeId, NameId), MethodInfo>,
@@ -49,26 +46,19 @@ where
     pub object_type: &'a Type,
     pub method_id: NameId,
     pub resolution: Option<&'a ResolvedMethod>,
-    pub display_type_symbol: F,
 }
 
-pub(crate) fn resolve_method_target<F>(
-    input: MethodResolutionInput<'_, F>,
-) -> Result<MethodTarget, String>
-where
-    F: Fn(Symbol) -> String,
-{
-    let lookup_direct_method = |type_name: Symbol| {
-        input
-            .type_metadata
-            .get(&type_name)
+pub(crate) fn resolve_method_target(
+    input: MethodResolutionInput<'_>,
+) -> Result<MethodTarget, String> {
+    let lookup_direct_method = |type_name_id: NameId| {
+        type_metadata_by_name_id(input.type_metadata, type_name_id)
             .and_then(|meta| meta.method_infos.get(&input.method_id))
             .cloned()
             .ok_or_else(|| {
                 format!(
-                    "Method {} not found on type {}",
-                    input.method_name_str,
-                    (input.display_type_symbol)(type_name)
+                    "Method {} not found on type {:?}",
+                    input.method_name_str, type_name_id
                 )
             })
     };
@@ -94,8 +84,8 @@ where
     if let Some(resolution) = input.resolution {
         return match resolution {
             ResolvedMethod::Direct { func_type } => {
-                let type_name = get_type_name_symbol(input.object_type)?;
-                let method_info = lookup_direct_method(type_name)?;
+                let type_name_id = get_type_name_id(input.object_type)?;
+                let method_info = lookup_direct_method(type_name_id)?;
                 Ok(MethodTarget::Direct {
                     method_info,
                     return_type: (*func_type.return_type).clone(),
@@ -185,12 +175,10 @@ where
                     func_type: func_type.clone(),
                 })
             }
-            ResolvedMethod::DefaultMethod {
-                type_name,
-                func_type,
-                ..
-            } => {
-                let method_info = lookup_direct_method(*type_name)?;
+            ResolvedMethod::DefaultMethod { func_type, .. } => {
+                // Get the name_id from the object type since DefaultMethod is called on a class/record
+                let type_name_id = get_type_name_id(input.object_type)?;
+                let method_info = lookup_direct_method(type_name_id)?;
                 Ok(MethodTarget::Default {
                     method_info,
                     return_type: (*func_type.return_type).clone(),
@@ -243,8 +231,8 @@ where
     }
 
     // No resolution found - try direct method lookup for default method bodies.
-    let type_name = get_type_name_symbol(input.object_type)?;
-    let method_info = lookup_direct_method(type_name)?;
+    let type_name_id = get_type_name_id(input.object_type)?;
+    let method_info = lookup_direct_method(type_name_id)?;
     let return_type = method_info.return_type.clone();
     Ok(MethodTarget::Direct {
         method_info,

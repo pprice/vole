@@ -196,7 +196,8 @@ impl Analyzer {
 
             // Check if it's a variable with a functional interface type
             if let Some(Type::Interface(iface)) = self.get_variable_type(*sym)
-                && let Some(func_type) = self.get_functional_interface_type(iface.name, interner)
+                && let Some(func_type) =
+                    self.get_functional_interface_type_by_name_id(iface.name_id)
             {
                 // Calling a functional interface - treat like a closure call
                 if self.in_lambda() {

@@ -126,7 +126,19 @@ impl InterfaceRegistry {
         interner: &crate::frontend::Interner,
     ) -> Option<&InterfaceMethodDef> {
         let interface = self.get(name, interner)?;
+        self.is_functional_inner(interface)
+    }
 
+    /// Check if an interface is a functional interface by NameId (cross-interner safe)
+    pub fn is_functional_by_name_id(&self, name_id: NameId) -> Option<&InterfaceMethodDef> {
+        let interface = self.get_by_name_id(name_id)?;
+        self.is_functional_inner(interface)
+    }
+
+    fn is_functional_inner<'a>(
+        &self,
+        interface: &'a InterfaceDef,
+    ) -> Option<&'a InterfaceMethodDef> {
         // Must have no required fields
         if !interface.fields.is_empty() {
             return None;

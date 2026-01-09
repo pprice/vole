@@ -65,7 +65,9 @@ impl Analyzer {
     }
 
     fn collect_function_signature(&mut self, func: &FuncDecl, interner: &Interner) {
-        let _ = self.name_table.intern(self.current_module, &[func.name], interner);
+        let _ = self
+            .name_table
+            .intern(self.current_module, &[func.name], interner);
         if func.type_params.is_empty() {
             // Non-generic function: resolve types normally
             let params: Vec<Type> = func
@@ -152,7 +154,9 @@ impl Analyzer {
     }
 
     fn collect_class_signature(&mut self, class: &ClassDecl, interner: &Interner) {
-        let name_id = self.name_table.intern(self.current_module, &[class.name], interner);
+        let name_id = self
+            .name_table
+            .intern(self.current_module, &[class.name], interner);
         let fields: Vec<StructField> = class
             .fields
             .iter()
@@ -163,11 +167,7 @@ impl Analyzer {
                 slot: i,
             })
             .collect();
-        let class_type = ClassType {
-            name: class.name,
-            name_id,
-            fields,
-        };
+        let class_type = ClassType { name_id, fields };
         self.classes.insert(class.name, class_type.clone());
         self.register_named_type(class.name, Type::Class(class_type.clone()), interner);
 
@@ -229,7 +229,9 @@ impl Analyzer {
     }
 
     fn collect_record_signature(&mut self, record: &RecordDecl, interner: &Interner) {
-        let name_id = self.name_table.intern(self.current_module, &[record.name], interner);
+        let name_id = self
+            .name_table
+            .intern(self.current_module, &[record.name], interner);
 
         // Handle generic records vs non-generic records
         if record.type_params.is_empty() {
@@ -248,7 +250,6 @@ impl Analyzer {
                 })
                 .collect();
             let record_type = RecordType {
-                name: record.name,
                 name_id,
                 fields,
                 type_args: vec![],
@@ -359,6 +360,7 @@ impl Analyzer {
             self.generic_records.insert(
                 record.name,
                 GenericRecordDef {
+                    name_id,
                     type_params,
                     field_names,
                     field_types,
@@ -391,7 +393,6 @@ impl Analyzer {
                 })
                 .collect();
             let record_type = RecordType {
-                name: record.name,
                 name_id,
                 fields,
                 type_args: vec![], // Generic record base has no type args yet
@@ -638,7 +639,6 @@ impl Analyzer {
         self.register_named_type(
             interface_decl.name,
             Type::Interface(crate::sema::types::InterfaceType {
-                name: interface_decl.name,
                 name_id,
                 type_args: Vec::new(),
                 methods: interface_methods,

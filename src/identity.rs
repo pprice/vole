@@ -87,17 +87,18 @@ impl NameTable {
         &self.modules[module.0 as usize]
     }
 
-    pub fn intern(
-        &mut self,
-        module: ModuleId,
-        segments: &[Symbol],
-        interner: &Interner,
-    ) -> NameId {
+    pub fn intern(&mut self, module: ModuleId, segments: &[Symbol], interner: &Interner) -> NameId {
         let string_segments: Vec<String> = segments
             .iter()
             .map(|s| interner.resolve(*s).to_string())
             .collect();
-        self.intern_raw(module, &string_segments.iter().map(|s| s.as_str()).collect::<Vec<_>>())
+        self.intern_raw(
+            module,
+            &string_segments
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>(),
+        )
     }
 
     pub fn intern_raw(&mut self, module: ModuleId, segments: &[&str]) -> NameId {
@@ -132,7 +133,13 @@ impl NameTable {
             .iter()
             .map(|s| interner.resolve(*s).to_string())
             .collect();
-        self.name_id_raw(module, &string_segments.iter().map(|s| s.as_str()).collect::<Vec<_>>())
+        self.name_id_raw(
+            module,
+            &string_segments
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>(),
+        )
     }
 
     pub fn name_id_raw(&self, module: ModuleId, segments: &[&str]) -> Option<NameId> {

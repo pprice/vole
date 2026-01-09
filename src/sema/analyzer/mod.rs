@@ -464,7 +464,11 @@ impl Analyzer {
     }
 
     fn type_display_pair(&mut self, left: &Type, right: &Type) -> String {
-        format!("{} and {}", self.type_display(left), self.type_display(right))
+        format!(
+            "{} and {}",
+            self.type_display(left),
+            self.type_display(right)
+        )
     }
 
     /// Helper to add a type mismatch error
@@ -522,7 +526,7 @@ impl Analyzer {
             }
             // Interface types: unify type args for the same interface
             (Type::Interface(p_iface), Type::Interface(a_iface))
-                if p_iface.name == a_iface.name =>
+                if p_iface.name_id == a_iface.name_id =>
             {
                 for (p_arg, a_arg) in p_iface.type_args.iter().zip(a_iface.type_args.iter()) {
                     self.unify_types(p_arg, a_arg, type_params, inferred);
@@ -667,7 +671,9 @@ impl Analyzer {
     }
 
     fn register_named_type(&mut self, name: Symbol, ty: Type, interner: &Interner) {
-        let name_id = self.name_table.intern(self.current_module, &[name], interner);
+        let name_id = self
+            .name_table
+            .intern(self.current_module, &[name], interner);
         self.type_table.insert_named(ty, name_id);
     }
 
@@ -688,7 +694,7 @@ impl Analyzer {
         // interner (e.g., stdlib prelude) than the current file being analyzed
         let def = self.interface_registry.get_by_str(name)?;
         // Use interface's symbol if not interned locally
-        let sym = interner.lookup(name).unwrap_or(def.name);
+        let _sym = interner.lookup(name).unwrap_or(def.name);
         if !def.type_params.is_empty() && def.type_params.len() != type_args.len() {
             return Some(Type::Error);
         }
@@ -711,7 +717,6 @@ impl Analyzer {
             })
             .collect();
         Some(Type::Interface(crate::sema::types::InterfaceType {
-            name: sym,
             name_id: def.name_id,
             type_args,
             methods,
@@ -978,7 +983,9 @@ impl Analyzer {
 
         let error_info = ErrorTypeInfo {
             name: decl.name,
-            name_id: self.name_table.intern(self.current_module, &[decl.name], interner),
+            name_id: self
+                .name_table
+                .intern(self.current_module, &[decl.name], interner),
             fields,
         };
 
@@ -1396,13 +1403,17 @@ impl Analyzer {
                     });
 
                     // Store export by name string
-                    let name_id = self.name_table.intern(module_id, &[f.name], &module_interner);
+                    let name_id = self
+                        .name_table
+                        .intern(module_id, &[f.name], &module_interner);
                     exports.insert(name_id, func_type);
                 }
                 Decl::Let(l) if !l.mutable => {
                     // Only export immutable let bindings
                     // Infer type from literal for constants and store the value
-                    let name_id = self.name_table.intern(module_id, &[l.name], &module_interner);
+                    let name_id = self
+                        .name_table
+                        .intern(module_id, &[l.name], &module_interner);
                     let (ty, const_val) = match &l.init.kind {
                         ExprKind::FloatLiteral(v) => (Type::F64, Some(ConstantValue::F64(*v))),
                         ExprKind::IntLiteral(v) => (Type::I64, Some(ConstantValue::I64(*v))),
@@ -1452,7 +1463,9 @@ impl Analyzer {
                             is_closure: false,
                         });
 
-                        let name_id = self.name_table.intern(module_id, &[func.vole_name], &module_interner);
+                        let name_id =
+                            self.name_table
+                                .intern(module_id, &[func.vole_name], &module_interner);
                         exports.insert(name_id, func_type);
                         // Mark as external function (FFI)
                         external_funcs.insert(name_id);

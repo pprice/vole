@@ -197,7 +197,7 @@ impl Cg<'_, '_, '_> {
                 .ctx
                 .analyzed
                 .interface_registry
-                .is_functional(iface.name, self.ctx.interner)
+                .is_functional_by_name_id(iface.name_id)
         {
             let func_type = FunctionType {
                 params: method_def.params.clone(),
@@ -210,10 +210,10 @@ impl Cg<'_, '_, '_> {
                 ty: type_to_cranelift(vole_type, self.ctx.pointer_type),
                 vole_type: vole_type.clone(),
             };
-            return self.interface_dispatch_call_args(
+            return self.interface_dispatch_call_args_by_name_id(
                 &obj,
                 &call.args,
-                iface.name,
+                iface.name_id,
                 method_def.name,
                 func_type,
             );
@@ -234,7 +234,7 @@ impl Cg<'_, '_, '_> {
                         .ctx
                         .analyzed
                         .interface_registry
-                        .is_functional(iface.name, self.ctx.interner)
+                        .is_functional_by_name_id(iface.name_id)
                 {
                     let func_type = FunctionType {
                         params: method_def.params.clone(),
@@ -244,10 +244,10 @@ impl Cg<'_, '_, '_> {
                     // Box the lambda value to create the interface representation
                     let boxed =
                         box_interface_value(self.builder, self.ctx, lambda_val, &declared_type)?;
-                    return self.interface_dispatch_call_args(
+                    return self.interface_dispatch_call_args_by_name_id(
                         &boxed,
                         &call.args,
-                        iface.name,
+                        iface.name_id,
                         method_def.name,
                         func_type,
                     );
@@ -265,17 +265,17 @@ impl Cg<'_, '_, '_> {
                     .ctx
                     .analyzed
                     .interface_registry
-                    .is_functional(iface.name, self.ctx.interner)
+                    .is_functional_by_name_id(iface.name_id)
             {
                 let func_type = FunctionType {
                     params: method_def.params.clone(),
                     return_type: Box::new(method_def.return_type.clone()),
                     is_closure: false,
                 };
-                return self.interface_dispatch_call_args(
+                return self.interface_dispatch_call_args_by_name_id(
                     &lambda_val,
                     &call.args,
-                    iface.name,
+                    iface.name_id,
                     method_def.name,
                     func_type,
                 );

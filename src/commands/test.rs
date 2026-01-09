@@ -5,7 +5,7 @@
 
 use std::fs;
 use std::io::{self, Write};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -476,7 +476,10 @@ fn print_failures_summary(results: &TestResults, colors: &TermColors) {
     let mut current_file: Option<&Path> = None;
 
     for result in &results.results {
-        if matches!(result.status, TestStatus::Failed(_) | TestStatus::Panicked(_)) {
+        if matches!(
+            result.status,
+            TestStatus::Failed(_) | TestStatus::Panicked(_)
+        ) {
             // Print file header if changed
             if current_file != Some(result.file.as_path()) {
                 println!("\n{}", result.file.display());

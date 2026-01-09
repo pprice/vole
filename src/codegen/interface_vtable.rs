@@ -6,8 +6,8 @@ use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
 use crate::codegen::RuntimeFn;
 use crate::codegen::types::{
-    CompileCtx, CompiledValue, MethodInfo, method_name_id_by_str, type_to_cranelift, value_to_word,
-    word_to_value,
+    CompileCtx, CompiledValue, MethodInfo, method_name_id_by_str, type_metadata_by_name_id,
+    type_to_cranelift, value_to_word, word_to_value,
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Interner, Symbol};
@@ -492,6 +492,19 @@ pub(crate) fn interface_method_slot(
         })
 }
 
+/// Look up an interface method slot by NameId (cross-interner safe)
+pub(crate) fn interface_method_slot_by_name_id(
+    interface_name_id: NameId,
+    method_name: Symbol,
+    registry: &crate::sema::interface_registry::InterfaceRegistry,
+    interner: &Interner,
+) -> Result<usize, String> {
+    let interface_def = registry
+        .get_by_name_id(interface_name_id)
+        .ok_or_else(|| format!("unknown interface with name_id {:?}", interface_name_id))?;
+    interface_method_slot(interface_def.name, method_name, registry, interner)
+}
+
 pub(crate) fn box_interface_value(
     builder: &mut FunctionBuilder,
     ctx: &mut CompileCtx,
@@ -502,10 +515,18 @@ pub(crate) fn box_interface_value(
         return Ok(value);
     };
 
+    // Look up the InterfaceDef to get the Symbol name for vtable operations
+    let interface_def = ctx
+        .analyzed
+        .interface_registry
+        .get_by_name_id(interface.name_id)
+        .ok_or_else(|| format!("unknown interface with name_id {:?}", interface.name_id))?;
+    let interface_name = interface_def.name;
+
     if iface_debug_enabled() {
         eprintln!(
             "iface_box: target={} value_type={:?}",
-            ctx.interner.resolve(interface.name),
+            ctx.interner.resolve(interface_name),
             value.vole_type
         );
     }
@@ -536,7 +557,7 @@ pub(crate) fn box_interface_value(
     let data_word = value_to_word(builder, &value, ctx.pointer_type, Some(heap_alloc_ref))?;
     let vtable_id = ctx.interface_vtables.borrow_mut().get_or_create(
         ctx,
-        interface.name,
+        interface_name,
         &interface.type_args,
         &value.vole_type,
     )?;
@@ -659,12 +680,12 @@ fn resolve_vtable_target(
 
     // Check direct methods on class/record
     if let Some(method_id) = method_id
-        && let Some(type_sym) = match concrete_type {
-            Type::Class(class_type) => Some(class_type.name),
-            Type::Record(record_type) => Some(record_type.name),
+        && let Some(type_name_id) = match concrete_type {
+            Type::Class(class_type) => Some(class_type.name_id),
+            Type::Record(record_type) => Some(record_type.name_id),
             _ => None,
         }
-        && let Some(meta) = ctx.type_metadata.get(&type_sym)
+        && let Some(meta) = type_metadata_by_name_id(ctx.type_metadata, type_name_id)
         && let Some(method_info) = meta.method_infos.get(&method_id).cloned()
     {
         let func_type = match &meta.vole_type {

@@ -35,11 +35,15 @@ impl Analyzer {
         // Get fields from object type
         let (type_name, fields) = match &object_type {
             Type::Class(class_type) => (
-                interner.resolve(class_type.name).to_string(),
+                self.name_table
+                    .last_segment_str(class_type.name_id)
+                    .unwrap_or_else(|| "class".to_string()),
                 Some(&class_type.fields),
             ),
             Type::Record(record_type) => (
-                interner.resolve(record_type.name).to_string(),
+                self.name_table
+                    .last_segment_str(record_type.name_id)
+                    .unwrap_or_else(|| "record".to_string()),
                 Some(&record_type.fields),
             ),
             Type::Error => return Ok(Type::Error),
@@ -101,11 +105,15 @@ impl Analyzer {
         // Get fields from inner type
         let (type_name, fields) = match &inner_type {
             Type::Class(class_type) => (
-                interner.resolve(class_type.name).to_string(),
+                self.name_table
+                    .last_segment_str(class_type.name_id)
+                    .unwrap_or_else(|| "class".to_string()),
                 &class_type.fields,
             ),
             Type::Record(record_type) => (
-                interner.resolve(record_type.name).to_string(),
+                self.name_table
+                    .last_segment_str(record_type.name_id)
+                    .unwrap_or_else(|| "record".to_string()),
                 &record_type.fields,
             ),
             Type::Error => return Ok(Type::Error),

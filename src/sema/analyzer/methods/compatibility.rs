@@ -12,12 +12,12 @@ impl Analyzer {
         // Non-functional interface compatibility
         if let Type::Interface(iface) = to {
             if let Type::Interface(from_iface) = from
-                && self.interface_extends(from_iface.name, iface.name, interner)
+                && self.interface_extends_by_name_id(from_iface.name_id, iface.name_id, interner)
             {
                 return true;
             }
 
-            if self.satisfies_interface(from, iface.name, interner) {
+            if self.satisfies_interface_by_name_id(from, iface.name_id, interner) {
                 return true;
             }
         }
@@ -25,7 +25,7 @@ impl Analyzer {
         // Function type is compatible with functional interface if signatures match
         if let Type::Function(fn_type) = from
             && let Type::Interface(iface) = to
-            && let Some(iface_fn) = self.get_functional_interface_type(iface.name, interner)
+            && let Some(iface_fn) = self.get_functional_interface_type_by_name_id(iface.name_id)
             && function_compatible_with_interface(fn_type, &iface_fn)
         {
             return true;
@@ -52,6 +52,41 @@ impl Analyzer {
                 if *parent == base {
                     return true;
                 }
+                stack.push(*parent);
+            }
+        }
+
+        false
+    }
+
+    fn interface_extends_by_name_id(
+        &self,
+        derived: NameId,
+        base: NameId,
+        interner: &Interner,
+    ) -> bool {
+        if derived == base {
+            return true;
+        }
+
+        // Get the derived interface def to start traversing
+        let Some(derived_def) = self.interface_registry.get_by_name_id(derived) else {
+            return false;
+        };
+
+        let mut stack: Vec<Symbol> = derived_def.extends.clone();
+        let mut seen = HashSet::new();
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current) {
+                continue;
+            }
+            let Some(def) = self.interface_registry.get(current, interner) else {
+                continue;
+            };
+            if def.name_id == base {
+                return true;
+            }
+            for parent in &def.extends {
                 stack.push(*parent);
             }
         }
@@ -97,10 +132,7 @@ impl Analyzer {
         return_type: &Type,
         _interner: &Interner,
     ) -> String {
-        let params_str: Vec<String> = params
-            .iter()
-            .map(|t| self.type_display(t))
-            .collect();
+        let params_str: Vec<String> = params.iter().map(|t| self.type_display(t)).collect();
         format!(
             "({}) -> {}",
             params_str.join(", "),

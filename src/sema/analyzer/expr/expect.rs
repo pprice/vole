@@ -338,7 +338,7 @@ impl Analyzer {
                         Some(ft.clone())
                     } else if let Type::Interface(iface) = t {
                         // Check if it's a functional interface (single abstract method, no fields)
-                        self.get_functional_interface_type(iface.name, interner)
+                        self.get_functional_interface_type_by_name_id(iface.name_id)
                     } else {
                         None
                     }

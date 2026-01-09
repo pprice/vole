@@ -86,7 +86,6 @@ impl Compiler<'_> {
 
         // Create a placeholder vole_type (will be replaced in finalize_class)
         let placeholder_type = Type::Class(ClassType {
-            name: class.name,
             name_id,
             fields: vec![],
         });
@@ -133,7 +132,6 @@ impl Compiler<'_> {
 
         // Create the Vole type
         let vole_type = Type::Class(ClassType {
-            name: class.name,
             name_id: self
                 .analyzed
                 .name_table
@@ -156,9 +154,11 @@ impl Compiler<'_> {
                 .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(Type::Void);
             let sig = self.create_method_signature(method);
-            let func_key = self
-                .func_registry
-                .intern_qualified(module_id, &[class.name, method.name], &self.analyzed.interner);
+            let func_key = self.func_registry.intern_qualified(
+                module_id,
+                &[class.name, method.name],
+                &self.analyzed.interner,
+            );
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
@@ -277,7 +277,6 @@ impl Compiler<'_> {
 
         // Create a placeholder vole_type (will be replaced in finalize_record)
         let placeholder_type = Type::Record(RecordType {
-            name: record.name,
             name_id,
             fields: vec![],
             type_args: vec![],
@@ -325,7 +324,6 @@ impl Compiler<'_> {
 
         // Create the Vole type
         let vole_type = Type::Record(RecordType {
-            name: record.name,
             name_id: self
                 .analyzed
                 .name_table
@@ -349,9 +347,11 @@ impl Compiler<'_> {
                 .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(Type::Void);
             let sig = self.create_method_signature(method);
-            let func_key = self
-                .func_registry
-                .intern_qualified(module_id, &[record.name, method.name], &self.analyzed.interner);
+            let func_key = self.func_registry.intern_qualified(
+                module_id,
+                &[record.name, method.name],
+                &self.analyzed.interner,
+            );
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);

@@ -47,10 +47,11 @@ pub(crate) fn get_field_slot_and_type(
     }
 }
 
-pub(crate) fn get_type_name_symbol(vole_type: &Type) -> Result<Symbol, String> {
+/// Get the NameId for a class or record type
+pub(crate) fn get_type_name_id(vole_type: &Type) -> Result<crate::identity::NameId, String> {
     match vole_type {
-        Type::Class(class_type) => Ok(class_type.name),
-        Type::Record(record_type) => Ok(record_type.name),
+        Type::Class(class_type) => Ok(class_type.name_id),
+        Type::Record(record_type) => Ok(record_type.name_id),
         _ => Err(CodegenError::type_mismatch(
             "type name extraction",
             "class or record",

@@ -82,6 +82,8 @@ pub struct GenericFuncDef {
 /// Information about a generic record definition
 #[derive(Debug, Clone)]
 pub struct GenericRecordDef {
+    /// The record's NameId for cross-interner lookups
+    pub name_id: NameId,
     /// The record's type parameters (e.g., T, K, V)
     pub type_params: Vec<TypeParamInfo>,
     /// Field names
@@ -178,7 +180,6 @@ pub fn substitute_type(ty: &Type, substitutions: &HashMap<Symbol, Type>) -> Type
         Type::TypeParam(sym) => substitutions.get(sym).cloned().unwrap_or(ty.clone()),
         Type::Array(elem) => Type::Array(Box::new(substitute_type(elem, substitutions))),
         Type::Interface(interface_type) => Type::Interface(crate::sema::types::InterfaceType {
-            name: interface_type.name,
             name_id: interface_type.name_id,
             type_args: interface_type
                 .type_args

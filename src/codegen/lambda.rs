@@ -229,10 +229,7 @@ fn compile_pure_lambda(
     sig.returns.push(AbiParam::new(return_type));
 
     let (name_id, func_key) = ctx.func_registry.intern_lambda_name(*ctx.lambda_counter);
-    let lambda_name = ctx
-        .func_registry
-        .name_table()
-        .display(name_id);
+    let lambda_name = ctx.func_registry.name_table().display(name_id);
     let func_id = ctx
         .module
         .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
@@ -370,10 +367,7 @@ fn compile_lambda_with_captures(
     sig.returns.push(AbiParam::new(return_type));
 
     let (name_id, func_key) = ctx.func_registry.intern_lambda_name(*ctx.lambda_counter);
-    let lambda_name = ctx
-        .func_registry
-        .name_table()
-        .display(name_id);
+    let lambda_name = ctx.func_registry.name_table().display(name_id);
     let func_id = ctx
         .module
         .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)

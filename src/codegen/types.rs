@@ -75,6 +75,19 @@ pub(crate) struct MethodInfo {
     pub return_type: Type,
 }
 
+/// Look up TypeMetadata by NameId (cross-interner safe)
+/// Returns the TypeMetadata for a class/record with the given name_id
+pub(crate) fn type_metadata_by_name_id(
+    type_metadata: &HashMap<Symbol, TypeMetadata>,
+    name_id: NameId,
+) -> Option<&TypeMetadata> {
+    type_metadata.values().find(|meta| match &meta.vole_type {
+        Type::Class(c) => c.name_id == name_id,
+        Type::Record(r) => r.name_id == name_id,
+        _ => false,
+    })
+}
+
 /// Context for compiling expressions and statements
 /// Bundles common parameters to reduce function argument count
 pub(crate) struct CompileCtx<'a> {
@@ -136,7 +149,9 @@ pub(crate) fn module_name_id(
     let module_path = analyzed.name_table.module_path(module_id);
     let (_, module_interner) = analyzed.module_programs.get(module_path)?;
     let sym = module_interner.lookup(name)?;
-    analyzed.name_table.name_id(module_id, &[sym], module_interner)
+    analyzed
+        .name_table
+        .name_id(module_id, &[sym], module_interner)
 }
 
 pub(crate) fn method_name_id(
@@ -219,7 +234,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     return Type::Error;
                 }
                 Type::Interface(crate::sema::types::InterfaceType {
-                    name: *sym,
                     name_id: iface.name_id,
                     type_args: Vec::new(),
                     methods: iface
@@ -399,7 +413,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     })
                     .collect();
                 return Type::Interface(crate::sema::types::InterfaceType {
-                    name: *name,
                     name_id: iface.name_id,
                     type_args: resolved_args,
                     methods,

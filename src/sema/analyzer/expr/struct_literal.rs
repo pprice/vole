@@ -200,7 +200,6 @@ impl Analyzer {
                 .collect();
 
             let concrete_record = RecordType {
-                name: base.name,
                 name_id: base.name_id,
                 fields: concrete_fields,
                 type_args,
