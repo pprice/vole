@@ -93,39 +93,45 @@ impl InterfaceVtableRegistry {
             return Ok(*data_id);
         }
 
-        // Get interface definition from InterfaceRegistry for type_params (Symbol-based)
-        // and name_id, but use EntityRegistry for method collection
-        let iface_def = ctx
-            .analyzed
-            .interface_registry
-            .get(interface_name, ctx.interner)
-            .ok_or_else(|| {
-                format!(
-                    "unknown interface {:?}",
-                    ctx.interner.resolve(interface_name)
-                )
-            })?;
-        let interface_name_id = iface_def.name_id;
-
-        // Get interface TypeDefId from EntityRegistry
+        // Get interface TypeDefId from EntityRegistry by looking up using the interface Symbol
+        // Try main module first, then builtin module (for built-in interfaces like Iterator)
+        let interface_name_str = ctx.interner.resolve(interface_name);
         let interface_type_id = ctx
             .analyzed
+            .name_table
+            .name_id_raw(ctx.analyzed.name_table.main_module(), &[interface_name_str])
+            .and_then(|name_id| ctx.analyzed.entity_registry.type_by_name(name_id))
+            .or_else(|| {
+                ctx.analyzed
+                    .name_table
+                    .builtin_module_id()
+                    .and_then(|builtin_mod| {
+                        ctx.analyzed
+                            .name_table
+                            .name_id_raw(builtin_mod, &[interface_name_str])
+                    })
+                    .and_then(|name_id| ctx.analyzed.entity_registry.type_by_name(name_id))
+            })
+            .ok_or_else(|| format!("unknown interface {:?}", interface_name_str))?;
+        let interface_name_id = ctx
+            .analyzed
             .entity_registry
-            .type_by_name(interface_name_id)
-            .ok_or_else(|| {
-                format!(
-                    "interface {:?} not found in entity_registry",
-                    interface_name_id
-                )
-            })?;
+            .get_type(interface_type_id)
+            .name_id;
 
         // Build substitution map from interface type params to concrete type args
-        // Still using Symbol keys since Type::TypeParam stores Symbol
-        let substitutions: HashMap<Symbol, Type> = iface_def
+        // Type::TypeParam stores Symbol, so convert NameId -> String -> Symbol via lookup
+        // (type parameter names should already be interned from parsing)
+        let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_id);
+        let substitutions: HashMap<Symbol, Type> = interface_def
             .type_params
             .iter()
             .zip(interface_type_args.iter())
-            .map(|(param, arg)| (*param, arg.clone()))
+            .filter_map(|(param_name_id, arg)| {
+                let param_str = ctx.analyzed.name_table.last_segment_str(*param_name_id)?;
+                let param_symbol = ctx.interner.lookup(&param_str)?;
+                Some((param_symbol, arg.clone()))
+            })
             .collect();
 
         // Collect methods via EntityRegistry
@@ -196,7 +202,7 @@ impl InterfaceVtableRegistry {
             // Use name_str for cross-interner safety
             let wrapper_id = self.compile_wrapper(
                 ctx,
-                &iface_def.name_str,
+                interface_name_str,
                 &method_def.name_str,
                 concrete_type,
                 &target,
