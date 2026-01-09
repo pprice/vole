@@ -45,6 +45,8 @@ interface Iterator<T> {
     func reverse() -> Iterator<T>
     func sorted() -> Iterator<T>
     func unique() -> Iterator<T>
+    func chunks(size: i64) -> Iterator<[T]>
+    func windows(size: i64) -> Iterator<[T]>
 
     external("std:intrinsics") {
         func "iter_next" as next() -> T | Done
@@ -69,6 +71,8 @@ interface Iterator<T> {
         func "iter_reverse" as reverse() -> Iterator<T>
         func "iter_sorted" as sorted() -> Iterator<T>
         func "iter_unique" as unique() -> Iterator<T>
+        func "iter_chunks" as chunks(size: i64) -> Iterator<[T]>
+        func "iter_windows" as windows(size: i64) -> Iterator<[T]>
     }
 }
 

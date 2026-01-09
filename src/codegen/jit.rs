@@ -284,6 +284,30 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
         self.import_function("vole_unique_iter_next", &sig);
 
+        // vole_chunks_iter(source: *mut UnifiedIterator, chunk_size: i64) -> *mut ChunksIterator
+        let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
+        self.import_function("vole_chunks_iter", &sig);
+
+        // vole_chunks_iter_next(iter: *mut ChunksIterator, out_value: *mut i64) -> i64
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
+        self.import_function("vole_chunks_iter_next", &sig);
+
+        // vole_chunks_iter_collect(iter: *mut ChunksIterator) -> *mut RcArray
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_chunks_iter_collect", &sig);
+
+        // vole_windows_iter(source: *mut UnifiedIterator, window_size: i64) -> *mut WindowsIterator
+        let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
+        self.import_function("vole_windows_iter", &sig);
+
+        // vole_windows_iter_next(iter: *mut WindowsIterator, out_value: *mut i64) -> i64
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
+        self.import_function("vole_windows_iter_next", &sig);
+
+        // vole_windows_iter_collect(iter: *mut WindowsIterator) -> *mut RcArray
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_windows_iter_collect", &sig);
+
         // vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64)
         let sig = self.create_signature(&[ptr_ty, types::I64, types::I64, types::I64], None);
         self.import_function("vole_array_set", &sig);
@@ -580,6 +604,30 @@ impl JitContext {
         builder.symbol(
             "vole_unique_iter_next",
             crate::runtime::iterator::vole_unique_iter_next as *const u8,
+        );
+        builder.symbol(
+            "vole_chunks_iter",
+            crate::runtime::iterator::vole_chunks_iter as *const u8,
+        );
+        builder.symbol(
+            "vole_chunks_iter_next",
+            crate::runtime::iterator::vole_chunks_iter_next as *const u8,
+        );
+        builder.symbol(
+            "vole_chunks_iter_collect",
+            crate::runtime::iterator::vole_chunks_iter_collect as *const u8,
+        );
+        builder.symbol(
+            "vole_windows_iter",
+            crate::runtime::iterator::vole_windows_iter as *const u8,
+        );
+        builder.symbol(
+            "vole_windows_iter_next",
+            crate::runtime::iterator::vole_windows_iter_next as *const u8,
+        );
+        builder.symbol(
+            "vole_windows_iter_collect",
+            crate::runtime::iterator::vole_windows_iter_collect as *const u8,
         );
         builder.symbol(
             "vole_array_set",

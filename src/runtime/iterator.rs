@@ -20,9 +20,11 @@ pub enum IteratorKind {
     Flatten = 6,
     FlatMap = 7,
     Unique = 8,
+    Chunks = 9,
+    Windows = 10,
 }
 
-/// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, or unique iterator
+/// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, unique, chunks, or windows iterator
 /// This allows chaining (e.g., arr.iter().map(f).filter(p).take(5))
 #[repr(C)]
 pub union IteratorSource {
@@ -35,6 +37,8 @@ pub union IteratorSource {
     pub flatten: FlattenSource,
     pub flat_map: FlatMapSource,
     pub unique: UniqueSource,
+    pub chunks: ChunksSource,
+    pub windows: WindowsSource,
 }
 
 /// Source data for array iteration
@@ -133,6 +137,30 @@ pub struct UniqueSource {
     pub has_prev: i64,
 }
 
+/// Source data for chunks iteration (yields non-overlapping chunks as arrays)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ChunksSource {
+    /// Collected elements array
+    pub elements: *mut RcArray,
+    /// Chunk size
+    pub chunk_size: i64,
+    /// Current position in the elements array
+    pub position: i64,
+}
+
+/// Source data for windows iteration (yields overlapping windows as arrays)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct WindowsSource {
+    /// Collected elements array
+    pub elements: *mut RcArray,
+    /// Window size
+    pub window_size: i64,
+    /// Current position in the elements array
+    pub position: i64,
+}
+
 /// Unified iterator structure
 /// The kind field tells us which variant is active
 #[repr(C)]
@@ -151,6 +179,8 @@ pub type ChainIterator = UnifiedIterator;
 pub type FlattenIterator = UnifiedIterator;
 pub type FlatMapIterator = UnifiedIterator;
 pub type UniqueIterator = UnifiedIterator;
+pub type ChunksIterator = UnifiedIterator;
+pub type WindowsIterator = UnifiedIterator;
 
 /// Create a new array iterator
 /// Returns pointer to heap-allocated iterator
@@ -248,6 +278,20 @@ pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
                 let source = iter_ref.source.unique.source;
                 vole_array_iter_free(source);
             }
+            IteratorKind::Chunks => {
+                // Free the collected elements array
+                let elements = iter_ref.source.chunks.elements;
+                if !elements.is_null() {
+                    RcArray::dec_ref(elements);
+                }
+            }
+            IteratorKind::Windows => {
+                // Free the collected elements array
+                let elements = iter_ref.source.windows.elements;
+                if !elements.is_null() {
+                    RcArray::dec_ref(elements);
+                }
+            }
         }
 
         // Free this iterator
@@ -313,6 +357,14 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
         IteratorKind::Unique => {
             // For unique iterators, delegate to unique_next logic
             vole_unique_iter_next(iter, out_value)
+        }
+        IteratorKind::Chunks => {
+            // For chunks iterators, delegate to chunks_next logic
+            vole_chunks_iter_next(iter, out_value)
+        }
+        IteratorKind::Windows => {
+            // For windows iterators, delegate to windows_next logic
+            vole_windows_iter_next(iter, out_value)
         }
     }
 }
@@ -1730,4 +1782,290 @@ pub extern "C" fn vole_unique_iter_next(iter: *mut UnifiedIterator, out_value: *
         }
         // Otherwise, skip this duplicate and continue
     }
+}
+
+// =============================================================================
+// ChunksIterator - splits into non-overlapping chunks
+// =============================================================================
+
+/// Create a new chunks iterator wrapping any source iterator
+/// First collects all elements, then yields non-overlapping chunks of the specified size.
+/// The last chunk may be smaller than the specified size.
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_chunks_iter(
+    source: *mut UnifiedIterator,
+    chunk_size: i64,
+) -> *mut UnifiedIterator {
+    use crate::runtime::value::TaggedValue;
+
+    // First, collect all elements from the source iterator
+    let elements = RcArray::new();
+
+    if !source.is_null() && chunk_size > 0 {
+        loop {
+            let mut value: i64 = 0;
+            let has_value = vole_array_iter_next(source, &mut value);
+            if has_value == 0 {
+                break;
+            }
+            unsafe {
+                RcArray::push(
+                    elements,
+                    TaggedValue {
+                        tag: 0,
+                        value: value as u64,
+                    },
+                );
+            }
+        }
+        // Free the source iterator
+        vole_array_iter_free(source);
+    } else if !source.is_null() {
+        // Free the source even if chunk_size <= 0
+        vole_array_iter_free(source);
+    }
+
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Chunks,
+        source: IteratorSource {
+            chunks: ChunksSource {
+                elements,
+                chunk_size: if chunk_size > 0 { chunk_size } else { 1 },
+                position: 0,
+            },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next chunk from chunks iterator
+/// Returns 1 and stores array pointer in out_value if available
+/// Returns 0 if iterator exhausted (Done)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_chunks_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    use crate::runtime::value::TaggedValue;
+
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    if iter_ref.kind != IteratorKind::Chunks {
+        return 0;
+    }
+
+    let chunks_src = unsafe { &mut iter_ref.source.chunks };
+
+    let elements_len = unsafe { (*chunks_src.elements).len } as i64;
+
+    // Check if we've exhausted all elements
+    if chunks_src.position >= elements_len {
+        return 0;
+    }
+
+    // Create a new array for this chunk
+    let chunk = RcArray::new();
+    let end_pos = std::cmp::min(chunks_src.position + chunks_src.chunk_size, elements_len);
+
+    for i in chunks_src.position..end_pos {
+        let value = unsafe {
+            let data = (*chunks_src.elements).data;
+            (*data.add(i as usize)).value
+        };
+        unsafe {
+            RcArray::push(chunk, TaggedValue { tag: 0, value });
+        }
+    }
+
+    chunks_src.position = end_pos;
+
+    unsafe { *out_value = chunk as i64 };
+    1
+}
+
+/// Collect all remaining chunks into a new array of arrays
+/// Returns pointer to newly allocated array
+/// Frees the iterator after collecting.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_chunks_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
+    use crate::runtime::value::TaggedValue;
+
+    let result = RcArray::new();
+
+    if iter.is_null() {
+        return result;
+    }
+
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_chunks_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+
+        // Push chunk array to result
+        unsafe {
+            RcArray::push(
+                result,
+                TaggedValue {
+                    tag: 0, // Arrays are stored as pointers
+                    value: value as u64,
+                },
+            );
+        }
+    }
+
+    // Free the iterator
+    vole_array_iter_free(iter);
+
+    result
+}
+
+// =============================================================================
+// WindowsIterator - sliding window of elements
+// =============================================================================
+
+/// Create a new windows iterator wrapping any source iterator
+/// First collects all elements, then yields overlapping windows of the specified size.
+/// Yields nothing if there are fewer elements than window_size.
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_windows_iter(
+    source: *mut UnifiedIterator,
+    window_size: i64,
+) -> *mut UnifiedIterator {
+    use crate::runtime::value::TaggedValue;
+
+    // First, collect all elements from the source iterator
+    let elements = RcArray::new();
+
+    if !source.is_null() && window_size > 0 {
+        loop {
+            let mut value: i64 = 0;
+            let has_value = vole_array_iter_next(source, &mut value);
+            if has_value == 0 {
+                break;
+            }
+            unsafe {
+                RcArray::push(
+                    elements,
+                    TaggedValue {
+                        tag: 0,
+                        value: value as u64,
+                    },
+                );
+            }
+        }
+        // Free the source iterator
+        vole_array_iter_free(source);
+    } else if !source.is_null() {
+        // Free the source even if window_size <= 0
+        vole_array_iter_free(source);
+    }
+
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Windows,
+        source: IteratorSource {
+            windows: WindowsSource {
+                elements,
+                window_size: if window_size > 0 { window_size } else { 1 },
+                position: 0,
+            },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next window from windows iterator
+/// Returns 1 and stores array pointer in out_value if available
+/// Returns 0 if iterator exhausted (Done)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_windows_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    use crate::runtime::value::TaggedValue;
+
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    if iter_ref.kind != IteratorKind::Windows {
+        return 0;
+    }
+
+    let windows_src = unsafe { &mut iter_ref.source.windows };
+
+    let elements_len = unsafe { (*windows_src.elements).len } as i64;
+
+    // Check if we can produce another window
+    // We need at least window_size elements starting from position
+    if windows_src.position + windows_src.window_size > elements_len {
+        return 0;
+    }
+
+    // Create a new array for this window
+    let window = RcArray::new();
+    for i in 0..windows_src.window_size {
+        let value = unsafe {
+            let data = (*windows_src.elements).data;
+            (*data.add((windows_src.position + i) as usize)).value
+        };
+        unsafe {
+            RcArray::push(window, TaggedValue { tag: 0, value });
+        }
+    }
+
+    // Move position forward by 1 for sliding window
+    windows_src.position += 1;
+
+    unsafe { *out_value = window as i64 };
+    1
+}
+
+/// Collect all remaining windows into a new array of arrays
+/// Returns pointer to newly allocated array
+/// Frees the iterator after collecting.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_windows_iter_collect(iter: *mut UnifiedIterator) -> *mut RcArray {
+    use crate::runtime::value::TaggedValue;
+
+    let result = RcArray::new();
+
+    if iter.is_null() {
+        return result;
+    }
+
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_windows_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+
+        // Push window array to result
+        unsafe {
+            RcArray::push(
+                result,
+                TaggedValue {
+                    tag: 0, // Arrays are stored as pointers
+                    value: value as u64,
+                },
+            );
+        }
+    }
+
+    // Free the iterator
+    vole_array_iter_free(iter);
+
+    result
 }
