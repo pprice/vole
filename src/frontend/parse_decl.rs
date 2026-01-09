@@ -263,24 +263,16 @@ impl<'src> Parser<'src> {
 
         let mut fields = Vec::new();
         let mut methods = Vec::new();
-        let mut external = None;
+        let mut external_blocks = Vec::new();
 
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
             // Check for 'default' keyword prefix
             let is_default = self.match_token(TokenType::KwDefault);
 
             if self.check(TokenType::KwExternal) {
-                if external.is_some() {
-                    return Err(ParseError::new(
-                        ParserError::DuplicateExternalBlock {
-                            span: self.current.span.into(),
-                        },
-                        self.current.span,
-                    ));
-                }
                 let mut block = self.parse_external_block()?;
                 block.is_default = is_default;
-                external = Some(block);
+                external_blocks.push(block);
             } else if self.check(TokenType::KwFunc) {
                 methods.push(self.interface_method(is_default)?);
             } else if is_default {
@@ -333,7 +325,7 @@ impl<'src> Parser<'src> {
             type_params,
             extends,
             fields,
-            external,
+            external_blocks,
             methods,
             span,
         }))

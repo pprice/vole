@@ -314,16 +314,12 @@ impl Analyzer {
             .collect();
 
         // Collect method names with default external bindings (from `default external` blocks)
-        let default_external_methods: HashSet<Symbol> =
-            if let Some(external) = &interface_decl.external {
-                if external.is_default {
-                    external.functions.iter().map(|f| f.vole_name).collect()
-                } else {
-                    HashSet::new()
-                }
-            } else {
-                HashSet::new()
-            };
+        let default_external_methods: HashSet<Symbol> = interface_decl
+            .external_blocks
+            .iter()
+            .filter(|ext| ext.is_default)
+            .flat_map(|ext| ext.functions.iter().map(|f| f.vole_name))
+            .collect();
 
         // Collect errors for methods with bodies that aren't marked as default
         let body_without_default_errors: Vec<_> = interface_decl
@@ -380,7 +376,7 @@ impl Analyzer {
         }
 
         let mut external_methods: HashMap<String, ExternalMethodInfo> = HashMap::new();
-        if let Some(external) = &interface_decl.external {
+        for external in &interface_decl.external_blocks {
             for func in &external.functions {
                 if !methods.iter().any(|method| method.name == func.vole_name) {
                     let ty = interner.resolve(interface_decl.name).to_string();

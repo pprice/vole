@@ -1,0 +1,36 @@
+// Test multiple external blocks in interfaces
+// This allows separating required externals from default externals
+
+interface Converter {
+    // Abstract method - must be implemented
+    func convert(value: i64) -> string
+
+    // Required external binding - built-in types must provide this
+    external("std:intrinsics") {
+        func "int_to_string" as convert(value: i64) -> string
+    }
+
+    // Default external binding - optional for implementors
+    func format(value: i64) -> string
+
+    default external("std:intrinsics") {
+        func "int_to_string" as format(value: i64) -> string
+    }
+}
+
+// Custom implementation only needs to implement the abstract method
+// since format has a default external binding
+record CustomConverter implements Converter {
+    prefix: string,
+
+    func convert(value: i64) -> string {
+        return self.prefix
+    }
+}
+
+tests "multiple external blocks" {
+    test "interface with multiple external blocks parses correctly" {
+        let c = CustomConverter { prefix: "value: " }
+        assert(c.convert(42) == "value: ")
+    }
+}

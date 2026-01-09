@@ -1277,7 +1277,7 @@ fn print_interface_decl<'a>(
             .append(arena.intersperse(extend_names, arena.text(", ")))
     };
 
-    if iface.fields.is_empty() && iface.external.is_none() && iface.methods.is_empty() {
+    if iface.fields.is_empty() && iface.external_blocks.is_empty() && iface.methods.is_empty() {
         return arena
             .text("interface ")
             .append(arena.text(name))
@@ -1298,8 +1298,8 @@ fn print_interface_decl<'a>(
         sections.push(arena.intersperse(field_docs, arena.hardline()));
     }
 
-    // External section
-    if let Some(ext) = &iface.external {
+    // External sections
+    for ext in &iface.external_blocks {
         sections.push(print_external_block(arena, ext, interner));
     }
 

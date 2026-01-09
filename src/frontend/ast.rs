@@ -122,9 +122,9 @@ pub struct RecordDecl {
 pub struct InterfaceDecl {
     pub name: Symbol,
     pub type_params: Vec<TypeParam>,
-    pub extends: Vec<Symbol>,            // Parent interfaces
-    pub fields: Vec<FieldDef>,           // Required fields
-    pub external: Option<ExternalBlock>, // External methods from native code
+    pub extends: Vec<Symbol>,                // Parent interfaces
+    pub fields: Vec<FieldDef>,               // Required fields
+    pub external_blocks: Vec<ExternalBlock>, // External methods from native code (multiple allowed)
     pub methods: Vec<InterfaceMethod>,
     pub span: Span,
 }
