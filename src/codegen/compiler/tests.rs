@@ -29,6 +29,7 @@ fn compile_and_run(source: &str) -> i64 {
         generic_functions: HashMap::new(),
         monomorph_cache: MonomorphCache::new(),
         generic_calls: HashMap::new(),
+        external_func_info: HashMap::new(),
         name_table: NameTable::new(),
         type_table: TypeTable::new(),
         well_known: WellKnownTypes::new(),

@@ -43,6 +43,8 @@ pub struct AnalyzedProgram {
     pub monomorph_cache: MonomorphCache,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
     pub generic_calls: HashMap<NodeId, MonomorphKey>,
+    /// External function info by string name (module path and native name) for prelude functions
+    pub external_func_info: HashMap<String, crate::sema::implement_registry::ExternalMethodInfo>,
     /// Qualified name interner for printable identities
     pub name_table: NameTable,
     /// Opaque type identities for named types
@@ -170,6 +172,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         generic_functions,
         monomorph_cache,
         generic_calls,
+        external_func_info,
         name_table,
         type_table,
         well_known,
@@ -189,6 +192,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         generic_functions,
         monomorph_cache,
         generic_calls,
+        external_func_info,
         name_table,
         type_table,
         well_known,
@@ -377,6 +381,7 @@ pub fn run_captured<W: Write + Send + 'static>(
         generic_functions,
         monomorph_cache,
         generic_calls,
+        external_func_info,
         name_table,
         type_table,
         well_known,
@@ -397,6 +402,7 @@ pub fn run_captured<W: Write + Send + 'static>(
         generic_functions,
         monomorph_cache,
         generic_calls,
+        external_func_info,
         name_table,
         type_table,
         well_known,

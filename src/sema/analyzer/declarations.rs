@@ -32,8 +32,9 @@ impl Analyzer {
                 Decl::Error(decl) => {
                     self.analyze_error_decl(decl, interner);
                 }
-                Decl::External(_) => {
-                    // External blocks are processed during code generation
+                Decl::External(ext_block) => {
+                    // Register external functions as top-level functions
+                    self.collect_external_block(ext_block, interner);
                 }
             }
         }
@@ -511,6 +512,46 @@ impl Analyzer {
                     interner,
                 );
             }
+        }
+    }
+
+    /// Register external block functions as top-level functions
+    /// This is called for standalone external blocks (not inside implement blocks)
+    fn collect_external_block(&mut self, ext_block: &ExternalBlock, interner: &Interner) {
+        for func in &ext_block.functions {
+            let params: Vec<Type> = func
+                .params
+                .iter()
+                .map(|p| self.resolve_type(&p.ty, interner))
+                .collect();
+            let return_type = func
+                .return_type
+                .as_ref()
+                .map(|t| self.resolve_type(t, interner))
+                .unwrap_or(Type::Void);
+
+            let func_type = FunctionType {
+                params,
+                return_type: Box::new(return_type),
+                is_closure: false,
+            };
+
+            // Register the function with its Vole name (Symbol)
+            self.functions.insert(func.vole_name, func_type.clone());
+
+            // Also register by string name for cross-interner lookups (prelude functions)
+            let name_str = interner.resolve(func.vole_name).to_string();
+            self.functions_by_name.insert(name_str.clone(), func_type);
+
+            // Store the external info (module path and native name) for codegen
+            let native_name = func.native_name.clone().unwrap_or_else(|| name_str.clone());
+            self.external_func_info.insert(
+                name_str,
+                ExternalMethodInfo {
+                    module_path: ext_block.module_path.clone(),
+                    native_name,
+                },
+            );
         }
     }
 }

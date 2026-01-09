@@ -22,9 +22,13 @@ pub enum IteratorKind {
     Unique = 8,
     Chunks = 9,
     Windows = 10,
+    Repeat = 11,
+    Once = 12,
+    Empty = 13,
+    FromFn = 14,
 }
 
-/// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, unique, chunks, or windows iterator
+/// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, unique, chunks, windows, repeat, once, empty, or from_fn iterator
 /// This allows chaining (e.g., arr.iter().map(f).filter(p).take(5))
 #[repr(C)]
 pub union IteratorSource {
@@ -39,6 +43,10 @@ pub union IteratorSource {
     pub unique: UniqueSource,
     pub chunks: ChunksSource,
     pub windows: WindowsSource,
+    pub repeat: RepeatSource,
+    pub once: OnceSource,
+    pub empty: EmptySource,
+    pub from_fn: FromFnSource,
 }
 
 /// Source data for array iteration
@@ -161,6 +169,40 @@ pub struct WindowsSource {
     pub position: i64,
 }
 
+/// Source data for repeat iteration (infinite iterator yielding the same value)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RepeatSource {
+    /// The value to repeat
+    pub value: i64,
+}
+
+/// Source data for once iteration (yields a single value)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct OnceSource {
+    /// The value to yield
+    pub value: i64,
+    /// Whether the value has been yielded (0 = no, 1 = yes)
+    pub exhausted: i64,
+}
+
+/// Source data for empty iteration (yields nothing)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct EmptySource {
+    /// Placeholder field (empty struct would have zero size)
+    pub _placeholder: i64,
+}
+
+/// Source data for from_fn iteration (calls a generator function repeatedly)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FromFnSource {
+    /// Generator closure that returns T? (nil to end iteration)
+    pub generator: *const Closure,
+}
+
 /// Unified iterator structure
 /// The kind field tells us which variant is active
 #[repr(C)]
@@ -181,6 +223,10 @@ pub type FlatMapIterator = UnifiedIterator;
 pub type UniqueIterator = UnifiedIterator;
 pub type ChunksIterator = UnifiedIterator;
 pub type WindowsIterator = UnifiedIterator;
+pub type RepeatIterator = UnifiedIterator;
+pub type OnceIterator = UnifiedIterator;
+pub type EmptyIterator = UnifiedIterator;
+pub type FromFnIterator = UnifiedIterator;
 
 /// Create a new array iterator
 /// Returns pointer to heap-allocated iterator
@@ -292,6 +338,18 @@ pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
                     RcArray::dec_ref(elements);
                 }
             }
+            IteratorKind::Repeat => {
+                // No resources to free - just the value
+            }
+            IteratorKind::Once => {
+                // No resources to free - just the value and flag
+            }
+            IteratorKind::Empty => {
+                // No resources to free
+            }
+            IteratorKind::FromFn => {
+                // Note: we don't free the generator closure - it's owned by calling context
+            }
         }
 
         // Free this iterator
@@ -365,6 +423,22 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
         IteratorKind::Windows => {
             // For windows iterators, delegate to windows_next logic
             vole_windows_iter_next(iter, out_value)
+        }
+        IteratorKind::Repeat => {
+            // For repeat iterators, delegate to repeat_next logic
+            vole_repeat_iter_next(iter, out_value)
+        }
+        IteratorKind::Once => {
+            // For once iterators, delegate to once_next logic
+            vole_once_iter_next(iter, out_value)
+        }
+        IteratorKind::Empty => {
+            // Empty iterator always returns Done
+            0
+        }
+        IteratorKind::FromFn => {
+            // For from_fn iterators, delegate to from_fn_next logic
+            vole_from_fn_iter_next(iter, out_value)
         }
     }
 }
@@ -2068,4 +2142,178 @@ pub extern "C" fn vole_windows_iter_collect(iter: *mut UnifiedIterator) -> *mut 
     vole_array_iter_free(iter);
 
     result
+}
+
+// =============================================================================
+// RepeatIterator - infinite iterator yielding the same value
+// =============================================================================
+
+/// Create a new repeat iterator that yields the same value forever
+/// WARNING: This is an infinite iterator - MUST use with take() or similar
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_repeat_iter(value: i64) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Repeat,
+        source: IteratorSource {
+            repeat: RepeatSource { value },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next value from repeat iterator
+/// Always returns 1 with the same value (infinite iterator)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_repeat_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &*iter };
+
+    if iter_ref.kind != IteratorKind::Repeat {
+        return 0;
+    }
+
+    let repeat_src = unsafe { iter_ref.source.repeat };
+    unsafe { *out_value = repeat_src.value };
+    1 // Always has a value (infinite iterator)
+}
+
+// =============================================================================
+// OnceIterator - iterator that yields a single value
+// =============================================================================
+
+/// Create a new once iterator that yields exactly one value
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_once_iter(value: i64) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Once,
+        source: IteratorSource {
+            once: OnceSource {
+                value,
+                exhausted: 0,
+            },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next value from once iterator
+/// Returns 1 with the value on first call, 0 on subsequent calls
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_once_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    if iter_ref.kind != IteratorKind::Once {
+        return 0;
+    }
+
+    let once_src = unsafe { &mut iter_ref.source.once };
+
+    if once_src.exhausted != 0 {
+        return 0; // Already yielded the value
+    }
+
+    once_src.exhausted = 1;
+    unsafe { *out_value = once_src.value };
+    1 // Has value
+}
+
+// =============================================================================
+// EmptyIterator - iterator that yields nothing
+// =============================================================================
+
+/// Create a new empty iterator that yields nothing
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_empty_iter() -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Empty,
+        source: IteratorSource {
+            empty: EmptySource { _placeholder: 0 },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+// Note: Empty iterator next is handled inline in vole_array_iter_next
+// as it always returns 0 immediately
+
+// =============================================================================
+// FromFnIterator - iterator from a generator function
+// =============================================================================
+
+/// Create a new from_fn iterator that calls a generator function repeatedly
+/// The generator should return T? - when it returns nil, iteration ends
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_from_fn_iter(generator: *const Closure) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::FromFn,
+        source: IteratorSource {
+            from_fn: FromFnSource { generator },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next value from from_fn iterator
+/// Calls the generator function - returns 1 with value if not nil, 0 if nil
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_from_fn_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &*iter };
+
+    if iter_ref.kind != IteratorKind::FromFn {
+        return 0;
+    }
+
+    let from_fn_src = unsafe { iter_ref.source.from_fn };
+
+    // Call the generator function
+    // The generator returns T? which is a tagged union with layout [tag:1][pad:7][payload:8]
+    // Tag 0 = I64 (value present), Tag 1 = Nil
+    unsafe {
+        let func_ptr = Closure::get_func(from_fn_src.generator);
+        let generator_fn: extern "C" fn(*const Closure) -> *mut u8 = std::mem::transmute(func_ptr);
+        let result_ptr = generator_fn(from_fn_src.generator);
+
+        if result_ptr.is_null() {
+            return 0;
+        }
+
+        // Read the tag
+        let tag = std::ptr::read(result_ptr);
+        let payload_ptr = result_ptr.add(8) as *const i64;
+        let payload = std::ptr::read(payload_ptr);
+
+        // Free the result (it was allocated by the generator)
+        let layout = Layout::from_size_align(16, 8).expect("valid layout");
+        std::alloc::dealloc(result_ptr, layout);
+
+        // Tag 0 = I64 (value), Tag 1 = Nil
+        if tag == 0 {
+            *out_value = payload;
+            1 // Has value
+        } else {
+            0 // Nil - end iteration
+        }
+    }
 }

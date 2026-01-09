@@ -1,0 +1,177 @@
+// Iterator factory function tests
+
+tests "iterator factories" {
+    // =========================================================================
+    // repeat() tests - infinite iterator yielding the same value
+    // =========================================================================
+
+    test "repeat with take" {
+        let result = repeat(42).take(3).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 42)
+        assert(result[1] == 42)
+        assert(result[2] == 42)
+    }
+
+    test "repeat with take zero" {
+        let result = repeat(100).take(0).collect()
+        assert(result.length() == 0)
+    }
+
+    test "repeat with map and take" {
+        let result = repeat(5).map((x) => x * 2).take(3).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 10)
+        assert(result[1] == 10)
+        assert(result[2] == 10)
+    }
+
+    test "repeat with filter and take" {
+        // Filter always passes (value is always 42), take 2
+        let result = repeat(42).filter((x) => x > 0).take(2).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 42)
+        assert(result[1] == 42)
+    }
+
+    test "repeat sum with take" {
+        let result = repeat(10).take(5).sum()
+        assert(result == 50)
+    }
+
+    test "repeat count with take" {
+        let result = repeat(1).take(100).count()
+        assert(result == 100)
+    }
+
+    // =========================================================================
+    // once() tests - iterator that yields a single value
+    // =========================================================================
+
+    test "once collect" {
+        let result = once(42).collect()
+        assert(result.length() == 1)
+        assert(result[0] == 42)
+    }
+
+    test "once with map" {
+        let result = once(10).map((x) => x * 3).collect()
+        assert(result.length() == 1)
+        assert(result[0] == 30)
+    }
+
+    test "once with filter pass" {
+        let result = once(42).filter((x) => x > 0).collect()
+        assert(result.length() == 1)
+        assert(result[0] == 42)
+    }
+
+    test "once with filter fail" {
+        let result = once(42).filter((x) => x < 0).collect()
+        assert(result.length() == 0)
+    }
+
+    test "once sum" {
+        let result = once(100).sum()
+        assert(result == 100)
+    }
+
+    test "once count" {
+        let result = once(999).count()
+        assert(result == 1)
+    }
+
+    test "once first" {
+        let result = once(42).first()
+        assert(result != nil)
+        assert((result ?? 0) == 42)
+    }
+
+    test "once chain with once" {
+        let result = once(1).chain(once(2)).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 1)
+        assert(result[1] == 2)
+    }
+
+    // =========================================================================
+    // empty() tests - iterator that yields nothing
+    // =========================================================================
+
+    test "empty collect" {
+        let result = empty().collect()
+        assert(result.length() == 0)
+    }
+
+    test "empty count" {
+        let result = empty().count()
+        assert(result == 0)
+    }
+
+    test "empty sum" {
+        let result = empty().sum()
+        assert(result == 0)
+    }
+
+    test "empty with map" {
+        let result = empty().map((x) => x * 2).collect()
+        assert(result.length() == 0)
+    }
+
+    test "empty with filter" {
+        let result = empty().filter((x) => x > 0).collect()
+        assert(result.length() == 0)
+    }
+
+    test "empty chain with array" {
+        let arr = [1, 2, 3]
+        let result = empty().chain(arr.iter()).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 1)
+    }
+
+    test "array chain with empty" {
+        let arr = [1, 2, 3]
+        let result = arr.iter().chain(empty()).collect()
+        assert(result.length() == 3)
+        assert(result[2] == 3)
+    }
+
+    test "empty first returns nil" {
+        let result = empty().first()
+        assert(result == nil)
+    }
+
+    // =========================================================================
+    // from_fn() tests - iterator from a generator function
+    // Note: from_fn requires closures returning T? which involves complex
+    // runtime calling conventions. This feature is deferred for now.
+    // =========================================================================
+
+    // TODO: from_fn tests require closure calling convention support
+    // test "from_fn simple counter" { ... }
+
+    // =========================================================================
+    // Combined factory tests
+    // =========================================================================
+
+    test "chain repeat and once" {
+        let result = repeat(1).take(2).chain(once(99)).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 1)
+        assert(result[1] == 1)
+        assert(result[2] == 99)
+    }
+
+    test "chain once and empty" {
+        let result = once(42).chain(empty()).collect()
+        assert(result.length() == 1)
+        assert(result[0] == 42)
+    }
+
+    test "chain empty and once" {
+        let result = empty().chain(once(42)).collect()
+        assert(result.length() == 1)
+        assert(result[0] == 42)
+    }
+}

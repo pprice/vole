@@ -308,6 +308,35 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_windows_iter_collect", &sig);
 
+        // Iterator factory functions
+        // vole_repeat_iter(value: i64) -> *mut RepeatIterator
+        let sig = self.create_signature(&[types::I64], Some(ptr_ty));
+        self.import_function("vole_repeat_iter", &sig);
+
+        // vole_repeat_iter_next(iter: *mut RepeatIterator, out_value: *mut i64) -> i64
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
+        self.import_function("vole_repeat_iter_next", &sig);
+
+        // vole_once_iter(value: i64) -> *mut OnceIterator
+        let sig = self.create_signature(&[types::I64], Some(ptr_ty));
+        self.import_function("vole_once_iter", &sig);
+
+        // vole_once_iter_next(iter: *mut OnceIterator, out_value: *mut i64) -> i64
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
+        self.import_function("vole_once_iter_next", &sig);
+
+        // vole_empty_iter() -> *mut EmptyIterator
+        let sig = self.create_signature(&[], Some(ptr_ty));
+        self.import_function("vole_empty_iter", &sig);
+
+        // vole_from_fn_iter(generator: *const Closure) -> *mut FromFnIterator
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_from_fn_iter", &sig);
+
+        // vole_from_fn_iter_next(iter: *mut FromFnIterator, out_value: *mut i64) -> i64
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
+        self.import_function("vole_from_fn_iter_next", &sig);
+
         // vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64)
         let sig = self.create_signature(&[ptr_ty, types::I64, types::I64, types::I64], None);
         self.import_function("vole_array_set", &sig);
@@ -629,6 +658,37 @@ impl JitContext {
             "vole_windows_iter_collect",
             crate::runtime::iterator::vole_windows_iter_collect as *const u8,
         );
+
+        // Iterator factory functions
+        builder.symbol(
+            "vole_repeat_iter",
+            crate::runtime::iterator::vole_repeat_iter as *const u8,
+        );
+        builder.symbol(
+            "vole_repeat_iter_next",
+            crate::runtime::iterator::vole_repeat_iter_next as *const u8,
+        );
+        builder.symbol(
+            "vole_once_iter",
+            crate::runtime::iterator::vole_once_iter as *const u8,
+        );
+        builder.symbol(
+            "vole_once_iter_next",
+            crate::runtime::iterator::vole_once_iter_next as *const u8,
+        );
+        builder.symbol(
+            "vole_empty_iter",
+            crate::runtime::iterator::vole_empty_iter as *const u8,
+        );
+        builder.symbol(
+            "vole_from_fn_iter",
+            crate::runtime::iterator::vole_from_fn_iter as *const u8,
+        );
+        builder.symbol(
+            "vole_from_fn_iter_next",
+            crate::runtime::iterator::vole_from_fn_iter_next as *const u8,
+        );
+
         builder.symbol(
             "vole_array_set",
             crate::runtime::builtins::vole_array_set as *const u8,

@@ -378,7 +378,66 @@ impl Cg<'_, '_, '_> {
             return Err(CodegenError::not_found("function", callee_name).into());
         }
 
-        // No module context - just fail
+        // No module context - try prelude external functions
+        // Look up the external info (module path and native name) from analyzed data
+        let ext_info = self.ctx.analyzed.external_func_info.get(callee_name);
+        let native_func = ext_info.and_then(|info| {
+            self.ctx
+                .native_registry
+                .lookup(&info.module_path, &info.native_name)
+        });
+        if let Some(native_func) = native_func {
+            // Compile arguments first
+            let mut args = Vec::new();
+            for arg in &call.args {
+                let compiled = self.expr(arg)?;
+                args.push(compiled.value);
+            }
+
+            // Build the Cranelift signature from NativeSignature
+            let mut sig = self.ctx.module.make_signature();
+            for param_type in &native_func.signature.params {
+                sig.params.push(AbiParam::new(native_type_to_cranelift(
+                    param_type,
+                    self.ctx.pointer_type,
+                )));
+            }
+            if native_func.signature.return_type != NativeType::Nil {
+                sig.returns.push(AbiParam::new(native_type_to_cranelift(
+                    &native_func.signature.return_type,
+                    self.ctx.pointer_type,
+                )));
+            }
+
+            // Import the signature and emit an indirect call
+            let sig_ref = self.builder.import_signature(sig);
+            let func_ptr = native_func.ptr;
+            let func_ptr_val = self
+                .builder
+                .ins()
+                .iconst(self.ctx.pointer_type, func_ptr as i64);
+
+            let call_inst = self
+                .builder
+                .ins()
+                .call_indirect(sig_ref, func_ptr_val, &args);
+            let results = self.builder.inst_results(call_inst);
+
+            if results.is_empty() {
+                return Ok(self.void_value());
+            } else {
+                let vole_type = native_type_to_vole_type(&native_func.signature.return_type);
+                return Ok(CompiledValue {
+                    value: results[0],
+                    ty: native_type_to_cranelift(
+                        &native_func.signature.return_type,
+                        self.ctx.pointer_type,
+                    ),
+                    vole_type,
+                });
+            }
+        }
+
         Err(CodegenError::not_found("function", callee_name).into())
     }
 

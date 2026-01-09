@@ -57,6 +57,10 @@ impl TypeError {
 pub struct Analyzer {
     scope: Scope,
     functions: HashMap<Symbol, FunctionType>,
+    /// Functions registered by string name (for prelude functions that cross interner boundaries)
+    functions_by_name: HashMap<String, FunctionType>,
+    /// External function info by string name (module path and native name)
+    pub external_func_info: HashMap<String, ExternalMethodInfo>,
     globals: HashMap<Symbol, Type>,
     current_function_return: Option<Type>,
     /// Current function's error type (if fallible)
@@ -129,6 +133,8 @@ impl Analyzer {
         let mut analyzer = Self {
             scope: Scope::new(),
             functions: HashMap::new(),
+            functions_by_name: HashMap::new(),
+            external_func_info: HashMap::new(),
             globals: HashMap::new(),
             current_function_return: None,
             current_function_error_type: None,
@@ -308,6 +314,7 @@ impl Analyzer {
             "std:prelude/i32",
             "std:prelude/f64",
             "std:prelude/bool",
+            "std:prelude/iterators",
         ] {
             self.load_prelude_file(path, interner);
         }
@@ -341,6 +348,8 @@ impl Analyzer {
         let mut sub_analyzer = Analyzer {
             scope: Scope::new(),
             functions: HashMap::new(),
+            functions_by_name: HashMap::new(),
+            external_func_info: HashMap::new(),
             globals: HashMap::new(),
             current_function_return: None,
             current_function_error_type: None,
@@ -386,6 +395,15 @@ impl Analyzer {
             // Merge the implement registry
             self.implement_registry
                 .merge(&sub_analyzer.implement_registry);
+            // Merge functions by name (for standalone external function declarations)
+            // We use by_name because the Symbol lookup won't work across interners
+            for (name, func_type) in sub_analyzer.functions_by_name {
+                self.functions_by_name.insert(name, func_type);
+            }
+            // Merge external function info (module path and native name)
+            for (name, info) in sub_analyzer.external_func_info {
+                self.external_func_info.insert(name, info);
+            }
             // Keep name/type tables in sync with prelude interned ids.
             self.name_table = sub_analyzer.name_table;
             self.type_table = sub_analyzer.type_table;
@@ -540,6 +558,7 @@ impl Analyzer {
         HashMap<Symbol, GenericFuncDef>,
         MonomorphCache,
         HashMap<NodeId, MonomorphKey>,
+        HashMap<String, ExternalMethodInfo>,
         NameTable,
         TypeTable,
         WellKnownTypes,
@@ -557,6 +576,7 @@ impl Analyzer {
             self.generic_functions,
             self.monomorph_cache,
             self.generic_calls,
+            self.external_func_info,
             self.name_table,
             self.type_table,
             self.well_known,

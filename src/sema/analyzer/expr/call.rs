@@ -45,7 +45,12 @@ impl Analyzer {
 
         if let ExprKind::Identifier(sym) = &call.callee.kind {
             // First check if it's a top-level function
-            if let Some(func_type) = self.functions.get(sym).cloned() {
+            let func_type = self.functions.get(sym).cloned().or_else(|| {
+                // Check by name for prelude functions (cross-interner lookup)
+                let name = interner.resolve(*sym);
+                self.functions_by_name.get(name).cloned()
+            });
+            if let Some(func_type) = func_type {
                 // Calling a user-defined function - conservatively mark side effects
                 if self.in_lambda() {
                     self.mark_lambda_has_side_effects();

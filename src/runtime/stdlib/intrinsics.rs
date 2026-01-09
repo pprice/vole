@@ -329,6 +329,40 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // Iterator factory functions
+    m.register(
+        "iter_repeat",
+        iterator::vole_repeat_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_once",
+        iterator::vole_once_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_empty",
+        iterator::vole_empty_iter as *const u8,
+        NativeSignature {
+            params: vec![],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_from_fn",
+        iterator::vole_from_fn_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64], // Closure pointer
+            return_type: NativeType::I64,
+        },
+    );
+
     m
 }
 
