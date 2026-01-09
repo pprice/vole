@@ -288,6 +288,30 @@ pub fn module() -> NativeModule {
             return_type: NativeType::I64,
         },
     );
+    m.register(
+        "iter_reverse",
+        iterator::vole_reverse_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_sorted",
+        iterator::vole_sorted_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_unique",
+        iterator::vole_unique_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
 
     m
 }

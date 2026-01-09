@@ -19,9 +19,10 @@ pub enum IteratorKind {
     Chain = 5,
     Flatten = 6,
     FlatMap = 7,
+    Unique = 8,
 }
 
-/// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, or flat_map iterator
+/// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, or unique iterator
 /// This allows chaining (e.g., arr.iter().map(f).filter(p).take(5))
 #[repr(C)]
 pub union IteratorSource {
@@ -33,6 +34,7 @@ pub union IteratorSource {
     pub chain: ChainSource,
     pub flatten: FlattenSource,
     pub flat_map: FlatMapSource,
+    pub unique: UniqueSource,
 }
 
 /// Source data for array iteration
@@ -119,6 +121,18 @@ pub struct FlatMapSource {
     pub inner: *mut UnifiedIterator,
 }
 
+/// Source data for unique iteration (filters consecutive duplicates)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct UniqueSource {
+    /// Pointer to source iterator
+    pub source: *mut UnifiedIterator,
+    /// Previous value (only valid after first element)
+    pub prev: i64,
+    /// Whether we've seen the first element (0 = no, 1 = yes)
+    pub has_prev: i64,
+}
+
 /// Unified iterator structure
 /// The kind field tells us which variant is active
 #[repr(C)]
@@ -136,6 +150,7 @@ pub type SkipIterator = UnifiedIterator;
 pub type ChainIterator = UnifiedIterator;
 pub type FlattenIterator = UnifiedIterator;
 pub type FlatMapIterator = UnifiedIterator;
+pub type UniqueIterator = UnifiedIterator;
 
 /// Create a new array iterator
 /// Returns pointer to heap-allocated iterator
@@ -228,6 +243,11 @@ pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
                     vole_array_iter_free(inner);
                 }
             }
+            IteratorKind::Unique => {
+                // Recursively free the source iterator
+                let source = iter_ref.source.unique.source;
+                vole_array_iter_free(source);
+            }
         }
 
         // Free this iterator
@@ -289,6 +309,10 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
         IteratorKind::FlatMap => {
             // For flat_map iterators, delegate to flat_map_next logic
             vole_flat_map_iter_next(iter, out_value)
+        }
+        IteratorKind::Unique => {
+            // For unique iterators, delegate to unique_next logic
+            vole_unique_iter_next(iter, out_value)
         }
     }
 }
@@ -1540,4 +1564,170 @@ pub extern "C" fn vole_flat_map_iter_collect(iter: *mut UnifiedIterator) -> *mut
     vole_array_iter_free(iter);
 
     result
+}
+
+// =============================================================================
+// Collecting operations: reverse, sorted, unique
+// =============================================================================
+
+/// Reverse iterator - collects all elements, reverses them, returns new array iterator
+/// This is an eager operation that consumes the entire source iterator.
+/// Frees the source iterator after collecting.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_reverse_iter(iter: *mut UnifiedIterator) -> *mut UnifiedIterator {
+    use crate::runtime::value::TaggedValue;
+
+    if iter.is_null() {
+        // Return empty array iterator
+        let empty = RcArray::new();
+        return vole_array_iter(empty);
+    }
+
+    // Collect all values into a vector
+    let mut values: Vec<i64> = Vec::new();
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_array_iter_next(iter, &mut value);
+        if has_value == 0 {
+            break;
+        }
+        values.push(value);
+    }
+
+    // Free the source iterator
+    vole_array_iter_free(iter);
+
+    // Create new array with reversed values
+    let result = RcArray::new();
+    for value in values.into_iter().rev() {
+        unsafe {
+            RcArray::push(
+                result,
+                TaggedValue {
+                    tag: 0,
+                    value: value as u64,
+                },
+            );
+        }
+    }
+
+    // Return iterator over the reversed array
+    vole_array_iter(result)
+}
+
+/// Sorted iterator - collects all elements, sorts them, returns new array iterator
+/// This is an eager operation that consumes the entire source iterator.
+/// Sorts i64 values in ascending order.
+/// Frees the source iterator after collecting.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_sorted_iter(iter: *mut UnifiedIterator) -> *mut UnifiedIterator {
+    use crate::runtime::value::TaggedValue;
+
+    if iter.is_null() {
+        // Return empty array iterator
+        let empty = RcArray::new();
+        return vole_array_iter(empty);
+    }
+
+    // Collect all values into a vector
+    let mut values: Vec<i64> = Vec::new();
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_array_iter_next(iter, &mut value);
+        if has_value == 0 {
+            break;
+        }
+        values.push(value);
+    }
+
+    // Free the source iterator
+    vole_array_iter_free(iter);
+
+    // Sort the values
+    values.sort();
+
+    // Create new array with sorted values
+    let result = RcArray::new();
+    for value in values {
+        unsafe {
+            RcArray::push(
+                result,
+                TaggedValue {
+                    tag: 0,
+                    value: value as u64,
+                },
+            );
+        }
+    }
+
+    // Return iterator over the sorted array
+    vole_array_iter(result)
+}
+
+/// Create a new unique iterator wrapping any source iterator
+/// Filters consecutive duplicates (like Unix uniq)
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_unique_iter(source: *mut UnifiedIterator) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Unique,
+        source: IteratorSource {
+            unique: UniqueSource {
+                source,
+                prev: 0,
+                has_prev: 0,
+            },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next value from unique iterator
+/// Skips consecutive duplicate values
+/// Returns 1 and stores value in out_value if available
+/// Returns 0 if iterator exhausted (Done)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_unique_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    // This function should only be called for Unique iterators
+    if iter_ref.kind != IteratorKind::Unique {
+        return 0;
+    }
+
+    let unique_src = unsafe { &mut iter_ref.source.unique };
+
+    loop {
+        // Get next value from source iterator
+        let mut value: i64 = 0;
+        let has_value = vole_array_iter_next(unique_src.source, &mut value);
+
+        if has_value == 0 {
+            return 0; // Source exhausted
+        }
+
+        // If this is the first element, always yield it
+        if unique_src.has_prev == 0 {
+            unique_src.has_prev = 1;
+            unique_src.prev = value;
+            unsafe { *out_value = value };
+            return 1;
+        }
+
+        // If value differs from previous, yield it
+        if value != unique_src.prev {
+            unique_src.prev = value;
+            unsafe { *out_value = value };
+            return 1;
+        }
+        // Otherwise, skip this duplicate and continue
+    }
 }

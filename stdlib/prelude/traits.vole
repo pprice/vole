@@ -42,6 +42,9 @@ interface Iterator<T> {
     func chain(other: Iterator<T>) -> Iterator<T>
     func flatten() -> Iterator<T>
     func flat_map(f: (T) -> [T]) -> Iterator<T>
+    func reverse() -> Iterator<T>
+    func sorted() -> Iterator<T>
+    func unique() -> Iterator<T>
 
     external("std:intrinsics") {
         func "iter_next" as next() -> T | Done
@@ -63,6 +66,9 @@ interface Iterator<T> {
         func "iter_chain" as chain(other: Iterator<T>) -> Iterator<T>
         func "iter_flatten" as flatten() -> Iterator<T>
         func "iter_flat_map" as flat_map(f: (T) -> [T]) -> Iterator<T>
+        func "iter_reverse" as reverse() -> Iterator<T>
+        func "iter_sorted" as sorted() -> Iterator<T>
+        func "iter_unique" as unique() -> Iterator<T>
     }
 }
 

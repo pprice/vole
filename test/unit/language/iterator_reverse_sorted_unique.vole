@@ -1,0 +1,255 @@
+// Iterator reverse(), sorted(), unique() method tests
+
+tests "iterator reverse, sorted, unique" {
+    // reverse() tests
+
+    test "reverse basic array" {
+        let arr = [1, 2, 3]
+        let rev = arr.iter().reverse().collect()
+        assert(rev.length() == 3)
+        assert(rev[0] == 3)
+        assert(rev[1] == 2)
+        assert(rev[2] == 1)
+    }
+
+    test "reverse empty array" {
+        let arr: [i64] = []
+        let rev = arr.iter().reverse().collect()
+        assert(rev.length() == 0)
+    }
+
+    test "reverse single element" {
+        let arr = [42]
+        let rev = arr.iter().reverse().collect()
+        assert(rev.length() == 1)
+        assert(rev[0] == 42)
+    }
+
+    test "reverse with map" {
+        let arr = [1, 2, 3]
+        let result = arr.iter().map((x) => x * 2).reverse().collect()
+        assert(result.length() == 3)
+        assert(result[0] == 6)  // 3*2 reversed
+        assert(result[1] == 4)  // 2*2 reversed
+        assert(result[2] == 2)  // 1*2 reversed
+    }
+
+    test "reverse with filter" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().filter((x) => x % 2 == 0).reverse().collect()
+        assert(result.length() == 2)
+        assert(result[0] == 4)
+        assert(result[1] == 2)
+    }
+
+    test "reverse then map" {
+        let arr = [1, 2, 3]
+        let result = arr.iter().reverse().map((x) => x * 10).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 30)
+        assert(result[1] == 20)
+        assert(result[2] == 10)
+    }
+
+    test "double reverse" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().reverse().reverse().collect()
+        assert(result.length() == 5)
+        assert(result[0] == 1)
+        assert(result[1] == 2)
+        assert(result[2] == 3)
+        assert(result[3] == 4)
+        assert(result[4] == 5)
+    }
+
+    // sorted() tests
+
+    test "sorted basic array" {
+        let arr = [3, 1, 4, 1, 5, 9, 2, 6]
+        let s = arr.iter().sorted().collect()
+        assert(s.length() == 8)
+        assert(s[0] == 1)
+        assert(s[1] == 1)
+        assert(s[2] == 2)
+        assert(s[3] == 3)
+        assert(s[4] == 4)
+        assert(s[5] == 5)
+        assert(s[6] == 6)
+        assert(s[7] == 9)
+    }
+
+    test "sorted empty array" {
+        let arr: [i64] = []
+        let s = arr.iter().sorted().collect()
+        assert(s.length() == 0)
+    }
+
+    test "sorted single element" {
+        let arr = [42]
+        let s = arr.iter().sorted().collect()
+        assert(s.length() == 1)
+        assert(s[0] == 42)
+    }
+
+    test "sorted already sorted" {
+        let arr = [1, 2, 3, 4, 5]
+        let s = arr.iter().sorted().collect()
+        assert(s.length() == 5)
+        assert(s[0] == 1)
+        assert(s[1] == 2)
+        assert(s[2] == 3)
+        assert(s[3] == 4)
+        assert(s[4] == 5)
+    }
+
+    test "sorted reverse order" {
+        let arr = [5, 4, 3, 2, 1]
+        let s = arr.iter().sorted().collect()
+        assert(s.length() == 5)
+        assert(s[0] == 1)
+        assert(s[1] == 2)
+        assert(s[2] == 3)
+        assert(s[3] == 4)
+        assert(s[4] == 5)
+    }
+
+    test "sorted with negative numbers" {
+        let arr = [3, -1, 4, -2, 0]
+        let s = arr.iter().sorted().collect()
+        assert(s.length() == 5)
+        assert(s[0] == -2)
+        assert(s[1] == -1)
+        assert(s[2] == 0)
+        assert(s[3] == 3)
+        assert(s[4] == 4)
+    }
+
+    test "sorted with map" {
+        let arr = [3, 1, 2]
+        let result = arr.iter().map((x) => x * 10).sorted().collect()
+        assert(result.length() == 3)
+        assert(result[0] == 10)
+        assert(result[1] == 20)
+        assert(result[2] == 30)
+    }
+
+    test "sorted with filter" {
+        let arr = [5, 2, 8, 1, 9, 3]
+        let result = arr.iter().filter((x) => x > 3).sorted().collect()
+        assert(result.length() == 3)
+        assert(result[0] == 5)
+        assert(result[1] == 8)
+        assert(result[2] == 9)
+    }
+
+    test "sorted then take" {
+        let arr = [5, 2, 8, 1, 9, 3]
+        let result = arr.iter().sorted().take(3).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 1)
+        assert(result[1] == 2)
+        assert(result[2] == 3)
+    }
+
+    // unique() tests - filters consecutive duplicates
+
+    test "unique basic" {
+        let arr = [1, 1, 2, 2, 2, 3, 1]
+        let u = arr.iter().unique().collect()
+        assert(u.length() == 4)
+        assert(u[0] == 1)
+        assert(u[1] == 2)
+        assert(u[2] == 3)
+        assert(u[3] == 1)  // not consecutive with first 1
+    }
+
+    test "unique empty array" {
+        let arr: [i64] = []
+        let u = arr.iter().unique().collect()
+        assert(u.length() == 0)
+    }
+
+    test "unique single element" {
+        let arr = [42]
+        let u = arr.iter().unique().collect()
+        assert(u.length() == 1)
+        assert(u[0] == 42)
+    }
+
+    test "unique all same" {
+        let arr = [5, 5, 5, 5, 5]
+        let u = arr.iter().unique().collect()
+        assert(u.length() == 1)
+        assert(u[0] == 5)
+    }
+
+    test "unique all different" {
+        let arr = [1, 2, 3, 4, 5]
+        let u = arr.iter().unique().collect()
+        assert(u.length() == 5)
+        assert(u[0] == 1)
+        assert(u[1] == 2)
+        assert(u[2] == 3)
+        assert(u[3] == 4)
+        assert(u[4] == 5)
+    }
+
+    test "unique with map" {
+        let arr = [1, 1, 2, 2, 3]
+        let result = arr.iter().unique().map((x) => x * 10).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 10)
+        assert(result[1] == 20)
+        assert(result[2] == 30)
+    }
+
+    test "sorted then unique" {
+        let arr = [3, 1, 2, 1, 3, 2]
+        let result = arr.iter().sorted().unique().collect()
+        assert(result.length() == 3)
+        assert(result[0] == 1)
+        assert(result[1] == 2)
+        assert(result[2] == 3)
+    }
+
+    test "unique with filter" {
+        let arr = [1, 1, 2, 2, 3, 3, 4, 4]
+        let result = arr.iter().unique().filter((x) => x % 2 == 0).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 2)
+        assert(result[1] == 4)
+    }
+
+    // Combined operations
+
+    test "reverse sorted unique" {
+        let arr = [1, 3, 2, 3, 1, 2]
+        let result = arr.iter().sorted().unique().reverse().collect()
+        assert(result.length() == 3)
+        assert(result[0] == 3)
+        assert(result[1] == 2)
+        assert(result[2] == 1)
+    }
+
+    test "filter sorted reverse" {
+        let arr = [5, 2, 8, 1, 9, 3]
+        let result = arr.iter().filter((x) => x > 2).sorted().reverse().collect()
+        assert(result.length() == 4)
+        assert(result[0] == 9)
+        assert(result[1] == 8)
+        assert(result[2] == 5)
+        assert(result[3] == 3)
+    }
+
+    test "map unique count" {
+        let arr = [1, 1, 2, 2, 3, 3]
+        let c = arr.iter().unique().count()
+        assert(c == 3)
+    }
+
+    test "sorted reverse sum" {
+        let arr = [3, 1, 2]
+        let s = arr.iter().sorted().reverse().sum()
+        assert(s == 6)
+    }
+}

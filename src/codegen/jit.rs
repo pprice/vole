@@ -268,6 +268,22 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_flat_map_iter_collect", &sig);
 
+        // vole_reverse_iter(iter: *mut UnifiedIterator) -> *mut UnifiedIterator
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_reverse_iter", &sig);
+
+        // vole_sorted_iter(iter: *mut UnifiedIterator) -> *mut UnifiedIterator
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_sorted_iter", &sig);
+
+        // vole_unique_iter(iter: *mut UnifiedIterator) -> *mut UnifiedIterator
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_unique_iter", &sig);
+
+        // vole_unique_iter_next(iter: *mut UniqueIterator, out_value: *mut i64) -> i64
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
+        self.import_function("vole_unique_iter_next", &sig);
+
         // vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64)
         let sig = self.create_signature(&[ptr_ty, types::I64, types::I64, types::I64], None);
         self.import_function("vole_array_set", &sig);
@@ -548,6 +564,22 @@ impl JitContext {
         builder.symbol(
             "vole_flat_map_iter_collect",
             crate::runtime::iterator::vole_flat_map_iter_collect as *const u8,
+        );
+        builder.symbol(
+            "vole_reverse_iter",
+            crate::runtime::iterator::vole_reverse_iter as *const u8,
+        );
+        builder.symbol(
+            "vole_sorted_iter",
+            crate::runtime::iterator::vole_sorted_iter as *const u8,
+        );
+        builder.symbol(
+            "vole_unique_iter",
+            crate::runtime::iterator::vole_unique_iter as *const u8,
+        );
+        builder.symbol(
+            "vole_unique_iter_next",
+            crate::runtime::iterator::vole_unique_iter_next as *const u8,
         );
         builder.symbol(
             "vole_array_set",
