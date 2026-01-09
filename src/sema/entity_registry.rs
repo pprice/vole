@@ -170,6 +170,36 @@ impl EntityRegistry {
             .get(&type_id)
             .and_then(|fields| fields.get(&name_id).copied())
     }
+
+    /// Register a new free function
+    pub fn register_function(
+        &mut self,
+        name_id: NameId,
+        full_name_id: NameId,
+        module: ModuleId,
+        signature: FunctionType,
+    ) -> FunctionId {
+        let id = FunctionId::new(self.function_defs.len() as u32);
+        self.function_defs.push(FunctionDef {
+            id,
+            name_id,
+            full_name_id,
+            module,
+            signature,
+        });
+        self.function_by_name.insert(full_name_id, id);
+        id
+    }
+
+    /// Get a function definition by ID
+    pub fn get_function(&self, id: FunctionId) -> &FunctionDef {
+        &self.function_defs[id.index() as usize]
+    }
+
+    /// Look up a function by its full NameId
+    pub fn function_by_name(&self, full_name_id: NameId) -> Option<FunctionId> {
+        self.function_by_name.get(&full_name_id).copied()
+    }
 }
 
 impl Default for EntityRegistry {
@@ -252,5 +282,30 @@ mod tests {
         assert_eq!(registry.get_field(field_id).defining_type, type_id);
         assert_eq!(registry.get_field(field_id).slot, 0);
         assert_eq!(registry.fields_on_type(type_id).collect::<Vec<_>>(), vec![field_id]);
+    }
+
+    #[test]
+    fn register_and_lookup_function() {
+        let mut names = NameTable::new();
+        let math_mod = names.module_id("math");
+        let func_name = names.intern_raw(math_mod, &["sin"]);
+
+        let mut registry = EntityRegistry::new();
+
+        let signature = FunctionType {
+            params: vec![Type::F64],
+            return_type: Box::new(Type::F64),
+            is_closure: false,
+        };
+
+        let func_id = registry.register_function(
+            func_name,
+            func_name, // For simple functions, name_id == full_name_id
+            math_mod,
+            signature,
+        );
+
+        assert_eq!(registry.function_by_name(func_name), Some(func_id));
+        assert_eq!(registry.get_function(func_id).module, math_mod);
     }
 }
