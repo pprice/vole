@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::frontend::{Interner, Symbol};
+use crate::frontend::{Interner, Span, Symbol};
 
 mod namer;
 pub use namer::{Namer, NamerLookup};
@@ -33,6 +33,13 @@ struct NameKey {
     segments: Vec<String>,
 }
 
+/// Source location where a name was defined (for diagnostics)
+#[derive(Debug, Clone)]
+pub struct DefLocation {
+    pub file: String,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone)]
 pub struct NameTable {
     modules: Vec<String>,
@@ -40,6 +47,7 @@ pub struct NameTable {
     names: Vec<QualifiedName>,
     name_lookup: HashMap<NameKey, NameId>,
     main_module: ModuleId,
+    diagnostics: HashMap<NameId, DefLocation>,
 }
 
 impl NameTable {
@@ -50,6 +58,7 @@ impl NameTable {
             names: Vec::new(),
             name_lookup: HashMap::new(),
             main_module: ModuleId(0),
+            diagnostics: HashMap::new(),
         };
         let main_module = table.module_id("main");
         table.main_module = main_module;
@@ -200,6 +209,22 @@ impl NameTable {
     pub fn last_segment_str(&self, id: NameId) -> Option<String> {
         let name = self.name(id);
         name.segments.last().cloned()
+    }
+
+    /// Record where a name was defined (for error messages)
+    pub fn set_location(&mut self, id: NameId, file: &str, span: Span) {
+        self.diagnostics.insert(
+            id,
+            DefLocation {
+                file: file.to_string(),
+                span,
+            },
+        );
+    }
+
+    /// Get the definition location for a name (if recorded)
+    pub fn location(&self, id: NameId) -> Option<&DefLocation> {
+        self.diagnostics.get(&id)
     }
 }
 
