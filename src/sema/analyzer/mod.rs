@@ -12,6 +12,7 @@ use crate::frontend::*;
 use crate::identity::{ModuleId, NameId, NameTable, Namer, NamerLookup};
 use crate::module::ModuleLoader;
 use crate::sema::EntityRegistry;
+use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
     GenericFuncDef, GenericRecordDef, MonomorphCache, MonomorphInstance, MonomorphKey,
     TypeParamInfo, TypeParamScope, substitute_type,
@@ -988,16 +989,46 @@ impl Analyzer {
             });
         }
 
+        let name_id = self
+            .name_table
+            .intern(self.current_module, &[decl.name], interner);
+
         let error_info = ErrorTypeInfo {
             name: decl.name,
-            name_id: self
-                .name_table
-                .intern(self.current_module, &[decl.name], interner),
-            fields,
+            name_id,
+            fields: fields.clone(),
         };
 
         self.error_types.insert(decl.name, error_info.clone());
         self.register_named_type(decl.name, Type::ErrorType(error_info), interner);
+
+        // Register in EntityRegistry (parallel migration)
+        let entity_type_id = self.entity_registry.register_type(
+            name_id,
+            TypeDefKind::ErrorType,
+            self.current_module,
+        );
+
+        // Register fields in EntityRegistry
+        let builtin_module = self.name_table.builtin_module();
+        let type_name_str = interner.resolve(decl.name);
+        for (i, field) in decl.fields.iter().enumerate() {
+            let field_name_str = interner.resolve(field.name);
+            let field_name_id = self
+                .name_table
+                .intern_raw(builtin_module, &[field_name_str]);
+            let full_field_name_id = self
+                .name_table
+                .intern_raw(self.current_module, &[type_name_str, field_name_str]);
+            let field_ty = fields[i].ty.clone();
+            self.entity_registry.register_field(
+                entity_type_id,
+                field_name_id,
+                full_field_name_id,
+                field_ty,
+                i,
+            );
+        }
     }
 
     fn resolve_type_param_constraint(
