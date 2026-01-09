@@ -62,6 +62,7 @@ impl EntityRegistry {
             methods: Vec::new(),
             fields: Vec::new(),
             extends: Vec::new(),
+            type_params: Vec::new(),
         });
         self.type_by_name.insert(name_id, id);
         self.methods_by_type.insert(id, HashMap::new());
@@ -236,6 +237,11 @@ impl EntityRegistry {
     /// Add an extends relationship (derived extends base)
     pub fn add_extends(&mut self, derived: TypeDefId, base: TypeDefId) {
         self.type_defs[derived.index() as usize].extends.push(base);
+    }
+
+    /// Set type parameters for a generic type
+    pub fn set_type_params(&mut self, type_id: TypeDefId, type_params: Vec<NameId>) {
+        self.type_defs[type_id.index() as usize].type_params = type_params;
     }
 
     /// Check if derived extends base (transitive)

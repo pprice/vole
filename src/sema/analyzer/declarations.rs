@@ -761,6 +761,19 @@ impl Analyzer {
             self.current_module,
         );
 
+        // Set type parameters in EntityRegistry
+        let builtin_mod = self.name_table.builtin_module();
+        let entity_type_params: Vec<_> = interface_decl
+            .type_params
+            .iter()
+            .map(|tp| {
+                let tp_name_str = interner.resolve(tp.name);
+                self.name_table.intern_raw(builtin_mod, &[tp_name_str])
+            })
+            .collect();
+        self.entity_registry
+            .set_type_params(entity_type_id, entity_type_params);
+
         // Register extends relationships
         // Note: extends contains Symbols, we need to look up their TypeDefIds
         // For now, skip - this will be filled in when we have full integration

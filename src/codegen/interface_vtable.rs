@@ -10,7 +10,7 @@ use crate::codegen::types::{
     type_to_cranelift, value_to_word, word_to_value,
 };
 use crate::errors::CodegenError;
-use crate::frontend::{Interner, Symbol};
+use crate::frontend::Symbol;
 use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
@@ -93,6 +93,8 @@ impl InterfaceVtableRegistry {
             return Ok(*data_id);
         }
 
+        // Get interface definition from InterfaceRegistry for type_params (Symbol-based)
+        // and name_id, but use EntityRegistry for method collection
         let iface_def = ctx
             .analyzed
             .interface_registry
@@ -105,7 +107,20 @@ impl InterfaceVtableRegistry {
             })?;
         let interface_name_id = iface_def.name_id;
 
+        // Get interface TypeDefId from EntityRegistry
+        let interface_type_id = ctx
+            .analyzed
+            .entity_registry
+            .type_by_name(interface_name_id)
+            .ok_or_else(|| {
+                format!(
+                    "interface {:?} not found in entity_registry",
+                    interface_name_id
+                )
+            })?;
+
         // Build substitution map from interface type params to concrete type args
+        // Still using Symbol keys since Type::TypeParam stores Symbol
         let substitutions: HashMap<Symbol, Type> = iface_def
             .type_params
             .iter()
@@ -113,26 +128,30 @@ impl InterfaceVtableRegistry {
             .map(|(param, arg)| (*param, arg.clone()))
             .collect();
 
-        let methods = collect_interface_methods(
-            interface_name,
-            &ctx.analyzed.interface_registry,
-            ctx.interner,
-        )
-        .ok_or_else(|| "failed to collect interface methods".to_string())?;
+        // Collect methods via EntityRegistry
+        let method_ids = collect_interface_methods_via_entity_registry(
+            interface_type_id,
+            &ctx.analyzed.entity_registry,
+        )?;
 
-        // Specialize methods with concrete type arguments
-        let methods: Vec<InterfaceMethodDef> = methods
-            .into_iter()
-            .map(|method| InterfaceMethodDef {
-                name: method.name,
-                name_str: method.name_str.clone(),
-                params: method
-                    .params
-                    .iter()
-                    .map(|t| substitute_type(t, &substitutions))
-                    .collect(),
-                return_type: substitute_type(&method.return_type, &substitutions),
-                has_default: method.has_default,
+        // Build InterfaceMethodDef from EntityRegistry's MethodDef for compatibility
+        let methods: Vec<InterfaceMethodDef> = method_ids
+            .iter()
+            .map(|&method_id| {
+                let method = ctx.analyzed.entity_registry.get_method(method_id);
+                let name_str = ctx.analyzed.name_table.display(method.name_id);
+                InterfaceMethodDef {
+                    name: interface_name, // Placeholder - not used in vtable building
+                    name_str,
+                    params: method
+                        .signature
+                        .params
+                        .iter()
+                        .map(|t| substitute_type(t, &substitutions))
+                        .collect(),
+                    return_type: substitute_type(&method.signature.return_type, &substitutions),
+                    has_default: method.has_default,
+                }
             })
             .collect();
         let word_bytes = ctx.pointer_type.bytes() as usize;
@@ -495,7 +514,7 @@ pub(crate) fn interface_method_slot_by_type_def_id(
 /// Returns methods in a consistent order for vtable slot assignment.
 /// Parent interface methods come first, then the interface's own methods.
 /// This matches the order used by collect_interface_methods.
-#[allow(dead_code)] // Part of parallel migration - will be used when callers are migrated
+/// Collect all methods from an interface and its parent interfaces using EntityRegistry
 pub(crate) fn collect_interface_methods_via_entity_registry(
     interface_id: TypeDefId,
     entity_registry: &EntityRegistry,
@@ -525,7 +544,6 @@ pub(crate) fn collect_interface_methods_via_entity_registry(
     Ok(methods)
 }
 
-#[allow(dead_code)] // Part of parallel migration - called by collect_interface_methods_via_entity_registry
 fn collect_interface_methods_inner_entity_registry(
     interface_id: TypeDefId,
     entity_registry: &EntityRegistry,
@@ -592,10 +610,22 @@ pub(crate) fn box_interface_value(
         return Ok(value);
     }
 
+    // Check if this is an external-only interface via EntityRegistry
+    let interface_type_id = ctx
+        .analyzed
+        .entity_registry
+        .type_by_name(interface.name_id)
+        .ok_or_else(|| {
+            format!(
+                "interface {:?} not found in entity_registry",
+                interface.name_id
+            )
+        })?;
+
     if ctx
         .analyzed
-        .interface_registry
-        .is_external_only(interface.name_id)
+        .entity_registry
+        .is_external_only(interface_type_id)
     {
         if iface_debug_enabled() {
             eprintln!("iface_box: external-only interface, skip boxing");
@@ -635,55 +665,6 @@ pub(crate) fn box_interface_value(
         ty: ctx.pointer_type,
         vole_type: interface_type.clone(),
     })
-}
-
-fn collect_interface_methods(
-    interface_name: Symbol,
-    registry: &crate::sema::interface_registry::InterfaceRegistry,
-    interner: &Interner,
-) -> Option<Vec<InterfaceMethodDef>> {
-    let mut methods = Vec::new();
-    let mut seen_interfaces = HashSet::new();
-    let mut seen_methods = HashSet::new();
-    collect_interface_methods_inner(
-        interface_name,
-        registry,
-        interner,
-        &mut methods,
-        &mut seen_interfaces,
-        &mut seen_methods,
-    )?;
-    Some(methods)
-}
-
-fn collect_interface_methods_inner(
-    interface_name: Symbol,
-    registry: &crate::sema::interface_registry::InterfaceRegistry,
-    interner: &Interner,
-    methods: &mut Vec<InterfaceMethodDef>,
-    seen_interfaces: &mut HashSet<Symbol>,
-    seen_methods: &mut HashSet<Symbol>,
-) -> Option<()> {
-    if !seen_interfaces.insert(interface_name) {
-        return Some(());
-    }
-    let iface = registry.get(interface_name, interner)?;
-    for parent in &iface.extends {
-        collect_interface_methods_inner(
-            *parent,
-            registry,
-            interner,
-            methods,
-            seen_interfaces,
-            seen_methods,
-        )?;
-    }
-    for method in &iface.methods {
-        if seen_methods.insert(method.name) {
-            methods.push(method.clone());
-        }
-    }
-    Some(())
 }
 
 fn resolve_vtable_target(
@@ -768,11 +749,18 @@ fn resolve_vtable_target(
 
     // Fall back to interface default if method has one
     if method_def.has_default {
-        // Check for default external binding (use name_str for cross-interner safety)
-        if let Some(external_info) = ctx
-            .analyzed
-            .interface_registry
-            .external_method_by_str(interface_name_id, &method_def.name_str)
+        // Check for default external binding via EntityRegistry
+        if let Some(interface_type_id) =
+            ctx.analyzed.entity_registry.type_by_name(interface_name_id)
+            && let Some(method_name_id) = method_id
+            && let Some(interface_method_id) = ctx
+                .analyzed
+                .entity_registry
+                .find_method_on_type(interface_type_id, method_name_id)
+            && let Some(external_info) = ctx
+                .analyzed
+                .entity_registry
+                .get_external_binding(interface_method_id)
         {
             return Ok(VtableMethodTarget::External {
                 external_info: external_info.clone(),

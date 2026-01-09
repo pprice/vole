@@ -27,6 +27,8 @@ pub struct TypeDef {
     pub methods: Vec<MethodId>,
     pub fields: Vec<FieldId>,
     pub extends: Vec<TypeDefId>,
+    /// Type parameters for generic types (e.g., T in Iterator<T>)
+    pub type_params: Vec<NameId>,
 }
 
 /// A method definition (always belongs to a type)
