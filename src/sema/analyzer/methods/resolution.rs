@@ -1,8 +1,145 @@
 use super::super::*;
+use crate::identity::{MethodId, TypeDefId};
+use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
 use std::collections::{HashMap, HashSet};
 
 impl Analyzer {
+    /// Resolve a method on a type using EntityRegistry (TypeDefId-based)
+    ///
+    /// This is the EntityRegistry-based version of method resolution.
+    /// Returns the MethodId if found on the type or its parent interfaces.
+    pub fn find_method_via_entity_registry(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<MethodId> {
+        // Use EntityRegistry's resolve_method which handles inheritance
+        self.entity_registry
+            .resolve_method(type_def_id, method_name_id)
+    }
+
+    /// Resolve a method call using EntityRegistry when possible
+    ///
+    /// This method attempts to use EntityRegistry for method resolution,
+    /// falling back to the traditional approach when EntityRegistry
+    /// doesn't have the type registered.
+    pub fn resolve_method_via_entity_registry(
+        &mut self,
+        object_type: &Type,
+        method_name: Symbol,
+        interner: &Interner,
+    ) -> Option<ResolvedMethod> {
+        // Try to get TypeDefId from the object type
+        let type_def_id = self.get_type_def_id_for_type(object_type);
+
+        if let Some(type_def_id) = type_def_id {
+            // Get the method name_id
+            let method_name_id = self.method_name_id(method_name, interner);
+
+            // Try to find the method via EntityRegistry
+            if let Some(method_id) =
+                self.find_method_via_entity_registry(type_def_id, method_name_id)
+            {
+                let method_def = self.entity_registry.get_method(method_id);
+                let defining_type = self.entity_registry.get_type(method_def.defining_type);
+
+                // Determine the resolution type based on the defining type's kind
+                match defining_type.kind {
+                    TypeDefKind::Interface => {
+                        // This is an interface method - check if it has a default
+                        if method_def.has_default {
+                            // Get the implementing type's symbol for default method resolution
+                            let type_sym = self.get_type_symbol(object_type);
+                            if let Some(type_sym) = type_sym {
+                                let interface_sym =
+                                    self.get_type_symbol_by_name_id(defining_type.name_id);
+                                if let Some(interface_sym) = interface_sym {
+                                    return Some(ResolvedMethod::DefaultMethod {
+                                        interface_name: interface_sym,
+                                        type_name: type_sym,
+                                        method_name,
+                                        func_type: method_def.signature.clone(),
+                                    });
+                                }
+                            }
+                        }
+                        // For non-default interface methods, use vtable dispatch
+                        let interface_sym = self.get_type_symbol_by_name_id(defining_type.name_id);
+                        if let Some(interface_sym) = interface_sym {
+                            return Some(ResolvedMethod::InterfaceMethod {
+                                interface_name: interface_sym,
+                                method_name,
+                                func_type: method_def.signature.clone(),
+                            });
+                        }
+                    }
+                    TypeDefKind::Class | TypeDefKind::Record => {
+                        // Direct method on class/record
+                        return Some(ResolvedMethod::Direct {
+                            func_type: method_def.signature.clone(),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Fall back to traditional resolution
+        self.resolve_method(object_type, method_name, interner)
+    }
+
+    /// Get TypeDefId for a Type if it's registered in EntityRegistry
+    fn get_type_def_id_for_type(&self, ty: &Type) -> Option<TypeDefId> {
+        let name_id = match ty {
+            Type::Class(c) => Some(c.name_id),
+            Type::Record(r) => Some(r.name_id),
+            Type::Interface(i) => Some(i.name_id),
+            Type::GenericInstance { def, .. } => Some(*def),
+            _ => None,
+        }?;
+
+        self.entity_registry.type_by_name(name_id)
+    }
+
+    /// Get the Symbol for a type (for compatibility with existing code)
+    fn get_type_symbol(&self, ty: &Type) -> Option<Symbol> {
+        match ty {
+            Type::Class(class_type) => self
+                .classes
+                .iter()
+                .find(|(_, c)| c.name_id == class_type.name_id)
+                .map(|(sym, _)| *sym),
+            Type::Record(record_type) => self
+                .records
+                .iter()
+                .find(|(_, r)| r.name_id == record_type.name_id)
+                .map(|(sym, _)| *sym),
+            _ => None,
+        }
+    }
+
+    /// Get the Symbol for a type by its NameId
+    fn get_type_symbol_by_name_id(&self, name_id: NameId) -> Option<Symbol> {
+        // Check interfaces first
+        if let Some(def) = self.interface_registry.get_by_name_id(name_id) {
+            return Some(def.name);
+        }
+        // Check classes
+        for (sym, class) in &self.classes {
+            if class.name_id == name_id {
+                return Some(*sym);
+            }
+        }
+        // Check records
+        for (sym, record) in &self.records {
+            if record.name_id == name_id {
+                return Some(*sym);
+            }
+        }
+        None
+    }
+
     /// Resolve a method call to a normalized resolution for later validation/codegen.
     pub(crate) fn resolve_method(
         &mut self,
