@@ -66,7 +66,7 @@ impl Analyzer {
     }
 
     fn collect_function_signature(&mut self, func: &FuncDecl, interner: &Interner) {
-        let _ = self
+        let name_id = self
             .name_table
             .intern(self.current_module, &[func.name], interner);
         if func.type_params.is_empty() {
@@ -82,13 +82,20 @@ impl Analyzer {
                 .map(|t| self.resolve_type(t, interner))
                 .unwrap_or(Type::Void);
 
-            self.functions.insert(
-                func.name,
-                FunctionType {
-                    params,
-                    return_type: Box::new(return_type),
-                    is_closure: false,
-                },
+            let signature = FunctionType {
+                params,
+                return_type: Box::new(return_type),
+                is_closure: false,
+            };
+
+            self.functions.insert(func.name, signature.clone());
+
+            // Register in EntityRegistry (parallel migration)
+            self.entity_registry.register_function(
+                name_id,
+                name_id, // For top-level functions, name_id == full_name_id
+                self.current_module,
+                signature,
             );
         } else {
             // Generic function: resolve with type params in scope
