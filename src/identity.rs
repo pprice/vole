@@ -6,7 +6,9 @@ use std::collections::HashMap;
 
 use crate::frontend::{Interner, Span, Symbol};
 
+mod entities;
 mod namer;
+pub use entities::{FieldId, FunctionId, MethodId, TypeDefId};
 pub use namer::{Namer, NamerLookup};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
