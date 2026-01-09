@@ -22,6 +22,27 @@ impl Analyzer {
     ) -> Result<Type, Vec<TypeError>> {
         match &expr.kind {
             ExprKind::IntLiteral(value) => match expected {
+                // Integer literals can be assigned to unions containing a matching integer type
+                // Return the concrete type, not the union, so codegen properly constructs the union
+                Some(Type::Union(variants)) => {
+                    if let Some(int_variant) = variants
+                        .iter()
+                        .find(|v| v.is_integer() && literal_fits(*value, v))
+                    {
+                        Ok(int_variant.clone())
+                    } else {
+                        let expected = self.type_display(&Type::Union(variants.clone()), interner);
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected,
+                                found: "integer literal".to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        Ok(Type::I64) // Return a sensible default
+                    }
+                }
                 Some(ty) if literal_fits(*value, ty) => Ok(ty.clone()),
                 Some(ty) => {
                     let expected = self.type_display(ty, interner);
