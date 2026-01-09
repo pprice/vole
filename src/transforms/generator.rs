@@ -152,6 +152,9 @@ fn find_max_node_id_in_expr(expr: &Expr) -> u32 {
                 max_id = max_id.max(find_max_node_id_in_expr(el));
             }
         }
+        ExprKind::RepeatLiteral { element, .. } => {
+            max_id = max_id.max(find_max_node_id_in_expr(element));
+        }
         ExprKind::StructLiteral(s) => {
             for f in &s.fields {
                 max_id = max_id.max(find_max_node_id_in_expr(&f.value));
@@ -344,6 +347,7 @@ impl<'a> GeneratorTransformer<'a> {
             }
             ExprKind::Grouping(inner) => self.expr_contains_yield(inner),
             ExprKind::ArrayLiteral(elems) => elems.iter().any(|e| self.expr_contains_yield(e)),
+            ExprKind::RepeatLiteral { element, .. } => self.expr_contains_yield(element),
             ExprKind::Index(idx) => {
                 self.expr_contains_yield(&idx.object) || self.expr_contains_yield(&idx.index)
             }
@@ -564,6 +568,9 @@ impl<'a> GeneratorTransformer<'a> {
                 for elem in elems {
                     self.collect_yields_from_expr(elem, yields);
                 }
+            }
+            ExprKind::RepeatLiteral { element, .. } => {
+                self.collect_yields_from_expr(element, yields);
             }
             ExprKind::Index(idx) => {
                 self.collect_yields_from_expr(&idx.object, yields);

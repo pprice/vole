@@ -56,6 +56,13 @@ impl Cg<'_, '_, '_> {
             ExprKind::InterpolatedString(parts) => self.interpolated_string(parts),
             ExprKind::Range(range) => self.range(range),
             ExprKind::ArrayLiteral(elements) => self.array_literal(elements),
+            ExprKind::RepeatLiteral { .. } => {
+                // TODO: Implement codegen for repeat literals in Phase 6
+                Err(
+                    CodegenError::unsupported("repeat literals ([expr; N]) not yet implemented")
+                        .into(),
+                )
+            }
             ExprKind::Index(idx) => self.index(&idx.object, &idx.index),
             ExprKind::Match(match_expr) => self.match_expr(match_expr),
             ExprKind::Nil => Ok(self.nil_value()),

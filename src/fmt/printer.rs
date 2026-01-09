@@ -316,6 +316,12 @@ fn print_expr<'a>(
             .append(print_expr(arena, inner, interner))
             .append(arena.text(")")),
         ExprKind::ArrayLiteral(elements) => print_array_literal(arena, elements, interner),
+        ExprKind::RepeatLiteral { element, count } => arena
+            .text("[")
+            .append(print_expr(arena, element, interner))
+            .append(arena.text("; "))
+            .append(arena.text(count.to_string()))
+            .append(arena.text("]")),
         ExprKind::Index(index) => print_index_expr(arena, index, interner),
         ExprKind::Match(match_expr) => print_match_expr(arena, match_expr, interner),
         ExprKind::Nil => arena.text("nil"),

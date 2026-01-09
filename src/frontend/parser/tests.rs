@@ -1237,3 +1237,65 @@ fn test_parse_tuple_trailing_comma() {
         }
     }
 }
+
+#[test]
+fn test_parse_repeat_literal() {
+    // Repeat literal: [0; 10]
+    let source = "let arr = [0; 10]";
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("should parse repeat literal");
+
+    if let Decl::Let(l) = &program.declarations[0] {
+        if let ExprKind::RepeatLiteral { element, count } = &l.init.kind {
+            assert_eq!(*count, 10);
+            if let ExprKind::IntLiteral(n) = &element.kind {
+                assert_eq!(*n, 0);
+            } else {
+                panic!("expected int literal as element");
+            }
+        } else {
+            panic!("expected repeat literal");
+        }
+    }
+}
+
+#[test]
+fn test_parse_repeat_literal_with_expression() {
+    // Repeat literal with expression: [1 + 2; 5]
+    let source = "let arr = [1 + 2; 5]";
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .expect("should parse repeat literal with expression");
+
+    if let Decl::Let(l) = &program.declarations[0] {
+        if let ExprKind::RepeatLiteral { element, count } = &l.init.kind {
+            assert_eq!(*count, 5);
+            assert!(matches!(&element.kind, ExprKind::Binary(_)));
+        } else {
+            panic!("expected repeat literal");
+        }
+    }
+}
+
+#[test]
+fn test_parse_array_vs_repeat_disambiguation() {
+    // [x] is array literal, [x; 5] is repeat literal
+    let source1 = "let a = [x]";
+    let mut parser1 = Parser::new(source1);
+    let program1 = parser1.parse_program().expect("should parse array literal");
+
+    if let Decl::Let(l) = &program1.declarations[0] {
+        assert!(matches!(&l.init.kind, ExprKind::ArrayLiteral(_)));
+    }
+
+    let source2 = "let b = [x; 5]";
+    let mut parser2 = Parser::new(source2);
+    let program2 = parser2
+        .parse_program()
+        .expect("should parse repeat literal");
+
+    if let Decl::Let(l) = &program2.declarations[0] {
+        assert!(matches!(&l.init.kind, ExprKind::RepeatLiteral { .. }));
+    }
+}

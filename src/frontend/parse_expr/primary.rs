@@ -322,17 +322,46 @@ impl<'src> Parser<'src> {
                 let start_span = self.current.span;
                 self.advance(); // consume '['
 
-                let mut elements = Vec::new();
+                // Empty array: []
+                if self.check(TokenType::RBracket) {
+                    let end_span = self.current.span;
+                    self.advance(); // consume ']'
+                    return Ok(Expr {
+                        id: self.next_id(),
+                        kind: ExprKind::ArrayLiteral(Vec::new()),
+                        span: start_span.merge(end_span),
+                    });
+                }
 
-                if !self.check(TokenType::RBracket) {
-                    elements.push(self.expression(0)?);
+                // Parse first element
+                let first = self.expression(0)?;
 
-                    while self.match_token(TokenType::Comma) {
-                        if self.check(TokenType::RBracket) {
-                            break; // trailing comma allowed
-                        }
-                        elements.push(self.expression(0)?);
+                // Check what follows the first element
+                if self.check(TokenType::Semicolon) {
+                    // [expr; N] - repeat literal
+                    self.advance(); // consume ';'
+                    let count = self.parse_repeat_count()?;
+                    let end_span = self.current.span;
+                    self.consume(TokenType::RBracket, "expected ']' after repeat count")?;
+
+                    return Ok(Expr {
+                        id: self.next_id(),
+                        kind: ExprKind::RepeatLiteral {
+                            element: Box::new(first),
+                            count,
+                        },
+                        span: start_span.merge(end_span),
+                    });
+                }
+
+                // [expr, ...] - array/tuple literal
+                let mut elements = vec![first];
+
+                while self.match_token(TokenType::Comma) {
+                    if self.check(TokenType::RBracket) {
+                        break; // trailing comma allowed
                     }
+                    elements.push(self.expression(0)?);
                 }
 
                 let end_span = self.current.span;
@@ -385,6 +414,30 @@ impl<'src> Parser<'src> {
                 token.span,
             )),
         }
+    }
+
+    /// Parse the count in a repeat literal [expr; N]
+    fn parse_repeat_count(&mut self) -> Result<usize, ParseError> {
+        let token = self.current.clone();
+        if token.ty != TokenType::IntLiteral {
+            return Err(ParseError::new(
+                ParserError::ExpectedExpression {
+                    found: token.ty.as_str().to_string(),
+                    span: token.span.into(),
+                },
+                token.span,
+            ));
+        }
+        self.advance();
+        token.lexeme.parse::<usize>().map_err(|_| {
+            ParseError::new(
+                ParserError::UnexpectedToken {
+                    token: "invalid repeat count (must be non-negative integer)".to_string(),
+                    span: token.span.into(),
+                },
+                token.span,
+            )
+        })
     }
 
     /// Parse a struct literal: Name { field: value, ... }

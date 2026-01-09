@@ -266,6 +266,15 @@ impl Analyzer {
                 }
             }
 
+            ExprKind::RepeatLiteral { element, count } => {
+                // [expr; N] creates a fixed-size array
+                let elem_ty = self.check_expr(element, interner)?;
+                Ok(Type::FixedArray {
+                    element: Box::new(elem_ty),
+                    size: *count,
+                })
+            }
+
             ExprKind::Index(idx) => {
                 let obj_ty = self.check_expr(&idx.object, interner)?;
                 let index_ty = self.check_expr(&idx.index, interner)?;

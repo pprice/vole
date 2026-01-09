@@ -342,6 +342,12 @@ pub enum ExprKind {
     /// Array literal: [1, 2, 3]
     ArrayLiteral(Vec<Expr>),
 
+    /// Repeat literal: [0; 10] - creates fixed-size array with repeated value
+    RepeatLiteral {
+        element: Box<Expr>,
+        count: usize,
+    },
+
     /// Index expression: arr[0]
     Index(Box<IndexExpr>),
 

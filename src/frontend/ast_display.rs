@@ -512,6 +512,14 @@ impl<'a> AstPrinter<'a> {
                     inner.write_expr(out, elem);
                 }
             }
+            ExprKind::RepeatLiteral { element, count } => {
+                self.write_indent(out);
+                writeln!(out, "RepeatLiteral (count={})", count).unwrap();
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("element:\n");
+                inner.indented().write_expr(out, element);
+            }
             ExprKind::Index(idx) => {
                 self.write_indent(out);
                 out.push_str("Index\n");
