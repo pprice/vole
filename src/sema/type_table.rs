@@ -107,6 +107,7 @@ impl TypeTable {
             PrimitiveTypeId::F64 => Type::F64,
             PrimitiveTypeId::Bool => Type::Bool,
             PrimitiveTypeId::String => Type::String,
+            PrimitiveTypeId::Range => Type::Range,
         };
         let _ = self.insert_named(ty, name_id);
     }

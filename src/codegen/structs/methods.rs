@@ -15,7 +15,7 @@ use crate::codegen::types::{
     CompiledValue, method_name_id, module_name_id, type_to_cranelift, value_to_word, word_to_value,
 };
 use crate::errors::CodegenError;
-use crate::frontend::{Expr, MethodCallExpr, NodeId};
+use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId};
 use crate::sema::generic::substitute_type;
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::{FunctionType, Type};
@@ -26,6 +26,14 @@ impl Cg<'_, '_, '_> {
         mc: &MethodCallExpr,
         expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
+        // Handle range.iter() specially since range expressions can't be compiled to values directly
+        if let ExprKind::Range(range) = &mc.object.kind {
+            let method_name = self.ctx.interner.resolve(mc.method);
+            if method_name == "iter" {
+                return self.range_iter(range);
+            }
+        }
+
         let display_type_symbol = |sym: crate::frontend::Symbol| {
             self.ctx
                 .type_metadata
@@ -251,6 +259,31 @@ impl Cg<'_, '_, '_> {
         }
     }
 
+    /// Compile range.iter() - creates a range iterator from start..end
+    fn range_iter(&mut self, range: &crate::frontend::RangeExpr) -> Result<CompiledValue, String> {
+        // Compile start and end expressions
+        let start = self.expr(&range.start)?;
+        let end_val = self.expr(&range.end)?;
+
+        // For inclusive ranges, add 1 to the end (since our iterator is exclusive-end)
+        let end_value = if range.inclusive {
+            self.builder.ins().iadd_imm(end_val.value, 1)
+        } else {
+            end_val.value
+        };
+
+        // Call vole_range_iter(start, end) -> Iterator<i64>
+        let result = self.call_runtime(RuntimeFn::RangeIter, &[start.value, end_value])?;
+
+        // Return as Iterator<i64>
+        let iter_type = self.interface_type("Iterator", vec![Type::I64])?;
+        Ok(CompiledValue {
+            value: result,
+            ty: self.ctx.pointer_type,
+            vole_type: iter_type,
+        })
+    }
+
     fn builtin_method(
         &mut self,
         obj: &CompiledValue,
@@ -273,6 +306,24 @@ impl Cg<'_, '_, '_> {
             (Type::String, "length") => {
                 let result = self.call_runtime(RuntimeFn::StringLen, &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
+            }
+            (Type::Range, "iter") => {
+                // Load start and end from the range struct (pointer to [start, end])
+                let start = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), obj.value, 0);
+                let end = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), obj.value, 8);
+                let result = self.call_runtime(RuntimeFn::RangeIter, &[start, end])?;
+                let iter_type = self.interface_type("Iterator", vec![Type::I64])?;
+                Ok(Some(CompiledValue {
+                    value: result,
+                    ty: self.ctx.pointer_type,
+                    vole_type: iter_type,
+                }))
             }
             _ => Ok(None),
         }

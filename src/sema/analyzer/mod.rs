@@ -257,6 +257,27 @@ impl Analyzer {
             );
         }
 
+        // Range.iter() -> Iterator<i64>
+        let range_id = self
+            .type_table
+            .primitive_name_id(PrimitiveTypeId::Range)
+            .map(TypeId::from_name_id);
+        if let Some(type_id) = range_id {
+            register_builtin!(
+                type_id,
+                method_iter,
+                FunctionType {
+                    params: vec![],
+                    return_type: Box::new(Type::Unknown), // Will be refined by check_builtin_method
+                    is_closure: false,
+                },
+                Some(ExternalMethodInfo {
+                    module_path: "std:intrinsics".to_string(),
+                    native_name: "range_iter".to_string(),
+                })
+            );
+        }
+
         // Iterator methods are resolved via interface declarations in the prelude.
     }
 
@@ -277,6 +298,7 @@ impl Analyzer {
             PrimitiveTypeId::F64,
             PrimitiveTypeId::Bool,
             PrimitiveTypeId::String,
+            PrimitiveTypeId::Range,
         ] {
             let name_id = if let Some(sym) = interner.lookup(prim.name()) {
                 namer.intern_symbol(builtin_module, sym)

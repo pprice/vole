@@ -7,7 +7,7 @@ use cranelift::prelude::*;
 
 use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
-use crate::frontend::{AssignTarget, Expr, ExprKind, MatchExpr, Pattern, UnaryOp};
+use crate::frontend::{AssignTarget, Expr, ExprKind, MatchExpr, Pattern, RangeExpr, UnaryOp};
 use crate::sema::Type;
 
 use super::context::Cg;
@@ -42,11 +42,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::StringLiteral(s) => self.string_literal(s),
             ExprKind::Call(call) => self.call(call, expr.span.line, expr.id),
             ExprKind::InterpolatedString(parts) => self.interpolated_string(parts),
-            ExprKind::Range(_) => Err(CodegenError::unsupported_with_context(
-                "range expression",
-                "only supported in for-in context",
-            )
-            .into()),
+            ExprKind::Range(range) => self.range(range),
             ExprKind::ArrayLiteral(elements) => self.array_literal(elements),
             ExprKind::Index(idx) => self.index(&idx.object, &idx.index),
             ExprKind::Match(match_expr) => self.match_expr(match_expr),
@@ -235,6 +231,45 @@ impl Cg<'_, '_, '_> {
             value: arr_ptr,
             ty: self.ctx.pointer_type,
             vole_type: Type::Array(Box::new(elem_type)),
+        })
+    }
+
+    /// Compile a range expression (start..end or start..=end)
+    /// Returns a pointer to a stack slot containing (start: i64, end: i64)
+    /// For inclusive ranges, we store end + 1 so the iterator uses exclusive end
+    fn range(&mut self, range: &RangeExpr) -> Result<CompiledValue, String> {
+        let start = self.expr(&range.start)?;
+        let end_val = self.expr(&range.end)?;
+
+        // For inclusive ranges (start..=end), add 1 to end so we can use exclusive end internally
+        let end = if range.inclusive {
+            self.builder.ins().iadd_imm(end_val.value, 1)
+        } else {
+            end_val.value
+        };
+
+        // Create a stack slot to hold (start, end) - 16 bytes
+        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            16,
+            0,
+        ));
+
+        // Store start at offset 0
+        self.builder.ins().stack_store(start.value, slot, 0);
+        // Store end at offset 8
+        self.builder.ins().stack_store(end, slot, 8);
+
+        // Return pointer to the slot
+        let ptr = self
+            .builder
+            .ins()
+            .stack_addr(self.ctx.pointer_type, slot, 0);
+
+        Ok(CompiledValue {
+            value: ptr,
+            ty: self.ctx.pointer_type,
+            vole_type: Type::Range,
         })
     }
 

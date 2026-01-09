@@ -47,6 +47,21 @@ impl Analyzer {
                     self.interface_type("Iterator", vec![*elem_ty.clone()], interner)?;
                 Some(method_type(vec![], iter_type))
             }
+            // Range.iter() -> Iterator<i64>
+            (Type::Range, "iter") => {
+                if !args.is_empty() {
+                    self.add_error(
+                        SemanticError::WrongArgumentCount {
+                            expected: 0,
+                            found: args.len(),
+                            span: args[0].span.into(),
+                        },
+                        args[0].span,
+                    );
+                }
+                let iter_type = self.interface_type("Iterator", vec![Type::I64], interner)?;
+                Some(method_type(vec![], iter_type))
+            }
             // String.length() -> i64
             (Type::String, "length") => {
                 if !args.is_empty() {

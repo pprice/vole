@@ -26,6 +26,7 @@ pub enum IteratorKind {
     Once = 12,
     Empty = 13,
     FromFn = 14,
+    Range = 15,
 }
 
 /// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, unique, chunks, windows, repeat, once, empty, or from_fn iterator
@@ -47,6 +48,7 @@ pub union IteratorSource {
     pub once: OnceSource,
     pub empty: EmptySource,
     pub from_fn: FromFnSource,
+    pub range: RangeSource,
 }
 
 /// Source data for array iteration
@@ -203,6 +205,16 @@ pub struct FromFnSource {
     pub generator: *const Closure,
 }
 
+/// Source data for range iteration (start..end or start..=end)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RangeSource {
+    /// Current value in the range
+    pub current: i64,
+    /// End value (exclusive)
+    pub end: i64,
+}
+
 /// Unified iterator structure
 /// The kind field tells us which variant is active
 #[repr(C)]
@@ -227,6 +239,7 @@ pub type RepeatIterator = UnifiedIterator;
 pub type OnceIterator = UnifiedIterator;
 pub type EmptyIterator = UnifiedIterator;
 pub type FromFnIterator = UnifiedIterator;
+pub type RangeIterator = UnifiedIterator;
 
 /// Create a new array iterator
 /// Returns pointer to heap-allocated iterator
@@ -350,6 +363,9 @@ pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
             IteratorKind::FromFn => {
                 // Note: we don't free the generator closure - it's owned by calling context
             }
+            IteratorKind::Range => {
+                // No resources to free - just start/current/end values
+            }
         }
 
         // Free this iterator
@@ -439,6 +455,10 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
         IteratorKind::FromFn => {
             // For from_fn iterators, delegate to from_fn_next logic
             vole_from_fn_iter_next(iter, out_value)
+        }
+        IteratorKind::Range => {
+            // For range iterators, delegate to range_next logic
+            vole_range_iter_next(iter, out_value)
         }
     }
 }
@@ -2316,4 +2336,52 @@ pub extern "C" fn vole_from_fn_iter_next(iter: *mut UnifiedIterator, out_value: 
             0 // Nil - end iteration
         }
     }
+}
+
+// =============================================================================
+// RangeIterator - iterator over a range of integers (start..end)
+// =============================================================================
+
+/// Create a new range iterator that yields integers from start to end (exclusive)
+/// Returns pointer to heap-allocated iterator
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_range_iter(start: i64, end: i64) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Range,
+        source: IteratorSource {
+            range: RangeSource {
+                current: start,
+                end,
+            },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next value from range iterator
+/// Returns 1 with the value if current < end, 0 if done
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_range_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    if iter_ref.kind != IteratorKind::Range {
+        return 0;
+    }
+
+    let range_src = unsafe { &mut iter_ref.source.range };
+
+    // Check if we've reached the end
+    if range_src.current >= range_src.end {
+        return 0; // Done
+    }
+
+    // Yield current value and increment
+    unsafe { *out_value = range_src.current };
+    range_src.current += 1;
+    1 // Has value
 }

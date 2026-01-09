@@ -22,6 +22,7 @@ pub enum PrimitiveTypeId {
     F64,
     Bool,
     String,
+    Range,
 }
 
 impl PrimitiveTypeId {
@@ -41,6 +42,7 @@ impl PrimitiveTypeId {
             PrimitiveTypeId::F64 => "f64",
             PrimitiveTypeId::Bool => "bool",
             PrimitiveTypeId::String => "string",
+            PrimitiveTypeId::Range => "range",
         }
     }
 }
@@ -70,6 +72,7 @@ impl TypeId {
             Type::F64 => types.primitive_name_id(PrimitiveTypeId::F64).map(TypeId),
             Type::Bool => types.primitive_name_id(PrimitiveTypeId::Bool).map(TypeId),
             Type::String => types.primitive_name_id(PrimitiveTypeId::String).map(TypeId),
+            Type::Range => types.primitive_name_id(PrimitiveTypeId::Range).map(TypeId),
             Type::Array(_) => types.array_name_id().map(TypeId),
             Type::Class(c) => Some(TypeId(c.name_id)),
             Type::Record(r) => Some(TypeId(r.name_id)),

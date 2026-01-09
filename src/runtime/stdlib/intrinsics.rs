@@ -363,6 +363,16 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // Range iterator: range_iter(start, end) -> Iterator
+    m.register(
+        "range_iter",
+        iterator::vole_range_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64], // start, end
+            return_type: NativeType::I64,
+        },
+    );
+
     m
 }
 

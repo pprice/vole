@@ -453,6 +453,7 @@ pub(crate) fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::
         Type::Union(_) => pointer_type,    // Unions are passed by pointer
         Type::Fallible(_) => pointer_type, // Fallibles are passed by pointer (tagged union)
         Type::Function(_) => pointer_type, // Function pointers
+        Type::Range => pointer_type,       // Ranges are passed by pointer (start, end)
         _ => types::I64,                   // Default
     }
 }
@@ -468,6 +469,7 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
         Type::String | Type::Array(_) => pointer_type.bytes(), // pointer size
         Type::Interface(_) => pointer_type.bytes(),
         Type::Nil | Type::Done | Type::Void => 0,
+        Type::Range => 16, // start (i64) + end (i64)
         Type::Union(variants) => {
             // Tag (1 byte) + padding + max payload size, aligned to 8
             let max_payload = variants
