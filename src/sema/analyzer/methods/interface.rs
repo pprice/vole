@@ -202,7 +202,9 @@ impl Analyzer {
                 if required.has_default {
                     continue;
                 }
-                let required_name = interner.resolve(required.name);
+                // Use name_str which was captured at interface definition time
+                // (required.name Symbol may be stale if from a different interner context)
+                let required_name = &required.name_str;
                 match type_methods.get(required_name) {
                     None => {
                         // Method is missing entirely
@@ -210,7 +212,7 @@ impl Analyzer {
                             SemanticError::InterfaceNotSatisfied {
                                 type_name: interner.resolve(type_name).to_string(),
                                 interface_name: interner.resolve(iface_name).to_string(),
-                                method: required_name.to_string(),
+                                method: required_name.clone(),
                                 span: span.into(),
                             },
                             span,
