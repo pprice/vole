@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::frontend::{Interner, Symbol};
+use crate::frontend::Symbol;
 use crate::identity::{ModuleId, NameId, NameTable};
 use crate::sema::Type;
 use crate::sema::implement_registry::PrimitiveTypeId;

@@ -262,7 +262,7 @@ impl Analyzer {
     pub(crate) fn get_type_method_signatures(
         &self,
         type_name: Symbol,
-        interner: &Interner,
+        _interner: &Interner,
     ) -> HashMap<String, FunctionType> {
         let mut method_sigs = HashMap::new();
 

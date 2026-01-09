@@ -95,7 +95,7 @@ impl Analyzer {
         &mut self,
         params: &[Type],
         return_type: &Type,
-        interner: &Interner,
+        _interner: &Interner,
     ) -> String {
         let params_str: Vec<String> = params
             .iter()

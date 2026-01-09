@@ -174,3 +174,30 @@ dev-test-for feature:
     echo ""
     echo "=== Test file names matching '{{feature}}' ==="
     find test/ -name "*{{feature}}*" -type f 2>/dev/null || echo "(not found)"
+
+# Debug a test file with lldb (builds debug, runs under debugger)
+dev-debug-test file:
+    #!/usr/bin/env bash
+    cargo build --bin vole 2>&1
+    echo "Starting lldb - use 'run' to execute, 'bt' for backtrace on crash"
+    lldb -- ./target/debug/vole test "{{file}}"
+
+# Debug running a vole program with lldb
+dev-debug-run file:
+    #!/usr/bin/env bash
+    cargo build --bin vole 2>&1
+    echo "Starting lldb - use 'run' to execute, 'bt' for backtrace on crash"
+    lldb -- ./target/debug/vole run "{{file}}"
+
+# Get backtrace from a crashing test (non-interactive)
+dev-backtrace-test file:
+    #!/usr/bin/env bash
+    cargo build --bin vole 2>&1
+    echo "Running test under lldb to capture backtrace..."
+    lldb -b -o "run" -o "bt" -o "quit" -- ./target/debug/vole test "{{file}}" 2>&1 | head -100
+
+# Disassemble around a crash address (usage: just dev-disasm 0x12345)
+dev-disasm addr:
+    #!/usr/bin/env bash
+    cargo build --bin vole 2>&1
+    lldb -b -o "disassemble -s {{addr}} -c 20" ./target/debug/vole 2>&1
