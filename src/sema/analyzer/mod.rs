@@ -752,6 +752,18 @@ impl Analyzer {
         self.scope.get(sym).map(|v| v.ty.clone())
     }
 
+    /// Get function type if the symbol refers to a top-level function.
+    /// Returns None if the symbol is not a function name.
+    fn get_function_type(&self, sym: Symbol, interner: &Interner) -> Option<FunctionType> {
+        // Check by Symbol first (same interner)
+        if let Some(func_type) = self.functions.get(&sym) {
+            return Some(func_type.clone());
+        }
+        // Check by name for prelude functions (cross-interner lookup)
+        let name = interner.resolve(sym);
+        self.functions_by_name.get(name).cloned()
+    }
+
     pub fn analyze(
         &mut self,
         program: &Program,

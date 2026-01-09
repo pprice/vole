@@ -35,6 +35,9 @@ impl Analyzer {
                         }
                     }
                     Ok(ty)
+                } else if let Some(func_type) = self.get_function_type(*sym, interner) {
+                    // Identifier refers to a function - treat it as a function value
+                    Ok(Type::Function(func_type))
                 } else {
                     let name = interner.resolve(*sym);
                     self.add_error(

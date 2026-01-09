@@ -4,10 +4,12 @@
 
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
+use cranelift_module::Module;
 
 use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
 use crate::frontend::{AssignTarget, Expr, ExprKind, MatchExpr, Pattern, RangeExpr, UnaryOp};
+use crate::identity::NamerLookup;
 use crate::sema::Type;
 
 use super::context::Cg;
@@ -139,9 +141,169 @@ impl Cg<'_, '_, '_> {
                 }
             }
             Ok(value)
+        } else if let Some(Type::Function(func_type)) = self.ctx.analyzed.expr_types.get(&expr.id) {
+            // Identifier refers to a named function - create a closure wrapper
+            self.function_reference(sym, func_type.clone())
         } else {
             Err(CodegenError::not_found("variable", self.ctx.interner.resolve(sym)).into())
         }
+    }
+
+    /// Compile a reference to a named function, wrapping it in a closure struct.
+    /// Creates a wrapper function that adapts the function to the closure calling convention.
+    fn function_reference(
+        &mut self,
+        sym: crate::frontend::Symbol,
+        func_type: crate::sema::FunctionType,
+    ) -> Result<CompiledValue, String> {
+        use cranelift::prelude::FunctionBuilderContext;
+
+        // Look up the original function's FuncId using the name table
+        let namer = NamerLookup::new(&self.ctx.analyzed.name_table, self.ctx.interner);
+        let module_id = self.ctx.analyzed.name_table.main_module();
+        let name_id = namer.function(module_id, sym).ok_or_else(|| {
+            CodegenError::not_found("function", self.ctx.interner.resolve(sym)).to_string()
+        })?;
+
+        let orig_func_key = self.ctx.func_registry.intern_name_id(name_id);
+        let orig_func_id = self
+            .ctx
+            .func_registry
+            .func_id(orig_func_key)
+            .ok_or_else(|| {
+                CodegenError::not_found("function id for", self.ctx.interner.resolve(sym))
+                    .to_string()
+            })?;
+
+        // Create a wrapper function that adapts the original function to closure calling convention.
+        // The wrapper takes (closure_ptr, params...) and calls the original function with just (params...).
+        *self.ctx.lambda_counter += 1;
+        let wrapper_index = *self.ctx.lambda_counter;
+
+        // Build wrapper signature: (closure_ptr, params...) -> return_type
+        let param_types: Vec<types::Type> = func_type
+            .params
+            .iter()
+            .map(|t| type_to_cranelift(t, self.ctx.pointer_type))
+            .collect();
+
+        let return_cr_type = type_to_cranelift(&func_type.return_type, self.ctx.pointer_type);
+
+        let mut wrapper_sig = self.ctx.module.make_signature();
+        wrapper_sig
+            .params
+            .push(AbiParam::new(self.ctx.pointer_type)); // closure ptr (ignored)
+        for &param_ty in &param_types {
+            wrapper_sig.params.push(AbiParam::new(param_ty));
+        }
+        if *func_type.return_type != Type::Void {
+            wrapper_sig.returns.push(AbiParam::new(return_cr_type));
+        }
+
+        // Create wrapper function
+        let (wrapper_name_id, wrapper_func_key) =
+            self.ctx.func_registry.intern_lambda_name(wrapper_index);
+        let wrapper_name = self
+            .ctx
+            .func_registry
+            .name_table()
+            .display(wrapper_name_id, self.ctx.interner);
+        let wrapper_func_id = self
+            .ctx
+            .module
+            .declare_function(
+                &wrapper_name,
+                cranelift_module::Linkage::Local,
+                &wrapper_sig,
+            )
+            .map_err(|e| e.to_string())?;
+
+        self.ctx
+            .func_registry
+            .set_func_id(wrapper_func_key, wrapper_func_id);
+        self.ctx
+            .func_registry
+            .set_return_type(wrapper_func_key, (*func_type.return_type).clone());
+
+        // Build the wrapper function body
+        let mut wrapper_ctx = self.ctx.module.make_context();
+        wrapper_ctx.func.signature = wrapper_sig.clone();
+
+        {
+            let mut wrapper_builder_ctx = FunctionBuilderContext::new();
+            let mut wrapper_builder =
+                FunctionBuilder::new(&mut wrapper_ctx.func, &mut wrapper_builder_ctx);
+
+            let entry_block = wrapper_builder.create_block();
+            wrapper_builder.append_block_params_for_function_params(entry_block);
+            wrapper_builder.switch_to_block(entry_block);
+
+            let block_params = wrapper_builder.block_params(entry_block).to_vec();
+            // block_params[0] is closure_ptr (ignored), block_params[1..] are the actual arguments
+
+            // Get reference to original function
+            let orig_func_ref = self
+                .ctx
+                .module
+                .declare_func_in_func(orig_func_id, wrapper_builder.func);
+
+            // Call original function with just the arguments (skip closure_ptr)
+            let call_args: Vec<Value> = block_params[1..].to_vec();
+            let call_inst = wrapper_builder.ins().call(orig_func_ref, &call_args);
+            let results = wrapper_builder.inst_results(call_inst).to_vec();
+
+            if results.is_empty() {
+                wrapper_builder.ins().return_(&[]);
+            } else {
+                wrapper_builder.ins().return_(&[results[0]]);
+            }
+
+            wrapper_builder.seal_all_blocks();
+            wrapper_builder.finalize();
+        }
+
+        self.ctx
+            .module
+            .define_function(wrapper_func_id, &mut wrapper_ctx)
+            .map_err(|e| format!("Failed to define function wrapper: {:?}", e))?;
+
+        // Get the wrapper function address
+        let wrapper_func_ref = self
+            .ctx
+            .module
+            .declare_func_in_func(wrapper_func_id, self.builder.func);
+        let wrapper_func_addr = self
+            .builder
+            .ins()
+            .func_addr(self.ctx.pointer_type, wrapper_func_ref);
+
+        // Wrap in a closure struct with zero captures
+        let alloc_id = self
+            .ctx
+            .func_registry
+            .runtime_key(RuntimeFn::ClosureAlloc)
+            .and_then(|key| self.ctx.func_registry.func_id(key))
+            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
+        let alloc_ref = self
+            .ctx
+            .module
+            .declare_func_in_func(alloc_id, self.builder.func);
+        let zero_captures = self.builder.ins().iconst(types::I64, 0);
+        let alloc_call = self
+            .builder
+            .ins()
+            .call(alloc_ref, &[wrapper_func_addr, zero_captures]);
+        let closure_ptr = self.builder.inst_results(alloc_call)[0];
+
+        Ok(CompiledValue {
+            value: closure_ptr,
+            ty: self.ctx.pointer_type,
+            vole_type: Type::Function(crate::sema::FunctionType {
+                params: func_type.params,
+                return_type: func_type.return_type,
+                is_closure: true, // Now wrapped as a closure struct
+            }),
+        })
     }
 
     /// Compile a unary expression
