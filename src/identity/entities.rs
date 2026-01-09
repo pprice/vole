@@ -8,6 +8,10 @@
 pub struct TypeDefId(u32);
 
 impl TypeDefId {
+    pub(crate) fn new(index: u32) -> Self {
+        Self(index)
+    }
+
     pub fn index(self) -> u32 {
         self.0
     }
@@ -18,6 +22,10 @@ impl TypeDefId {
 pub struct MethodId(u32);
 
 impl MethodId {
+    pub(crate) fn new(index: u32) -> Self {
+        Self(index)
+    }
+
     pub fn index(self) -> u32 {
         self.0
     }
@@ -28,6 +36,10 @@ impl MethodId {
 pub struct FieldId(u32);
 
 impl FieldId {
+    pub(crate) fn new(index: u32) -> Self {
+        Self(index)
+    }
+
     pub fn index(self) -> u32 {
         self.0
     }
@@ -38,6 +50,10 @@ impl FieldId {
 pub struct FunctionId(u32);
 
 impl FunctionId {
+    pub(crate) fn new(index: u32) -> Self {
+        Self(index)
+    }
+
     pub fn index(self) -> u32 {
         self.0
     }

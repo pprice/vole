@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 
-use crate::identity::{FieldId, FunctionId, MethodId, NameId, TypeDefId};
-use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef};
+use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
+use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 
 /// Central registry for all language entities
 #[derive(Debug, Clone)]
@@ -43,10 +43,67 @@ impl EntityRegistry {
             fields_by_type: HashMap::new(),
         }
     }
+
+    /// Register a new type definition
+    pub fn register_type(
+        &mut self,
+        name_id: NameId,
+        kind: TypeDefKind,
+        module: ModuleId,
+    ) -> TypeDefId {
+        let id = TypeDefId::new(self.type_defs.len() as u32);
+        self.type_defs.push(TypeDef {
+            id,
+            name_id,
+            kind,
+            module,
+            methods: Vec::new(),
+            fields: Vec::new(),
+            extends: Vec::new(),
+        });
+        self.type_by_name.insert(name_id, id);
+        self.methods_by_type.insert(id, HashMap::new());
+        self.fields_by_type.insert(id, HashMap::new());
+        id
+    }
+
+    /// Get a type definition by ID
+    pub fn get_type(&self, id: TypeDefId) -> &TypeDef {
+        &self.type_defs[id.index() as usize]
+    }
+
+    /// Get a mutable type definition by ID
+    pub fn get_type_mut(&mut self, id: TypeDefId) -> &mut TypeDef {
+        &mut self.type_defs[id.index() as usize]
+    }
+
+    /// Look up a type by its NameId
+    pub fn type_by_name(&self, name_id: NameId) -> Option<TypeDefId> {
+        self.type_by_name.get(&name_id).copied()
+    }
 }
 
 impl Default for EntityRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::identity::NameTable;
+
+    #[test]
+    fn register_and_lookup_type() {
+        let mut names = NameTable::new();
+        let name_id = names.intern_raw(names.main_module(), &["TestType"]);
+
+        let mut registry = EntityRegistry::new();
+        let type_id = registry.register_type(name_id, TypeDefKind::Record, names.main_module());
+
+        assert_eq!(registry.type_by_name(name_id), Some(type_id));
+        assert_eq!(registry.get_type(type_id).name_id, name_id);
+        assert_eq!(registry.get_type(type_id).kind, TypeDefKind::Record);
     }
 }
