@@ -44,6 +44,7 @@ Vole is a compiled programming language with JIT compilation via Cranelift.
 ## Build Commands
 
 ```bash
+just check       # Fast type checking (use after ANY code change)
 just build       # Debug build
 just ci          # Run all checks (format, clippy, test, snap)
 just pre-commit  # Quick checks and fixes before committing
@@ -124,3 +125,115 @@ tests {
 Types: `i32`, `i64`, `f64`, `bool`, `string`, `nil`, `T?` (optional)
 
 See `docs/language/cheatsheet.md` for full reference. Update docs when changing language features.
+
+## Verification Requirements
+
+**ALWAYS run `just check` after ANY code change before claiming success.**
+
+### Before Claiming Done
+```bash
+just check              # After any code change
+just ci                 # After feature work
+cargo run --bin vole -- test <path>  # After test changes
+```
+
+### Never Claim Success When
+- `cargo check` shows errors
+- Tests are failing
+- Build warnings about unused/unresolved items
+
+### Subagent Requirements
+When dispatching subagents, they MUST run `cargo check` and verify exit code 0 before reporting success.
+
+## String Interners - CRITICAL
+
+There are **multiple interners** (AST interner, sema interner). This is a common source of bugs.
+
+### The Problem
+```rust
+// WRONG - symbol might be from different interner
+let name = some_type.name;
+registry.lookup(name);  // May fail silently or return wrong result
+
+// WRONG - comparing symbols from different interners
+if type1.name == type2.name { ... }  // May be false even for same string
+```
+
+### Safe Patterns
+```rust
+// RIGHT - resolve to string when crossing boundaries
+let name_str = interner.resolve(some_type.name);
+registry.lookup_by_str(name_str);
+
+// RIGHT - use NameId for cross-interner compatibility
+let name_id = NameId::from_symbol(some_type.name, interner);
+```
+
+### When This Bites You
+- Implementing interface methods (interface name from different interner)
+- Looking up types across module boundaries
+- Generator transforms (builds AST with fresh symbols)
+
+## Common Pitfalls
+
+### AST Changes Cascade
+Changing AST types (`ast.rs`) requires updates in:
+- Parser (`parse_*.rs`)
+- Sema analyzer (`analyzer/*.rs`)
+- Codegen (`codegen/*.rs`)
+- Printer (`fmt/printer.rs`)
+- Transforms (`transforms/*.rs`)
+
+**Search ALL locations before making AST changes.**
+
+### Type vs TypeExpr
+- `Type` = sema layer resolved types
+- `TypeExpr` = AST layer syntax types
+
+Don't confuse them - they're in different compiler phases.
+
+### Interface Boxing
+Returning a record as an interface type requires boxing. Check:
+- `box_interface_value` in codegen
+- Vtable dispatch for method calls
+
+### Generator Transform
+Generators build AST directly, bypassing parser. Changes to parser syntax may not affect generators.
+Location: `src/transforms/generator.rs`
+
+## Refactoring Checklist
+
+Before renaming a field, type, or function:
+
+1. **Find all usages FIRST**
+   ```bash
+   grep -rn 'old_name' src/ --include='*.rs'
+   ```
+
+2. **Count usages** - know how many changes needed
+
+3. **Fix ALL usages in one pass** - don't build until all are done
+
+4. **Run `just check`** - verify before claiming success
+
+### Common Refactors
+
+| Change | Search Pattern |
+|--------|---------------|
+| Struct field | `grep -rn 'field_name' src/` |
+| Enum variant | `grep -rn 'EnumName::Variant' src/` |
+| Function | `grep -rn 'fn func_name\|func_name(' src/` |
+| Type | `grep -rn 'TypeName' src/` |
+
+## Debugging with vole inspect
+
+Use `vole inspect` to see intermediate representations:
+
+```bash
+vole inspect ast file.vole       # Show parsed AST
+vole inspect ir file.vole        # Show Cranelift IR
+```
+
+### When to Use
+- **AST**: Parser bugs, transform issues, syntax questions
+- **IR**: Codegen bugs, wrong output, type layout issues

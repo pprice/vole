@@ -10,6 +10,7 @@ use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::{FunctionType, Type};
 
+#[derive(Debug)]
 pub(crate) enum MethodTarget {
     Direct {
         method_info: MethodInfo,
@@ -113,7 +114,45 @@ where
                     )
                     .into());
                 }
+
+                // For interface types, we need vtable dispatch - the external_info is for
+                // the default implementation, but the concrete type may override it
+                if let Type::Interface(interface_type) = input.object_type {
+                    // Look up interface by name_id to get the correct symbol for the current interner
+                    let iface_def = input
+                        .analyzed
+                        .interface_registry
+                        .get_by_name_id(interface_type.name_id)
+                        .ok_or_else(|| {
+                            format!(
+                                "interface {:?} not found by name_id",
+                                interface_type.name_id
+                            )
+                        })?;
+                    // Look up interface name symbol in current interner
+                    let interface_name_sym = input
+                        .analyzed
+                        .interner
+                        .lookup(&iface_def.name_str)
+                        .ok_or_else(|| {
+                            format!("interface name {} not interned", iface_def.name_str)
+                        })?;
+                    let method_name_sym = input
+                        .analyzed
+                        .interner
+                        .lookup(input.method_name_str)
+                        .ok_or_else(|| {
+                            format!("method name {} not interned", input.method_name_str)
+                        })?;
+                    return Ok(MethodTarget::InterfaceDispatch {
+                        interface_name: interface_name_sym,
+                        method_name: method_name_sym,
+                        func_type: func_type.clone(),
+                    });
+                }
+
                 if let Some(ext_info) = external_info {
+                    // For concrete types with external implementation, call external directly
                     return Ok(MethodTarget::External {
                         external_info: ext_info.clone(),
                         return_type: (*func_type.return_type).clone(),
@@ -158,14 +197,48 @@ where
                 })
             }
             ResolvedMethod::InterfaceMethod {
-                interface_name,
-                method_name,
+                interface_name: _,
+                method_name: _,
                 func_type,
-            } => Ok(MethodTarget::InterfaceDispatch {
-                interface_name: *interface_name,
-                method_name: *method_name,
-                func_type: func_type.clone(),
-            }),
+            } => {
+                // Use object type's interface info for cross-interner safety
+                if let Type::Interface(interface_type) = input.object_type {
+                    let iface_def = input
+                        .analyzed
+                        .interface_registry
+                        .get_by_name_id(interface_type.name_id)
+                        .ok_or_else(|| {
+                            format!(
+                                "interface {:?} not found by name_id",
+                                interface_type.name_id
+                            )
+                        })?;
+                    let interface_name_sym = input
+                        .analyzed
+                        .interner
+                        .lookup(&iface_def.name_str)
+                        .ok_or_else(|| {
+                            format!("interface name {} not interned", iface_def.name_str)
+                        })?;
+                    let method_name_sym = input
+                        .analyzed
+                        .interner
+                        .lookup(input.method_name_str)
+                        .ok_or_else(|| {
+                            format!("method name {} not interned", input.method_name_str)
+                        })?;
+                    Ok(MethodTarget::InterfaceDispatch {
+                        interface_name: interface_name_sym,
+                        method_name: method_name_sym,
+                        func_type: func_type.clone(),
+                    })
+                } else {
+                    Err(format!(
+                        "InterfaceMethod resolution on non-interface type: {:?}",
+                        input.object_type
+                    ))
+                }
+            }
         };
     }
 

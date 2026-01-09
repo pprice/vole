@@ -6,6 +6,7 @@ pub mod closure;
 pub mod instance;
 pub mod iterator;
 pub mod native_registry;
+pub mod signal;
 pub mod stdlib;
 pub mod string;
 pub mod type_registry;
@@ -19,6 +20,10 @@ pub use builtins::set_stdout_capture;
 pub use instance::RcInstance;
 pub use native_registry::{
     NativeFunction, NativeModule, NativeRegistry, NativeSignature, NativeType,
+};
+pub use signal::{
+    clear_context, clear_current_test, install_segfault_handler, pop_context, push_context,
+    replace_context, set_current_file, set_current_test,
 };
 pub use string::RcString;
 pub use value::{Context, RcHeader, TYPE_STRING};

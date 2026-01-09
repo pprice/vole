@@ -148,6 +148,16 @@ pub(crate) fn method_name_id(
     namer.method(name)
 }
 
+/// Look up a method NameId by string name (cross-interner safe)
+pub(crate) fn method_name_id_by_str(
+    analyzed: &AnalyzedProgram,
+    interner: &Interner,
+    name_str: &str,
+) -> Option<NameId> {
+    let namer = NamerLookup::new(&analyzed.name_table, interner);
+    namer.method_by_str(name_str)
+}
+
 pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: &Type) -> String {
     match ty {
         Type::Class(class_type) => analyzed.name_table.display(class_type.name_id, interner),

@@ -10,6 +10,10 @@ build:
 build-release:
     cargo build --release
 
+# Fast type checking (no codegen) - use this to verify changes quickly
+check:
+    cargo check --all-targets
+
 # Run tests in debug mode
 test:
     cargo test

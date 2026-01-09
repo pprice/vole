@@ -1364,10 +1364,10 @@ fn print_implement_block<'a>(
     impl_block: &ImplementBlock,
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
-    let header = if let Some(trait_name) = impl_block.trait_name {
+    let header = if let Some(ref trait_type) = impl_block.trait_type {
         arena
             .text("implement ")
-            .append(arena.text(interner.resolve(trait_name).to_string()))
+            .append(print_type_expr(arena, trait_type, interner))
             .append(arena.text(" for "))
             .append(print_type_expr(arena, &impl_block.target_type, interner))
     } else {

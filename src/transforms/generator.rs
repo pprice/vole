@@ -466,7 +466,7 @@ impl<'a> GeneratorTransformer<'a> {
         let record_decl = RecordDecl {
             name: record_name,
             type_params: Vec::new(),
-            implements: vec![iterator_type],
+            implements: vec![iterator_type.clone()],
             fields,
             external: None,
             methods: Vec::new(),
@@ -482,9 +482,9 @@ impl<'a> GeneratorTransformer<'a> {
             func.span,
         );
 
-        // Create the implement block for Iterator
+        // Create the implement block for Iterator<T>
         let impl_block = ImplementBlock {
-            trait_name: Some(iterator_sym),
+            trait_type: Some(iterator_type),
             target_type: TypeExpr::Named(record_name),
             external: None,
             methods: vec![next_method],

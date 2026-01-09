@@ -1,0 +1,352 @@
+// Manual Iterator implementation tests
+// Test that records can implement Iterator<T> directly
+
+// A manually implemented iterator that counts from 0 to max
+record Counter implements Iterator<i64> {
+    current: i64,
+    max: i64,
+}
+
+implement Iterator<i64> for Counter {
+    func next() -> i64 | Done {
+        if self.current >= self.max {
+            return Done {}
+        }
+        let v = self.current
+        self.current = self.current + 1
+        return v
+    }
+}
+
+func count_to(n: i64) -> Iterator<i64> {
+    return Counter { current: 0, max: n }
+}
+
+// A range iterator for testing different patterns
+record Range implements Iterator<i64> {
+    start: i64,
+    end: i64,
+    step: i64,
+}
+
+implement Iterator<i64> for Range {
+    func next() -> i64 | Done {
+        if self.start >= self.end {
+            return Done {}
+        }
+        let v = self.start
+        self.start = self.start + self.step
+        return v
+    }
+}
+
+func range(start: i64, end: i64) -> Iterator<i64> {
+    return Range { start: start, end: end, step: 1 }
+}
+
+func range_step(start: i64, end: i64, step: i64) -> Iterator<i64> {
+    return Range { start: start, end: end, step: step }
+}
+
+tests "manual iterator basics" {
+    test "counter creates and returns first value" {
+        let iter = count_to(3)
+        let result = iter.next()
+        // We expect 0 as the first value
+        match result {
+            Done => assert(false)
+            i64 => assert(true)  // Got a value (which we know is 0)
+        }
+    }
+
+    test "counter can be iterated manually" {
+        let iter = count_to(3)
+        // Consume all values
+        iter.next()  // 0
+        iter.next()  // 1
+        iter.next()  // 2
+        // Fourth call should return Done
+        let result = iter.next()
+        match result {
+            Done => assert(true)
+            i64 => assert(false)
+        }
+    }
+
+    test "range iterator returns Done when exhausted" {
+        let iter = range(5, 8)
+        iter.next()  // 5
+        iter.next()  // 6
+        iter.next()  // 7
+        // Should be done now
+        let result = iter.next()
+        match result {
+            Done => assert(true)
+            i64 => assert(false)
+        }
+    }
+}
+
+tests "manual iterator with collect" {
+    test "counter collect" {
+        let result = count_to(4).collect()
+        assert(result.length() == 4)
+        assert(result[0] == 0)
+        assert(result[1] == 1)
+        assert(result[2] == 2)
+        assert(result[3] == 3)
+    }
+
+    test "range collect" {
+        let result = range(10, 13).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 10)
+        assert(result[1] == 11)
+        assert(result[2] == 12)
+    }
+
+    test "empty counter collect" {
+        let result = count_to(0).collect()
+        assert(result.length() == 0)
+    }
+
+    test "range with step collect" {
+        let result = range_step(0, 10, 2).collect()
+        assert(result.length() == 5)
+        assert(result[0] == 0)
+        assert(result[1] == 2)
+        assert(result[2] == 4)
+        assert(result[3] == 6)
+        assert(result[4] == 8)
+    }
+}
+
+tests "manual iterator with map" {
+    test "counter with map" {
+        let result = count_to(3).map((x) => x * 10).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 0)
+        assert(result[1] == 10)
+        assert(result[2] == 20)
+    }
+
+    test "range with map" {
+        let result = range(1, 4).map((x) => x * x).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 1)
+        assert(result[1] == 4)
+        assert(result[2] == 9)
+    }
+}
+
+tests "manual iterator with filter" {
+    test "counter with filter" {
+        let result = count_to(6).filter((x) => x % 2 == 0).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 0)
+        assert(result[1] == 2)
+        assert(result[2] == 4)
+    }
+
+    test "range with filter" {
+        let result = range(1, 10).filter((x) => x > 5).collect()
+        assert(result.length() == 4)
+        assert(result[0] == 6)
+        assert(result[1] == 7)
+        assert(result[2] == 8)
+        assert(result[3] == 9)
+    }
+}
+
+tests "manual iterator with take and skip" {
+    test "counter with take" {
+        let result = count_to(100).take(3).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 0)
+        assert(result[1] == 1)
+        assert(result[2] == 2)
+    }
+
+    test "counter with skip" {
+        let result = count_to(5).skip(2).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 2)
+        assert(result[1] == 3)
+        assert(result[2] == 4)
+    }
+
+    test "range with take and skip" {
+        let result = range(0, 10).skip(3).take(4).collect()
+        assert(result.length() == 4)
+        assert(result[0] == 3)
+        assert(result[1] == 4)
+        assert(result[2] == 5)
+        assert(result[3] == 6)
+    }
+}
+
+tests "manual iterator with sum and count" {
+    test "counter sum" {
+        // 0 + 1 + 2 + 3 + 4 = 10
+        assert(count_to(5).sum() == 10)
+    }
+
+    test "counter count" {
+        assert(count_to(7).count() == 7)
+    }
+
+    test "range sum" {
+        // 5 + 6 + 7 + 8 + 9 = 35
+        assert(range(5, 10).sum() == 35)
+    }
+
+    test "range count" {
+        assert(range(10, 20).count() == 10)
+    }
+
+    test "filtered count" {
+        // Evens in 0..10: 0, 2, 4, 6, 8 = 5 elements
+        assert(count_to(10).filter((x) => x % 2 == 0).count() == 5)
+    }
+
+    test "filtered sum" {
+        // Evens in 0..10: 0 + 2 + 4 + 6 + 8 = 20
+        assert(count_to(10).filter((x) => x % 2 == 0).sum() == 20)
+    }
+}
+
+tests "manual iterator with first, last, nth" {
+    test "counter first" {
+        let result = count_to(5).first()
+        assert(result != nil)
+        assert((result ?? -1) == 0)
+    }
+
+    test "counter last" {
+        let result = count_to(5).last()
+        assert(result != nil)
+        assert((result ?? -1) == 4)
+    }
+
+    test "counter nth" {
+        let result = count_to(10).nth(7)
+        assert(result != nil)
+        assert((result ?? -1) == 7)
+    }
+
+    test "range first" {
+        let result = range(100, 200).first()
+        assert(result != nil)
+        assert((result ?? -1) == 100)
+    }
+
+    test "range last" {
+        let result = range(100, 105).last()
+        assert(result != nil)
+        assert((result ?? -1) == 104)
+    }
+
+    test "range nth" {
+        let result = range(10, 20).nth(5)
+        assert(result != nil)
+        assert((result ?? -1) == 15)
+    }
+
+    test "empty iterator first returns nil" {
+        let result = count_to(0).first()
+        assert(result == nil)
+    }
+
+    test "empty iterator last returns nil" {
+        let result = count_to(0).last()
+        assert(result == nil)
+    }
+
+    test "nth beyond bounds returns nil" {
+        let result = count_to(3).nth(10)
+        assert(result == nil)
+    }
+}
+
+tests "manual iterator chained operations" {
+    test "map then filter" {
+        // 0, 1, 2, 3, 4 -> 0, 10, 20, 30, 40 -> filter > 15 -> 20, 30, 40
+        let result = count_to(5).map((x) => x * 10).filter((x) => x > 15).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 20)
+        assert(result[1] == 30)
+        assert(result[2] == 40)
+    }
+
+    test "filter then map" {
+        // 0..10 -> filter evens -> 0, 2, 4, 6, 8 -> square -> 0, 4, 16, 36, 64
+        let result = count_to(10).filter((x) => x % 2 == 0).map((x) => x * x).collect()
+        assert(result.length() == 5)
+        assert(result[0] == 0)
+        assert(result[1] == 4)
+        assert(result[2] == 16)
+        assert(result[3] == 36)
+        assert(result[4] == 64)
+    }
+
+    test "skip then take then map" {
+        // 0..20 -> skip 5 -> 5..19 -> take 3 -> 5, 6, 7 -> *2 -> 10, 12, 14
+        let result = count_to(20).skip(5).take(3).map((x) => x * 2).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 10)
+        assert(result[1] == 12)
+        assert(result[2] == 14)
+    }
+
+    test "complex chain with sum" {
+        // range(1, 11) = 1..10, filter > 3 = 4..10, take 4 = 4, 5, 6, 7
+        // map *2 = 8, 10, 12, 14, sum = 44
+        let result = range(1, 11).filter((x) => x > 3).take(4).map((x) => x * 2).sum()
+        assert(result == 44)
+    }
+
+    test "chain with first after filter" {
+        // 0..100, filter > 50, first = 51
+        let result = count_to(100).filter((x) => x > 50).first()
+        assert(result != nil)
+        assert((result ?? -1) == 51)
+    }
+
+    test "chain with last after take" {
+        // 0..100, skip 90, take 5 = 90, 91, 92, 93, 94, last = 94
+        let result = count_to(100).skip(90).take(5).last()
+        assert(result != nil)
+        assert((result ?? -1) == 94)
+    }
+
+    test "chain with nth after map and filter" {
+        // range(0, 20), filter evens = 0, 2, 4, 6, 8, 10, 12, 14, 16, 18
+        // map *3 = 0, 6, 12, 18, 24, 30, 36, 42, 48, 54
+        // nth(4) = 24
+        let result = range(0, 20).filter((x) => x % 2 == 0).map((x) => x * 3).nth(4)
+        assert(result != nil)
+        assert((result ?? -1) == 24)
+    }
+}
+
+tests "multiple independent iterators" {
+    test "calling factory multiple times creates fresh iterators" {
+        let arr1 = count_to(3).collect()
+        let arr2 = count_to(3).collect()
+
+        assert(arr1.length() == 3)
+        assert(arr2.length() == 3)
+        assert(arr1[0] == 0)
+        assert(arr2[0] == 0)
+    }
+
+    test "two ranges are independent" {
+        let arr1 = range(0, 5).collect()
+        let arr2 = range(10, 15).collect()
+
+        assert(arr1.length() == 5)
+        assert(arr2.length() == 5)
+        assert(arr1[0] == 0)
+        assert(arr2[0] == 10)
+    }
+}

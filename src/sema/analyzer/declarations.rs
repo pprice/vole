@@ -648,13 +648,17 @@ impl Analyzer {
     }
 
     fn collect_implement_block(&mut self, impl_block: &ImplementBlock, interner: &Interner) {
+        // Extract trait name symbol from trait_type (if present)
+        let trait_name = impl_block.trait_type.as_ref().and_then(interface_base_name);
+
         // Validate trait exists if specified
-        if let Some(trait_name) = impl_block.trait_name
-            && self.interface_registry.get(trait_name, interner).is_none()
+        if let Some(ref trait_type) = impl_block.trait_type
+            && let Some(name) = interface_base_name(trait_type)
+            && self.interface_registry.get(name, interner).is_none()
         {
             self.add_error(
                 SemanticError::UnknownInterface {
-                    name: interner.resolve(trait_name).to_string(),
+                    name: format_type_expr(trait_type, interner),
                     span: impl_block.span.into(),
                 },
                 impl_block.span,
@@ -701,7 +705,7 @@ impl Analyzer {
                     type_id,
                     method_id,
                     MethodImpl {
-                        trait_name: impl_block.trait_name,
+                        trait_name,
                         func_type,
                         is_builtin: false,
                         external_info: None,
@@ -711,12 +715,7 @@ impl Analyzer {
 
             // Analyze external block if present
             if let Some(ref external) = impl_block.external {
-                self.analyze_external_block(
-                    external,
-                    &target_type,
-                    impl_block.trait_name,
-                    interner,
-                );
+                self.analyze_external_block(external, &target_type, trait_name, interner);
             }
         }
     }

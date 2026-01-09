@@ -60,6 +60,10 @@ pub enum Type {
     Fallible(FallibleType),
     /// Module type (from import expression)
     Module(ModuleType),
+    /// Runtime iterator type - represents builtin iterators (array.iter(), range.iter(), etc.)
+    /// These are raw pointers to UnifiedIterator and should call external functions directly
+    /// without interface boxing. The inner type is the element type.
+    RuntimeIterator(Box<Type>),
     /// Type parameter (e.g., T in func identity<T>(x: T) -> T)
     /// Only valid within generic context during type checking
     TypeParam(Symbol),
@@ -326,6 +330,7 @@ impl Type {
             Type::Module(_) => "module",
             Type::TypeParam(_) => "type parameter",
             Type::GenericInstance { .. } => "generic",
+            Type::RuntimeIterator(_) => "iterator",
         }
     }
 

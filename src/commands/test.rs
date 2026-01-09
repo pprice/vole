@@ -4,6 +4,8 @@
 // Discovers and executes tests from Vole source files.
 
 use std::fs;
+use std::io::{self, Write};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -13,7 +15,8 @@ use super::common::{TermColors, parse_and_analyze, read_stdin};
 use crate::cli::{ColorMode, ReportMode, expand_paths};
 use crate::codegen::{Compiler, JitContext, TestInfo};
 use crate::runtime::{
-    AssertFailure, JmpBuf, call_setjmp, clear_test_jmp_buf, set_test_jmp_buf, take_assert_failure,
+    AssertFailure, JmpBuf, call_setjmp, clear_current_test, clear_test_jmp_buf, set_current_file,
+    set_current_test, set_test_jmp_buf, take_assert_failure,
 };
 use crate::util::format_duration;
 
@@ -22,6 +25,7 @@ use crate::util::format_duration;
 pub enum TestStatus {
     Passed,
     Failed(Option<AssertFailure>),
+    Panicked(String),
 }
 
 /// Result of running a single test
@@ -59,7 +63,7 @@ impl TestResults {
     fn add(&mut self, result: TestResult) {
         match &result.status {
             TestStatus::Passed => self.passed += 1,
-            TestStatus::Failed(_) => self.failed += 1,
+            TestStatus::Failed(_) | TestStatus::Panicked(_) => self.failed += 1,
         }
         self.results.push(result);
     }
@@ -119,15 +123,23 @@ pub fn run_tests(
             break;
         }
 
-        match run_file_tests(file, filter) {
+        // Print file path BEFORE processing for immediate feedback
+        if !matches!(report, ReportMode::Results) {
+            println!("\n{}", file.display());
+            let _ = io::stdout().flush();
+        }
+
+        // Set current file for signal handler
+        set_current_file(&file.display().to_string());
+
+        match run_file_tests_with_progress(file, filter, &colors, &report) {
             Ok(results) => {
-                print_file_results(file, &results, &colors, &report);
                 all_results.merge(results);
             }
             Err(e) => {
                 // Empty error means diagnostics were already rendered
                 if !e.is_empty() {
-                    eprintln!("\n{}: error: {}", file.display(), e);
+                    eprintln!("  error: {}", e);
                 }
                 all_results.failed += 1;
             }
@@ -169,14 +181,19 @@ fn run_stdin_tests(
     let stdin_path = PathBuf::from("<stdin>");
     let mut all_results = TestResults::new();
 
-    match run_source_tests(&source, "<stdin>", &stdin_path, filter) {
+    // Print file path BEFORE processing
+    if !matches!(report, ReportMode::Results) {
+        println!("\n{}", stdin_path.display());
+        let _ = io::stdout().flush();
+    }
+
+    match run_source_tests_with_progress(&source, "<stdin>", &stdin_path, filter, colors, report) {
         Ok(results) => {
-            print_file_results(&stdin_path, &results, colors, report);
             all_results.merge(results);
         }
         Err(e) => {
             if !e.is_empty() {
-                eprintln!("error: {}", e);
+                eprintln!("  error: {}", e);
             }
             all_results.failed += 1;
         }
@@ -198,19 +215,26 @@ fn run_stdin_tests(
     }
 }
 
-/// Parse, type check, compile, and run tests from a single file
-fn run_file_tests(path: &Path, filter: Option<&str>) -> Result<TestResults, String> {
+/// Parse, type check, compile, and run tests with incremental progress output
+fn run_file_tests_with_progress(
+    path: &Path,
+    filter: Option<&str>,
+    colors: &TermColors,
+    report: &ReportMode,
+) -> Result<TestResults, String> {
     let source = fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
     let file_path = path.to_string_lossy();
-    run_source_tests(&source, &file_path, path, filter)
+    run_source_tests_with_progress(&source, &file_path, path, filter, colors, report)
 }
 
-/// Parse, type check, compile, and run tests from source code
-fn run_source_tests(
+/// Parse, type check, compile, and run tests with incremental progress output
+fn run_source_tests_with_progress(
     source: &str,
     file_path: &str,
     path: &Path,
     filter: Option<&str>,
+    colors: &TermColors,
+    report: &ReportMode,
 ) -> Result<TestResults, String> {
     // Parse and type check
     let analyzed = parse_and_analyze(source, file_path).map_err(|()| String::new())?;
@@ -247,14 +271,20 @@ fn run_source_tests(
         tests
     };
 
-    // Execute tests
-    let results = execute_tests(tests, &jit, path);
+    // Execute tests with progress output
+    let results = execute_tests_with_progress(tests, &jit, path, colors, report);
 
     Ok(results)
 }
 
-/// Execute compiled tests with setjmp/longjmp for assertion failure handling
-fn execute_tests(tests: Vec<TestInfo>, jit: &JitContext, file: &Path) -> TestResults {
+/// Execute compiled tests with incremental progress output
+fn execute_tests_with_progress(
+    tests: Vec<TestInfo>,
+    jit: &JitContext,
+    file: &Path,
+    colors: &TermColors,
+    report: &ReportMode,
+) -> TestResults {
     let mut results = TestResults::new();
     let start = Instant::now();
     let file_path = file.to_path_buf();
@@ -263,6 +293,16 @@ fn execute_tests(tests: Vec<TestInfo>, jit: &JitContext, file: &Path) -> TestRes
         let func_ptr = match jit.get_function_ptr_by_id(test.func_id) {
             Some(ptr) => ptr,
             None => {
+                // Print failure immediately
+                if !matches!(report, ReportMode::Results) {
+                    println!(
+                        "  {}\u{2717}{} {} - could not find test function",
+                        colors.red(),
+                        colors.reset(),
+                        test.name,
+                    );
+                    let _ = io::stdout().flush();
+                }
                 results.add(TestResult {
                     info: test,
                     status: TestStatus::Failed(None),
@@ -276,13 +316,17 @@ fn execute_tests(tests: Vec<TestInfo>, jit: &JitContext, file: &Path) -> TestRes
         // Test functions have signature () -> i64
         let test_fn: extern "C" fn() -> i64 = unsafe { std::mem::transmute(func_ptr) };
 
+        // Set current test for signal handler
+        set_current_test(&test.name);
+
         let test_start = Instant::now();
 
         // Set up jump buffer for assertion failure recovery
         let mut jmp_buf: JmpBuf = JmpBuf::zeroed();
         set_test_jmp_buf(&mut jmp_buf);
 
-        let status = unsafe {
+        // Wrap test execution in catch_unwind to catch panics
+        let panic_result = catch_unwind(AssertUnwindSafe(|| unsafe {
             if call_setjmp(&mut jmp_buf) == 0 {
                 // Normal execution path
                 test_fn();
@@ -291,14 +335,82 @@ fn execute_tests(tests: Vec<TestInfo>, jit: &JitContext, file: &Path) -> TestRes
                 // Returned via longjmp from assertion failure
                 TestStatus::Failed(take_assert_failure())
             }
-        };
+        }));
 
         clear_test_jmp_buf();
+        clear_current_test();
+
+        let status = match panic_result {
+            Ok(status) => status,
+            Err(panic_info) => {
+                // Extract panic message
+                let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    (*s).to_string()
+                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic".to_string()
+                };
+                TestStatus::Panicked(msg)
+            }
+        };
 
         let duration = test_start.elapsed();
+        let duration_str = format_duration(duration);
+
+        // Print result immediately after test completes
+        if !matches!(report, ReportMode::Results) {
+            match &status {
+                TestStatus::Passed => {
+                    if !matches!(report, ReportMode::Failures) {
+                        println!(
+                            "  {}\u{2713}{} {} {}({}){}",
+                            colors.green(),
+                            colors.reset(),
+                            test.name,
+                            colors.dim(),
+                            duration_str,
+                            colors.reset()
+                        );
+                        let _ = io::stdout().flush();
+                    }
+                }
+                TestStatus::Failed(failure) => {
+                    print!(
+                        "  {}\u{2717}{} {} {}({}){}",
+                        colors.red(),
+                        colors.reset(),
+                        test.name,
+                        colors.dim(),
+                        duration_str,
+                        colors.reset()
+                    );
+                    if let Some(info) = failure {
+                        println!(" - assertion failed at {}:{}", info.file, info.line);
+                    } else {
+                        println!();
+                    }
+                    let _ = io::stdout().flush();
+                }
+                TestStatus::Panicked(msg) => {
+                    println!(
+                        "  {}\u{2620}{} {} {}({}){}",
+                        colors.red(),
+                        colors.reset(),
+                        test.name,
+                        colors.dim(),
+                        duration_str,
+                        colors.reset()
+                    );
+                    eprintln!("    PANIC: {}", msg);
+                    let _ = io::stdout().flush();
+                    let _ = io::stderr().flush();
+                }
+            }
+        }
 
         results.add(TestResult {
-            info: test,
+            info: test.clone(),
             status,
             duration,
             file: file_path.clone(),
@@ -307,45 +419,6 @@ fn execute_tests(tests: Vec<TestInfo>, jit: &JitContext, file: &Path) -> TestRes
 
     results.total_duration = start.elapsed();
     results
-}
-
-/// Print results for tests from a single file
-fn print_file_results(
-    path: &Path,
-    results: &TestResults,
-    colors: &TermColors,
-    report: &ReportMode,
-) {
-    if results.results.is_empty() {
-        return;
-    }
-
-    // In results mode, don't print individual tests
-    if matches!(report, ReportMode::Results) {
-        return;
-    }
-
-    // Check if we should print this file's header
-    let has_relevant_results = match report {
-        ReportMode::All => true,
-        ReportMode::Failures => results.failed > 0,
-        ReportMode::Results => false,
-    };
-
-    if !has_relevant_results {
-        return;
-    }
-
-    println!("\n{}", path.display());
-
-    for result in &results.results {
-        // In failures mode, skip passed tests
-        if matches!(report, ReportMode::Failures) && matches!(result.status, TestStatus::Passed) {
-            continue;
-        }
-
-        print_test_result(result, colors);
-    }
 }
 
 /// Print a single test result
@@ -380,6 +453,18 @@ fn print_test_result(result: &TestResult, colors: &TermColors) {
                 println!();
             }
         }
+        TestStatus::Panicked(msg) => {
+            println!(
+                "  {}\u{2620}{} {} {}({}){}",
+                colors.red(),
+                colors.reset(),
+                result.info.name,
+                colors.dim(),
+                duration,
+                colors.reset()
+            );
+            eprintln!("    PANIC: {}", msg);
+        }
     }
 }
 
@@ -391,7 +476,7 @@ fn print_failures_summary(results: &TestResults, colors: &TermColors) {
     let mut current_file: Option<&Path> = None;
 
     for result in &results.results {
-        if matches!(result.status, TestStatus::Failed(_)) {
+        if matches!(result.status, TestStatus::Failed(_) | TestStatus::Panicked(_)) {
             // Print file header if changed
             if current_file != Some(result.file.as_path()) {
                 println!("\n{}", result.file.display());

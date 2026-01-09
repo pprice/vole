@@ -126,6 +126,12 @@ impl Cg<'_, '_, '_> {
             return Ok(result);
         }
 
+        // Handle RuntimeIterator methods - these call external functions directly
+        // without interface boxing or vtable dispatch
+        if let Type::RuntimeIterator(elem_ty) = &obj.vole_type {
+            return self.runtime_iterator_method(&obj, mc, method_name_str, elem_ty);
+        }
+
         let method_id = method_name_id(self.ctx.analyzed, self.ctx.interner, mc.method)
             .ok_or_else(|| {
                 format!(
@@ -137,6 +143,13 @@ impl Cg<'_, '_, '_> {
         // Look up method resolution to determine naming convention and return type
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
         let resolution = self.ctx.analyzed.method_resolutions.get(expr_id);
+
+        if iface_debug_enabled() {
+            eprintln!(
+                "codegen: method_call obj_type={:?} method={} resolution={:?}",
+                obj.vole_type, method_name_str, resolution
+            );
+        }
 
         let target = resolve_method_target(MethodResolutionInput {
             analyzed: self.ctx.analyzed,
@@ -272,15 +285,14 @@ impl Cg<'_, '_, '_> {
             end_val.value
         };
 
-        // Call vole_range_iter(start, end) -> Iterator<i64>
+        // Call vole_range_iter(start, end) -> RuntimeIterator<i64>
         let result = self.call_runtime(RuntimeFn::RangeIter, &[start.value, end_value])?;
 
-        // Return as Iterator<i64>
-        let iter_type = self.interface_type("Iterator", vec![Type::I64])?;
+        // Return as RuntimeIterator<i64> - concrete type for builtin iterators
         Ok(CompiledValue {
             value: result,
             ty: self.ctx.pointer_type,
-            vole_type: iter_type,
+            vole_type: Type::RuntimeIterator(Box::new(Type::I64)),
         })
     }
 
@@ -296,11 +308,12 @@ impl Cg<'_, '_, '_> {
             }
             (Type::Array(elem_ty), "iter") => {
                 let result = self.call_runtime(RuntimeFn::ArrayIter, &[obj.value])?;
-                let iter_type = self.interface_type("Iterator", vec![*elem_ty.clone()])?;
+                // Return RuntimeIterator - a concrete type for builtin iterators
+                // This avoids interface boxing while still being compatible with Iterator<T>
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
-                    vole_type: iter_type,
+                    vole_type: Type::RuntimeIterator(elem_ty.clone()),
                 }))
             }
             (Type::String, "length") => {
@@ -309,11 +322,10 @@ impl Cg<'_, '_, '_> {
             }
             (Type::String, "iter") => {
                 let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
-                let iter_type = self.interface_type("Iterator", vec![Type::String])?;
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
-                    vole_type: iter_type,
+                    vole_type: Type::RuntimeIterator(Box::new(Type::String)),
                 }))
             }
             (Type::Range, "iter") => {
@@ -327,57 +339,67 @@ impl Cg<'_, '_, '_> {
                     .ins()
                     .load(types::I64, MemFlags::new(), obj.value, 8);
                 let result = self.call_runtime(RuntimeFn::RangeIter, &[start, end])?;
-                let iter_type = self.interface_type("Iterator", vec![Type::I64])?;
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
-                    vole_type: iter_type,
+                    vole_type: Type::RuntimeIterator(Box::new(Type::I64)),
                 }))
             }
             _ => Ok(None),
         }
     }
 
-    fn interface_type(&mut self, name: &str, type_args: Vec<Type>) -> Result<Type, String> {
-        let sym = self
+    /// Handle method calls on RuntimeIterator - calls external Iterator functions directly
+    fn runtime_iterator_method(
+        &mut self,
+        obj: &CompiledValue,
+        mc: &MethodCallExpr,
+        method_name: &str,
+        elem_ty: &Type,
+    ) -> Result<CompiledValue, String> {
+        // Look up the external function for this Iterator method
+        let iter_sym = self
             .ctx
             .interner
-            .lookup(name)
-            .ok_or_else(|| format!("interface {} not interned", name))?;
-        let def = self
+            .lookup("Iterator")
+            .ok_or_else(|| "Iterator interface not interned".to_string())?;
+        let iter_def = self
             .ctx
             .analyzed
             .interface_registry
-            .get(sym, self.ctx.interner)
-            .ok_or_else(|| format!("unknown interface {}", name))?;
-        if !def.type_params.is_empty() && def.type_params.len() != type_args.len() {
-            return Ok(Type::Error);
-        }
-        let mut substitutions = std::collections::HashMap::new();
-        for (param, arg) in def.type_params.iter().zip(type_args.iter()) {
-            substitutions.insert(*param, arg.clone());
-        }
-        let methods = def
+            .get(iter_sym, self.ctx.interner)
+            .ok_or_else(|| "Iterator interface not found".to_string())?;
+
+        // Get the external binding for this method
+        let external_info = iter_def
+            .external_methods
+            .get(method_name)
+            .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?;
+
+        // Find the method's return type from the interface definition
+        let method_def = iter_def
             .methods
             .iter()
-            .map(|method| crate::sema::types::InterfaceMethodType {
-                name: method.name,
-                params: method
-                    .params
-                    .iter()
-                    .map(|t| substitute_type(t, &substitutions))
-                    .collect(),
-                return_type: Box::new(substitute_type(&method.return_type, &substitutions)),
-                has_default: method.has_default,
-            })
+            .find(|m| m.name_str == method_name)
+            .ok_or_else(|| format!("Method {} not found on Iterator", method_name))?;
+
+        // Substitute the element type for T in the return type
+        let substitutions: std::collections::HashMap<crate::frontend::Symbol, Type> = iter_def
+            .type_params
+            .iter()
+            .map(|param| (*param, elem_ty.clone()))
             .collect();
-        Ok(Type::Interface(crate::sema::types::InterfaceType {
-            name: sym,
-            name_id: def.name_id,
-            type_args,
-            methods,
-            extends: def.extends.clone(),
-        }))
+        let return_type = substitute_type(&method_def.return_type, &substitutions);
+
+        // Build args: self (iterator ptr) + method args
+        let mut args = vec![obj.value];
+        for arg in &mc.args {
+            let compiled = self.expr(arg)?;
+            args.push(compiled.value);
+        }
+
+        // Call the external function directly
+        self.call_external(external_info, &args, &return_type)
     }
 
     fn functional_interface_call(
@@ -574,7 +596,10 @@ impl Cg<'_, '_, '_> {
             self.func_ref(key)?
         };
 
-        let mut call_args = vec![data_word];
+        // Pass the full boxed interface pointer (not just data_word) so wrappers can
+        // access both data and vtable. This is needed for Iterator methods that create
+        // UnifiedIterator adapters via vole_interface_iter.
+        let mut call_args = vec![obj.value];
         for arg in args {
             let compiled = self.expr(arg)?;
             let word = value_to_word(self.builder, &compiled, word_type, Some(heap_alloc_ref))?;

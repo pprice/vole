@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 use super::common::{parse_and_analyze, read_stdin};
 use crate::cli::expand_paths;
+use crate::runtime::push_context;
 
 /// Check Vole source files (parse + type check, no execution)
 /// Use "-" to read from stdin.
@@ -70,6 +71,7 @@ fn check_single_file(path: &Path) -> Result<(), ()> {
     };
 
     let file_path = path.to_string_lossy();
+    push_context(&format!("checking {}", file_path));
     parse_and_analyze(&source, &file_path)?;
     Ok(())
 }

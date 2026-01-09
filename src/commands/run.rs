@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 use super::common::{parse_and_analyze, read_stdin};
 use crate::codegen::{Compiler, JitContext};
+use crate::runtime::{push_context, replace_context};
 
 /// Run a Vole source file (or stdin if path is "-")
 pub fn run_file(path: &Path) -> ExitCode {
@@ -32,10 +33,15 @@ fn execute(path: &Path) -> Result<(), String> {
         (source, path.to_string_lossy().to_string())
     };
 
+    // Set context for signal handler
+    push_context(&file_path);
+
     // Parse and type check
+    replace_context(&format!("{} (parsing)", file_path));
     let analyzed = parse_and_analyze(&source, &file_path).map_err(|()| String::new())?;
 
     // Compile
+    replace_context(&format!("{} (compiling)", file_path));
     let mut jit = JitContext::new();
     {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
@@ -46,6 +52,7 @@ fn execute(path: &Path) -> Result<(), String> {
     let _ = jit.finalize();
 
     // Execute main
+    replace_context(&format!("{} (executing main)", file_path));
     let fn_ptr = jit
         .get_function_ptr("main")
         .ok_or_else(|| "no 'main' function found".to_string())?;

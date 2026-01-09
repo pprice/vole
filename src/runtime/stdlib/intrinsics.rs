@@ -144,6 +144,15 @@ pub fn module() -> NativeModule {
             return_type: NativeType::I64,
         },
     );
+    // interface_iter: wraps a boxed interface implementing Iterator into a UnifiedIterator
+    m.register(
+        "interface_iter",
+        iterator::vole_interface_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64], // boxed interface pointer
+            return_type: NativeType::I64,  // UnifiedIterator pointer
+        },
+    );
     m.register(
         "iter_next",
         iterator::vole_iter_next as *const u8,

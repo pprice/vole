@@ -13,8 +13,12 @@ use vole::commands::run::run_file;
 use vole::commands::test::run_tests;
 use vole::commands::version::print_version;
 use vole::errors::set_color_mode;
+use vole::runtime::install_segfault_handler;
 
 fn main() -> ExitCode {
+    // Install signal handler early for segfault debugging
+    install_segfault_handler();
+
     unsafe {
         std::env::set_var("RUST_BACKTRACE", "1");
     }

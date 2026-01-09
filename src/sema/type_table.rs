@@ -66,6 +66,7 @@ enum TypeFingerprint {
         def: NameId,
         args: Vec<TypeKey>,
     },
+    RuntimeIterator(TypeKey),
 }
 
 #[derive(Debug, Clone)]
@@ -265,6 +266,10 @@ impl TypeTable {
                     },
                     ty.clone(),
                 )
+            }
+            Type::RuntimeIterator(elem) => {
+                let elem_key = self.key_for_type(elem);
+                self.intern_fingerprint(TypeFingerprint::RuntimeIterator(elem_key), ty.clone())
             }
         }
     }

@@ -6,7 +6,7 @@ use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
 use crate::codegen::RuntimeFn;
 use crate::codegen::types::{
-    CompileCtx, CompiledValue, MethodInfo, method_name_id, type_to_cranelift, value_to_word,
+    CompileCtx, CompiledValue, MethodInfo, method_name_id_by_str, type_to_cranelift, value_to_word,
     word_to_value,
 };
 use crate::errors::CodegenError;
@@ -174,16 +174,26 @@ impl InterfaceVtableRegistry {
 
         for (index, method_def) in methods.iter().enumerate() {
             let target = resolve_vtable_target(ctx, interface_name_id, concrete_type, method_def)?;
-            let wrapper_id =
-                self.compile_wrapper(ctx, interface_name, method_def.name, concrete_type, &target)?;
+            // Use name_str for cross-interner safety
+            let wrapper_id = self.compile_wrapper(
+                ctx,
+                &iface_def.name_str,
+                &method_def.name_str,
+                concrete_type,
+                &target,
+            )?;
             let func_ref = ctx.module.declare_func_in_data(wrapper_id, &mut data);
             data.write_function_addr((index * word_bytes) as u32, func_ref);
             if iface_debug_enabled() {
+                let target_type = match &target {
+                    VtableMethodTarget::Direct { .. } => "Direct",
+                    VtableMethodTarget::Implemented { .. } => "Implemented",
+                    VtableMethodTarget::External { .. } => "External",
+                    VtableMethodTarget::Function { .. } => "Function",
+                };
                 eprintln!(
-                    "iface_vtable: slot={} method={} wrapper={:?}",
-                    index,
-                    ctx.interner.resolve(method_def.name),
-                    wrapper_id
+                    "iface_vtable: slot={} method={} target={} wrapper={:?}",
+                    index, method_def.name_str, target_type, wrapper_id
                 );
             }
         }
@@ -198,8 +208,8 @@ impl InterfaceVtableRegistry {
     fn compile_wrapper(
         &mut self,
         ctx: &mut CompileCtx,
-        interface_name: Symbol,
-        method_name: Symbol,
+        interface_name: &str,
+        method_name: &str,
         concrete_type: &Type,
         target: &VtableMethodTarget,
     ) -> Result<cranelift_module::FuncId, String> {
@@ -222,9 +232,7 @@ impl InterfaceVtableRegistry {
 
         let wrapper_name = format!(
             "__vole_iface_wrap_{}_{}_{}",
-            ctx.interner.resolve(interface_name),
-            ctx.interner.resolve(method_name),
-            self.wrapper_counter
+            interface_name, method_name, self.wrapper_counter
         );
         self.wrapper_counter += 1;
 
@@ -244,11 +252,14 @@ impl InterfaceVtableRegistry {
             builder.seal_block(entry);
 
             let params = builder.block_params(entry).to_vec();
-            let self_word = params[0];
+            // self_word is now the boxed interface pointer [data_ptr, vtable_ptr]
+            // We need to extract data_ptr for most targets
+            let box_ptr = params[0];
+            let data_word = builder.ins().load(word_type, MemFlags::new(), box_ptr, 0);
             let results = match target {
                 VtableMethodTarget::Function { func_type } => {
                     let self_val =
-                        word_to_value(&mut builder, self_word, concrete_type, ctx.pointer_type);
+                        word_to_value(&mut builder, data_word, concrete_type, ctx.pointer_type);
                     let mut args = Vec::with_capacity(func_type.params.len() + 1);
                     for (param_word, param_ty) in params[1..].iter().zip(func_type.params.iter()) {
                         args.push(word_to_value(
@@ -320,7 +331,7 @@ impl InterfaceVtableRegistry {
                 VtableMethodTarget::Direct { method_info, .. }
                 | VtableMethodTarget::Implemented { method_info, .. } => {
                     let self_val =
-                        word_to_value(&mut builder, self_word, concrete_type, ctx.pointer_type);
+                        word_to_value(&mut builder, data_word, concrete_type, ctx.pointer_type);
                     let mut call_args = Vec::with_capacity(1 + func_type.params.len());
                     call_args.push(self_val);
                     for (param_word, param_ty) in params[1..].iter().zip(func_type.params.iter()) {
@@ -343,8 +354,32 @@ impl InterfaceVtableRegistry {
                     external_info,
                     func_type,
                 } => {
-                    let self_val =
-                        word_to_value(&mut builder, self_word, concrete_type, ctx.pointer_type);
+                    // For Iterator interface, wrap the boxed interface in a UnifiedIterator
+                    // so external functions like vole_iter_collect can iterate via vtable.
+                    let self_val = if interface_name == "Iterator" {
+                        // Call vole_interface_iter(box_ptr) to create UnifiedIterator adapter
+                        let interface_iter_fn = ctx
+                            .native_registry
+                            .lookup("std:intrinsics", "interface_iter")
+                            .ok_or_else(|| {
+                                "native function std:intrinsics::interface_iter not found"
+                                    .to_string()
+                            })?;
+                        let mut iter_sig = ctx.module.make_signature();
+                        iter_sig.params.push(AbiParam::new(ctx.pointer_type));
+                        iter_sig.returns.push(AbiParam::new(ctx.pointer_type));
+                        let iter_sig_ref = builder.import_signature(iter_sig);
+                        let iter_fn_ptr = builder
+                            .ins()
+                            .iconst(ctx.pointer_type, interface_iter_fn.ptr as i64);
+                        let iter_call =
+                            builder
+                                .ins()
+                                .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr]);
+                        builder.inst_results(iter_call)[0]
+                    } else {
+                        word_to_value(&mut builder, data_word, concrete_type, ctx.pointer_type)
+                    };
                     let mut call_args = Vec::with_capacity(1 + func_type.params.len());
                     call_args.push(self_val);
                     for (param_word, param_ty) in params[1..].iter().zip(func_type.params.iter()) {
@@ -365,10 +400,13 @@ impl InterfaceVtableRegistry {
                             )
                         })?;
                     let mut native_sig = ctx.module.make_signature();
-                    native_sig.params.push(AbiParam::new(type_to_cranelift(
-                        concrete_type,
-                        ctx.pointer_type,
-                    )));
+                    // For Iterator, the self param is now *mut UnifiedIterator (pointer)
+                    let self_param_type = if interface_name == "Iterator" {
+                        ctx.pointer_type
+                    } else {
+                        type_to_cranelift(concrete_type, ctx.pointer_type)
+                    };
+                    native_sig.params.push(AbiParam::new(self_param_type));
                     for param_type in &func_type.params {
                         native_sig.params.push(AbiParam::new(type_to_cranelift(
                             param_type,
@@ -432,15 +470,24 @@ pub(crate) fn interface_method_slot(
     registry: &crate::sema::interface_registry::InterfaceRegistry,
     interner: &Interner,
 ) -> Result<usize, String> {
+    if iface_debug_enabled() {
+        eprintln!(
+            "interface_method_slot: looking up interface={} method={}",
+            interner.resolve(interface_name),
+            interner.resolve(method_name)
+        );
+    }
     let methods = collect_interface_methods(interface_name, registry, interner)
         .ok_or_else(|| format!("unknown interface {}", interner.resolve(interface_name)))?;
+    // Use string comparison for cross-interner safety
+    let method_name_str = interner.resolve(method_name);
     methods
         .iter()
-        .position(|m| m.name == method_name)
+        .position(|m| m.name_str == method_name_str)
         .ok_or_else(|| {
             format!(
                 "method {} not found on interface {}",
-                interner.resolve(method_name),
+                method_name_str,
                 interner.resolve(interface_name)
             )
         })
@@ -580,22 +627,19 @@ fn resolve_vtable_target(
     let type_id = TypeId::from_type(concrete_type, &ctx.analyzed.type_table).ok_or_else(|| {
         format!(
             "cannot resolve interface method {} on {:?}",
-            ctx.interner.resolve(method_def.name),
-            concrete_type
+            method_def.name_str, concrete_type
         )
     })?;
-    let method_id =
-        method_name_id(ctx.analyzed, ctx.interner, method_def.name).ok_or_else(|| {
-            format!(
-                "method name not interned: {}",
-                ctx.interner.resolve(method_def.name)
-            )
-        })?;
+    // Use string-based lookup for cross-interner safety (method_def is from stdlib interner)
+    // This may return None for default interface methods that aren't explicitly implemented
+    let method_id = method_name_id_by_str(ctx.analyzed, ctx.interner, &method_def.name_str);
 
-    if let Some(impl_) = ctx
-        .analyzed
-        .implement_registry
-        .get_method(&type_id, method_id)
+    // Check implement registry for explicit implementations
+    if let Some(method_id) = method_id
+        && let Some(impl_) = ctx
+            .analyzed
+            .implement_registry
+            .get_method(&type_id, method_id)
     {
         if let Some(external_info) = impl_.external_info.clone() {
             return Ok(VtableMethodTarget::External {
@@ -614,11 +658,14 @@ fn resolve_vtable_target(
         });
     }
 
-    if let Some(type_sym) = match concrete_type {
-        Type::Class(class_type) => Some(class_type.name),
-        Type::Record(record_type) => Some(record_type.name),
-        _ => None,
-    } && let Some(meta) = ctx.type_metadata.get(&type_sym)
+    // Check direct methods on class/record
+    if let Some(method_id) = method_id
+        && let Some(type_sym) = match concrete_type {
+            Type::Class(class_type) => Some(class_type.name),
+            Type::Record(record_type) => Some(record_type.name),
+            _ => None,
+        }
+        && let Some(meta) = ctx.type_metadata.get(&type_sym)
         && let Some(method_info) = meta.method_infos.get(&method_id).cloned()
     {
         let func_type = match &meta.vole_type {
@@ -647,12 +694,12 @@ fn resolve_vtable_target(
 
     // Fall back to interface default if method has one
     if method_def.has_default {
-        // Check for default external binding
-        if let Some(external_info) = ctx.analyzed.interface_registry.external_method(
-            interface_name_id,
-            method_def.name,
-            ctx.interner,
-        ) {
+        // Check for default external binding (use name_str for cross-interner safety)
+        if let Some(external_info) = ctx
+            .analyzed
+            .interface_registry
+            .external_method_by_str(interface_name_id, &method_def.name_str)
+        {
             return Ok(VtableMethodTarget::External {
                 external_info: external_info.clone(),
                 func_type: FunctionType {
@@ -667,11 +714,7 @@ fn resolve_vtable_target(
 
     Err(CodegenError::not_found(
         "method implementation",
-        format!(
-            "{} on {:?}",
-            ctx.interner.resolve(method_def.name),
-            concrete_type
-        ),
+        format!("{} on {:?}", method_def.name_str, concrete_type),
     )
     .into())
 }

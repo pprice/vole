@@ -386,24 +386,13 @@ impl<'src> Parser<'src> {
         self.advance(); // consume 'implement'
 
         // Parse: Trait for Type  OR  just Type
+        // Trait can be a generic type like Iterator<i64>
         let first_type = self.parse_type()?;
 
-        let (trait_name, target_type) = if self.match_token(TokenType::KwFor) {
-            // implement Trait for Type
-            let trait_sym = match &first_type {
-                TypeExpr::Named(sym) => *sym,
-                _ => {
-                    return Err(ParseError::new(
-                        ParserError::UnexpectedToken {
-                            token: "expected interface name".to_string(),
-                            span: self.current.span.into(),
-                        },
-                        self.current.span,
-                    ));
-                }
-            };
+        let (trait_type, target_type) = if self.match_token(TokenType::KwFor) {
+            // implement Trait for Type (Trait may be generic like Iterator<i64>)
             let target = self.parse_type()?;
-            (Some(trait_sym), target)
+            (Some(first_type), target)
         } else {
             // implement Type { ... } (type extension)
             (None, first_type)
@@ -435,7 +424,7 @@ impl<'src> Parser<'src> {
         let span = start_span.merge(self.previous.span);
 
         Ok(Decl::Implement(ImplementBlock {
-            trait_name,
+            trait_type,
             target_type,
             external,
             methods,

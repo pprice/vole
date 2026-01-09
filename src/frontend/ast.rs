@@ -144,8 +144,8 @@ pub struct InterfaceMethod {
 /// Standalone implement block: implement Trait for Type { ... }
 #[derive(Debug, Clone)]
 pub struct ImplementBlock {
-    pub trait_name: Option<Symbol>, // None for type extension (implement Type { ... })
-    pub target_type: TypeExpr,      // The type being extended
+    pub trait_type: Option<TypeExpr>, // None for type extension (implement Type { ... })
+    pub target_type: TypeExpr,        // The type being extended
     pub external: Option<ExternalBlock>, // External methods from native code
     pub methods: Vec<FuncDecl>,
     pub span: Span,

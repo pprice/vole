@@ -29,9 +29,11 @@ pub enum IteratorKind {
     FromFn = 14,
     Range = 15,
     StringChars = 16,
+    /// Interface iterator - wraps a boxed interface implementing Iterator
+    Interface = 17,
 }
 
-/// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, unique, chunks, windows, repeat, once, empty, from_fn, range, or string_chars iterator
+/// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, unique, chunks, windows, repeat, once, empty, from_fn, range, string_chars, or interface iterator
 /// This allows chaining (e.g., arr.iter().map(f).filter(p).take(5))
 #[repr(C)]
 pub union IteratorSource {
@@ -52,6 +54,7 @@ pub union IteratorSource {
     pub from_fn: FromFnSource,
     pub range: RangeSource,
     pub string_chars: StringCharsSource,
+    pub interface: InterfaceSource,
 }
 
 /// Source data for array iteration
@@ -228,6 +231,15 @@ pub struct StringCharsSource {
     pub byte_pos: i64,
 }
 
+/// Source data for interface iteration (wraps a boxed interface implementing Iterator)
+/// This allows user-defined types implementing Iterator to use the standard iterator methods.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InterfaceSource {
+    /// Pointer to the boxed interface (layout: [data_ptr, vtable_ptr])
+    pub boxed_interface: *const u8,
+}
+
 /// Unified iterator structure
 /// The kind field tells us which variant is active
 #[repr(C)]
@@ -271,6 +283,20 @@ pub extern "C" fn vole_array_iter(array: *const RcArray) -> *mut UnifiedIterator
         kind: IteratorKind::Array,
         source: IteratorSource {
             array: ArraySource { array, index: 0 },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Create an interface iterator wrapper from a boxed interface implementing Iterator.
+/// The boxed_interface has layout: [data_ptr, vtable_ptr].
+/// Returns pointer to heap-allocated iterator.
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_interface_iter(boxed_interface: *const u8) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Interface,
+        source: IteratorSource {
+            interface: InterfaceSource { boxed_interface },
         },
     });
     Box::into_raw(iter)
@@ -387,6 +413,9 @@ pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
                     RcString::dec_ref(string as *mut RcString);
                 }
             }
+            IteratorKind::Interface => {
+                // The boxed interface is owned by the Vole runtime, don't free it here
+            }
         }
 
         // Free this iterator
@@ -484,6 +513,60 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
         IteratorKind::StringChars => {
             // For string chars iterators, delegate to string_chars_next logic
             vole_string_chars_iter_next(iter, out_value)
+        }
+        IteratorKind::Interface => {
+            // For interface iterators, call through the vtable
+            vole_interface_iter_next(iter, out_value)
+        }
+    }
+}
+
+/// Get next value from interface iterator by calling through the vtable.
+/// The boxed interface has layout: [data_ptr, vtable_ptr]
+/// The vtable has method pointers, with next() at slot 0.
+/// The next() wrapper returns a tagged union pointer where tag 0 = Done, tag 1 = value.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_interface_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &*iter };
+    if iter_ref.kind != IteratorKind::Interface {
+        return 0;
+    }
+
+    let interface_src = unsafe { iter_ref.source.interface };
+    let boxed = interface_src.boxed_interface;
+    if boxed.is_null() {
+        return 0;
+    }
+
+    unsafe {
+        // Load vtable pointer from the boxed interface (layout: [data_ptr, vtable_ptr])
+        let vtable_ptr = *((boxed as *const i64).add(1));
+
+        // Get the next() method pointer from vtable slot 0
+        let next_fn_ptr = *(vtable_ptr as *const usize);
+
+        // Call the next() wrapper: fn(box_ptr) -> tagged_union_ptr
+        // The wrapper expects the full boxed interface pointer so it can extract data_ptr
+        let next_fn: extern "C" fn(i64) -> *mut u8 = std::mem::transmute(next_fn_ptr);
+        let result_ptr = next_fn(boxed as i64);
+
+        // Parse the tagged union result
+        // Layout: [tag:1][pad:7][payload:8]
+        // Tag 0 = Done, Tag 1 = value
+        let tag = *result_ptr;
+        if tag == 0 {
+            // Done - no more values
+            0
+        } else {
+            // Has value - extract payload
+            let payload = *(result_ptr.add(8) as *const i64);
+            *out_value = payload;
+            1
         }
     }
 }
