@@ -306,6 +306,32 @@ impl Analyzer {
             },
             ExprKind::Grouping(inner) => self.check_expr_expecting(inner, expected, interner),
             ExprKind::ArrayLiteral(elements) => {
+                // Check if expecting a tuple type
+                if let Some(Type::Tuple(expected_elems)) = expected {
+                    // Check that literal has correct number of elements
+                    if elements.len() != expected_elems.len() {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: format!("tuple with {} elements", expected_elems.len()),
+                                found: format!("{} elements", elements.len()),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        return Ok(Type::Error);
+                    }
+                    // Check each element against its expected type
+                    let elem_types: Vec<Type> = elements
+                        .iter()
+                        .zip(expected_elems.iter())
+                        .map(|(elem, expected_elem)| {
+                            self.check_expr_expecting(elem, Some(expected_elem), interner)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    return Ok(Type::Tuple(elem_types));
+                }
+
+                // Check if expecting an array type
                 let elem_expected = match expected {
                     Some(Type::Array(elem)) => Some(elem.as_ref()),
                     _ => None,
@@ -318,13 +344,32 @@ impl Analyzer {
                     return Ok(Type::Array(Box::new(Type::Unknown)));
                 }
 
-                let elem_ty = self.check_expr_expecting(&elements[0], elem_expected, interner)?;
+                // Infer types for all elements
+                let elem_types: Vec<Type> = elements
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| {
+                        if i == 0 {
+                            self.check_expr_expecting(e, elem_expected, interner)
+                        } else {
+                            self.check_expr(e, interner)
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
 
-                for elem in elements.iter().skip(1) {
-                    self.check_expr_expecting(elem, Some(&elem_ty), interner)?;
+                // Check if all elements have compatible types (homogeneous → Array)
+                // or different types (heterogeneous → Tuple)
+                let first_ty = &elem_types[0];
+                let is_homogeneous = elem_types
+                    .iter()
+                    .skip(1)
+                    .all(|ty| self.types_compatible(ty, first_ty, interner));
+
+                if is_homogeneous {
+                    Ok(Type::Array(Box::new(first_ty.clone())))
+                } else {
+                    Ok(Type::Tuple(elem_types))
                 }
-
-                Ok(Type::Array(Box::new(elem_ty)))
             }
             ExprKind::Index(_) => {
                 // Index expressions just delegate to check_expr

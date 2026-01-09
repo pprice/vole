@@ -88,6 +88,32 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
         _ => {}
     }
 
+    // Tuple compatibility: same length and each element is compatible
+    if let (Type::Tuple(from_elems), Type::Tuple(to_elems)) = (from, to)
+        && from_elems.len() == to_elems.len()
+    {
+        return from_elems
+            .iter()
+            .zip(to_elems.iter())
+            .all(|(f, t)| types_compatible_core(f, t));
+    }
+
+    // Fixed array compatibility: same element type and same size
+    if let (
+        Type::FixedArray {
+            element: from_elem,
+            size: from_size,
+        },
+        Type::FixedArray {
+            element: to_elem,
+            size: to_size,
+        },
+    ) = (from, to)
+        && from_size == to_size
+    {
+        return types_compatible_core(from_elem, to_elem);
+    }
+
     false
 }
 
@@ -246,5 +272,63 @@ mod tests {
             &fn_type,
             &iface_fn_wrong_params
         ));
+    }
+
+    #[test]
+    fn test_types_compatible_tuple() {
+        let tuple1 = Type::Tuple(vec![Type::I32, Type::String]);
+        let tuple2 = Type::Tuple(vec![Type::I32, Type::String]);
+        let tuple3 = Type::Tuple(vec![Type::I32, Type::Bool]); // Different element type
+        let tuple4 = Type::Tuple(vec![Type::I32]); // Different length
+
+        assert!(types_compatible_core(&tuple1, &tuple2));
+        assert!(!types_compatible_core(&tuple1, &tuple3));
+        assert!(!types_compatible_core(&tuple1, &tuple4));
+    }
+
+    #[test]
+    fn test_types_compatible_tuple_widening() {
+        // Tuple with widening: [i32, f32] compatible with [i64, f64]
+        let narrow = Type::Tuple(vec![Type::I32, Type::F32]);
+        let wide = Type::Tuple(vec![Type::I64, Type::F64]);
+        assert!(types_compatible_core(&narrow, &wide));
+    }
+
+    #[test]
+    fn test_types_compatible_fixed_array() {
+        let arr1 = Type::FixedArray {
+            element: Box::new(Type::I32),
+            size: 10,
+        };
+        let arr2 = Type::FixedArray {
+            element: Box::new(Type::I32),
+            size: 10,
+        };
+        let arr3 = Type::FixedArray {
+            element: Box::new(Type::I32),
+            size: 5,
+        }; // Different size
+        let arr4 = Type::FixedArray {
+            element: Box::new(Type::String),
+            size: 10,
+        }; // Different element type
+
+        assert!(types_compatible_core(&arr1, &arr2));
+        assert!(!types_compatible_core(&arr1, &arr3));
+        assert!(!types_compatible_core(&arr1, &arr4));
+    }
+
+    #[test]
+    fn test_types_compatible_fixed_array_widening() {
+        // Fixed array with widening: [i32; 5] compatible with [i64; 5]
+        let narrow = Type::FixedArray {
+            element: Box::new(Type::I32),
+            size: 5,
+        };
+        let wide = Type::FixedArray {
+            element: Box::new(Type::I64),
+            size: 5,
+        };
+        assert!(types_compatible_core(&narrow, &wide));
     }
 }

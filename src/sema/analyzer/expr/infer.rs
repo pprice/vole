@@ -242,27 +242,27 @@ impl Analyzer {
                     // Empty array needs type annotation or we use Unknown
                     Ok(Type::Array(Box::new(Type::Unknown)))
                 } else {
-                    // Infer element type from first element
-                    let elem_ty = self.check_expr(&elements[0], interner)?;
+                    // Infer types for all elements
+                    let elem_types: Vec<Type> = elements
+                        .iter()
+                        .map(|e| self.check_expr(e, interner))
+                        .collect::<Result<Vec<_>, _>>()?;
 
-                    // Check remaining elements match
-                    for elem in elements.iter().skip(1) {
-                        let ty = self.check_expr(elem, interner)?;
-                        if !self.types_compatible(&ty, &elem_ty, interner) {
-                            let expected = self.type_display(&elem_ty);
-                            let found = self.type_display(&ty);
-                            self.add_error(
-                                SemanticError::TypeMismatch {
-                                    expected,
-                                    found,
-                                    span: elem.span.into(),
-                                },
-                                elem.span,
-                            );
-                        }
+                    // Check if all elements have compatible types (homogeneous → Array)
+                    // or different types (heterogeneous → Tuple)
+                    let first_ty = &elem_types[0];
+                    let is_homogeneous = elem_types
+                        .iter()
+                        .skip(1)
+                        .all(|ty| self.types_compatible(ty, first_ty, interner));
+
+                    if is_homogeneous {
+                        // All same type → dynamic array
+                        Ok(Type::Array(Box::new(first_ty.clone())))
+                    } else {
+                        // Different types → tuple
+                        Ok(Type::Tuple(elem_types))
                     }
-
-                    Ok(Type::Array(Box::new(elem_ty)))
                 }
             }
 

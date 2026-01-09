@@ -608,3 +608,51 @@ fn satisfies_interface_with_method() {
 
     assert!(analyzer.satisfies_interface(&ty, hashable_sym, &interner));
 }
+
+#[test]
+fn analyze_homogeneous_array_literal() {
+    let source = r#"
+        func foo() -> [i64] {
+            return [1, 2, 3]
+        }
+    "#;
+    let result = check(source);
+    // Should analyze without errors - homogeneous array
+    assert!(result.is_ok(), "Expected no errors but got: {:?}", result);
+}
+
+#[test]
+fn analyze_heterogeneous_tuple_literal() {
+    let source = r#"
+        func foo() -> [i64, string, bool] {
+            return [1, "hello", true]
+        }
+    "#;
+    let result = check(source);
+    // Should analyze without errors - heterogeneous tuple
+    assert!(result.is_ok(), "Expected no errors but got: {:?}", result);
+}
+
+#[test]
+fn analyze_repeat_literal() {
+    let source = r#"
+        func foo() -> [i64; 5] {
+            return [0; 5]
+        }
+    "#;
+    let result = check(source);
+    // Should analyze without errors - repeat literal matches fixed array type
+    assert!(result.is_ok(), "Expected no errors but got: {:?}", result);
+}
+
+#[test]
+fn analyze_repeat_literal_wrong_size() {
+    let source = r#"
+        func foo() -> [i64; 5] {
+            return [0; 10]
+        }
+    "#;
+    let result = check(source);
+    // Should have type mismatch - [i64; 10] vs [i64; 5]
+    assert!(result.is_err(), "Expected type mismatch error");
+}
