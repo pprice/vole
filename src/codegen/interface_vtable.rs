@@ -17,10 +17,6 @@ use crate::sema::generic::substitute_type;
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::{EntityRegistry, FunctionType, Type};
 
-pub(crate) fn iface_debug_enabled() -> bool {
-    std::env::var_os("VOLE_DEBUG_IFACE").is_some()
-}
-
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 enum InterfaceConcreteType {
     TypeId(TypeId),
@@ -121,14 +117,12 @@ impl InterfaceVtableRegistry {
 
         let word_bytes = ctx.pointer_type.bytes() as usize;
 
-        if iface_debug_enabled() {
-            eprintln!(
-                "iface_vtable: interface={} type={:?} methods={}",
-                ctx.interner.resolve(interface_name),
-                concrete_type,
-                method_ids.len()
-            );
-        }
+        tracing::debug!(
+            interface = %ctx.interner.resolve(interface_name),
+            concrete_type = ?concrete_type,
+            method_count = method_ids.len(),
+            "building vtable"
+        );
 
         let type_name = match concrete_key {
             InterfaceConcreteType::TypeId(type_id) => {
@@ -175,18 +169,19 @@ impl InterfaceVtableRegistry {
             )?;
             let func_ref = ctx.module.declare_func_in_data(wrapper_id, &mut data);
             data.write_function_addr((index * word_bytes) as u32, func_ref);
-            if iface_debug_enabled() {
-                let target_type = match &target {
-                    VtableMethodTarget::Direct { .. } => "Direct",
-                    VtableMethodTarget::Implemented { .. } => "Implemented",
-                    VtableMethodTarget::External { .. } => "External",
-                    VtableMethodTarget::Function { .. } => "Function",
-                };
-                eprintln!(
-                    "iface_vtable: slot={} method={} target={} wrapper={:?}",
-                    index, method_name_str, target_type, wrapper_id
-                );
-            }
+            let target_type = match &target {
+                VtableMethodTarget::Direct { .. } => "Direct",
+                VtableMethodTarget::Implemented { .. } => "Implemented",
+                VtableMethodTarget::External { .. } => "External",
+                VtableMethodTarget::Function { .. } => "Function",
+            };
+            tracing::debug!(
+                slot = index,
+                method = %method_name_str,
+                target = target_type,
+                wrapper = ?wrapper_id,
+                "vtable slot"
+            );
         }
 
         ctx.module
@@ -584,18 +579,14 @@ pub(crate) fn box_interface_value(
         )
     })?;
 
-    if iface_debug_enabled() {
-        eprintln!(
-            "iface_box: target={} value_type={:?}",
-            ctx.interner.resolve(interface_name),
-            value.vole_type
-        );
-    }
+    tracing::debug!(
+        interface = %ctx.interner.resolve(interface_name),
+        value_type = ?value.vole_type,
+        "boxing value as interface"
+    );
 
     if matches!(value.vole_type, Type::Interface(_)) {
-        if iface_debug_enabled() {
-            eprintln!("iface_box: already interface, skip boxing");
-        }
+        tracing::debug!("already interface, skip boxing");
         return Ok(value);
     }
 
@@ -616,9 +607,7 @@ pub(crate) fn box_interface_value(
         .entity_registry
         .is_external_only(interface_type_id)
     {
-        if iface_debug_enabled() {
-            eprintln!("iface_box: external-only interface, skip boxing");
-        }
+        tracing::debug!("external-only interface, skip boxing");
         return Ok(CompiledValue {
             value: value.value,
             ty: ctx.pointer_type,

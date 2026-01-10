@@ -5,7 +5,7 @@ use cranelift_module::Module;
 
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
-use crate::codegen::interface_vtable::{box_interface_value, iface_debug_enabled};
+use crate::codegen::interface_vtable::box_interface_value;
 use crate::codegen::method_resolution::{
     MethodResolutionInput, MethodTarget, resolve_method_target,
 };
@@ -135,12 +135,12 @@ impl Cg<'_, '_, '_> {
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
         let resolution = self.ctx.analyzed.method_resolutions.get(expr_id);
 
-        if iface_debug_enabled() {
-            eprintln!(
-                "codegen: method_call obj_type={:?} method={} resolution={:?}",
-                obj.vole_type, method_name_str, resolution
-            );
-        }
+        tracing::debug!(
+            obj_type = ?obj.vole_type,
+            method = %method_name_str,
+            resolution = ?resolution,
+            "method call"
+        );
 
         let target = resolve_method_target(MethodResolutionInput {
             analyzed: self.ctx.analyzed,
@@ -613,7 +613,9 @@ impl Cg<'_, '_, '_> {
         let word_type = self.ctx.pointer_type;
         let word_bytes = word_type.bytes() as i32;
 
-        let data_word = self
+        // Load data pointer from boxed interface (first word)
+        // Currently unused but kept for interface dispatch debugging
+        let _data_word = self
             .builder
             .ins()
             .load(word_type, MemFlags::new(), obj.value, 0);
@@ -628,29 +630,7 @@ impl Cg<'_, '_, '_> {
             (slot as i32) * word_bytes,
         );
 
-        if iface_debug_enabled() {
-            let print_key = self
-                .ctx
-                .func_registry
-                .runtime_key(RuntimeFn::PrintlnI64)
-                .ok_or_else(|| "println_i64 not registered".to_string())?;
-            let print_ref = self.func_ref(print_key)?;
-            let to_i64 = |builder: &mut FunctionBuilder, val: Value| {
-                if word_type == types::I64 {
-                    val
-                } else {
-                    builder.ins().uextend(types::I64, val)
-                }
-            };
-            let slot_val = self.builder.ins().iconst(types::I64, slot as i64);
-            let data_i64 = to_i64(self.builder, data_word);
-            let vtable_i64 = to_i64(self.builder, vtable_ptr);
-            let func_i64 = to_i64(self.builder, func_ptr);
-            self.builder.ins().call(print_ref, &[slot_val]);
-            self.builder.ins().call(print_ref, &[data_i64]);
-            self.builder.ins().call(print_ref, &[vtable_i64]);
-            self.builder.ins().call(print_ref, &[func_i64]);
-        }
+        tracing::trace!(slot = slot, "interface vtable dispatch");
 
         let mut sig = self.ctx.module.make_signature();
         sig.params.push(AbiParam::new(word_type));
