@@ -215,6 +215,17 @@ impl Cg<'_, '_, '_> {
                     func_type,
                 );
             }
+            MethodTarget::StaticMethod {
+                type_def_id,
+                method_id,
+                func_type: _,
+            } => {
+                // Static method call - codegen will be implemented in vole-oxt
+                return Err(format!(
+                    "Static method codegen not yet implemented: type_def_id={:?}, method_id={:?}",
+                    type_def_id, method_id
+                ));
+            }
             MethodTarget::Direct {
                 method_info,
                 return_type,

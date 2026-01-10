@@ -5,7 +5,7 @@ use crate::codegen::types::{MethodInfo, method_name_id_by_str, type_metadata_by_
 use crate::commands::common::AnalyzedProgram;
 use crate::errors::CodegenError;
 use crate::frontend::Symbol;
-use crate::identity::{NameId, TypeDefId};
+use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::{FunctionType, Type};
@@ -34,6 +34,12 @@ pub(crate) enum MethodTarget {
     InterfaceDispatch {
         interface_type_id: TypeDefId,
         method_name_id: NameId,
+        func_type: FunctionType,
+    },
+    StaticMethod {
+        type_def_id: TypeDefId,
+        method_id: MethodId,
+        #[allow(dead_code)] // Used in vole-oxt codegen
         func_type: FunctionType,
     },
 }
@@ -218,6 +224,19 @@ pub(crate) fn resolve_method_target(
                         input.object_type
                     ))
                 }
+            }
+            ResolvedMethod::Static {
+                type_def_id,
+                method_id,
+                func_type,
+            } => {
+                // Static method call - will be compiled similarly to direct methods
+                // but without an implicit self parameter
+                Ok(MethodTarget::StaticMethod {
+                    type_def_id: *type_def_id,
+                    method_id: *method_id,
+                    func_type: func_type.clone(),
+                })
             }
         };
     }

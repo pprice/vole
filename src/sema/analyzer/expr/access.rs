@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::identity::TypeDefId;
 
 impl Analyzer {
     pub(super) fn check_field_access_expr(
@@ -161,6 +162,35 @@ impl Analyzer {
         method_call: &MethodCallExpr,
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
+        // Check for static method call: TypeName.method()
+        // If the object is an identifier that refers to a type (not a variable),
+        // this is a static method call.
+        if let ExprKind::Identifier(type_sym) = &method_call.object.kind {
+            let type_name_str = interner.resolve(*type_sym);
+
+            // Check if this identifier refers to a type (not a variable)
+            if self.get_variable_type(*type_sym).is_none() {
+                // Try to find this as a type
+                if let Some(type_def_id) = self.entity_registry.type_by_symbol(
+                    *type_sym,
+                    interner,
+                    &self.name_table,
+                    self.current_module,
+                ) {
+                    // This is a static method call
+                    return self.check_static_method_call(
+                        expr,
+                        type_def_id,
+                        type_name_str,
+                        method_call.method,
+                        &method_call.args,
+                        method_call.method_span,
+                        interner,
+                    );
+                }
+            }
+        }
+
         let object_type = self.check_expr(&method_call.object, interner)?;
         let method_name = interner.resolve(method_call.method);
 
@@ -380,6 +410,91 @@ impl Analyzer {
         for arg in &method_call.args {
             self.check_expr(arg, interner)?;
         }
+        Ok(Type::Error)
+    }
+
+    /// Check a static method call: TypeName.method(args)
+    #[allow(clippy::too_many_arguments)]
+    fn check_static_method_call(
+        &mut self,
+        expr: &Expr,
+        type_def_id: TypeDefId,
+        type_name_str: &str,
+        method_sym: Symbol,
+        args: &[Expr],
+        method_span: Span,
+        interner: &Interner,
+    ) -> Result<Type, Vec<TypeError>> {
+        let method_name_str = interner.resolve(method_sym);
+        let method_name_id = self.method_name_id(method_sym, interner);
+
+        // Look up the static method on this type
+        if let Some(method_id) = self
+            .entity_registry
+            .find_static_method_on_type(type_def_id, method_name_id)
+        {
+            let method_def = self.entity_registry.get_method(method_id);
+            let func_type = method_def.signature.clone();
+
+            // Check argument count
+            if args.len() != func_type.params.len() {
+                self.add_error(
+                    SemanticError::WrongArgumentCount {
+                        expected: func_type.params.len(),
+                        found: args.len(),
+                        span: expr.span.into(),
+                    },
+                    expr.span,
+                );
+            }
+
+            // Check argument types
+            for (arg, param_ty) in args.iter().zip(func_type.params.iter()) {
+                let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
+                if !self.types_compatible(&arg_ty, param_ty, interner) {
+                    let expected = self.type_display(param_ty);
+                    let found = self.type_display(&arg_ty);
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected,
+                            found,
+                            span: arg.span.into(),
+                        },
+                        arg.span,
+                    );
+                }
+            }
+
+            let return_type = (*func_type.return_type).clone();
+
+            // Record resolution for codegen
+            self.method_resolutions.insert(
+                expr.id,
+                ResolvedMethod::Static {
+                    type_def_id,
+                    method_id,
+                    func_type: func_type.clone(),
+                },
+            );
+
+            return Ok(return_type);
+        }
+
+        // No static method found - report error
+        self.add_error(
+            SemanticError::UnknownMethod {
+                ty: type_name_str.to_string(),
+                method: method_name_str.to_string(),
+                span: method_span.into(),
+            },
+            method_span,
+        );
+
+        // Still check args for more errors
+        for arg in args {
+            self.check_expr(arg, interner)?;
+        }
+
         Ok(Type::Error)
     }
 }

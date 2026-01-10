@@ -1,6 +1,7 @@
 // src/sema/resolution.rs
 
 use crate::frontend::{NodeId, Symbol};
+use crate::identity::{MethodId, TypeDefId};
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::types::FunctionType;
 use std::collections::HashMap;
@@ -37,6 +38,13 @@ pub enum ResolvedMethod {
         method_name: Symbol,
         func_type: FunctionType,
     },
+
+    /// Static method on a type (called via TypeName.method())
+    Static {
+        type_def_id: TypeDefId,
+        method_id: MethodId,
+        func_type: FunctionType,
+    },
 }
 
 impl ResolvedMethod {
@@ -48,6 +56,7 @@ impl ResolvedMethod {
             ResolvedMethod::FunctionalInterface { func_type } => func_type,
             ResolvedMethod::DefaultMethod { func_type, .. } => func_type,
             ResolvedMethod::InterfaceMethod { func_type, .. } => func_type,
+            ResolvedMethod::Static { func_type, .. } => func_type,
         }
     }
 
