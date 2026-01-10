@@ -375,7 +375,17 @@ impl Cg<'_, '_, '_> {
                 if results.is_empty() {
                     return Ok(self.void_value());
                 } else {
-                    let vole_type = native_type_to_vole_type(&native_func.signature.return_type);
+                    // Try to get declared Vole return type from external_func_info
+                    // Fall back to native type conversion
+                    let ext_info = self.ctx.analyzed.external_func_info.get(callee_name);
+                    let vole_type = ext_info
+                        .and_then(|info| info.return_type.as_ref().map(|t| (**t).clone()))
+                        .unwrap_or_else(|| {
+                            native_type_to_vole_type(&native_func.signature.return_type)
+                        });
+                    // Convert Iterator<T> to RuntimeIterator(T) since external functions
+                    // return raw iterator pointers, not boxed interface values
+                    let vole_type = self.maybe_convert_iterator_return_type(vole_type);
                     return Ok(CompiledValue {
                         value: results[0],
                         ty: native_type_to_cranelift(
