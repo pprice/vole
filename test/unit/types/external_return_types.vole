@@ -1,0 +1,115 @@
+// Test that external functions returning generic types like Iterator<T>
+// have their return types correctly inferred for subsequent method calls.
+//
+// The bug: external functions were using native return type (I64) instead of
+// declared Vole return type (Iterator<i64>), causing method resolution to fail.
+
+tests {
+    // Basic: external function returning Iterator<i64>
+    test "repeat returns iterator type" {
+        let iter = repeat(42)
+        // If return type is wrong (I64), this would fail with "method take not found on I64"
+        let result = iter.take(2).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 42)
+        assert(result[1] == 42)
+    }
+
+    test "once returns iterator type" {
+        let iter = once(99)
+        let result = iter.collect()
+        assert(result.length() == 1)
+        assert(result[0] == 99)
+    }
+
+    test "empty returns iterator type" {
+        let iter = empty()
+        let result = iter.collect()
+        assert(result.length() == 0)
+    }
+
+    // Chained methods on external function results
+    test "repeat with chained map" {
+        let result = repeat(5).take(3).map((x) => x * 2).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 10)
+        assert(result[1] == 10)
+        assert(result[2] == 10)
+    }
+
+    test "repeat with chained filter" {
+        // repeat(1).take(5) gives [1, 1, 1, 1, 1]
+        // filter keeps all (1 > 0 is true)
+        let result = repeat(1).take(5).filter((x) => x > 0).collect()
+        assert(result.length() == 5)
+    }
+
+    test "once with map and filter" {
+        let result = once(10).map((x) => x + 5).filter((x) => x > 10).collect()
+        assert(result.length() == 1)
+        assert(result[0] == 15)
+    }
+
+    // Terminal operations on external function results
+    test "repeat with count" {
+        let count = repeat(1).take(7).count()
+        assert(count == 7)
+    }
+
+    test "repeat with sum" {
+        let sum = repeat(3).take(4).sum()
+        assert(sum == 12)
+    }
+
+    test "once with first" {
+        let first = once(42).first()
+        assert((first ?? 0) == 42)
+    }
+
+    test "empty with first returns nil" {
+        let first = empty().first()
+        assert(first == nil)
+    }
+
+    // Combining external functions with array iterators
+    test "chain array with repeat" {
+        let arr = [1, 2, 3]
+        let result = arr.iter().chain(repeat(0).take(2)).collect()
+        assert(result.length() == 5)
+        assert(result[3] == 0)
+        assert(result[4] == 0)
+    }
+
+    test "chain once with array" {
+        let arr = [1, 2]
+        let result = once(0).chain(arr.iter()).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 0)
+        assert(result[1] == 1)
+        assert(result[2] == 2)
+    }
+
+    // Deep chains to stress test type propagation
+    test "deep chain on repeat" {
+        let result = repeat(1)
+            .take(10)
+            .map((x) => x + 1)
+            .filter((x) => x > 0)
+            .map((x) => x * 2)
+            .take(5)
+            .collect()
+        assert(result.length() == 5)
+        assert(result[0] == 4)  // (1+1)*2 = 4
+    }
+
+    test "multiple external function chains" {
+        let result = once(1)
+            .chain(once(2))
+            .chain(once(3))
+            .collect()
+        assert(result.length() == 3)
+        assert(result[0] == 1)
+        assert(result[1] == 2)
+        assert(result[2] == 3)
+    }
+}

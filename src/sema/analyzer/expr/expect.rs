@@ -344,17 +344,10 @@ impl Analyzer {
                     return Ok(Type::Array(Box::new(Type::Unknown)));
                 }
 
-                // Infer types for all elements
+                // Infer types for all elements, passing expected element type to each
                 let elem_types: Vec<Type> = elements
                     .iter()
-                    .enumerate()
-                    .map(|(i, e)| {
-                        if i == 0 {
-                            self.check_expr_expecting(e, elem_expected, interner)
-                        } else {
-                            self.check_expr(e, interner)
-                        }
-                    })
+                    .map(|e| self.check_expr_expecting(e, elem_expected, interner))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 // Check if all elements have compatible types (homogeneous → Array)
