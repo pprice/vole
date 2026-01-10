@@ -14,7 +14,7 @@ use crate::codegen::types::{
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId};
-use crate::identity::NameId;
+use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::generic::substitute_type;
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::{FunctionType, Type};
@@ -25,6 +25,16 @@ impl Cg<'_, '_, '_> {
         mc: &MethodCallExpr,
         expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
+        // Check for static method call FIRST - don't try to compile the receiver
+        if let Some(ResolvedMethod::Static {
+            type_def_id,
+            method_id,
+            func_type,
+        }) = self.ctx.analyzed.method_resolutions.get(expr_id)
+        {
+            return self.static_method_call(*type_def_id, *method_id, func_type.clone(), mc);
+        }
+
         // Handle range.iter() specially since range expressions can't be compiled to values directly
         if let ExprKind::Range(range) = &mc.object.kind {
             let method_name = self.ctx.interner.resolve(mc.method);
@@ -215,16 +225,10 @@ impl Cg<'_, '_, '_> {
                     func_type,
                 );
             }
-            MethodTarget::StaticMethod {
-                type_def_id,
-                method_id,
-                func_type: _,
-            } => {
-                // Static method call - codegen will be implemented in vole-oxt
-                return Err(format!(
-                    "Static method codegen not yet implemented: type_def_id={:?}, method_id={:?}",
-                    type_def_id, method_id
-                ));
+            MethodTarget::StaticMethod { .. } => {
+                // Static method calls are handled early in method_call() before resolve_method_target
+                // This branch should never be reached
+                unreachable!("Static method calls should be handled early in method_call()")
             }
             MethodTarget::Direct {
                 method_info,
@@ -422,11 +426,7 @@ impl Cg<'_, '_, '_> {
     /// When calling external iterator methods, the runtime returns raw iterator pointers,
     /// not boxed interface values. This function converts Interface/GenericInstance types
     /// for Iterator to RuntimeIterator so that subsequent method calls use direct dispatch.
-    fn convert_iterator_return_type(
-        &self,
-        ty: Type,
-        iterator_type_id: crate::identity::TypeDefId,
-    ) -> Type {
+    fn convert_iterator_return_type(&self, ty: Type, iterator_type_id: TypeDefId) -> Type {
         let iterator_name_id = self
             .ctx
             .analyzed
@@ -593,7 +593,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         obj: &CompiledValue,
         args: &[Expr],
-        interface_type_id: crate::identity::TypeDefId,
+        interface_type_id: TypeDefId,
         method_name_id: NameId,
         func_type: FunctionType,
     ) -> Result<CompiledValue, String> {
@@ -708,5 +708,61 @@ impl Cg<'_, '_, '_> {
             ty: type_to_cranelift(&return_type, word_type),
             vole_type: return_type,
         })
+    }
+
+    /// Handle static method call: TypeName.method(args)
+    /// Static methods don't have a receiver, so we don't compile the object expression.
+    fn static_method_call(
+        &mut self,
+        type_def_id: TypeDefId,
+        method_id: MethodId,
+        func_type: FunctionType,
+        mc: &MethodCallExpr,
+    ) -> Result<CompiledValue, String> {
+        // Get the method's name_id for lookup
+        let method_def = self.ctx.analyzed.entity_registry.get_method(method_id);
+        let method_name_id = method_def.name_id;
+
+        // Look up the static method info
+        let method_info = self
+            .ctx
+            .static_method_infos
+            .get(&(type_def_id, method_name_id))
+            .ok_or_else(|| {
+                format!(
+                    "Static method not found: type_def_id={:?}, method_name_id={:?}",
+                    type_def_id, method_name_id
+                )
+            })?
+            .clone();
+
+        // Compile arguments (no receiver for static methods)
+        let mut args = Vec::new();
+        for (arg, param_ty) in mc.args.iter().zip(func_type.params.iter()) {
+            let compiled = self.expr(arg)?;
+            // Box interface values if needed
+            let compiled = if matches!(param_ty, Type::Interface(_)) {
+                box_interface_value(self.builder, self.ctx, compiled, param_ty)?
+            } else {
+                compiled
+            };
+            args.push(compiled.value);
+        }
+
+        // Get function reference and call
+        let func_ref = self.func_ref(method_info.func_key)?;
+        let call = self.builder.ins().call(func_ref, &args);
+        let results = self.builder.inst_results(call);
+
+        let return_type = (*func_type.return_type).clone();
+        if results.is_empty() {
+            Ok(self.void_value())
+        } else {
+            Ok(CompiledValue {
+                value: results[0],
+                ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
+                vole_type: return_type,
+            })
+        }
     }
 }

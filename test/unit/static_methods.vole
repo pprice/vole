@@ -1,0 +1,60 @@
+// Test static methods on records and classes
+
+record Point {
+    x: i64,
+    y: i64,
+
+    statics {
+        func origin() -> Point {
+            return Point { x: 0, y: 0 }
+        }
+
+        func from_x(x: i64) -> Point {
+            return Point { x: x, y: 0 }
+        }
+    }
+}
+
+class Counter {
+    value: i64,
+
+    statics {
+        func zero() -> Counter {
+            return Counter { value: 0 }
+        }
+
+        func starting_at(v: i64) -> Counter {
+            return Counter { value: v }
+        }
+    }
+
+    func increment() {
+        self.value = self.value + 1
+    }
+}
+
+tests {
+    test "record static method - origin" {
+        let p = Point.origin()
+        assert(p.x == 0)
+        assert(p.y == 0)
+    }
+
+    test "record static method with params" {
+        let p = Point.from_x(42)
+        assert(p.x == 42)
+        assert(p.y == 0)
+    }
+
+    test "class static method - zero" {
+        let c = Counter.zero()
+        assert(c.value == 0)
+    }
+
+    test "class static method with params" {
+        let c = Counter.starting_at(10)
+        assert(c.value == 10)
+        c.increment()
+        assert(c.value == 11)
+    }
+}

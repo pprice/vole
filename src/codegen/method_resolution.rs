@@ -36,10 +36,10 @@ pub(crate) enum MethodTarget {
         method_name_id: NameId,
         func_type: FunctionType,
     },
+    #[allow(dead_code)] // Handled earlier via ResolvedMethod::Static
     StaticMethod {
         type_def_id: TypeDefId,
         method_id: MethodId,
-        #[allow(dead_code)] // Used in vole-oxt codegen
         func_type: FunctionType,
     },
 }

@@ -161,4 +161,42 @@ impl Compiler<'_> {
 
         self.jit.create_signature(&params, ret)
     }
+
+    /// Create a signature for a static method (no self parameter)
+    pub(super) fn create_static_method_signature(&self, method: &InterfaceMethod) -> Signature {
+        let module_id = self.analyzed.name_table.main_module();
+        // Static methods have NO self parameter
+        let mut params = Vec::new();
+        for param in &method.params {
+            params.push(type_to_cranelift(
+                &resolve_type_expr_full(
+                    &param.ty,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.entity_registry,
+                    &self.analyzed.error_types,
+                    &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
+                ),
+                self.pointer_type,
+            ));
+        }
+
+        let ret = method.return_type.as_ref().map(|t| {
+            type_to_cranelift(
+                &resolve_type_expr_full(
+                    t,
+                    &self.analyzed.type_aliases,
+                    &self.analyzed.entity_registry,
+                    &self.analyzed.error_types,
+                    &self.analyzed.interner,
+                    &self.analyzed.name_table,
+                    module_id,
+                ),
+                self.pointer_type,
+            )
+        });
+
+        self.jit.create_signature(&params, ret)
+    }
 }

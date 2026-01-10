@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use super::Compiler;
 use crate::codegen::types::{MethodInfo, TypeMetadata, method_name_id};
-use crate::frontend::{ClassDecl, Decl, InterfaceDecl, Program, RecordDecl, Symbol, TypeExpr};
+use crate::frontend::{
+    ClassDecl, Decl, InterfaceDecl, Program, RecordDecl, StaticsBlock, Symbol, TypeExpr,
+};
 use crate::runtime::type_registry::{FieldTypeTag, register_instance_type};
 use crate::sema::{ClassType, RecordType, StructField, Type};
 
@@ -230,6 +232,11 @@ impl Compiler<'_> {
             }
         }
 
+        // Register static methods from statics block
+        if let Some(ref statics) = class.statics {
+            self.register_static_methods(statics, class.name);
+        }
+
         self.type_metadata.insert(
             class.name,
             TypeMetadata {
@@ -424,6 +431,11 @@ impl Compiler<'_> {
             }
         }
 
+        // Register static methods from statics block
+        if let Some(ref statics) = record.statics {
+            self.register_static_methods(statics, record.name);
+        }
+
         self.type_metadata.insert(
             record.name,
             TypeMetadata {
@@ -443,5 +455,61 @@ impl Compiler<'_> {
                 method_infos,
             },
         );
+    }
+
+    /// Register static methods from a statics block for a type
+    fn register_static_methods(&mut self, statics: &StaticsBlock, type_name: Symbol) {
+        let module_id = self.func_registry.main_module();
+
+        // Get the TypeDefId for this type from entity_registry
+        let type_name_id = self.analyzed.name_table.name_id(
+            self.analyzed.name_table.main_module(),
+            &[type_name],
+            &self.analyzed.interner,
+        );
+
+        let type_def_id =
+            type_name_id.and_then(|name_id| self.analyzed.entity_registry.type_by_name(name_id));
+
+        for method in &statics.methods {
+            // Only register methods with bodies (not abstract ones)
+            if method.body.is_none() {
+                continue;
+            }
+
+            let return_type = method
+                .return_type
+                .as_ref()
+                .map(|t| self.resolve_type_with_metadata(t))
+                .unwrap_or(Type::Void);
+
+            // Create signature without self parameter
+            let sig = self.create_static_method_signature(method);
+
+            // Function key: TypeName::methodName
+            let func_key = self.func_registry.intern_qualified(
+                module_id,
+                &[type_name, method.name],
+                &self.analyzed.interner,
+            );
+            let display_name = self.func_registry.display(func_key);
+            let func_id = self.jit.declare_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, func_id);
+
+            // Register in static_method_infos for codegen lookup
+            if let Some(type_def_id) = type_def_id {
+                let method_name_id =
+                    method_name_id(self.analyzed, &self.analyzed.interner, method.name);
+                if let Some(method_name_id) = method_name_id {
+                    self.static_method_infos.insert(
+                        (type_def_id, method_name_id),
+                        MethodInfo {
+                            func_key,
+                            return_type,
+                        },
+                    );
+                }
+            }
+        }
     }
 }

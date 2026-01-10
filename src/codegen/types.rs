@@ -12,7 +12,7 @@ use crate::codegen::FunctionRegistry;
 use crate::commands::common::AnalyzedProgram;
 use crate::errors::CodegenError;
 use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
-use crate::identity::{self, ModuleId, NameId, NameTable, NamerLookup};
+use crate::identity::{self, ModuleId, NameId, NameTable, NamerLookup, TypeDefId};
 use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
@@ -107,6 +107,8 @@ pub(crate) struct CompileCtx<'a> {
     pub type_metadata: &'a HashMap<Symbol, TypeMetadata>,
     /// Implement block method info for primitive and named types
     pub impl_method_infos: &'a HashMap<(TypeId, NameId), MethodInfo>,
+    /// Static method info keyed by (TypeDefId, method_name)
+    pub static_method_infos: &'a HashMap<(TypeDefId, NameId), MethodInfo>,
     /// Interface vtable registry (interface + concrete type -> data id)
     pub interface_vtables:
         &'a std::cell::RefCell<crate::codegen::interface_vtable::InterfaceVtableRegistry>,
@@ -222,7 +224,7 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
 
 /// Build an InterfaceType from EntityRegistry's TypeDef
 fn build_interface_type_from_entity(
-    type_def_id: identity::TypeDefId,
+    type_def_id: TypeDefId,
     entity_registry: &EntityRegistry,
     type_args: Vec<Type>,
 ) -> Type {

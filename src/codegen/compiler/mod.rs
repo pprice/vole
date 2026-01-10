@@ -17,7 +17,7 @@ use crate::codegen::{
 };
 use crate::commands::common::AnalyzedProgram;
 use crate::frontend::{LetStmt, Symbol};
-use crate::identity::NameId;
+use crate::identity::{NameId, TypeDefId};
 use crate::runtime::NativeRegistry;
 use crate::sema::TypeId;
 
@@ -40,6 +40,8 @@ pub struct Compiler<'a> {
     type_metadata: HashMap<Symbol, TypeMetadata>,
     /// Implement block method info keyed by (TypeId, method)
     impl_method_infos: HashMap<(TypeId, NameId), MethodInfo>,
+    /// Static method info keyed by (TypeDefId, method_name)
+    static_method_infos: HashMap<(TypeDefId, NameId), MethodInfo>,
     /// Interface vtable registry for interface-typed values
     interface_vtables: RefCell<InterfaceVtableRegistry>,
     /// Next type ID to assign
@@ -76,6 +78,7 @@ impl<'a> Compiler<'a> {
             test_name_ids: Vec::new(),
             type_metadata: HashMap::new(),
             impl_method_infos: HashMap::new(),
+            static_method_infos: HashMap::new(),
             interface_vtables: RefCell::new(InterfaceVtableRegistry::new()),
             next_type_id: 0,
             func_registry,
