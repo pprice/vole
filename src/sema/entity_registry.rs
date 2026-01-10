@@ -63,6 +63,7 @@ impl EntityRegistry {
             fields: Vec::new(),
             extends: Vec::new(),
             type_params: Vec::new(),
+            type_params_symbols: Vec::new(),
         });
         self.type_by_name.insert(name_id, id);
         self.methods_by_type.insert(id, HashMap::new());
@@ -83,6 +84,26 @@ impl EntityRegistry {
     /// Look up a type by its NameId
     pub fn type_by_name(&self, name_id: NameId) -> Option<TypeDefId> {
         self.type_by_name.get(&name_id).copied()
+    }
+
+    /// Look up an interface by its short name (string-based, cross-module)
+    /// This searches through all registered types to find one matching the short name
+    /// and of kind Interface
+    pub fn interface_by_short_name(
+        &self,
+        short_name: &str,
+        name_table: &crate::identity::NameTable,
+    ) -> Option<TypeDefId> {
+        for type_def in &self.type_defs {
+            if type_def.kind == TypeDefKind::Interface
+                && name_table
+                    .last_segment_str(type_def.name_id)
+                    .is_some_and(|last_segment| last_segment == short_name)
+            {
+                return Some(type_def.id);
+            }
+        }
+        None
     }
 
     /// Register a new method on a type
@@ -240,8 +261,14 @@ impl EntityRegistry {
     }
 
     /// Set type parameters for a generic type
-    pub fn set_type_params(&mut self, type_id: TypeDefId, type_params: Vec<NameId>) {
+    pub fn set_type_params(
+        &mut self,
+        type_id: TypeDefId,
+        type_params: Vec<NameId>,
+        type_params_symbols: Vec<crate::frontend::Symbol>,
+    ) {
         self.type_defs[type_id.index() as usize].type_params = type_params;
+        self.type_defs[type_id.index() as usize].type_params_symbols = type_params_symbols;
     }
 
     /// Check if derived extends base (transitive)
@@ -348,6 +375,97 @@ impl EntityRegistry {
             let method = self.get_method(method_id);
             method.external_binding.is_some() && !method.has_default
         })
+    }
+
+    /// Merge another registry into this one.
+    /// This is used when merging prelude definitions into the main analyzer.
+    pub fn merge(&mut self, other: &EntityRegistry) {
+        // Build a mapping from other's IDs to our new IDs
+        let mut type_id_map: HashMap<TypeDefId, TypeDefId> = HashMap::new();
+
+        // First pass: register all types (without methods/fields to avoid ID confusion)
+        for other_type in &other.type_defs {
+            // Check if we already have a type with this name
+            if self.type_by_name.contains_key(&other_type.name_id) {
+                // Type already exists, map to existing ID
+                let existing_id = self.type_by_name[&other_type.name_id];
+                type_id_map.insert(other_type.id, existing_id);
+            } else {
+                // New type - add it
+                let new_id = TypeDefId::new(self.type_defs.len() as u32);
+                let mut new_type = other_type.clone();
+                new_type.id = new_id;
+                new_type.methods = Vec::new(); // Will be filled in later
+                new_type.fields = Vec::new();
+                new_type.extends = Vec::new(); // Will be remapped
+                self.type_defs.push(new_type);
+                self.type_by_name.insert(other_type.name_id, new_id);
+                self.methods_by_type.insert(new_id, HashMap::new());
+                self.fields_by_type.insert(new_id, HashMap::new());
+                type_id_map.insert(other_type.id, new_id);
+            }
+        }
+
+        // Second pass: register all methods
+        for other_method in &other.method_defs {
+            let new_defining_type = type_id_map[&other_method.defining_type];
+            let new_id = MethodId::new(self.method_defs.len() as u32);
+            let mut new_method = other_method.clone();
+            new_method.id = new_id;
+            new_method.defining_type = new_defining_type;
+            self.method_defs.push(new_method);
+            self.type_defs[new_defining_type.index() as usize]
+                .methods
+                .push(new_id);
+            self.method_by_full_name
+                .insert(other_method.full_name_id, new_id);
+            self.methods_by_type
+                .entry(new_defining_type)
+                .or_default()
+                .insert(other_method.name_id, new_id);
+        }
+
+        // Third pass: register all fields
+        for other_field in &other.field_defs {
+            let new_defining_type = type_id_map[&other_field.defining_type];
+            let new_id = FieldId::new(self.field_defs.len() as u32);
+            let mut new_field = other_field.clone();
+            new_field.id = new_id;
+            new_field.defining_type = new_defining_type;
+            self.field_defs.push(new_field);
+            self.type_defs[new_defining_type.index() as usize]
+                .fields
+                .push(new_id);
+            self.field_by_full_name
+                .insert(other_field.full_name_id, new_id);
+            self.fields_by_type
+                .entry(new_defining_type)
+                .or_default()
+                .insert(other_field.name_id, new_id);
+        }
+
+        // Fourth pass: fix extends relationships
+        for other_type in &other.type_defs {
+            let new_id = type_id_map[&other_type.id];
+            let extends: Vec<TypeDefId> = other_type
+                .extends
+                .iter()
+                .map(|&parent_id| type_id_map[&parent_id])
+                .collect();
+            self.type_defs[new_id.index() as usize].extends = extends;
+        }
+
+        // Merge functions
+        for (name_id, func_id) in &other.function_by_name {
+            if !self.function_by_name.contains_key(name_id) {
+                let other_func = &other.function_defs[func_id.index() as usize];
+                let new_id = FunctionId::new(self.function_defs.len() as u32);
+                let mut new_func = other_func.clone();
+                new_func.id = new_id;
+                self.function_defs.push(new_func);
+                self.function_by_name.insert(*name_id, new_id);
+            }
+        }
     }
 }
 

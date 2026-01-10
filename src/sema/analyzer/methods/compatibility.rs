@@ -34,7 +34,67 @@ impl Analyzer {
         false
     }
 
+    #[allow(dead_code)]
     fn interface_extends(&self, derived: Symbol, base: Symbol, interner: &Interner) -> bool {
+        if derived == base {
+            return true;
+        }
+
+        // Look up both interfaces via EntityRegistry
+        let derived_str = interner.resolve(derived);
+        let base_str = interner.resolve(base);
+
+        let derived_id = self
+            .name_table
+            .name_id_raw(self.current_module, &[derived_str])
+            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+            .or_else(|| {
+                self.entity_registry
+                    .interface_by_short_name(derived_str, &self.name_table)
+            });
+
+        let base_id = self
+            .name_table
+            .name_id_raw(self.current_module, &[base_str])
+            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+            .or_else(|| {
+                self.entity_registry
+                    .interface_by_short_name(base_str, &self.name_table)
+            });
+
+        let (Some(derived_id), Some(base_id)) = (derived_id, base_id) else {
+            return false;
+        };
+
+        self.interface_extends_by_type_def_id(derived_id, base_id)
+    }
+
+    fn interface_extends_by_name_id(
+        &self,
+        derived: NameId,
+        base: NameId,
+        _interner: &Interner,
+    ) -> bool {
+        if derived == base {
+            return true;
+        }
+
+        // Look up TypeDefIds via EntityRegistry
+        let derived_id = self.entity_registry.type_by_name(derived);
+        let base_id = self.entity_registry.type_by_name(base);
+
+        let (Some(derived_id), Some(base_id)) = (derived_id, base_id) else {
+            return false;
+        };
+
+        self.interface_extends_by_type_def_id(derived_id, base_id)
+    }
+
+    fn interface_extends_by_type_def_id(
+        &self,
+        derived: crate::identity::TypeDefId,
+        base: crate::identity::TypeDefId,
+    ) -> bool {
         if derived == base {
             return true;
         }
@@ -45,84 +105,16 @@ impl Analyzer {
             if !seen.insert(current) {
                 continue;
             }
-            let Some(def) = self.interface_registry.get(current, interner) else {
-                continue;
-            };
-            for parent in &def.extends {
-                if *parent == base {
+            let def = self.entity_registry.get_type(current);
+            for &parent_id in &def.extends {
+                if parent_id == base {
                     return true;
                 }
-                stack.push(*parent);
+                stack.push(parent_id);
             }
         }
 
         false
-    }
-
-    fn interface_extends_by_name_id(
-        &self,
-        derived: NameId,
-        base: NameId,
-        interner: &Interner,
-    ) -> bool {
-        if derived == base {
-            return true;
-        }
-
-        // Get the derived interface def to start traversing
-        let Some(derived_def) = self.interface_registry.get_by_name_id(derived) else {
-            return false;
-        };
-
-        let mut stack: Vec<Symbol> = derived_def.extends.clone();
-        let mut seen = HashSet::new();
-        while let Some(current) = stack.pop() {
-            if !seen.insert(current) {
-                continue;
-            }
-            let Some(def) = self.interface_registry.get(current, interner) else {
-                continue;
-            };
-            if def.name_id == base {
-                return true;
-            }
-            for parent in &def.extends {
-                stack.push(*parent);
-            }
-        }
-
-        false
-    }
-
-    /// Check if a method signature matches an interface requirement
-    /// The `implementing_type` is used to substitute Self (Type::Error) in interface definitions
-    pub(crate) fn signatures_match(
-        required: &InterfaceMethodDef,
-        found: &FunctionType,
-        implementing_type: &Type,
-    ) -> bool {
-        // Check parameter count
-        if required.params.len() != found.params.len() {
-            return false;
-        }
-        // Check parameter types, substituting Self (Type::Error) with implementing_type
-        for (req_param, found_param) in required.params.iter().zip(found.params.iter()) {
-            let effective_req = if matches!(req_param, Type::Error) {
-                implementing_type
-            } else {
-                req_param
-            };
-            if effective_req != found_param {
-                return false;
-            }
-        }
-        // Check return type, substituting Self (Type::Error) with implementing_type
-        let effective_return = if matches!(required.return_type, Type::Error) {
-            implementing_type
-        } else {
-            &required.return_type
-        };
-        effective_return == &*found.return_type
     }
 
     /// Format a method signature for error messages

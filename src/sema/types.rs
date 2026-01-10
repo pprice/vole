@@ -126,7 +126,7 @@ pub struct InterfaceType {
     pub name_id: NameId,
     pub type_args: Vec<Type>,
     pub methods: Vec<InterfaceMethodType>,
-    pub extends: Vec<Symbol>, // Parent interfaces
+    pub extends: Vec<NameId>, // Parent interface NameIds
 }
 
 // Custom PartialEq to compare only name_id and type_args
@@ -141,7 +141,7 @@ impl PartialEq for InterfaceType {
 /// Method signature in an interface
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceMethodType {
-    pub name: Symbol,
+    pub name: NameId,
     pub params: Vec<Type>,
     pub return_type: Box<Type>,
     pub has_default: bool, // True if interface provides default implementation

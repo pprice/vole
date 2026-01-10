@@ -15,9 +15,9 @@ use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
 use crate::identity::{ModuleId, NameId, NameTable, NamerLookup};
 use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
+use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, MonomorphKey, substitute_type};
-use crate::sema::interface_registry::InterfaceRegistry;
-use crate::sema::{ErrorTypeInfo, FunctionType, Type, TypeId, TypeKey};
+use crate::sema::{EntityRegistry, ErrorTypeInfo, FunctionType, Type, TypeId, TypeKey};
 
 /// Compiled value with its type
 #[derive(Clone)]
@@ -132,7 +132,7 @@ pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
     resolve_type_expr_with_metadata(
         ty,
         &ctx.analyzed.type_aliases,
-        &ctx.analyzed.interface_registry,
+        &ctx.analyzed.entity_registry,
         &ctx.analyzed.error_types,
         ctx.type_metadata,
         ctx.interner,
@@ -221,13 +221,51 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
     }
 }
 
-/// Resolve a type expression using aliases, interface registry, error types, and type metadata
+/// Build an InterfaceType from EntityRegistry's TypeDef
+fn build_interface_type_from_entity(
+    type_def_id: crate::identity::TypeDefId,
+    entity_registry: &EntityRegistry,
+    type_args: Vec<Type>,
+) -> Type {
+    let type_def = entity_registry.get_type(type_def_id);
+
+    // Build methods from MethodDef
+    let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
+        .methods
+        .iter()
+        .map(|&method_id| {
+            let method = entity_registry.get_method(method_id);
+            crate::sema::types::InterfaceMethodType {
+                name: method.name_id,
+                params: method.signature.params.clone(),
+                return_type: Box::new((*method.signature.return_type).clone()),
+                has_default: method.has_default,
+            }
+        })
+        .collect();
+
+    // Build extends from TypeDefIds -> NameIds
+    let extends: Vec<NameId> = type_def
+        .extends
+        .iter()
+        .map(|&parent_id| entity_registry.get_type(parent_id).name_id)
+        .collect();
+
+    Type::Interface(crate::sema::types::InterfaceType {
+        name_id: type_def.name_id,
+        type_args,
+        methods,
+        extends,
+    })
+}
+
+/// Resolve a type expression using aliases, entity registry, error types, and type metadata
 /// This is the full resolution function that handles all named types including classes/records
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_type_expr_with_metadata(
     ty: &TypeExpr,
     type_aliases: &HashMap<Symbol, Type>,
-    interface_registry: &InterfaceRegistry,
+    entity_registry: &EntityRegistry,
     error_types: &HashMap<Symbol, ErrorTypeInfo>,
     type_metadata: &HashMap<Symbol, TypeMetadata>,
     interner: &Interner,
@@ -240,41 +278,44 @@ pub(crate) fn resolve_type_expr_with_metadata(
             // Look up type alias first
             if let Some(aliased) = type_aliases.get(sym) {
                 aliased.clone()
-            } else if let Some(iface) = interface_registry.get(*sym, interner) {
-                // Check interface registry
-                if !iface.type_params.is_empty() {
-                    return Type::Error;
-                }
-                Type::Interface(crate::sema::types::InterfaceType {
-                    name_id: iface.name_id,
-                    type_args: Vec::new(),
-                    methods: iface
-                        .methods
-                        .iter()
-                        .map(|m| crate::sema::types::InterfaceMethodType {
-                            name: m.name,
-                            params: m.params.clone(),
-                            return_type: Box::new(m.return_type.clone()),
-                            has_default: m.has_default,
-                        })
-                        .collect(),
-                    extends: iface.extends.clone(),
-                })
-            } else if let Some(error_info) = error_types.get(sym) {
-                // Check error types
-                Type::ErrorType(error_info.clone())
-            } else if let Some(metadata) = type_metadata.get(sym) {
-                // Check class/record type metadata
-                metadata.vole_type.clone()
             } else {
-                Type::Error
+                // Check entity registry for interface
+                // First try exact NameId lookup, then fall back to short name search
+                let name_str = interner.resolve(*sym);
+                let type_def_id = name_table
+                    .name_id(module_id, &[*sym], interner)
+                    .and_then(|name_id| entity_registry.type_by_name(name_id))
+                    .or_else(|| entity_registry.interface_by_short_name(name_str, name_table));
+
+                if let Some(type_def_id) = type_def_id {
+                    let type_def = entity_registry.get_type(type_def_id);
+                    if type_def.kind == TypeDefKind::Interface {
+                        // Generic interface without type args is an error
+                        if !type_def.type_params.is_empty() {
+                            return Type::Error;
+                        }
+                        return build_interface_type_from_entity(
+                            type_def_id,
+                            entity_registry,
+                            Vec::new(),
+                        );
+                    }
+                }
+                // Not an interface, check other sources
+                if let Some(error_info) = error_types.get(sym) {
+                    Type::ErrorType(error_info.clone())
+                } else if let Some(metadata) = type_metadata.get(sym) {
+                    metadata.vole_type.clone()
+                } else {
+                    Type::Error
+                }
             }
         }
         TypeExpr::Array(elem) => {
             let elem_ty = resolve_type_expr_with_metadata(
                 elem,
                 type_aliases,
-                interface_registry,
+                entity_registry,
                 error_types,
                 type_metadata,
                 interner,
@@ -288,7 +329,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
             let inner_ty = resolve_type_expr_with_metadata(
                 inner,
                 type_aliases,
-                interface_registry,
+                entity_registry,
                 error_types,
                 type_metadata,
                 interner,
@@ -304,7 +345,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     resolve_type_expr_with_metadata(
                         v,
                         type_aliases,
-                        interface_registry,
+                        entity_registry,
                         error_types,
                         type_metadata,
                         interner,
@@ -327,7 +368,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     resolve_type_expr_with_metadata(
                         p,
                         type_aliases,
-                        interface_registry,
+                        entity_registry,
                         error_types,
                         type_metadata,
                         interner,
@@ -339,7 +380,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
             let ret_type = resolve_type_expr_with_metadata(
                 return_type,
                 type_aliases,
-                interface_registry,
+                entity_registry,
                 error_types,
                 type_metadata,
                 interner,
@@ -363,7 +404,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
             let success = resolve_type_expr_with_metadata(
                 success_type,
                 type_aliases,
-                interface_registry,
+                entity_registry,
                 error_types,
                 type_metadata,
                 interner,
@@ -373,7 +414,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
             let error = resolve_type_expr_with_metadata(
                 error_type,
                 type_aliases,
-                interface_registry,
+                entity_registry,
                 error_types,
                 type_metadata,
                 interner,
@@ -393,7 +434,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     resolve_type_expr_with_metadata(
                         a,
                         type_aliases,
-                        interface_registry,
+                        entity_registry,
                         error_types,
                         type_metadata,
                         interner,
@@ -402,34 +443,70 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     )
                 })
                 .collect();
-            if let Some(iface) = interface_registry.get(*name, interner) {
-                if !iface.type_params.is_empty() && iface.type_params.len() != resolved_args.len() {
-                    return Type::Error;
+            // Check entity registry for generic interface
+            // First try exact NameId lookup, then fall back to short name search
+            let name_str = interner.resolve(*name);
+            let type_def_id = name_table
+                .name_id(module_id, &[*name], interner)
+                .and_then(|name_id| entity_registry.type_by_name(name_id))
+                .or_else(|| entity_registry.interface_by_short_name(name_str, name_table));
+
+            if let Some(type_def_id) = type_def_id {
+                let type_def = entity_registry.get_type(type_def_id);
+                if type_def.kind == TypeDefKind::Interface {
+                    if !type_def.type_params.is_empty()
+                        && type_def.type_params.len() != resolved_args.len()
+                    {
+                        return Type::Error;
+                    }
+                    // Build substitution map using type param Symbols
+                    // We use type_params_symbols which stores the original Symbols from declaration
+                    let mut substitutions = HashMap::new();
+                    for (sym, arg) in type_def
+                        .type_params_symbols
+                        .iter()
+                        .zip(resolved_args.iter())
+                    {
+                        substitutions.insert(*sym, arg.clone());
+                    }
+
+                    // Build methods with substituted types
+                    let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
+                        .methods
+                        .iter()
+                        .map(|&method_id| {
+                            let method = entity_registry.get_method(method_id);
+                            crate::sema::types::InterfaceMethodType {
+                                name: method.name_id,
+                                params: method
+                                    .signature
+                                    .params
+                                    .iter()
+                                    .map(|t| substitute_type(t, &substitutions))
+                                    .collect(),
+                                return_type: Box::new(substitute_type(
+                                    &method.signature.return_type,
+                                    &substitutions,
+                                )),
+                                has_default: method.has_default,
+                            }
+                        })
+                        .collect();
+
+                    // Build extends
+                    let extends: Vec<NameId> = type_def
+                        .extends
+                        .iter()
+                        .map(|&parent_id| entity_registry.get_type(parent_id).name_id)
+                        .collect();
+
+                    return Type::Interface(crate::sema::types::InterfaceType {
+                        name_id: type_def.name_id,
+                        type_args: resolved_args,
+                        methods,
+                        extends,
+                    });
                 }
-                let mut substitutions = HashMap::new();
-                for (param, arg) in iface.type_params.iter().zip(resolved_args.iter()) {
-                    substitutions.insert(*param, arg.clone());
-                }
-                let methods = iface
-                    .methods
-                    .iter()
-                    .map(|method| crate::sema::types::InterfaceMethodType {
-                        name: method.name,
-                        params: method
-                            .params
-                            .iter()
-                            .map(|t| substitute_type(t, &substitutions))
-                            .collect(),
-                        return_type: Box::new(substitute_type(&method.return_type, &substitutions)),
-                        has_default: method.has_default,
-                    })
-                    .collect();
-                return Type::Interface(crate::sema::types::InterfaceType {
-                    name_id: iface.name_id,
-                    type_args: resolved_args,
-                    methods,
-                    extends: iface.extends.clone(),
-                });
             }
             let Some(name_id) = name_table.name_id(module_id, &[*name], interner) else {
                 return Type::Error;
@@ -446,7 +523,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     resolve_type_expr_with_metadata(
                         e,
                         type_aliases,
-                        interface_registry,
+                        entity_registry,
                         error_types,
                         type_metadata,
                         interner,
@@ -461,7 +538,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
             let elem_ty = resolve_type_expr_with_metadata(
                 element,
                 type_aliases,
-                interface_registry,
+                entity_registry,
                 error_types,
                 type_metadata,
                 interner,
@@ -476,13 +553,13 @@ pub(crate) fn resolve_type_expr_with_metadata(
     }
 }
 
-/// Resolve a type expression using aliases, interface registry, and error types
+/// Resolve a type expression using aliases, entity registry, and error types
 /// This is used when CompileCtx is not available (e.g., during Compiler setup)
 /// Note: This does NOT resolve class/record types from type_metadata - use resolve_type_expr for that
 pub(crate) fn resolve_type_expr_full(
     ty: &TypeExpr,
     type_aliases: &HashMap<Symbol, Type>,
-    interface_registry: &InterfaceRegistry,
+    entity_registry: &EntityRegistry,
     error_types: &HashMap<Symbol, ErrorTypeInfo>,
     interner: &Interner,
     name_table: &NameTable,
@@ -493,7 +570,7 @@ pub(crate) fn resolve_type_expr_full(
     resolve_type_expr_with_metadata(
         ty,
         type_aliases,
-        interface_registry,
+        entity_registry,
         error_types,
         &empty_type_metadata,
         interner,

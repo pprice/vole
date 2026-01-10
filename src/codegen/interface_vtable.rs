@@ -94,7 +94,7 @@ impl InterfaceVtableRegistry {
         }
 
         // Get interface TypeDefId from EntityRegistry by looking up using the interface Symbol
-        // Try main module first, then builtin module (for built-in interfaces like Iterator)
+        // Try main module first, then builtin module, then short name fallback (for prelude interfaces like Iterator)
         let interface_name_str = ctx.interner.resolve(interface_name);
         let interface_type_id = ctx
             .analyzed
@@ -111,6 +111,12 @@ impl InterfaceVtableRegistry {
                             .name_id_raw(builtin_mod, &[interface_name_str])
                     })
                     .and_then(|name_id| ctx.analyzed.entity_registry.type_by_name(name_id))
+            })
+            .or_else(|| {
+                // Fall back to short name search across all modules (for prelude interfaces)
+                ctx.analyzed
+                    .entity_registry
+                    .interface_by_short_name(interface_name_str, &ctx.analyzed.name_table)
             })
             .ok_or_else(|| format!("unknown interface {:?}", interface_name_str))?;
         let interface_name_id = ctx
@@ -593,13 +599,30 @@ pub(crate) fn box_interface_value(
         return Ok(value);
     };
 
-    // Look up the InterfaceDef to get the Symbol name for vtable operations
-    let interface_def = ctx
+    // Look up the interface Symbol name for vtable operations via EntityRegistry
+    let interface_type_id = ctx
         .analyzed
-        .interface_registry
-        .get_by_name_id(interface.name_id)
+        .entity_registry
+        .type_by_name(interface.name_id)
         .ok_or_else(|| format!("unknown interface with name_id {:?}", interface.name_id))?;
-    let interface_name = interface_def.name;
+    let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_id);
+    // Get the interface Symbol by looking up the short name in the interner
+    let interface_name_str = ctx
+        .analyzed
+        .name_table
+        .last_segment_str(interface_def.name_id)
+        .ok_or_else(|| {
+            format!(
+                "cannot get interface name string for {:?}",
+                interface.name_id
+            )
+        })?;
+    let interface_name = ctx.interner.lookup(&interface_name_str).ok_or_else(|| {
+        format!(
+            "interface name '{}' not found in interner",
+            interface_name_str
+        )
+    })?;
 
     if iface_debug_enabled() {
         eprintln!(

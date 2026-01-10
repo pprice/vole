@@ -14,7 +14,7 @@ impl Compiler<'_> {
                 &resolve_type_expr_full(
                     &param.ty,
                     &self.analyzed.type_aliases,
-                    &self.analyzed.interface_registry,
+                    &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
@@ -29,7 +29,7 @@ impl Compiler<'_> {
                 &resolve_type_expr_full(
                     t,
                     &self.analyzed.type_aliases,
-                    &self.analyzed.interface_registry,
+                    &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
@@ -52,7 +52,7 @@ impl Compiler<'_> {
                 &resolve_type_expr_full(
                     &param.ty,
                     &self.analyzed.type_aliases,
-                    &self.analyzed.interface_registry,
+                    &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
@@ -67,7 +67,7 @@ impl Compiler<'_> {
                 &resolve_type_expr_full(
                     t,
                     &self.analyzed.type_aliases,
-                    &self.analyzed.interface_registry,
+                    &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
@@ -96,7 +96,7 @@ impl Compiler<'_> {
                 &resolve_type_expr_full(
                     &param.ty,
                     &self.analyzed.type_aliases,
-                    &self.analyzed.interface_registry,
+                    &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
@@ -111,7 +111,7 @@ impl Compiler<'_> {
                 &resolve_type_expr_full(
                     t,
                     &self.analyzed.type_aliases,
-                    &self.analyzed.interface_registry,
+                    &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
@@ -134,7 +134,7 @@ impl Compiler<'_> {
                 &resolve_type_expr_full(
                     &param.ty,
                     &self.analyzed.type_aliases,
-                    &self.analyzed.interface_registry,
+                    &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
@@ -149,7 +149,7 @@ impl Compiler<'_> {
                 &resolve_type_expr_full(
                     t,
                     &self.analyzed.type_aliases,
-                    &self.analyzed.interface_registry,
+                    &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,

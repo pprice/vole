@@ -3,9 +3,10 @@
 // Type resolution: converts TypeExpr (AST representation) to Type (semantic representation)
 
 use crate::frontend::{Interner, Symbol, TypeExpr};
-use crate::identity::{ModuleId, NameTable};
+use crate::identity::{ModuleId, NameId, NameTable};
+use crate::sema::EntityRegistry;
+use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{TypeParamScope, substitute_type};
-use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::types::{
     ClassType, ErrorTypeInfo, FallibleType, FunctionType, InterfaceMethodType, InterfaceType,
     RecordType, Type,
@@ -18,7 +19,7 @@ pub struct TypeResolutionContext<'a> {
     pub classes: &'a HashMap<Symbol, ClassType>,
     pub records: &'a HashMap<Symbol, RecordType>,
     pub error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
-    pub interface_registry: &'a InterfaceRegistry,
+    pub entity_registry: &'a EntityRegistry,
     pub interner: &'a Interner,
     pub name_table: &'a mut NameTable,
     pub module_id: ModuleId,
@@ -33,35 +34,72 @@ fn interface_instance(
     type_args: Vec<Type>,
     ctx: &mut TypeResolutionContext<'_>,
 ) -> Option<Type> {
-    let def = ctx.interface_registry.get(name, ctx.interner)?;
-    if !def.type_params.is_empty() && def.type_params.len() != type_args.len() {
+    // Look up interface by Symbol -> NameId -> TypeDefId
+    // First try exact NameId lookup, then fall back to short name search
+    let name_str = ctx.interner.resolve(name);
+    let type_def_id = ctx
+        .name_table
+        .name_id_raw(ctx.module_id, &[name_str])
+        .and_then(|name_id| ctx.entity_registry.type_by_name(name_id))
+        .or_else(|| {
+            // Fall back to string-based lookup across all modules
+            ctx.entity_registry
+                .interface_by_short_name(name_str, ctx.name_table)
+        })?;
+    let type_def = ctx.entity_registry.get_type(type_def_id);
+
+    // Verify it's an interface
+    if type_def.kind != TypeDefKind::Interface {
+        return None;
+    }
+
+    if !type_def.type_params.is_empty() && type_def.type_params.len() != type_args.len() {
         return Some(Type::Error);
     }
 
+    // Build substitution map using type param Symbols
+    // We use type_params_symbols which stores the original Symbols from declaration
+    // These match the Symbols used in Type::TypeParam in method signatures
     let mut substitutions = HashMap::new();
-    for (param, arg) in def.type_params.iter().zip(type_args.iter()) {
-        substitutions.insert(*param, arg.clone());
+    for (sym, arg) in type_def.type_params_symbols.iter().zip(type_args.iter()) {
+        substitutions.insert(*sym, arg.clone());
     }
 
-    let methods = def
+    // Build methods with substituted types
+    let methods: Vec<InterfaceMethodType> = type_def
         .methods
         .iter()
-        .map(|method| InterfaceMethodType {
-            name: method.name,
-            params: method
-                .params
-                .iter()
-                .map(|t| substitute_type(t, &substitutions))
-                .collect(),
-            return_type: Box::new(substitute_type(&method.return_type, &substitutions)),
-            has_default: method.has_default,
+        .map(|&method_id| {
+            let method = ctx.entity_registry.get_method(method_id);
+            InterfaceMethodType {
+                name: method.name_id,
+                params: method
+                    .signature
+                    .params
+                    .iter()
+                    .map(|t| substitute_type(t, &substitutions))
+                    .collect(),
+                return_type: Box::new(substitute_type(
+                    &method.signature.return_type,
+                    &substitutions,
+                )),
+                has_default: method.has_default,
+            }
         })
         .collect();
+
+    // Build extends from TypeDefIds -> NameIds
+    let extends: Vec<NameId> = type_def
+        .extends
+        .iter()
+        .map(|&parent_id| ctx.entity_registry.get_type(parent_id).name_id)
+        .collect();
+
     Some(Type::Interface(InterfaceType {
-        name_id: def.name_id,
+        name_id: type_def.name_id,
         type_args,
         methods,
-        extends: def.extends.clone(),
+        extends,
     }))
 }
 
@@ -72,7 +110,7 @@ impl<'a> TypeResolutionContext<'a> {
         classes: &'a HashMap<Symbol, ClassType>,
         records: &'a HashMap<Symbol, RecordType>,
         error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
-        interface_registry: &'a InterfaceRegistry,
+        entity_registry: &'a EntityRegistry,
         interner: &'a Interner,
         name_table: &'a mut NameTable,
         module_id: ModuleId,
@@ -82,7 +120,7 @@ impl<'a> TypeResolutionContext<'a> {
             classes,
             records,
             error_types,
-            interface_registry,
+            entity_registry,
             interner,
             name_table,
             module_id,
@@ -98,7 +136,7 @@ impl<'a> TypeResolutionContext<'a> {
         classes: &'a HashMap<Symbol, ClassType>,
         records: &'a HashMap<Symbol, RecordType>,
         error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
-        interface_registry: &'a InterfaceRegistry,
+        entity_registry: &'a EntityRegistry,
         interner: &'a Interner,
         name_table: &'a mut NameTable,
         module_id: ModuleId,
@@ -109,7 +147,7 @@ impl<'a> TypeResolutionContext<'a> {
             classes,
             records,
             error_types,
-            interface_registry,
+            entity_registry,
             interner,
             name_table,
             module_id,
@@ -245,8 +283,8 @@ mod tests {
             std::sync::LazyLock::new(HashMap::new);
         static EMPTY_ERRORS: std::sync::LazyLock<HashMap<Symbol, ErrorTypeInfo>> =
             std::sync::LazyLock::new(HashMap::new);
-        static EMPTY_INTERFACES: std::sync::LazyLock<InterfaceRegistry> =
-            std::sync::LazyLock::new(InterfaceRegistry::new);
+        static EMPTY_ENTITY_REGISTRY: std::sync::LazyLock<EntityRegistry> =
+            std::sync::LazyLock::new(EntityRegistry::new);
 
         let mut name_table = NameTable::new();
         let module_id = name_table.main_module();
@@ -255,7 +293,7 @@ mod tests {
             &EMPTY_CLASSES,
             &EMPTY_RECORDS,
             &EMPTY_ERRORS,
-            &EMPTY_INTERFACES,
+            &EMPTY_ENTITY_REGISTRY,
             interner,
             &mut name_table,
             module_id,
@@ -347,8 +385,8 @@ mod tests {
             std::sync::LazyLock::new(HashMap::new);
         static EMPTY_ERRORS: std::sync::LazyLock<HashMap<Symbol, ErrorTypeInfo>> =
             std::sync::LazyLock::new(HashMap::new);
-        static EMPTY_INTERFACES: std::sync::LazyLock<InterfaceRegistry> =
-            std::sync::LazyLock::new(InterfaceRegistry::new);
+        static EMPTY_ENTITY_REGISTRY: std::sync::LazyLock<EntityRegistry> =
+            std::sync::LazyLock::new(EntityRegistry::new);
         static TEST_INTERNER: std::sync::LazyLock<Interner> = std::sync::LazyLock::new(|| {
             let mut interner = Interner::new();
             interner.intern("UnknownType"); // Symbol(0) = "UnknownType"
@@ -362,7 +400,7 @@ mod tests {
             &EMPTY_CLASSES,
             &EMPTY_RECORDS,
             &EMPTY_ERRORS,
-            &EMPTY_INTERFACES,
+            &EMPTY_ENTITY_REGISTRY,
             &TEST_INTERNER,
             &mut name_table,
             module_id,

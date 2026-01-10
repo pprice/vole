@@ -121,10 +121,6 @@ impl Analyzer {
 
     /// Get the Symbol for a type by its NameId
     fn get_type_symbol_by_name_id(&self, name_id: NameId) -> Option<Symbol> {
-        // Check interfaces first
-        if let Some(def) = self.interface_registry.get_by_name_id(name_id) {
-            return Some(def.name);
-        }
         // Check classes
         for (sym, class) in &self.classes {
             if class.name_id == name_id {
@@ -137,6 +133,9 @@ impl Analyzer {
                 return Some(*sym);
             }
         }
+        // For interfaces, we need to look up the Symbol another way
+        // The Symbol is stored in the type_implements map values
+        // or we can get the name string from the name_table
         None
     }
 
@@ -168,57 +167,96 @@ impl Analyzer {
             _ => (None, &[] as &[Type]),
         };
         if let Some(name_id) = interface_name_id
-            && let Some(interface_def) = self.interface_registry.get_by_name_id(name_id)
+            && let Some(type_def_id) = self.entity_registry.type_by_name(name_id)
         {
+            let interface_def = self.entity_registry.get_type(type_def_id);
+
+            // Build substitution map from type params to type args
             let mut substitutions = HashMap::new();
-            for (param, arg) in interface_def.type_params.iter().zip(type_args.iter()) {
-                substitutions.insert(*param, arg.clone());
+            for (param_sym, arg) in interface_def
+                .type_params_symbols
+                .iter()
+                .zip(type_args.iter())
+            {
+                substitutions.insert(*param_sym, arg.clone());
             }
 
-            let mut stack = vec![interface_def];
+            // Get interface Symbol by looking up from type_implements or by name
+            let interface_sym = self
+                .type_implements
+                .values()
+                .flat_map(|syms| syms.iter())
+                .find(|&&sym| {
+                    let sym_str = interner.resolve(sym);
+                    self.name_table
+                        .last_segment_str(name_id)
+                        .is_some_and(|n| n == sym_str)
+                })
+                .copied()
+                .or_else(|| {
+                    self.name_table
+                        .last_segment_str(name_id)
+                        .and_then(|name_str| interner.lookup(&name_str))
+                });
+
+            // Traverse interface hierarchy via EntityRegistry
+            let mut stack = vec![type_def_id];
             let mut seen = HashSet::new();
-            while let Some(def) = stack.pop() {
-                if !seen.insert(def.name) {
+            while let Some(current_id) = stack.pop() {
+                if !seen.insert(current_id) {
                     continue;
                 }
+                let def = self.entity_registry.get_type(current_id);
+
                 // Resolve method name to string for cross-interner comparison
                 let method_name_str = interner.resolve(method_name);
-                for method_def in &def.methods {
+                for &method_id in &def.methods {
+                    let method = self.entity_registry.get_method(method_id);
+                    let method_name_from_id = self
+                        .name_table
+                        .last_segment_str(method.name_id)
+                        .unwrap_or_default();
+
                     // Compare by string since interface was registered with different interner
-                    if method_def.name_str == method_name_str {
+                    if method_name_from_id == method_name_str {
                         let func_type = FunctionType {
-                            params: method_def
+                            params: method
+                                .signature
                                 .params
                                 .iter()
                                 .map(|t| substitute_type(t, &substitutions))
                                 .collect(),
                             return_type: Box::new(substitute_type(
-                                &method_def.return_type,
+                                &method.signature.return_type,
                                 &substitutions,
                             )),
                             is_closure: false,
                         };
-                        if let Some(external_info) =
-                            def.external_methods.get(method_name_str).cloned()
+                        // Check for external binding
+                        if let Some(external_info) = self
+                            .entity_registry
+                            .get_external_binding(method_id)
+                            .cloned()
                         {
                             return Some(ResolvedMethod::Implemented {
-                                trait_name: Some(def.name),
+                                trait_name: interface_sym,
                                 func_type,
                                 is_builtin: false,
                                 external_info: Some(external_info),
                             });
                         }
-                        return Some(ResolvedMethod::InterfaceMethod {
-                            interface_name: interface_def.name,
-                            method_name,
-                            func_type,
-                        });
+                        if let Some(interface_sym) = interface_sym {
+                            return Some(ResolvedMethod::InterfaceMethod {
+                                interface_name: interface_sym,
+                                method_name,
+                                func_type,
+                            });
+                        }
                     }
                 }
-                for parent in &def.extends {
-                    if let Some(parent_def) = self.interface_registry.get(*parent, interner) {
-                        stack.push(parent_def);
-                    }
+                // Add parent interfaces to stack
+                for &parent_id in &def.extends {
+                    stack.push(parent_id);
                 }
             }
         }
@@ -288,20 +326,33 @@ impl Analyzer {
         if let Some(type_sym) = type_sym
             && let Some(interfaces) = self.type_implements.get(&type_sym).cloned()
         {
+            let method_name_str = interner.resolve(method_name);
             for interface_name in &interfaces {
-                if let Some(interface_def) = self.interface_registry.get(*interface_name, interner)
-                {
-                    for method_def in &interface_def.methods {
-                        if method_def.name == method_name && method_def.has_default {
+                // Look up interface via EntityRegistry
+                let interface_str = interner.resolve(*interface_name);
+                let type_def_id = self
+                    .name_table
+                    .name_id_raw(self.current_module, &[interface_str])
+                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+                    .or_else(|| {
+                        self.entity_registry
+                            .interface_by_short_name(interface_str, &self.name_table)
+                    });
+
+                if let Some(type_def_id) = type_def_id {
+                    let interface_def = self.entity_registry.get_type(type_def_id);
+                    for &method_id in &interface_def.methods {
+                        let method = self.entity_registry.get_method(method_id);
+                        let def_method_name = self
+                            .name_table
+                            .last_segment_str(method.name_id)
+                            .unwrap_or_default();
+                        if def_method_name == method_name_str && method.has_default {
                             return Some(ResolvedMethod::DefaultMethod {
                                 interface_name: *interface_name,
                                 type_name: type_sym,
                                 method_name,
-                                func_type: FunctionType {
-                                    params: method_def.params.clone(),
-                                    return_type: Box::new(method_def.return_type.clone()),
-                                    is_closure: false,
-                                },
+                                func_type: method.signature.clone(),
                             });
                         }
                     }

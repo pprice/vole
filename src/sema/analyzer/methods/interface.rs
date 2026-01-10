@@ -181,39 +181,11 @@ impl Analyzer {
         interface_name_id: NameId,
         interner: &Interner,
     ) -> bool {
-        let Some(interface) = self.interface_registry.get_by_name_id(interface_name_id) else {
+        // Use EntityRegistry for interface lookup
+        let Some(type_def_id) = self.entity_registry.type_by_name(interface_name_id) else {
             return false;
         };
-
-        // Check required fields
-        for field in &interface.fields {
-            if !self.type_has_field(ty, field.name, &field.ty, interner) {
-                return false;
-            }
-        }
-
-        // Check required methods (skip those with defaults)
-        for method in &interface.methods {
-            if method.has_default {
-                continue;
-            }
-
-            if !self.type_has_method(ty, method, interner) {
-                return false;
-            }
-        }
-
-        // Check parent interfaces (extends) - need to look up each parent's NameId
-        for parent in &interface.extends {
-            // Get the parent's NameId from the registry
-            if let Some(parent_def) = self.interface_registry.get(*parent, interner)
-                && !self.satisfies_interface_by_name_id(ty, parent_def.name_id, interner)
-            {
-                return false;
-            }
-        }
-
-        true
+        self.satisfies_interface_by_type_def_id(ty, type_def_id, interner)
     }
 
     /// Check if a type implements Stringable (has to_string() -> string method)
@@ -222,9 +194,13 @@ impl Analyzer {
         if let Some(stringable_id) = self.well_known.stringable {
             return self.satisfies_interface_via_entity_registry(ty, stringable_id, interner);
         }
-        // Fallback: try to find "Stringable" by string lookup
-        if let Some(def) = self.interface_registry.get_by_str("Stringable") {
-            return self.satisfies_interface_via_entity_registry(ty, def.name_id, interner);
+        // Fallback: try to find "Stringable" via EntityRegistry short name lookup
+        if let Some(type_def_id) = self
+            .entity_registry
+            .interface_by_short_name("Stringable", &self.name_table)
+        {
+            let interface = self.entity_registry.get_type(type_def_id);
+            return self.satisfies_interface_via_entity_registry(ty, interface.name_id, interner);
         }
         false
     }
@@ -239,109 +215,23 @@ impl Analyzer {
         interface_name: Symbol,
         interner: &Interner,
     ) -> bool {
-        let Some(interface) = self.interface_registry.get(interface_name, interner) else {
+        // Look up interface by Symbol -> NameId -> TypeDefId via EntityRegistry
+        let interface_name_str = interner.resolve(interface_name);
+        let type_def_id = self
+            .name_table
+            .name_id_raw(self.current_module, &[interface_name_str])
+            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+            .or_else(|| {
+                // Fall back to short name lookup across all modules
+                self.entity_registry
+                    .interface_by_short_name(interface_name_str, &self.name_table)
+            });
+
+        let Some(type_def_id) = type_def_id else {
             return false;
         };
 
-        // Check required fields
-        for field in &interface.fields {
-            if !self.type_has_field(ty, field.name, &field.ty, interner) {
-                return false;
-            }
-        }
-
-        // Check required methods (skip those with defaults)
-        for method in &interface.methods {
-            if method.has_default {
-                continue;
-            }
-
-            if !self.type_has_method(ty, method, interner) {
-                return false;
-            }
-        }
-
-        // Check parent interfaces (extends)
-        for parent in &interface.extends {
-            if !self.satisfies_interface(ty, *parent, interner) {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    /// Check if a type has a field with the given name and compatible type
-    pub(crate) fn type_has_field(
-        &self,
-        ty: &Type,
-        field_name: Symbol,
-        expected_type: &Type,
-        interner: &Interner,
-    ) -> bool {
-        let field_name_str = interner.resolve(field_name);
-        match ty {
-            Type::Record(r) => r.fields.iter().any(|f| {
-                f.name == field_name_str && self.types_compatible(&f.ty, expected_type, interner)
-            }),
-            Type::Class(c) => c.fields.iter().any(|f| {
-                f.name == field_name_str && self.types_compatible(&f.ty, expected_type, interner)
-            }),
-            _ => false,
-        }
-    }
-
-    /// Check if a type has a method that matches the interface method signature
-    pub(crate) fn type_has_method(
-        &self,
-        ty: &Type,
-        interface_method: &InterfaceMethodDef,
-        interner: &Interner,
-    ) -> bool {
-        // Get type name_id for method lookup
-        let type_name_id = match ty {
-            Type::Record(r) => Some(r.name_id),
-            Type::Class(c) => Some(c.name_id),
-            _ => None,
-        };
-
-        // For primitives/arrays, check implement registry
-        if type_name_id.is_none() {
-            if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
-                && let Some(method_id) =
-                    self.method_name_id_by_str(&interface_method.name_str, interner)
-            {
-                return self
-                    .implement_registry
-                    .get_method(&type_id, method_id)
-                    .is_some();
-            }
-            return false;
-        }
-
-        let type_name_id = type_name_id.unwrap();
-
-        // Check direct methods on the type
-        if let Some(method_id) = self.method_name_id_by_str(&interface_method.name_str, interner) {
-            let method_key = (type_name_id, method_id);
-            if self.methods.contains_key(&method_key) {
-                return true;
-            }
-        }
-
-        // Check implement registry
-        if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
-            && let Some(method_id) =
-                self.method_name_id_by_str(&interface_method.name_str, interner)
-            && self
-                .implement_registry
-                .get_method(&type_id, method_id)
-                .is_some()
-        {
-            return true;
-        }
-
-        false
+        self.satisfies_interface_by_type_def_id(ty, type_def_id, interner)
     }
 
     /// Validate that a type satisfies an interface by having all required methods with correct signatures
@@ -362,15 +252,50 @@ impl Analyzer {
             return; // Unknown type, can't validate
         };
 
-        if let Some(iface) = self.interface_registry.get(iface_name, interner).cloned() {
+        // Look up interface via EntityRegistry
+        let iface_name_str = interner.resolve(iface_name);
+        let type_def_id = self
+            .name_table
+            .name_id_raw(self.current_module, &[iface_name_str])
+            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+            .or_else(|| {
+                self.entity_registry
+                    .interface_by_short_name(iface_name_str, &self.name_table)
+            });
+
+        if let Some(type_def_id) = type_def_id {
+            // Clone the data we need to avoid borrow conflicts
+            let iface = self.entity_registry.get_type(type_def_id);
+            let method_ids = iface.methods.clone();
+            let extends = iface.extends.clone();
+
+            // Collect method info upfront (name_str, has_default, signature)
+            let method_infos: Vec<(String, bool, FunctionType)> = method_ids
+                .iter()
+                .map(|&method_id| {
+                    let method = self.entity_registry.get_method(method_id);
+                    let name = self
+                        .name_table
+                        .last_segment_str(method.name_id)
+                        .unwrap_or_default();
+                    (name, method.has_default, method.signature.clone())
+                })
+                .collect();
+
+            // Collect parent names upfront
+            let parent_names: Vec<Option<String>> = extends
+                .iter()
+                .map(|&parent_id| {
+                    let parent_def = self.entity_registry.get_type(parent_id);
+                    self.name_table.last_segment_str(parent_def.name_id)
+                })
+                .collect();
+
             // Check methods required by this interface
-            for required in &iface.methods {
-                if required.has_default {
+            for (required_name, has_default, signature) in &method_infos {
+                if *has_default {
                     continue;
                 }
-                // Use name_str which was captured at interface definition time
-                // (required.name Symbol may be stale if from a different interner context)
-                let required_name = &required.name_str;
                 match type_methods.get(required_name) {
                     None => {
                         // Method is missing entirely
@@ -386,10 +311,15 @@ impl Analyzer {
                     }
                     Some(found_sig) => {
                         // Method exists, check signature (substituting Self with implementing type)
-                        if !Self::signatures_match(required, found_sig, &implementing_type) {
+                        if !Self::signatures_match_entity(
+                            &signature.params,
+                            &signature.return_type,
+                            found_sig,
+                            &implementing_type,
+                        ) {
                             let expected = self.format_method_signature(
-                                &required.params,
-                                &required.return_type,
+                                &signature.params,
+                                &signature.return_type,
                                 interner,
                             );
                             let found = self.format_method_signature(
@@ -411,17 +341,51 @@ impl Analyzer {
                     }
                 }
             }
-            // Check parent interfaces (extends)
-            for parent_iface in &iface.extends {
-                self.validate_interface_satisfaction(
-                    type_name,
-                    *parent_iface,
-                    type_methods,
-                    span,
-                    interner,
-                );
+
+            // Check parent interfaces (extends) - get their Symbols from entity registry
+            for parent_name_str in parent_names.into_iter().flatten() {
+                if let Some(parent_sym) = interner.lookup(&parent_name_str) {
+                    self.validate_interface_satisfaction(
+                        type_name,
+                        parent_sym,
+                        type_methods,
+                        span,
+                        interner,
+                    );
+                }
             }
         }
+    }
+
+    /// Check if method signature matches (EntityRegistry version)
+    fn signatures_match_entity(
+        required_params: &[Type],
+        required_return: &Type,
+        found: &FunctionType,
+        implementing_type: &Type,
+    ) -> bool {
+        // Check parameter count
+        if required_params.len() != found.params.len() {
+            return false;
+        }
+        // Check parameter types, substituting Self (Type::Error) with implementing_type
+        for (req_param, found_param) in required_params.iter().zip(found.params.iter()) {
+            let effective_req = if matches!(req_param, Type::Error) {
+                implementing_type
+            } else {
+                req_param
+            };
+            if effective_req != found_param {
+                return false;
+            }
+        }
+        // Check return type, substituting Self (Type::Error) with implementing_type
+        let effective_return = if matches!(required_return, Type::Error) {
+            implementing_type
+        } else {
+            required_return
+        };
+        effective_return == &*found.return_type
     }
 
     /// Get all method signatures for a type (from direct methods + implement blocks)

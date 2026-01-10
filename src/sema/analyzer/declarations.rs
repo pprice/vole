@@ -133,7 +133,7 @@ impl Analyzer {
                 &self.classes,
                 &self.records,
                 &self.error_types,
-                &self.interface_registry,
+                &self.entity_registry,
                 interner,
                 &mut self.name_table,
                 module_id,
@@ -210,7 +210,19 @@ impl Analyzer {
             let mut iface_names = Vec::new();
             for iface_type in &class.implements {
                 if let Some(iface_sym) = interface_base_name(iface_type) {
-                    if self.interface_registry.get(iface_sym, interner).is_none() {
+                    // Validate interface exists via EntityRegistry
+                    let iface_str = interner.resolve(iface_sym);
+                    let iface_exists = self
+                        .name_table
+                        .name_id_raw(self.current_module, &[iface_str])
+                        .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+                        .is_some()
+                        || self
+                            .entity_registry
+                            .interface_by_short_name(iface_str, &self.name_table)
+                            .is_some();
+
+                    if !iface_exists {
                         self.add_error(
                             SemanticError::UnknownInterface {
                                 name: format_type_expr(iface_type, interner),
@@ -359,7 +371,19 @@ impl Analyzer {
                 let mut iface_names = Vec::new();
                 for iface_type in &record.implements {
                     if let Some(iface_sym) = interface_base_name(iface_type) {
-                        if self.interface_registry.get(iface_sym, interner).is_none() {
+                        // Validate interface exists via EntityRegistry
+                        let iface_str = interner.resolve(iface_sym);
+                        let iface_exists = self
+                            .name_table
+                            .name_id_raw(self.current_module, &[iface_str])
+                            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+                            .is_some()
+                            || self
+                                .entity_registry
+                                .interface_by_short_name(iface_str, &self.name_table)
+                                .is_some();
+
+                        if !iface_exists {
                             self.add_error(
                                 SemanticError::UnknownInterface {
                                     name: format_type_expr(iface_type, interner),
@@ -475,7 +499,7 @@ impl Analyzer {
                 &self.classes,
                 &self.records,
                 &self.error_types,
-                &self.interface_registry,
+                &self.entity_registry,
                 interner,
                 &mut self.name_table,
                 module_id,
@@ -511,7 +535,7 @@ impl Analyzer {
                         &self.classes,
                         &self.records,
                         &self.error_types,
-                        &self.interface_registry,
+                        &self.entity_registry,
                         interner,
                         &mut self.name_table,
                         module_id,
@@ -532,12 +556,24 @@ impl Analyzer {
             self.records.insert(record.name, record_type.clone());
             self.register_named_type(record.name, Type::Record(record_type.clone()), interner);
 
-            // Register and validate implements list
+            // Register and validate implements list (for generic records)
             if !record.implements.is_empty() {
                 let mut iface_names = Vec::new();
                 for iface_type in &record.implements {
                     if let Some(iface_sym) = interface_base_name(iface_type) {
-                        if self.interface_registry.get(iface_sym, interner).is_none() {
+                        // Validate interface exists via EntityRegistry
+                        let iface_str = interner.resolve(iface_sym);
+                        let iface_exists = self
+                            .name_table
+                            .name_id_raw(self.current_module, &[iface_str])
+                            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+                            .is_some()
+                            || self
+                                .entity_registry
+                                .interface_by_short_name(iface_str, &self.name_table)
+                                .is_some();
+
+                        if !iface_exists {
                             self.add_error(
                                 SemanticError::UnknownInterface {
                                     name: format_type_expr(iface_type, interner),
@@ -568,7 +604,7 @@ impl Analyzer {
                     &self.classes,
                     &self.records,
                     &self.error_types,
-                    &self.interface_registry,
+                    &self.entity_registry,
                     interner,
                     &mut self.name_table,
                     module_id,
@@ -637,7 +673,7 @@ impl Analyzer {
             &self.classes,
             &self.records,
             &self.error_types,
-            &self.interface_registry,
+            &self.entity_registry,
             interner,
             &mut self.name_table,
             module_id,
@@ -698,7 +734,7 @@ impl Analyzer {
         let interface_methods: Vec<crate::sema::types::InterfaceMethodType> = methods
             .iter()
             .map(|method| crate::sema::types::InterfaceMethodType {
-                name: method.name,
+                name: self.method_name_id(method.name, interner),
                 params: method.params.clone(),
                 return_type: Box::new(method.return_type.clone()),
                 has_default: method.has_default,
@@ -771,12 +807,34 @@ impl Analyzer {
                 self.name_table.intern_raw(builtin_mod, &[tp_name_str])
             })
             .collect();
-        self.entity_registry
-            .set_type_params(entity_type_id, entity_type_params);
+        // Also store the original Symbols for type param substitution
+        let entity_type_param_symbols: Vec<_> = interface_decl
+            .type_params
+            .iter()
+            .map(|tp| tp.name)
+            .collect();
+        self.entity_registry.set_type_params(
+            entity_type_id,
+            entity_type_params,
+            entity_type_param_symbols,
+        );
 
-        // Register extends relationships
-        // Note: extends contains Symbols, we need to look up their TypeDefIds
-        // For now, skip - this will be filled in when we have full integration
+        // Register extends relationships and build extends Vec<NameId>
+        let extends_name_ids: Vec<NameId> = interface_decl
+            .extends
+            .iter()
+            .map(|&parent_sym| {
+                let parent_str = interner.resolve(parent_sym);
+                let parent_name_id = self
+                    .name_table
+                    .intern_raw(self.current_module, &[parent_str]);
+                if let Some(parent_type_id) = self.entity_registry.type_by_name(parent_name_id) {
+                    self.entity_registry
+                        .add_extends(entity_type_id, parent_type_id);
+                }
+                parent_name_id
+            })
+            .collect();
 
         // Register methods in EntityRegistry (with external bindings)
         for method in &methods {
@@ -805,6 +863,25 @@ impl Analyzer {
             );
         }
 
+        // Register fields in EntityRegistry (for interface field requirements)
+        for (i, field) in fields.iter().enumerate() {
+            let field_name_str = interner.resolve(field.name).to_string();
+            let builtin_module = self.name_table.builtin_module();
+            let field_name_id = self
+                .name_table
+                .intern_raw(builtin_module, &[&field_name_str]);
+            let full_field_name_id = self
+                .name_table
+                .intern_raw(self.current_module, &[&name_str, &field_name_str]);
+            self.entity_registry.register_field(
+                entity_type_id,
+                field_name_id,
+                full_field_name_id,
+                field.ty.clone(),
+                i,
+            );
+        }
+
         let def = InterfaceDef {
             name: interface_decl.name,
             name_id,
@@ -828,7 +905,7 @@ impl Analyzer {
                 name_id,
                 type_args: Vec::new(),
                 methods: interface_methods,
-                extends: interface_decl.extends.clone(),
+                extends: extends_name_ids,
             }),
             interner,
         );
@@ -841,15 +918,28 @@ impl Analyzer {
         // Validate trait exists if specified
         if let Some(ref trait_type) = impl_block.trait_type
             && let Some(name) = interface_base_name(trait_type)
-            && self.interface_registry.get(name, interner).is_none()
         {
-            self.add_error(
-                SemanticError::UnknownInterface {
-                    name: format_type_expr(trait_type, interner),
-                    span: impl_block.span.into(),
-                },
-                impl_block.span,
-            );
+            // Validate interface exists via EntityRegistry
+            let iface_str = interner.resolve(name);
+            let iface_exists = self
+                .name_table
+                .name_id_raw(self.current_module, &[iface_str])
+                .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+                .is_some()
+                || self
+                    .entity_registry
+                    .interface_by_short_name(iface_str, &self.name_table)
+                    .is_some();
+
+            if !iface_exists {
+                self.add_error(
+                    SemanticError::UnknownInterface {
+                        name: format_type_expr(trait_type, interner),
+                        span: impl_block.span.into(),
+                    },
+                    impl_block.span,
+                );
+            }
         }
 
         let target_type = self.resolve_type(&impl_block.target_type, interner);

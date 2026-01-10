@@ -94,7 +94,7 @@ pub struct Analyzer {
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their resolved types, including narrowed types
     expr_types: HashMap<NodeId, Type>,
-    /// Interface definitions registry
+    /// Interface definitions registry (DEPRECATED - being replaced by EntityRegistry)
     pub interface_registry: InterfaceRegistry,
     /// Methods added via implement blocks
     pub implement_registry: ImplementRegistry,
@@ -437,6 +437,8 @@ impl Analyzer {
             // Merge the interface registry
             self.interface_registry
                 .merge(&sub_analyzer.interface_registry);
+            // Merge the entity registry (types, methods, fields)
+            self.entity_registry.merge(&sub_analyzer.entity_registry);
             // Merge the implement registry
             self.implement_registry
                 .merge(&sub_analyzer.implement_registry);
@@ -696,39 +698,74 @@ impl Analyzer {
         &mut self,
         name: &str,
         type_args: Vec<Type>,
-        interner: &Interner,
+        _interner: &Interner,
     ) -> Option<Type> {
-        // Use string-based lookup since the interface may be defined in a different
-        // interner (e.g., stdlib prelude) than the current file being analyzed
-        let def = self.interface_registry.get_by_str(name)?;
-        // Use interface's symbol if not interned locally
-        let _sym = interner.lookup(name).unwrap_or(def.name);
-        if !def.type_params.is_empty() && def.type_params.len() != type_args.len() {
+        // Look up interface by string name using EntityRegistry
+        // First try exact NameId lookup, then fall back to short name search
+        let type_def_id = self
+            .name_table
+            .name_id_raw(self.current_module, &[name])
+            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+            .or_else(|| {
+                self.name_table
+                    .name_id_raw(self.name_table.main_module(), &[name])
+                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+            })
+            .or_else(|| {
+                // Fall back to string-based lookup across all modules
+                self.entity_registry
+                    .interface_by_short_name(name, &self.name_table)
+            })?;
+        let type_def = self.entity_registry.get_type(type_def_id);
+
+        // Check type params match
+        if !type_def.type_params.is_empty() && type_def.type_params.len() != type_args.len() {
             return Some(Type::Error);
         }
+
+        // Build substitution map using type param Symbols
+        // We use type_params_symbols which stores the original Symbols from declaration
+        // These match the Symbols used in Type::TypeParam in method signatures
         let mut substitutions = HashMap::new();
-        for (param, arg) in def.type_params.iter().zip(type_args.iter()) {
-            substitutions.insert(*param, arg.clone());
+        for (sym, arg) in type_def.type_params_symbols.iter().zip(type_args.iter()) {
+            substitutions.insert(*sym, arg.clone());
         }
-        let methods = def
+
+        // Build methods with substituted types
+        let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
             .methods
             .iter()
-            .map(|method| crate::sema::types::InterfaceMethodType {
-                name: method.name,
-                params: method
-                    .params
-                    .iter()
-                    .map(|t| substitute_type(t, &substitutions))
-                    .collect(),
-                return_type: Box::new(substitute_type(&method.return_type, &substitutions)),
-                has_default: method.has_default,
+            .map(|&method_id| {
+                let method = self.entity_registry.get_method(method_id);
+                crate::sema::types::InterfaceMethodType {
+                    name: method.name_id,
+                    params: method
+                        .signature
+                        .params
+                        .iter()
+                        .map(|t| substitute_type(t, &substitutions))
+                        .collect(),
+                    return_type: Box::new(substitute_type(
+                        &method.signature.return_type,
+                        &substitutions,
+                    )),
+                    has_default: method.has_default,
+                }
             })
             .collect();
+
+        // Build extends from TypeDefIds -> NameIds
+        let extends: Vec<NameId> = type_def
+            .extends
+            .iter()
+            .map(|&parent_id| self.entity_registry.get_type(parent_id).name_id)
+            .collect();
+
         Some(Type::Interface(crate::sema::types::InterfaceType {
-            name_id: def.name_id,
+            name_id: type_def.name_id,
             type_args,
             methods,
-            extends: def.extends.clone(),
+            extends,
         }))
     }
 
@@ -823,7 +860,7 @@ impl Analyzer {
             classes: &self.classes,
             records: &self.records,
             error_types: &self.error_types,
-            interface_registry: &self.interface_registry,
+            entity_registry: &self.entity_registry,
             interner,
             name_table: &mut self.name_table,
             module_id,
@@ -973,7 +1010,7 @@ impl Analyzer {
                 classes: &self.classes,
                 records: &self.records,
                 error_types: &self.error_types,
-                interface_registry: &self.interface_registry,
+                entity_registry: &self.entity_registry,
                 interner,
                 name_table: &mut self.name_table,
                 module_id,
@@ -1040,7 +1077,19 @@ impl Analyzer {
     ) -> Option<crate::sema::generic::TypeConstraint> {
         match constraint {
             TypeConstraint::Interface(sym) => {
-                if self.interface_registry.get(*sym, interner).is_none() {
+                // Validate interface exists via EntityRegistry
+                let iface_str = interner.resolve(*sym);
+                let iface_exists = self
+                    .name_table
+                    .name_id_raw(self.current_module, &[iface_str])
+                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+                    .is_some()
+                    || self
+                        .entity_registry
+                        .interface_by_short_name(iface_str, &self.name_table)
+                        .is_some();
+
+                if !iface_exists {
                     self.add_error(
                         SemanticError::UnknownInterface {
                             name: interner.resolve(*sym).to_string(),
@@ -1059,7 +1108,7 @@ impl Analyzer {
                     &self.classes,
                     &self.records,
                     &self.error_types,
-                    &self.interface_registry,
+                    &self.entity_registry,
                     interner,
                     &mut self.name_table,
                     module_id,
@@ -1414,7 +1463,7 @@ impl Analyzer {
                             classes: &self.classes,
                             records: &self.records,
                             error_types: &self.error_types,
-                            interface_registry: &self.interface_registry,
+                            entity_registry: &self.entity_registry,
                             interner: &module_interner,
                             name_table: &mut self.name_table,
                             module_id,
@@ -1475,7 +1524,7 @@ impl Analyzer {
                                 classes: &self.classes,
                                 records: &self.records,
                                 error_types: &self.error_types,
-                                interface_registry: &self.interface_registry,
+                                entity_registry: &self.entity_registry,
                                 interner: &module_interner,
                                 name_table: &mut self.name_table,
                                 module_id,

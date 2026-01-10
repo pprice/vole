@@ -346,39 +346,48 @@ impl Cg<'_, '_, '_> {
         method_name: &str,
         elem_ty: &Type,
     ) -> Result<CompiledValue, String> {
-        // Look up the external function for this Iterator method
-        let iter_sym = self
-            .ctx
-            .interner
-            .lookup("Iterator")
-            .ok_or_else(|| "Iterator interface not interned".to_string())?;
-        let iter_def = self
+        // Look up the Iterator interface via EntityRegistry
+        let iter_type_id = self
             .ctx
             .analyzed
-            .interface_registry
-            .get(iter_sym, self.ctx.interner)
-            .ok_or_else(|| "Iterator interface not found".to_string())?;
+            .entity_registry
+            .interface_by_short_name("Iterator", &self.ctx.analyzed.name_table)
+            .ok_or_else(|| "Iterator interface not found in entity registry".to_string())?;
 
-        // Get the external binding for this method
-        let external_info = iter_def
-            .external_methods
-            .get(method_name)
-            .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?;
+        let iter_def = self.ctx.analyzed.entity_registry.get_type(iter_type_id);
 
-        // Find the method's return type from the interface definition
-        let method_def = iter_def
+        // Find the method by name
+        let method_id = iter_def
             .methods
             .iter()
-            .find(|m| m.name_str == method_name)
+            .find(|&&mid| {
+                let m = self.ctx.analyzed.entity_registry.get_method(mid);
+                self.ctx
+                    .analyzed
+                    .name_table
+                    .last_segment_str(m.name_id)
+                    .is_some_and(|n| n == method_name)
+            })
             .ok_or_else(|| format!("Method {} not found on Iterator", method_name))?;
+
+        let method = self.ctx.analyzed.entity_registry.get_method(*method_id);
+
+        // Get the external binding for this method
+        let external_info = self
+            .ctx
+            .analyzed
+            .entity_registry
+            .get_external_binding(*method_id)
+            .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?
+            .clone();
 
         // Substitute the element type for T in the return type
         let substitutions: std::collections::HashMap<crate::frontend::Symbol, Type> = iter_def
-            .type_params
+            .type_params_symbols
             .iter()
             .map(|param| (*param, elem_ty.clone()))
             .collect();
-        let return_type = substitute_type(&method_def.return_type, &substitutions);
+        let return_type = substitute_type(&method.signature.return_type, &substitutions);
 
         // Build args: self (iterator ptr) + method args
         let mut args = vec![obj.value];
@@ -388,7 +397,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Call the external function directly
-        self.call_external(external_info, &args, &return_type)
+        self.call_external(&external_info, &args, &return_type)
     }
 
     fn functional_interface_call(
