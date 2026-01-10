@@ -213,12 +213,14 @@ pub enum SemanticError {
     },
 
     #[error("method '{method}' has wrong signature for interface '{interface_name}'")]
-    #[diagnostic(code(E2053), help("expected {expected}, found {found}"))]
+    #[diagnostic(code(E2053), help("{details}\ninterface requires: {expected}"))]
     InterfaceSignatureMismatch {
         interface_name: String,
         method: String,
         expected: String,
+        #[allow(dead_code)]
         found: String,
+        details: String,
         #[label("signature mismatch")]
         span: SourceSpan,
     },

@@ -322,22 +322,32 @@ impl Analyzer {
                             found_sig,
                             &implementing_type,
                         ) {
-                            let expected = self.format_method_signature(
+                            // Use interface-specific formatter to show "Self" properly
+                            let expected = self.format_interface_method_signature(
                                 &signature.params,
                                 &signature.return_type,
-                                interner,
                             );
                             let found = self.format_method_signature(
                                 &found_sig.params,
                                 &found_sig.return_type,
                                 interner,
                             );
+
+                            // Generate detailed mismatch information
+                            let details = self.describe_signature_mismatch(
+                                &signature.params,
+                                &signature.return_type,
+                                found_sig,
+                                &implementing_type,
+                            );
+
                             self.add_error(
                                 SemanticError::InterfaceSignatureMismatch {
                                     interface_name: interner.resolve(iface_name).to_string(),
                                     method: required_name.to_string(),
                                     expected,
                                     found,
+                                    details,
                                     span: span.into(),
                                 },
                                 span,
@@ -391,6 +401,77 @@ impl Analyzer {
             required_return
         };
         effective_return == &*found.return_type
+    }
+
+    /// Describe what specifically mismatches between required and found signatures.
+    /// Returns a human-readable description of the differences.
+    fn describe_signature_mismatch(
+        &mut self,
+        required_params: &[Type],
+        required_return: &Type,
+        found: &FunctionType,
+        implementing_type: &Type,
+    ) -> String {
+        let mut mismatches = Vec::new();
+
+        // Check parameter count
+        if required_params.len() != found.params.len() {
+            mismatches.push(format!(
+                "parameter count: expected {}, found {}",
+                required_params.len(),
+                found.params.len()
+            ));
+        } else {
+            // Check each parameter type
+            for (i, (req_param, found_param)) in
+                required_params.iter().zip(found.params.iter()).enumerate()
+            {
+                let effective_req = if matches!(req_param, Type::Error) {
+                    implementing_type
+                } else {
+                    req_param
+                };
+                if effective_req != found_param {
+                    let expected_str = if matches!(req_param, Type::Error) {
+                        "Self".to_string()
+                    } else {
+                        self.type_display(req_param)
+                    };
+                    let found_str = self.type_display(found_param);
+                    mismatches.push(format!(
+                        "parameter {}: expected '{}', found '{}'",
+                        i + 1,
+                        expected_str,
+                        found_str
+                    ));
+                }
+            }
+        }
+
+        // Check return type
+        let effective_return = if matches!(required_return, Type::Error) {
+            implementing_type
+        } else {
+            required_return
+        };
+        if effective_return != &*found.return_type {
+            let expected_str = if matches!(required_return, Type::Error) {
+                "Self".to_string()
+            } else {
+                self.type_display(required_return)
+            };
+            let found_str = self.type_display(&found.return_type);
+            mismatches.push(format!(
+                "return type: expected '{}', found '{}'",
+                expected_str, found_str
+            ));
+        }
+
+        if mismatches.is_empty() {
+            "signature mismatch".to_string()
+        } else {
+            mismatches.join("\n")
+        }
     }
 
     /// Get all method signatures for a type (from direct methods + implement blocks)

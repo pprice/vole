@@ -115,4 +115,29 @@ impl Analyzer {
             self.type_display(return_type)
         )
     }
+
+    /// Format a method signature for interface requirement messages.
+    /// Shows "Self" instead of "error" for Type::Error (which represents Self in interfaces).
+    pub(crate) fn format_interface_method_signature(
+        &mut self,
+        params: &[Type],
+        return_type: &Type,
+    ) -> String {
+        let params_str: Vec<String> = params
+            .iter()
+            .map(|t| {
+                if matches!(t, Type::Error) {
+                    "Self".to_string()
+                } else {
+                    self.type_display(t)
+                }
+            })
+            .collect();
+        let return_str = if matches!(return_type, Type::Error) {
+            "Self".to_string()
+        } else {
+            self.type_display(return_type)
+        };
+        format!("({}) -> {}", params_str.join(", "), return_str)
+    }
 }
