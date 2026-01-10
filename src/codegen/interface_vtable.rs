@@ -17,19 +17,6 @@ use crate::sema::generic::substitute_type;
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::{EntityRegistry, FunctionType, Type};
 
-/// Local struct for vtable method info (replaces InterfaceMethodDef dependency)
-#[derive(Debug, Clone)]
-struct VtableMethodInfo {
-    /// String name for cross-interner lookups
-    name_str: String,
-    /// Parameter types (after type substitution)
-    params: Vec<Type>,
-    /// Return type (after type substitution)
-    return_type: Type,
-    /// Whether this method has a default implementation
-    has_default: bool,
-}
-
 pub(crate) fn iface_debug_enabled() -> bool {
     std::env::var_os("VOLE_DEBUG_IFACE").is_some()
 }
@@ -152,25 +139,6 @@ impl InterfaceVtableRegistry {
             &ctx.analyzed.entity_registry,
         )?;
 
-        // Build VtableMethodInfo from EntityRegistry's MethodDef
-        let methods: Vec<VtableMethodInfo> = method_ids
-            .iter()
-            .map(|&method_id| {
-                let method = ctx.analyzed.entity_registry.get_method(method_id);
-                let name_str = ctx.analyzed.name_table.display(method.name_id);
-                VtableMethodInfo {
-                    name_str,
-                    params: method
-                        .signature
-                        .params
-                        .iter()
-                        .map(|t| substitute_type(t, &substitutions))
-                        .collect(),
-                    return_type: substitute_type(&method.signature.return_type, &substitutions),
-                    has_default: method.has_default,
-                }
-            })
-            .collect();
         let word_bytes = ctx.pointer_type.bytes() as usize;
 
         if iface_debug_enabled() {
@@ -178,7 +146,7 @@ impl InterfaceVtableRegistry {
                 "iface_vtable: interface={} type={:?} methods={}",
                 ctx.interner.resolve(interface_name),
                 concrete_type,
-                methods.len()
+                method_ids.len()
             );
         }
 
@@ -205,16 +173,23 @@ impl InterfaceVtableRegistry {
             .map_err(|e| e.to_string())?;
 
         let mut data = DataDescription::new();
-        data.define_zeroinit(word_bytes * methods.len());
+        data.define_zeroinit(word_bytes * method_ids.len());
         data.set_align(word_bytes as u64);
 
-        for (index, method_def) in methods.iter().enumerate() {
-            let target = resolve_vtable_target(ctx, interface_name_id, concrete_type, method_def)?;
-            // Use name_str for cross-interner safety
+        for (index, &method_id) in method_ids.iter().enumerate() {
+            let method = ctx.analyzed.entity_registry.get_method(method_id);
+            let method_name_str = ctx.analyzed.name_table.display(method.name_id);
+            let target = resolve_vtable_target(
+                ctx,
+                interface_name_id,
+                concrete_type,
+                method_id,
+                &substitutions,
+            )?;
             let wrapper_id = self.compile_wrapper(
                 ctx,
                 interface_name_str,
-                &method_def.name_str,
+                &method_name_str,
                 concrete_type,
                 &target,
             )?;
@@ -229,7 +204,7 @@ impl InterfaceVtableRegistry {
                 };
                 eprintln!(
                     "iface_vtable: slot={} method={} target={} wrapper={:?}",
-                    index, method_def.name_str, target_type, wrapper_id
+                    index, method_name_str, target_type, wrapper_id
                 );
             }
         }
@@ -705,8 +680,23 @@ fn resolve_vtable_target(
     ctx: &CompileCtx,
     interface_name_id: NameId,
     concrete_type: &Type,
-    method_def: &VtableMethodInfo,
+    interface_method_id: MethodId,
+    substitutions: &HashMap<NameId, Type>,
 ) -> Result<VtableMethodTarget, String> {
+    // Get method info from EntityRegistry
+    let interface_method = ctx.analyzed.entity_registry.get_method(interface_method_id);
+    let method_name_str = ctx.analyzed.name_table.display(interface_method.name_id);
+
+    // Apply substitutions to get concrete param/return types
+    let substituted_params: Vec<Type> = interface_method
+        .signature
+        .params
+        .iter()
+        .map(|t| substitute_type(t, substitutions))
+        .collect();
+    let substituted_return_type =
+        substitute_type(&interface_method.signature.return_type, substitutions);
+
     if let Type::Function(func_type) = concrete_type {
         return Ok(VtableMethodTarget::Function {
             func_type: func_type.clone(),
@@ -716,19 +706,19 @@ fn resolve_vtable_target(
     let type_id = TypeId::from_type(concrete_type, &ctx.analyzed.type_table).ok_or_else(|| {
         format!(
             "cannot resolve interface method {} on {:?}",
-            method_def.name_str, concrete_type
+            method_name_str, concrete_type
         )
     })?;
     // Use string-based lookup for cross-interner safety (method_def is from stdlib interner)
     // This may return None for default interface methods that aren't explicitly implemented
-    let method_id = method_name_id_by_str(ctx.analyzed, ctx.interner, &method_def.name_str);
+    let method_name_id = method_name_id_by_str(ctx.analyzed, ctx.interner, &method_name_str);
 
     // Check implement registry for explicit implementations
-    if let Some(method_id) = method_id
+    if let Some(method_name_id) = method_name_id
         && let Some(impl_) = ctx
             .analyzed
             .implement_registry
-            .get_method(&type_id, method_id)
+            .get_method(&type_id, method_name_id)
     {
         if let Some(external_info) = impl_.external_info.clone() {
             return Ok(VtableMethodTarget::External {
@@ -738,7 +728,7 @@ fn resolve_vtable_target(
         }
         let method_info = ctx
             .impl_method_infos
-            .get(&(type_id, method_id))
+            .get(&(type_id, method_name_id))
             .cloned()
             .ok_or_else(|| "implement method info not found".to_string())?;
         return Ok(VtableMethodTarget::Implemented {
@@ -748,14 +738,14 @@ fn resolve_vtable_target(
     }
 
     // Check direct methods on class/record
-    if let Some(method_id) = method_id
+    if let Some(method_name_id) = method_name_id
         && let Some(type_name_id) = match concrete_type {
             Type::Class(class_type) => Some(class_type.name_id),
             Type::Record(record_type) => Some(record_type.name_id),
             _ => None,
         }
         && let Some(meta) = type_metadata_by_name_id(ctx.type_metadata, type_name_id)
-        && let Some(method_info) = meta.method_infos.get(&method_id).cloned()
+        && let Some(method_info) = meta.method_infos.get(&method_name_id).cloned()
     {
         // Look up method type via EntityRegistry
         let func_type = ctx
@@ -765,7 +755,7 @@ fn resolve_vtable_target(
             .and_then(|type_def_id| {
                 ctx.analyzed
                     .entity_registry
-                    .find_method_on_type(type_def_id, method_id)
+                    .find_method_on_type(type_def_id, method_name_id)
             })
             .map(|m_id| {
                 ctx.analyzed
@@ -775,8 +765,8 @@ fn resolve_vtable_target(
                     .clone()
             })
             .unwrap_or_else(|| FunctionType {
-                params: method_def.params.clone(),
-                return_type: Box::new(method_def.return_type.clone()),
+                params: substituted_params.clone(),
+                return_type: Box::new(substituted_return_type.clone()),
                 is_closure: false,
             });
         return Ok(VtableMethodTarget::Direct {
@@ -786,25 +776,25 @@ fn resolve_vtable_target(
     }
 
     // Fall back to interface default if method has one
-    if method_def.has_default {
+    if interface_method.has_default {
         // Check for default external binding via EntityRegistry
         if let Some(interface_type_id) =
             ctx.analyzed.entity_registry.type_by_name(interface_name_id)
-            && let Some(method_name_id) = method_id
-            && let Some(interface_method_id) = ctx
+            && let Some(method_name_id) = method_name_id
+            && let Some(found_method_id) = ctx
                 .analyzed
                 .entity_registry
                 .find_method_on_type(interface_type_id, method_name_id)
             && let Some(external_info) = ctx
                 .analyzed
                 .entity_registry
-                .get_external_binding(interface_method_id)
+                .get_external_binding(found_method_id)
         {
             return Ok(VtableMethodTarget::External {
                 external_info: external_info.clone(),
                 func_type: FunctionType {
-                    params: method_def.params.clone(),
-                    return_type: Box::new(method_def.return_type.clone()),
+                    params: substituted_params,
+                    return_type: Box::new(substituted_return_type),
                     is_closure: false,
                 },
             });
@@ -814,7 +804,7 @@ fn resolve_vtable_target(
 
     Err(CodegenError::not_found(
         "method implementation",
-        format!("{} on {:?}", method_def.name_str, concrete_type),
+        format!("{} on {:?}", method_name_str, concrete_type),
     )
     .into())
 }

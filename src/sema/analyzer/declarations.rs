@@ -5,24 +5,6 @@ use super::*;
 use crate::frontend::ast::TypeExpr;
 use crate::sema::entity_defs::TypeDefKind;
 
-/// Definition of an interface field requirement (local to declarations)
-#[derive(Debug, Clone)]
-struct InterfaceFieldDef {
-    name: Symbol,
-    ty: Type,
-}
-
-/// Definition of an interface method requirement (local to declarations)
-#[derive(Debug, Clone)]
-struct InterfaceMethodDef {
-    name: Symbol,
-    /// String name for cross-interner lookups
-    name_str: String,
-    params: Vec<Type>,
-    return_type: Type,
-    has_default: bool,
-}
-
 /// Extract the base interface name from a TypeExpr.
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
 fn interface_base_name(type_expr: &TypeExpr) -> Option<Symbol> {
@@ -669,14 +651,11 @@ impl Analyzer {
             &type_param_scope,
         );
 
-        // Convert AST fields to InterfaceFieldDef
-        let fields: Vec<InterfaceFieldDef> = interface_decl
+        // Resolve field types directly from AST (store for later registration)
+        let resolved_fields: Vec<(Symbol, Type)> = interface_decl
             .fields
             .iter()
-            .map(|f| InterfaceFieldDef {
-                name: f.name,
-                ty: resolve_type(&f.ty, &mut type_ctx),
-            })
+            .map(|f| (f.name, resolve_type(&f.ty, &mut type_ctx)))
             .collect();
 
         // Collect method names with default external bindings (from `default external` blocks)
@@ -697,36 +676,39 @@ impl Analyzer {
             .map(|m| (interner.resolve(m.name).to_string(), m.span))
             .collect();
 
-        // Convert AST methods to InterfaceMethodDef
-        let methods: Vec<InterfaceMethodDef> = interface_decl
+        // Build interface_methods for Type and collect method data for EntityRegistry registration
+        // We resolve types once and reuse the data
+        let method_data: Vec<(Symbol, String, Vec<Type>, Type, bool)> = interface_decl
             .methods
             .iter()
-            .map(|m| InterfaceMethodDef {
-                name: m.name,
-                name_str: interner.resolve(m.name).to_string(),
-                params: m
+            .map(|m| {
+                let name = m.name;
+                let name_str = interner.resolve(m.name).to_string();
+                let params: Vec<Type> = m
                     .params
                     .iter()
                     .map(|p| resolve_type(&p.ty, &mut type_ctx))
-                    .collect(),
-                return_type: m
+                    .collect();
+                let return_type = m
                     .return_type
                     .as_ref()
                     .map(|t| resolve_type(t, &mut type_ctx))
-                    .unwrap_or(Type::Void),
-                has_default: m.is_default
-                    || m.body.is_some()
-                    || default_external_methods.contains(&m.name),
+                    .unwrap_or(Type::Void);
+                let has_default =
+                    m.is_default || m.body.is_some() || default_external_methods.contains(&m.name);
+                (name, name_str, params, return_type, has_default)
             })
             .collect();
 
-        let interface_methods: Vec<crate::sema::types::InterfaceMethodType> = methods
+        let interface_methods: Vec<crate::sema::types::InterfaceMethodType> = method_data
             .iter()
-            .map(|method| crate::sema::types::InterfaceMethodType {
-                name: self.method_name_id(method.name, interner),
-                params: method.params.clone(),
-                return_type: Box::new(method.return_type.clone()),
-                has_default: method.has_default,
+            .map(|(name, _, params, return_type, has_default)| {
+                crate::sema::types::InterfaceMethodType {
+                    name: self.method_name_id(*name, interner),
+                    params: params.clone(),
+                    return_type: Box::new(return_type.clone()),
+                    has_default: *has_default,
+                }
             })
             .collect();
 
@@ -741,10 +723,13 @@ impl Analyzer {
             );
         }
 
+        // Collect method names for external block validation
+        let method_names: HashSet<Symbol> = method_data.iter().map(|(name, ..)| *name).collect();
+
         let mut external_methods: HashMap<String, ExternalMethodInfo> = HashMap::new();
         for external in &interface_decl.external_blocks {
             for func in &external.functions {
-                if !methods.iter().any(|method| method.name == func.vole_name) {
+                if !method_names.contains(&func.vole_name) {
                     let ty = interner.resolve(interface_decl.name).to_string();
                     let method = interner.resolve(func.vole_name).to_string();
                     self.add_error(
@@ -808,8 +793,7 @@ impl Analyzer {
             .collect();
 
         // Register methods in EntityRegistry (with external bindings)
-        for method in &methods {
-            let method_name_str = &method.name_str;
+        for (_, method_name_str, params, return_type, has_default) in &method_data {
             let builtin_module = self.name_table.builtin_module();
             let method_name_id = self
                 .name_table
@@ -818,8 +802,8 @@ impl Analyzer {
                 .name_table
                 .intern_raw(self.current_module, &[&name_str, method_name_str]);
             let signature = FunctionType {
-                params: method.params.clone(),
-                return_type: Box::new(method.return_type.clone()),
+                params: params.clone(),
+                return_type: Box::new(return_type.clone()),
                 is_closure: false,
             };
             // Look up external binding for this method
@@ -829,14 +813,14 @@ impl Analyzer {
                 method_name_id,
                 full_method_name_id,
                 signature,
-                method.has_default,
+                *has_default,
                 external_binding,
             );
         }
 
         // Register fields in EntityRegistry (for interface field requirements)
-        for (i, field) in fields.iter().enumerate() {
-            let field_name_str = interner.resolve(field.name).to_string();
+        for (i, (field_name, field_ty)) in resolved_fields.iter().enumerate() {
+            let field_name_str = interner.resolve(*field_name).to_string();
             let builtin_module = self.name_table.builtin_module();
             let field_name_id = self
                 .name_table
@@ -848,7 +832,7 @@ impl Analyzer {
                 entity_type_id,
                 field_name_id,
                 full_field_name_id,
-                field.ty.clone(),
+                field_ty.clone(),
                 i,
             );
         }
