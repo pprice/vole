@@ -3,6 +3,7 @@
 use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{ColorChoice, CommandFactory, FromArgMatches};
 use std::process::ExitCode;
+use tracing_subscriber::EnvFilter;
 
 use vole::cli::{BenchCommands, Cli, Commands};
 use vole::commands::bench::{run_bench, run_compare};
@@ -18,6 +19,17 @@ use vole::runtime::install_segfault_handler;
 fn main() -> ExitCode {
     // Install signal handler early for segfault debugging
     install_segfault_handler();
+
+    // Initialize tracing if VOLE_LOG is set
+    if let Ok(filter) = EnvFilter::try_from_env("VOLE_LOG") {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(true)
+            .with_level(true)
+            .with_writer(std::io::stderr)
+            .init();
+        tracing::debug!("tracing initialized");
+    }
 
     unsafe {
         std::env::set_var("RUST_BACKTRACE", "1");
