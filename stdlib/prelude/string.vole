@@ -22,6 +22,14 @@ implement Stringable for string {
     func to_string() -> string { return self }
 }
 
+implement Default for string {
+    statics {
+        func default_value() -> string {
+            return ""
+        }
+    }
+}
+
 implement string {
     external("std:string") {
         func "str_len" as length() -> i64

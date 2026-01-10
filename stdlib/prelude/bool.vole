@@ -11,3 +11,11 @@ implement Stringable for bool {
         func "bool_to_string" as to_string() -> string
     }
 }
+
+implement Default for bool {
+    statics {
+        func default_value() -> bool {
+            return false
+        }
+    }
+}

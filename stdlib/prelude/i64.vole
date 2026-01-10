@@ -23,3 +23,39 @@ implement Stringable for i64 {
         func "i64_to_string" as to_string() -> string
     }
 }
+
+implement Default for i64 {
+    statics {
+        func default_value() -> i64 {
+            return 0
+        }
+    }
+}
+
+implement Zero for i64 {
+    statics {
+        func zero() -> i64 {
+            return 0
+        }
+    }
+}
+
+implement One for i64 {
+    statics {
+        func one() -> i64 {
+            return 1
+        }
+    }
+}
+
+implement Bounded for i64 {
+    statics {
+        func min_value() -> i64 {
+            // -9223372036854775808 can't be written as a literal (overflow on positive part)
+            return -9223372036854775807 - 1
+        }
+        func max_value() -> i64 {
+            return 9223372036854775807
+        }
+    }
+}

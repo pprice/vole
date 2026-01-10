@@ -17,3 +17,27 @@ implement Stringable for f64 {
         func "f64_to_string" as to_string() -> string
     }
 }
+
+implement Default for f64 {
+    statics {
+        func default_value() -> f64 {
+            return 0.0
+        }
+    }
+}
+
+implement Zero for f64 {
+    statics {
+        func zero() -> f64 {
+            return 0.0
+        }
+    }
+}
+
+implement One for f64 {
+    statics {
+        func one() -> f64 {
+            return 1.0
+        }
+    }
+}

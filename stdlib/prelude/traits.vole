@@ -1,6 +1,35 @@
 // stdlib/prelude/traits.vole
 // Core trait definitions for Vole
 
+// Static interfaces - methods called on types, not instances
+
+interface Default {
+    statics {
+        func default_value() -> Self
+    }
+}
+
+interface Bounded {
+    statics {
+        func min_value() -> Self
+        func max_value() -> Self
+    }
+}
+
+interface Zero {
+    statics {
+        func zero() -> Self
+    }
+}
+
+interface One {
+    statics {
+        func one() -> Self
+    }
+}
+
+// Instance interfaces
+
 interface Equatable {
     func equals(other: Self) -> bool
 }
