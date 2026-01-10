@@ -278,6 +278,44 @@ impl Analyzer {
                 false, // class methods don't have defaults
             );
         }
+
+        // Register static methods in EntityRegistry
+        if let Some(ref statics) = class.statics {
+            let builtin_module = self.name_table.builtin_module();
+            let class_name_str = interner.resolve(class.name);
+            for method in &statics.methods {
+                let method_name_str = interner.resolve(method.name);
+                let method_name_id = self
+                    .name_table
+                    .intern_raw(builtin_module, &[method_name_str]);
+                let full_method_name_id = self
+                    .name_table
+                    .intern_raw(self.current_module, &[class_name_str, method_name_str]);
+                let params: Vec<Type> = method
+                    .params
+                    .iter()
+                    .map(|p| self.resolve_type(&p.ty, interner))
+                    .collect();
+                let return_type = method
+                    .return_type
+                    .as_ref()
+                    .map(|t| self.resolve_type(t, interner))
+                    .unwrap_or(Type::Void);
+                let signature = FunctionType {
+                    params,
+                    return_type: Box::new(return_type),
+                    is_closure: false,
+                };
+                let has_default = method.is_default || method.body.is_some();
+                self.entity_registry.register_static_method(
+                    entity_type_id,
+                    method_name_id,
+                    full_method_name_id,
+                    signature,
+                    has_default,
+                );
+            }
+        }
     }
 
     fn collect_record_signature(&mut self, record: &RecordDecl, interner: &Interner) {
@@ -396,6 +434,44 @@ impl Analyzer {
                     signature,
                     false,
                 );
+            }
+
+            // Register static methods in EntityRegistry
+            if let Some(ref statics) = record.statics {
+                let builtin_module = self.name_table.builtin_module();
+                let record_name_str = interner.resolve(record.name);
+                for method in &statics.methods {
+                    let method_name_str = interner.resolve(method.name);
+                    let method_name_id = self
+                        .name_table
+                        .intern_raw(builtin_module, &[method_name_str]);
+                    let full_method_name_id = self
+                        .name_table
+                        .intern_raw(self.current_module, &[record_name_str, method_name_str]);
+                    let params: Vec<Type> = method
+                        .params
+                        .iter()
+                        .map(|p| self.resolve_type(&p.ty, interner))
+                        .collect();
+                    let return_type = method
+                        .return_type
+                        .as_ref()
+                        .map(|t| self.resolve_type(t, interner))
+                        .unwrap_or(Type::Void);
+                    let signature = FunctionType {
+                        params,
+                        return_type: Box::new(return_type),
+                        is_closure: false,
+                    };
+                    let has_default = method.is_default || method.body.is_some();
+                    self.entity_registry.register_static_method(
+                        entity_type_id,
+                        method_name_id,
+                        full_method_name_id,
+                        signature,
+                        has_default,
+                    );
+                }
             }
         } else {
             // Generic record: store with type params as placeholders
@@ -819,6 +895,90 @@ impl Analyzer {
             );
         }
 
+        // Register static methods from statics block (if present)
+        if let Some(ref statics_block) = interface_decl.statics {
+            // Collect static method names with default external bindings
+            let default_static_external_methods: HashSet<Symbol> = statics_block
+                .external_blocks
+                .iter()
+                .filter(|ext| ext.is_default)
+                .flat_map(|ext| ext.functions.iter().map(|f| f.vole_name))
+                .collect();
+
+            // Build external methods map for static methods
+            let mut static_external_methods: HashMap<String, ExternalMethodInfo> = HashMap::new();
+            for external in &statics_block.external_blocks {
+                for func in &external.functions {
+                    let native_name = func
+                        .native_name
+                        .clone()
+                        .unwrap_or_else(|| interner.resolve(func.vole_name).to_string());
+                    let method_name_str = interner.resolve(func.vole_name).to_string();
+                    static_external_methods.insert(
+                        method_name_str,
+                        ExternalMethodInfo {
+                            module_path: external.module_path.clone(),
+                            native_name,
+                            return_type: None,
+                        },
+                    );
+                }
+            }
+
+            // Register static methods
+            for method in &statics_block.methods {
+                let method_name_str = interner.resolve(method.name).to_string();
+                let builtin_module = self.name_table.builtin_module();
+                let method_name_id = self
+                    .name_table
+                    .intern_raw(builtin_module, &[&method_name_str]);
+                let full_method_name_id = self
+                    .name_table
+                    .intern_raw(self.current_module, &[&name_str, &method_name_str]);
+
+                // Create a fresh type context for each static method
+                let mut static_type_ctx = TypeResolutionContext::with_type_params(
+                    &self.type_aliases,
+                    &self.error_types,
+                    &self.entity_registry,
+                    interner,
+                    &mut self.name_table,
+                    module_id,
+                    &type_param_scope,
+                );
+
+                let params: Vec<Type> = method
+                    .params
+                    .iter()
+                    .map(|p| resolve_type(&p.ty, &mut static_type_ctx))
+                    .collect();
+                let return_type = method
+                    .return_type
+                    .as_ref()
+                    .map(|t| resolve_type(t, &mut static_type_ctx))
+                    .unwrap_or(Type::Void);
+                let has_default = method.is_default
+                    || method.body.is_some()
+                    || default_static_external_methods.contains(&method.name);
+
+                let signature = FunctionType {
+                    params,
+                    return_type: Box::new(return_type),
+                    is_closure: false,
+                };
+
+                let external_binding = static_external_methods.get(&method_name_str).cloned();
+                self.entity_registry.register_static_method_with_binding(
+                    entity_type_id,
+                    method_name_id,
+                    full_method_name_id,
+                    signature,
+                    has_default,
+                    external_binding,
+                );
+            }
+        }
+
         // Register fields in EntityRegistry (for interface field requirements)
         for (i, (field_name, field_ty)) in resolved_fields.iter().enumerate() {
             let field_name_str = interner.resolve(*field_name).to_string();
@@ -932,6 +1092,110 @@ impl Analyzer {
             // Analyze external block if present
             if let Some(ref external) = impl_block.external {
                 self.analyze_external_block(external, &target_type, trait_name, interner);
+            }
+
+            // Register static methods from statics block (if present)
+            if let Some(ref statics_block) = impl_block.statics {
+                // Get entity type id for registering static methods
+                let entity_type_id = match &target_type {
+                    Type::Record(r) => self.entity_registry.type_by_name(r.name_id),
+                    Type::Class(c) => self.entity_registry.type_by_name(c.name_id),
+                    _ => None,
+                };
+
+                if let Some(entity_type_id) = entity_type_id {
+                    let type_name_str = match &impl_block.target_type {
+                        TypeExpr::Named(sym) => interner.resolve(*sym).to_string(),
+                        _ => "unknown".to_string(),
+                    };
+
+                    // Register static methods
+                    for method in &statics_block.methods {
+                        let method_name_str = interner.resolve(method.name).to_string();
+                        let builtin_module = self.name_table.builtin_module();
+                        let method_name_id = self
+                            .name_table
+                            .intern_raw(builtin_module, &[&method_name_str]);
+                        let full_method_name_id = self
+                            .name_table
+                            .intern_raw(self.current_module, &[&type_name_str, &method_name_str]);
+
+                        let params: Vec<Type> = method
+                            .params
+                            .iter()
+                            .map(|p| self.resolve_type(&p.ty, interner))
+                            .collect();
+                        let return_type = method
+                            .return_type
+                            .as_ref()
+                            .map(|t| self.resolve_type(t, interner))
+                            .unwrap_or(Type::Void);
+
+                        let signature = FunctionType {
+                            params,
+                            return_type: Box::new(return_type),
+                            is_closure: false,
+                        };
+
+                        self.entity_registry.register_static_method(
+                            entity_type_id,
+                            method_name_id,
+                            full_method_name_id,
+                            signature,
+                            false, // implement block methods don't have defaults
+                        );
+                    }
+
+                    // Register external static methods
+                    for external in &statics_block.external_blocks {
+                        for func in &external.functions {
+                            let method_name_str = interner.resolve(func.vole_name).to_string();
+                            let builtin_module = self.name_table.builtin_module();
+                            let method_name_id = self
+                                .name_table
+                                .intern_raw(builtin_module, &[&method_name_str]);
+                            let full_method_name_id = self.name_table.intern_raw(
+                                self.current_module,
+                                &[&type_name_str, &method_name_str],
+                            );
+
+                            let params: Vec<Type> = func
+                                .params
+                                .iter()
+                                .map(|p| self.resolve_type(&p.ty, interner))
+                                .collect();
+                            let return_type = func
+                                .return_type
+                                .as_ref()
+                                .map(|t| self.resolve_type(t, interner))
+                                .unwrap_or(Type::Void);
+
+                            let signature = FunctionType {
+                                params,
+                                return_type: Box::new(return_type.clone()),
+                                is_closure: false,
+                            };
+
+                            let native_name = func
+                                .native_name
+                                .clone()
+                                .unwrap_or_else(|| method_name_str.clone());
+
+                            self.entity_registry.register_static_method_with_binding(
+                                entity_type_id,
+                                method_name_id,
+                                full_method_name_id,
+                                signature,
+                                false,
+                                Some(ExternalMethodInfo {
+                                    module_path: external.module_path.clone(),
+                                    native_name,
+                                    return_type: Some(Box::new(return_type)),
+                                }),
+                            );
+                        }
+                    }
+                }
             }
         }
     }

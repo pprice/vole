@@ -67,6 +67,9 @@ pub struct Analyzer {
     /// Generator context: if inside a generator function, this holds the Iterator element type.
     /// None means we're not in a generator (or not in a function at all).
     current_generator_element_type: Option<Type>,
+    /// If we're inside a static method, this holds the method name (for error reporting).
+    /// None means we're not in a static method.
+    current_static_method: Option<String>,
     errors: Vec<TypeError>,
     /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
     type_overrides: HashMap<Symbol, Type>,
@@ -134,6 +137,7 @@ impl Analyzer {
             current_function_return: None,
             current_function_error_type: None,
             current_generator_element_type: None,
+            current_static_method: None,
             errors: Vec::new(),
             type_overrides: HashMap::new(),
             lambda_captures: Vec::new(),
@@ -385,6 +389,7 @@ impl Analyzer {
             current_function_return: None,
             current_function_error_type: None,
             current_generator_element_type: None,
+            current_static_method: None,
             errors: Vec::new(),
             type_overrides: HashMap::new(),
             lambda_captures: Vec::new(),
@@ -922,6 +927,12 @@ impl Analyzer {
                     for method in &class.methods {
                         self.check_method(method, class.name, interner)?;
                     }
+                    // Check static methods if present
+                    if let Some(ref statics) = class.statics {
+                        for method in &statics.methods {
+                            self.check_static_method(method, class.name, interner)?;
+                        }
+                    }
                     // Validate interface satisfaction
                     if let Some(interfaces) = self.type_implements.get(&class.name).cloned() {
                         let type_methods = self.get_type_method_signatures(class.name, interner);
@@ -940,6 +951,12 @@ impl Analyzer {
                     for method in &record.methods {
                         self.check_method(method, record.name, interner)?;
                     }
+                    // Check static methods if present
+                    if let Some(ref statics) = record.statics {
+                        for method in &statics.methods {
+                            self.check_static_method(method, record.name, interner)?;
+                        }
+                    }
                     // Validate interface satisfaction
                     if let Some(interfaces) = self.type_implements.get(&record.name).cloned() {
                         let type_methods = self.get_type_method_signatures(record.name, interner);
@@ -954,12 +971,24 @@ impl Analyzer {
                         }
                     }
                 }
-                Decl::Interface(_) => {
-                    // TODO: Type check interface method signatures
+                Decl::Interface(interface_decl) => {
+                    // Check static method default bodies
+                    if let Some(ref statics) = interface_decl.statics {
+                        for method in &statics.methods {
+                            self.check_static_method(method, interface_decl.name, interner)?;
+                        }
+                    }
                 }
                 Decl::Implement(impl_block) => {
-                    // Methods will be type-checked when called
-                    let _ = impl_block;
+                    // Check static methods in implement blocks
+                    if let Some(ref statics) = impl_block.statics {
+                        // Get the target type name
+                        if let TypeExpr::Named(type_name) = &impl_block.target_type {
+                            for method in &statics.methods {
+                                self.check_static_method(method, *type_name, interner)?;
+                            }
+                        }
+                    }
                 }
                 Decl::Error(_) => {
                     // Error declarations fully processed in first pass
@@ -1346,6 +1375,78 @@ impl Analyzer {
         self.current_function_return = None;
         self.current_function_error_type = None;
         self.current_generator_element_type = None;
+
+        Ok(())
+    }
+
+    /// Check a static method body (no `self` access allowed)
+    fn check_static_method(
+        &mut self,
+        method: &InterfaceMethod,
+        type_name: Symbol,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        // Only check methods with bodies
+        let Some(ref body) = method.body else {
+            return Ok(());
+        };
+
+        // Look up static method type via EntityRegistry
+        let type_def_id = self
+            .entity_registry
+            .type_by_symbol(type_name, interner, &self.name_table, self.current_module)
+            .expect("type should be registered in EntityRegistry");
+        let method_name_id = self.method_name_id(method.name, interner);
+        let method_id = self
+            .entity_registry
+            .find_static_method_on_type(type_def_id, method_name_id)
+            .expect("static method should be registered in EntityRegistry");
+        let method_def = self.entity_registry.get_method(method_id);
+        let method_type = method_def.signature.clone();
+        let return_type = *method_type.return_type.clone();
+        self.current_function_return = Some(return_type.clone());
+
+        // Set error type context if this is a fallible method
+        if let Type::Fallible(ref ft) = return_type {
+            self.current_function_error_type = Some((*ft.error_type).clone());
+        } else {
+            self.current_function_error_type = None;
+        }
+
+        // Set generator context if return type is Iterator<T>
+        self.current_generator_element_type =
+            self.extract_iterator_element_type(&return_type, interner);
+
+        // Mark that we're in a static method (for self-usage detection)
+        let method_name_str = interner.resolve(method.name).to_string();
+        self.current_static_method = Some(method_name_str);
+
+        // Create scope WITHOUT 'self'
+        let parent_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(parent_scope);
+
+        // Add parameters (no 'self' for static methods)
+        for (param, ty) in method.params.iter().zip(method_type.params.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty.clone(),
+                    mutable: false,
+                },
+            );
+        }
+
+        // Check body
+        self.check_block(body, interner)?;
+
+        // Restore scope and context
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+        self.current_function_return = None;
+        self.current_function_error_type = None;
+        self.current_generator_element_type = None;
+        self.current_static_method = None;
 
         Ok(())
     }

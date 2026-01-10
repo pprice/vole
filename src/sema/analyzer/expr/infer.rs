@@ -25,6 +25,21 @@ impl Analyzer {
             ExprKind::TypeLiteral(_) => Ok(Type::Type), // Type values have metatype `type`
 
             ExprKind::Identifier(sym) => {
+                // Check for 'self' usage in static method
+                let name_str = interner.resolve(*sym);
+                if name_str == "self"
+                    && let Some(ref method_name) = self.current_static_method
+                {
+                    self.add_error(
+                        SemanticError::SelfInStaticMethod {
+                            method: method_name.clone(),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    return Ok(Type::Error);
+                }
+
                 // Use get_variable_type to respect flow-sensitive narrowing
                 if let Some(ty) = self.get_variable_type(*sym) {
                     // Check if this is a capture (inside lambda, not a local)

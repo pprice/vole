@@ -30,6 +30,8 @@ pub struct TypeDef {
     /// Type parameters for generic types as NameIds (e.g., T in Iterator<T>)
     /// Used for both display and type substitution
     pub type_params: Vec<NameId>,
+    /// Static methods (called on the type, not on instances)
+    pub static_methods: Vec<MethodId>,
 }
 
 /// A method definition (always belongs to a type)
@@ -41,6 +43,8 @@ pub struct MethodDef {
     pub defining_type: TypeDefId,
     pub signature: FunctionType,
     pub has_default: bool,
+    /// Whether this is a static method (called on type, not instance)
+    pub is_static: bool,
     /// External binding for this method (if any)
     pub external_binding: Option<ExternalMethodInfo>,
 }

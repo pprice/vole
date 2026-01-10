@@ -28,6 +28,8 @@ pub struct EntityRegistry {
     // Scoped lookups: (type, method_name) -> MethodId
     pub(crate) methods_by_type: HashMap<TypeDefId, HashMap<NameId, MethodId>>,
     pub(crate) fields_by_type: HashMap<TypeDefId, HashMap<NameId, FieldId>>,
+    // Static method lookups: (type, static_method_name) -> MethodId
+    pub(crate) static_methods_by_type: HashMap<TypeDefId, HashMap<NameId, MethodId>>,
 }
 
 impl EntityRegistry {
@@ -43,6 +45,7 @@ impl EntityRegistry {
             function_by_name: HashMap::new(),
             methods_by_type: HashMap::new(),
             fields_by_type: HashMap::new(),
+            static_methods_by_type: HashMap::new(),
         }
     }
 
@@ -63,10 +66,12 @@ impl EntityRegistry {
             fields: Vec::new(),
             extends: Vec::new(),
             type_params: Vec::new(),
+            static_methods: Vec::new(),
         });
         self.type_by_name.insert(name_id, id);
         self.methods_by_type.insert(id, HashMap::new());
         self.fields_by_type.insert(id, HashMap::new());
+        self.static_methods_by_type.insert(id, HashMap::new());
         id
     }
 
@@ -142,6 +147,7 @@ impl EntityRegistry {
             defining_type,
             signature,
             has_default,
+            is_static: false,
             external_binding,
         });
         self.method_by_full_name.insert(full_name_id, id);
@@ -153,6 +159,79 @@ impl EntityRegistry {
             .methods
             .push(id);
         id
+    }
+
+    /// Register a new static method on a type
+    pub fn register_static_method(
+        &mut self,
+        defining_type: TypeDefId,
+        name_id: NameId,
+        full_name_id: NameId,
+        signature: FunctionType,
+        has_default: bool,
+    ) -> MethodId {
+        self.register_static_method_with_binding(
+            defining_type,
+            name_id,
+            full_name_id,
+            signature,
+            has_default,
+            None,
+        )
+    }
+
+    /// Register a new static method on a type with optional external binding
+    pub fn register_static_method_with_binding(
+        &mut self,
+        defining_type: TypeDefId,
+        name_id: NameId,
+        full_name_id: NameId,
+        signature: FunctionType,
+        has_default: bool,
+        external_binding: Option<ExternalMethodInfo>,
+    ) -> MethodId {
+        let id = MethodId::new(self.method_defs.len() as u32);
+        self.method_defs.push(MethodDef {
+            id,
+            name_id,
+            full_name_id,
+            defining_type,
+            signature,
+            has_default,
+            is_static: true,
+            external_binding,
+        });
+        self.method_by_full_name.insert(full_name_id, id);
+        self.static_methods_by_type
+            .get_mut(&defining_type)
+            .expect("type must be registered before adding static methods")
+            .insert(name_id, id);
+        self.type_defs[defining_type.index() as usize]
+            .static_methods
+            .push(id);
+        id
+    }
+
+    /// Get all static methods defined directly on a type
+    pub fn static_methods_on_type(
+        &self,
+        type_id: TypeDefId,
+    ) -> impl Iterator<Item = MethodId> + '_ {
+        self.type_defs[type_id.index() as usize]
+            .static_methods
+            .iter()
+            .copied()
+    }
+
+    /// Find a static method on a type by its short name
+    pub fn find_static_method_on_type(
+        &self,
+        type_id: TypeDefId,
+        name_id: NameId,
+    ) -> Option<MethodId> {
+        self.static_methods_by_type
+            .get(&type_id)
+            .and_then(|methods| methods.get(&name_id).copied())
     }
 
     /// Get a method definition by ID
@@ -484,15 +563,17 @@ impl EntityRegistry {
                 new_type.methods = Vec::new(); // Will be filled in later
                 new_type.fields = Vec::new();
                 new_type.extends = Vec::new(); // Will be remapped
+                new_type.static_methods = Vec::new(); // Will be filled in later
                 self.type_defs.push(new_type);
                 self.type_by_name.insert(other_type.name_id, new_id);
                 self.methods_by_type.insert(new_id, HashMap::new());
                 self.fields_by_type.insert(new_id, HashMap::new());
+                self.static_methods_by_type.insert(new_id, HashMap::new());
                 type_id_map.insert(other_type.id, new_id);
             }
         }
 
-        // Second pass: register all methods
+        // Second pass: register all methods (both regular and static)
         for other_method in &other.method_defs {
             let new_defining_type = type_id_map[&other_method.defining_type];
             let new_id = MethodId::new(self.method_defs.len() as u32);
@@ -500,15 +581,26 @@ impl EntityRegistry {
             new_method.id = new_id;
             new_method.defining_type = new_defining_type;
             self.method_defs.push(new_method);
-            self.type_defs[new_defining_type.index() as usize]
-                .methods
-                .push(new_id);
             self.method_by_full_name
                 .insert(other_method.full_name_id, new_id);
-            self.methods_by_type
-                .entry(new_defining_type)
-                .or_default()
-                .insert(other_method.name_id, new_id);
+
+            if other_method.is_static {
+                self.type_defs[new_defining_type.index() as usize]
+                    .static_methods
+                    .push(new_id);
+                self.static_methods_by_type
+                    .entry(new_defining_type)
+                    .or_default()
+                    .insert(other_method.name_id, new_id);
+            } else {
+                self.type_defs[new_defining_type.index() as usize]
+                    .methods
+                    .push(new_id);
+                self.methods_by_type
+                    .entry(new_defining_type)
+                    .or_default()
+                    .insert(other_method.name_id, new_id);
+            }
         }
 
         // Third pass: register all fields

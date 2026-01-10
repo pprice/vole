@@ -1,0 +1,12 @@
+// Test that self usage in static methods is an error
+
+record Point {
+    x: i64,
+    y: i64,
+
+    statics {
+        func bad_static() -> i64 {
+            return self.x  // ERROR: self in static method
+        }
+    }
+}

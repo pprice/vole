@@ -401,4 +401,25 @@ pub enum SemanticError {
         #[label("index out of bounds")]
         span: SourceSpan,
     },
+
+    #[error("'self' cannot be used in static method '{method}'")]
+    #[diagnostic(
+        code(E2077),
+        help("static methods are called on the type, not on an instance")
+    )]
+    SelfInStaticMethod {
+        method: String,
+        #[label("'self' is not available in static context")]
+        span: SourceSpan,
+    },
+
+    #[error("type '{type_name}' missing required static method '{method}'")]
+    #[diagnostic(code(E2078))]
+    MissingStaticMethod {
+        type_name: String,
+        method: String,
+        interface: String,
+        #[label("interface requires static method")]
+        span: SourceSpan,
+    },
 }
