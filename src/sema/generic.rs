@@ -226,6 +226,12 @@ pub fn substitute_type(ty: &Type, substitutions: &HashMap<NameId, Type>) -> Type
                 .map(|t| substitute_type(t, substitutions))
                 .collect(),
         },
+        Type::Tuple(elements) => Type::Tuple(
+            elements
+                .iter()
+                .map(|t| substitute_type(t, substitutions))
+                .collect(),
+        ),
         // All other types don't contain type parameters
         _ => ty.clone(),
     }

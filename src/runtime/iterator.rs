@@ -31,6 +31,10 @@ pub enum IteratorKind {
     StringChars = 16,
     /// Interface iterator - wraps a boxed interface implementing Iterator
     Interface = 17,
+    /// Enumerate iterator - yields (index, value) pairs
+    Enumerate = 18,
+    /// Zip iterator - combines two iterators into pairs
+    Zip = 19,
 }
 
 /// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, unique, chunks, windows, repeat, once, empty, from_fn, range, string_chars, or interface iterator
@@ -55,6 +59,8 @@ pub union IteratorSource {
     pub range: RangeSource,
     pub string_chars: StringCharsSource,
     pub interface: InterfaceSource,
+    pub enumerate: EnumerateSource,
+    pub zip: ZipSource,
 }
 
 /// Source data for array iteration
@@ -240,6 +246,26 @@ pub struct InterfaceSource {
     pub boxed_interface: *const u8,
 }
 
+/// Source data for enumerate iteration (yields (index, value) pairs)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct EnumerateSource {
+    /// Pointer to source iterator
+    pub source: *mut UnifiedIterator,
+    /// Current index (0-based)
+    pub index: i64,
+}
+
+/// Source data for zip iteration (combines two iterators)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ZipSource {
+    /// First iterator
+    pub first: *mut UnifiedIterator,
+    /// Second iterator
+    pub second: *mut UnifiedIterator,
+}
+
 /// Unified iterator structure
 /// The kind field tells us which variant is active
 #[repr(C)]
@@ -416,6 +442,18 @@ pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
             IteratorKind::Interface => {
                 // The boxed interface is owned by the Vole runtime, don't free it here
             }
+            IteratorKind::Enumerate => {
+                // Recursively free the source iterator
+                let source = iter_ref.source.enumerate.source;
+                vole_array_iter_free(source);
+            }
+            IteratorKind::Zip => {
+                // Recursively free both source iterators
+                let first = iter_ref.source.zip.first;
+                let second = iter_ref.source.zip.second;
+                vole_array_iter_free(first);
+                vole_array_iter_free(second);
+            }
         }
 
         // Free this iterator
@@ -517,6 +555,14 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
         IteratorKind::Interface => {
             // For interface iterators, call through the vtable
             vole_interface_iter_next(iter, out_value)
+        }
+        IteratorKind::Enumerate => {
+            // For enumerate iterators, delegate to enumerate_next logic
+            vole_enumerate_iter_next(iter, out_value)
+        }
+        IteratorKind::Zip => {
+            // For zip iterators, delegate to zip_next logic
+            vole_zip_iter_next(iter, out_value)
         }
     }
 }
@@ -2584,4 +2630,147 @@ pub extern "C" fn vole_string_chars_iter_next(
             0 // Done - should not happen if byte_pos < byte_len
         }
     }
+}
+
+// =============================================================================
+// EnumerateIterator - yields (index, value) pairs
+// =============================================================================
+
+/// Create a new enumerate iterator that wraps any source iterator and yields (index, value) tuples.
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_enumerate_iter(source: *mut UnifiedIterator) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Enumerate,
+        source: IteratorSource {
+            enumerate: EnumerateSource { source, index: 0 },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next (index, value) tuple from enumerate iterator.
+/// Returns 1 and stores tuple pointer in out_value if available.
+/// Returns 0 if iterator exhausted (Done).
+/// The tuple layout is: [index:i64][value:i64] (16 bytes total, 8-byte aligned)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_enumerate_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    if iter_ref.kind != IteratorKind::Enumerate {
+        return 0;
+    }
+
+    let enum_src = unsafe { &mut iter_ref.source.enumerate };
+
+    // Get next value from source iterator
+    let mut source_value: i64 = 0;
+    let has_value = vole_array_iter_next(enum_src.source, &mut source_value);
+
+    if has_value == 0 {
+        return 0; // Source exhausted
+    }
+
+    // Allocate tuple: (i64, T) where T is also i64 for simplicity
+    // Layout: [index:8][value:8] = 16 bytes
+    let layout = Layout::from_size_align(16, 8).expect("valid tuple layout");
+    let tuple_ptr = unsafe { alloc(layout) };
+    if tuple_ptr.is_null() {
+        std::alloc::handle_alloc_error(layout);
+    }
+
+    // Write index and value to tuple
+    unsafe {
+        std::ptr::write(tuple_ptr as *mut i64, enum_src.index);
+        std::ptr::write((tuple_ptr as *mut i64).add(1), source_value);
+    }
+
+    // Increment index for next call
+    enum_src.index += 1;
+
+    // Return tuple pointer
+    unsafe { *out_value = tuple_ptr as i64 };
+    1 // Has value
+}
+
+// =============================================================================
+// ZipIterator - combines two iterators into (a, b) pairs
+// =============================================================================
+
+/// Create a new zip iterator that combines two iterators.
+/// Stops when either iterator is exhausted.
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_zip_iter(
+    first: *mut UnifiedIterator,
+    second: *mut UnifiedIterator,
+) -> *mut UnifiedIterator {
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::Zip,
+        source: IteratorSource {
+            zip: ZipSource { first, second },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next (a, b) tuple from zip iterator.
+/// Returns 1 and stores tuple pointer in out_value if both iterators have values.
+/// Returns 0 if either iterator is exhausted (Done).
+/// The tuple layout is: [first:i64][second:i64] (16 bytes total, 8-byte aligned)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_zip_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    if iter_ref.kind != IteratorKind::Zip {
+        return 0;
+    }
+
+    let zip_src = unsafe { &mut iter_ref.source.zip };
+
+    // Get next value from first iterator
+    let mut first_value: i64 = 0;
+    let has_first = vole_array_iter_next(zip_src.first, &mut first_value);
+
+    if has_first == 0 {
+        return 0; // First iterator exhausted
+    }
+
+    // Get next value from second iterator
+    let mut second_value: i64 = 0;
+    let has_second = vole_array_iter_next(zip_src.second, &mut second_value);
+
+    if has_second == 0 {
+        return 0; // Second iterator exhausted
+    }
+
+    // Allocate tuple: (T, U) where both are i64 for simplicity
+    // Layout: [first:8][second:8] = 16 bytes
+    let layout = Layout::from_size_align(16, 8).expect("valid tuple layout");
+    let tuple_ptr = unsafe { alloc(layout) };
+    if tuple_ptr.is_null() {
+        std::alloc::handle_alloc_error(layout);
+    }
+
+    // Write values to tuple
+    unsafe {
+        std::ptr::write(tuple_ptr as *mut i64, first_value);
+        std::ptr::write((tuple_ptr as *mut i64).add(1), second_value);
+    }
+
+    // Return tuple pointer
+    unsafe { *out_value = tuple_ptr as i64 };
+    1 // Has value
 }

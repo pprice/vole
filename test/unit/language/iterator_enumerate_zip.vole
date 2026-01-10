@@ -1,0 +1,119 @@
+// Iterator enumerate and zip combinators
+
+tests {
+    // =========================================================================
+    // enumerate() - yields (index, value) pairs
+    // =========================================================================
+
+    test "enumerate basic collect" {
+        let arr = [10, 20, 30]
+        let enumerated = arr.iter().enumerate().collect()
+        assert(enumerated.length() == 3)
+    }
+
+    test "enumerate with for loop" {
+        let arr = [10, 20, 30]
+        let mut sum = 0
+        for pair in arr.iter().enumerate() {
+            sum = sum + pair[0] + pair[1]
+        }
+        // (0 + 10) + (1 + 20) + (2 + 30) = 63
+        assert(sum == 63)
+    }
+
+    test "enumerate indices are correct" {
+        let arr = [100, 200, 300]
+        let mut indices = 0
+        for pair in arr.iter().enumerate() {
+            indices = indices + pair[0]
+        }
+        // 0 + 1 + 2 = 3
+        assert(indices == 3)
+    }
+
+    test "enumerate empty array" {
+        let arr: [i64] = []
+        let enumerated = arr.iter().enumerate().collect()
+        assert(enumerated.length() == 0)
+    }
+
+    // TODO: enumerate with map requires lambda parameter type inference for tuples
+    // test "enumerate with map" {
+    //     let arr = [1, 2, 3]
+    //     let result = arr.iter().enumerate().map((pair) => pair[0] * pair[1]).collect()
+    //     assert(result[0] == 0)
+    //     assert(result[1] == 2)
+    //     assert(result[2] == 6)
+    // }
+
+    // =========================================================================
+    // zip() - combines two iterators into pairs
+    // =========================================================================
+
+    test "zip basic collect" {
+        let a = [1, 2, 3]
+        let b = [4, 5, 6]
+        let zipped = a.iter().zip(b.iter()).collect()
+        assert(zipped.length() == 3)
+    }
+
+    test "zip with for loop" {
+        let names = [1, 2, 3]
+        let values = [10, 20, 30]
+        let mut sum = 0
+        for pair in names.iter().zip(values.iter()) {
+            sum = sum + pair[0] + pair[1]
+        }
+        // (1+10) + (2+20) + (3+30) = 66
+        assert(sum == 66)
+    }
+
+    test "zip stops at shorter first" {
+        let a = [1, 2, 3, 4, 5]
+        let b = [10, 20]
+        let zipped = a.iter().zip(b.iter()).collect()
+        assert(zipped.length() == 2)
+    }
+
+    test "zip stops at shorter second" {
+        let a = [1, 2]
+        let b = [10, 20, 30, 40, 50]
+        let zipped = a.iter().zip(b.iter()).collect()
+        assert(zipped.length() == 2)
+    }
+
+    test "zip empty arrays" {
+        let a: [i64] = []
+        let b: [i64] = []
+        let zipped = a.iter().zip(b.iter()).collect()
+        assert(zipped.length() == 0)
+    }
+
+    test "zip one empty" {
+        let a = [1, 2, 3]
+        let b: [i64] = []
+        let zipped = a.iter().zip(b.iter()).collect()
+        assert(zipped.length() == 0)
+    }
+
+    test "zip values are correct" {
+        let a = [10, 20, 30]
+        let b = [1, 2, 3]
+        let mut product_sum = 0
+        for pair in a.iter().zip(b.iter()) {
+            product_sum = product_sum + (pair[0] * pair[1])
+        }
+        // 10*1 + 20*2 + 30*3 = 10 + 40 + 90 = 140
+        assert(product_sum == 140)
+    }
+
+    // TODO: zip with map requires lambda parameter type inference for tuples
+    // test "zip with map" {
+    //     let a = [1, 2, 3]
+    //     let b = [10, 20, 30]
+    //     let result = a.iter().zip(b.iter()).map((pair) => pair[0] + pair[1]).collect()
+    //     assert(result[0] == 11)
+    //     assert(result[1] == 22)
+    //     assert(result[2] == 33)
+    // }
+}

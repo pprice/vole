@@ -387,6 +387,14 @@ impl TypeTable {
                     .join(", ");
                 format!("{}<{}>", def_name, arg_list)
             }
+            Type::Tuple(elements) => {
+                let elem_list = elements
+                    .iter()
+                    .map(|elem| self.display_type_inner(elem, names))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("[{}]", elem_list)
+            }
             _ => ty.name().to_string(),
         }
     }

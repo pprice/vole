@@ -141,7 +141,27 @@ impl Analyzer {
                     Type::Array(elem) => *elem.clone(),
                     // String is iterable - yields string (individual characters)
                     Type::String => Type::String,
+                    // Runtime iterators have their element type directly
+                    Type::RuntimeIterator(elem) => *elem.clone(),
                     // Accept Iterator<T> directly - extract element type
+                    Type::GenericInstance { def, args } => {
+                        // GenericInstance is used for Iterator<T> from method return types
+                        if self.well_known.is_iterator(*def) {
+                            args.first().cloned().unwrap_or(Type::Unknown)
+                        } else {
+                            let found = self.type_display(&iterable_ty);
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "iterable (range, array, string, or Iterator<T>)"
+                                        .to_string(),
+                                    found,
+                                    span: for_stmt.iterable.span.into(),
+                                },
+                                for_stmt.iterable.span,
+                            );
+                            Type::Error
+                        }
+                    }
                     Type::Interface(_) => {
                         if let Some(elem) =
                             self.extract_iterator_element_type(&iterable_ty, interner)

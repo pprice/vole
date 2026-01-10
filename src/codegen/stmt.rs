@@ -518,6 +518,7 @@ impl Cg<'_, '_, '_> {
         match ty {
             Type::Interface(iface) => iface.type_args.first().cloned().unwrap_or(Type::I64),
             Type::GenericInstance { args, .. } => args.first().cloned().unwrap_or(Type::I64),
+            Type::RuntimeIterator(elem) => (**elem).clone(),
             _ => Type::I64,
         }
     }

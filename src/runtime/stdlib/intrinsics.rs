@@ -337,6 +337,22 @@ pub fn module() -> NativeModule {
             return_type: NativeType::I64,
         },
     );
+    m.register(
+        "iter_enumerate",
+        iterator::vole_enumerate_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
+        "iter_zip",
+        iterator::vole_zip_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
 
     // Iterator factory functions
     m.register(

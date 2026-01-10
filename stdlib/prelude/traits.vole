@@ -47,6 +47,8 @@ interface Iterator<T> {
     func unique() -> Iterator<T>
     func chunks(size: i64) -> Iterator<[T]>
     func windows(size: i64) -> Iterator<[T]>
+    func enumerate() -> Iterator<[i64, T]>
+    func zip(other: Iterator<T>) -> Iterator<[T, T]>
 
     default external("std:intrinsics") {
         func "iter_next" as next() -> T | Done
@@ -73,6 +75,8 @@ interface Iterator<T> {
         func "iter_unique" as unique() -> Iterator<T>
         func "iter_chunks" as chunks(size: i64) -> Iterator<[T]>
         func "iter_windows" as windows(size: i64) -> Iterator<[T]>
+        func "iter_enumerate" as enumerate() -> Iterator<[i64, T]>
+        func "iter_zip" as zip(other: Iterator<T>) -> Iterator<[T, T]>
     }
 }
 
