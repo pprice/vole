@@ -297,27 +297,25 @@ Use `VOLE_LOG` to observe compiler behavior with structured tracing.
 
 ### Quick Start
 ```bash
-just trace file.vole              # Pipeline phases with timing
+just trace file.vole              # Pipeline phases with timing (compact)
 just trace-verbose file.vole      # Detailed spans (sema, codegen calls)
+just trace-full file.vole         # With ISO timestamps (human debugging)
 just trace-module codegen file.vole  # Focus on specific module
 just trace-test test/unit/        # Trace test execution
 ```
 
-### Environment Variable
-```bash
-VOLE_LOG=vole=info cargo run -- run file.vole   # Pipeline phases
-VOLE_LOG=vole=debug cargo run -- run file.vole  # All vole spans
-VOLE_LOG=debug cargo run -- run file.vole       # Everything (verbose)
-```
+### Environment Variables
+- `VOLE_LOG` - Filter (e.g., `vole=info`, `vole::codegen=debug`)
+- `VOLE_LOG_STYLE=full` - ISO timestamps (default: compact, no timestamps)
 
 ### What You'll See
-Pipeline phase spans with timing:
+Pipeline phase spans with timing (compact format):
 ```
-INFO parse{file=test.vole}: close time.busy=105µs
-INFO transform: close time.busy=21µs
-INFO sema: close time.busy=15.0ms
-INFO codegen: close time.busy=2.05ms
-INFO execute: close time.busy=11.9µs
+INFO parse{file=test.vole}: vole::commands::common: close time.busy=105µs time.idle=52µs
+INFO transform: vole::commands::common: close time.busy=21µs time.idle=5µs
+INFO sema: vole::commands::common: close time.busy=15.0ms time.idle=5µs
+INFO codegen: vole::commands::run: close time.busy=2.05ms time.idle=15µs
+INFO execute: vole::commands::run: close time.busy=11.9µs time.idle=9µs
 ```
 
 ### Filter Syntax

@@ -4,7 +4,17 @@ use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{ColorChoice, CommandFactory, FromArgMatches};
 use std::process::ExitCode;
 use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::EnvFilter;
+
+/// A timer that outputs nothing but still enables span timing calculation
+struct NoTimestamp;
+
+impl FormatTime for NoTimestamp {
+    fn format_time(&self, _w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        Ok(())
+    }
+}
 
 use vole::cli::{BenchCommands, Cli, Commands};
 use vole::commands::bench::{run_bench, run_compare};
@@ -22,14 +32,28 @@ fn main() -> ExitCode {
     install_segfault_handler();
 
     // Initialize tracing if VOLE_LOG is set
+    // VOLE_LOG_STYLE: "compact" (default, LLM-friendly) or "full" (verbose with timestamps)
     if let Ok(filter) = EnvFilter::try_from_env("VOLE_LOG") {
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_target(true)
-            .with_level(true)
-            .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-            .with_writer(std::io::stderr)
-            .init();
+        let style = std::env::var("VOLE_LOG_STYLE").unwrap_or_default();
+        if style == "full" {
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_target(true)
+                .with_level(true)
+                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                .with_writer(std::io::stderr)
+                .init();
+        } else {
+            // Compact output: no timestamp prefix, keep target/level/ANSI and timing
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_target(true)
+                .with_level(true)
+                .with_timer(NoTimestamp)
+                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                .with_writer(std::io::stderr)
+                .init();
+        }
         tracing::debug!("tracing initialized");
     }
 
