@@ -290,3 +290,38 @@ This shows which file and test was running when the crash occurred.
 2. Use `vole inspect ir` to see generated code
 3. Use `just dev-disasm <addr>` to examine crash site
 4. Check union tag/payload layout if crash is in type checks
+
+## Tracing
+
+Use `VOLE_LOG` to observe compiler behavior with structured tracing.
+
+### Quick Start
+```bash
+just trace file.vole              # Pipeline phases with timing
+just trace-verbose file.vole      # Detailed spans (sema, codegen calls)
+just trace-module codegen file.vole  # Focus on specific module
+just trace-test test/unit/        # Trace test execution
+```
+
+### Environment Variable
+```bash
+VOLE_LOG=vole=info cargo run -- run file.vole   # Pipeline phases
+VOLE_LOG=vole=debug cargo run -- run file.vole  # All vole spans
+VOLE_LOG=debug cargo run -- run file.vole       # Everything (verbose)
+```
+
+### What You'll See
+Pipeline phase spans with timing:
+```
+INFO parse{file=test.vole}: close time.busy=105µs
+INFO transform: close time.busy=21µs
+INFO sema: close time.busy=15.0ms
+INFO codegen: close time.busy=2.05ms
+INFO execute: close time.busy=11.9µs
+```
+
+### Filter Syntax
+- `vole=info` - All vole spans at info level
+- `vole::codegen=debug` - Codegen module only
+- `vole::sema=trace` - Sema with maximum detail
+- `vole=info,vole::codegen::calls=debug` - Combined filters

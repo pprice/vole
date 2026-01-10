@@ -201,3 +201,19 @@ dev-disasm addr:
     #!/usr/bin/env bash
     cargo build --bin vole 2>&1
     lldb -b -o "disassemble -s {{addr}} -c 20" ./target/debug/vole 2>&1
+
+# Run with tracing enabled (shows pipeline phases)
+trace file:
+    VOLE_LOG=vole=info cargo run --quiet -- run "{{file}}" 2>&1
+
+# Run with verbose tracing (includes nested spans)
+trace-verbose file:
+    VOLE_LOG=vole=debug cargo run --quiet -- run "{{file}}" 2>&1
+
+# Run with tracing for a specific module (e.g., codegen, sema)
+trace-module module file:
+    VOLE_LOG=vole::{{module}}=debug cargo run --quiet -- run "{{file}}" 2>&1
+
+# Run tests with tracing enabled
+trace-test path:
+    VOLE_LOG=vole=info cargo run --quiet -- test "{{path}}" 2>&1
