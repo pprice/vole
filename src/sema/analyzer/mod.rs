@@ -1298,10 +1298,11 @@ impl Analyzer {
         type_name: Symbol,
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
-        // Look up method type via EntityRegistry
+        // Look up method type via Resolver
         let type_def_id = self
-            .entity_registry
-            .type_by_symbol(type_name, interner, &self.name_table, self.current_module)
+            .resolver(interner)
+            .resolve(type_name)
+            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
             .expect("type should be registered in EntityRegistry");
         let method_name_id = self.method_name_id(method.name, interner);
         let method_id = self
@@ -1393,10 +1394,11 @@ impl Analyzer {
             return Ok(());
         };
 
-        // Look up static method type via EntityRegistry
+        // Look up static method type via Resolver
         let type_def_id = self
-            .entity_registry
-            .type_by_symbol(type_name, interner, &self.name_table, self.current_module)
+            .resolver(interner)
+            .resolve(type_name)
+            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
             .expect("type should be registered in EntityRegistry");
         let method_name_id = self.method_name_id(method.name, interner);
         let method_id = self

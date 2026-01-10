@@ -518,30 +518,6 @@ impl EntityRegistry {
         })
     }
 
-    /// Look up a type by Symbol + Interner, returning the TypeDefId if found
-    pub fn type_by_symbol(
-        &self,
-        sym: crate::frontend::Symbol,
-        interner: &crate::frontend::Interner,
-        name_table: &crate::identity::NameTable,
-        module_id: ModuleId,
-    ) -> Option<TypeDefId> {
-        let name_str = interner.resolve(sym);
-        // First try current module
-        if let Some(name_id) = name_table.name_id_raw(module_id, &[name_str])
-            && let Some(type_id) = self.type_by_name(name_id)
-        {
-            return Some(type_id);
-        }
-        // Fall back to main module
-        if let Some(name_id) = name_table.name_id_raw(name_table.main_module(), &[name_str])
-            && let Some(type_id) = self.type_by_name(name_id)
-        {
-            return Some(type_id);
-        }
-        None
-    }
-
     /// Merge another registry into this one.
     /// This is used when merging prelude definitions into the main analyzer.
     pub fn merge(&mut self, other: &EntityRegistry) {

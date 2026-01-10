@@ -546,15 +546,11 @@ fn satisfies_interface_with_field() {
     let person_sym = interner.intern("Person");
     let named_sym = interner.intern("Named");
 
-    // Get the Person type via EntityRegistry
+    // Get the Person type via Resolver
     let type_def_id = analyzer
-        .entity_registry
-        .type_by_symbol(
-            person_sym,
-            &interner,
-            &analyzer.name_table,
-            analyzer.current_module,
-        )
+        .resolver(&interner)
+        .resolve(person_sym)
+        .and_then(|name_id| analyzer.entity_registry.type_by_name(name_id))
         .unwrap();
     let person_type = analyzer
         .entity_registry
@@ -586,15 +582,11 @@ fn satisfies_interface_missing_field() {
     let point_sym = interner.intern("Point");
     let named_sym = interner.intern("Named");
 
-    // Get the Point type via EntityRegistry
+    // Get the Point type via Resolver
     let type_def_id = analyzer
-        .entity_registry
-        .type_by_symbol(
-            point_sym,
-            &interner,
-            &analyzer.name_table,
-            analyzer.current_module,
-        )
+        .resolver(&interner)
+        .resolve(point_sym)
+        .and_then(|name_id| analyzer.entity_registry.type_by_name(name_id))
         .unwrap();
     let point_type = analyzer
         .entity_registry
@@ -628,15 +620,11 @@ fn satisfies_interface_with_method() {
     let user_sym = interner.intern("User");
     let hashable_sym = interner.intern("Hashable");
 
-    // Get the User type via EntityRegistry
+    // Get the User type via Resolver
     let type_def_id = analyzer
-        .entity_registry
-        .type_by_symbol(
-            user_sym,
-            &interner,
-            &analyzer.name_table,
-            analyzer.current_module,
-        )
+        .resolver(&interner)
+        .resolve(user_sym)
+        .and_then(|name_id| analyzer.entity_registry.type_by_name(name_id))
         .unwrap();
     let user_type = analyzer
         .entity_registry

@@ -36,13 +36,11 @@ impl Analyzer {
                 None
             }
             Pattern::Identifier { name, span } => {
-                // Check if this identifier is a known class or record type via EntityRegistry
-                let type_id_opt = self.entity_registry.type_by_symbol(
-                    *name,
-                    interner,
-                    &self.name_table,
-                    self.current_module,
-                );
+                // Check if this identifier is a known class or record type via Resolver
+                let type_id_opt = self
+                    .resolver(interner)
+                    .resolve(*name)
+                    .and_then(|name_id| self.entity_registry.type_by_name(name_id));
 
                 if let Some(type_id) = type_id_opt {
                     let type_def = self.entity_registry.get_type(type_id);
@@ -251,13 +249,11 @@ impl Analyzer {
             } => {
                 // Typed record pattern: TypeName { x, y }
                 if let Some(name) = type_name {
-                    // Look up the type
-                    let type_id_opt = self.entity_registry.type_by_symbol(
-                        *name,
-                        interner,
-                        &self.name_table,
-                        self.current_module,
-                    );
+                    // Look up the type via Resolver
+                    let type_id_opt = self
+                        .resolver(interner)
+                        .resolve(*name)
+                        .and_then(|name_id| self.entity_registry.type_by_name(name_id));
 
                     if let Some(type_id) = type_id_opt {
                         let type_def = self.entity_registry.get_type(type_id);
@@ -421,8 +417,9 @@ impl Analyzer {
                 Pattern::Identifier { name, .. } => {
                     // Only a catch-all if NOT a known type name
                     let is_type = self
-                        .entity_registry
-                        .type_by_symbol(*name, interner, &self.name_table, self.current_module)
+                        .resolver(interner)
+                        .resolve(*name)
+                        .and_then(|name_id| self.entity_registry.type_by_name(name_id))
                         .is_some();
                     !is_type
                 }
@@ -471,9 +468,10 @@ impl Analyzer {
         match pattern {
             Pattern::Type { type_expr, .. } => Some(self.resolve_type(type_expr, interner)),
             Pattern::Identifier { name, .. } => {
-                // Look up via EntityRegistry
-                self.entity_registry
-                    .type_by_symbol(*name, interner, &self.name_table, self.current_module)
+                // Look up via Resolver
+                self.resolver(interner)
+                    .resolve(*name)
+                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
                     .and_then(|type_id| {
                         let type_def = self.entity_registry.get_type(type_id);
                         match type_def.kind {
@@ -494,8 +492,9 @@ impl Analyzer {
                 ..
             } => {
                 // Typed record pattern: Point { x, y } covers type Point
-                self.entity_registry
-                    .type_by_symbol(*name, interner, &self.name_table, self.current_module)
+                self.resolver(interner)
+                    .resolve(*name)
+                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
                     .and_then(|type_id| {
                         let type_def = self.entity_registry.get_type(type_id);
                         match type_def.kind {

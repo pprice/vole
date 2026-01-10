@@ -245,13 +245,11 @@ impl Analyzer {
         span: Span,
         interner: &Interner,
     ) {
-        // Get the implementing type for Self substitution via EntityRegistry
-        let type_id_opt = self.entity_registry.type_by_symbol(
-            type_name,
-            interner,
-            &self.name_table,
-            self.current_module,
-        );
+        // Get the implementing type for Self substitution via Resolver
+        let type_id_opt = self
+            .resolver(interner)
+            .resolve(type_name)
+            .and_then(|name_id| self.entity_registry.type_by_name(name_id));
         let implementing_type = if let Some(type_id) = type_id_opt {
             let type_def = self.entity_registry.get_type(type_id);
             match type_def.kind {
@@ -423,13 +421,11 @@ impl Analyzer {
                 .unwrap_or_default()
         };
 
-        // Methods defined directly on the type via EntityRegistry
-        let type_def_id_opt = self.entity_registry.type_by_symbol(
-            type_name,
-            interner,
-            &self.name_table,
-            self.current_module,
-        );
+        // Methods defined directly on the type via Resolver
+        let type_def_id_opt = self
+            .resolver(interner)
+            .resolve(type_name)
+            .and_then(|name_id| self.entity_registry.type_by_name(name_id));
         if let Some(type_def_id) = type_def_id_opt {
             for method_id in self.entity_registry.methods_on_type(type_def_id) {
                 let method = self.entity_registry.get_method(method_id);

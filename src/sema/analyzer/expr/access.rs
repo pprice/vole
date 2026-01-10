@@ -171,12 +171,11 @@ impl Analyzer {
             // Check if this identifier refers to a type (not a variable)
             if self.get_variable_type(*type_sym).is_none() {
                 // Try to find this as a type
-                if let Some(type_def_id) = self.entity_registry.type_by_symbol(
-                    *type_sym,
-                    interner,
-                    &self.name_table,
-                    self.current_module,
-                ) {
+                if let Some(type_def_id) = self
+                    .resolver(interner)
+                    .resolve(*type_sym)
+                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+                {
                     // This is a static method call
                     return self.check_static_method_call(
                         expr,
