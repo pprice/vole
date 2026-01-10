@@ -112,53 +112,66 @@ fn render_sema_error_to<W: Write>(err: &TypeError, file_path: &str, source: &str
 /// errors (diagnostics are rendered to stderr before returning).
 #[allow(clippy::result_unit_err)] // Error details are rendered internally
 pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgram, ()> {
-    // Parse
-    let mut parser = Parser::with_file(source, file_path);
-    let mut program = match parser.parse_program() {
-        Ok(prog) => prog,
-        Err(e) => {
-            // Render any lexer errors first
-            let lexer_errors = parser.take_lexer_errors();
-            if !lexer_errors.is_empty() {
-                for err in &lexer_errors {
-                    render_lexer_error(err, file_path, source);
+    // Parse phase
+    let (mut program, mut interner) = {
+        let _span = tracing::info_span!("parse", file = %file_path).entered();
+        let mut parser = Parser::with_file(source, file_path);
+        let program = match parser.parse_program() {
+            Ok(prog) => prog,
+            Err(e) => {
+                // Render any lexer errors first
+                let lexer_errors = parser.take_lexer_errors();
+                if !lexer_errors.is_empty() {
+                    for err in &lexer_errors {
+                        render_lexer_error(err, file_path, source);
+                    }
+                } else {
+                    render_parser_error(&e, file_path, source);
                 }
-            } else {
-                render_parser_error(&e, file_path, source);
+                return Err(());
+            }
+        };
+
+        // Check for lexer errors that didn't cause parse failure
+        let lexer_errors = parser.take_lexer_errors();
+        if !lexer_errors.is_empty() {
+            for err in &lexer_errors {
+                render_lexer_error(err, file_path, source);
             }
             return Err(());
         }
+
+        let mut interner = parser.into_interner();
+        interner.seed_builtin_symbols();
+        tracing::debug!(declarations = program.declarations.len(), "parsed");
+        (program, interner)
     };
 
-    // Check for lexer errors that didn't cause parse failure
-    let lexer_errors = parser.take_lexer_errors();
-    if !lexer_errors.is_empty() {
-        for err in &lexer_errors {
-            render_lexer_error(err, file_path, source);
+    // Transform phase (generators to state machines)
+    {
+        let _span = tracing::info_span!("transform").entered();
+        let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
+        if !transform_errors.is_empty() {
+            for err in &transform_errors {
+                render_sema_error(err, file_path, source);
+            }
+            return Err(());
         }
-        return Err(());
     }
 
-    let mut interner = parser.into_interner();
-    interner.seed_builtin_symbols();
-
-    // Transform generators to state machines (before type checking)
-    let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
-    if !transform_errors.is_empty() {
-        for err in &transform_errors {
-            render_sema_error(err, file_path, source);
+    // Sema phase (type checking)
+    let analyzer = {
+        let _span = tracing::info_span!("sema").entered();
+        let mut analyzer = Analyzer::new(file_path, source);
+        if let Err(errors) = analyzer.analyze(&program, &interner) {
+            for err in &errors {
+                render_sema_error(err, file_path, source);
+            }
+            return Err(());
         }
-        return Err(());
-    }
-
-    // Type check
-    let mut analyzer = Analyzer::new(file_path, source);
-    if let Err(errors) = analyzer.analyze(&program, &interner) {
-        for err in &errors {
-            render_sema_error(err, file_path, source);
-        }
-        return Err(());
-    }
+        tracing::debug!("type checking complete");
+        analyzer
+    };
 
     let (
         type_aliases,

@@ -40,27 +40,35 @@ fn execute(path: &Path) -> Result<(), String> {
     replace_context(&format!("{} (parsing)", file_path));
     let analyzed = parse_and_analyze(&source, &file_path).map_err(|()| String::new())?;
 
-    // Compile
+    // Codegen phase
     replace_context(&format!("{} (compiling)", file_path));
-    let mut jit = JitContext::new();
-    {
-        let mut compiler = Compiler::new(&mut jit, &analyzed);
-        compiler
-            .compile_program(&analyzed.program)
-            .map_err(|e| format!("compilation error: {}", e))?;
-    }
-    let _ = jit.finalize();
+    let jit = {
+        let _span = tracing::info_span!("codegen").entered();
+        let mut jit = JitContext::new();
+        {
+            let mut compiler = Compiler::new(&mut jit, &analyzed);
+            compiler
+                .compile_program(&analyzed.program)
+                .map_err(|e| format!("compilation error: {}", e))?;
+        }
+        let _ = jit.finalize();
+        tracing::debug!("compilation complete");
+        jit
+    };
 
-    // Execute main
+    // Execute phase
     replace_context(&format!("{} (executing main)", file_path));
-    let fn_ptr = jit
-        .get_function_ptr("main")
-        .ok_or_else(|| "no 'main' function found".to_string())?;
+    {
+        let _span = tracing::info_span!("execute").entered();
+        let fn_ptr = jit
+            .get_function_ptr("main")
+            .ok_or_else(|| "no 'main' function found".to_string())?;
 
-    // Call main - it may or may not return a value
-    // We use extern "C" fn() since main() in Vole can be void
-    let main: extern "C" fn() = unsafe { std::mem::transmute(fn_ptr) };
-    main();
+        // Call main - it may or may not return a value
+        // We use extern "C" fn() since main() in Vole can be void
+        let main: extern "C" fn() = unsafe { std::mem::transmute(fn_ptr) };
+        main();
+    }
 
     Ok(())
 }

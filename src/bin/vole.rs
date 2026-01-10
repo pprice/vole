@@ -3,6 +3,7 @@
 use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{ColorChoice, CommandFactory, FromArgMatches};
 use std::process::ExitCode;
+use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
 use vole::cli::{BenchCommands, Cli, Commands};
@@ -26,6 +27,7 @@ fn main() -> ExitCode {
             .with_env_filter(filter)
             .with_target(true)
             .with_level(true)
+            .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
             .with_writer(std::io::stderr)
             .init();
         tracing::debug!("tracing initialized");
