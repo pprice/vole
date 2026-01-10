@@ -169,6 +169,13 @@ pub(super) fn compile_lambda(
     let captures = lambda.captures.borrow();
     let has_captures = !captures.is_empty();
 
+    tracing::debug!(
+        params = lambda.params.len(),
+        captures = captures.len(),
+        has_captures,
+        "compiling lambda"
+    );
+
     if has_captures {
         compile_lambda_with_captures(builder, lambda, variables, ctx)
     } else {

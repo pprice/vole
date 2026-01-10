@@ -137,6 +137,11 @@ impl Analyzer {
                     .iter()
                     .filter_map(|tp| inferred.get(&tp.name_id).cloned())
                     .collect();
+                tracing::debug!(
+                    func = %interner.resolve(*sym),
+                    type_args = ?type_args.iter().map(|t| self.type_display(t)).collect::<Vec<_>>(),
+                    "generic instantiation"
+                );
                 let type_keys = type_args.iter().map(|ty| self.type_key_for(ty)).collect();
                 let module_id = self.name_table.main_module();
                 let name_id = {

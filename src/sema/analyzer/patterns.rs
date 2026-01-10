@@ -5,6 +5,7 @@ use super::*;
 impl Analyzer {
     /// Check a pattern against the scrutinee type.
     /// Returns the narrowed type if this pattern narrows the scrutinee (e.g., type patterns).
+    #[tracing::instrument(skip(self, interner), fields(scrutinee = %self.type_display(scrutinee_type)))]
     pub(crate) fn check_pattern(
         &mut self,
         pattern: &Pattern,

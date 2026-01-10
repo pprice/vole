@@ -8,6 +8,11 @@ impl Analyzer {
     ) -> Result<Type, Vec<TypeError>> {
         let ty = self.check_expr_inner(expr, interner)?;
         self.record_expr_type(expr, ty.clone());
+        tracing::trace!(
+            line = expr.span.line,
+            inferred_type = %self.type_display(&ty),
+            "type inferred"
+        );
         Ok(ty)
     }
 

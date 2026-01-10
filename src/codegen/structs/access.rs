@@ -11,8 +11,10 @@ use crate::sema::types::ConstantValue;
 use cranelift::prelude::*;
 
 impl Cg<'_, '_, '_> {
+    #[tracing::instrument(skip(self, fa), fields(field = %self.ctx.interner.resolve(fa.field)))]
     pub fn field_access(&mut self, fa: &FieldAccessExpr) -> Result<CompiledValue, String> {
         let obj = self.expr(&fa.object)?;
+        tracing::trace!(object_type = ?obj.vole_type, "field access on");
 
         // Handle module field access for constants (e.g., math.PI)
         if let Type::Module(ref module_type) = obj.vole_type {

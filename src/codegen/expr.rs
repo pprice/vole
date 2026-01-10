@@ -938,8 +938,10 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a match expression
+    #[tracing::instrument(skip(self, match_expr), fields(arms = match_expr.arms.len()))]
     pub fn match_expr(&mut self, match_expr: &MatchExpr) -> Result<CompiledValue, String> {
         let scrutinee = self.expr(&match_expr.scrutinee)?;
+        tracing::trace!(scrutinee_type = ?scrutinee.vole_type, "match scrutinee");
 
         let merge_block = self.builder.create_block();
         self.builder.append_block_param(merge_block, types::I64);
