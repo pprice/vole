@@ -197,11 +197,11 @@ impl Analyzer {
         }
 
         // Register in type_table for type resolution
-        if let Some(class_type) = self
+        let class_type = self
             .entity_registry
-            .build_class_type(entity_type_id, &self.name_table)
-        {
-            self.register_named_type(class.name, Type::Class(class_type), interner);
+            .build_class_type(entity_type_id, &self.name_table);
+        if let Some(ref ct) = class_type {
+            self.register_named_type(class.name, Type::Class(ct.clone()), interner);
         }
 
         // Register and validate implements list
@@ -240,6 +240,8 @@ impl Analyzer {
         }
 
         // Register methods in EntityRegistry (single source of truth)
+        // Use class_type as Self for resolving method signatures
+        let self_type_for_methods = class_type.map(Type::Class);
         let builtin_module = self.name_table.builtin_module();
         for method in &class.methods {
             let method_name_str = interner.resolve(method.name);
@@ -253,12 +255,14 @@ impl Analyzer {
             let params: Vec<Type> = method
                 .params
                 .iter()
-                .map(|p| self.resolve_type(&p.ty, interner))
+                .map(|p| {
+                    self.resolve_type_with_self(&p.ty, interner, self_type_for_methods.clone())
+                })
                 .collect();
             let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| self.resolve_type(t, interner))
+                .map(|t| self.resolve_type_with_self(t, interner, self_type_for_methods.clone()))
                 .unwrap_or(Type::Void);
             let signature = FunctionType {
                 params,
@@ -349,11 +353,11 @@ impl Analyzer {
             }
 
             // Register in type_table for type resolution
-            if let Some(record_type) = self
+            let record_type = self
                 .entity_registry
-                .build_record_type(entity_type_id, &self.name_table)
-            {
-                self.register_named_type(record.name, Type::Record(record_type), interner);
+                .build_record_type(entity_type_id, &self.name_table);
+            if let Some(ref rt) = record_type {
+                self.register_named_type(record.name, Type::Record(rt.clone()), interner);
             }
 
             // Register and validate implements list
@@ -392,6 +396,8 @@ impl Analyzer {
             }
 
             // Register methods in EntityRegistry (single source of truth)
+            // Use record_type as Self for resolving method signatures
+            let self_type_for_methods = record_type.map(Type::Record);
             let builtin_module = self.name_table.builtin_module();
             for method in &record.methods {
                 let method_name_str = interner.resolve(method.name);
@@ -405,12 +411,16 @@ impl Analyzer {
                 let params: Vec<Type> = method
                     .params
                     .iter()
-                    .map(|p| self.resolve_type(&p.ty, interner))
+                    .map(|p| {
+                        self.resolve_type_with_self(&p.ty, interner, self_type_for_methods.clone())
+                    })
                     .collect();
                 let return_type = method
                     .return_type
                     .as_ref()
-                    .map(|t| self.resolve_type(t, interner))
+                    .map(|t| {
+                        self.resolve_type_with_self(t, interner, self_type_for_methods.clone())
+                    })
                     .unwrap_or(Type::Void);
                 let signature = FunctionType {
                     params,
