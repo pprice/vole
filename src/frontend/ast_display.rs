@@ -740,6 +740,22 @@ impl<'a> AstPrinter<'a> {
                 }
                 out.push(']');
             }
+            Pattern::Record { fields, .. } => {
+                out.push_str("{ ");
+                for (i, field) in fields.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    let field_name = self.interner.resolve(field.field_name);
+                    let binding_name = self.interner.resolve(field.binding);
+                    if field.field_name == field.binding {
+                        out.push_str(field_name);
+                    } else {
+                        out.push_str(&format!("{}: {}", field_name, binding_name));
+                    }
+                }
+                out.push_str(" }");
+            }
         }
     }
 

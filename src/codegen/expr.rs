@@ -14,7 +14,7 @@ use crate::sema::Type;
 
 use super::context::Cg;
 use super::interface_vtable::box_interface_value;
-use super::structs::{convert_field_value, convert_to_i64_for_storage};
+use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
     array_element_tag, fallible_error_tag, resolve_type_expr, tuple_layout, type_to_cranelift,
@@ -1167,6 +1167,84 @@ impl Cg<'_, '_, '_> {
                                     Some(is_error)
                                 }
                             }
+                            Pattern::Record {
+                                type_name: Some(name),
+                                fields,
+                                ..
+                            } => {
+                                // Error type with destructuring: error Overflow { value, max } => ...
+                                if let Some(error_info) = self.ctx.analyzed.error_types.get(name) {
+                                    // Check if this error type matches
+                                    if let Type::Fallible(ft) = &scrutinee.vole_type {
+                                        let error_tag =
+                                            fallible_error_tag(ft, *name, self.ctx.interner);
+                                        if let Some(error_tag) = error_tag {
+                                            let is_this_error = self.builder.ins().icmp_imm(
+                                                IntCC::Equal,
+                                                tag,
+                                                error_tag,
+                                            );
+
+                                            // Error fields are stored inline in the fallible structure
+                                            // Layout: tag at offset 0, fields at offset 8, 16, 24, ...
+                                            for field_pattern in fields.iter() {
+                                                let field_name = self
+                                                    .ctx
+                                                    .interner
+                                                    .resolve(field_pattern.field_name);
+                                                // Find the field index and type in the error type
+                                                if let Some((field_idx, field)) = error_info
+                                                    .fields
+                                                    .iter()
+                                                    .enumerate()
+                                                    .find(|(_, f)| f.name == field_name)
+                                                {
+                                                    // Calculate field offset: payload starts at offset 8, each field is 8 bytes
+                                                    let field_offset = FALLIBLE_PAYLOAD_OFFSET
+                                                        + (field_idx as i32 * 8);
+
+                                                    // Load the field value as i64 (stored as i64)
+                                                    let raw_value = self.builder.ins().load(
+                                                        types::I64,
+                                                        MemFlags::new(),
+                                                        scrutinee.value,
+                                                        field_offset,
+                                                    );
+
+                                                    // Convert from i64 to the actual field type
+                                                    let (result_val, cranelift_ty) =
+                                                        convert_field_value(
+                                                            self.builder,
+                                                            raw_value,
+                                                            &field.ty,
+                                                        );
+                                                    let var =
+                                                        self.builder.declare_var(cranelift_ty);
+                                                    self.builder.def_var(var, result_val);
+                                                    arm_variables.insert(
+                                                        field_pattern.binding,
+                                                        (var, field.ty.clone()),
+                                                    );
+                                                }
+                                            }
+
+                                            Some(is_this_error)
+                                        } else {
+                                            // Error type not found in fallible
+                                            let never_match =
+                                                self.builder.ins().iconst(types::I8, 0);
+                                            Some(never_match)
+                                        }
+                                    } else {
+                                        let never_match = self.builder.ins().iconst(types::I8, 0);
+                                        Some(never_match)
+                                    }
+                                } else {
+                                    // Unknown error type
+                                    let never_match = self.builder.ins().iconst(types::I8, 0);
+                                    Some(never_match)
+                                }
+                            }
                             _ => {
                                 // Catch-all for other patterns (like wildcard)
                                 let is_error = self.builder.ins().icmp_imm(
@@ -1210,6 +1288,49 @@ impl Cg<'_, '_, '_> {
                         }
                     }
                     None // Tuple patterns always match (type checked in sema)
+                }
+                Pattern::Record {
+                    type_name, fields, ..
+                } => {
+                    // Record destructuring in match - TypeName { x, y } or { x, y }
+                    let pattern_check = if let Some(name) = type_name {
+                        // Typed record pattern - need to check type first
+                        if let Some(type_meta) = self.ctx.type_metadata.get(name) {
+                            self.compile_type_pattern_check(&scrutinee, &type_meta.vole_type)?
+                        } else {
+                            // Unknown type name - never matches
+                            Some(self.builder.ins().iconst(types::I8, 0))
+                        }
+                    } else {
+                        // Untyped record pattern - always matches (type checked in sema)
+                        None
+                    };
+
+                    // Extract and bind fields
+                    for field_pattern in fields {
+                        let field_name = self.ctx.interner.resolve(field_pattern.field_name);
+
+                        // Get slot and type for this field
+                        let (slot, field_type) =
+                            get_field_slot_and_type(&scrutinee.vole_type, field_name, self.ctx)?;
+
+                        // Use runtime to get field value
+                        let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+                        let result_raw = self.call_runtime(
+                            RuntimeFn::InstanceGetField,
+                            &[scrutinee.value, slot_val],
+                        )?;
+
+                        // Convert the raw i64 result to the proper type
+                        let (result_val, cranelift_ty) =
+                            convert_field_value(self.builder, result_raw, &field_type);
+
+                        let var = self.builder.declare_var(cranelift_ty);
+                        self.builder.def_var(var, result_val);
+                        arm_variables.insert(field_pattern.binding, (var, field_type.clone()));
+                    }
+
+                    pattern_check
                 }
             };
 

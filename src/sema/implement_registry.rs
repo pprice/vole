@@ -102,6 +102,9 @@ pub struct MethodKey {
 pub struct ExternalMethodInfo {
     pub module_path: String,
     pub native_name: String,
+    /// Declared Vole return type (for external functions with generic return types like Iterator<T>)
+    /// Boxed to reduce enum variant size in ResolvedMethod
+    pub return_type: Option<Box<Type>>,
 }
 
 /// Implementation of a method

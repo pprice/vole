@@ -1,0 +1,41 @@
+// Error destructuring tests
+
+error SimpleError {}
+error Overflow { value: i64, max: i64 }
+error NotFound { key: string }
+
+func mayOverflow(x: i64) -> fallible(i64, Overflow) {
+    if x > 100 {
+        raise Overflow { value: x, max: 100 }
+    }
+    return x
+}
+
+func findItem(key: string) -> fallible(string, NotFound) {
+    if key == "missing" {
+        raise NotFound { key: key }
+    }
+    return "found: " + key
+}
+
+tests {
+    test "match with error type pattern" {
+        let result = mayOverflow(200)
+        let value = match result {
+            success x => x
+            error Overflow => -1
+            _ => -999
+        }
+        assert(value == -1)
+    }
+
+    test "match with error destructuring" {
+        let result = mayOverflow(200)
+        let value = match result {
+            success x => x
+            error Overflow { value, max } => value - max
+            _ => -999
+        }
+        assert(value == 100)
+    }
+}

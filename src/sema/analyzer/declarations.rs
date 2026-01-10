@@ -752,6 +752,7 @@ impl Analyzer {
                     ExternalMethodInfo {
                         module_path: external.module_path.clone(),
                         native_name,
+                        return_type: None, // Type is already defined in interface method declaration
                     },
                 );
             }
@@ -952,7 +953,7 @@ impl Analyzer {
 
             let func_type = FunctionType {
                 params,
-                return_type: Box::new(return_type),
+                return_type: Box::new(return_type.clone()),
                 is_closure: false,
             };
 
@@ -970,6 +971,7 @@ impl Analyzer {
                 ExternalMethodInfo {
                     module_path: ext_block.module_path.clone(),
                     native_name,
+                    return_type: Some(Box::new(return_type)),
                 },
             );
         }

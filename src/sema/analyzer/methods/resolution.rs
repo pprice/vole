@@ -44,6 +44,10 @@ impl Analyzer {
                 let method_def = self.entity_registry.get_method(method_id);
                 let defining_type = self.entity_registry.get_type(method_def.defining_type);
 
+                // Build substitutions for generic interface types
+                let substitutions = self.build_interface_substitutions(object_type);
+                let func_type = self.apply_substitutions(&method_def.signature, &substitutions);
+
                 // Determine the resolution type based on the defining type's kind
                 match defining_type.kind {
                     TypeDefKind::Interface => {
@@ -62,7 +66,7 @@ impl Analyzer {
                                         interface_name: interface_sym,
                                         type_name: type_sym,
                                         method_name,
-                                        func_type: method_def.signature.clone(),
+                                        func_type,
                                     });
                                 }
                             }
@@ -74,15 +78,13 @@ impl Analyzer {
                             return Some(ResolvedMethod::InterfaceMethod {
                                 interface_name: interface_sym,
                                 method_name,
-                                func_type: method_def.signature.clone(),
+                                func_type,
                             });
                         }
                     }
                     TypeDefKind::Class | TypeDefKind::Record => {
                         // Direct method on class/record
-                        return Some(ResolvedMethod::Direct {
-                            func_type: method_def.signature.clone(),
-                        });
+                        return Some(ResolvedMethod::Direct { func_type });
                     }
                     _ => {}
                 }
@@ -91,6 +93,51 @@ impl Analyzer {
 
         // Fall back to traditional resolution
         self.resolve_method(object_type, method_name, interner)
+    }
+
+    /// Build substitution map for generic interface types
+    fn build_interface_substitutions(&self, object_type: &Type) -> HashMap<NameId, Type> {
+        let mut substitutions = HashMap::new();
+
+        // Extract type_args from the object type
+        let (name_id, type_args) = match object_type {
+            Type::Interface(iface) => (Some(iface.name_id), iface.type_args.as_slice()),
+            Type::GenericInstance { def, args } => (Some(*def), args.as_slice()),
+            _ => (None, &[] as &[Type]),
+        };
+
+        // Build substitutions from interface's type params to type args
+        if let Some(name_id) = name_id
+            && let Some(type_def_id) = self.entity_registry.type_by_name(name_id)
+        {
+            let type_def = self.entity_registry.get_type(type_def_id);
+            for (param_name_id, arg) in type_def.type_params.iter().zip(type_args.iter()) {
+                substitutions.insert(*param_name_id, arg.clone());
+            }
+        }
+
+        substitutions
+    }
+
+    /// Apply substitutions to a function type
+    fn apply_substitutions(
+        &self,
+        func_type: &FunctionType,
+        substitutions: &HashMap<NameId, Type>,
+    ) -> FunctionType {
+        if substitutions.is_empty() {
+            return func_type.clone();
+        }
+
+        FunctionType {
+            params: func_type
+                .params
+                .iter()
+                .map(|t| substitute_type(t, substitutions))
+                .collect(),
+            return_type: Box::new(substitute_type(&func_type.return_type, substitutions)),
+            is_closure: func_type.is_closure,
+        }
     }
 
     /// Get TypeDefId for a Type if it's registered in EntityRegistry

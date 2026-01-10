@@ -244,6 +244,165 @@ impl Analyzer {
                     None
                 }
             }
+            Pattern::Record {
+                type_name,
+                fields,
+                span,
+            } => {
+                // Typed record pattern: TypeName { x, y }
+                if let Some(name) = type_name {
+                    // Look up the type
+                    let type_id_opt = self.entity_registry.type_by_symbol(
+                        *name,
+                        interner,
+                        &self.name_table,
+                        self.current_module,
+                    );
+
+                    if let Some(type_id) = type_id_opt {
+                        let type_def = self.entity_registry.get_type(type_id);
+                        let (pattern_type, type_fields) = match type_def.kind {
+                            TypeDefKind::Record => {
+                                if let Some(record_type) = self
+                                    .entity_registry
+                                    .build_record_type(type_id, &self.name_table)
+                                {
+                                    let fields_ref = record_type.fields.clone();
+                                    (Some(Type::Record(record_type)), fields_ref)
+                                } else {
+                                    (None, vec![])
+                                }
+                            }
+                            TypeDefKind::Class => {
+                                if let Some(class_type) = self
+                                    .entity_registry
+                                    .build_class_type(type_id, &self.name_table)
+                                {
+                                    let fields_ref = class_type.fields.clone();
+                                    (Some(Type::Class(class_type)), fields_ref)
+                                } else {
+                                    (None, vec![])
+                                }
+                            }
+                            TypeDefKind::ErrorType => {
+                                // Error type destructuring: error Overflow { value, max }
+                                if let Some(error_info) = self.error_types.get(name).cloned() {
+                                    let fields_ref = error_info.fields.clone();
+                                    (Some(Type::ErrorType(error_info)), fields_ref)
+                                } else {
+                                    (None, vec![])
+                                }
+                            }
+                            _ => {
+                                self.add_error(
+                                    SemanticError::TypeMismatch {
+                                        expected: "record, class, or error type".to_string(),
+                                        found: interner.resolve(*name).to_string(),
+                                        span: (*span).into(),
+                                    },
+                                    *span,
+                                );
+                                return None;
+                            }
+                        };
+
+                        if let Some(ref pt) = pattern_type {
+                            // Check compatibility with scrutinee
+                            self.check_type_pattern_compatibility(
+                                pt,
+                                scrutinee_type,
+                                *span,
+                                interner,
+                            );
+
+                            // Bind each field
+                            for field_pattern in fields {
+                                let field_name_str = interner.resolve(field_pattern.field_name);
+                                if let Some(field) =
+                                    type_fields.iter().find(|f| f.name == field_name_str)
+                                {
+                                    self.scope.define(
+                                        field_pattern.binding,
+                                        Variable {
+                                            ty: field.ty.clone(),
+                                            mutable: false,
+                                        },
+                                    );
+                                } else {
+                                    self.add_error(
+                                        SemanticError::UnknownField {
+                                            ty: interner.resolve(*name).to_string(),
+                                            field: field_name_str.to_string(),
+                                            span: field_pattern.span.into(),
+                                        },
+                                        field_pattern.span,
+                                    );
+                                }
+                            }
+                        }
+                        pattern_type
+                    } else {
+                        self.add_error(
+                            SemanticError::UnknownType {
+                                name: interner.resolve(*name).to_string(),
+                                span: (*span).into(),
+                            },
+                            *span,
+                        );
+                        None
+                    }
+                } else {
+                    // Untyped record pattern in match - bind fields from scrutinee type
+                    let type_fields = match scrutinee_type {
+                        Type::Record(record_type) => Some(&record_type.fields),
+                        Type::Class(class_type) => Some(&class_type.fields),
+                        _ => {
+                            let found = self.type_display(scrutinee_type);
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: "record or class".to_string(),
+                                    found,
+                                    span: (*span).into(),
+                                },
+                                *span,
+                            );
+                            None
+                        }
+                    };
+
+                    if let Some(type_fields) = type_fields {
+                        let type_name_str = match scrutinee_type {
+                            Type::Record(r) => self.name_table.display(r.name_id),
+                            Type::Class(c) => self.name_table.display(c.name_id),
+                            _ => "unknown".to_string(),
+                        };
+                        for field_pattern in fields {
+                            let field_name_str = interner.resolve(field_pattern.field_name);
+                            if let Some(field) =
+                                type_fields.iter().find(|f| f.name == field_name_str)
+                            {
+                                self.scope.define(
+                                    field_pattern.binding,
+                                    Variable {
+                                        ty: field.ty.clone(),
+                                        mutable: false,
+                                    },
+                                );
+                            } else {
+                                self.add_error(
+                                    SemanticError::UnknownField {
+                                        ty: type_name_str.clone(),
+                                        field: field_name_str.to_string(),
+                                        span: field_pattern.span.into(),
+                                    },
+                                    field_pattern.span,
+                                );
+                            }
+                        }
+                    }
+                    None
+                }
+            }
         }
     }
 
@@ -280,29 +439,7 @@ impl Analyzer {
             let mut covered: Vec<bool> = vec![false; variants.len()];
 
             for arm in arms {
-                let pattern_type = match &arm.pattern {
-                    Pattern::Type { type_expr, .. } => Some(self.resolve_type(type_expr, interner)),
-                    Pattern::Identifier { name, .. } => {
-                        // Look up via EntityRegistry
-                        self.entity_registry
-                            .type_by_symbol(*name, interner, &self.name_table, self.current_module)
-                            .and_then(|type_id| {
-                                let type_def = self.entity_registry.get_type(type_id);
-                                match type_def.kind {
-                                    TypeDefKind::Class => self
-                                        .entity_registry
-                                        .build_class_type(type_id, &self.name_table)
-                                        .map(Type::Class),
-                                    TypeDefKind::Record => self
-                                        .entity_registry
-                                        .build_record_type(type_id, &self.name_table)
-                                        .map(Type::Record),
-                                    _ => None,
-                                }
-                            })
-                    }
-                    _ => None,
-                };
+                let pattern_type = self.get_pattern_type(&arm.pattern, interner);
 
                 if let Some(ref pt) = pattern_type {
                     for (i, variant) in variants.iter().enumerate() {
@@ -316,8 +453,66 @@ impl Analyzer {
             return covered.iter().all(|&c| c);
         }
 
-        // For non-union types without catch-all, not exhaustive
+        // For non-union types, check if any pattern covers the exact type
+        for arm in arms {
+            let pattern_type = self.get_pattern_type(&arm.pattern, interner);
+            if let Some(pt) = pattern_type
+                && pt == *scrutinee_type
+            {
+                return true;
+            }
+        }
+
         false
+    }
+
+    /// Extract the type that a pattern matches against, if it's a type pattern
+    fn get_pattern_type(&mut self, pattern: &Pattern, interner: &Interner) -> Option<Type> {
+        match pattern {
+            Pattern::Type { type_expr, .. } => Some(self.resolve_type(type_expr, interner)),
+            Pattern::Identifier { name, .. } => {
+                // Look up via EntityRegistry
+                self.entity_registry
+                    .type_by_symbol(*name, interner, &self.name_table, self.current_module)
+                    .and_then(|type_id| {
+                        let type_def = self.entity_registry.get_type(type_id);
+                        match type_def.kind {
+                            TypeDefKind::Class => self
+                                .entity_registry
+                                .build_class_type(type_id, &self.name_table)
+                                .map(Type::Class),
+                            TypeDefKind::Record => self
+                                .entity_registry
+                                .build_record_type(type_id, &self.name_table)
+                                .map(Type::Record),
+                            _ => None,
+                        }
+                    })
+            }
+            Pattern::Record {
+                type_name: Some(name),
+                ..
+            } => {
+                // Typed record pattern: Point { x, y } covers type Point
+                self.entity_registry
+                    .type_by_symbol(*name, interner, &self.name_table, self.current_module)
+                    .and_then(|type_id| {
+                        let type_def = self.entity_registry.get_type(type_id);
+                        match type_def.kind {
+                            TypeDefKind::Class => self
+                                .entity_registry
+                                .build_class_type(type_id, &self.name_table)
+                                .map(Type::Class),
+                            TypeDefKind::Record => self
+                                .entity_registry
+                                .build_record_type(type_id, &self.name_table)
+                                .map(Type::Record),
+                            _ => None,
+                        }
+                    })
+            }
+            _ => None,
+        }
     }
 
     /// Check that a type pattern is compatible with the scrutinee type

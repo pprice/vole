@@ -153,10 +153,16 @@ impl<'src> Parser<'src> {
                 self.advance();
                 Ok(Pattern::Wildcard(token.span))
             }
-            // Identifier - could be binding pattern or type pattern (resolved in analyzer)
+            // Identifier - could be binding pattern, type pattern, or type destructure (resolved in analyzer)
             TokenType::Identifier => {
                 self.advance();
                 let name = self.interner.intern(&token.lexeme);
+
+                // Check for record destructure pattern: TypeName { x, y }
+                if self.check(TokenType::LBrace) {
+                    return self.parse_typed_record_pattern(name, token.span);
+                }
+
                 Ok(Pattern::Identifier {
                     name,
                     span: token.span,
@@ -207,6 +213,57 @@ impl<'src> Parser<'src> {
         }
     }
 
+    /// Parse a typed record destructure pattern: TypeName { x, y } or TypeName { x: a, y: b }
+    fn parse_typed_record_pattern(
+        &mut self,
+        type_name: Symbol,
+        start_span: Span,
+    ) -> Result<Pattern, ParseError> {
+        self.advance(); // consume '{'
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            // Parse field: name or name: binding
+            let field_token = self.current.clone();
+            self.consume(TokenType::Identifier, "expected field name")?;
+            let field_name = self.interner.intern(&field_token.lexeme);
+            let mut field_end_span = field_token.span;
+
+            let binding = if self.match_token(TokenType::Colon) {
+                // Renamed binding: { x: alias }
+                let binding_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected binding name after ':'")?;
+                field_end_span = binding_token.span;
+                self.interner.intern(&binding_token.lexeme)
+            } else {
+                // Same name binding: { x }
+                field_name
+            };
+
+            fields.push(RecordFieldPattern {
+                field_name,
+                binding,
+                span: field_token.span.merge(field_end_span),
+            });
+
+            if !self.match_token(TokenType::Comma) {
+                break;
+            }
+            self.skip_newlines();
+        }
+
+        let end_span = self.current.span;
+        self.consume(TokenType::RBrace, "expected '}' after record pattern")?;
+
+        Ok(Pattern::Record {
+            type_name: Some(type_name),
+            fields,
+            span: start_span.merge(end_span),
+        })
+    }
+
     /// Get the span from a pattern
     pub(super) fn get_pattern_span(&self, pattern: &Pattern) -> Span {
         match pattern {
@@ -217,6 +274,7 @@ impl<'src> Parser<'src> {
             Pattern::Success { span, .. } => *span,
             Pattern::Error { span, .. } => *span,
             Pattern::Tuple { span, .. } => *span,
+            Pattern::Record { span, .. } => *span,
             Pattern::Literal(expr) => expr.span,
         }
     }

@@ -14,7 +14,7 @@ use crate::sema::Type;
 use super::compiler::ControlFlowCtx;
 use super::context::{Cg, ControlFlow};
 use super::interface_vtable::box_interface_value;
-use super::structs::convert_to_i64_for_storage;
+use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
 use super::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
     fallible_error_tag, resolve_type_expr, tuple_layout, type_size, type_to_cranelift,
@@ -191,33 +191,11 @@ impl Cg<'_, '_, '_> {
             }
 
             Stmt::LetTuple(let_tuple) => {
-                // Compile the initializer - should be a tuple
+                // Compile the initializer - should be a tuple, fixed array, or record
                 let init = self.expr(&let_tuple.init)?;
 
-                // Extract elements from the tuple pattern
-                if let Pattern::Tuple { elements, .. } = &let_tuple.pattern
-                    && let Type::Tuple(elem_types) = &init.vole_type
-                {
-                    let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
-
-                    for (i, pattern) in elements.iter().enumerate() {
-                        if let Pattern::Identifier { name, .. } = pattern {
-                            let offset = offsets[i];
-                            let elem_type = &elem_types[i];
-                            let elem_cr_type = type_to_cranelift(elem_type, self.ctx.pointer_type);
-                            let value = self.builder.ins().load(
-                                elem_cr_type,
-                                MemFlags::new(),
-                                init.value,
-                                offset,
-                            );
-                            let var = self.builder.declare_var(elem_cr_type);
-                            self.builder.def_var(var, value);
-                            self.vars.insert(*name, (var, elem_type.clone()));
-                        }
-                        // Wildcard patterns are ignored
-                    }
-                }
+                // Recursively compile the destructuring pattern
+                self.compile_destructure_pattern(&let_tuple.pattern, init.value, &init.vole_type)?;
                 Ok(false)
             }
 
@@ -758,6 +736,72 @@ impl Cg<'_, '_, '_> {
             ty: self.ctx.pointer_type,
             vole_type: union_type.clone(),
         })
+    }
+
+    /// Recursively compile a destructuring pattern, binding variables for the values extracted
+    fn compile_destructure_pattern(
+        &mut self,
+        pattern: &Pattern,
+        value: Value,
+        ty: &Type,
+    ) -> Result<(), String> {
+        match pattern {
+            Pattern::Identifier { name, .. } => {
+                let cr_type = type_to_cranelift(ty, self.ctx.pointer_type);
+                let var = self.builder.declare_var(cr_type);
+                self.builder.def_var(var, value);
+                self.vars.insert(*name, (var, ty.clone()));
+            }
+            Pattern::Wildcard(_) => {
+                // Wildcard - nothing to bind
+            }
+            Pattern::Tuple { elements, .. } => match ty {
+                Type::Tuple(elem_types) => {
+                    let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
+                    for (i, elem_pattern) in elements.iter().enumerate() {
+                        let offset = offsets[i];
+                        let elem_type = &elem_types[i];
+                        let elem_cr_type = type_to_cranelift(elem_type, self.ctx.pointer_type);
+                        let elem_value =
+                            self.builder
+                                .ins()
+                                .load(elem_cr_type, MemFlags::new(), value, offset);
+                        self.compile_destructure_pattern(elem_pattern, elem_value, elem_type)?;
+                    }
+                }
+                Type::FixedArray { element, .. } => {
+                    let elem_cr_type = type_to_cranelift(element, self.ctx.pointer_type);
+                    let elem_size = type_size(element, self.ctx.pointer_type).div_ceil(8) * 8;
+                    for (i, elem_pattern) in elements.iter().enumerate() {
+                        let offset = (i as i32) * (elem_size as i32);
+                        let elem_value =
+                            self.builder
+                                .ins()
+                                .load(elem_cr_type, MemFlags::new(), value, offset);
+                        self.compile_destructure_pattern(elem_pattern, elem_value, element)?;
+                    }
+                }
+                _ => {}
+            },
+            Pattern::Record { fields, .. } => {
+                // Record destructuring - extract fields via runtime
+                for field_pattern in fields {
+                    let field_name = self.ctx.interner.resolve(field_pattern.field_name);
+                    let (slot, field_type) = get_field_slot_and_type(ty, field_name, self.ctx)?;
+                    let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+                    let result_raw =
+                        self.call_runtime(RuntimeFn::InstanceGetField, &[value, slot_val])?;
+                    let (result_val, cranelift_ty) =
+                        convert_field_value(self.builder, result_raw, &field_type);
+                    let var = self.builder.declare_var(cranelift_ty);
+                    self.builder.def_var(var, result_val);
+                    self.vars
+                        .insert(field_pattern.binding, (var, field_type.clone()));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Compile a raise statement: raise ErrorName { field: value, ... }

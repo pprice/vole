@@ -750,6 +750,21 @@ fn print_pattern<'a>(
             );
             arena.text("[").append(inner).append(arena.text("]"))
         }
+        Pattern::Record { fields, .. } => {
+            let inner = arena.intersperse(
+                fields.iter().map(|field| {
+                    let field_name = interner.resolve(field.field_name);
+                    let binding_name = interner.resolve(field.binding);
+                    if field.field_name == field.binding {
+                        arena.text(field_name.to_string())
+                    } else {
+                        arena.text(format!("{}: {}", field_name, binding_name))
+                    }
+                }),
+                arena.text(", "),
+            );
+            arena.text("{ ").append(inner).append(arena.text(" }"))
+        }
     }
 }
 

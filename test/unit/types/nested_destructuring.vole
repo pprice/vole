@@ -1,0 +1,37 @@
+// Nested destructuring tests
+
+tests {
+    test "nested tuple destructuring" {
+        let nested: [[i64, i64], i64] = [[1, 2], 3]
+        let [[a, b], c] = nested
+        assert(a == 1)
+        assert(b == 2)
+        assert(c == 3)
+    }
+
+    test "deeply nested tuple" {
+        let deep: [[[i64, i64], i64], i64] = [[[10, 20], 30], 40]
+        let [[[x, y], z], w] = deep
+        assert(x == 10)
+        assert(y == 20)
+        assert(z == 30)
+        assert(w == 40)
+    }
+
+    test "nested with wildcard" {
+        let data: [[i64, i64], [i64, i64]] = [[1, 2], [3, 4]]
+        let [[a, _], [_, d]] = data
+        assert(a == 1)
+        assert(d == 4)
+    }
+
+    test "three level tuple" {
+        let t: [[[i64, i64], [i64, i64]], i64] = [[[1, 2], [3, 4]], 5]
+        let [[[a, b], [c, d]], e] = t
+        assert(a == 1)
+        assert(b == 2)
+        assert(c == 3)
+        assert(d == 4)
+        assert(e == 5)
+    }
+}

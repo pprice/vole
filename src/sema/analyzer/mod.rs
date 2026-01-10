@@ -234,6 +234,7 @@ impl Analyzer {
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "array_iter".to_string(),
+                    return_type: None, // Refined by check_builtin_method
                 })
             );
         }
@@ -259,6 +260,7 @@ impl Analyzer {
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "string_chars_iter".to_string(),
+                    return_type: None, // Refined by check_builtin_method
                 })
             );
         }
@@ -280,6 +282,7 @@ impl Analyzer {
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "range_iter".to_string(),
+                    return_type: None, // Refined by check_builtin_method
                 })
             );
         }
@@ -1175,6 +1178,7 @@ impl Analyzer {
 
             // Register in implement registry
             let method_id = self.method_name_id(func.vole_name, interner);
+            let return_type = (*func_type.return_type).clone();
             self.implement_registry.register_method(
                 type_id,
                 method_id,
@@ -1185,6 +1189,7 @@ impl Analyzer {
                     external_info: Some(ExternalMethodInfo {
                         module_path: external.module_path.clone(),
                         native_name,
+                        return_type: Some(Box::new(return_type)),
                     }),
                 },
             );

@@ -234,55 +234,115 @@ impl Analyzer {
                 self.analyze_raise_stmt(raise_stmt, interner);
             }
             Stmt::LetTuple(let_tuple) => {
-                // Check the initializer - should be a tuple type
+                // Check the initializer
                 let init_type = self.check_expr(&let_tuple.init, interner)?;
 
-                // Extract element types and bind variables
-                if let Pattern::Tuple { elements, span } = &let_tuple.pattern {
-                    if let Type::Tuple(elem_types) = &init_type {
-                        if elements.len() != elem_types.len() {
-                            self.add_error(
-                                SemanticError::TypeMismatch {
-                                    expected: format!("tuple of {} elements", elem_types.len()),
-                                    found: format!(
-                                        "destructuring pattern with {} elements",
-                                        elements.len()
-                                    ),
-                                    span: (*span).into(),
-                                },
-                                *span,
-                            );
-                        } else {
-                            // Bind each identifier in the pattern to its type
-                            for (pattern, elem_type) in elements.iter().zip(elem_types.iter()) {
-                                if let Pattern::Identifier { name, .. } = pattern {
-                                    self.scope.define(
-                                        *name,
-                                        Variable {
-                                            ty: elem_type.clone(),
-                                            mutable: let_tuple.mutable,
-                                        },
-                                    );
-                                    self.add_lambda_local(*name);
-                                }
-                                // Wildcards are just skipped
-                            }
-                        }
-                    } else {
-                        let found = self.type_display(&init_type);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "tuple".to_string(),
-                                found,
-                                span: let_tuple.init.span.into(),
-                            },
-                            let_tuple.init.span,
-                        );
-                    }
-                }
+                // Recursively check the destructuring pattern
+                self.check_destructure_pattern(
+                    &let_tuple.pattern,
+                    &init_type,
+                    let_tuple.mutable,
+                    let_tuple.init.span,
+                    interner,
+                );
             }
         }
         Ok(())
+    }
+
+    /// Recursively check a destructuring pattern against a type, defining variables as needed
+    fn check_destructure_pattern(
+        &mut self,
+        pattern: &Pattern,
+        ty: &Type,
+        mutable: bool,
+        init_span: Span,
+        interner: &Interner,
+    ) {
+        match pattern {
+            Pattern::Identifier { name, .. } => {
+                self.scope.define(
+                    *name,
+                    Variable {
+                        ty: ty.clone(),
+                        mutable,
+                    },
+                );
+                self.add_lambda_local(*name);
+            }
+            Pattern::Wildcard(_) => {
+                // Wildcard - nothing to bind
+            }
+            Pattern::Tuple { elements, span } => match ty {
+                Type::Tuple(elem_types) => {
+                    if elements.len() != elem_types.len() {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: format!("tuple of {} elements", elem_types.len()),
+                                found: format!(
+                                    "destructuring pattern with {} elements",
+                                    elements.len()
+                                ),
+                                span: (*span).into(),
+                            },
+                            *span,
+                        );
+                    } else {
+                        for (elem_pattern, elem_type) in elements.iter().zip(elem_types.iter()) {
+                            self.check_destructure_pattern(
+                                elem_pattern,
+                                elem_type,
+                                mutable,
+                                init_span,
+                                interner,
+                            );
+                        }
+                    }
+                }
+                Type::FixedArray { element, size } => {
+                    if elements.len() != *size {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: format!("array of {} elements", size),
+                                found: format!(
+                                    "destructuring pattern with {} elements",
+                                    elements.len()
+                                ),
+                                span: (*span).into(),
+                            },
+                            *span,
+                        );
+                    } else {
+                        for elem_pattern in elements.iter() {
+                            self.check_destructure_pattern(
+                                elem_pattern,
+                                element,
+                                mutable,
+                                init_span,
+                                interner,
+                            );
+                        }
+                    }
+                }
+                _ => {
+                    let found = self.type_display(ty);
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "tuple or fixed array".to_string(),
+                            found,
+                            span: init_span.into(),
+                        },
+                        init_span,
+                    );
+                }
+            },
+            Pattern::Record { fields, span, .. } => {
+                self.check_record_destructuring(ty, fields, mutable, *span, init_span, interner);
+            }
+            _ => {
+                // Other patterns not supported in let destructuring
+            }
+        }
     }
 
     /// Analyze a raise statement
@@ -479,5 +539,63 @@ impl Analyzer {
         }
 
         false
+    }
+
+    /// Check record destructuring and bind variables
+    fn check_record_destructuring(
+        &mut self,
+        init_type: &Type,
+        fields: &[RecordFieldPattern],
+        mutable: bool,
+        _pattern_span: Span,
+        init_span: Span,
+        interner: &Interner,
+    ) {
+        // Get the record fields from the type
+        let record_fields = match init_type {
+            Type::Record(record_type) => &record_type.fields,
+            Type::Class(class_type) => &class_type.fields,
+            _ => {
+                let found = self.type_display(init_type);
+                self.add_error(
+                    SemanticError::TypeMismatch {
+                        expected: "record or class".to_string(),
+                        found,
+                        span: init_span.into(),
+                    },
+                    init_span,
+                );
+                return;
+            }
+        };
+
+        // Check each destructured field
+        for field_pattern in fields {
+            let field_name_str = interner.resolve(field_pattern.field_name);
+
+            // Find the field in the record
+            if let Some(field) = record_fields.iter().find(|f| f.name == field_name_str) {
+                // Bind the field to the binding name
+                self.scope.define(
+                    field_pattern.binding,
+                    Variable {
+                        ty: field.ty.clone(),
+                        mutable,
+                    },
+                );
+                self.add_lambda_local(field_pattern.binding);
+            } else {
+                // Get the type name for the error message
+                let type_name = self.type_display(init_type);
+                self.add_error(
+                    SemanticError::UnknownField {
+                        ty: type_name,
+                        field: field_name_str.to_string(),
+                        span: field_pattern.span.into(),
+                    },
+                    field_pattern.span,
+                );
+            }
+        }
     }
 }

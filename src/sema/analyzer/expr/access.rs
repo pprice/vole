@@ -250,6 +250,7 @@ impl Analyzer {
                                 .module_path(module_type.module_id)
                                 .to_string(),
                             native_name: method_name_str.to_string(),
+                            return_type: Some(Box::new((*func_type.return_type).clone())),
                         })
                     } else {
                         None

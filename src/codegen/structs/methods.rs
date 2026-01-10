@@ -198,6 +198,8 @@ impl Cg<'_, '_, '_> {
                         args.push(compiled.value);
                     }
                 }
+                // Convert Iterator return types to RuntimeIterator for external methods
+                let return_type = self.maybe_convert_iterator_return_type(return_type);
                 return self.call_external(&external_info, &args, &return_type);
             }
             MethodTarget::InterfaceDispatch {
@@ -389,6 +391,10 @@ impl Cg<'_, '_, '_> {
             .collect();
         let return_type = substitute_type(&method.signature.return_type, &substitutions);
 
+        // Convert Iterator<T> return types to RuntimeIterator(T) since the runtime
+        // functions return raw iterator pointers, not boxed interface values
+        let return_type = self.convert_iterator_return_type(return_type, iter_type_id);
+
         // Build args: self (iterator ptr) + method args
         let mut args = vec![obj.value];
         for arg in &mc.args {
@@ -398,6 +404,70 @@ impl Cg<'_, '_, '_> {
 
         // Call the external function directly
         self.call_external(&external_info, &args, &return_type)
+    }
+
+    /// Convert Iterator<T> return types to RuntimeIterator(T)
+    ///
+    /// When calling external iterator methods, the runtime returns raw iterator pointers,
+    /// not boxed interface values. This function converts Interface/GenericInstance types
+    /// for Iterator to RuntimeIterator so that subsequent method calls use direct dispatch.
+    fn convert_iterator_return_type(
+        &self,
+        ty: Type,
+        iterator_type_id: crate::identity::TypeDefId,
+    ) -> Type {
+        let iterator_name_id = self
+            .ctx
+            .analyzed
+            .entity_registry
+            .get_type(iterator_type_id)
+            .name_id;
+        self.convert_iterator_return_type_by_name_id(ty, iterator_name_id)
+    }
+
+    /// Convert Iterator<T> return types to RuntimeIterator(T), looking up Iterator interface by name
+    pub(crate) fn maybe_convert_iterator_return_type(&self, ty: Type) -> Type {
+        // Look up the Iterator interface
+        if let Some(iterator_type_id) = self
+            .ctx
+            .analyzed
+            .entity_registry
+            .interface_by_short_name("Iterator", &self.ctx.analyzed.name_table)
+        {
+            let iterator_name_id = self
+                .ctx
+                .analyzed
+                .entity_registry
+                .get_type(iterator_type_id)
+                .name_id;
+            self.convert_iterator_return_type_by_name_id(ty, iterator_name_id)
+        } else {
+            ty
+        }
+    }
+
+    /// Core implementation of iterator return type conversion
+    fn convert_iterator_return_type_by_name_id(&self, ty: Type, iterator_name_id: NameId) -> Type {
+        match &ty {
+            // Handle Iterator<T> stored as Interface
+            Type::Interface(iface) if iface.name_id == iterator_name_id => {
+                if let Some(elem_ty) = iface.type_args.first() {
+                    Type::RuntimeIterator(Box::new(elem_ty.clone()))
+                } else {
+                    ty
+                }
+            }
+            // Handle Iterator<T> stored as GenericInstance (self-referential case)
+            Type::GenericInstance { def, args } if *def == iterator_name_id => {
+                if let Some(elem_ty) = args.first() {
+                    Type::RuntimeIterator(Box::new(elem_ty.clone()))
+                } else {
+                    ty
+                }
+            }
+            // Not an Iterator type, return as-is
+            _ => ty,
+        }
     }
 
     fn functional_interface_call(
@@ -617,10 +687,15 @@ impl Cg<'_, '_, '_> {
             .copied()
             .ok_or_else(|| "interface call missing return value".to_string())?;
         let value = word_to_value(self.builder, word, &func_type.return_type, word_type);
+
+        // Convert Iterator return types to RuntimeIterator for interface dispatch
+        // since external iterator methods return raw iterator pointers, not boxed interfaces
+        let return_type = self.maybe_convert_iterator_return_type((*func_type.return_type).clone());
+
         Ok(CompiledValue {
             value,
-            ty: type_to_cranelift(&func_type.return_type, word_type),
-            vole_type: (*func_type.return_type).clone(),
+            ty: type_to_cranelift(&return_type, word_type),
+            vole_type: return_type,
         })
     }
 }

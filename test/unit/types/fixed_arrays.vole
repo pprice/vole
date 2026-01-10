@@ -48,4 +48,27 @@ tests {
         arr[i] = 42
         assert(arr[1] == 42)
     }
+
+    test "fixed array destructuring" {
+        let arr: [i64; 3] = [7; 3]
+        let [a, b, c] = arr
+        assert(a == 7)
+        assert(b == 7)
+        assert(c == 7)
+    }
+
+    test "fixed array destructuring with wildcard" {
+        let arr: [i64; 3] = [1; 3]
+        let [x, _, z] = arr
+        assert(x == 1)
+        assert(z == 1)
+    }
+
+    test "mutable fixed array destructuring" {
+        let arr: [i64; 2] = [5; 2]
+        let mut [a, b] = arr
+        a = 10
+        assert(a == 10)
+        assert(b == 5)
+    }
 }

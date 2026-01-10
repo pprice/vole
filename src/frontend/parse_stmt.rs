@@ -68,6 +68,22 @@ impl<'src> Parser<'src> {
             }));
         }
 
+        // Check for record destructuring: let { x, y } = expr
+        if self.check(TokenType::LBrace) {
+            let pattern = self.parse_record_pattern()?;
+
+            self.consume(TokenType::Eq, "expected '=' in let statement")?;
+            let init = self.expression(0)?;
+            let span = start_span.merge(init.span);
+
+            return Ok(Stmt::LetTuple(LetTupleStmt {
+                pattern,
+                mutable,
+                init,
+                span,
+            }));
+        }
+
         // Regular let statement
         let stmt = self.let_statement_inner(mutable, start_span)?;
         Ok(Stmt::Let(stmt))
@@ -110,45 +126,50 @@ impl<'src> Parser<'src> {
         self.let_statement_inner(mutable, start_span)
     }
 
-    /// Parse a tuple destructuring pattern: [a, b, c]
+    /// Parse a destructuring pattern (for let statements): supports identifiers, wildcards, tuples, and records
+    fn parse_destructure_pattern(&mut self) -> Result<Pattern, ParseError> {
+        let token = self.current.clone();
+
+        match token.ty {
+            TokenType::LBracket => self.parse_tuple_pattern(),
+            TokenType::LBrace => self.parse_record_pattern(),
+            TokenType::Identifier if token.lexeme == "_" => {
+                self.advance();
+                Ok(Pattern::Wildcard(token.span))
+            }
+            TokenType::Identifier => {
+                self.advance();
+                let name = self.interner.intern(&token.lexeme);
+                Ok(Pattern::Identifier {
+                    name,
+                    span: token.span,
+                })
+            }
+            _ => Err(ParseError::new(
+                ParserError::ExpectedToken {
+                    expected: "pattern".to_string(),
+                    found: token.ty.as_str().to_string(),
+                    span: token.span.into(),
+                },
+                token.span,
+            )),
+        }
+    }
+
+    /// Parse a tuple destructuring pattern: [a, b, c] or [[a, b], c]
     fn parse_tuple_pattern(&mut self) -> Result<Pattern, ParseError> {
         let start_span = self.current.span;
         self.advance(); // consume '['
 
         let mut elements = Vec::new();
-        let mut end_span = start_span;
 
         loop {
             if self.check(TokenType::RBracket) {
                 break;
             }
 
-            // Parse element pattern (identifier or wildcard)
-            let token = self.current.clone();
-            let elem_pattern = if token.ty == TokenType::Identifier && token.lexeme == "_" {
-                // Wildcard pattern
-                self.advance();
-                end_span = token.span;
-                Pattern::Wildcard(token.span)
-            } else if token.ty == TokenType::Identifier {
-                // Identifier pattern
-                self.advance();
-                let name = self.interner.intern(&token.lexeme);
-                end_span = token.span;
-                Pattern::Identifier {
-                    name,
-                    span: token.span,
-                }
-            } else {
-                return Err(ParseError::new(
-                    ParserError::ExpectedToken {
-                        expected: "identifier".to_string(),
-                        found: token.ty.as_str().to_string(),
-                        span: token.span.into(),
-                    },
-                    token.span,
-                ));
-            };
+            // Parse element pattern recursively
+            let elem_pattern = self.parse_destructure_pattern()?;
             elements.push(elem_pattern);
 
             if !self.match_token(TokenType::Comma) {
@@ -160,7 +181,54 @@ impl<'src> Parser<'src> {
 
         Ok(Pattern::Tuple {
             elements,
-            span: start_span.merge(end_span),
+            span: start_span.merge(self.previous.span),
+        })
+    }
+
+    /// Parse a record destructuring pattern: { x, y } or { x: a, y: b }
+    fn parse_record_pattern(&mut self) -> Result<Pattern, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume '{'
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            // Parse field: name or name: binding
+            let field_token = self.current.clone();
+            self.consume(TokenType::Identifier, "expected field name")?;
+            let field_name = self.interner.intern(&field_token.lexeme);
+            let mut field_end_span = field_token.span;
+
+            let binding = if self.match_token(TokenType::Colon) {
+                // Renamed binding: { x: alias }
+                let binding_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected binding name after ':'")?;
+                field_end_span = binding_token.span;
+                self.interner.intern(&binding_token.lexeme)
+            } else {
+                // Same name binding: { x }
+                field_name
+            };
+
+            fields.push(RecordFieldPattern {
+                field_name,
+                binding,
+                span: field_token.span.merge(field_end_span),
+            });
+
+            if !self.match_token(TokenType::Comma) {
+                break;
+            }
+            self.skip_newlines();
+        }
+
+        self.consume(TokenType::RBrace, "expected '}' after record pattern")?;
+
+        Ok(Pattern::Record {
+            type_name: None,
+            fields,
+            span: start_span.merge(self.previous.span),
         })
     }
 

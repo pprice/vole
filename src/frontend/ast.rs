@@ -684,6 +684,16 @@ impl LambdaExpr {
     }
 }
 
+/// Field binding for record destructuring: x or x: alias
+#[derive(Debug, Clone)]
+pub struct RecordFieldPattern {
+    /// The field name in the record
+    pub field_name: Symbol,
+    /// The variable to bind (same as field_name if no rename)
+    pub binding: Symbol,
+    pub span: Span,
+}
+
 /// Pattern for matching
 #[derive(Debug, Clone)]
 pub enum Pattern {
@@ -709,6 +719,13 @@ pub enum Pattern {
     },
     /// Tuple destructuring pattern: [a, b, c]
     Tuple { elements: Vec<Pattern>, span: Span },
+    /// Record destructuring pattern: { x, y } or TypeName { x, y }
+    Record {
+        /// Optional type name for typed patterns in match arms (e.g., Point in `Point { x, y }`)
+        type_name: Option<Symbol>,
+        fields: Vec<RecordFieldPattern>,
+        span: Span,
+    },
 }
 
 #[cfg(test)]
