@@ -224,8 +224,9 @@ mod tests {
     fn type_id_from_type() {
         let mut names = crate::identity::NameTable::new();
         let mut types = TypeTable::new();
+        // Use pre-registered primitives from NameTable
+        let i64_name = names.primitives.i64;
         let builtin = names.builtin_module();
-        let i64_name = names.intern_raw(builtin, &["i64"]);
         let array_name = names.intern_raw(builtin, &["array"]);
         types.register_primitive_name(PrimitiveTypeId::I64, i64_name);
         types.register_array_name(array_name);
@@ -249,8 +250,9 @@ mod tests {
         let mut registry = ImplementRegistry::new();
         let mut names = crate::identity::NameTable::new();
         let mut types = TypeTable::new();
+        // Use pre-registered primitives from NameTable
+        let string_name = names.primitives.string;
         let builtin = names.builtin_module();
-        let string_name = names.intern_raw(builtin, &["string"]);
         let length_id = names.intern(builtin, &[length_sym], &interner);
         let to_upper_id = names.intern(builtin, &[to_upper_sym], &interner);
         types.register_primitive_name(PrimitiveTypeId::String, string_name);
@@ -301,9 +303,10 @@ mod tests {
         // Add method to registry1
         let mut names = crate::identity::NameTable::new();
         let mut types = TypeTable::new();
+        // Use pre-registered primitives from NameTable
+        let i64_name = names.primitives.i64;
+        let string_name = names.primitives.string;
         let builtin = names.builtin_module();
-        let i64_name = names.intern_raw(builtin, &["i64"]);
-        let string_name = names.intern_raw(builtin, &["string"]);
         types.register_primitive_name(PrimitiveTypeId::I64, i64_name);
         types.register_primitive_name(PrimitiveTypeId::String, string_name);
 

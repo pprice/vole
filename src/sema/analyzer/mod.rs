@@ -9,7 +9,7 @@ mod stmt;
 
 use crate::errors::SemanticError;
 use crate::frontend::*;
-use crate::identity::{self, ModuleId, NameId, NameTable, Namer};
+use crate::identity::{self, ModuleId, NameId, NameTable, Namer, Resolver};
 use crate::module::ModuleLoader;
 use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
@@ -566,6 +566,14 @@ impl Analyzer {
     /// Get the resolved expression types (for use by codegen)
     pub fn expr_types(&self) -> &HashMap<NodeId, Type> {
         &self.expr_types
+    }
+
+    /// Get a resolver configured for the current module context.
+    /// Uses the resolution chain: primitives -> current module -> builtin module.
+    pub fn resolver<'a>(&'a self, interner: &'a Interner) -> Resolver<'a> {
+        // For now, we don't track imports at the Analyzer level.
+        // The resolver will check: primitives, current module, then builtin module.
+        Resolver::new(interner, &self.name_table, self.current_module, &[])
     }
 
     /// Take ownership of the expression types (consuming self)

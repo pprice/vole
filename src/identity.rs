@@ -8,8 +8,10 @@ use crate::frontend::{Interner, Span, Symbol};
 
 mod entities;
 mod namer;
+mod resolver;
 pub use entities::{FieldId, FunctionId, MethodId, TypeDefId};
 pub use namer::{Namer, NamerLookup, method_name_id_by_str};
+pub use resolver::Resolver;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModuleId(u32);
@@ -42,6 +44,49 @@ pub struct DefLocation {
     pub span: Span,
 }
 
+/// Cached NameIds for language primitives.
+/// Registered at NameTable creation, always available.
+#[derive(Debug, Clone)]
+pub struct Primitives {
+    pub i8: NameId,
+    pub i16: NameId,
+    pub i32: NameId,
+    pub i64: NameId,
+    pub i128: NameId,
+    pub u8: NameId,
+    pub u16: NameId,
+    pub u32: NameId,
+    pub u64: NameId,
+    pub f32: NameId,
+    pub f64: NameId,
+    pub bool: NameId,
+    pub string: NameId,
+    pub nil: NameId,
+}
+
+impl Primitives {
+    /// Look up a primitive by name
+    pub fn by_name(&self, name: &str) -> Option<NameId> {
+        match name {
+            "i8" => Some(self.i8),
+            "i16" => Some(self.i16),
+            "i32" => Some(self.i32),
+            "i64" => Some(self.i64),
+            "i128" => Some(self.i128),
+            "u8" => Some(self.u8),
+            "u16" => Some(self.u16),
+            "u32" => Some(self.u32),
+            "u64" => Some(self.u64),
+            "f32" => Some(self.f32),
+            "f64" => Some(self.f64),
+            "bool" => Some(self.bool),
+            "string" => Some(self.string),
+            "nil" => Some(self.nil),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct NameTable {
     modules: Vec<String>,
@@ -50,10 +95,13 @@ pub struct NameTable {
     name_lookup: HashMap<NameKey, NameId>,
     main_module: ModuleId,
     diagnostics: HashMap<NameId, DefLocation>,
+    pub primitives: Primitives,
 }
 
 impl NameTable {
     pub fn new() -> Self {
+        // Use placeholder NameIds - they'll be overwritten before new() returns
+        let placeholder = NameId(0);
         let mut table = Self {
             modules: Vec::new(),
             module_lookup: HashMap::new(),
@@ -61,11 +109,50 @@ impl NameTable {
             name_lookup: HashMap::new(),
             main_module: ModuleId(0),
             diagnostics: HashMap::new(),
+            primitives: Primitives {
+                i8: placeholder,
+                i16: placeholder,
+                i32: placeholder,
+                i64: placeholder,
+                i128: placeholder,
+                u8: placeholder,
+                u16: placeholder,
+                u32: placeholder,
+                u64: placeholder,
+                f32: placeholder,
+                f64: placeholder,
+                bool: placeholder,
+                string: placeholder,
+                nil: placeholder,
+            },
         };
         let main_module = table.module_id("main");
         table.main_module = main_module;
         let _ = table.module_id("");
+
+        // Register primitives in the builtin module
+        table.primitives = table.register_primitives();
         table
+    }
+
+    fn register_primitives(&mut self) -> Primitives {
+        let builtin = self.builtin_module();
+        Primitives {
+            i8: self.intern_raw(builtin, &["i8"]),
+            i16: self.intern_raw(builtin, &["i16"]),
+            i32: self.intern_raw(builtin, &["i32"]),
+            i64: self.intern_raw(builtin, &["i64"]),
+            i128: self.intern_raw(builtin, &["i128"]),
+            u8: self.intern_raw(builtin, &["u8"]),
+            u16: self.intern_raw(builtin, &["u16"]),
+            u32: self.intern_raw(builtin, &["u32"]),
+            u64: self.intern_raw(builtin, &["u64"]),
+            f32: self.intern_raw(builtin, &["f32"]),
+            f64: self.intern_raw(builtin, &["f64"]),
+            bool: self.intern_raw(builtin, &["bool"]),
+            string: self.intern_raw(builtin, &["string"]),
+            nil: self.intern_raw(builtin, &["nil"]),
+        }
     }
 
     pub fn main_module(&self) -> ModuleId {
@@ -252,5 +339,50 @@ mod tests {
         let name_id = names.intern(module, &[foo, bar], &interner);
 
         assert_eq!(names.display(name_id), "std:math::foo::bar");
+    }
+
+    #[test]
+    fn primitives_registered_at_creation() {
+        let names = NameTable::new();
+
+        // All primitives should be registered and have valid NameIds
+        assert_eq!(names.display(names.primitives.i32), "i32");
+        assert_eq!(names.display(names.primitives.i64), "i64");
+        assert_eq!(names.display(names.primitives.bool), "bool");
+        assert_eq!(names.display(names.primitives.string), "string");
+        assert_eq!(names.display(names.primitives.nil), "nil");
+        assert_eq!(names.display(names.primitives.f64), "f64");
+    }
+
+    #[test]
+    fn primitives_by_name_lookup() {
+        let names = NameTable::new();
+
+        // by_name should return the correct NameId
+        assert_eq!(names.primitives.by_name("i32"), Some(names.primitives.i32));
+        assert_eq!(names.primitives.by_name("i64"), Some(names.primitives.i64));
+        assert_eq!(
+            names.primitives.by_name("bool"),
+            Some(names.primitives.bool)
+        );
+        assert_eq!(
+            names.primitives.by_name("string"),
+            Some(names.primitives.string)
+        );
+        assert_eq!(names.primitives.by_name("nil"), Some(names.primitives.nil));
+
+        // Unknown names should return None
+        assert_eq!(names.primitives.by_name("foo"), None);
+        assert_eq!(names.primitives.by_name("int"), None);
+    }
+
+    #[test]
+    fn primitives_in_builtin_module() {
+        let names = NameTable::new();
+        let builtin = names.builtin_module_id().unwrap();
+
+        // Primitives should be in the builtin module
+        assert_eq!(names.module_of(names.primitives.i32), builtin);
+        assert_eq!(names.module_of(names.primitives.string), builtin);
     }
 }
