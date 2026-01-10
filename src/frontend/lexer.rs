@@ -304,6 +304,7 @@ impl<'src> Lexer<'src> {
             ch: c,
             span: span.into(),
         };
+        tracing::debug!(char = %c, line = self.start_line, col = self.start_column, "lexer error: unexpected character");
         let message = format!("unexpected character '{}'", c);
         self.errors.push(error);
         Token::new(TokenType::Error, message, span)
@@ -320,6 +321,7 @@ impl<'src> Lexer<'src> {
             self.column,
         );
         let error = LexerError::UnterminatedString { span: span.into() };
+        tracing::debug!(line = self.start_line, col = self.start_column, "lexer error: unterminated string");
         let message = "unterminated string literal".to_string();
         self.errors.push(error);
         Token::new(TokenType::Error, message, span)
@@ -337,6 +339,7 @@ impl<'src> Lexer<'src> {
             self.column,
         );
         let error = LexerError::InvalidNumber { span: span.into() };
+        tracing::debug!(line = self.start_line, col = self.start_column, "lexer error: invalid number");
         let message = "invalid number literal".to_string();
         self.errors.push(error);
         Token::new(TokenType::Error, message, span)

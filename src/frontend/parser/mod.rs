@@ -78,7 +78,10 @@ impl<'src> Parser<'src> {
         self.skip_newlines();
 
         while !self.check(TokenType::Eof) {
-            declarations.push(self.declaration()?);
+            let line = self.current.span.line;
+            let decl = self.declaration()?;
+            tracing::trace!(line, "parsed declaration");
+            declarations.push(decl);
             self.skip_newlines();
         }
 
