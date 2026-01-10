@@ -57,4 +57,42 @@ tests {
         c.increment()
         assert(c.value == 11)
     }
+
+    // Tests for static interfaces
+    test "Default interface - i32" {
+        let v = i32.default_value()
+        assert(v == 0)
+    }
+
+    test "Default interface - i64" {
+        let v = i64.default_value()
+        assert(v == 0)
+    }
+
+    test "Default interface - bool" {
+        let v = bool.default_value()
+        assert(v == false)
+    }
+
+    test "Default interface - string" {
+        let v = string.default_value()
+        assert(v == "")
+    }
+
+    test "Bounded interface - i32" {
+        assert(i32.min_value() == -2147483648)
+        assert(i32.max_value() == 2147483647)
+    }
+
+    test "Bounded interface - i64" {
+        assert(i64.min_value() == -9223372036854775807 - 1)
+        assert(i64.max_value() == 9223372036854775807)
+    }
+
+    test "Zero and One interfaces" {
+        assert(i32.zero() == 0)
+        assert(i32.one() == 1)
+        assert(i64.zero() == 0)
+        assert(i64.one() == 1)
+    }
 }
