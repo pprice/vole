@@ -149,14 +149,9 @@ impl Analyzer {
                         if self.well_known.is_iterator(*def) {
                             args.first().cloned().unwrap_or(Type::Unknown)
                         } else {
-                            let found = self.type_display(&iterable_ty);
-                            self.add_error(
-                                SemanticError::TypeMismatch {
-                                    expected: "iterable (range, array, string, or Iterator<T>)"
-                                        .to_string(),
-                                    found,
-                                    span: for_stmt.iterable.span.into(),
-                                },
+                            self.type_error(
+                                "iterable (range, array, string, or Iterator<T>)",
+                                &iterable_ty,
                                 for_stmt.iterable.span,
                             );
                             Type::Error
@@ -168,28 +163,18 @@ impl Analyzer {
                         {
                             elem
                         } else {
-                            let found = self.type_display(&iterable_ty);
-                            self.add_error(
-                                SemanticError::TypeMismatch {
-                                    expected: "iterable (range, array, string, or Iterator<T>)"
-                                        .to_string(),
-                                    found,
-                                    span: for_stmt.iterable.span.into(),
-                                },
+                            self.type_error(
+                                "iterable (range, array, string, or Iterator<T>)",
+                                &iterable_ty,
                                 for_stmt.iterable.span,
                             );
                             Type::Error
                         }
                     }
                     _ => {
-                        let found = self.type_display(&iterable_ty);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "iterable (range, array, string, or Iterator<T>)"
-                                    .to_string(),
-                                found,
-                                span: for_stmt.iterable.span.into(),
-                            },
+                        self.type_error(
+                            "iterable (range, array, string, or Iterator<T>)",
+                            &iterable_ty,
                             for_stmt.iterable.span,
                         );
                         Type::Error
@@ -345,15 +330,7 @@ impl Analyzer {
                     }
                 }
                 _ => {
-                    let found = self.type_display(ty);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: "tuple or fixed array".to_string(),
-                            found,
-                            span: init_span.into(),
-                        },
-                        init_span,
-                    );
+                    self.type_error("tuple or fixed array", ty, init_span);
                 }
             },
             Pattern::Record { fields, span, .. } => {
@@ -576,15 +553,7 @@ impl Analyzer {
             Type::Record(record_type) => &record_type.fields,
             Type::Class(class_type) => &class_type.fields,
             _ => {
-                let found = self.type_display(init_type);
-                self.add_error(
-                    SemanticError::TypeMismatch {
-                        expected: "record or class".to_string(),
-                        found,
-                        span: init_span.into(),
-                    },
-                    init_span,
-                );
+                self.type_error("record or class", init_type, init_span);
                 return;
             }
         };

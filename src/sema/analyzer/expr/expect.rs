@@ -107,15 +107,7 @@ impl Analyzer {
                             // Right implements Stringable
                             Ok(Type::String)
                         } else {
-                            let found = self.type_display(&right_ty);
-                            self.add_error(
-                                SemanticError::TypeMismatch {
-                                    expected: "Stringable".to_string(),
-                                    found,
-                                    span: bin.right.span.into(),
-                                },
-                                bin.right.span,
-                            );
+                            self.type_error("Stringable", &right_ty, bin.right.span);
                             Ok(Type::Error)
                         }
                     } else if left_ty.is_numeric() && right_ty.is_numeric() {
@@ -134,15 +126,7 @@ impl Analyzer {
                             Ok(Type::I32)
                         }
                     } else {
-                        let found = self.type_display_pair(&left_ty, &right_ty);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "numeric or string".to_string(),
-                                found,
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
+                        self.type_error_pair("numeric or string", &left_ty, &right_ty, expr.span);
                         Ok(Type::Error)
                     }
                 }
@@ -168,15 +152,7 @@ impl Analyzer {
                             Ok(Type::I32)
                         }
                     } else {
-                        let found = self.type_display_pair(&left_ty, &right_ty);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "numeric".to_string(),
-                                found,
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
+                        self.type_error_pair("numeric", &left_ty, &right_ty, expr.span);
                         Ok(Type::Error)
                     }
                 }
@@ -200,15 +176,7 @@ impl Analyzer {
                     if left_ty == Type::Bool && right_ty == Type::Bool {
                         Ok(Type::Bool)
                     } else {
-                        let found = self.type_display_pair(&left_ty, &right_ty);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "bool".to_string(),
-                                found,
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
+                        self.type_error_pair("bool", &left_ty, &right_ty, expr.span);
                         Ok(Type::Error)
                     }
                 }
@@ -234,15 +202,7 @@ impl Analyzer {
                             Ok(Type::I32)
                         }
                     } else {
-                        let found = self.type_display_pair(&left_ty, &right_ty);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "integer".to_string(),
-                                found,
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
+                        self.type_error_pair("integer", &left_ty, &right_ty, expr.span);
                         Ok(Type::Error)
                     }
                 }
@@ -254,15 +214,7 @@ impl Analyzer {
                     if operand_ty.is_numeric() {
                         Ok(operand_ty)
                     } else {
-                        let found = self.type_display(&operand_ty);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "numeric".to_string(),
-                                found,
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
+                        self.type_error("numeric", &operand_ty, expr.span);
                         Ok(Type::Error)
                     }
                 }
@@ -273,15 +225,7 @@ impl Analyzer {
                     if operand_ty == Type::Bool {
                         Ok(Type::Bool)
                     } else {
-                        let found = self.type_display(&operand_ty);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "bool".to_string(),
-                                found,
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
+                        self.type_error("bool", &operand_ty, expr.span);
                         Ok(Type::Error)
                     }
                 }
@@ -291,15 +235,7 @@ impl Analyzer {
                     if operand_ty.is_integer() {
                         Ok(operand_ty)
                     } else {
-                        let found = self.type_display(&operand_ty);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "integer".to_string(),
-                                found,
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
+                        self.type_error("integer", &operand_ty, expr.span);
                         Ok(Type::Error)
                     }
                 }

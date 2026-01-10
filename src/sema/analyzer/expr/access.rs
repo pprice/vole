@@ -70,15 +70,7 @@ impl Analyzer {
                 field_access.field_span,
             );
         } else {
-            let found = self.type_display(&object_type);
-            self.add_error(
-                SemanticError::TypeMismatch {
-                    expected: "class or record".to_string(),
-                    found,
-                    span: field_access.object.span.into(),
-                },
-                field_access.object.span,
-            );
+            self.type_error("class or record", &object_type, field_access.object.span);
         }
         Ok(Type::Error)
     }
@@ -120,13 +112,9 @@ impl Analyzer {
             ),
             Type::Error => return Ok(Type::Error),
             _ => {
-                let found = self.type_display(&object_type);
-                self.add_error(
-                    SemanticError::TypeMismatch {
-                        expected: "optional class or record".to_string(),
-                        found,
-                        span: opt_chain.object.span.into(),
-                    },
+                self.type_error(
+                    "optional class or record",
+                    &object_type,
                     opt_chain.object.span,
                 );
                 return Ok(Type::Error);
@@ -296,15 +284,7 @@ impl Analyzer {
 
                     return Ok(*func_type.return_type.clone());
                 } else {
-                    let found = self.type_display(export_type);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: "function".to_string(),
-                            found,
-                            span: method_call.method_span.into(),
-                        },
-                        method_call.method_span,
-                    );
+                    self.type_error("function", export_type, method_call.method_span);
                     return Ok(Type::Error);
                 }
             } else {

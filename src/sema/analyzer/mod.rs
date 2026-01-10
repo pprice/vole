@@ -465,13 +465,45 @@ impl Analyzer {
         )
     }
 
-    /// Helper to add a type mismatch error
-    #[allow(dead_code)] // Will be used in subsequent refactor tasks
+    /// Helper to add a type mismatch error (string version)
+    #[allow(dead_code)]
     fn type_mismatch(&mut self, expected: &str, found: &str, span: Span) {
         self.add_error(
             SemanticError::TypeMismatch {
                 expected: expected.to_string(),
                 found: found.to_string(),
+                span: span.into(),
+            },
+            span,
+        );
+    }
+
+    /// Helper to add a type mismatch error with automatic type display
+    pub(crate) fn type_error(&mut self, expected: &str, found: &Type, span: Span) {
+        let found_str = self.type_display(found);
+        self.add_error(
+            SemanticError::TypeMismatch {
+                expected: expected.to_string(),
+                found: found_str,
+                span: span.into(),
+            },
+            span,
+        );
+    }
+
+    /// Helper to add a type mismatch error for binary operations
+    pub(crate) fn type_error_pair(
+        &mut self,
+        expected: &str,
+        left: &Type,
+        right: &Type,
+        span: Span,
+    ) {
+        let found = self.type_display_pair(left, right);
+        self.add_error(
+            SemanticError::TypeMismatch {
+                expected: expected.to_string(),
+                found,
                 span: span.into(),
             },
             span,

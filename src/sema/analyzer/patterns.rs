@@ -230,15 +230,7 @@ impl Analyzer {
                     }
                     None // No type narrowing for tuple patterns
                 } else {
-                    let found = self.type_display(scrutinee_type);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: "tuple".to_string(),
-                            found,
-                            span: (*span).into(),
-                        },
-                        *span,
-                    );
+                    self.type_error("tuple", scrutinee_type, *span);
                     None
                 }
             }
@@ -352,15 +344,7 @@ impl Analyzer {
                         Type::Record(record_type) => Some(&record_type.fields),
                         Type::Class(class_type) => Some(&class_type.fields),
                         _ => {
-                            let found = self.type_display(scrutinee_type);
-                            self.add_error(
-                                SemanticError::TypeMismatch {
-                                    expected: "record or class".to_string(),
-                                    found,
-                                    span: (*span).into(),
-                                },
-                                *span,
-                            );
+                            self.type_error("record or class", scrutinee_type, *span);
                             None
                         }
                     };

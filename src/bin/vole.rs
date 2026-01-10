@@ -3,15 +3,18 @@
 use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{ColorChoice, CommandFactory, FromArgMatches};
 use std::process::ExitCode;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::time::FormatTime;
-use tracing_subscriber::EnvFilter;
 
 /// A timer that outputs nothing but still enables span timing calculation
 struct NoTimestamp;
 
 impl FormatTime for NoTimestamp {
-    fn format_time(&self, _w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+    fn format_time(
+        &self,
+        _w: &mut tracing_subscriber::fmt::format::Writer<'_>,
+    ) -> std::fmt::Result {
         Ok(())
     }
 }
