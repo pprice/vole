@@ -209,11 +209,11 @@ impl Analyzer {
             let mut iface_names = Vec::new();
             for iface_type in &class.implements {
                 if let Some(iface_sym) = interface_base_name(iface_type) {
-                    // Validate interface exists via EntityRegistry
+                    // Validate interface exists via EntityRegistry using resolver
                     let iface_str = interner.resolve(iface_sym);
                     let iface_exists = self
-                        .name_table
-                        .name_id_raw(self.current_module, &[iface_str])
+                        .resolver(interner)
+                        .resolve_str(iface_str)
                         .and_then(|name_id| self.entity_registry.type_by_name(name_id))
                         .is_some()
                         || self
@@ -366,11 +366,11 @@ impl Analyzer {
                 let mut iface_names = Vec::new();
                 for iface_type in &record.implements {
                     if let Some(iface_sym) = interface_base_name(iface_type) {
-                        // Validate interface exists via EntityRegistry
+                        // Validate interface exists via EntityRegistry using resolver
                         let iface_str = interner.resolve(iface_sym);
                         let iface_exists = self
-                            .name_table
-                            .name_id_raw(self.current_module, &[iface_str])
+                            .resolver(interner)
+                            .resolve_str(iface_str)
                             .and_then(|name_id| self.entity_registry.type_by_name(name_id))
                             .is_some()
                             || self
@@ -570,11 +570,11 @@ impl Analyzer {
                 let mut iface_names = Vec::new();
                 for iface_type in &record.implements {
                     if let Some(iface_sym) = interface_base_name(iface_type) {
-                        // Validate interface exists via EntityRegistry
+                        // Validate interface exists via EntityRegistry using resolver
                         let iface_str = interner.resolve(iface_sym);
                         let iface_exists = self
-                            .name_table
-                            .name_id_raw(self.current_module, &[iface_str])
+                            .resolver(interner)
+                            .resolve_str(iface_str)
                             .and_then(|name_id| self.entity_registry.type_by_name(name_id))
                             .is_some()
                             || self
@@ -1018,11 +1018,11 @@ impl Analyzer {
         if let Some(ref trait_type) = impl_block.trait_type
             && let Some(name) = interface_base_name(trait_type)
         {
-            // Validate interface exists via EntityRegistry
+            // Validate interface exists via EntityRegistry using resolver
             let iface_str = interner.resolve(name);
             let iface_exists = self
-                .name_table
-                .name_id_raw(self.current_module, &[iface_str])
+                .resolver(interner)
+                .resolve_str(iface_str)
                 .and_then(|name_id| self.entity_registry.type_by_name(name_id))
                 .is_some()
                 || self

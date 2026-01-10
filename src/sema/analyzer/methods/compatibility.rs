@@ -44,19 +44,18 @@ impl Analyzer {
         // Look up both interfaces via EntityRegistry
         let derived_str = interner.resolve(derived);
         let base_str = interner.resolve(base);
+        let resolver = self.resolver(interner);
 
-        let derived_id = self
-            .name_table
-            .name_id_raw(self.current_module, &[derived_str])
+        let derived_id = resolver
+            .resolve_str(derived_str)
             .and_then(|name_id| self.entity_registry.type_by_name(name_id))
             .or_else(|| {
                 self.entity_registry
                     .interface_by_short_name(derived_str, &self.name_table)
             });
 
-        let base_id = self
-            .name_table
-            .name_id_raw(self.current_module, &[base_str])
+        let base_id = resolver
+            .resolve_str(base_str)
             .and_then(|name_id| self.entity_registry.type_by_name(name_id))
             .or_else(|| {
                 self.entity_registry

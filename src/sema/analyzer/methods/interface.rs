@@ -220,8 +220,8 @@ impl Analyzer {
         // Look up interface by Symbol -> NameId -> TypeDefId via EntityRegistry
         let interface_name_str = interner.resolve(interface_name);
         let type_def_id = self
-            .name_table
-            .name_id_raw(self.current_module, &[interface_name_str])
+            .resolver(interner)
+            .resolve_str(interface_name_str)
             .and_then(|name_id| self.entity_registry.type_by_name(name_id))
             .or_else(|| {
                 // Fall back to short name lookup across all modules
@@ -273,11 +273,11 @@ impl Analyzer {
             None => return, // Unknown type, can't validate
         };
 
-        // Look up interface via EntityRegistry
+        // Look up interface via EntityRegistry using resolver
         let iface_name_str = interner.resolve(iface_name);
         let type_def_id = self
-            .name_table
-            .name_id_raw(self.current_module, &[iface_name_str])
+            .resolver(interner)
+            .resolve_str(iface_name_str)
             .and_then(|name_id| self.entity_registry.type_by_name(name_id))
             .or_else(|| {
                 self.entity_registry

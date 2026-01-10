@@ -362,11 +362,11 @@ impl Analyzer {
         {
             let method_name_str = interner.resolve(method_name);
             for interface_name in &interfaces {
-                // Look up interface via EntityRegistry
+                // Look up interface via EntityRegistry using resolver
                 let interface_str = interner.resolve(*interface_name);
                 let type_def_id = self
-                    .name_table
-                    .name_id_raw(self.current_module, &[interface_str])
+                    .resolver(interner)
+                    .resolve_str(interface_str)
                     .and_then(|name_id| self.entity_registry.type_by_name(name_id))
                     .or_else(|| {
                         self.entity_registry

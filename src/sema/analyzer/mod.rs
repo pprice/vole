@@ -688,19 +688,13 @@ impl Analyzer {
         &mut self,
         name: &str,
         type_args: Vec<Type>,
-        _interner: &Interner,
+        interner: &Interner,
     ) -> Option<Type> {
-        // Look up interface by string name using EntityRegistry
-        // First try exact NameId lookup, then fall back to short name search
+        // Look up interface by string name using resolver
         let type_def_id = self
-            .name_table
-            .name_id_raw(self.current_module, &[name])
+            .resolver(interner)
+            .resolve_str(name)
             .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-            .or_else(|| {
-                self.name_table
-                    .name_id_raw(self.name_table.main_module(), &[name])
-                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-            })
             .or_else(|| {
                 // Fall back to string-based lookup across all modules
                 self.entity_registry
@@ -1084,11 +1078,11 @@ impl Analyzer {
     ) -> Option<crate::sema::generic::TypeConstraint> {
         match constraint {
             TypeConstraint::Interface(sym) => {
-                // Validate interface exists via EntityRegistry
+                // Validate interface exists via EntityRegistry using resolver
                 let iface_str = interner.resolve(*sym);
                 let iface_exists = self
-                    .name_table
-                    .name_id_raw(self.current_module, &[iface_str])
+                    .resolver(interner)
+                    .resolve_str(iface_str)
                     .and_then(|name_id| self.entity_registry.type_by_name(name_id))
                     .is_some()
                     || self
