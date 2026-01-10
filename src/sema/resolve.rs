@@ -3,7 +3,7 @@
 // Type resolution: converts TypeExpr (AST representation) to Type (semantic representation)
 
 use crate::frontend::{Interner, Symbol, TypeExpr};
-use crate::identity::{ModuleId, NameId, NameTable};
+use crate::identity::{ModuleId, NameId, NameTable, Resolver};
 use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{TypeParamScope, substitute_type};
@@ -32,11 +32,11 @@ fn interface_instance(
     ctx: &mut TypeResolutionContext<'_>,
 ) -> Option<Type> {
     // Look up interface by Symbol -> NameId -> TypeDefId
-    // First try exact NameId lookup, then fall back to short name search
+    // Use resolver for layered lookup (current module -> builtin module)
     let name_str = ctx.interner.resolve(name);
     let type_def_id = ctx
-        .name_table
-        .name_id_raw(ctx.module_id, &[name_str])
+        .resolver()
+        .resolve_str(name_str)
         .and_then(|name_id| ctx.entity_registry.type_by_name(name_id))
         .or_else(|| {
             // Fall back to string-based lookup across all modules
@@ -142,6 +142,12 @@ impl<'a> TypeResolutionContext<'a> {
             self_type: None,
         }
     }
+
+    /// Get a resolver for name lookups in the current context.
+    /// Uses the resolution chain: primitives -> current module -> builtin module.
+    pub fn resolver(&self) -> Resolver<'_> {
+        Resolver::new(self.interner, self.name_table, self.module_id, &[])
+    }
 }
 
 /// Resolve a TypeExpr to a Type
@@ -162,12 +168,11 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
             // Look up type alias first
             if let Some(aliased) = ctx.type_aliases.get(sym) {
                 aliased.clone()
-            } else if let Some(type_id) = ctx.entity_registry.type_by_symbol(
-                *sym,
-                ctx.interner,
-                ctx.name_table,
-                ctx.module_id,
-            ) {
+            } else if let Some(type_id) = ctx
+                .resolver()
+                .resolve(*sym)
+                .and_then(|name_id| ctx.entity_registry.type_by_name(name_id))
+            {
                 // Look up via EntityRegistry
                 let type_def = ctx.entity_registry.get_type(type_id);
                 match type_def.kind {
