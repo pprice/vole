@@ -12,7 +12,7 @@ use crate::codegen::FunctionRegistry;
 use crate::commands::common::AnalyzedProgram;
 use crate::errors::CodegenError;
 use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
-use crate::identity::{ModuleId, NameId, NameTable, NamerLookup};
+use crate::identity::{self, ModuleId, NameId, NameTable, NamerLookup};
 use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
@@ -169,8 +169,7 @@ pub(crate) fn method_name_id_by_str(
     interner: &Interner,
     name_str: &str,
 ) -> Option<NameId> {
-    let namer = NamerLookup::new(&analyzed.name_table, interner);
-    namer.method_by_str(name_str)
+    identity::method_name_id_by_str(&analyzed.name_table, interner, name_str)
 }
 
 #[allow(clippy::only_used_in_recursion)]
@@ -223,7 +222,7 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
 
 /// Build an InterfaceType from EntityRegistry's TypeDef
 fn build_interface_type_from_entity(
-    type_def_id: crate::identity::TypeDefId,
+    type_def_id: identity::TypeDefId,
     entity_registry: &EntityRegistry,
     type_args: Vec<Type>,
 ) -> Type {

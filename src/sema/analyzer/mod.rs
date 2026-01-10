@@ -9,7 +9,7 @@ mod stmt;
 
 use crate::errors::SemanticError;
 use crate::frontend::*;
-use crate::identity::{ModuleId, NameId, NameTable, Namer, NamerLookup};
+use crate::identity::{self, ModuleId, NameId, NameTable, Namer};
 use crate::module::ModuleLoader;
 use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
@@ -748,8 +748,7 @@ impl Analyzer {
 
     /// Look up a method NameId by string name (cross-interner safe)
     fn method_name_id_by_str(&self, name_str: &str, interner: &Interner) -> Option<NameId> {
-        let namer = NamerLookup::new(&self.name_table, interner);
-        namer.method_by_str(name_str)
+        identity::method_name_id_by_str(&self.name_table, interner, name_str)
     }
 
     /// Mark the current lambda as having side effects

@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::identity::TypeDefId;
 use std::collections::HashSet;
 
 #[allow(dead_code)]
@@ -90,11 +91,7 @@ impl Analyzer {
         self.interface_extends_by_type_def_id(derived_id, base_id)
     }
 
-    fn interface_extends_by_type_def_id(
-        &self,
-        derived: crate::identity::TypeDefId,
-        base: crate::identity::TypeDefId,
-    ) -> bool {
+    fn interface_extends_by_type_def_id(&self, derived: TypeDefId, base: TypeDefId) -> bool {
         if derived == base {
             return true;
         }

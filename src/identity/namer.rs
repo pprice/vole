@@ -76,3 +76,13 @@ impl<'a> NamerLookup<'a> {
         self.names.name_id_raw(module, &[name_str])
     }
 }
+
+/// Look up a method NameId by string name (cross-interner safe).
+/// Convenience function for contexts with separate NameTable and Interner references.
+pub fn method_name_id_by_str(
+    name_table: &NameTable,
+    interner: &Interner,
+    name_str: &str,
+) -> Option<NameId> {
+    NamerLookup::new(name_table, interner).method_by_str(name_str)
+}

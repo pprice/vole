@@ -9,7 +9,7 @@ use crate::frontend::{Interner, Span, Symbol};
 mod entities;
 mod namer;
 pub use entities::{FieldId, FunctionId, MethodId, TypeDefId};
-pub use namer::{Namer, NamerLookup};
+pub use namer::{Namer, NamerLookup, method_name_id_by_str};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModuleId(u32);
