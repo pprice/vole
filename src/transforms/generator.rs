@@ -476,6 +476,7 @@ impl<'a> GeneratorTransformer<'a> {
             fields,
             external: None,
             methods: Vec::new(),
+            statics: None,
             span: func.span,
         };
 
@@ -494,6 +495,7 @@ impl<'a> GeneratorTransformer<'a> {
             target_type: TypeExpr::Named(record_name),
             external: None,
             methods: vec![next_method],
+            statics: None,
             span: func.span,
         };
 

@@ -50,6 +50,7 @@ pub enum TokenType {
     KwDone,       // Done keyword (iterator termination sentinel)
     KwYield,      // yield keyword (generator yield expression)
     KwDefault,    // default keyword (interface default methods)
+    KwStatics,    // statics keyword (static method blocks)
 
     // Type keywords
     KwI8,
@@ -169,6 +170,7 @@ impl TokenType {
             Self::KwDone => "Done",
             Self::KwYield => "yield",
             Self::KwDefault => "default",
+            Self::KwStatics => "statics",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",

@@ -102,6 +102,7 @@ pub struct ClassDecl {
     pub fields: Vec<FieldDef>,
     pub external: Option<ExternalBlock>, // External methods from native code
     pub methods: Vec<FuncDecl>,
+    pub statics: Option<StaticsBlock>, // Static methods
     pub span: Span,
 }
 
@@ -114,6 +115,7 @@ pub struct RecordDecl {
     pub fields: Vec<FieldDef>,
     pub external: Option<ExternalBlock>, // External methods from native code
     pub methods: Vec<FuncDecl>,
+    pub statics: Option<StaticsBlock>, // Static methods
     pub span: Span,
 }
 
@@ -126,6 +128,7 @@ pub struct InterfaceDecl {
     pub fields: Vec<FieldDef>,               // Required fields
     pub external_blocks: Vec<ExternalBlock>, // External methods from native code (multiple allowed)
     pub methods: Vec<InterfaceMethod>,
+    pub statics: Option<StaticsBlock>, // Static methods
     pub span: Span,
 }
 
@@ -148,6 +151,7 @@ pub struct ImplementBlock {
     pub target_type: TypeExpr,        // The type being extended
     pub external: Option<ExternalBlock>, // External methods from native code
     pub methods: Vec<FuncDecl>,
+    pub statics: Option<StaticsBlock>, // Static methods
     pub span: Span,
 }
 
@@ -157,6 +161,15 @@ pub struct ExternalBlock {
     pub module_path: String,
     pub functions: Vec<ExternalFunc>,
     pub is_default: bool, // true if marked with 'default' keyword (interface default methods)
+    pub span: Span,
+}
+
+/// Statics block: statics { func declarations, external blocks }
+/// Contains static methods that are called on the type, not on instances
+#[derive(Debug, Clone)]
+pub struct StaticsBlock {
+    pub methods: Vec<InterfaceMethod>, // Static methods (may have bodies or be abstract)
+    pub external_blocks: Vec<ExternalBlock>, // External static methods
     pub span: Span,
 }
 

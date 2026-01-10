@@ -127,7 +127,7 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::LBrace, "expected '{' after class name")?;
         self.skip_newlines();
 
-        let (fields, external, methods) = self.parse_class_body()?;
+        let (fields, external, methods, statics) = self.parse_class_body()?;
 
         self.consume(TokenType::RBrace, "expected '}' to close class")?;
         let span = start_span.merge(self.previous.span);
@@ -139,6 +139,7 @@ impl<'src> Parser<'src> {
             fields,
             external,
             methods,
+            statics,
             span,
         }))
     }
@@ -160,7 +161,7 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::LBrace, "expected '{' after record name")?;
         self.skip_newlines();
 
-        let (fields, external, methods) = self.parse_class_body()?;
+        let (fields, external, methods, statics) = self.parse_class_body()?;
 
         self.consume(TokenType::RBrace, "expected '}' to close record")?;
         let span = start_span.merge(self.previous.span);
@@ -172,6 +173,7 @@ impl<'src> Parser<'src> {
             fields,
             external,
             methods,
+            statics,
             span,
         }))
     }
@@ -262,12 +264,23 @@ impl<'src> Parser<'src> {
         let mut fields = Vec::new();
         let mut methods = Vec::new();
         let mut external_blocks = Vec::new();
+        let mut statics: Option<StaticsBlock> = None;
 
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
             // Check for 'default' keyword prefix
             let is_default = self.match_token(TokenType::KwDefault);
 
-            if self.check(TokenType::KwExternal) {
+            if self.check(TokenType::KwStatics) {
+                if statics.is_some() {
+                    return Err(ParseError::new(
+                        ParserError::DuplicateStaticsBlock {
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
+                }
+                statics = Some(self.parse_statics_block()?);
+            } else if self.check(TokenType::KwExternal) {
                 let mut block = self.parse_external_block()?;
                 block.is_default = is_default;
                 external_blocks.push(block);
@@ -325,6 +338,7 @@ impl<'src> Parser<'src> {
             fields,
             external_blocks,
             methods,
+            statics,
             span,
         }))
     }
@@ -403,8 +417,19 @@ impl<'src> Parser<'src> {
 
         let mut external = None;
         let mut methods = Vec::new();
+        let mut statics = None;
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
-            if self.check(TokenType::KwExternal) {
+            if self.check(TokenType::KwStatics) {
+                if statics.is_some() {
+                    return Err(ParseError::new(
+                        ParserError::DuplicateStaticsBlock {
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
+                }
+                statics = Some(self.parse_statics_block()?);
+            } else if self.check(TokenType::KwExternal) {
                 if external.is_some() {
                     return Err(ParseError::new(
                         ParserError::DuplicateExternalBlock {
@@ -428,6 +453,7 @@ impl<'src> Parser<'src> {
             target_type,
             external,
             methods,
+            statics,
             span,
         }))
     }
@@ -435,13 +461,32 @@ impl<'src> Parser<'src> {
     #[allow(clippy::type_complexity)]
     fn parse_class_body(
         &mut self,
-    ) -> Result<(Vec<FieldDef>, Option<ExternalBlock>, Vec<FuncDecl>), ParseError> {
+    ) -> Result<
+        (
+            Vec<FieldDef>,
+            Option<ExternalBlock>,
+            Vec<FuncDecl>,
+            Option<StaticsBlock>,
+        ),
+        ParseError,
+    > {
         let mut fields = Vec::new();
         let mut methods = Vec::new();
         let mut external = None;
+        let mut statics = None;
 
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
-            if self.check(TokenType::KwExternal) {
+            if self.check(TokenType::KwStatics) {
+                if statics.is_some() {
+                    return Err(ParseError::new(
+                        ParserError::DuplicateStaticsBlock {
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
+                }
+                statics = Some(self.parse_statics_block()?);
+            } else if self.check(TokenType::KwExternal) {
                 if external.is_some() {
                     return Err(ParseError::new(
                         ParserError::DuplicateExternalBlock {
@@ -488,7 +533,7 @@ impl<'src> Parser<'src> {
             self.skip_newlines();
         }
 
-        Ok((fields, external, methods))
+        Ok((fields, external, methods, statics))
     }
 
     fn test_case(&mut self) -> Result<TestCase, ParseError> {
@@ -517,5 +562,49 @@ impl<'src> Parser<'src> {
         let span = start_span.merge(body.span);
 
         Ok(TestCase { name, body, span })
+    }
+
+    /// Parse statics block: statics { methods, external blocks }
+    /// Contains static methods that are called on the type, not on instances.
+    fn parse_statics_block(&mut self) -> Result<StaticsBlock, ParseError> {
+        let start_span = self.current.span;
+        self.consume(TokenType::KwStatics, "expected 'statics'")?;
+        self.consume(TokenType::LBrace, "expected '{' after 'statics'")?;
+        self.skip_newlines();
+
+        let mut methods = Vec::new();
+        let mut external_blocks = Vec::new();
+
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            // Check for 'default' keyword prefix
+            let is_default = self.match_token(TokenType::KwDefault);
+
+            if self.check(TokenType::KwExternal) {
+                let mut ext_block = self.parse_external_block()?;
+                ext_block.is_default = is_default;
+                external_blocks.push(ext_block);
+            } else if self.check(TokenType::KwFunc) {
+                let method = self.interface_method(is_default)?;
+                methods.push(method);
+            } else {
+                return Err(ParseError::new(
+                    ParserError::UnexpectedToken {
+                        token: self.current.ty.as_str().to_string(),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            }
+            self.skip_newlines();
+        }
+
+        self.consume(TokenType::RBrace, "expected '}' to close statics block")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(StaticsBlock {
+            methods,
+            external_blocks,
+            span,
+        })
     }
 }

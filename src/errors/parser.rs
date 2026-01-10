@@ -101,4 +101,11 @@ pub enum ParserError {
         #[label("second external block")]
         span: SourceSpan,
     },
+
+    #[error("duplicate statics block")]
+    #[diagnostic(code(E1024), help("only one statics block is allowed per declaration"))]
+    DuplicateStaticsBlock {
+        #[label("second statics block")]
+        span: SourceSpan,
+    },
 }
