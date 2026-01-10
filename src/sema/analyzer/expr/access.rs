@@ -151,30 +151,19 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
         // Check for static method call: TypeName.method()
-        // If the object is an identifier that refers to a type (not a variable),
-        // this is a static method call.
-        if let ExprKind::Identifier(type_sym) = &method_call.object.kind {
-            let type_name_str = interner.resolve(*type_sym);
-
-            // Check if this identifier refers to a type (not a variable)
-            if self.get_variable_type(*type_sym).is_none() {
-                // Try to find this as a type
-                if let Some(type_def_id) = self
-                    .resolver(interner)
-                    .resolve_type(*type_sym, &self.entity_registry)
-                {
-                    // This is a static method call
-                    return self.check_static_method_call(
-                        expr,
-                        type_def_id,
-                        type_name_str,
-                        method_call.method,
-                        &method_call.args,
-                        method_call.method_span,
-                        interner,
-                    );
-                }
-            }
+        // Handle both identifier types (Point.create) and primitive keywords (i32.default_value)
+        if let Some((type_def_id, type_name_str)) =
+            self.resolve_static_call_target(&method_call.object, interner)
+        {
+            return self.check_static_method_call(
+                expr,
+                type_def_id,
+                &type_name_str,
+                method_call.method,
+                &method_call.args,
+                method_call.method_span,
+                interner,
+            );
         }
 
         let object_type = self.check_expr(&method_call.object, interner)?;
@@ -389,6 +378,45 @@ impl Analyzer {
             self.check_expr(arg, interner)?;
         }
         Ok(Type::Error)
+    }
+
+    /// Try to resolve a static method call target from an expression.
+    /// Returns (TypeDefId, type_name) if this is a valid static call target.
+    /// Handles both identifier types (Point.create) and primitive keywords (i32.default_value)
+    fn resolve_static_call_target(
+        &self,
+        object: &Expr,
+        interner: &Interner,
+    ) -> Option<(TypeDefId, String)> {
+        match &object.kind {
+            // Named types: Point.create(), MyClass.static_method()
+            ExprKind::Identifier(type_sym) => {
+                // Only consider this a static call if it's not a variable
+                if self.get_variable_type(*type_sym).is_some() {
+                    return None;
+                }
+                let type_name_str = interner.resolve(*type_sym).to_string();
+                let type_def_id = self
+                    .resolver(interner)
+                    .resolve_type(*type_sym, &self.entity_registry)?;
+                tracing::trace!(type_name = %type_name_str, ?type_def_id, "resolved static call target (identifier)");
+                Some((type_def_id, type_name_str))
+            }
+            // Primitive type keywords: i32.default_value(), bool.default_value()
+            ExprKind::TypeLiteral(type_expr) => {
+                use crate::frontend::ast::TypeExpr;
+                if let TypeExpr::Primitive(prim) = type_expr {
+                    let name_id = self.name_table.primitives.from_ast(*prim);
+                    let type_def_id = self.entity_registry.type_by_name(name_id)?;
+                    let type_name = self.name_table.display(name_id).to_string();
+                    tracing::trace!(%type_name, ?type_def_id, "resolved static call target (primitive)");
+                    Some((type_def_id, type_name))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Check a static method call: TypeName.method(args)

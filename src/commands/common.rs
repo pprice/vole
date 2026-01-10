@@ -34,6 +34,9 @@ pub struct AnalyzedProgram {
     pub error_types: HashMap<Symbol, ErrorTypeInfo>,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: HashMap<String, (Program, Interner)>,
+    /// Expression types for module programs (keyed by module path -> NodeId -> Type)
+    /// Stored separately since NodeIds are per-program
+    pub module_expr_types: HashMap<String, HashMap<NodeId, Type>>,
     /// Generic function definitions (for monomorphization)
     pub generic_functions: HashMap<Symbol, GenericFuncDef>,
     /// Generic record definitions (for type inference in struct literals)
@@ -181,6 +184,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         type_implements,
         error_types,
         module_programs,
+        module_expr_types,
         generic_functions,
         generic_records,
         monomorph_cache,
@@ -201,6 +205,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         type_implements,
         error_types,
         module_programs,
+        module_expr_types,
         generic_functions,
         generic_records,
         monomorph_cache,
@@ -390,6 +395,7 @@ pub fn run_captured<W: Write + Send + 'static>(
         type_implements,
         error_types,
         module_programs,
+        module_expr_types,
         generic_functions,
         generic_records,
         monomorph_cache,
@@ -411,6 +417,7 @@ pub fn run_captured<W: Write + Send + 'static>(
         type_implements,
         error_types,
         module_programs,
+        module_expr_types,
         generic_functions,
         generic_records,
         monomorph_cache,

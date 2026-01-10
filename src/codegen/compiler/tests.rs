@@ -19,6 +19,7 @@ fn compile_and_run(source: &str) -> i64 {
         interner,
         type_aliases: HashMap::new(),
         expr_types: HashMap::new(),
+        module_expr_types: HashMap::new(),
         method_resolutions: MethodResolutions::new(),
         implement_registry: ImplementRegistry::new(),
         type_implements: HashMap::new(),

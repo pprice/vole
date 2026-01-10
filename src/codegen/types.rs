@@ -139,6 +139,21 @@ impl<'a> CompileCtx<'a> {
             &[], // No imports in codegen context
         )
     }
+
+    /// Look up expression type, checking module-specific expr_types if compiling module code
+    pub fn get_expr_type(&self, node_id: &NodeId) -> Option<&Type> {
+        // When compiling module code, NodeIds are relative to that module's program
+        // Use module-specific expr_types if available
+        if let Some(module_path) = self.current_module {
+            if let Some(module_types) = self.analyzed.module_expr_types.get(module_path) {
+                if let Some(ty) = module_types.get(node_id) {
+                    return Some(ty);
+                }
+            }
+        }
+        // Fall back to main program expr_types
+        self.analyzed.expr_types.get(node_id)
+    }
 }
 
 /// Resolve a type expression to a Vole Type (uses CompileCtx for full context)

@@ -209,6 +209,22 @@ impl Analyzer {
             },
             ExprKind::Unary(un) => match un.op {
                 UnaryOp::Neg => {
+                    // Special case: -INT_LITERAL should check if the negated value fits
+                    // This handles cases like -2147483648 (i32::MIN) where the positive
+                    // value doesn't fit but the negated value does
+                    if let ExprKind::IntLiteral(value) = &un.operand.kind {
+                        let negated = value.wrapping_neg();
+                        if let Some(target) = expected {
+                            if literal_fits(negated, target) {
+                                self.record_expr_type(&un.operand, target.clone());
+                                return Ok(target.clone());
+                            }
+                        }
+                        // Fall back to i64 if no expected type or doesn't fit
+                        self.record_expr_type(&un.operand, Type::I64);
+                        return Ok(Type::I64);
+                    }
+
                     // Propagate expected type through negation
                     let operand_ty = self.check_expr_expecting(&un.operand, expected, interner)?;
                     if operand_ty.is_numeric() {

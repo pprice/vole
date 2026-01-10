@@ -9,8 +9,8 @@ use crate::codegen::types::{
     CompileCtx, MethodInfo, TypeMetadata, method_name_id, resolve_type_expr_full, type_to_cranelift,
 };
 use crate::frontend::{
-    ClassDecl, FuncDecl, ImplementBlock, InterfaceMethod, RecordDecl, StaticsBlock, Symbol,
-    TypeExpr,
+    ClassDecl, FuncDecl, ImplementBlock, Interner, InterfaceMethod, RecordDecl, StaticsBlock,
+    Symbol, TypeExpr,
 };
 use crate::identity::ModuleId;
 use crate::sema::{Type, TypeId};
@@ -105,13 +105,13 @@ impl Compiler<'_> {
     }
 
     /// Get the type name symbol from a TypeExpr (for implement blocks on records/classes)
+    /// Returns None for primitives since they should use the TypeId path which is interner-independent
     fn get_type_name_symbol(&self, ty: &TypeExpr) -> Option<Symbol> {
         match ty {
             TypeExpr::Named(sym) => Some(*sym),
-            TypeExpr::Primitive(p) => {
-                let type_name = Type::from_primitive(*p).name();
-                self.analyzed.interner.lookup(type_name)
-            }
+            // Primitives return None so we use the TypeId path instead,
+            // which avoids cross-interner issues with module programs
+            TypeExpr::Primitive(_) => None,
             _ => None,
         }
     }
@@ -127,6 +127,15 @@ impl Compiler<'_> {
 
     /// Register implement block methods (first pass)
     pub(super) fn register_implement_block(&mut self, impl_block: &ImplementBlock) {
+        self.register_implement_block_with_interner(impl_block, &self.analyzed.interner.clone())
+    }
+
+    /// Register implement block methods with a specific interner (for module programs)
+    pub(super) fn register_implement_block_with_interner(
+        &mut self,
+        impl_block: &ImplementBlock,
+        interner: &Interner,
+    ) {
         let module_id = self.analyzed.name_table.main_module();
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
@@ -153,7 +162,7 @@ impl Compiler<'_> {
                 &self.analyzed.type_aliases,
                 &self.analyzed.entity_registry,
                 &self.analyzed.error_types,
-                &self.analyzed.interner,
+                interner,
                 &self.analyzed.name_table,
                 module_id,
             ),
@@ -172,7 +181,7 @@ impl Compiler<'_> {
                         &self.analyzed.type_aliases,
                         &self.analyzed.entity_registry,
                         &self.analyzed.error_types,
-                        &self.analyzed.interner,
+                        interner,
                         &self.analyzed.name_table,
                         module_id,
                     )
@@ -183,16 +192,16 @@ impl Compiler<'_> {
                 self.func_registry.intern_qualified(
                     func_module,
                     &[type_sym, method.name],
-                    &self.analyzed.interner,
+                    interner,
                 )
             } else if let Some(type_id) = type_id {
                 self.func_registry.intern_with_prefix(
                     type_id.name_id(),
                     method.name,
-                    &self.analyzed.interner,
+                    interner,
                 )
             } else {
-                let method_name_str = self.analyzed.interner.resolve(method.name);
+                let method_name_str = interner.resolve(method.name);
                 self.func_registry
                     .intern_raw_qualified(func_module, &[type_name.as_str(), method_name_str])
             };
@@ -200,7 +209,7 @@ impl Compiler<'_> {
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
             if let Some(type_id) = type_id {
-                let method_id = method_name_id(self.analyzed, &self.analyzed.interner, method.name)
+                let method_id = method_name_id(self.analyzed, interner, method.name)
                     .expect("implement method name_id should be registered");
                 self.impl_method_infos.insert(
                     (type_id, method_id),
@@ -209,6 +218,75 @@ impl Compiler<'_> {
                         return_type,
                     },
                 );
+            }
+        }
+
+        // Register static methods from statics block (if present)
+        if let Some(ref statics) = impl_block.statics {
+            // Get TypeDefId for this type
+            let type_def_id = match &impl_block.target_type {
+                TypeExpr::Primitive(p) => {
+                    let name_id = self.analyzed.name_table.primitives.from_ast(*p);
+                    self.analyzed.entity_registry.type_by_name(name_id)
+                }
+                TypeExpr::Named(sym) => {
+                    let name_id = self.analyzed.name_table.name_id(
+                        self.analyzed.name_table.main_module(),
+                        &[*sym],
+                        interner,
+                    );
+                    name_id.and_then(|id| self.analyzed.entity_registry.type_by_name(id))
+                }
+                _ => None,
+            };
+
+            for method in &statics.methods {
+                // Only register methods with bodies
+                if method.body.is_none() {
+                    continue;
+                }
+
+                let return_type = method
+                    .return_type
+                    .as_ref()
+                    .map(|t| {
+                        resolve_type_expr_full(
+                            t,
+                            &self.analyzed.type_aliases,
+                            &self.analyzed.entity_registry,
+                            &self.analyzed.error_types,
+                            interner,
+                            &self.analyzed.name_table,
+                            module_id,
+                        )
+                    })
+                    .unwrap_or(Type::Void);
+
+                // Create signature without self parameter
+                let sig = self.create_static_method_signature(method);
+
+                // Function key: TypeName::methodName
+                let func_key = self
+                    .func_registry
+                    .intern_raw_qualified(func_module, &[type_name.as_str(), interner.resolve(method.name)]);
+                let display_name = self.func_registry.display(func_key);
+                let func_id = self.jit.declare_function(&display_name, &sig);
+                self.func_registry.set_func_id(func_key, func_id);
+
+                // Register in static_method_infos for codegen lookup
+                if let Some(type_def_id) = type_def_id {
+                    let method_name_id =
+                        method_name_id(self.analyzed, interner, method.name);
+                    if let Some(method_name_id) = method_name_id {
+                        self.static_method_infos.insert(
+                            (type_def_id, method_name_id),
+                            MethodInfo {
+                                func_key,
+                                return_type,
+                            },
+                        );
+                    }
+                }
             }
         }
     }
@@ -266,6 +344,193 @@ impl Compiler<'_> {
                 method_key,
             )?;
         }
+
+        // Compile static methods from statics block (if present)
+        if let Some(ref statics) = impl_block.statics {
+            let interner = self.analyzed.interner.clone();
+            self.compile_implement_statics(statics, &type_name, func_module, None, &interner)?;
+        }
+
+        Ok(())
+    }
+
+    /// Compile ONLY the static methods from an implement block (for module programs)
+    pub(super) fn compile_implement_statics_only(
+        &mut self,
+        impl_block: &ImplementBlock,
+        module_path: Option<&str>,
+        interner: &Interner,
+    ) -> Result<(), String> {
+        let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
+            return Ok(()); // Unsupported type
+        };
+        let func_module = if matches!(&impl_block.target_type, TypeExpr::Primitive(_)) {
+            self.func_registry.builtin_module()
+        } else {
+            self.func_registry.main_module()
+        };
+
+        if let Some(ref statics) = impl_block.statics {
+            self.compile_implement_statics(statics, &type_name, func_module, module_path, interner)?;
+        }
+        Ok(())
+    }
+
+    /// Compile static methods from an implement block's statics section
+    fn compile_implement_statics(
+        &mut self,
+        statics: &StaticsBlock,
+        type_name: &str,
+        func_module: ModuleId,
+        module_path: Option<&str>,
+        interner: &Interner,
+    ) -> Result<(), String> {
+        let module_id = self.analyzed.name_table.main_module();
+
+        for method in &statics.methods {
+            // Only compile methods with bodies
+            let body = match &method.body {
+                Some(body) => body,
+                None => continue,
+            };
+
+            // Look up the registered function
+            let method_name_str = interner.resolve(method.name);
+            let func_key = self
+                .func_registry
+                .intern_raw_qualified(func_module, &[type_name, method_name_str]);
+            let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+                format!(
+                    "Internal error: static method {}::{} not declared",
+                    type_name, method_name_str
+                )
+            })?;
+
+            // Resolve return type for context (needed for proper literal type inference)
+            let return_type = method
+                .return_type
+                .as_ref()
+                .map(|t| {
+                    resolve_type_expr_full(
+                        t,
+                        &self.analyzed.type_aliases,
+                        &self.analyzed.entity_registry,
+                        &self.analyzed.error_types,
+                        interner,
+                        &self.analyzed.name_table,
+                        module_id,
+                    )
+                })
+                .unwrap_or(Type::Void);
+
+            // Create signature (no self parameter)
+            let sig = self.create_static_method_signature(method);
+            self.jit.ctx.func.signature = sig;
+
+            // Collect param types
+            let param_types: Vec<types::Type> = method
+                .params
+                .iter()
+                .map(|p| {
+                    type_to_cranelift(
+                        &resolve_type_expr_full(
+                            &p.ty,
+                            &self.analyzed.type_aliases,
+                            &self.analyzed.entity_registry,
+                            &self.analyzed.error_types,
+                            interner,
+                            &self.analyzed.name_table,
+                            module_id,
+                        ),
+                        self.pointer_type,
+                    )
+                })
+                .collect();
+            let param_vole_types: Vec<Type> = method
+                .params
+                .iter()
+                .map(|p| {
+                    resolve_type_expr_full(
+                        &p.ty,
+                        &self.analyzed.type_aliases,
+                        &self.analyzed.entity_registry,
+                        &self.analyzed.error_types,
+                        interner,
+                        &self.analyzed.name_table,
+                        module_id,
+                    )
+                })
+                .collect();
+            let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+
+            // Get source file pointer before borrowing ctx.func
+            let source_file_ptr = self.source_file_ptr();
+
+            // Create function builder
+            let mut builder_ctx = FunctionBuilderContext::new();
+            {
+                let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+                let entry_block = builder.create_block();
+                builder.append_block_params_for_function_params(entry_block);
+                builder.switch_to_block(entry_block);
+
+                // Build variables map (no self for static methods)
+                let mut variables = HashMap::new();
+
+                // Get entry block params (just user params, no self)
+                let params = builder.block_params(entry_block).to_vec();
+
+                // Bind parameters
+                for (((name, ty), vole_ty), val) in param_names
+                    .iter()
+                    .zip(param_types.iter())
+                    .zip(param_vole_types.iter())
+                    .zip(params.iter())
+                {
+                    let var = builder.declare_var(*ty);
+                    builder.def_var(var, *val);
+                    variables.insert(*name, (var, vole_ty.clone()));
+                }
+
+                // Compile method body
+                let mut cf_ctx = ControlFlowCtx::new();
+                let mut ctx = CompileCtx {
+                    analyzed: self.analyzed,
+                    interner: &self.analyzed.interner,
+                    pointer_type: self.pointer_type,
+                    module: &mut self.jit.module,
+                    func_registry: &mut self.func_registry,
+                    source_file_ptr,
+                    globals: &self.globals,
+                    lambda_counter: &mut self.lambda_counter,
+                    type_metadata: &self.type_metadata,
+                    impl_method_infos: &self.impl_method_infos,
+                    static_method_infos: &self.static_method_infos,
+                    interface_vtables: &self.interface_vtables,
+                    current_function_return_type: Some(return_type.clone()),
+                    native_registry: &self.native_registry,
+                    current_module: module_path,
+                    generic_calls: &self.analyzed.generic_calls,
+                    monomorph_cache: &self.analyzed.monomorph_cache,
+                };
+                let terminated =
+                    compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
+
+                // Add implicit return if no explicit return
+                if !terminated {
+                    builder.ins().return_(&[]);
+                }
+
+                builder.seal_all_blocks();
+                builder.finalize();
+            }
+
+            // Define the function
+            self.jit.define_function(func_id)?;
+            self.jit.clear();
+        }
+
         Ok(())
     }
 

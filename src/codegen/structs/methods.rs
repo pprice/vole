@@ -708,9 +708,23 @@ impl Cg<'_, '_, '_> {
             .static_method_infos
             .get(&(type_def_id, method_name_id))
             .ok_or_else(|| {
+                let type_def = self.ctx.analyzed.entity_registry.get_type(type_def_id);
+                let type_name = self.ctx.analyzed.name_table.display(type_def.name_id);
+                let method_name = self.ctx.analyzed.name_table.display(method_name_id);
+                let registered_keys: Vec<_> = self
+                    .ctx
+                    .static_method_infos
+                    .keys()
+                    .map(|(tid, mid)| {
+                        let t = self.ctx.analyzed.entity_registry.get_type(*tid);
+                        let tn = self.ctx.analyzed.name_table.display(t.name_id);
+                        let mn = self.ctx.analyzed.name_table.display(*mid);
+                        format!("({}, {})", tn, mn)
+                    })
+                    .collect();
                 format!(
-                    "Static method not found: type_def_id={:?}, method_name_id={:?}",
-                    type_def_id, method_name_id
+                    "Static method not found: {}::{} (type_def_id={:?}, method_name_id={:?}). Registered: {:?}",
+                    type_name, method_name, type_def_id, method_name_id, registered_keys
                 )
             })?
             .clone();

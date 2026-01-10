@@ -9,7 +9,7 @@ mod stmt;
 
 use crate::errors::SemanticError;
 use crate::frontend::*;
-use crate::identity::{self, ModuleId, NameId, NameTable, Namer, Resolver};
+use crate::identity::{self, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
 use crate::module::ModuleLoader;
 use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
@@ -100,6 +100,9 @@ pub struct Analyzer {
     module_types: HashMap<String, ModuleType>,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     module_programs: HashMap<String, (Program, Interner)>,
+    /// Expression types for module programs (keyed by module path -> NodeId -> Type)
+    /// Stored separately since NodeIds are per-program and can't be merged into main expr_types
+    pub module_expr_types: HashMap<String, HashMap<NodeId, Type>>,
     /// Flag to prevent recursive prelude loading
     loading_prelude: bool,
     /// Generic function definitions (with type params)
@@ -152,6 +155,7 @@ impl Analyzer {
             module_loader: ModuleLoader::new(),
             module_types: HashMap::new(),
             module_programs: HashMap::new(),
+            module_expr_types: HashMap::new(),
             loading_prelude: false,
             generic_functions: HashMap::new(),
             generic_records: HashMap::new(),
@@ -163,6 +167,9 @@ impl Analyzer {
             well_known: WellKnownTypes::new(),
             entity_registry: EntityRegistry::new(),
         };
+
+        // Register primitives in EntityRegistry so they can have static methods
+        analyzer.entity_registry.register_primitives(&analyzer.name_table);
 
         // Register built-in interfaces and implementations
         // NOTE: This is temporary - will eventually come from stdlib/traits.void
@@ -404,6 +411,7 @@ impl Analyzer {
             module_loader: ModuleLoader::new(),
             module_types: HashMap::new(),
             module_programs: HashMap::new(),
+            module_expr_types: HashMap::new(),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
             generic_functions: HashMap::new(),
             generic_records: HashMap::new(),
@@ -422,7 +430,8 @@ impl Analyzer {
         sub_analyzer.entity_registry = self.entity_registry.clone();
 
         // Analyze the prelude file
-        if sub_analyzer.analyze(&program, &prelude_interner).is_ok() {
+        let analyze_result = sub_analyzer.analyze(&program, &prelude_interner);
+        if analyze_result.is_ok() {
             // Merge the entity registry (types, methods, fields)
             self.entity_registry.merge(&sub_analyzer.entity_registry);
             // Merge the implement registry
@@ -440,6 +449,13 @@ impl Analyzer {
             // Keep name/type tables in sync with prelude interned ids.
             self.name_table = sub_analyzer.name_table;
             self.type_table = sub_analyzer.type_table;
+
+            // Store prelude program for codegen (needed for implement block compilation)
+            self.module_programs
+                .insert(import_path.to_string(), (program, prelude_interner));
+            // Store module-specific expr_types separately (NodeIds are per-program)
+            self.module_expr_types
+                .insert(import_path.to_string(), sub_analyzer.expr_types);
         }
         // Silently ignore analysis errors in prelude
     }
@@ -625,6 +641,7 @@ impl Analyzer {
         HashMap<Symbol, Vec<Symbol>>,
         HashMap<Symbol, ErrorTypeInfo>,
         HashMap<String, (Program, Interner)>,
+        HashMap<String, HashMap<NodeId, Type>>,
         HashMap<Symbol, GenericFuncDef>,
         HashMap<Symbol, GenericRecordDef>,
         MonomorphCache,
@@ -643,6 +660,7 @@ impl Analyzer {
             self.type_implements,
             self.error_types,
             self.module_programs,
+            self.module_expr_types,
             self.generic_functions,
             self.generic_records,
             self.monomorph_cache,
@@ -1011,11 +1029,28 @@ impl Analyzer {
                 Decl::Implement(impl_block) => {
                     // Check static methods in implement blocks
                     if let Some(ref statics) = impl_block.statics {
-                        // Get the target type name
-                        if let TypeExpr::Named(type_name) = &impl_block.target_type {
-                            for method in &statics.methods {
-                                self.check_static_method(method, *type_name, interner)?;
+                        match &impl_block.target_type {
+                            TypeExpr::Named(type_name) => {
+                                for method in &statics.methods {
+                                    self.check_static_method(method, *type_name, interner)?;
+                                }
                             }
+                            TypeExpr::Primitive(prim) => {
+                                // Get TypeDefId for primitive
+                                let name_id = self.name_table.primitives.from_ast(*prim);
+                                if let Some(type_def_id) =
+                                    self.entity_registry.type_by_name(name_id)
+                                {
+                                    for method in &statics.methods {
+                                        self.check_static_method_with_type_def(
+                                            method,
+                                            type_def_id,
+                                            interner,
+                                        )?;
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -1420,6 +1455,74 @@ impl Analyzer {
             .resolver(interner)
             .resolve_type(type_name, &self.entity_registry)
             .expect("type should be registered in EntityRegistry");
+        let method_name_id = self.method_name_id(method.name, interner);
+        let method_id = self
+            .entity_registry
+            .find_static_method_on_type(type_def_id, method_name_id)
+            .expect("static method should be registered in EntityRegistry");
+        let method_def = self.entity_registry.get_method(method_id);
+        let method_type = method_def.signature.clone();
+        let return_type = *method_type.return_type.clone();
+        self.current_function_return = Some(return_type.clone());
+
+        // Set error type context if this is a fallible method
+        if let Type::Fallible(ref ft) = return_type {
+            self.current_function_error_type = Some((*ft.error_type).clone());
+        } else {
+            self.current_function_error_type = None;
+        }
+
+        // Set generator context if return type is Iterator<T>
+        self.current_generator_element_type =
+            self.extract_iterator_element_type(&return_type, interner);
+
+        // Mark that we're in a static method (for self-usage detection)
+        let method_name_str = interner.resolve(method.name).to_string();
+        self.current_static_method = Some(method_name_str);
+
+        // Create scope WITHOUT 'self'
+        let parent_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(parent_scope);
+
+        // Add parameters (no 'self' for static methods)
+        for (param, ty) in method.params.iter().zip(method_type.params.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty.clone(),
+                    mutable: false,
+                },
+            );
+        }
+
+        // Check body
+        self.check_block(body, interner)?;
+
+        // Restore scope and context
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+        self.current_function_return = None;
+        self.current_function_error_type = None;
+        self.current_generator_element_type = None;
+        self.current_static_method = None;
+
+        Ok(())
+    }
+
+    /// Check a static method body with the type already resolved to a TypeDefId.
+    /// This is used for primitive types where we can't resolve via Symbol.
+    fn check_static_method_with_type_def(
+        &mut self,
+        method: &InterfaceMethod,
+        type_def_id: TypeDefId,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        // Only check methods with bodies
+        let Some(ref body) = method.body else {
+            return Ok(());
+        };
+
         let method_name_id = self.method_name_id(method.name, interner);
         let method_id = self
             .entity_registry

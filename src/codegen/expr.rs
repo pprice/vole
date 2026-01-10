@@ -34,11 +34,10 @@ impl Cg<'_, '_, '_> {
         match &expr.kind {
             ExprKind::IntLiteral(n) => {
                 // Look up inferred type from semantic analysis for bidirectional type inference
+                // Uses get_expr_type helper to check module-specific expr_types when compiling prelude
                 let vole_type = self
                     .ctx
-                    .analyzed
-                    .expr_types
-                    .get(&expr.id)
+                    .get_expr_type(&expr.id)
                     .cloned()
                     .unwrap_or(Type::I64);
                 Ok(self.int_const(*n, vole_type))
@@ -110,7 +109,7 @@ impl Cg<'_, '_, '_> {
             let ty = self.builder.func.dfg.value_type(val);
 
             // Check for narrowed type from semantic analysis
-            if let Some(narrowed_type) = self.ctx.analyzed.expr_types.get(&expr.id)
+            if let Some(narrowed_type) = self.ctx.get_expr_type(&expr.id)
                 && matches!(vole_type, Type::Union(_))
                 && !matches!(narrowed_type, Type::Union(_))
             {
@@ -144,7 +143,7 @@ impl Cg<'_, '_, '_> {
                 }
             }
             Ok(value)
-        } else if let Some(Type::Function(func_type)) = self.ctx.analyzed.expr_types.get(&expr.id) {
+        } else if let Some(Type::Function(func_type)) = self.ctx.get_expr_type(&expr.id) {
             // Identifier refers to a named function - create a closure wrapper
             self.function_reference(sym, func_type.clone())
         } else {

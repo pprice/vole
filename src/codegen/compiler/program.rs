@@ -242,6 +242,13 @@ impl Compiler<'_> {
                 }
             }
 
+            // Register implement blocks (including static methods)
+            for decl in &program.declarations {
+                if let Decl::Implement(impl_block) = decl {
+                    self.register_implement_block_with_interner(impl_block, module_interner);
+                }
+            }
+
             // Second pass: compile pure Vole function bodies
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
@@ -260,6 +267,20 @@ impl Compiler<'_> {
                         module_interner,
                         &module_globals,
                     )?;
+                }
+            }
+
+            // Compile ONLY static methods from implement blocks in module programs
+            // Regular implement methods are handled via external FFI or were already compiled
+            for decl in &program.declarations {
+                if let Decl::Implement(impl_block) = decl {
+                    if impl_block.statics.is_some() {
+                        self.compile_implement_statics_only(
+                            impl_block,
+                            Some(module_path),
+                            module_interner,
+                        )?;
+                    }
                 }
             }
         }

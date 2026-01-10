@@ -85,6 +85,26 @@ impl Primitives {
             _ => None,
         }
     }
+
+    /// Map AST PrimitiveType to NameId
+    pub fn from_ast(&self, prim: crate::frontend::ast::PrimitiveType) -> NameId {
+        use crate::frontend::ast::PrimitiveType;
+        match prim {
+            PrimitiveType::I8 => self.i8,
+            PrimitiveType::I16 => self.i16,
+            PrimitiveType::I32 => self.i32,
+            PrimitiveType::I64 => self.i64,
+            PrimitiveType::I128 => self.i128,
+            PrimitiveType::U8 => self.u8,
+            PrimitiveType::U16 => self.u16,
+            PrimitiveType::U32 => self.u32,
+            PrimitiveType::U64 => self.u64,
+            PrimitiveType::F32 => self.f32,
+            PrimitiveType::F64 => self.f64,
+            PrimitiveType::Bool => self.bool,
+            PrimitiveType::String => self.string,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
