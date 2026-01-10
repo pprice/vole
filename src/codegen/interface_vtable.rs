@@ -15,8 +15,20 @@ use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
-use crate::sema::interface_registry::InterfaceMethodDef;
 use crate::sema::{EntityRegistry, FunctionType, Type};
+
+/// Local struct for vtable method info (replaces InterfaceMethodDef dependency)
+#[derive(Debug, Clone)]
+struct VtableMethodInfo {
+    /// String name for cross-interner lookups
+    name_str: String,
+    /// Parameter types (after type substitution)
+    params: Vec<Type>,
+    /// Return type (after type substitution)
+    return_type: Type,
+    /// Whether this method has a default implementation
+    has_default: bool,
+}
 
 pub(crate) fn iface_debug_enabled() -> bool {
     std::env::var_os("VOLE_DEBUG_IFACE").is_some()
@@ -146,14 +158,13 @@ impl InterfaceVtableRegistry {
             &ctx.analyzed.entity_registry,
         )?;
 
-        // Build InterfaceMethodDef from EntityRegistry's MethodDef for compatibility
-        let methods: Vec<InterfaceMethodDef> = method_ids
+        // Build VtableMethodInfo from EntityRegistry's MethodDef
+        let methods: Vec<VtableMethodInfo> = method_ids
             .iter()
             .map(|&method_id| {
                 let method = ctx.analyzed.entity_registry.get_method(method_id);
                 let name_str = ctx.analyzed.name_table.display(method.name_id);
-                InterfaceMethodDef {
-                    name: interface_name, // Placeholder - not used in vtable building
+                VtableMethodInfo {
                     name_str,
                     params: method
                         .signature
@@ -700,7 +711,7 @@ fn resolve_vtable_target(
     ctx: &CompileCtx,
     interface_name_id: NameId,
     concrete_type: &Type,
-    method_def: &InterfaceMethodDef,
+    method_def: &VtableMethodInfo,
 ) -> Result<VtableMethodTarget, String> {
     if let Type::Function(func_type) = concrete_type {
         return Ok(VtableMethodTarget::Function {

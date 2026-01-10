@@ -5,6 +5,24 @@ use super::*;
 use crate::frontend::ast::TypeExpr;
 use crate::sema::entity_defs::TypeDefKind;
 
+/// Definition of an interface field requirement (local to declarations)
+#[derive(Debug, Clone)]
+struct InterfaceFieldDef {
+    name: Symbol,
+    ty: Type,
+}
+
+/// Definition of an interface method requirement (local to declarations)
+#[derive(Debug, Clone)]
+struct InterfaceMethodDef {
+    name: Symbol,
+    /// String name for cross-interner lookups
+    name_str: String,
+    params: Vec<Type>,
+    return_type: Type,
+    has_default: bool,
+}
+
 /// Extract the base interface name from a TypeExpr.
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
 fn interface_base_name(type_expr: &TypeExpr) -> Option<Symbol> {
@@ -789,8 +807,7 @@ impl Analyzer {
             .name_table
             .intern_raw(self.current_module, &[&name_str]);
 
-        // Register in EntityRegistry BEFORE moving methods into InterfaceDef
-        // (parallel migration)
+        // Register in EntityRegistry
         let entity_type_id = self.entity_registry.register_type(
             name_id,
             TypeDefKind::Interface,
@@ -881,23 +898,6 @@ impl Analyzer {
                 i,
             );
         }
-
-        let def = InterfaceDef {
-            name: interface_decl.name,
-            name_id,
-            name_str,
-            type_params: interface_decl
-                .type_params
-                .iter()
-                .map(|param| param.name)
-                .collect(),
-            extends: interface_decl.extends.clone(),
-            fields,
-            methods,
-            external_methods,
-        };
-
-        self.interface_registry.register(def);
 
         self.register_named_type(
             interface_decl.name,

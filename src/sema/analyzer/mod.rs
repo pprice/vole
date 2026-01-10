@@ -20,9 +20,6 @@ use crate::sema::generic::{
 use crate::sema::implement_registry::{
     ExternalMethodInfo, ImplementRegistry, MethodImpl, PrimitiveTypeId, TypeId,
 };
-use crate::sema::interface_registry::{
-    InterfaceDef, InterfaceFieldDef, InterfaceMethodDef, InterfaceRegistry,
-};
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::types::{ConstantValue, ModuleType};
 use crate::sema::{
@@ -94,8 +91,6 @@ pub struct Analyzer {
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their resolved types, including narrowed types
     expr_types: HashMap<NodeId, Type>,
-    /// Interface definitions registry (DEPRECATED - being replaced by EntityRegistry)
-    pub interface_registry: InterfaceRegistry,
     /// Methods added via implement blocks
     pub implement_registry: ImplementRegistry,
     /// Resolved method calls for codegen
@@ -156,7 +151,6 @@ impl Analyzer {
             error_types: HashMap::new(),
             methods: HashMap::new(),
             expr_types: HashMap::new(),
-            interface_registry: InterfaceRegistry::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             type_implements: HashMap::new(),
@@ -408,7 +402,6 @@ impl Analyzer {
             error_types: HashMap::new(),
             methods: HashMap::new(),
             expr_types: HashMap::new(),
-            interface_registry: InterfaceRegistry::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             type_implements: HashMap::new(),
@@ -427,16 +420,13 @@ impl Analyzer {
             entity_registry: EntityRegistry::new(),
         };
 
-        // Copy existing interface registry so prelude files can reference earlier definitions
-        sub_analyzer.interface_registry = self.interface_registry.clone();
+        // Copy existing registries so prelude files can reference earlier definitions
         sub_analyzer.name_table = self.name_table.clone();
         sub_analyzer.type_table = self.type_table.clone();
+        sub_analyzer.entity_registry = self.entity_registry.clone();
 
         // Analyze the prelude file
         if sub_analyzer.analyze(&program, &prelude_interner).is_ok() {
-            // Merge the interface registry
-            self.interface_registry
-                .merge(&sub_analyzer.interface_registry);
             // Merge the entity registry (types, methods, fields)
             self.entity_registry.merge(&sub_analyzer.entity_registry);
             // Merge the implement registry
@@ -597,7 +587,6 @@ impl Analyzer {
         MethodResolutions,
         ImplementRegistry,
         HashMap<(NameId, NameId), FunctionType>,
-        InterfaceRegistry,
         HashMap<Symbol, Vec<Symbol>>,
         HashMap<Symbol, ErrorTypeInfo>,
         HashMap<String, (Program, Interner)>,
@@ -617,7 +606,6 @@ impl Analyzer {
             self.method_resolutions,
             self.implement_registry,
             self.methods,
-            self.interface_registry,
             self.type_implements,
             self.error_types,
             self.module_programs,

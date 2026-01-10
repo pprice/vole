@@ -7,7 +7,6 @@ use crate::sema::ImplementRegistry;
 use crate::sema::TypeTable;
 use crate::sema::WellKnownTypes;
 use crate::sema::generic::MonomorphCache;
-use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::resolution::MethodResolutions;
 
 fn compile_and_run(source: &str) -> i64 {
@@ -23,7 +22,6 @@ fn compile_and_run(source: &str) -> i64 {
         method_resolutions: MethodResolutions::new(),
         implement_registry: ImplementRegistry::new(),
         methods: HashMap::new(),
-        interface_registry: InterfaceRegistry::new(),
         type_implements: HashMap::new(),
         error_types: HashMap::new(),
         module_programs: HashMap::new(),

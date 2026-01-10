@@ -14,7 +14,6 @@ use crate::frontend::{AstPrinter, Interner, NodeId, ParseError, Parser, Symbol, 
 use crate::identity::{NameId, NameTable};
 use crate::runtime::set_stdout_capture;
 use crate::sema::generic::{GenericFuncDef, GenericRecordDef, MonomorphCache, MonomorphKey};
-use crate::sema::interface_registry::InterfaceRegistry;
 use crate::sema::{
     Analyzer, EntityRegistry, ErrorTypeInfo, FunctionType, ImplementRegistry, MethodResolutions,
     Type, TypeError, TypeTable, WellKnownTypes,
@@ -30,7 +29,6 @@ pub struct AnalyzedProgram {
     pub method_resolutions: MethodResolutions,
     pub implement_registry: ImplementRegistry,
     pub methods: HashMap<(NameId, NameId), FunctionType>,
-    pub interface_registry: InterfaceRegistry,
     /// Tracks which interfaces each type implements: type_name -> [interface_names]
     pub type_implements: HashMap<Symbol, Vec<Symbol>>,
     /// Error type definitions
@@ -169,7 +167,6 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         method_resolutions,
         implement_registry,
         methods,
-        interface_registry,
         type_implements,
         error_types,
         module_programs,
@@ -191,7 +188,6 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         method_resolutions,
         implement_registry,
         methods,
-        interface_registry,
         type_implements,
         error_types,
         module_programs,
@@ -382,7 +378,6 @@ pub fn run_captured<W: Write + Send + 'static>(
         method_resolutions,
         implement_registry,
         methods,
-        interface_registry,
         type_implements,
         error_types,
         module_programs,
@@ -405,7 +400,6 @@ pub fn run_captured<W: Write + Send + 'static>(
         method_resolutions,
         implement_registry,
         methods,
-        interface_registry,
         type_implements,
         error_types,
         module_programs,
