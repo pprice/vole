@@ -20,6 +20,7 @@ use crate::sema::resolution::ResolvedMethod;
 use crate::sema::{FunctionType, Type};
 
 impl Cg<'_, '_, '_> {
+    #[tracing::instrument(skip(self, mc), fields(method = %self.ctx.interner.resolve(mc.method)))]
     pub fn method_call(
         &mut self,
         mc: &MethodCallExpr,

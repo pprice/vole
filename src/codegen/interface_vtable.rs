@@ -58,6 +58,7 @@ impl InterfaceVtableRegistry {
         Self::default()
     }
 
+    #[tracing::instrument(skip(self, ctx, interface_type_args), fields(interface = %ctx.interner.resolve(interface_name)))]
     pub(crate) fn get_or_create(
         &mut self,
         ctx: &mut CompileCtx,
@@ -544,6 +545,7 @@ fn collect_interface_methods_inner_entity_registry(
     }
 }
 
+#[tracing::instrument(skip(builder, ctx, value), fields(interface_type = ?interface_type))]
 pub(crate) fn box_interface_value(
     builder: &mut FunctionBuilder,
     ctx: &mut CompileCtx,

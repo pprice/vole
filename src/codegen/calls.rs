@@ -162,6 +162,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a function call
+    #[tracing::instrument(skip(self, call))]
     pub fn call(
         &mut self,
         call: &CallExpr,
