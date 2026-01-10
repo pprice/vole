@@ -24,6 +24,7 @@ impl Analyzer {
     /// This method attempts to use EntityRegistry for method resolution,
     /// falling back to the traditional approach when EntityRegistry
     /// doesn't have the type registered.
+    #[tracing::instrument(skip(self, interner), fields(method = %interner.resolve(method_name)))]
     pub fn resolve_method_via_entity_registry(
         &mut self,
         object_type: &Type,

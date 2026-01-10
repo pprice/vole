@@ -784,6 +784,7 @@ impl Analyzer {
         self.functions_by_name.get(name).cloned()
     }
 
+    #[tracing::instrument(skip(self, program, interner))]
     pub fn analyze(
         &mut self,
         program: &Program,
@@ -1478,6 +1479,7 @@ impl Analyzer {
 
     /// Analyze an imported module and return its type
     #[allow(clippy::result_unit_err)] // Error is added to self.errors vector
+    #[tracing::instrument(skip(self, span, _interner), fields(path = %import_path))]
     pub fn analyze_module(
         &mut self,
         import_path: &str,
