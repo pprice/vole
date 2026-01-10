@@ -8,16 +8,13 @@ use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{TypeParamScope, substitute_type};
 use crate::sema::types::{
-    ClassType, ErrorTypeInfo, FallibleType, FunctionType, InterfaceMethodType, InterfaceType,
-    RecordType, Type,
+    ErrorTypeInfo, FallibleType, FunctionType, InterfaceMethodType, InterfaceType, Type,
 };
 use std::collections::HashMap;
 
 /// Context needed for type resolution
 pub struct TypeResolutionContext<'a> {
     pub type_aliases: &'a HashMap<Symbol, Type>,
-    pub classes: &'a HashMap<Symbol, ClassType>,
-    pub records: &'a HashMap<Symbol, RecordType>,
     pub error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
     pub entity_registry: &'a EntityRegistry,
     pub interner: &'a Interner,
@@ -107,8 +104,6 @@ impl<'a> TypeResolutionContext<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         type_aliases: &'a HashMap<Symbol, Type>,
-        classes: &'a HashMap<Symbol, ClassType>,
-        records: &'a HashMap<Symbol, RecordType>,
         error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
         entity_registry: &'a EntityRegistry,
         interner: &'a Interner,
@@ -117,8 +112,6 @@ impl<'a> TypeResolutionContext<'a> {
     ) -> Self {
         Self {
             type_aliases,
-            classes,
-            records,
             error_types,
             entity_registry,
             interner,
@@ -133,8 +126,6 @@ impl<'a> TypeResolutionContext<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn with_type_params(
         type_aliases: &'a HashMap<Symbol, Type>,
-        classes: &'a HashMap<Symbol, ClassType>,
-        records: &'a HashMap<Symbol, RecordType>,
         error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
         entity_registry: &'a EntityRegistry,
         interner: &'a Interner,
@@ -144,8 +135,6 @@ impl<'a> TypeResolutionContext<'a> {
     ) -> Self {
         Self {
             type_aliases,
-            classes,
-            records,
             error_types,
             entity_registry,
             interner,
@@ -175,10 +164,49 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
             // Look up type alias first
             if let Some(aliased) = ctx.type_aliases.get(sym) {
                 aliased.clone()
-            } else if let Some(record) = ctx.records.get(sym) {
-                Type::Record(record.clone())
-            } else if let Some(class) = ctx.classes.get(sym) {
-                Type::Class(class.clone())
+            } else if let Some(type_id) = ctx.entity_registry.type_by_symbol(
+                *sym,
+                ctx.interner,
+                ctx.name_table,
+                ctx.module_id,
+            ) {
+                // Look up via EntityRegistry
+                let type_def = ctx.entity_registry.get_type(type_id);
+                match type_def.kind {
+                    TypeDefKind::Record => {
+                        if let Some(record) = ctx
+                            .entity_registry
+                            .build_record_type(type_id, ctx.name_table)
+                        {
+                            Type::Record(record)
+                        } else {
+                            Type::Error
+                        }
+                    }
+                    TypeDefKind::Class => {
+                        if let Some(class) = ctx
+                            .entity_registry
+                            .build_class_type(type_id, ctx.name_table)
+                        {
+                            Type::Class(class)
+                        } else {
+                            Type::Error
+                        }
+                    }
+                    TypeDefKind::Interface => {
+                        // Use interface_instance for proper method resolution
+                        interface_instance(*sym, Vec::new(), ctx).unwrap_or(Type::Error)
+                    }
+                    TypeDefKind::ErrorType => {
+                        // Fall through to ctx.error_types lookup for proper ErrorTypeInfo
+                        if let Some(error_info) = ctx.error_types.get(sym) {
+                            Type::ErrorType(error_info.clone())
+                        } else {
+                            Type::Error
+                        }
+                    }
+                    TypeDefKind::Primitive => Type::Error,
+                }
             } else if let Some(interface) = interface_instance(*sym, Vec::new(), ctx) {
                 interface
             } else if let Some(error_info) = ctx.error_types.get(sym) {
@@ -277,10 +305,6 @@ mod tests {
 
         static EMPTY_ALIASES: std::sync::LazyLock<HashMap<Symbol, Type>> =
             std::sync::LazyLock::new(HashMap::new);
-        static EMPTY_CLASSES: std::sync::LazyLock<HashMap<Symbol, ClassType>> =
-            std::sync::LazyLock::new(HashMap::new);
-        static EMPTY_RECORDS: std::sync::LazyLock<HashMap<Symbol, RecordType>> =
-            std::sync::LazyLock::new(HashMap::new);
         static EMPTY_ERRORS: std::sync::LazyLock<HashMap<Symbol, ErrorTypeInfo>> =
             std::sync::LazyLock::new(HashMap::new);
         static EMPTY_ENTITY_REGISTRY: std::sync::LazyLock<EntityRegistry> =
@@ -290,8 +314,6 @@ mod tests {
         let module_id = name_table.main_module();
         let mut ctx = TypeResolutionContext::new(
             &EMPTY_ALIASES,
-            &EMPTY_CLASSES,
-            &EMPTY_RECORDS,
             &EMPTY_ERRORS,
             &EMPTY_ENTITY_REGISTRY,
             interner,
@@ -379,10 +401,6 @@ mod tests {
 
         static EMPTY_ALIASES: std::sync::LazyLock<HashMap<Symbol, Type>> =
             std::sync::LazyLock::new(HashMap::new);
-        static EMPTY_CLASSES: std::sync::LazyLock<HashMap<Symbol, ClassType>> =
-            std::sync::LazyLock::new(HashMap::new);
-        static EMPTY_RECORDS: std::sync::LazyLock<HashMap<Symbol, RecordType>> =
-            std::sync::LazyLock::new(HashMap::new);
         static EMPTY_ERRORS: std::sync::LazyLock<HashMap<Symbol, ErrorTypeInfo>> =
             std::sync::LazyLock::new(HashMap::new);
         static EMPTY_ENTITY_REGISTRY: std::sync::LazyLock<EntityRegistry> =
@@ -397,8 +415,6 @@ mod tests {
         let module_id = name_table.main_module();
         let mut ctx = TypeResolutionContext::new(
             &EMPTY_ALIASES,
-            &EMPTY_CLASSES,
-            &EMPTY_RECORDS,
             &EMPTY_ERRORS,
             &EMPTY_ENTITY_REGISTRY,
             &TEST_INTERNER,

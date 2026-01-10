@@ -36,27 +36,79 @@ impl Analyzer {
                 None
             }
             Pattern::Identifier { name, span } => {
-                // Check if this identifier is a known class or record type
-                if let Some(class_type) = self.classes.get(name).cloned() {
-                    // This is a type pattern for a class
-                    let pattern_type = Type::Class(class_type);
-                    self.check_type_pattern_compatibility(
-                        &pattern_type,
-                        scrutinee_type,
-                        *span,
-                        interner,
-                    );
-                    Some(pattern_type)
-                } else if let Some(record_type) = self.records.get(name).cloned() {
-                    // This is a type pattern for a record
-                    let pattern_type = Type::Record(record_type);
-                    self.check_type_pattern_compatibility(
-                        &pattern_type,
-                        scrutinee_type,
-                        *span,
-                        interner,
-                    );
-                    Some(pattern_type)
+                // Check if this identifier is a known class or record type via EntityRegistry
+                let type_id_opt = self.entity_registry.type_by_symbol(
+                    *name,
+                    interner,
+                    &self.name_table,
+                    self.current_module,
+                );
+
+                if let Some(type_id) = type_id_opt {
+                    let type_def = self.entity_registry.get_type(type_id);
+                    match type_def.kind {
+                        TypeDefKind::Class => {
+                            if let Some(class_type) = self
+                                .entity_registry
+                                .build_class_type(type_id, &self.name_table)
+                            {
+                                let pattern_type = Type::Class(class_type);
+                                self.check_type_pattern_compatibility(
+                                    &pattern_type,
+                                    scrutinee_type,
+                                    *span,
+                                    interner,
+                                );
+                                Some(pattern_type)
+                            } else {
+                                // Regular identifier binding pattern (fallback)
+                                self.scope.define(
+                                    *name,
+                                    Variable {
+                                        ty: scrutinee_type.clone(),
+                                        mutable: false,
+                                    },
+                                );
+                                None
+                            }
+                        }
+                        TypeDefKind::Record => {
+                            if let Some(record_type) = self
+                                .entity_registry
+                                .build_record_type(type_id, &self.name_table)
+                            {
+                                let pattern_type = Type::Record(record_type);
+                                self.check_type_pattern_compatibility(
+                                    &pattern_type,
+                                    scrutinee_type,
+                                    *span,
+                                    interner,
+                                );
+                                Some(pattern_type)
+                            } else {
+                                // Regular identifier binding pattern (fallback)
+                                self.scope.define(
+                                    *name,
+                                    Variable {
+                                        ty: scrutinee_type.clone(),
+                                        mutable: false,
+                                    },
+                                );
+                                None
+                            }
+                        }
+                        _ => {
+                            // Regular identifier binding pattern for other type kinds
+                            self.scope.define(
+                                *name,
+                                Variable {
+                                    ty: scrutinee_type.clone(),
+                                    mutable: false,
+                                },
+                            );
+                            None
+                        }
+                    }
                 } else {
                     // Regular identifier binding pattern
                     self.scope.define(
@@ -177,7 +229,11 @@ impl Analyzer {
                 Pattern::Wildcard(_) => true,
                 Pattern::Identifier { name, .. } => {
                     // Only a catch-all if NOT a known type name
-                    !self.classes.contains_key(name) && !self.records.contains_key(name)
+                    let is_type = self
+                        .entity_registry
+                        .type_by_symbol(*name, interner, &self.name_table, self.current_module)
+                        .is_some();
+                    !is_type
                 }
                 _ => false,
             }
@@ -194,15 +250,25 @@ impl Analyzer {
             for arm in arms {
                 let pattern_type = match &arm.pattern {
                     Pattern::Type { type_expr, .. } => Some(self.resolve_type(type_expr, interner)),
-                    Pattern::Identifier { name, .. } => self
-                        .classes
-                        .get(name)
-                        .map(|class_type| Type::Class(class_type.clone()))
-                        .or_else(|| {
-                            self.records
-                                .get(name)
-                                .map(|record_type| Type::Record(record_type.clone()))
-                        }),
+                    Pattern::Identifier { name, .. } => {
+                        // Look up via EntityRegistry
+                        self.entity_registry
+                            .type_by_symbol(*name, interner, &self.name_table, self.current_module)
+                            .and_then(|type_id| {
+                                let type_def = self.entity_registry.get_type(type_id);
+                                match type_def.kind {
+                                    TypeDefKind::Class => self
+                                        .entity_registry
+                                        .build_class_type(type_id, &self.name_table)
+                                        .map(Type::Class),
+                                    TypeDefKind::Record => self
+                                        .entity_registry
+                                        .build_record_type(type_id, &self.name_table)
+                                        .map(Type::Record),
+                                    _ => None,
+                                }
+                            })
+                    }
                     _ => None,
                 };
 

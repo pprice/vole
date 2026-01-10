@@ -11,12 +11,12 @@ use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext};
 use crate::errors::{LexerError, render_to_stderr, render_to_writer};
 use crate::frontend::{AstPrinter, Interner, NodeId, ParseError, Parser, Symbol, ast::Program};
-use crate::identity::{NameId, NameTable};
+use crate::identity::NameTable;
 use crate::runtime::set_stdout_capture;
 use crate::sema::generic::{GenericFuncDef, GenericRecordDef, MonomorphCache, MonomorphKey};
 use crate::sema::{
-    Analyzer, EntityRegistry, ErrorTypeInfo, FunctionType, ImplementRegistry, MethodResolutions,
-    Type, TypeError, TypeTable, WellKnownTypes,
+    Analyzer, EntityRegistry, ErrorTypeInfo, ImplementRegistry, MethodResolutions, Type, TypeError,
+    TypeTable, WellKnownTypes,
 };
 use crate::transforms;
 
@@ -28,7 +28,6 @@ pub struct AnalyzedProgram {
     pub expr_types: HashMap<NodeId, Type>,
     pub method_resolutions: MethodResolutions,
     pub implement_registry: ImplementRegistry,
-    pub methods: HashMap<(NameId, NameId), FunctionType>,
     /// Tracks which interfaces each type implements: type_name -> [interface_names]
     pub type_implements: HashMap<Symbol, Vec<Symbol>>,
     /// Error type definitions
@@ -166,7 +165,6 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         expr_types,
         method_resolutions,
         implement_registry,
-        methods,
         type_implements,
         error_types,
         module_programs,
@@ -187,7 +185,6 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         expr_types,
         method_resolutions,
         implement_registry,
-        methods,
         type_implements,
         error_types,
         module_programs,
@@ -377,7 +374,6 @@ pub fn run_captured<W: Write + Send + 'static>(
         expr_types,
         method_resolutions,
         implement_registry,
-        methods,
         type_implements,
         error_types,
         module_programs,
@@ -399,7 +395,6 @@ pub fn run_captured<W: Write + Send + 'static>(
         expr_types,
         method_resolutions,
         implement_registry,
-        methods,
         type_implements,
         error_types,
         module_programs,

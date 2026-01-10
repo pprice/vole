@@ -148,8 +148,6 @@ impl Analyzer {
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext::with_type_params(
                 &self.type_aliases,
-                &self.classes,
-                &self.records,
                 &self.error_types,
                 &self.entity_registry,
                 interner,
@@ -183,21 +181,7 @@ impl Analyzer {
         let name_id = self
             .name_table
             .intern(self.current_module, &[class.name], interner);
-        let fields: Vec<StructField> = class
-            .fields
-            .iter()
-            .enumerate()
-            .map(|(i, f)| StructField {
-                name: interner.resolve(f.name).to_string(),
-                ty: self.resolve_type(&f.ty, interner),
-                slot: i,
-            })
-            .collect();
-        let class_type = ClassType { name_id, fields };
-        self.classes.insert(class.name, class_type.clone());
-        self.register_named_type(class.name, Type::Class(class_type.clone()), interner);
-
-        // Register in EntityRegistry (parallel migration)
+        // Register in EntityRegistry (single source of truth)
         let entity_type_id =
             self.entity_registry
                 .register_type(name_id, TypeDefKind::Class, self.current_module);
@@ -221,6 +205,14 @@ impl Analyzer {
                 field_ty,
                 i,
             );
+        }
+
+        // Register in type_table for type resolution
+        if let Some(class_type) = self
+            .entity_registry
+            .build_class_type(entity_type_id, &self.name_table)
+        {
+            self.register_named_type(class.name, Type::Class(class_type), interner);
         }
 
         // Register and validate implements list
@@ -263,35 +255,7 @@ impl Analyzer {
             self.type_implements.insert(class.name, iface_names);
         }
 
-        // Register methods (with Self type resolved to the class type)
-        let self_type = Some(Type::Class(class_type));
-        for method in &class.methods {
-            let params: Vec<Type> = method
-                .params
-                .iter()
-                .map(|p| self.resolve_type_with_self(&p.ty, interner, self_type.clone()))
-                .collect();
-            let return_type = method
-                .return_type
-                .as_ref()
-                .map(|t| self.resolve_type_with_self(t, interner, self_type.clone()))
-                .unwrap_or(Type::Void);
-            let type_id = self
-                .name_table
-                .name_id(self.current_module, &[class.name], interner)
-                .expect("class name_id should be registered");
-            let method_id = self.method_name_id(method.name, interner);
-            self.methods.insert(
-                (type_id, method_id),
-                FunctionType {
-                    params,
-                    return_type: Box::new(return_type),
-                    is_closure: false,
-                },
-            );
-        }
-
-        // Register methods in EntityRegistry
+        // Register methods in EntityRegistry (single source of truth)
         let builtin_module = self.name_table.builtin_module();
         for method in &class.methods {
             let method_name_str = interner.resolve(method.name);
@@ -334,29 +298,7 @@ impl Analyzer {
 
         // Handle generic records vs non-generic records
         if record.type_params.is_empty() {
-            // Non-generic record: resolve types normally
-            let fields: Vec<StructField> = record
-                .fields
-                .iter()
-                .enumerate()
-                .map(|(i, f)| {
-                    let ty = self.resolve_type(&f.ty, interner);
-                    StructField {
-                        name: interner.resolve(f.name).to_string(),
-                        ty,
-                        slot: i,
-                    }
-                })
-                .collect();
-            let record_type = RecordType {
-                name_id,
-                fields,
-                type_args: vec![],
-            };
-            self.records.insert(record.name, record_type.clone());
-            self.register_named_type(record.name, Type::Record(record_type.clone()), interner);
-
-            // Register in EntityRegistry (parallel migration)
+            // Non-generic record: Register in EntityRegistry (single source of truth)
             let entity_type_id = self.entity_registry.register_type(
                 name_id,
                 TypeDefKind::Record,
@@ -382,6 +324,14 @@ impl Analyzer {
                     field_ty,
                     i,
                 );
+            }
+
+            // Register in type_table for type resolution
+            if let Some(record_type) = self
+                .entity_registry
+                .build_record_type(entity_type_id, &self.name_table)
+            {
+                self.register_named_type(record.name, Type::Record(record_type), interner);
             }
 
             // Register and validate implements list
@@ -424,35 +374,7 @@ impl Analyzer {
                 self.type_implements.insert(record.name, iface_names);
             }
 
-            // Register methods (with Self type resolved to the record type)
-            let self_type = Some(Type::Record(record_type));
-            for method in &record.methods {
-                let params: Vec<Type> = method
-                    .params
-                    .iter()
-                    .map(|p| self.resolve_type_with_self(&p.ty, interner, self_type.clone()))
-                    .collect();
-                let return_type = method
-                    .return_type
-                    .as_ref()
-                    .map(|t| self.resolve_type_with_self(t, interner, self_type.clone()))
-                    .unwrap_or(Type::Void);
-                let type_id = self
-                    .name_table
-                    .name_id(self.current_module, &[record.name], interner)
-                    .expect("record name_id should be registered");
-                let method_id = self.method_name_id(method.name, interner);
-                self.methods.insert(
-                    (type_id, method_id),
-                    FunctionType {
-                        params,
-                        return_type: Box::new(return_type),
-                        is_closure: false,
-                    },
-                );
-            }
-
-            // Register methods in EntityRegistry
+            // Register methods in EntityRegistry (single source of truth)
             let builtin_module = self.name_table.builtin_module();
             for method in &record.methods {
                 let method_name_str = interner.resolve(method.name);
@@ -514,8 +436,6 @@ impl Analyzer {
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext::with_type_params(
                 &self.type_aliases,
-                &self.classes,
-                &self.records,
                 &self.error_types,
                 &self.entity_registry,
                 interner,
@@ -550,8 +470,6 @@ impl Analyzer {
                 .map(|(i, f)| {
                     let mut ctx = TypeResolutionContext::with_type_params(
                         &self.type_aliases,
-                        &self.classes,
-                        &self.records,
                         &self.error_types,
                         &self.entity_registry,
                         interner,
@@ -571,7 +489,6 @@ impl Analyzer {
                 fields,
                 type_args: vec![], // Generic record base has no type args yet
             };
-            self.records.insert(record.name, record_type.clone());
             self.register_named_type(record.name, Type::Record(record_type.clone()), interner);
 
             // Register and validate implements list (for generic records)
@@ -614,44 +531,77 @@ impl Analyzer {
                 self.type_implements.insert(record.name, iface_names);
             }
 
-            // Register methods (with Self type resolved and type params in scope)
-            let self_type = Type::Record(record_type);
+            // Register methods in EntityRegistry (with type params in scope)
+            // Note: The signature stored has type params as placeholders
+            let builtin_module = self.name_table.builtin_module();
+            // Get or create the type in EntityRegistry
+            let entity_type_id = self
+                .entity_registry
+                .type_by_name(name_id)
+                .unwrap_or_else(|| {
+                    self.entity_registry.register_type(
+                        name_id,
+                        TypeDefKind::Record,
+                        self.current_module,
+                    )
+                });
+
             for method in &record.methods {
-                let mut ctx = TypeResolutionContext::with_type_params(
-                    &self.type_aliases,
-                    &self.classes,
-                    &self.records,
-                    &self.error_types,
-                    &self.entity_registry,
-                    interner,
-                    &mut self.name_table,
-                    module_id,
-                    &type_param_scope,
-                );
-                // Set self_type so TypeExpr::SelfType resolves correctly
-                ctx.self_type = Some(self_type.clone());
-                let params: Vec<Type> = method
-                    .params
-                    .iter()
-                    .map(|p| resolve_type(&p.ty, &mut ctx))
-                    .collect();
-                let return_type = method
-                    .return_type
-                    .as_ref()
-                    .map(|t| resolve_type(t, &mut ctx))
-                    .unwrap_or(Type::Void);
-                let type_id = self
+                // First resolve types, then intern names (to avoid borrow conflicts)
+                let params: Vec<Type> = {
+                    let mut ctx = TypeResolutionContext::with_type_params(
+                        &self.type_aliases,
+                        &self.error_types,
+                        &self.entity_registry,
+                        interner,
+                        &mut self.name_table,
+                        module_id,
+                        &type_param_scope,
+                    );
+                    ctx.self_type = Some(Type::Record(record_type.clone()));
+                    method
+                        .params
+                        .iter()
+                        .map(|p| resolve_type(&p.ty, &mut ctx))
+                        .collect()
+                };
+                let return_type: Type = {
+                    let mut ctx = TypeResolutionContext::with_type_params(
+                        &self.type_aliases,
+                        &self.error_types,
+                        &self.entity_registry,
+                        interner,
+                        &mut self.name_table,
+                        module_id,
+                        &type_param_scope,
+                    );
+                    ctx.self_type = Some(Type::Record(record_type.clone()));
+                    method
+                        .return_type
+                        .as_ref()
+                        .map(|t| resolve_type(t, &mut ctx))
+                        .unwrap_or(Type::Void)
+                };
+
+                let method_name_str = interner.resolve(method.name);
+                let method_name_id = self
                     .name_table
-                    .name_id(self.current_module, &[record.name], interner)
-                    .expect("record name_id should be registered");
-                let method_id = self.method_name_id(method.name, interner);
-                self.methods.insert(
-                    (type_id, method_id),
-                    FunctionType {
-                        params,
-                        return_type: Box::new(return_type),
-                        is_closure: false,
-                    },
+                    .intern_raw(builtin_module, &[method_name_str]);
+                let full_method_name_id = self.name_table.intern_raw(
+                    self.current_module,
+                    &[interner.resolve(record.name), method_name_str],
+                );
+                let signature = FunctionType {
+                    params,
+                    return_type: Box::new(return_type),
+                    is_closure: false,
+                };
+                self.entity_registry.register_method(
+                    entity_type_id,
+                    method_name_id,
+                    full_method_name_id,
+                    signature,
+                    false,
                 );
             }
         }
@@ -688,8 +638,6 @@ impl Analyzer {
         let module_id = self.current_module;
         let mut type_ctx = TypeResolutionContext::with_type_params(
             &self.type_aliases,
-            &self.classes,
-            &self.records,
             &self.error_types,
             &self.entity_registry,
             interner,

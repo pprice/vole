@@ -23,7 +23,7 @@ use crate::sema::implement_registry::{
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::types::{ConstantValue, ModuleType};
 use crate::sema::{
-    ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type, TypeKey, WellKnownTypes,
+    ErrorTypeInfo, FunctionType, RecordType, StructField, Type, TypeKey, WellKnownTypes,
     compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
@@ -80,14 +80,8 @@ pub struct Analyzer {
     lambda_side_effects: Vec<bool>,
     /// Type aliases: `let MyType = i32` stores MyType -> i32
     type_aliases: HashMap<Symbol, Type>,
-    /// Registered class types
-    classes: HashMap<Symbol, ClassType>,
-    /// Registered record types
-    records: HashMap<Symbol, RecordType>,
     /// Registered error types (e.g., DivByZero, OutOfRange)
     error_types: HashMap<Symbol, ErrorTypeInfo>,
-    /// Methods for classes/records: (type_symbol, method_name) -> FunctionType
-    methods: HashMap<(NameId, NameId), FunctionType>,
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their resolved types, including narrowed types
     expr_types: HashMap<NodeId, Type>,
@@ -146,10 +140,7 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             type_aliases: HashMap::new(),
-            classes: HashMap::new(),
-            records: HashMap::new(),
             error_types: HashMap::new(),
-            methods: HashMap::new(),
             expr_types: HashMap::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
@@ -397,10 +388,7 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             type_aliases: HashMap::new(),
-            classes: HashMap::new(),
-            records: HashMap::new(),
             error_types: HashMap::new(),
-            methods: HashMap::new(),
             expr_types: HashMap::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
@@ -586,7 +574,6 @@ impl Analyzer {
         HashMap<NodeId, Type>,
         MethodResolutions,
         ImplementRegistry,
-        HashMap<(NameId, NameId), FunctionType>,
         HashMap<Symbol, Vec<Symbol>>,
         HashMap<Symbol, ErrorTypeInfo>,
         HashMap<String, (Program, Interner)>,
@@ -605,7 +592,6 @@ impl Analyzer {
             self.expr_types,
             self.method_resolutions,
             self.implement_registry,
-            self.methods,
             self.type_implements,
             self.error_types,
             self.module_programs,
@@ -845,8 +831,6 @@ impl Analyzer {
         let module_id = self.current_module;
         let mut ctx = TypeResolutionContext {
             type_aliases: &self.type_aliases,
-            classes: &self.classes,
-            records: &self.records,
             error_types: &self.error_types,
             entity_registry: &self.entity_registry,
             interner,
@@ -995,8 +979,6 @@ impl Analyzer {
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext {
                 type_aliases: &self.type_aliases,
-                classes: &self.classes,
-                records: &self.records,
                 error_types: &self.error_types,
                 entity_registry: &self.entity_registry,
                 interner,
@@ -1093,8 +1075,6 @@ impl Analyzer {
                 let module_id = self.current_module;
                 let mut ctx = TypeResolutionContext::with_type_params(
                     &self.type_aliases,
-                    &self.classes,
-                    &self.records,
                     &self.error_types,
                     &self.entity_registry,
                     interner,
@@ -1285,13 +1265,18 @@ impl Analyzer {
         type_name: Symbol,
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
-        let type_id = self
-            .name_table
-            .name_id(self.current_module, &[type_name], interner)
-            .expect("type name_id should be registered");
-        let method_id = self.method_name_id(method.name, interner);
-        let method_key = (type_id, method_id);
-        let method_type = self.methods.get(&method_key).cloned().unwrap();
+        // Look up method type via EntityRegistry
+        let type_def_id = self
+            .entity_registry
+            .type_by_symbol(type_name, interner, &self.name_table, self.current_module)
+            .expect("type should be registered in EntityRegistry");
+        let method_name_id = self.method_name_id(method.name, interner);
+        let method_id = self
+            .entity_registry
+            .find_method_on_type(type_def_id, method_name_id)
+            .expect("method should be registered in EntityRegistry");
+        let method_def = self.entity_registry.get_method(method_id);
+        let method_type = method_def.signature.clone();
         let return_type = *method_type.return_type.clone();
         self.current_function_return = Some(return_type.clone());
 
@@ -1315,10 +1300,20 @@ impl Analyzer {
         let self_sym = interner
             .lookup("self")
             .expect("'self' should be interned during parsing");
-        let self_type = if let Some(class_type) = self.classes.get(&type_name) {
-            Type::Class(class_type.clone())
-        } else {
-            Type::Record(self.records.get(&type_name).unwrap().clone())
+        // Get self type via EntityRegistry
+        let type_def = self.entity_registry.get_type(type_def_id);
+        let self_type = match type_def.kind {
+            TypeDefKind::Class => self
+                .entity_registry
+                .build_class_type(type_def_id, &self.name_table)
+                .map(Type::Class)
+                .unwrap_or(Type::Error),
+            TypeDefKind::Record => self
+                .entity_registry
+                .build_record_type(type_def_id, &self.name_table)
+                .map(Type::Record)
+                .unwrap_or(Type::Error),
+            _ => Type::Error,
         };
         self.scope.define(
             self_sym,
@@ -1448,8 +1443,6 @@ impl Analyzer {
                     let (params, return_type) = {
                         let mut ctx = TypeResolutionContext {
                             type_aliases: &self.type_aliases,
-                            classes: &self.classes,
-                            records: &self.records,
                             error_types: &self.error_types,
                             entity_registry: &self.entity_registry,
                             interner: &module_interner,
@@ -1509,8 +1502,6 @@ impl Analyzer {
                         let (params, return_type) = {
                             let mut ctx = TypeResolutionContext {
                                 type_aliases: &self.type_aliases,
-                                classes: &self.classes,
-                                records: &self.records,
                                 error_types: &self.error_types,
                                 entity_registry: &self.entity_registry,
                                 interner: &module_interner,

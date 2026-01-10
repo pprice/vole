@@ -129,14 +129,16 @@ impl Analyzer {
 
         let type_name_id = type_name_id.unwrap();
 
-        // Check direct methods on the type
-        if let Some(method_id) = self.method_name_id_by_str(method_name, interner) {
-            let method_key = (type_name_id, method_id);
-            if let Some(found_sig) = self.methods.get(&method_key) {
-                // Check signature compatibility
-                if self.signatures_compatible(expected_sig, found_sig, ty) {
-                    return true;
-                }
+        // Check direct methods on the type via EntityRegistry
+        if let Some(type_def_id) = self.entity_registry.type_by_name(type_name_id)
+            && let Some(method_name_id) = self.method_name_id_by_str(method_name, interner)
+            && let Some(method_id) = self
+                .entity_registry
+                .find_method_on_type(type_def_id, method_name_id)
+        {
+            let method_def = self.entity_registry.get_method(method_id);
+            if self.signatures_compatible(expected_sig, &method_def.signature, ty) {
+                return true;
             }
         }
 
@@ -243,13 +245,32 @@ impl Analyzer {
         span: Span,
         interner: &Interner,
     ) {
-        // Get the implementing type for Self substitution
-        let implementing_type = if let Some(class_type) = self.classes.get(&type_name) {
-            Type::Class(class_type.clone())
-        } else if let Some(record_type) = self.records.get(&type_name) {
-            Type::Record(record_type.clone())
+        // Get the implementing type for Self substitution via EntityRegistry
+        let type_id_opt = self.entity_registry.type_by_symbol(
+            type_name,
+            interner,
+            &self.name_table,
+            self.current_module,
+        );
+        let implementing_type = if let Some(type_id) = type_id_opt {
+            let type_def = self.entity_registry.get_type(type_id);
+            match type_def.kind {
+                TypeDefKind::Class => self
+                    .entity_registry
+                    .build_class_type(type_id, &self.name_table)
+                    .map(Type::Class),
+                TypeDefKind::Record => self
+                    .entity_registry
+                    .build_record_type(type_id, &self.name_table)
+                    .map(Type::Record),
+                _ => None,
+            }
         } else {
-            return; // Unknown type, can't validate
+            None
+        };
+        let implementing_type = match implementing_type {
+            Some(t) => t,
+            None => return, // Unknown type, can't validate
         };
 
         // Look up interface via EntityRegistry
@@ -392,7 +413,7 @@ impl Analyzer {
     pub(crate) fn get_type_method_signatures(
         &self,
         type_name: Symbol,
-        _interner: &Interner,
+        interner: &Interner,
     ) -> HashMap<String, FunctionType> {
         let mut method_sigs = HashMap::new();
 
@@ -402,31 +423,22 @@ impl Analyzer {
                 .unwrap_or_default()
         };
 
-        // Methods defined directly on the type
-        let type_id = self
-            .records
-            .get(&type_name)
-            .map(|record| record.name_id)
-            .or_else(|| self.classes.get(&type_name).map(|class| class.name_id));
-        if let Some(type_id) = type_id {
-            for ((ty, method_name), func_type) in &self.methods {
-                if *ty == type_id {
-                    method_sigs.insert(method_name_str(*method_name), func_type.clone());
-                }
+        // Methods defined directly on the type via EntityRegistry
+        let type_def_id_opt = self.entity_registry.type_by_symbol(
+            type_name,
+            interner,
+            &self.name_table,
+            self.current_module,
+        );
+        if let Some(type_def_id) = type_def_id_opt {
+            for method_id in self.entity_registry.methods_on_type(type_def_id) {
+                let method = self.entity_registry.get_method(method_id);
+                method_sigs.insert(method_name_str(method.name_id), method.signature.clone());
             }
-        }
 
-        // Methods from implement blocks
-        if let Some(type_id) = self
-            .records
-            .get(&type_name)
-            .map(|record| TypeId::from_name_id(record.name_id))
-            .or_else(|| {
-                self.classes
-                    .get(&type_name)
-                    .map(|class| TypeId::from_name_id(class.name_id))
-            })
-        {
+            // Methods from implement blocks
+            let name_id = self.entity_registry.get_type(type_def_id).name_id;
+            let type_id = TypeId::from_name_id(name_id);
             for (method_name, method_impl) in self.implement_registry.get_methods_for_type(&type_id)
             {
                 method_sigs.insert(method_name_str(method_name), method_impl.func_type.clone());

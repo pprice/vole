@@ -12,30 +12,80 @@ impl Analyzer {
             return self.check_generic_struct_literal(expr, struct_lit, &generic_def, interner);
         }
 
-        // Look up the type (class or record)
-        let (type_name, fields, is_class) =
-            if let Some(class_type) = self.classes.get(&struct_lit.name).cloned() {
-                (
-                    interner.resolve(struct_lit.name).to_string(),
-                    class_type.fields,
-                    true,
-                )
-            } else if let Some(record_type) = self.records.get(&struct_lit.name).cloned() {
-                (
-                    interner.resolve(struct_lit.name).to_string(),
-                    record_type.fields,
-                    false,
-                )
-            } else {
-                self.add_error(
-                    SemanticError::UnknownType {
-                        name: interner.resolve(struct_lit.name).to_string(),
-                        span: expr.span.into(),
-                    },
-                    expr.span,
-                );
-                return Ok(Type::Error);
-            };
+        // Look up the type (class or record) via EntityRegistry
+        let type_id_opt = self.entity_registry.type_by_symbol(
+            struct_lit.name,
+            interner,
+            &self.name_table,
+            self.current_module,
+        );
+
+        let (type_name, fields, result_type) = if let Some(type_id) = type_id_opt {
+            let type_def = self.entity_registry.get_type(type_id);
+            match type_def.kind {
+                TypeDefKind::Class => {
+                    if let Some(class_type) = self
+                        .entity_registry
+                        .build_class_type(type_id, &self.name_table)
+                    {
+                        (
+                            interner.resolve(struct_lit.name).to_string(),
+                            class_type.fields.clone(),
+                            Type::Class(class_type),
+                        )
+                    } else {
+                        self.add_error(
+                            SemanticError::UnknownType {
+                                name: interner.resolve(struct_lit.name).to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        return Ok(Type::Error);
+                    }
+                }
+                TypeDefKind::Record => {
+                    if let Some(record_type) = self
+                        .entity_registry
+                        .build_record_type(type_id, &self.name_table)
+                    {
+                        (
+                            interner.resolve(struct_lit.name).to_string(),
+                            record_type.fields.clone(),
+                            Type::Record(record_type),
+                        )
+                    } else {
+                        self.add_error(
+                            SemanticError::UnknownType {
+                                name: interner.resolve(struct_lit.name).to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        return Ok(Type::Error);
+                    }
+                }
+                _ => {
+                    self.add_error(
+                        SemanticError::UnknownType {
+                            name: interner.resolve(struct_lit.name).to_string(),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    return Ok(Type::Error);
+                }
+            }
+        } else {
+            self.add_error(
+                SemanticError::UnknownType {
+                    name: interner.resolve(struct_lit.name).to_string(),
+                    span: expr.span.into(),
+                },
+                expr.span,
+            );
+            return Ok(Type::Error);
+        };
 
         // Check that all required fields are present
         let provided_fields: HashSet<String> = struct_lit
@@ -78,15 +128,7 @@ impl Analyzer {
         }
 
         // Return the appropriate type
-        if is_class {
-            Ok(Type::Class(
-                self.classes.get(&struct_lit.name).unwrap().clone(),
-            ))
-        } else {
-            Ok(Type::Record(
-                self.records.get(&struct_lit.name).unwrap().clone(),
-            ))
-        }
+        Ok(result_type)
     }
 
     /// Check a struct literal for a generic record, inferring type parameters from field values
@@ -184,8 +226,16 @@ impl Analyzer {
         }
 
         // Build the concrete record type with substituted field types
-        let record_base = self.records.get(&struct_lit.name).cloned();
-        if let Some(base) = record_base {
+        // Look up record via EntityRegistry to get name_id
+        let type_id_opt = self.entity_registry.type_by_symbol(
+            struct_lit.name,
+            interner,
+            &self.name_table,
+            self.current_module,
+        );
+
+        if let Some(type_id) = type_id_opt {
+            let type_def = self.entity_registry.get_type(type_id);
             let concrete_fields: Vec<StructField> = generic_def
                 .field_names
                 .iter()
@@ -205,13 +255,13 @@ impl Analyzer {
                 .collect();
 
             let concrete_record = RecordType {
-                name_id: base.name_id,
+                name_id: type_def.name_id,
                 fields: concrete_fields,
                 type_args,
             };
             Ok(Type::Record(concrete_record))
         } else {
-            // Shouldn't happen - if we have a generic_records entry, we should have a records entry
+            // Shouldn't happen - if we have a generic_records entry, we should have a registry entry
             Ok(Type::Error)
         }
     }

@@ -50,11 +50,14 @@ impl Analyzer {
                         // This is an interface method - check if it has a default
                         if method_def.has_default {
                             // Get the implementing type's symbol for default method resolution
-                            let type_sym = self.get_type_symbol(object_type);
-                            if let Some(type_sym) = type_sym {
-                                let interface_sym =
-                                    self.get_type_symbol_by_name_id(defining_type.name_id);
-                                if let Some(interface_sym) = interface_sym {
+                            if let Some(type_name_id) = self.get_type_name_id(object_type) {
+                                let type_sym =
+                                    self.get_type_symbol_by_name_id(type_name_id, interner);
+                                let interface_sym = self
+                                    .get_type_symbol_by_name_id(defining_type.name_id, interner);
+                                if let (Some(type_sym), Some(interface_sym)) =
+                                    (type_sym, interface_sym)
+                                {
                                     return Some(ResolvedMethod::DefaultMethod {
                                         interface_name: interface_sym,
                                         type_name: type_sym,
@@ -65,7 +68,8 @@ impl Analyzer {
                             }
                         }
                         // For non-default interface methods, use vtable dispatch
-                        let interface_sym = self.get_type_symbol_by_name_id(defining_type.name_id);
+                        let interface_sym =
+                            self.get_type_symbol_by_name_id(defining_type.name_id, interner);
                         if let Some(interface_sym) = interface_sym {
                             return Some(ResolvedMethod::InterfaceMethod {
                                 interface_name: interface_sym,
@@ -102,41 +106,23 @@ impl Analyzer {
         self.entity_registry.type_by_name(name_id)
     }
 
-    /// Get the Symbol for a type (for compatibility with existing code)
-    fn get_type_symbol(&self, ty: &Type) -> Option<Symbol> {
+    /// Get the name_id for a type
+    fn get_type_name_id(&self, ty: &Type) -> Option<NameId> {
         match ty {
-            Type::Class(class_type) => self
-                .classes
-                .iter()
-                .find(|(_, c)| c.name_id == class_type.name_id)
-                .map(|(sym, _)| *sym),
-            Type::Record(record_type) => self
-                .records
-                .iter()
-                .find(|(_, r)| r.name_id == record_type.name_id)
-                .map(|(sym, _)| *sym),
+            Type::Class(class_type) => Some(class_type.name_id),
+            Type::Record(record_type) => Some(record_type.name_id),
             _ => None,
         }
     }
 
     /// Get the Symbol for a type by its NameId
-    fn get_type_symbol_by_name_id(&self, name_id: NameId) -> Option<Symbol> {
-        // Check classes
-        for (sym, class) in &self.classes {
-            if class.name_id == name_id {
-                return Some(*sym);
-            }
+    fn get_type_symbol_by_name_id(&self, name_id: NameId, interner: &Interner) -> Option<Symbol> {
+        // Get the name string from name_table and look up Symbol via interner
+        if let Some(name_str) = self.name_table.last_segment_str(name_id) {
+            interner.lookup(&name_str)
+        } else {
+            None
         }
-        // Check records
-        for (sym, record) in &self.records {
-            if record.name_id == name_id {
-                return Some(*sym);
-            }
-        }
-        // For interfaces, we need to look up the Symbol another way
-        // The Symbol is stored in the type_implements map values
-        // or we can get the name string from the name_table
-        None
     }
 
     /// Resolve a method call to a normalized resolution for later validation/codegen.
@@ -261,8 +247,8 @@ impl Analyzer {
             }
         }
 
-        // 3. Direct methods on class/record
-        let (type_id, record_type_args) = match object_type {
+        // 3. Direct methods on class/record via EntityRegistry
+        let (type_name_id, record_type_args) = match object_type {
             Type::Class(c) => (Some(c.name_id), None),
             Type::Record(r) => (
                 Some(r.name_id),
@@ -274,15 +260,24 @@ impl Analyzer {
             ),
             _ => (None, None),
         };
-        if let Some(type_id) = type_id {
-            let method_id = self.method_name_id(method_name, interner);
-            if let Some(func_type) = self.methods.get(&(type_id, method_id)).cloned() {
+        if let Some(type_name_id) = type_name_id
+            && let Some(type_def_id) = self.entity_registry.type_by_name(type_name_id)
+        {
+            let method_name_id = self.method_name_id(method_name, interner);
+            // Look up method via EntityRegistry
+            if let Some(method_id) = self
+                .entity_registry
+                .find_method_on_type(type_def_id, method_name_id)
+            {
+                let method_def = self.entity_registry.get_method(method_id);
+                let func_type = method_def.signature.clone();
+
                 // For generic records, substitute type args in the method signature
                 // Find the generic record def by matching name_id
                 let generic_def = self
                     .generic_records
                     .values()
-                    .find(|def| def.name_id == type_id);
+                    .find(|def| def.name_id == type_name_id);
                 if let (Some(type_args), Some(generic_def)) = (record_type_args, generic_def) {
                     let mut substitutions = HashMap::new();
                     for (param, arg) in generic_def.type_params.iter().zip(type_args.iter()) {
@@ -309,18 +304,14 @@ impl Analyzer {
         }
 
         // 4. Default methods from implemented interfaces
-        // Find the type symbol by matching name_id (classes/records are keyed by Symbol)
+        // Find the type symbol by matching name_id via EntityRegistry
         let type_sym = match object_type {
-            Type::Class(class_type) => self
-                .classes
-                .iter()
-                .find(|(_, c)| c.name_id == class_type.name_id)
-                .map(|(sym, _)| *sym),
-            Type::Record(record_type) => self
-                .records
-                .iter()
-                .find(|(_, r)| r.name_id == record_type.name_id)
-                .map(|(sym, _)| *sym),
+            Type::Class(class_type) => {
+                self.get_type_symbol_by_name_id(class_type.name_id, interner)
+            }
+            Type::Record(record_type) => {
+                self.get_type_symbol_by_name_id(record_type.name_id, interner)
+            }
             _ => None,
         };
         if let Some(type_sym) = type_sym

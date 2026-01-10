@@ -377,6 +377,99 @@ impl EntityRegistry {
         })
     }
 
+    /// Build a ClassType from a TypeDefId (for types registered as Class)
+    pub fn build_class_type(
+        &self,
+        type_id: TypeDefId,
+        name_table: &crate::identity::NameTable,
+    ) -> Option<crate::sema::ClassType> {
+        use crate::sema::{ClassType, StructField};
+
+        let type_def = self.get_type(type_id);
+        if type_def.kind != TypeDefKind::Class {
+            return None;
+        }
+
+        let fields: Vec<StructField> = type_def
+            .fields
+            .iter()
+            .map(|&field_id| {
+                let field = self.get_field(field_id);
+                StructField {
+                    name: name_table
+                        .last_segment_str(field.name_id)
+                        .unwrap_or_else(|| "?".to_string()),
+                    ty: field.ty.clone(),
+                    slot: field.slot,
+                }
+            })
+            .collect();
+
+        Some(ClassType {
+            name_id: type_def.name_id,
+            fields,
+        })
+    }
+
+    /// Build a RecordType from a TypeDefId (for types registered as Record)
+    pub fn build_record_type(
+        &self,
+        type_id: TypeDefId,
+        name_table: &crate::identity::NameTable,
+    ) -> Option<crate::sema::RecordType> {
+        use crate::sema::{RecordType, StructField};
+
+        let type_def = self.get_type(type_id);
+        if type_def.kind != TypeDefKind::Record {
+            return None;
+        }
+
+        let fields: Vec<StructField> = type_def
+            .fields
+            .iter()
+            .map(|&field_id| {
+                let field = self.get_field(field_id);
+                StructField {
+                    name: name_table
+                        .last_segment_str(field.name_id)
+                        .unwrap_or_else(|| "?".to_string()),
+                    ty: field.ty.clone(),
+                    slot: field.slot,
+                }
+            })
+            .collect();
+
+        Some(RecordType {
+            name_id: type_def.name_id,
+            fields,
+            type_args: Vec::new(), // Non-generic records have empty type_args
+        })
+    }
+
+    /// Look up a type by Symbol + Interner, returning the TypeDefId if found
+    pub fn type_by_symbol(
+        &self,
+        sym: crate::frontend::Symbol,
+        interner: &crate::frontend::Interner,
+        name_table: &crate::identity::NameTable,
+        module_id: ModuleId,
+    ) -> Option<TypeDefId> {
+        let name_str = interner.resolve(sym);
+        // First try current module
+        if let Some(name_id) = name_table.name_id_raw(module_id, &[name_str])
+            && let Some(type_id) = self.type_by_name(name_id)
+        {
+            return Some(type_id);
+        }
+        // Fall back to main module
+        if let Some(name_id) = name_table.name_id_raw(name_table.main_module(), &[name_str])
+            && let Some(type_id) = self.type_by_name(name_id)
+        {
+            return Some(type_id);
+        }
+        None
+    }
+
     /// Merge another registry into this one.
     /// This is used when merging prelude definitions into the main analyzer.
     pub fn merge(&mut self, other: &EntityRegistry) {

@@ -546,9 +546,21 @@ fn satisfies_interface_with_field() {
     let person_sym = interner.intern("Person");
     let named_sym = interner.intern("Named");
 
-    // Get the Person type
-    let person_type = analyzer.records.get(&person_sym).unwrap();
-    let ty = Type::Record(person_type.clone());
+    // Get the Person type via EntityRegistry
+    let type_def_id = analyzer
+        .entity_registry
+        .type_by_symbol(
+            person_sym,
+            &interner,
+            &analyzer.name_table,
+            analyzer.current_module,
+        )
+        .unwrap();
+    let person_type = analyzer
+        .entity_registry
+        .build_record_type(type_def_id, &analyzer.name_table)
+        .unwrap();
+    let ty = Type::Record(person_type);
 
     // Check if Person satisfies Named
     assert!(analyzer.satisfies_interface(&ty, named_sym, &interner));
@@ -574,8 +586,21 @@ fn satisfies_interface_missing_field() {
     let point_sym = interner.intern("Point");
     let named_sym = interner.intern("Named");
 
-    let point_type = analyzer.records.get(&point_sym).unwrap();
-    let ty = Type::Record(point_type.clone());
+    // Get the Point type via EntityRegistry
+    let type_def_id = analyzer
+        .entity_registry
+        .type_by_symbol(
+            point_sym,
+            &interner,
+            &analyzer.name_table,
+            analyzer.current_module,
+        )
+        .unwrap();
+    let point_type = analyzer
+        .entity_registry
+        .build_record_type(type_def_id, &analyzer.name_table)
+        .unwrap();
+    let ty = Type::Record(point_type);
 
     // Point does NOT satisfy Named (missing name field)
     assert!(!analyzer.satisfies_interface(&ty, named_sym, &interner));
@@ -603,8 +628,21 @@ fn satisfies_interface_with_method() {
     let user_sym = interner.intern("User");
     let hashable_sym = interner.intern("Hashable");
 
-    let user_type = analyzer.records.get(&user_sym).unwrap();
-    let ty = Type::Record(user_type.clone());
+    // Get the User type via EntityRegistry
+    let type_def_id = analyzer
+        .entity_registry
+        .type_by_symbol(
+            user_sym,
+            &interner,
+            &analyzer.name_table,
+            analyzer.current_module,
+        )
+        .unwrap();
+    let user_type = analyzer
+        .entity_registry
+        .build_record_type(type_def_id, &analyzer.name_table)
+        .unwrap();
+    let ty = Type::Record(user_type);
 
     assert!(analyzer.satisfies_interface(&ty, hashable_sym, &interner));
 }

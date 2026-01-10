@@ -763,24 +763,28 @@ fn resolve_vtable_target(
         && let Some(meta) = type_metadata_by_name_id(ctx.type_metadata, type_name_id)
         && let Some(method_info) = meta.method_infos.get(&method_id).cloned()
     {
-        let func_type = match &meta.vole_type {
-            Type::Class(class_type) => ctx
-                .analyzed
-                .methods
-                .get(&(class_type.name_id, method_id))
-                .cloned(),
-            Type::Record(record_type) => ctx
-                .analyzed
-                .methods
-                .get(&(record_type.name_id, method_id))
-                .cloned(),
-            _ => None,
-        };
-        let func_type = func_type.unwrap_or_else(|| FunctionType {
-            params: method_def.params.clone(),
-            return_type: Box::new(method_def.return_type.clone()),
-            is_closure: false,
-        });
+        // Look up method type via EntityRegistry
+        let func_type = ctx
+            .analyzed
+            .entity_registry
+            .type_by_name(type_name_id)
+            .and_then(|type_def_id| {
+                ctx.analyzed
+                    .entity_registry
+                    .find_method_on_type(type_def_id, method_id)
+            })
+            .map(|m_id| {
+                ctx.analyzed
+                    .entity_registry
+                    .get_method(m_id)
+                    .signature
+                    .clone()
+            })
+            .unwrap_or_else(|| FunctionType {
+                params: method_def.params.clone(),
+                return_type: Box::new(method_def.return_type.clone()),
+                is_closure: false,
+            });
         return Ok(VtableMethodTarget::Direct {
             method_info,
             func_type,

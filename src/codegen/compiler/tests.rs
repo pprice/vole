@@ -21,7 +21,6 @@ fn compile_and_run(source: &str) -> i64 {
         expr_types: HashMap::new(),
         method_resolutions: MethodResolutions::new(),
         implement_registry: ImplementRegistry::new(),
-        methods: HashMap::new(),
         type_implements: HashMap::new(),
         error_types: HashMap::new(),
         module_programs: HashMap::new(),
