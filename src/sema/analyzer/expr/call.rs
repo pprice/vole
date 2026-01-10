@@ -135,7 +135,7 @@ impl Analyzer {
                 let type_args: Vec<Type> = generic_def
                     .type_params
                     .iter()
-                    .filter_map(|tp| inferred.get(&tp.name).cloned())
+                    .filter_map(|tp| inferred.get(&tp.name_id).cloned())
                     .collect();
                 let type_keys = type_args.iter().map(|ty| self.type_key_for(ty)).collect();
                 let module_id = self.name_table.main_module();

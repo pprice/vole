@@ -459,15 +459,10 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     {
                         return Type::Error;
                     }
-                    // Build substitution map using type param Symbols
-                    // We use type_params_symbols which stores the original Symbols from declaration
+                    // Build substitution map using type param NameIds
                     let mut substitutions = HashMap::new();
-                    for (sym, arg) in type_def
-                        .type_params_symbols
-                        .iter()
-                        .zip(resolved_args.iter())
-                    {
-                        substitutions.insert(*sym, arg.clone());
+                    for (name_id, arg) in type_def.type_params.iter().zip(resolved_args.iter()) {
+                        substitutions.insert(*name_id, arg.clone());
                     }
 
                     // Build methods with substituted types

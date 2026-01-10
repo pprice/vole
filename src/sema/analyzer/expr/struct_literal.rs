@@ -251,7 +251,7 @@ impl Analyzer {
             let type_args: Vec<Type> = generic_def
                 .type_params
                 .iter()
-                .filter_map(|tp| inferred.get(&tp.name).cloned())
+                .filter_map(|tp| inferred.get(&tp.name_id).cloned())
                 .collect();
 
             let concrete_record = RecordType {

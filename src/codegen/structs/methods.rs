@@ -382,8 +382,8 @@ impl Cg<'_, '_, '_> {
             .clone();
 
         // Substitute the element type for T in the return type
-        let substitutions: std::collections::HashMap<crate::frontend::Symbol, Type> = iter_def
-            .type_params_symbols
+        let substitutions: std::collections::HashMap<NameId, Type> = iter_def
+            .type_params
             .iter()
             .map(|param| (*param, elem_ty.clone()))
             .collect();

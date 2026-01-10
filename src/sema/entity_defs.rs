@@ -28,10 +28,8 @@ pub struct TypeDef {
     pub fields: Vec<FieldId>,
     pub extends: Vec<TypeDefId>,
     /// Type parameters for generic types as NameIds (e.g., T in Iterator<T>)
+    /// Used for both display and type substitution
     pub type_params: Vec<NameId>,
-    /// Type parameters as Symbols - needed for substitution in method signatures
-    /// These are the Symbols used when the type was declared.
-    pub type_params_symbols: Vec<crate::frontend::Symbol>,
 }
 
 /// A method definition (always belongs to a type)

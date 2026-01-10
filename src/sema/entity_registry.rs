@@ -63,7 +63,6 @@ impl EntityRegistry {
             fields: Vec::new(),
             extends: Vec::new(),
             type_params: Vec::new(),
-            type_params_symbols: Vec::new(),
         });
         self.type_by_name.insert(name_id, id);
         self.methods_by_type.insert(id, HashMap::new());
@@ -261,14 +260,8 @@ impl EntityRegistry {
     }
 
     /// Set type parameters for a generic type
-    pub fn set_type_params(
-        &mut self,
-        type_id: TypeDefId,
-        type_params: Vec<NameId>,
-        type_params_symbols: Vec<crate::frontend::Symbol>,
-    ) {
+    pub fn set_type_params(&mut self, type_id: TypeDefId, type_params: Vec<NameId>) {
         self.type_defs[type_id.index() as usize].type_params = type_params;
-        self.type_defs[type_id.index() as usize].type_params_symbols = type_params_symbols;
     }
 
     /// Check if derived extends base (transitive)

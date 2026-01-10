@@ -54,12 +54,10 @@ fn interface_instance(
         return Some(Type::Error);
     }
 
-    // Build substitution map using type param Symbols
-    // We use type_params_symbols which stores the original Symbols from declaration
-    // These match the Symbols used in Type::TypeParam in method signatures
+    // Build substitution map using type param NameIds
     let mut substitutions = HashMap::new();
-    for (sym, arg) in type_def.type_params_symbols.iter().zip(type_args.iter()) {
-        substitutions.insert(*sym, arg.clone());
+    for (name_id, arg) in type_def.type_params.iter().zip(type_args.iter()) {
+        substitutions.insert(*name_id, arg.clone());
     }
 
     // Build methods with substituted types
@@ -157,9 +155,9 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
         TypeExpr::Named(sym) => {
             // Check if it's a type parameter in scope first
             if let Some(type_params) = ctx.type_params
-                && type_params.is_type_param(*sym)
+                && let Some(tp_info) = type_params.get(*sym)
             {
-                return Type::TypeParam(*sym);
+                return Type::TypeParam(tp_info.name_id);
             }
             // Look up type alias first
             if let Some(aliased) = ctx.type_aliases.get(sym) {

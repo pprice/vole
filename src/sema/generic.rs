@@ -13,8 +13,10 @@ use std::collections::HashMap;
 /// Information about a type parameter in scope
 #[derive(Debug, Clone)]
 pub struct TypeParamInfo {
-    /// The name of the type parameter (e.g., T, U)
+    /// The name of the type parameter as Symbol (for parsing/resolution stage)
     pub name: Symbol,
+    /// The name of the type parameter as NameId (for type substitution)
+    pub name_id: NameId,
     /// Optional constraint on the type parameter
     pub constraint: Option<TypeConstraint>,
 }
@@ -133,8 +135,8 @@ pub struct MonomorphInstance {
     pub instance_id: u32,
     /// The concrete function type after substitution
     pub func_type: FunctionType,
-    /// Map from type param name to concrete type
-    pub substitutions: HashMap<Symbol, Type>,
+    /// Map from type param NameId to concrete type
+    pub substitutions: HashMap<NameId, Type>,
 }
 
 impl MonomorphCache {
@@ -175,9 +177,9 @@ impl MonomorphCache {
 }
 
 /// Substitute concrete types for type parameters in a type
-pub fn substitute_type(ty: &Type, substitutions: &HashMap<Symbol, Type>) -> Type {
+pub fn substitute_type(ty: &Type, substitutions: &HashMap<NameId, Type>) -> Type {
     match ty {
-        Type::TypeParam(sym) => substitutions.get(sym).cloned().unwrap_or(ty.clone()),
+        Type::TypeParam(name_id) => substitutions.get(name_id).cloned().unwrap_or(ty.clone()),
         Type::Array(elem) => Type::Array(Box::new(substitute_type(elem, substitutions))),
         Type::Interface(interface_type) => Type::Interface(crate::sema::types::InterfaceType {
             name_id: interface_type.name_id,
@@ -235,12 +237,15 @@ mod tests {
 
     #[test]
     fn test_type_param_scope() {
+        let mut names = crate::identity::NameTable::new();
         let mut scope = TypeParamScope::new();
 
         // Symbol(0) for testing - in real code these come from interner
         let t = Symbol(0);
+        let t_name_id = names.intern_raw(names.main_module(), &["T"]);
         scope.add(TypeParamInfo {
             name: t,
+            name_id: t_name_id,
             constraint: None,
         });
 
@@ -290,16 +295,17 @@ mod tests {
 
     #[test]
     fn test_substitute_type() {
-        let t = Symbol(0);
+        let mut names = crate::identity::NameTable::new();
+        let t_name_id = names.intern_raw(names.main_module(), &["T"]);
         let mut subs = HashMap::new();
-        subs.insert(t, Type::I64);
+        subs.insert(t_name_id, Type::I64);
 
         // Simple substitution
-        let result = substitute_type(&Type::TypeParam(t), &subs);
+        let result = substitute_type(&Type::TypeParam(t_name_id), &subs);
         assert_eq!(result, Type::I64);
 
         // Array of type param
-        let arr = Type::Array(Box::new(Type::TypeParam(t)));
+        let arr = Type::Array(Box::new(Type::TypeParam(t_name_id)));
         let result = substitute_type(&arr, &subs);
         assert_eq!(result, Type::Array(Box::new(Type::I64)));
 

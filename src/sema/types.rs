@@ -66,7 +66,7 @@ pub enum Type {
     RuntimeIterator(Box<Type>),
     /// Type parameter (e.g., T in func identity<T>(x: T) -> T)
     /// Only valid within generic context during type checking
-    TypeParam(Symbol),
+    TypeParam(NameId),
     /// Generic type instance (e.g., Box<i64>, Result<string, i64>)
     GenericInstance {
         /// Name of the generic type definition
@@ -440,7 +440,7 @@ impl std::fmt::Display for Type {
                 write!(f, "fallible({}, {})", ft.success_type, ft.error_type)
             }
             Type::Module(m) => write!(f, "module(id:{})", m.module_id.index()),
-            Type::TypeParam(sym) => write!(f, "{:?}", sym), // Symbol Debug shows interned string
+            Type::TypeParam(name_id) => write!(f, "{:?}", name_id), // NameId Debug shows the identity
             Type::GenericInstance { def, args } => {
                 write!(f, "{:?}<", def)?;
                 for (i, arg) in args.iter().enumerate() {

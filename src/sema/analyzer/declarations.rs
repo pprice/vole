@@ -117,10 +117,14 @@ impl Analyzer {
             );
         } else {
             // Generic function: resolve with type params in scope
+            let builtin_mod = self.name_table.builtin_module();
             let mut name_scope = TypeParamScope::new();
             for tp in &func.type_params {
+                let tp_name_str = interner.resolve(tp.name);
+                let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
                 name_scope.add(TypeParamInfo {
                     name: tp.name,
+                    name_id: tp_name_id,
                     constraint: None,
                 });
             }
@@ -129,11 +133,14 @@ impl Analyzer {
                 .type_params
                 .iter()
                 .map(|tp| {
+                    let tp_name_str = interner.resolve(tp.name);
+                    let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
                     let constraint = tp.constraint.as_ref().and_then(|c| {
                         self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
                     });
                     TypeParamInfo {
                         name: tp.name,
+                        name_id: tp_name_id,
                         constraint,
                     }
                 })
@@ -410,10 +417,14 @@ impl Analyzer {
             }
         } else {
             // Generic record: store with type params as placeholders
+            let builtin_mod = self.name_table.builtin_module();
             let mut name_scope = TypeParamScope::new();
             for tp in &record.type_params {
+                let tp_name_str = interner.resolve(tp.name);
+                let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
                 name_scope.add(TypeParamInfo {
                     name: tp.name,
+                    name_id: tp_name_id,
                     constraint: None, // TODO: handle constraints
                 });
             }
@@ -421,9 +432,14 @@ impl Analyzer {
             let type_params: Vec<TypeParamInfo> = record
                 .type_params
                 .iter()
-                .map(|tp| TypeParamInfo {
-                    name: tp.name,
-                    constraint: None,
+                .map(|tp| {
+                    let tp_name_str = interner.resolve(tp.name);
+                    let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
+                    TypeParamInfo {
+                        name: tp.name,
+                        name_id: tp_name_id,
+                        constraint: None,
+                    }
                 })
                 .collect();
 
@@ -608,10 +624,14 @@ impl Analyzer {
     }
 
     fn collect_interface_def(&mut self, interface_decl: &InterfaceDecl, interner: &Interner) {
+        let builtin_mod = self.name_table.builtin_module();
         let mut name_scope = TypeParamScope::new();
         for tp in &interface_decl.type_params {
+            let tp_name_str = interner.resolve(tp.name);
+            let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
             name_scope.add(TypeParamInfo {
                 name: tp.name,
+                name_id: tp_name_id,
                 constraint: None,
             });
         }
@@ -620,11 +640,14 @@ impl Analyzer {
             .type_params
             .iter()
             .map(|tp| {
+                let tp_name_str = interner.resolve(tp.name);
+                let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
                 let constraint = tp.constraint.as_ref().and_then(|c| {
                     self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
                 });
                 TypeParamInfo {
                     name: tp.name,
+                    name_id: tp_name_id,
                     constraint,
                 }
             })
@@ -762,27 +785,10 @@ impl Analyzer {
             self.current_module,
         );
 
-        // Set type parameters in EntityRegistry
-        let builtin_mod = self.name_table.builtin_module();
-        let entity_type_params: Vec<_> = interface_decl
-            .type_params
-            .iter()
-            .map(|tp| {
-                let tp_name_str = interner.resolve(tp.name);
-                self.name_table.intern_raw(builtin_mod, &[tp_name_str])
-            })
-            .collect();
-        // Also store the original Symbols for type param substitution
-        let entity_type_param_symbols: Vec<_> = interface_decl
-            .type_params
-            .iter()
-            .map(|tp| tp.name)
-            .collect();
-        self.entity_registry.set_type_params(
-            entity_type_id,
-            entity_type_params,
-            entity_type_param_symbols,
-        );
+        // Set type parameters in EntityRegistry (using NameIds only)
+        let entity_type_params: Vec<_> = type_params.iter().map(|tp| tp.name_id).collect();
+        self.entity_registry
+            .set_type_params(entity_type_id, entity_type_params);
 
         // Register extends relationships and build extends Vec<NameId>
         let extends_name_ids: Vec<NameId> = interface_decl

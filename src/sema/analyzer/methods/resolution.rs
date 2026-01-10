@@ -159,12 +159,8 @@ impl Analyzer {
 
             // Build substitution map from type params to type args
             let mut substitutions = HashMap::new();
-            for (param_sym, arg) in interface_def
-                .type_params_symbols
-                .iter()
-                .zip(type_args.iter())
-            {
-                substitutions.insert(*param_sym, arg.clone());
+            for (param_name_id, arg) in interface_def.type_params.iter().zip(type_args.iter()) {
+                substitutions.insert(*param_name_id, arg.clone());
             }
 
             // Get interface Symbol by looking up from type_implements or by name
@@ -281,7 +277,7 @@ impl Analyzer {
                 if let (Some(type_args), Some(generic_def)) = (record_type_args, generic_def) {
                     let mut substitutions = HashMap::new();
                     for (param, arg) in generic_def.type_params.iter().zip(type_args.iter()) {
-                        substitutions.insert(param.name, arg.clone());
+                        substitutions.insert(param.name_id, arg.clone());
                     }
                     let substituted_func_type = FunctionType {
                         params: func_type

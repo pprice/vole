@@ -472,13 +472,13 @@ impl Analyzer {
 
     /// Infer type parameters from argument types.
     /// Given type params like [T, U], param types like [T, [U]], and arg types like [i64, [string]],
-    /// returns a map {T -> i64, U -> string}.
+    /// returns a map {NameId -> Type} for substitution.
     pub(crate) fn infer_type_params(
         &self,
         type_params: &[TypeParamInfo],
         param_types: &[Type],
         arg_types: &[Type],
-    ) -> HashMap<Symbol, Type> {
+    ) -> HashMap<NameId, Type> {
         let mut inferred = HashMap::new();
 
         // For each parameter, try to match its type against the argument type
@@ -495,15 +495,15 @@ impl Analyzer {
         pattern: &Type,
         actual: &Type,
         type_params: &[TypeParamInfo],
-        inferred: &mut HashMap<Symbol, Type>,
+        inferred: &mut HashMap<NameId, Type>,
     ) {
         match (pattern, actual) {
             // If the pattern is a type param, bind it
-            (Type::TypeParam(sym), actual) => {
+            (Type::TypeParam(name_id), actual) => {
                 // Only bind if it's one of our type params
-                if type_params.iter().any(|tp| tp.name == *sym) {
+                if type_params.iter().any(|tp| tp.name_id == *name_id) {
                     // Only bind if not already bound (first binding wins)
-                    inferred.entry(*sym).or_insert_with(|| actual.clone());
+                    inferred.entry(*name_id).or_insert_with(|| actual.clone());
                 }
             }
             // Array: unify element types
@@ -697,12 +697,10 @@ impl Analyzer {
             return Some(Type::Error);
         }
 
-        // Build substitution map using type param Symbols
-        // We use type_params_symbols which stores the original Symbols from declaration
-        // These match the Symbols used in Type::TypeParam in method signatures
+        // Build substitution map using type param NameIds
         let mut substitutions = HashMap::new();
-        for (sym, arg) in type_def.type_params_symbols.iter().zip(type_args.iter()) {
-            substitutions.insert(*sym, arg.clone());
+        for (name_id, arg) in type_def.type_params.iter().zip(type_args.iter()) {
+            substitutions.insert(*name_id, arg.clone());
         }
 
         // Build methods with substituted types
@@ -1091,7 +1089,7 @@ impl Analyzer {
     fn check_type_param_constraints(
         &mut self,
         type_params: &[TypeParamInfo],
-        inferred: &HashMap<Symbol, Type>,
+        inferred: &HashMap<NameId, Type>,
         span: Span,
         interner: &Interner,
     ) {
@@ -1099,7 +1097,7 @@ impl Analyzer {
             let Some(constraint) = &param.constraint else {
                 continue;
             };
-            let Some(found) = inferred.get(&param.name) else {
+            let Some(found) = inferred.get(&param.name_id) else {
                 continue;
             };
             match constraint {

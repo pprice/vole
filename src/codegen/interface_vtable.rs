@@ -138,18 +138,12 @@ impl InterfaceVtableRegistry {
             .name_id;
 
         // Build substitution map from interface type params to concrete type args
-        // Type::TypeParam stores Symbol, so convert NameId -> String -> Symbol via lookup
-        // (type parameter names should already be interned from parsing)
         let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_id);
-        let substitutions: HashMap<Symbol, Type> = interface_def
+        let substitutions: HashMap<NameId, Type> = interface_def
             .type_params
             .iter()
             .zip(interface_type_args.iter())
-            .filter_map(|(param_name_id, arg)| {
-                let param_str = ctx.analyzed.name_table.last_segment_str(*param_name_id)?;
-                let param_symbol = ctx.interner.lookup(&param_str)?;
-                Some((param_symbol, arg.clone()))
-            })
+            .map(|(param_name_id, arg)| (*param_name_id, arg.clone()))
             .collect();
 
         // Collect methods via EntityRegistry

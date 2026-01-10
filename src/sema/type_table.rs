@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 
-use crate::frontend::Symbol;
 use crate::identity::{ModuleId, NameId, NameTable};
 use crate::sema::Type;
 use crate::sema::implement_registry::PrimitiveTypeId;
@@ -61,7 +60,7 @@ enum TypeFingerprint {
         error: TypeKey,
     },
     Module(ModuleId),
-    TypeParam(Symbol),
+    TypeParam(NameId),
     GenericInstance {
         def: NameId,
         args: Vec<TypeKey>,
@@ -254,8 +253,8 @@ impl TypeTable {
             Type::Module(module_type) => {
                 self.intern_fingerprint(TypeFingerprint::Module(module_type.module_id), ty.clone())
             }
-            Type::TypeParam(sym) => {
-                self.intern_fingerprint(TypeFingerprint::TypeParam(*sym), ty.clone())
+            Type::TypeParam(name_id) => {
+                self.intern_fingerprint(TypeFingerprint::TypeParam(*name_id), ty.clone())
             }
             Type::GenericInstance { def, args } => {
                 let arg_keys = args.iter().map(|arg| self.key_for_type(arg)).collect();
@@ -374,10 +373,10 @@ impl TypeTable {
             Type::Module(module_type) => {
                 format!("module(\"{}\")", names.module_path(module_type.module_id))
             }
-            Type::TypeParam(sym) => {
-                // For TypeParam, we just use the symbol index as a fallback
+            Type::TypeParam(name_id) => {
+                // For TypeParam, display the NameId
                 // In practice, TypeParams should be substituted before display
-                format!("T{}", sym.0)
+                names.display(*name_id)
             }
             Type::GenericInstance { def, args } => {
                 let def_name = names.display(*def);
