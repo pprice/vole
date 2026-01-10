@@ -34,6 +34,9 @@ pub enum TypeConstraint {
 #[derive(Debug, Clone)]
 pub struct Program {
     pub declarations: Vec<Decl>,
+    /// The next available node ID (one past the highest ID used).
+    /// Used by transforms that need to create new AST nodes.
+    pub next_node_id: u32,
 }
 
 /// Top-level declarations

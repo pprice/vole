@@ -49,167 +49,6 @@ use crate::frontend::ast::*;
 use crate::frontend::{Interner, Span};
 use crate::sema::TypeError;
 
-/// Find the maximum NodeId used in a program to avoid collisions with generated nodes
-fn find_max_node_id(program: &Program) -> u32 {
-    let mut max_id: u32 = 0;
-    for decl in &program.declarations {
-        max_id = max_id.max(find_max_node_id_in_decl(decl));
-    }
-    max_id
-}
-
-fn find_max_node_id_in_decl(decl: &Decl) -> u32 {
-    match decl {
-        Decl::Function(f) => find_max_node_id_in_block(&f.body),
-        Decl::Record(r) => r
-            .methods
-            .iter()
-            .map(|m| find_max_node_id_in_block(&m.body))
-            .max()
-            .unwrap_or(0),
-        Decl::Implement(i) => i
-            .methods
-            .iter()
-            .map(|m| find_max_node_id_in_block(&m.body))
-            .max()
-            .unwrap_or(0),
-        Decl::Tests(t) => t
-            .tests
-            .iter()
-            .map(|t| find_max_node_id_in_block(&t.body))
-            .max()
-            .unwrap_or(0),
-        _ => 0,
-    }
-}
-
-fn find_max_node_id_in_block(block: &Block) -> u32 {
-    let mut max_id: u32 = 0;
-    for stmt in &block.stmts {
-        max_id = max_id.max(find_max_node_id_in_stmt(stmt));
-    }
-    max_id
-}
-
-fn find_max_node_id_in_stmt(stmt: &Stmt) -> u32 {
-    match stmt {
-        Stmt::Expr(e) => find_max_node_id_in_expr(&e.expr),
-        Stmt::Let(l) => find_max_node_id_in_expr(&l.init),
-        Stmt::Return(r) => r.value.as_ref().map(find_max_node_id_in_expr).unwrap_or(0),
-        Stmt::If(i) => {
-            let cond = find_max_node_id_in_expr(&i.condition);
-            let then_b = find_max_node_id_in_block(&i.then_branch);
-            let else_b = i
-                .else_branch
-                .as_ref()
-                .map(find_max_node_id_in_block)
-                .unwrap_or(0);
-            cond.max(then_b).max(else_b)
-        }
-        Stmt::While(w) => {
-            find_max_node_id_in_expr(&w.condition).max(find_max_node_id_in_block(&w.body))
-        }
-        Stmt::For(f) => {
-            find_max_node_id_in_expr(&f.iterable).max(find_max_node_id_in_block(&f.body))
-        }
-        Stmt::Raise(r) => r
-            .fields
-            .iter()
-            .map(|f| find_max_node_id_in_expr(&f.value))
-            .max()
-            .unwrap_or(0),
-        Stmt::LetTuple(lt) => find_max_node_id_in_expr(&lt.init),
-        Stmt::Break(_) | Stmt::Continue(_) => 0,
-    }
-}
-
-fn find_max_node_id_in_expr(expr: &Expr) -> u32 {
-    let mut max_id = expr.id.0;
-    match &expr.kind {
-        ExprKind::Binary(b) => {
-            max_id = max_id.max(find_max_node_id_in_expr(&b.left));
-            max_id = max_id.max(find_max_node_id_in_expr(&b.right));
-        }
-        ExprKind::Unary(u) => max_id = max_id.max(find_max_node_id_in_expr(&u.operand)),
-        ExprKind::Call(c) => {
-            max_id = max_id.max(find_max_node_id_in_expr(&c.callee));
-            for arg in &c.args {
-                max_id = max_id.max(find_max_node_id_in_expr(arg));
-            }
-        }
-        ExprKind::MethodCall(m) => {
-            max_id = max_id.max(find_max_node_id_in_expr(&m.object));
-            for arg in &m.args {
-                max_id = max_id.max(find_max_node_id_in_expr(arg));
-            }
-        }
-        ExprKind::FieldAccess(f) => max_id = max_id.max(find_max_node_id_in_expr(&f.object)),
-        ExprKind::Index(i) => {
-            max_id = max_id.max(find_max_node_id_in_expr(&i.object));
-            max_id = max_id.max(find_max_node_id_in_expr(&i.index));
-        }
-        ExprKind::ArrayLiteral(a) => {
-            for el in a {
-                max_id = max_id.max(find_max_node_id_in_expr(el));
-            }
-        }
-        ExprKind::RepeatLiteral { element, .. } => {
-            max_id = max_id.max(find_max_node_id_in_expr(element));
-        }
-        ExprKind::StructLiteral(s) => {
-            for f in &s.fields {
-                max_id = max_id.max(find_max_node_id_in_expr(&f.value));
-            }
-        }
-        ExprKind::Match(m) => {
-            max_id = max_id.max(find_max_node_id_in_expr(&m.scrutinee));
-            for arm in &m.arms {
-                max_id = max_id.max(find_max_node_id_in_expr(&arm.body));
-            }
-        }
-        ExprKind::Lambda(l) => {
-            if let LambdaBody::Expr(e) = &l.body {
-                max_id = max_id.max(find_max_node_id_in_expr(e));
-            } else if let LambdaBody::Block(b) = &l.body {
-                max_id = max_id.max(find_max_node_id_in_block(b));
-            }
-        }
-        ExprKind::Assign(a) => max_id = max_id.max(find_max_node_id_in_expr(&a.value)),
-        ExprKind::Range(r) => {
-            max_id = max_id.max(find_max_node_id_in_expr(&r.start));
-            max_id = max_id.max(find_max_node_id_in_expr(&r.end));
-        }
-        ExprKind::Try(t) => max_id = max_id.max(find_max_node_id_in_expr(t)),
-        ExprKind::Yield(y) => max_id = max_id.max(find_max_node_id_in_expr(&y.value)),
-        ExprKind::InterpolatedString(s) => {
-            for part in s {
-                if let StringPart::Expr(e) = part {
-                    max_id = max_id.max(find_max_node_id_in_expr(e));
-                }
-            }
-        }
-        ExprKind::Grouping(g) => max_id = max_id.max(find_max_node_id_in_expr(g)),
-        ExprKind::NullCoalesce(nc) => {
-            max_id = max_id.max(find_max_node_id_in_expr(&nc.value));
-            max_id = max_id.max(find_max_node_id_in_expr(&nc.default));
-        }
-        ExprKind::Is(is) => max_id = max_id.max(find_max_node_id_in_expr(&is.value)),
-        ExprKind::OptionalChain(oc) => max_id = max_id.max(find_max_node_id_in_expr(&oc.object)),
-        ExprKind::CompoundAssign(ca) => max_id = max_id.max(find_max_node_id_in_expr(&ca.value)),
-        // Leaf nodes
-        ExprKind::IntLiteral(_)
-        | ExprKind::FloatLiteral(_)
-        | ExprKind::BoolLiteral(_)
-        | ExprKind::StringLiteral(_)
-        | ExprKind::Identifier(_)
-        | ExprKind::Nil
-        | ExprKind::Done
-        | ExprKind::TypeLiteral(_)
-        | ExprKind::Import(_) => {}
-    }
-    max_id
-}
-
 /// Transform all generator functions in a program to state machines.
 ///
 /// This function:
@@ -255,8 +94,8 @@ impl<'a> GeneratorTransformer<'a> {
     }
 
     fn transform(&mut self, program: &mut Program) -> (usize, Vec<TypeError>) {
-        // Find the maximum NodeId in the existing program to avoid collisions
-        self.next_node_id = find_max_node_id(program) + 1;
+        // Use the program's next_node_id to avoid collisions with existing nodes
+        self.next_node_id = program.next_node_id;
 
         // Collect indices of generator functions and their info
         let mut generators_info = Vec::new();
@@ -294,6 +133,9 @@ impl<'a> GeneratorTransformer<'a> {
         for (idx, decl) in new_declarations {
             program.declarations.insert(idx, decl);
         }
+
+        // Update program's next_node_id to reflect nodes created during transform
+        program.next_node_id = self.next_node_id;
 
         (count, std::mem::take(&mut self.errors))
     }

@@ -85,7 +85,10 @@ impl<'src> Parser<'src> {
             self.skip_newlines();
         }
 
-        Ok(Program { declarations })
+        Ok(Program {
+            declarations,
+            next_node_id: self.next_node_id,
+        })
     }
 
     pub(super) fn skip_newlines(&mut self) {
