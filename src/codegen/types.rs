@@ -12,7 +12,7 @@ use crate::codegen::FunctionRegistry;
 use crate::commands::common::AnalyzedProgram;
 use crate::errors::CodegenError;
 use crate::frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
-use crate::identity::{self, ModuleId, NameId, NameTable, NamerLookup, TypeDefId};
+use crate::identity::{self, ModuleId, NameId, NameTable, NamerLookup, Resolver, TypeDefId};
 use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
@@ -123,6 +123,22 @@ pub(crate) struct CompileCtx<'a> {
     pub generic_calls: &'a HashMap<NodeId, MonomorphKey>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: &'a MonomorphCache,
+}
+
+impl<'a> CompileCtx<'a> {
+    /// Get a Resolver for name lookups in codegen
+    pub fn resolver(&self) -> Resolver<'_> {
+        let module_id = self
+            .current_module
+            .and_then(|path| self.analyzed.name_table.module_id_if_known(path))
+            .unwrap_or_else(|| self.analyzed.name_table.main_module());
+        Resolver::new(
+            self.interner,
+            &self.analyzed.name_table,
+            module_id,
+            &[], // No imports in codegen context
+        )
+    }
 }
 
 /// Resolve a type expression to a Vole Type (uses CompileCtx for full context)
@@ -273,6 +289,9 @@ pub(crate) fn resolve_type_expr_with_metadata(
     name_table: &NameTable,
     module_id: ModuleId,
 ) -> Type {
+    // Create resolver for name lookups
+    let resolver = Resolver::new(interner, name_table, module_id, &[]);
+
     match ty {
         TypeExpr::Primitive(p) => Type::from_primitive(*p),
         TypeExpr::Named(sym) => {
@@ -280,11 +299,10 @@ pub(crate) fn resolve_type_expr_with_metadata(
             if let Some(aliased) = type_aliases.get(sym) {
                 aliased.clone()
             } else {
-                // Check entity registry for interface
-                // First try exact NameId lookup, then fall back to short name search
+                // Check entity registry for interface via Resolver
                 let name_str = interner.resolve(*sym);
-                let type_def_id = name_table
-                    .name_id(module_id, &[*sym], interner)
+                let type_def_id = resolver
+                    .resolve(*sym)
                     .and_then(|name_id| entity_registry.type_by_name(name_id))
                     .or_else(|| entity_registry.interface_by_short_name(name_str, name_table));
 
@@ -444,11 +462,10 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     )
                 })
                 .collect();
-            // Check entity registry for generic interface
-            // First try exact NameId lookup, then fall back to short name search
+            // Check entity registry for generic interface via Resolver
             let name_str = interner.resolve(*name);
-            let type_def_id = name_table
-                .name_id(module_id, &[*name], interner)
+            let type_def_id = resolver
+                .resolve(*name)
                 .and_then(|name_id| entity_registry.type_by_name(name_id))
                 .or_else(|| entity_registry.interface_by_short_name(name_str, name_table));
 

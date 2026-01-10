@@ -363,12 +363,18 @@ impl Cg<'_, '_, '_> {
         method_name: &str,
         elem_ty: &Type,
     ) -> Result<CompiledValue, String> {
-        // Look up the Iterator interface via EntityRegistry
+        // Look up the Iterator interface via Resolver
         let iter_type_id = self
             .ctx
-            .analyzed
-            .entity_registry
-            .interface_by_short_name("Iterator", &self.ctx.analyzed.name_table)
+            .resolver()
+            .resolve_str("Iterator")
+            .and_then(|name_id| self.ctx.analyzed.entity_registry.type_by_name(name_id))
+            .or_else(|| {
+                self.ctx
+                    .analyzed
+                    .entity_registry
+                    .interface_by_short_name("Iterator", &self.ctx.analyzed.name_table)
+            })
             .ok_or_else(|| "Iterator interface not found in entity registry".to_string())?;
 
         let iter_def = self.ctx.analyzed.entity_registry.get_type(iter_type_id);
@@ -438,13 +444,19 @@ impl Cg<'_, '_, '_> {
 
     /// Convert Iterator<T> return types to RuntimeIterator(T), looking up Iterator interface by name
     pub(crate) fn maybe_convert_iterator_return_type(&self, ty: Type) -> Type {
-        // Look up the Iterator interface
-        if let Some(iterator_type_id) = self
+        // Look up the Iterator interface via Resolver
+        let iterator_type_id = self
             .ctx
-            .analyzed
-            .entity_registry
-            .interface_by_short_name("Iterator", &self.ctx.analyzed.name_table)
-        {
+            .resolver()
+            .resolve_str("Iterator")
+            .and_then(|name_id| self.ctx.analyzed.entity_registry.type_by_name(name_id))
+            .or_else(|| {
+                self.ctx
+                    .analyzed
+                    .entity_registry
+                    .interface_by_short_name("Iterator", &self.ctx.analyzed.name_table)
+            });
+        if let Some(iterator_type_id) = iterator_type_id {
             let iterator_name_id = self
                 .ctx
                 .analyzed

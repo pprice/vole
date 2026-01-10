@@ -92,25 +92,12 @@ impl InterfaceVtableRegistry {
             return Ok(*data_id);
         }
 
-        // Get interface TypeDefId from EntityRegistry by looking up using the interface Symbol
-        // Try main module first, then builtin module, then short name fallback (for prelude interfaces like Iterator)
+        // Get interface TypeDefId via Resolver, with short name fallback for prelude interfaces
         let interface_name_str = ctx.interner.resolve(interface_name);
         let interface_type_id = ctx
-            .analyzed
-            .name_table
-            .name_id_raw(ctx.analyzed.name_table.main_module(), &[interface_name_str])
+            .resolver()
+            .resolve_str(interface_name_str)
             .and_then(|name_id| ctx.analyzed.entity_registry.type_by_name(name_id))
-            .or_else(|| {
-                ctx.analyzed
-                    .name_table
-                    .builtin_module_id()
-                    .and_then(|builtin_mod| {
-                        ctx.analyzed
-                            .name_table
-                            .name_id_raw(builtin_mod, &[interface_name_str])
-                    })
-                    .and_then(|name_id| ctx.analyzed.entity_registry.type_by_name(name_id))
-            })
             .or_else(|| {
                 // Fall back to short name search across all modules (for prelude interfaces)
                 ctx.analyzed

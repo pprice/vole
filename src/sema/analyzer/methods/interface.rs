@@ -196,11 +196,16 @@ impl Analyzer {
         if let Some(stringable_id) = self.well_known.stringable {
             return self.satisfies_interface_via_entity_registry(ty, stringable_id, interner);
         }
-        // Fallback: try to find "Stringable" via EntityRegistry short name lookup
-        if let Some(type_def_id) = self
-            .entity_registry
-            .interface_by_short_name("Stringable", &self.name_table)
-        {
+        // Fallback: try to find "Stringable" via Resolver then short name lookup
+        let type_def_id = self
+            .resolver(interner)
+            .resolve_str("Stringable")
+            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+            .or_else(|| {
+                self.entity_registry
+                    .interface_by_short_name("Stringable", &self.name_table)
+            });
+        if let Some(type_def_id) = type_def_id {
             let interface = self.entity_registry.get_type(type_def_id);
             return self.satisfies_interface_via_entity_registry(ty, interface.name_id, interner);
         }
