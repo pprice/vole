@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 
 use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
-use crate::frontend::{self, ExprKind, RaiseStmt, Stmt, Symbol};
+use crate::frontend::{self, ExprKind, Pattern, RaiseStmt, Stmt, Symbol};
 use crate::sema::Type;
 
 use super::compiler::ControlFlowCtx;
@@ -17,7 +17,7 @@ use super::interface_vtable::box_interface_value;
 use super::structs::convert_to_i64_for_storage;
 use super::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    fallible_error_tag, resolve_type_expr, type_size, type_to_cranelift,
+    fallible_error_tag, resolve_type_expr, tuple_layout, type_size, type_to_cranelift,
 };
 
 /// Compile a block of statements (wrapper for compatibility)
@@ -187,6 +187,37 @@ impl Cg<'_, '_, '_> {
                 let var = self.builder.declare_var(cranelift_ty);
                 self.builder.def_var(var, final_value);
                 self.vars.insert(let_stmt.name, (var, final_type));
+                Ok(false)
+            }
+
+            Stmt::LetTuple(let_tuple) => {
+                // Compile the initializer - should be a tuple
+                let init = self.expr(&let_tuple.init)?;
+
+                // Extract elements from the tuple pattern
+                if let Pattern::Tuple { elements, .. } = &let_tuple.pattern
+                    && let Type::Tuple(elem_types) = &init.vole_type
+                {
+                    let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
+
+                    for (i, pattern) in elements.iter().enumerate() {
+                        if let Pattern::Identifier { name, .. } = pattern {
+                            let offset = offsets[i];
+                            let elem_type = &elem_types[i];
+                            let elem_cr_type = type_to_cranelift(elem_type, self.ctx.pointer_type);
+                            let value = self.builder.ins().load(
+                                elem_cr_type,
+                                MemFlags::new(),
+                                init.value,
+                                offset,
+                            );
+                            let var = self.builder.declare_var(elem_cr_type);
+                            self.builder.def_var(var, value);
+                            self.vars.insert(*name, (var, elem_type.clone()));
+                        }
+                        // Wildcard patterns are ignored
+                    }
+                }
                 Ok(false)
             }
 

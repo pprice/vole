@@ -1,0 +1,60 @@
+// Tuple tests
+
+tests {
+    test "tuple literal creation" {
+        let t = [1, "hello"]
+        assert(true)  // Just test it compiles for now
+    }
+
+    test "tuple element access int" {
+        let t = [42, "world"]
+        assert(t[0] == 42)
+    }
+
+    test "tuple element access string" {
+        let t = [42, "world"]
+        assert(t[1] == "world")
+    }
+
+    test "tuple with 3 elements" {
+        let t = [1, "two", 3.14]
+        assert(t[0] == 1)
+        assert(t[1] == "two")
+        assert(t[2] == 3.14)
+    }
+
+    test "tuple with bools" {
+        let t = [true, false, 42]
+        assert(t[0] == true)
+        assert(t[1] == false)
+        assert(t[2] == 42)
+    }
+
+    test "nested tuple access" {
+        let inner = [1, 2]
+        let outer = [inner, 3]
+        // outer[0] returns the inner tuple pointer
+        // For now just test outer[1]
+        assert(outer[1] == 3)
+    }
+
+    test "tuple destructuring" {
+        let t = [1, "hello"]
+        let [a, b] = t
+        assert(a == 1)
+        assert(b == "hello")
+    }
+
+    test "tuple destructuring with wildcard" {
+        let t = [42, "ignored", 99]
+        let [x, _, z] = t
+        assert(x == 42)
+        assert(z == 99)
+    }
+
+    test "tuple destructuring inline" {
+        let [num, text] = [10, "twenty"]
+        assert(num == 10)
+        assert(text == "twenty")
+    }
+}

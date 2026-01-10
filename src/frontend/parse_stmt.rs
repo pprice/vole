@@ -4,7 +4,8 @@
 
 use super::ast::*;
 use super::parser::{ParseError, Parser};
-use super::token::TokenType;
+use super::token::{Span, TokenType};
+use crate::errors::ParserError;
 
 impl<'src> Parser<'src> {
     /// Parse a block: `{ statements }`
@@ -46,17 +47,38 @@ impl<'src> Parser<'src> {
 
     /// Parse a let statement (as a Stmt)
     fn let_stmt(&mut self) -> Result<Stmt, ParseError> {
-        let stmt = self.let_statement()?;
-        Ok(Stmt::Let(stmt))
-    }
-
-    /// Parse a let statement (returns LetStmt directly)
-    pub(super) fn let_statement(&mut self) -> Result<LetStmt, ParseError> {
         let start_span = self.current.span;
         self.advance(); // consume 'let'
 
         let mutable = self.match_token(TokenType::KwMut);
 
+        // Check for tuple destructuring: let [a, b] = expr
+        if self.check(TokenType::LBracket) {
+            let pattern = self.parse_tuple_pattern()?;
+
+            self.consume(TokenType::Eq, "expected '=' in let statement")?;
+            let init = self.expression(0)?;
+            let span = start_span.merge(init.span);
+
+            return Ok(Stmt::LetTuple(LetTupleStmt {
+                pattern,
+                mutable,
+                init,
+                span,
+            }));
+        }
+
+        // Regular let statement
+        let stmt = self.let_statement_inner(mutable, start_span)?;
+        Ok(Stmt::Let(stmt))
+    }
+
+    /// Parse the rest of a let statement (after 'let' and optional 'mut')
+    fn let_statement_inner(
+        &mut self,
+        mutable: bool,
+        start_span: Span,
+    ) -> Result<LetStmt, ParseError> {
         let name_token = self.current.clone();
         self.consume(TokenType::Identifier, "expected variable name")?;
         let name = self.interner.intern(&name_token.lexeme);
@@ -77,6 +99,68 @@ impl<'src> Parser<'src> {
             mutable,
             init,
             span,
+        })
+    }
+
+    /// Parse a let statement (returns LetStmt directly)
+    pub(super) fn let_statement(&mut self) -> Result<LetStmt, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'let'
+        let mutable = self.match_token(TokenType::KwMut);
+        self.let_statement_inner(mutable, start_span)
+    }
+
+    /// Parse a tuple destructuring pattern: [a, b, c]
+    fn parse_tuple_pattern(&mut self) -> Result<Pattern, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume '['
+
+        let mut elements = Vec::new();
+        let mut end_span = start_span;
+
+        loop {
+            if self.check(TokenType::RBracket) {
+                break;
+            }
+
+            // Parse element pattern (identifier or wildcard)
+            let token = self.current.clone();
+            let elem_pattern = if token.ty == TokenType::Identifier && token.lexeme == "_" {
+                // Wildcard pattern
+                self.advance();
+                end_span = token.span;
+                Pattern::Wildcard(token.span)
+            } else if token.ty == TokenType::Identifier {
+                // Identifier pattern
+                self.advance();
+                let name = self.interner.intern(&token.lexeme);
+                end_span = token.span;
+                Pattern::Identifier {
+                    name,
+                    span: token.span,
+                }
+            } else {
+                return Err(ParseError::new(
+                    ParserError::ExpectedToken {
+                        expected: "identifier".to_string(),
+                        found: token.ty.as_str().to_string(),
+                        span: token.span.into(),
+                    },
+                    token.span,
+                ));
+            };
+            elements.push(elem_pattern);
+
+            if !self.match_token(TokenType::Comma) {
+                break;
+            }
+        }
+
+        self.consume(TokenType::RBracket, "expected ']' after tuple pattern")?;
+
+        Ok(Pattern::Tuple {
+            elements,
+            span: start_span.merge(end_span),
         })
     }
 

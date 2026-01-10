@@ -233,6 +233,54 @@ impl Analyzer {
             Stmt::Raise(raise_stmt) => {
                 self.analyze_raise_stmt(raise_stmt, interner);
             }
+            Stmt::LetTuple(let_tuple) => {
+                // Check the initializer - should be a tuple type
+                let init_type = self.check_expr(&let_tuple.init, interner)?;
+
+                // Extract element types and bind variables
+                if let Pattern::Tuple { elements, span } = &let_tuple.pattern {
+                    if let Type::Tuple(elem_types) = &init_type {
+                        if elements.len() != elem_types.len() {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: format!("tuple of {} elements", elem_types.len()),
+                                    found: format!(
+                                        "destructuring pattern with {} elements",
+                                        elements.len()
+                                    ),
+                                    span: (*span).into(),
+                                },
+                                *span,
+                            );
+                        } else {
+                            // Bind each identifier in the pattern to its type
+                            for (pattern, elem_type) in elements.iter().zip(elem_types.iter()) {
+                                if let Pattern::Identifier { name, .. } = pattern {
+                                    self.scope.define(
+                                        *name,
+                                        Variable {
+                                            ty: elem_type.clone(),
+                                            mutable: let_tuple.mutable,
+                                        },
+                                    );
+                                    self.add_lambda_local(*name);
+                                }
+                                // Wildcards are just skipped
+                            }
+                        }
+                    } else {
+                        let found = self.type_display(&init_type);
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "tuple".to_string(),
+                                found,
+                                span: let_tuple.init.span.into(),
+                            },
+                            let_tuple.init.span,
+                        );
+                    }
+                }
+            }
         }
         Ok(())
     }

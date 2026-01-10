@@ -212,6 +212,38 @@ impl Analyzer {
                     None
                 }
             }
+            Pattern::Tuple { elements, span } => {
+                // Tuple pattern - check against tuple type
+                if let Type::Tuple(elem_types) = scrutinee_type {
+                    if elements.len() != elem_types.len() {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: format!("tuple of {} elements", elem_types.len()),
+                                found: format!("tuple pattern with {} elements", elements.len()),
+                                span: (*span).into(),
+                            },
+                            *span,
+                        );
+                        return None;
+                    }
+                    // Check each element pattern against its type
+                    for (pattern, elem_type) in elements.iter().zip(elem_types.iter()) {
+                        self.check_pattern(pattern, elem_type, interner);
+                    }
+                    None // No type narrowing for tuple patterns
+                } else {
+                    let found = self.type_display(scrutinee_type);
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "tuple".to_string(),
+                            found,
+                            span: (*span).into(),
+                        },
+                        *span,
+                    );
+                    None
+                }
+            }
         }
     }
 

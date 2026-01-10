@@ -118,6 +118,7 @@ fn find_max_node_id_in_stmt(stmt: &Stmt) -> u32 {
             .map(|f| find_max_node_id_in_expr(&f.value))
             .max()
             .unwrap_or(0),
+        Stmt::LetTuple(lt) => find_max_node_id_in_expr(&lt.init),
         Stmt::Break(_) | Stmt::Continue(_) => 0,
     }
 }
@@ -330,6 +331,7 @@ impl<'a> GeneratorTransformer<'a> {
                 .value
                 .as_ref()
                 .is_some_and(|e| self.expr_contains_yield(e)),
+            Stmt::LetTuple(lt) => self.expr_contains_yield(&lt.init),
             Stmt::Raise(_) | Stmt::Break(_) | Stmt::Continue(_) => false,
         }
     }
@@ -537,6 +539,9 @@ impl<'a> GeneratorTransformer<'a> {
                 if let Some(value) = &ret_stmt.value {
                     self.collect_yields_from_expr(value, yields);
                 }
+            }
+            Stmt::LetTuple(lt) => {
+                self.collect_yields_from_expr(&lt.init, yields);
             }
             Stmt::Raise(_) | Stmt::Break(_) | Stmt::Continue(_) => {}
         }

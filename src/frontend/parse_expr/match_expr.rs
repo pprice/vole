@@ -216,6 +216,7 @@ impl<'src> Parser<'src> {
             Pattern::Val { span, .. } => *span,
             Pattern::Success { span, .. } => *span,
             Pattern::Error { span, .. } => *span,
+            Pattern::Tuple { span, .. } => *span,
             Pattern::Literal(expr) => expr.span,
         }
     }

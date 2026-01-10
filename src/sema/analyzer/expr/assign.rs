@@ -106,6 +106,7 @@ impl Analyzer {
                 // Get element type
                 match obj_type {
                     Type::Array(elem_ty) => (*elem_ty, true, true),
+                    Type::FixedArray { element, .. } => (*element, true, true),
                     _ => {
                         if obj_type != Type::Error {
                             let found = self.type_display(&obj_type);
@@ -240,6 +241,7 @@ impl Analyzer {
                 // Get element type
                 match obj_type {
                     Type::Array(elem_ty) => *elem_ty,
+                    Type::FixedArray { element, .. } => *element,
                     _ => {
                         if obj_type != Type::Error {
                             let found = self.type_display(&obj_type);

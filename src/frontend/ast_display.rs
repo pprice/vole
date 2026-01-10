@@ -333,6 +333,18 @@ impl<'a> AstPrinter<'a> {
                 out.push_str("Raise\n");
                 // TODO: implement raise statement display
             }
+            Stmt::LetTuple(lt) => {
+                self.write_indent(out);
+                out.push_str("LetTuple\n");
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("pattern: ");
+                self.write_pattern_inline(out, &lt.pattern);
+                out.push('\n');
+                inner.write_indent(out);
+                out.push_str("init:\n");
+                inner.indented().write_expr(out, &lt.init);
+            }
         }
     }
 
@@ -717,6 +729,16 @@ impl<'a> AstPrinter<'a> {
                     out.push(' ');
                     self.write_pattern_inline(out, inner_pattern);
                 }
+            }
+            Pattern::Tuple { elements, .. } => {
+                out.push('[');
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    self.write_pattern_inline(out, elem);
+                }
+                out.push(']');
             }
         }
     }

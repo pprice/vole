@@ -392,4 +392,13 @@ pub enum SemanticError {
         #[label("missing 'default' keyword")]
         span: SourceSpan,
     },
+
+    #[error("index {index} out of bounds for tuple of length {len}")]
+    #[diagnostic(code(E2076))]
+    IndexOutOfBounds {
+        index: usize,
+        len: usize,
+        #[label("index out of bounds")]
+        span: SourceSpan,
+    },
 }

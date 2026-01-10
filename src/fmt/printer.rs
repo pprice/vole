@@ -76,6 +76,24 @@ fn print_let_stmt<'a>(
         .append(print_expr(arena, &stmt.init, interner))
 }
 
+/// Print a let tuple destructuring statement.
+fn print_let_tuple_stmt<'a>(
+    arena: &'a Arena<'a>,
+    stmt: &LetTupleStmt,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let keyword = if stmt.mutable {
+        arena.text("let mut ")
+    } else {
+        arena.text("let ")
+    };
+
+    keyword
+        .append(print_pattern(arena, &stmt.pattern, interner))
+        .append(arena.text(" = "))
+        .append(print_expr(arena, &stmt.init, interner))
+}
+
 /// Print a function declaration.
 fn print_func_decl<'a>(
     arena: &'a Arena<'a>,
@@ -185,6 +203,7 @@ fn print_stmt<'a>(
 ) -> DocBuilder<'a, Arena<'a>> {
     match stmt {
         Stmt::Let(let_stmt) => print_let_stmt(arena, let_stmt, interner),
+        Stmt::LetTuple(let_tuple) => print_let_tuple_stmt(arena, let_tuple, interner),
         Stmt::Expr(expr_stmt) => print_expr(arena, &expr_stmt.expr, interner),
         Stmt::While(while_stmt) => print_while_stmt(arena, while_stmt, interner),
         Stmt::For(for_stmt) => print_for_stmt(arena, for_stmt, interner),
@@ -721,6 +740,15 @@ fn print_pattern<'a>(
                 )),
                 None => base,
             }
+        }
+        Pattern::Tuple { elements, .. } => {
+            let inner = arena.intersperse(
+                elements
+                    .iter()
+                    .map(|elem| print_pattern(arena, elem, interner)),
+                arena.text(", "),
+            );
+            arena.text("[").append(inner).append(arena.text("]"))
         }
     }
 }

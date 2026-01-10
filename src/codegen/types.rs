@@ -592,6 +592,8 @@ pub(crate) fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::
         Type::Fallible(_) => pointer_type, // Fallibles are passed by pointer (tagged union)
         Type::Function(_) => pointer_type, // Function pointers
         Type::Range => pointer_type,       // Ranges are passed by pointer (start, end)
+        Type::Tuple(_) => pointer_type,    // Tuples are passed by pointer
+        Type::FixedArray { .. } => pointer_type, // Fixed arrays are passed by pointer
         _ => types::I64,                   // Default
     }
 }
@@ -664,8 +666,36 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
             // Layout: [tag:8][payload:max_payload] aligned to 8
             8 + max_payload.div_ceil(8) * 8
         }
+        Type::Tuple(elements) => {
+            // Sum of element sizes, each aligned to 8 bytes
+            elements
+                .iter()
+                .map(|t| type_size(t, pointer_type).div_ceil(8) * 8)
+                .sum()
+        }
+        Type::FixedArray { element, size } => {
+            // Element size * count, each element aligned to 8 bytes
+            let elem_size = type_size(element, pointer_type).div_ceil(8) * 8;
+            elem_size * (*size as u32)
+        }
         _ => 8, // default
     }
+}
+
+/// Calculate layout for tuple elements.
+/// Returns (total_size, offsets) where offsets[i] is the byte offset for element i.
+/// Each element is aligned to 8 bytes for simplicity.
+pub(crate) fn tuple_layout(elements: &[Type], pointer_type: types::Type) -> (u32, Vec<i32>) {
+    let mut offsets = Vec::with_capacity(elements.len());
+    let mut offset = 0i32;
+
+    for elem in elements {
+        offsets.push(offset);
+        let elem_size = type_size(elem, pointer_type).div_ceil(8) * 8;
+        offset += elem_size as i32;
+    }
+
+    (offset as u32, offsets)
 }
 
 // ============================================================================

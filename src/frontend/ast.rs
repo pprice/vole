@@ -240,6 +240,7 @@ pub struct Block {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Let(LetStmt),
+    LetTuple(LetTupleStmt),
     Expr(ExprStmt),
     While(WhileStmt),
     For(ForStmt),
@@ -255,6 +256,15 @@ pub enum Stmt {
 pub struct LetStmt {
     pub name: Symbol,
     pub ty: Option<TypeExpr>,
+    pub mutable: bool,
+    pub init: Expr,
+    pub span: Span,
+}
+
+/// Tuple destructuring: let [a, b] = expr
+#[derive(Debug, Clone)]
+pub struct LetTupleStmt {
+    pub pattern: Pattern,
     pub mutable: bool,
     pub init: Expr,
     pub span: Span,
@@ -697,6 +707,8 @@ pub enum Pattern {
         inner: Option<Box<Pattern>>, // None = bare error, Some = error <pattern>
         span: Span,
     },
+    /// Tuple destructuring pattern: [a, b, c]
+    Tuple { elements: Vec<Pattern>, span: Span },
 }
 
 #[cfg(test)]

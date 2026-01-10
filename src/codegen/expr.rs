@@ -17,7 +17,7 @@ use super::interface_vtable::box_interface_value;
 use super::structs::{convert_field_value, convert_to_i64_for_storage};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    array_element_tag, fallible_error_tag, resolve_type_expr, type_to_cranelift,
+    array_element_tag, fallible_error_tag, resolve_type_expr, tuple_layout, type_to_cranelift,
 };
 
 impl Cg<'_, '_, '_> {
@@ -55,13 +55,9 @@ impl Cg<'_, '_, '_> {
             ExprKind::Call(call) => self.call(call, expr.span.line, expr.id),
             ExprKind::InterpolatedString(parts) => self.interpolated_string(parts),
             ExprKind::Range(range) => self.range(range),
-            ExprKind::ArrayLiteral(elements) => self.array_literal(elements),
-            ExprKind::RepeatLiteral { .. } => {
-                // TODO: Implement codegen for repeat literals in Phase 6
-                Err(
-                    CodegenError::unsupported("repeat literals ([expr; N]) not yet implemented")
-                        .into(),
-                )
+            ExprKind::ArrayLiteral(elements) => self.array_literal(elements, expr),
+            ExprKind::RepeatLiteral { element, count } => {
+                self.repeat_literal(element, *count, expr)
             }
             ExprKind::Index(idx) => self.index(&idx.object, &idx.index),
             ExprKind::Match(match_expr) => self.match_expr(match_expr),
@@ -372,8 +368,23 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Compile an array literal
-    fn array_literal(&mut self, elements: &[Expr]) -> Result<CompiledValue, String> {
+    /// Compile an array or tuple literal
+    fn array_literal(&mut self, elements: &[Expr], expr: &Expr) -> Result<CompiledValue, String> {
+        // Check the inferred type from semantic analysis
+        let inferred_type = self
+            .ctx
+            .analyzed
+            .expr_types
+            .get(&expr.id)
+            .cloned()
+            .unwrap_or(Type::Unknown);
+
+        // If it's a tuple, use stack allocation
+        if let Type::Tuple(ref elem_types) = inferred_type {
+            return self.tuple_literal(elements, elem_types);
+        }
+
+        // Otherwise, create a dynamic array
         let arr_ptr = self.call_runtime(RuntimeFn::ArrayNew, &[])?;
         let array_push_key = self
             .ctx
@@ -406,6 +417,107 @@ impl Cg<'_, '_, '_> {
             value: arr_ptr,
             ty: self.ctx.pointer_type,
             vole_type: Type::Array(Box::new(elem_type)),
+        })
+    }
+
+    /// Compile a tuple literal to stack-allocated memory
+    fn tuple_literal(
+        &mut self,
+        elements: &[Expr],
+        elem_types: &[Type],
+    ) -> Result<CompiledValue, String> {
+        // Calculate layout
+        let (total_size, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
+
+        // Create stack slot for the tuple
+        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            total_size,
+            0,
+        ));
+
+        // Compile and store each element
+        for (i, elem) in elements.iter().enumerate() {
+            let compiled = self.expr(elem)?;
+            let offset = offsets[i];
+
+            // Store the value at its offset in the tuple
+            self.builder.ins().stack_store(compiled.value, slot, offset);
+        }
+
+        // Return pointer to the tuple
+        let ptr = self
+            .builder
+            .ins()
+            .stack_addr(self.ctx.pointer_type, slot, 0);
+
+        Ok(CompiledValue {
+            value: ptr,
+            ty: self.ctx.pointer_type,
+            vole_type: Type::Tuple(elem_types.to_vec()),
+        })
+    }
+
+    /// Compile a repeat literal [expr; N] to a fixed-size array
+    fn repeat_literal(
+        &mut self,
+        element: &Expr,
+        count: usize,
+        expr: &Expr,
+    ) -> Result<CompiledValue, String> {
+        // Get the element type from semantic analysis
+        let elem_type = self
+            .ctx
+            .analyzed
+            .expr_types
+            .get(&element.id)
+            .cloned()
+            .unwrap_or(Type::Unknown);
+
+        // Compile the element once
+        let elem_value = self.expr(element)?;
+
+        // Each element is aligned to 8 bytes
+        let elem_size = 8u32;
+        let total_size = elem_size * (count as u32);
+
+        // Create stack slot for the fixed array
+        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            total_size,
+            0,
+        ));
+
+        // Store the element value at each position
+        for i in 0..count {
+            let offset = (i as i32) * (elem_size as i32);
+            self.builder
+                .ins()
+                .stack_store(elem_value.value, slot, offset);
+        }
+
+        // Return pointer to the array
+        let ptr = self
+            .builder
+            .ins()
+            .stack_addr(self.ctx.pointer_type, slot, 0);
+
+        // Get the full type from sema
+        let vole_type = self
+            .ctx
+            .analyzed
+            .expr_types
+            .get(&expr.id)
+            .cloned()
+            .unwrap_or(Type::FixedArray {
+                element: Box::new(elem_type),
+                size: count,
+            });
+
+        Ok(CompiledValue {
+            value: ptr,
+            ty: self.ctx.pointer_type,
+            vole_type,
         })
     }
 
@@ -450,22 +562,99 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an index expression
     fn index(&mut self, object: &Expr, index: &Expr) -> Result<CompiledValue, String> {
-        let arr = self.expr(object)?;
-        let idx = self.expr(index)?;
+        let obj = self.expr(object)?;
 
-        let elem_type = match &arr.vole_type {
-            Type::Array(elem) => elem.as_ref().clone(),
-            _ => Type::I64,
-        };
+        match &obj.vole_type {
+            Type::Tuple(elem_types) => {
+                // Tuple indexing - must be constant index (checked in sema)
+                if let ExprKind::IntLiteral(i) = &index.kind {
+                    let i = *i as usize;
+                    let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
+                    let offset = offsets[i];
+                    let elem_type = &elem_types[i];
+                    let elem_cr_type = type_to_cranelift(elem_type, self.ctx.pointer_type);
 
-        let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, idx.value])?;
-        let (result_value, result_ty) = convert_field_value(self.builder, raw_value, &elem_type);
+                    let value =
+                        self.builder
+                            .ins()
+                            .load(elem_cr_type, MemFlags::new(), obj.value, offset);
 
-        Ok(CompiledValue {
-            value: result_value,
-            ty: result_ty,
-            vole_type: elem_type,
-        })
+                    Ok(CompiledValue {
+                        value,
+                        ty: elem_cr_type,
+                        vole_type: elem_type.clone(),
+                    })
+                } else {
+                    Err("tuple index must be a constant".to_string())
+                }
+            }
+            Type::FixedArray { element, size } => {
+                // Fixed array indexing
+                let elem_size = 8i32; // All elements aligned to 8 bytes
+                let elem_cr_type = type_to_cranelift(element, self.ctx.pointer_type);
+
+                // Calculate offset: base + (index * elem_size)
+                let offset = if let ExprKind::IntLiteral(i) = &index.kind {
+                    // Constant index - bounds check at compile time already done in sema
+                    let i = *i as usize;
+                    if i >= *size {
+                        return Err(format!(
+                            "index {} out of bounds for fixed array of size {}",
+                            i, size
+                        ));
+                    }
+                    self.builder.ins().iconst(types::I64, (i as i64) * 8)
+                } else {
+                    // Runtime index - add bounds check
+                    let idx = self.expr(index)?;
+                    let size_val = self.builder.ins().iconst(types::I64, *size as i64);
+
+                    // Check if index < 0 or index >= size
+                    // We treat index as unsigned, so negative becomes very large
+                    let in_bounds =
+                        self.builder
+                            .ins()
+                            .icmp(IntCC::UnsignedLessThan, idx.value, size_val);
+
+                    // Trap if out of bounds
+                    self.builder
+                        .ins()
+                        .trapz(in_bounds, TrapCode::unwrap_user(2));
+
+                    let elem_size_val = self.builder.ins().iconst(types::I64, elem_size as i64);
+                    self.builder.ins().imul(idx.value, elem_size_val)
+                };
+
+                let elem_ptr = self.builder.ins().iadd(obj.value, offset);
+                let value = self
+                    .builder
+                    .ins()
+                    .load(elem_cr_type, MemFlags::new(), elem_ptr, 0);
+
+                Ok(CompiledValue {
+                    value,
+                    ty: elem_cr_type,
+                    vole_type: (**element).clone(),
+                })
+            }
+            Type::Array(elem) => {
+                // Dynamic array indexing (existing behavior)
+                let idx = self.expr(index)?;
+                let elem_type = elem.as_ref().clone();
+
+                let raw_value =
+                    self.call_runtime(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
+                let (result_value, result_ty) =
+                    convert_field_value(self.builder, raw_value, &elem_type);
+
+                Ok(CompiledValue {
+                    value: result_value,
+                    ty: result_ty,
+                    vole_type: elem_type,
+                })
+            }
+            _ => Err(format!("cannot index type {}", obj.vole_type.name())),
+        }
     }
 
     /// Compile an index assignment
@@ -476,26 +665,77 @@ impl Cg<'_, '_, '_> {
         value: &Expr,
     ) -> Result<CompiledValue, String> {
         let arr = self.expr(object)?;
-        let idx = self.expr(index)?;
         let val = self.expr(value)?;
 
-        let set_value_key = self
-            .ctx
-            .func_registry
-            .runtime_key(RuntimeFn::ArraySet)
-            .ok_or_else(|| "vole_array_set not found".to_string())?;
-        let set_value_ref = self.func_ref(set_value_key)?;
-        let tag_val = self
-            .builder
-            .ins()
-            .iconst(types::I64, array_element_tag(&val.vole_type));
-        let value_bits = convert_to_i64_for_storage(self.builder, &val);
+        match &arr.vole_type {
+            Type::FixedArray { size, .. } => {
+                // Fixed array assignment - store directly at offset
+                let elem_size = 8i32; // All elements aligned to 8 bytes
 
-        self.builder
-            .ins()
-            .call(set_value_ref, &[arr.value, idx.value, tag_val, value_bits]);
+                // Calculate offset
+                let offset = if let ExprKind::IntLiteral(i) = &index.kind {
+                    let i = *i as usize;
+                    if i >= *size {
+                        return Err(format!(
+                            "index {} out of bounds for fixed array of size {}",
+                            i, size
+                        ));
+                    }
+                    self.builder.ins().iconst(types::I64, (i as i64) * 8)
+                } else {
+                    // Runtime index - add bounds check
+                    let idx = self.expr(index)?;
+                    let size_val = self.builder.ins().iconst(types::I64, *size as i64);
 
-        Ok(val)
+                    // Check if index < 0 or index >= size
+                    let in_bounds =
+                        self.builder
+                            .ins()
+                            .icmp(IntCC::UnsignedLessThan, idx.value, size_val);
+
+                    // Trap if out of bounds
+                    self.builder
+                        .ins()
+                        .trapz(in_bounds, TrapCode::unwrap_user(2));
+
+                    let elem_size_val = self.builder.ins().iconst(types::I64, elem_size as i64);
+                    self.builder.ins().imul(idx.value, elem_size_val)
+                };
+
+                let elem_ptr = self.builder.ins().iadd(arr.value, offset);
+                self.builder
+                    .ins()
+                    .store(MemFlags::new(), val.value, elem_ptr, 0);
+
+                Ok(val)
+            }
+            Type::Array(_) => {
+                // Dynamic array assignment (existing behavior)
+                let idx = self.expr(index)?;
+
+                let set_value_key = self
+                    .ctx
+                    .func_registry
+                    .runtime_key(RuntimeFn::ArraySet)
+                    .ok_or_else(|| "vole_array_set not found".to_string())?;
+                let set_value_ref = self.func_ref(set_value_key)?;
+                let tag_val = self
+                    .builder
+                    .ins()
+                    .iconst(types::I64, array_element_tag(&val.vole_type));
+                let value_bits = convert_to_i64_for_storage(self.builder, &val);
+
+                self.builder
+                    .ins()
+                    .call(set_value_ref, &[arr.value, idx.value, tag_val, value_bits]);
+
+                Ok(val)
+            }
+            _ => Err(format!(
+                "cannot assign to index of type {}",
+                arr.vole_type.name()
+            )),
+        }
     }
 
     /// Compile an `is` type check expression
@@ -945,6 +1185,31 @@ impl Cg<'_, '_, '_> {
                                 .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
                         Some(is_error)
                     }
+                }
+                Pattern::Tuple { elements, .. } => {
+                    // Tuple destructuring in match - extract elements and bind
+                    if let Type::Tuple(elem_types) = &scrutinee.vole_type {
+                        let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
+                        for (i, pattern) in elements.iter().enumerate() {
+                            if let Pattern::Identifier { name, .. } = pattern {
+                                let offset = offsets[i];
+                                let elem_type = &elem_types[i];
+                                let elem_cr_type =
+                                    type_to_cranelift(elem_type, self.ctx.pointer_type);
+                                let value = self.builder.ins().load(
+                                    elem_cr_type,
+                                    MemFlags::new(),
+                                    scrutinee.value,
+                                    offset,
+                                );
+                                let var = self.builder.declare_var(elem_cr_type);
+                                self.builder.def_var(var, value);
+                                arm_variables.insert(*name, (var, elem_type.clone()));
+                            }
+                            // Other pattern types in tuple (like wildcards) are ignored
+                        }
+                    }
+                    None // Tuple patterns always match (type checked in sema)
                 }
             };
 

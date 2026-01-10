@@ -292,9 +292,33 @@ impl Analyzer {
                     );
                 }
 
-                // Object must be array
+                // Object must be array, tuple, or fixed array
                 match obj_ty {
                     Type::Array(elem_ty) => Ok(*elem_ty),
+                    Type::Tuple(ref elements) => {
+                        // For tuples, try to get element type from constant index
+                        if let ExprKind::IntLiteral(i) = &idx.index.kind {
+                            let i = *i as usize;
+                            if i < elements.len() {
+                                Ok(elements[i].clone())
+                            } else {
+                                self.add_error(
+                                    SemanticError::IndexOutOfBounds {
+                                        index: i,
+                                        len: elements.len(),
+                                        span: idx.index.span.into(),
+                                    },
+                                    idx.index.span,
+                                );
+                                Ok(Type::Error)
+                            }
+                        } else {
+                            // Non-constant index - return union of all element types
+                            // For now, just return first element type (common case: 2-tuples)
+                            Ok(elements.first().cloned().unwrap_or(Type::Unknown))
+                        }
+                    }
+                    Type::FixedArray { element, .. } => Ok(*element),
                     _ => {
                         let found = self.type_display(&obj_ty);
                         self.add_error(

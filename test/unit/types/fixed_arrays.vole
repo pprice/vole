@@ -1,0 +1,51 @@
+// Fixed array tests
+
+tests {
+    test "repeat literal creation" {
+        let arr: [i64; 5] = [0; 5]
+        assert(true)
+    }
+
+    test "repeat literal access" {
+        let arr: [i64; 3] = [42; 3]
+        assert(arr[0] == 42)
+        assert(arr[1] == 42)
+        assert(arr[2] == 42)
+    }
+
+    test "repeat literal with expression" {
+        let x = 10
+        let arr: [i64; 2] = [x; 2]
+        assert(arr[0] == 10)
+        assert(arr[1] == 10)
+    }
+
+    test "fixed array string elements" {
+        let arr: [string; 2] = ["hello"; 2]
+        assert(arr[0] == "hello")
+        assert(arr[1] == "hello")
+    }
+
+    test "fixed array modification" {
+        let mut arr: [i64; 3] = [0; 3]
+        arr[0] = 1
+        arr[1] = 2
+        arr[2] = 3
+        assert(arr[0] == 1)
+        assert(arr[1] == 2)
+        assert(arr[2] == 3)
+    }
+
+    test "fixed array dynamic index" {
+        let arr: [i64; 5] = [10; 5]
+        let i = 2
+        assert(arr[i] == 10)
+    }
+
+    test "fixed array dynamic modification" {
+        let mut arr: [i64; 3] = [0; 3]
+        let i = 1
+        arr[i] = 42
+        assert(arr[1] == 42)
+    }
+}
