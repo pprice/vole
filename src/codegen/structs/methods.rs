@@ -367,14 +367,7 @@ impl Cg<'_, '_, '_> {
         let iter_type_id = self
             .ctx
             .resolver()
-            .resolve_str("Iterator")
-            .and_then(|name_id| self.ctx.analyzed.entity_registry.type_by_name(name_id))
-            .or_else(|| {
-                self.ctx
-                    .analyzed
-                    .entity_registry
-                    .interface_by_short_name("Iterator", &self.ctx.analyzed.name_table)
-            })
+            .resolve_type_str_or_interface("Iterator", &self.ctx.analyzed.entity_registry)
             .ok_or_else(|| "Iterator interface not found in entity registry".to_string())?;
 
         let iter_def = self.ctx.analyzed.entity_registry.get_type(iter_type_id);
@@ -448,14 +441,7 @@ impl Cg<'_, '_, '_> {
         let iterator_type_id = self
             .ctx
             .resolver()
-            .resolve_str("Iterator")
-            .and_then(|name_id| self.ctx.analyzed.entity_registry.type_by_name(name_id))
-            .or_else(|| {
-                self.ctx
-                    .analyzed
-                    .entity_registry
-                    .interface_by_short_name("Iterator", &self.ctx.analyzed.name_table)
-            });
+            .resolve_type_str_or_interface("Iterator", &self.ctx.analyzed.entity_registry);
         if let Some(iterator_type_id) = iterator_type_id {
             let iterator_name_id = self
                 .ctx

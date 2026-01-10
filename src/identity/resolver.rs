@@ -4,7 +4,8 @@
 // Bridges Symbol (AST) to NameId (semantic) with layered resolution.
 
 use crate::frontend::{Interner, Symbol};
-use crate::identity::{ModuleId, NameId, NameTable};
+use crate::identity::{ModuleId, NameId, NameTable, TypeDefId};
+use crate::sema::EntityRegistry;
 
 /// Scoped resolver - the bridge from Symbol to NameId.
 ///
@@ -69,6 +70,45 @@ impl<'a> Resolver<'a> {
         }
 
         None
+    }
+
+    // --- Entity resolution (Symbol/string → TypeDefId) ---
+
+    /// Resolve a Symbol to a TypeDefId through the resolution chain.
+    /// This combines name resolution with entity registry lookup.
+    pub fn resolve_type(&self, sym: Symbol, registry: &EntityRegistry) -> Option<TypeDefId> {
+        self.resolve(sym)
+            .and_then(|name_id| registry.type_by_name(name_id))
+    }
+
+    /// Resolve a string to a TypeDefId through the resolution chain.
+    /// This combines name resolution with entity registry lookup.
+    pub fn resolve_type_str(&self, name: &str, registry: &EntityRegistry) -> Option<TypeDefId> {
+        self.resolve_str(name)
+            .and_then(|name_id| registry.type_by_name(name_id))
+    }
+
+    /// Resolve a type with fallback to interface short name search.
+    /// This is the common pattern for interface lookups where the interface
+    /// might be in a different module (like prelude interfaces).
+    pub fn resolve_type_or_interface(
+        &self,
+        sym: Symbol,
+        registry: &EntityRegistry,
+    ) -> Option<TypeDefId> {
+        let name = self.interner.resolve(sym);
+        self.resolve_type_str_or_interface(name, registry)
+    }
+
+    /// Resolve a type string with fallback to interface short name search.
+    pub fn resolve_type_str_or_interface(
+        &self,
+        name: &str,
+        registry: &EntityRegistry,
+    ) -> Option<TypeDefId> {
+        self.resolve_str(name)
+            .and_then(|name_id| registry.type_by_name(name_id))
+            .or_else(|| registry.interface_by_short_name(name, self.table))
     }
 
     // --- Direct primitive access (zero lookup cost) ---

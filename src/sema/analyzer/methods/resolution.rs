@@ -362,16 +362,10 @@ impl Analyzer {
         {
             let method_name_str = interner.resolve(method_name);
             for interface_name in &interfaces {
-                // Look up interface via EntityRegistry using resolver
-                let interface_str = interner.resolve(*interface_name);
+                // Look up interface via Resolver with interface fallback
                 let type_def_id = self
                     .resolver(interner)
-                    .resolve_str(interface_str)
-                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-                    .or_else(|| {
-                        self.entity_registry
-                            .interface_by_short_name(interface_str, &self.name_table)
-                    });
+                    .resolve_type_or_interface(*interface_name, &self.entity_registry);
 
                 if let Some(type_def_id) = type_def_id {
                     let interface_def = self.entity_registry.get_type(type_def_id);

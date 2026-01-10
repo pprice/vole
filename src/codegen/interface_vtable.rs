@@ -96,14 +96,7 @@ impl InterfaceVtableRegistry {
         let interface_name_str = ctx.interner.resolve(interface_name);
         let interface_type_id = ctx
             .resolver()
-            .resolve_str(interface_name_str)
-            .and_then(|name_id| ctx.analyzed.entity_registry.type_by_name(name_id))
-            .or_else(|| {
-                // Fall back to short name search across all modules (for prelude interfaces)
-                ctx.analyzed
-                    .entity_registry
-                    .interface_by_short_name(interface_name_str, &ctx.analyzed.name_table)
-            })
+            .resolve_type_str_or_interface(interface_name_str, &ctx.analyzed.entity_registry)
             .ok_or_else(|| format!("unknown interface {:?}", interface_name_str))?;
         let interface_name_id = ctx
             .analyzed

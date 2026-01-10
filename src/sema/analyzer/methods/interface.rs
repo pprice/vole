@@ -196,15 +196,10 @@ impl Analyzer {
         if let Some(stringable_id) = self.well_known.stringable {
             return self.satisfies_interface_via_entity_registry(ty, stringable_id, interner);
         }
-        // Fallback: try to find "Stringable" via Resolver then short name lookup
+        // Fallback: try to find "Stringable" via Resolver with interface fallback
         let type_def_id = self
             .resolver(interner)
-            .resolve_str("Stringable")
-            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-            .or_else(|| {
-                self.entity_registry
-                    .interface_by_short_name("Stringable", &self.name_table)
-            });
+            .resolve_type_str_or_interface("Stringable", &self.entity_registry);
         if let Some(type_def_id) = type_def_id {
             let interface = self.entity_registry.get_type(type_def_id);
             return self.satisfies_interface_via_entity_registry(ty, interface.name_id, interner);
@@ -222,17 +217,10 @@ impl Analyzer {
         interface_name: Symbol,
         interner: &Interner,
     ) -> bool {
-        // Look up interface by Symbol -> NameId -> TypeDefId via EntityRegistry
-        let interface_name_str = interner.resolve(interface_name);
+        // Look up interface via Resolver with interface fallback
         let type_def_id = self
             .resolver(interner)
-            .resolve_str(interface_name_str)
-            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-            .or_else(|| {
-                // Fall back to short name lookup across all modules
-                self.entity_registry
-                    .interface_by_short_name(interface_name_str, &self.name_table)
-            });
+            .resolve_type_or_interface(interface_name, &self.entity_registry);
 
         let Some(type_def_id) = type_def_id else {
             return false;
@@ -253,8 +241,7 @@ impl Analyzer {
         // Get the implementing type for Self substitution via Resolver
         let type_id_opt = self
             .resolver(interner)
-            .resolve(type_name)
-            .and_then(|name_id| self.entity_registry.type_by_name(name_id));
+            .resolve_type(type_name, &self.entity_registry);
         let implementing_type = if let Some(type_id) = type_id_opt {
             let type_def = self.entity_registry.get_type(type_id);
             match type_def.kind {
@@ -276,16 +263,10 @@ impl Analyzer {
             None => return, // Unknown type, can't validate
         };
 
-        // Look up interface via EntityRegistry using resolver
-        let iface_name_str = interner.resolve(iface_name);
+        // Look up interface via Resolver with interface fallback
         let type_def_id = self
             .resolver(interner)
-            .resolve_str(iface_name_str)
-            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-            .or_else(|| {
-                self.entity_registry
-                    .interface_by_short_name(iface_name_str, &self.name_table)
-            });
+            .resolve_type_or_interface(iface_name, &self.entity_registry);
 
         if let Some(type_def_id) = type_def_id {
             // Clone the data we need to avoid borrow conflicts
@@ -429,8 +410,7 @@ impl Analyzer {
         // Methods defined directly on the type via Resolver
         let type_def_id_opt = self
             .resolver(interner)
-            .resolve(type_name)
-            .and_then(|name_id| self.entity_registry.type_by_name(name_id));
+            .resolve_type(type_name, &self.entity_registry);
         if let Some(type_def_id) = type_def_id_opt {
             for method_id in self.entity_registry.methods_on_type(type_def_id) {
                 let method = self.entity_registry.get_method(method_id);

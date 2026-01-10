@@ -213,13 +213,8 @@ impl Analyzer {
                     let iface_str = interner.resolve(iface_sym);
                     let iface_exists = self
                         .resolver(interner)
-                        .resolve_str(iface_str)
-                        .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-                        .is_some()
-                        || self
-                            .entity_registry
-                            .interface_by_short_name(iface_str, &self.name_table)
-                            .is_some();
+                        .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+                        .is_some();
 
                     if !iface_exists {
                         self.add_error(
@@ -370,13 +365,8 @@ impl Analyzer {
                         let iface_str = interner.resolve(iface_sym);
                         let iface_exists = self
                             .resolver(interner)
-                            .resolve_str(iface_str)
-                            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-                            .is_some()
-                            || self
-                                .entity_registry
-                                .interface_by_short_name(iface_str, &self.name_table)
-                                .is_some();
+                            .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+                            .is_some();
 
                         if !iface_exists {
                             self.add_error(
@@ -574,13 +564,8 @@ impl Analyzer {
                         let iface_str = interner.resolve(iface_sym);
                         let iface_exists = self
                             .resolver(interner)
-                            .resolve_str(iface_str)
-                            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-                            .is_some()
-                            || self
-                                .entity_registry
-                                .interface_by_short_name(iface_str, &self.name_table)
-                                .is_some();
+                            .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+                            .is_some();
 
                         if !iface_exists {
                             self.add_error(
@@ -1022,13 +1007,8 @@ impl Analyzer {
             let iface_str = interner.resolve(name);
             let iface_exists = self
                 .resolver(interner)
-                .resolve_str(iface_str)
-                .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-                .is_some()
-                || self
-                    .entity_registry
-                    .interface_by_short_name(iface_str, &self.name_table)
-                    .is_some();
+                .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+                .is_some();
 
             if !iface_exists {
                 self.add_error(

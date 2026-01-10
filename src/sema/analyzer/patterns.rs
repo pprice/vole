@@ -39,8 +39,7 @@ impl Analyzer {
                 // Check if this identifier is a known class or record type via Resolver
                 let type_id_opt = self
                     .resolver(interner)
-                    .resolve(*name)
-                    .and_then(|name_id| self.entity_registry.type_by_name(name_id));
+                    .resolve_type(*name, &self.entity_registry);
 
                 if let Some(type_id) = type_id_opt {
                     let type_def = self.entity_registry.get_type(type_id);
@@ -252,8 +251,7 @@ impl Analyzer {
                     // Look up the type via Resolver
                     let type_id_opt = self
                         .resolver(interner)
-                        .resolve(*name)
-                        .and_then(|name_id| self.entity_registry.type_by_name(name_id));
+                        .resolve_type(*name, &self.entity_registry);
 
                     if let Some(type_id) = type_id_opt {
                         let type_def = self.entity_registry.get_type(type_id);
@@ -418,8 +416,7 @@ impl Analyzer {
                     // Only a catch-all if NOT a known type name
                     let is_type = self
                         .resolver(interner)
-                        .resolve(*name)
-                        .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+                        .resolve_type(*name, &self.entity_registry)
                         .is_some();
                     !is_type
                 }
@@ -470,8 +467,7 @@ impl Analyzer {
             Pattern::Identifier { name, .. } => {
                 // Look up via Resolver
                 self.resolver(interner)
-                    .resolve(*name)
-                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+                    .resolve_type(*name, &self.entity_registry)
                     .and_then(|type_id| {
                         let type_def = self.entity_registry.get_type(type_id);
                         match type_def.kind {
@@ -493,8 +489,7 @@ impl Analyzer {
             } => {
                 // Typed record pattern: Point { x, y } covers type Point
                 self.resolver(interner)
-                    .resolve(*name)
-                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+                    .resolve_type(*name, &self.entity_registry)
                     .and_then(|type_id| {
                         let type_def = self.entity_registry.get_type(type_id);
                         match type_def.kind {

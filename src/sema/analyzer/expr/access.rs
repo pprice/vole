@@ -173,8 +173,7 @@ impl Analyzer {
                 // Try to find this as a type
                 if let Some(type_def_id) = self
                     .resolver(interner)
-                    .resolve(*type_sym)
-                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+                    .resolve_type(*type_sym, &self.entity_registry)
                 {
                     // This is a static method call
                     return self.check_static_method_call(

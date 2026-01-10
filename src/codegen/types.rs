@@ -300,11 +300,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 aliased.clone()
             } else {
                 // Check entity registry for interface via Resolver
-                let name_str = interner.resolve(*sym);
-                let type_def_id = resolver
-                    .resolve(*sym)
-                    .and_then(|name_id| entity_registry.type_by_name(name_id))
-                    .or_else(|| entity_registry.interface_by_short_name(name_str, name_table));
+                let type_def_id = resolver.resolve_type_or_interface(*sym, entity_registry);
 
                 if let Some(type_def_id) = type_def_id {
                     let type_def = entity_registry.get_type(type_def_id);
@@ -463,11 +459,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 })
                 .collect();
             // Check entity registry for generic interface via Resolver
-            let name_str = interner.resolve(*name);
-            let type_def_id = resolver
-                .resolve(*name)
-                .and_then(|name_id| entity_registry.type_by_name(name_id))
-                .or_else(|| entity_registry.interface_by_short_name(name_str, name_table));
+            let type_def_id = resolver.resolve_type_or_interface(*name, entity_registry);
 
             if let Some(type_def_id) = type_def_id {
                 let type_def = entity_registry.get_type(type_def_id);

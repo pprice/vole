@@ -31,18 +31,11 @@ fn interface_instance(
     type_args: Vec<Type>,
     ctx: &mut TypeResolutionContext<'_>,
 ) -> Option<Type> {
-    // Look up interface by Symbol -> NameId -> TypeDefId
-    // Use resolver for layered lookup (current module -> builtin module)
+    // Look up interface by Symbol -> TypeDefId via resolver with interface fallback
     let name_str = ctx.interner.resolve(name);
     let type_def_id = ctx
         .resolver()
-        .resolve_str(name_str)
-        .and_then(|name_id| ctx.entity_registry.type_by_name(name_id))
-        .or_else(|| {
-            // Fall back to string-based lookup across all modules
-            ctx.entity_registry
-                .interface_by_short_name(name_str, ctx.name_table)
-        })?;
+        .resolve_type_str_or_interface(name_str, ctx.entity_registry)?;
     let type_def = ctx.entity_registry.get_type(type_def_id);
 
     // Verify it's an interface
@@ -168,11 +161,7 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
             // Look up type alias first
             if let Some(aliased) = ctx.type_aliases.get(sym) {
                 aliased.clone()
-            } else if let Some(type_id) = ctx
-                .resolver()
-                .resolve(*sym)
-                .and_then(|name_id| ctx.entity_registry.type_by_name(name_id))
-            {
+            } else if let Some(type_id) = ctx.resolver().resolve_type(*sym, ctx.entity_registry) {
                 // Look up via EntityRegistry
                 let type_def = ctx.entity_registry.get_type(type_id);
                 match type_def.kind {

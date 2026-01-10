@@ -690,16 +690,10 @@ impl Analyzer {
         type_args: Vec<Type>,
         interner: &Interner,
     ) -> Option<Type> {
-        // Look up interface by string name using resolver
+        // Look up interface by string name using resolver with interface fallback
         let type_def_id = self
             .resolver(interner)
-            .resolve_str(name)
-            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-            .or_else(|| {
-                // Fall back to string-based lookup across all modules
-                self.entity_registry
-                    .interface_by_short_name(name, &self.name_table)
-            })?;
+            .resolve_type_str_or_interface(name, &self.entity_registry)?;
         let type_def = self.entity_registry.get_type(type_def_id);
 
         // Check type params match
@@ -1082,13 +1076,8 @@ impl Analyzer {
                 let iface_str = interner.resolve(*sym);
                 let iface_exists = self
                     .resolver(interner)
-                    .resolve_str(iface_str)
-                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-                    .is_some()
-                    || self
-                        .entity_registry
-                        .interface_by_short_name(iface_str, &self.name_table)
-                        .is_some();
+                    .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+                    .is_some();
 
                 if !iface_exists {
                     self.add_error(
@@ -1301,8 +1290,7 @@ impl Analyzer {
         // Look up method type via Resolver
         let type_def_id = self
             .resolver(interner)
-            .resolve(type_name)
-            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+            .resolve_type(type_name, &self.entity_registry)
             .expect("type should be registered in EntityRegistry");
         let method_name_id = self.method_name_id(method.name, interner);
         let method_id = self
@@ -1397,8 +1385,7 @@ impl Analyzer {
         // Look up static method type via Resolver
         let type_def_id = self
             .resolver(interner)
-            .resolve(type_name)
-            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+            .resolve_type(type_name, &self.entity_registry)
             .expect("type should be registered in EntityRegistry");
         let method_name_id = self.method_name_id(method.name, interner);
         let method_id = self

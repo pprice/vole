@@ -549,8 +549,7 @@ fn satisfies_interface_with_field() {
     // Get the Person type via Resolver
     let type_def_id = analyzer
         .resolver(&interner)
-        .resolve(person_sym)
-        .and_then(|name_id| analyzer.entity_registry.type_by_name(name_id))
+        .resolve_type(person_sym, &analyzer.entity_registry)
         .unwrap();
     let person_type = analyzer
         .entity_registry
@@ -585,8 +584,7 @@ fn satisfies_interface_missing_field() {
     // Get the Point type via Resolver
     let type_def_id = analyzer
         .resolver(&interner)
-        .resolve(point_sym)
-        .and_then(|name_id| analyzer.entity_registry.type_by_name(name_id))
+        .resolve_type(point_sym, &analyzer.entity_registry)
         .unwrap();
     let point_type = analyzer
         .entity_registry
@@ -623,8 +621,7 @@ fn satisfies_interface_with_method() {
     // Get the User type via Resolver
     let type_def_id = analyzer
         .resolver(&interner)
-        .resolve(user_sym)
-        .and_then(|name_id| analyzer.entity_registry.type_by_name(name_id))
+        .resolve_type(user_sym, &analyzer.entity_registry)
         .unwrap();
     let user_type = analyzer
         .entity_registry

@@ -15,8 +15,7 @@ impl Analyzer {
         // Look up the type (class or record) via Resolver
         let type_id_opt = self
             .resolver(interner)
-            .resolve(struct_lit.name)
-            .and_then(|name_id| self.entity_registry.type_by_name(name_id));
+            .resolve_type(struct_lit.name, &self.entity_registry);
 
         let (type_name, fields, result_type) = if let Some(type_id) = type_id_opt {
             let type_def = self.entity_registry.get_type(type_id);
@@ -224,11 +223,10 @@ impl Analyzer {
         }
 
         // Build the concrete record type with substituted field types
-        // Look up record via Resolver to get name_id
+        // Look up record via Resolver
         let type_id_opt = self
             .resolver(interner)
-            .resolve(struct_lit.name)
-            .and_then(|name_id| self.entity_registry.type_by_name(name_id));
+            .resolve_type(struct_lit.name, &self.entity_registry);
 
         if let Some(type_id) = type_id_opt {
             let type_def = self.entity_registry.get_type(type_id);

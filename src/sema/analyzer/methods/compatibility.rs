@@ -46,21 +46,9 @@ impl Analyzer {
         let base_str = interner.resolve(base);
         let resolver = self.resolver(interner);
 
-        let derived_id = resolver
-            .resolve_str(derived_str)
-            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-            .or_else(|| {
-                self.entity_registry
-                    .interface_by_short_name(derived_str, &self.name_table)
-            });
+        let derived_id = resolver.resolve_type_str_or_interface(derived_str, &self.entity_registry);
 
-        let base_id = resolver
-            .resolve_str(base_str)
-            .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-            .or_else(|| {
-                self.entity_registry
-                    .interface_by_short_name(base_str, &self.name_table)
-            });
+        let base_id = resolver.resolve_type_str_or_interface(base_str, &self.entity_registry);
 
         let (Some(derived_id), Some(base_id)) = (derived_id, base_id) else {
             return false;
