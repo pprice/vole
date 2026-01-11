@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::frontend::ast::TypeExpr;
-use crate::sema::entity_defs::{GenericTypeInfo, TypeDefKind};
+use crate::sema::entity_defs::{GenericFuncInfo, GenericTypeInfo, TypeDefKind};
 
 /// Extract the base interface name from a TypeExpr.
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
@@ -153,9 +153,25 @@ impl Analyzer {
                 .map(|t| resolve_type(t, &mut ctx))
                 .unwrap_or(Type::Void);
 
-            self.generic_functions.insert(
-                func.name,
-                GenericFuncDef {
+            // Create a FunctionType with TypeParam placeholders for the signature
+            let signature = FunctionType {
+                params: param_types.clone(),
+                return_type: Box::new(return_type.clone()),
+                is_closure: false,
+            };
+
+            // Register in EntityRegistry
+            let func_id = self.entity_registry.register_function(
+                name_id,
+                name_id, // For top-level functions, name_id == full_name_id
+                self.current_module,
+                signature,
+            );
+
+            // Set generic info on the function
+            self.entity_registry.set_function_generic_info(
+                func_id,
+                GenericFuncInfo {
                     type_params,
                     param_types,
                     return_type,

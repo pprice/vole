@@ -372,6 +372,15 @@ impl EntityRegistry {
         self.function_by_name.get(&full_name_id).copied()
     }
 
+    /// Set generic function info (type params, param/return types) for a generic function
+    pub fn set_function_generic_info(
+        &mut self,
+        func_id: FunctionId,
+        info: crate::sema::entity_defs::GenericFuncInfo,
+    ) {
+        self.function_defs[func_id.index() as usize].generic_info = Some(info);
+    }
+
     /// Add an extends relationship (derived extends base)
     pub fn add_extends(&mut self, derived: TypeDefId, base: TypeDefId) {
         self.type_defs[derived.index() as usize].extends.push(base);

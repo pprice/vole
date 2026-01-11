@@ -10,10 +10,10 @@ use std::collections::HashMap;
 use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext};
 use crate::errors::{LexerError, render_to_stderr, render_to_writer};
-use crate::frontend::{AstPrinter, Interner, ParseError, Parser, Symbol, ast::Program};
+use crate::frontend::{AstPrinter, Interner, ParseError, Parser, ast::Program};
 use crate::identity::NameTable;
 use crate::runtime::set_stdout_capture;
-use crate::sema::generic::{GenericFuncDef, MonomorphCache};
+use crate::sema::generic::MonomorphCache;
 use crate::sema::{
     AnalysisOutput, Analyzer, EntityRegistry, ExpressionData, ImplementRegistry, ProgramQuery,
     TypeError, TypeTable, TypeWarning, WellKnownTypes,
@@ -29,8 +29,6 @@ pub struct AnalyzedProgram {
     pub implement_registry: ImplementRegistry,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: HashMap<String, (Program, Interner)>,
-    /// Generic function definitions (for monomorphization)
-    pub generic_functions: HashMap<Symbol, GenericFuncDef>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: MonomorphCache,
     /// External function info by string name (module path and native name) for prelude functions
@@ -54,7 +52,6 @@ impl AnalyzedProgram {
             expression_data: output.expression_data,
             implement_registry: output.implement_registry,
             module_programs: output.module_programs,
-            generic_functions: output.generic_functions,
             monomorph_cache: output.monomorph_cache,
             external_func_info: output.external_func_info,
             name_table: output.name_table,

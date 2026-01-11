@@ -65,8 +65,21 @@ impl Analyzer {
                 return Ok(*func_type.return_type);
             }
 
-            // Check if it's a generic function
-            if let Some(generic_def) = self.generic_functions.get(sym).cloned() {
+            // Check if it's a generic function via EntityRegistry
+            let generic_info = {
+                let name_id = self
+                    .name_table
+                    .intern(self.current_module, &[*sym], interner);
+                self.entity_registry
+                    .function_by_name(name_id)
+                    .and_then(|func_id| {
+                        self.entity_registry
+                            .get_function(func_id)
+                            .generic_info
+                            .clone()
+                    })
+            };
+            if let Some(generic_def) = generic_info {
                 // Calling a generic function - infer type params and monomorphize
                 if self.in_lambda() {
                     self.mark_lambda_has_side_effects();

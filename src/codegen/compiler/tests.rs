@@ -20,7 +20,6 @@ fn compile_and_run(source: &str) -> i64 {
         expression_data: ExpressionData::new(),
         implement_registry: ImplementRegistry::new(),
         module_programs: HashMap::new(),
-        generic_functions: HashMap::new(),
         monomorph_cache: MonomorphCache::new(),
         external_func_info: HashMap::new(),
         name_table: NameTable::new(),

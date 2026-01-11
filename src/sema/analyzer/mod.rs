@@ -15,8 +15,7 @@ use crate::sema::EntityRegistry;
 use crate::sema::ExpressionData;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
-    GenericFuncDef, MonomorphCache, MonomorphInstance, MonomorphKey, TypeParamInfo, TypeParamScope,
-    substitute_type,
+    MonomorphCache, MonomorphInstance, MonomorphKey, TypeParamInfo, TypeParamScope, substitute_type,
 };
 use crate::sema::implement_registry::{
     ExternalMethodInfo, ImplementRegistry, MethodImpl, PrimitiveTypeId, TypeId,
@@ -77,8 +76,6 @@ pub struct AnalysisOutput {
     pub implement_registry: ImplementRegistry,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     pub module_programs: HashMap<String, (Program, Interner)>,
-    /// Generic function definitions (with type params)
-    pub generic_functions: HashMap<Symbol, GenericFuncDef>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: MonomorphCache,
     /// External function info by string name (module path and native name)
@@ -140,8 +137,6 @@ pub struct Analyzer {
     pub module_expr_types: HashMap<String, HashMap<NodeId, Type>>,
     /// Flag to prevent recursive prelude loading
     loading_prelude: bool,
-    /// Generic function definitions (with type params)
-    generic_functions: HashMap<Symbol, GenericFuncDef>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: MonomorphCache,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
@@ -188,7 +183,6 @@ impl Analyzer {
             module_programs: HashMap::new(),
             module_expr_types: HashMap::new(),
             loading_prelude: false,
-            generic_functions: HashMap::new(),
             monomorph_cache: MonomorphCache::new(),
             generic_calls: HashMap::new(),
             name_table,
@@ -443,7 +437,6 @@ impl Analyzer {
             module_programs: HashMap::new(),
             module_expr_types: HashMap::new(),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
-            generic_functions: HashMap::new(),
             monomorph_cache: MonomorphCache::new(),
             generic_calls: HashMap::new(),
             name_table: NameTable::new(),
@@ -698,7 +691,6 @@ impl Analyzer {
             expression_data,
             implement_registry: self.implement_registry,
             module_programs: self.module_programs,
-            generic_functions: self.generic_functions,
             monomorph_cache: self.monomorph_cache,
             external_func_info: self.external_func_info,
             name_table: self.name_table,
