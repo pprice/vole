@@ -8,9 +8,11 @@ use cranelift_module::Module;
 
 use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
+use std::collections::HashMap;
+
 use crate::frontend::{
     AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, LetInit, MatchExpr, Pattern, RangeExpr,
-    UnaryOp,
+    RecordFieldPattern, Symbol, UnaryOp,
 };
 use crate::sema::Type;
 use crate::sema::entity_defs::TypeDefKind;
@@ -112,11 +114,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an identifier lookup
-    fn identifier(
-        &mut self,
-        sym: crate::frontend::Symbol,
-        expr: &Expr,
-    ) -> Result<CompiledValue, String> {
+    fn identifier(&mut self, sym: Symbol, expr: &Expr) -> Result<CompiledValue, String> {
         if let Some((var, vole_type)) = self.vars.get(&sym) {
             let val = self.builder.use_var(*var);
             let ty = self.builder.func.dfg.value_type(val);
@@ -171,7 +169,7 @@ impl Cg<'_, '_, '_> {
     /// Creates a wrapper function that adapts the function to the closure calling convention.
     fn function_reference(
         &mut self,
-        sym: crate::frontend::Symbol,
+        sym: Symbol,
         func_type: crate::sema::FunctionType,
     ) -> Result<CompiledValue, String> {
         use cranelift::prelude::FunctionBuilderContext;
@@ -1088,188 +1086,14 @@ impl Cg<'_, '_, '_> {
                     Some(is_success)
                 }
                 Pattern::Error { inner, .. } => {
-                    // Check if tag != FALLIBLE_SUCCESS_TAG (i.e., it's an error)
+                    // Load the tag from fallible structure
                     let tag = self.builder.ins().load(
                         types::I64,
                         MemFlags::new(),
                         scrutinee.value,
                         FALLIBLE_TAG_OFFSET,
                     );
-
-                    if let Some(inner_pat) = inner {
-                        // Inner pattern could be identifier (catch-all) or type (specific error)
-                        match inner_pat.as_ref() {
-                            Pattern::Identifier { name, .. } => {
-                                // Check if this is an error type name via EntityRegistry
-                                let is_error_type = self
-                                    .ctx
-                                    .resolver()
-                                    .resolve_type(*name, &self.ctx.analyzed.entity_registry)
-                                    .map(|type_id| {
-                                        self.ctx.analyzed.entity_registry.get_type(type_id).kind
-                                            == TypeDefKind::ErrorType
-                                    })
-                                    .unwrap_or(false);
-                                if is_error_type {
-                                    // Specific error type: error DivByZero => ...
-                                    // Get the fallible type to look up the tag
-                                    if let Type::Fallible(ft) = &scrutinee.vole_type {
-                                        let error_tag =
-                                            fallible_error_tag(ft, *name, self.ctx.interner);
-                                        if let Some(error_tag) = error_tag {
-                                            let is_this_error = self.builder.ins().icmp_imm(
-                                                IntCC::Equal,
-                                                tag,
-                                                error_tag,
-                                            );
-                                            Some(is_this_error)
-                                        } else {
-                                            // Error type not found in fallible - will never match
-                                            let never_match =
-                                                self.builder.ins().iconst(types::I8, 0);
-                                            Some(never_match)
-                                        }
-                                    } else {
-                                        // Not matching on a fallible type
-                                        let never_match = self.builder.ins().iconst(types::I8, 0);
-                                        Some(never_match)
-                                    }
-                                } else {
-                                    // Catch-all error binding: error e => ...
-                                    let is_error = self.builder.ins().icmp_imm(
-                                        IntCC::NotEqual,
-                                        tag,
-                                        FALLIBLE_SUCCESS_TAG,
-                                    );
-
-                                    // Extract error type and bind
-                                    if let Type::Fallible(ft) = &scrutinee.vole_type {
-                                        let error_type = &*ft.error_type;
-                                        let payload_ty =
-                                            type_to_cranelift(error_type, self.ctx.pointer_type);
-                                        let payload = self.builder.ins().load(
-                                            payload_ty,
-                                            MemFlags::new(),
-                                            scrutinee.value,
-                                            FALLIBLE_PAYLOAD_OFFSET,
-                                        );
-                                        let var = self.builder.declare_var(payload_ty);
-                                        self.builder.def_var(var, payload);
-                                        arm_variables.insert(*name, (var, error_type.clone()));
-                                    }
-                                    Some(is_error)
-                                }
-                            }
-                            Pattern::Record {
-                                type_name: Some(name),
-                                fields,
-                                ..
-                            } => {
-                                // Error type with destructuring: error Overflow { value, max } => ...
-                                // Look up error_info via EntityRegistry
-                                let error_info_opt = self
-                                    .ctx
-                                    .resolver()
-                                    .resolve_type(*name, &self.ctx.analyzed.entity_registry)
-                                    .and_then(|type_id| {
-                                        let type_def =
-                                            self.ctx.analyzed.entity_registry.get_type(type_id);
-                                        if type_def.kind == TypeDefKind::ErrorType {
-                                            type_def.error_info.clone()
-                                        } else {
-                                            None
-                                        }
-                                    });
-                                if let Some(error_info) = error_info_opt {
-                                    // Check if this error type matches
-                                    if let Type::Fallible(ft) = &scrutinee.vole_type {
-                                        let error_tag =
-                                            fallible_error_tag(ft, *name, self.ctx.interner);
-                                        if let Some(error_tag) = error_tag {
-                                            let is_this_error = self.builder.ins().icmp_imm(
-                                                IntCC::Equal,
-                                                tag,
-                                                error_tag,
-                                            );
-
-                                            // Error fields are stored inline in the fallible structure
-                                            // Layout: tag at offset 0, fields at offset 8, 16, 24, ...
-                                            for field_pattern in fields.iter() {
-                                                let field_name = self
-                                                    .ctx
-                                                    .interner
-                                                    .resolve(field_pattern.field_name);
-                                                // Find the field index and type in the error type
-                                                if let Some((field_idx, field)) = error_info
-                                                    .fields
-                                                    .iter()
-                                                    .enumerate()
-                                                    .find(|(_, f)| f.name == field_name)
-                                                {
-                                                    // Calculate field offset: payload starts at offset 8, each field is 8 bytes
-                                                    let field_offset = FALLIBLE_PAYLOAD_OFFSET
-                                                        + (field_idx as i32 * 8);
-
-                                                    // Load the field value as i64 (stored as i64)
-                                                    let raw_value = self.builder.ins().load(
-                                                        types::I64,
-                                                        MemFlags::new(),
-                                                        scrutinee.value,
-                                                        field_offset,
-                                                    );
-
-                                                    // Convert from i64 to the actual field type
-                                                    let (result_val, cranelift_ty) =
-                                                        convert_field_value(
-                                                            self.builder,
-                                                            raw_value,
-                                                            &field.ty,
-                                                        );
-                                                    let var =
-                                                        self.builder.declare_var(cranelift_ty);
-                                                    self.builder.def_var(var, result_val);
-                                                    arm_variables.insert(
-                                                        field_pattern.binding,
-                                                        (var, field.ty.clone()),
-                                                    );
-                                                }
-                                            }
-
-                                            Some(is_this_error)
-                                        } else {
-                                            // Error type not found in fallible
-                                            let never_match =
-                                                self.builder.ins().iconst(types::I8, 0);
-                                            Some(never_match)
-                                        }
-                                    } else {
-                                        let never_match = self.builder.ins().iconst(types::I8, 0);
-                                        Some(never_match)
-                                    }
-                                } else {
-                                    // Unknown error type
-                                    let never_match = self.builder.ins().iconst(types::I8, 0);
-                                    Some(never_match)
-                                }
-                            }
-                            _ => {
-                                // Catch-all for other patterns (like wildcard)
-                                let is_error = self.builder.ins().icmp_imm(
-                                    IntCC::NotEqual,
-                                    tag,
-                                    FALLIBLE_SUCCESS_TAG,
-                                );
-                                Some(is_error)
-                            }
-                        }
-                    } else {
-                        // Bare error pattern: error => ...
-                        let is_error =
-                            self.builder
-                                .ins()
-                                .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
-                        Some(is_error)
-                    }
+                    self.compile_error_pattern(inner, &scrutinee, tag, &mut arm_variables)?
                 }
                 Pattern::Tuple { elements, .. } => {
                     // Tuple destructuring in match - extract elements and bind
@@ -1613,5 +1437,187 @@ impl Cg<'_, '_, '_> {
         } else {
             Ok(self.void_value())
         }
+    }
+
+    // =========================================================================
+    // Error pattern helpers (extracted from match_expr for readability)
+    // =========================================================================
+
+    /// Compile an error pattern match, returning the condition value.
+    fn compile_error_pattern(
+        &mut self,
+        inner: &Option<Box<Pattern>>,
+        scrutinee: &CompiledValue,
+        tag: Value,
+        arm_variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ) -> Result<Option<Value>, String> {
+        let Some(inner_pat) = inner else {
+            // Bare error pattern: error => ...
+            let is_error = self
+                .builder
+                .ins()
+                .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
+            return Ok(Some(is_error));
+        };
+
+        match inner_pat.as_ref() {
+            Pattern::Identifier { name, .. } => {
+                self.compile_error_identifier_pattern(*name, scrutinee, tag, arm_variables)
+            }
+            Pattern::Record {
+                type_name: Some(name),
+                fields,
+                ..
+            } => self.compile_error_record_pattern(*name, fields, scrutinee, tag, arm_variables),
+            _ => {
+                // Catch-all for other patterns (like wildcard)
+                let is_error =
+                    self.builder
+                        .ins()
+                        .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
+                Ok(Some(is_error))
+            }
+        }
+    }
+
+    /// Compile an identifier pattern inside an error pattern.
+    /// Handles both specific error types (error DivByZero) and catch-all bindings (error e).
+    fn compile_error_identifier_pattern(
+        &mut self,
+        name: Symbol,
+        scrutinee: &CompiledValue,
+        tag: Value,
+        arm_variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ) -> Result<Option<Value>, String> {
+        // Check if this is an error type name via EntityRegistry
+        let is_error_type = self
+            .ctx
+            .resolver()
+            .resolve_type(name, &self.ctx.analyzed.entity_registry)
+            .is_some_and(|type_id| {
+                self.ctx.analyzed.entity_registry.get_type(type_id).kind == TypeDefKind::ErrorType
+            });
+
+        if is_error_type {
+            return self.compile_specific_error_type_pattern(name, scrutinee, tag);
+        }
+
+        // Catch-all error binding: error e => ...
+        let is_error = self
+            .builder
+            .ins()
+            .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
+
+        // Extract error type and bind
+        if let Type::Fallible(ft) = &scrutinee.vole_type {
+            let error_type = &*ft.error_type;
+            let payload_ty = type_to_cranelift(error_type, self.ctx.pointer_type);
+            let payload = self.builder.ins().load(
+                payload_ty,
+                MemFlags::new(),
+                scrutinee.value,
+                FALLIBLE_PAYLOAD_OFFSET,
+            );
+            let var = self.builder.declare_var(payload_ty);
+            self.builder.def_var(var, payload);
+            arm_variables.insert(name, (var, error_type.clone()));
+        }
+
+        Ok(Some(is_error))
+    }
+
+    /// Compile a specific error type pattern (e.g., error DivByZero).
+    fn compile_specific_error_type_pattern(
+        &mut self,
+        name: Symbol,
+        scrutinee: &CompiledValue,
+        tag: Value,
+    ) -> Result<Option<Value>, String> {
+        let Type::Fallible(ft) = &scrutinee.vole_type else {
+            // Not matching on a fallible type
+            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+        };
+
+        let Some(error_tag) = fallible_error_tag(ft, name, self.ctx.interner) else {
+            // Error type not found in fallible - will never match
+            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+        };
+
+        let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
+        Ok(Some(is_this_error))
+    }
+
+    /// Compile a record pattern inside an error pattern (e.g., error Overflow { value, max }).
+    fn compile_error_record_pattern(
+        &mut self,
+        name: Symbol,
+        fields: &[RecordFieldPattern],
+        scrutinee: &CompiledValue,
+        tag: Value,
+        arm_variables: &mut HashMap<Symbol, (Variable, Type)>,
+    ) -> Result<Option<Value>, String> {
+        // Look up error_info via EntityRegistry
+        let error_info = self
+            .ctx
+            .resolver()
+            .resolve_type(name, &self.ctx.analyzed.entity_registry)
+            .and_then(|type_id| {
+                let type_def = self.ctx.analyzed.entity_registry.get_type(type_id);
+                if type_def.kind == TypeDefKind::ErrorType {
+                    type_def.error_info.clone()
+                } else {
+                    None
+                }
+            });
+
+        let Some(error_info) = error_info else {
+            // Unknown error type
+            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+        };
+
+        let Type::Fallible(ft) = &scrutinee.vole_type else {
+            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+        };
+
+        let Some(error_tag) = fallible_error_tag(ft, name, self.ctx.interner) else {
+            // Error type not found in fallible
+            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+        };
+
+        let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
+
+        // Error fields are stored inline in the fallible structure
+        // Layout: tag at offset 0, fields at offset 8, 16, 24, ...
+        for field_pattern in fields.iter() {
+            let field_name = self.ctx.interner.resolve(field_pattern.field_name);
+
+            // Find the field index and type in the error type
+            let Some((field_idx, field)) = error_info
+                .fields
+                .iter()
+                .enumerate()
+                .find(|(_, f)| f.name == field_name)
+            else {
+                continue;
+            };
+
+            // Calculate field offset: payload starts at offset 8, each field is 8 bytes
+            let field_offset = FALLIBLE_PAYLOAD_OFFSET + (field_idx as i32 * 8);
+
+            // Load the field value as i64 (stored as i64)
+            let raw_value =
+                self.builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), scrutinee.value, field_offset);
+
+            // Convert from i64 to the actual field type
+            let (result_val, cranelift_ty) =
+                convert_field_value(self.builder, raw_value, &field.ty);
+            let var = self.builder.declare_var(cranelift_ty);
+            self.builder.def_var(var, result_val);
+            arm_variables.insert(field_pattern.binding, (var, field.ty.clone()));
+        }
+
+        Ok(Some(is_this_error))
     }
 }
