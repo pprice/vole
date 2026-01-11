@@ -569,6 +569,10 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 size: *size,
             }
         }
+        TypeExpr::Structural { .. } => {
+            // Structural types are constraint-only, not concrete types for codegen
+            Type::Void
+        }
     }
 }
 

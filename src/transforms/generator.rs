@@ -663,6 +663,31 @@ impl<'a> GeneratorTransformer<'a> {
             TypeExpr::FixedArray { element, size } => {
                 format!("[{}; {}]", self.type_expr_to_string(element), size)
             }
+            TypeExpr::Structural { fields, methods } => {
+                let mut parts = Vec::new();
+                for field in fields {
+                    parts.push(format!(
+                        "{}: {}",
+                        self.interner.resolve(field.name),
+                        self.type_expr_to_string(&field.ty)
+                    ));
+                }
+                for method in methods {
+                    let params_str = method
+                        .params
+                        .iter()
+                        .map(|p| self.type_expr_to_string(p))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    parts.push(format!(
+                        "func {}({}) -> {}",
+                        self.interner.resolve(method.name),
+                        params_str,
+                        self.type_expr_to_string(&method.return_type)
+                    ));
+                }
+                format!("{{ {} }}", parts.join(", "))
+            }
         }
     }
 

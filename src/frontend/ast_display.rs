@@ -261,6 +261,37 @@ impl<'a> AstPrinter<'a> {
                 out.push_str(&size.to_string());
                 out.push(']');
             }
+            TypeExpr::Structural { fields, methods } => {
+                out.push_str("{ ");
+                let mut first = true;
+                for field in fields {
+                    if !first {
+                        out.push_str(", ");
+                    }
+                    first = false;
+                    out.push_str(self.interner.resolve(field.name));
+                    out.push_str(": ");
+                    self.write_type_inline(out, &field.ty);
+                }
+                for method in methods {
+                    if !first {
+                        out.push_str(", ");
+                    }
+                    first = false;
+                    out.push_str("func ");
+                    out.push_str(self.interner.resolve(method.name));
+                    out.push('(');
+                    for (i, param) in method.params.iter().enumerate() {
+                        if i > 0 {
+                            out.push_str(", ");
+                        }
+                        self.write_type_inline(out, param);
+                    }
+                    out.push_str(") -> ");
+                    self.write_type_inline(out, &method.return_type);
+                }
+                out.push_str(" }");
+            }
         }
     }
 
@@ -879,6 +910,37 @@ impl<'a> AstPrinter<'a> {
                 out.push_str("; ");
                 out.push_str(&size.to_string());
                 out.push(']');
+            }
+            TypeExpr::Structural { fields, methods } => {
+                out.push_str("{ ");
+                let mut first = true;
+                for field in fields {
+                    if !first {
+                        out.push_str(", ");
+                    }
+                    first = false;
+                    out.push_str(self.interner.resolve(field.name));
+                    out.push_str(": ");
+                    self.write_type_expr_inline(out, &field.ty);
+                }
+                for method in methods {
+                    if !first {
+                        out.push_str(", ");
+                    }
+                    first = false;
+                    out.push_str("func ");
+                    out.push_str(self.interner.resolve(method.name));
+                    out.push('(');
+                    for (i, param) in method.params.iter().enumerate() {
+                        if i > 0 {
+                            out.push_str(", ");
+                        }
+                        self.write_type_expr_inline(out, param);
+                    }
+                    out.push_str(") -> ");
+                    self.write_type_expr_inline(out, &method.return_type);
+                }
+                out.push_str(" }");
             }
         }
     }

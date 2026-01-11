@@ -194,6 +194,23 @@ pub struct ErrorDecl {
     pub span: Span,
 }
 
+/// A field in a structural type constraint: { name: string, age: i32 }
+#[derive(Debug, Clone)]
+pub struct StructuralField {
+    pub name: Symbol,
+    pub ty: TypeExpr,
+    pub span: Span,
+}
+
+/// A method in a structural type constraint: { func get() -> i32 }
+#[derive(Debug, Clone)]
+pub struct StructuralMethod {
+    pub name: Symbol,
+    pub params: Vec<TypeExpr>,
+    pub return_type: TypeExpr,
+    pub span: Span,
+}
+
 /// Type expression
 #[derive(Debug, Clone)]
 pub enum TypeExpr {
@@ -225,6 +242,11 @@ pub enum TypeExpr {
     FixedArray {
         element: Box<TypeExpr>,
         size: usize,
+    },
+    /// Structural type: { name: string, func get() -> i32 }
+    Structural {
+        fields: Vec<StructuralField>,
+        methods: Vec<StructuralMethod>,
     },
 }
 

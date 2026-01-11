@@ -280,6 +280,11 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                 size: *size,
             }
         }
+        TypeExpr::Structural { .. } => {
+            // Structural types will be resolved in a later task (vole-mkp5)
+            // For now, return Void as placeholder
+            Type::Void
+        }
     }
 }
 

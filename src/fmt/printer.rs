@@ -1052,6 +1052,37 @@ fn print_type_expr<'a>(
             .append(arena.text("; "))
             .append(arena.text(size.to_string()))
             .append(arena.text("]")),
+        TypeExpr::Structural { fields, methods } => {
+            let mut parts = Vec::new();
+            for field in fields {
+                parts.push(
+                    arena
+                        .text(interner.resolve(field.name).to_string())
+                        .append(arena.text(": "))
+                        .append(print_type_expr(arena, &field.ty, interner)),
+                );
+            }
+            for method in methods {
+                let params: Vec<_> = method
+                    .params
+                    .iter()
+                    .map(|p| print_type_expr(arena, p, interner))
+                    .collect();
+                parts.push(
+                    arena
+                        .text("func ")
+                        .append(arena.text(interner.resolve(method.name).to_string()))
+                        .append(arena.text("("))
+                        .append(arena.intersperse(params, arena.text(", ")))
+                        .append(arena.text(") -> "))
+                        .append(print_type_expr(arena, &method.return_type, interner)),
+                );
+            }
+            arena
+                .text("{ ")
+                .append(arena.intersperse(parts, arena.text(", ")))
+                .append(arena.text(" }"))
+        }
     }
 }
 
