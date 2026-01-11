@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::frontend::ast::TypeExpr;
-use crate::sema::entity_defs::TypeDefKind;
+use crate::sema::entity_defs::{GenericTypeInfo, TypeDefKind};
 
 /// Extract the base interface name from a TypeExpr.
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
@@ -362,22 +362,22 @@ impl Analyzer {
                 .map(|f| resolve_type(&f.ty, &mut ctx))
                 .collect();
 
-            self.generic_classes.insert(
-                class.name,
-                GenericClassDef {
-                    name_id,
-                    type_params,
-                    field_names,
-                    field_types,
-                },
-            );
-
-            // Also register in EntityRegistry with TypeParam placeholders
+            // Register in EntityRegistry with TypeParam placeholders
             // This allows struct literal checking to find the class definition
             let entity_type_id = self.entity_registry.register_type(
                 name_id,
                 TypeDefKind::Class,
                 self.current_module,
+            );
+
+            // Set generic info for type inference during struct literal checking
+            self.entity_registry.set_generic_info(
+                entity_type_id,
+                GenericTypeInfo {
+                    type_params,
+                    field_names,
+                    field_types,
+                },
             );
 
             // Register fields with placeholder types
@@ -665,16 +665,6 @@ impl Analyzer {
             let type_param_name_ids: Vec<NameId> =
                 type_params.iter().map(|tp| tp.name_id).collect();
 
-            self.generic_records.insert(
-                record.name,
-                GenericRecordDef {
-                    name_id,
-                    type_params,
-                    field_names,
-                    field_types,
-                },
-            );
-
             // Also register in regular records with TypeParam placeholders
             // This allows struct literal checking to find the record definition
             let fields: Vec<StructField> = record
@@ -787,6 +777,16 @@ impl Analyzer {
             // Set type params on the type definition
             self.entity_registry
                 .set_type_params(entity_type_id, type_param_name_ids);
+
+            // Set generic info for type inference during struct literal checking
+            self.entity_registry.set_generic_info(
+                entity_type_id,
+                GenericTypeInfo {
+                    type_params,
+                    field_names,
+                    field_types,
+                },
+            );
 
             for method in &record.methods {
                 // First resolve types, then intern names (to avoid borrow conflicts)

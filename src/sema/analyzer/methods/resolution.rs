@@ -319,14 +319,12 @@ impl Analyzer {
                 let func_type = method_def.signature.clone();
 
                 // For generic records, substitute type args in the method signature
-                // Find the generic record def by matching name_id
-                let generic_def = self
-                    .generic_records
-                    .values()
-                    .find(|def| def.name_id == type_name_id);
-                if let (Some(type_args), Some(generic_def)) = (record_type_args, generic_def) {
+                // Look up generic info from EntityRegistry
+                let type_def = self.entity_registry.get_type(type_def_id);
+                let generic_info = type_def.generic_info.as_ref();
+                if let (Some(type_args), Some(generic_info)) = (record_type_args, generic_info) {
                     let mut substitutions = HashMap::new();
-                    for (param, arg) in generic_def.type_params.iter().zip(type_args.iter()) {
+                    for (param, arg) in generic_info.type_params.iter().zip(type_args.iter()) {
                         substitutions.insert(param.name_id, arg.clone());
                     }
                     let substituted_func_type = FunctionType {

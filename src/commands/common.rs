@@ -13,9 +13,7 @@ use crate::errors::{LexerError, render_to_stderr, render_to_writer};
 use crate::frontend::{AstPrinter, Interner, NodeId, ParseError, Parser, Symbol, ast::Program};
 use crate::identity::NameTable;
 use crate::runtime::set_stdout_capture;
-use crate::sema::generic::{
-    GenericClassDef, GenericFuncDef, GenericRecordDef, MonomorphCache, MonomorphKey,
-};
+use crate::sema::generic::{GenericFuncDef, MonomorphCache, MonomorphKey};
 use crate::sema::{
     Analyzer, EntityRegistry, ErrorTypeInfo, ImplementRegistry, MethodResolutions, Type, TypeError,
     TypeTable, TypeWarning, WellKnownTypes,
@@ -40,10 +38,6 @@ pub struct AnalyzedProgram {
     pub module_expr_types: HashMap<String, HashMap<NodeId, Type>>,
     /// Generic function definitions (for monomorphization)
     pub generic_functions: HashMap<Symbol, GenericFuncDef>,
-    /// Generic record definitions (for type inference in struct literals)
-    pub generic_records: HashMap<Symbol, GenericRecordDef>,
-    /// Generic class definitions (for type inference in struct literals)
-    pub generic_classes: HashMap<Symbol, GenericClassDef>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: MonomorphCache,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
@@ -200,8 +194,6 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         module_programs,
         module_expr_types,
         generic_functions,
-        generic_records,
-        generic_classes,
         monomorph_cache,
         generic_calls,
         external_func_info,
@@ -221,8 +213,6 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         module_programs,
         module_expr_types,
         generic_functions,
-        generic_records,
-        generic_classes,
         monomorph_cache,
         generic_calls,
         external_func_info,
@@ -411,8 +401,6 @@ pub fn run_captured<W: Write + Send + 'static>(
         module_programs,
         module_expr_types,
         generic_functions,
-        generic_records,
-        generic_classes,
         monomorph_cache,
         generic_calls,
         external_func_info,
@@ -433,8 +421,6 @@ pub fn run_captured<W: Write + Send + 'static>(
         module_programs,
         module_expr_types,
         generic_functions,
-        generic_records,
-        generic_classes,
         monomorph_cache,
         generic_calls,
         external_func_info,

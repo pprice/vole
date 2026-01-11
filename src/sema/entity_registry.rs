@@ -381,6 +381,15 @@ impl EntityRegistry {
         self.type_defs[type_id.index() as usize].type_params = type_params;
     }
 
+    /// Set generic type info (type params, field names/types) for a record or class
+    pub fn set_generic_info(
+        &mut self,
+        type_id: TypeDefId,
+        info: crate::sema::entity_defs::GenericTypeInfo,
+    ) {
+        self.type_defs[type_id.index() as usize].generic_info = Some(info);
+    }
+
     /// Check if derived extends base (transitive)
     pub fn type_extends(&self, derived: TypeDefId, base: TypeDefId) -> bool {
         if derived == base {
