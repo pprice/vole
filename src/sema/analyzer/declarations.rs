@@ -757,27 +757,7 @@ impl Analyzer {
         interner: &Interner,
     ) {
         for iface_type in implements {
-            if let Some(iface_sym) = interface_base_name(iface_type) {
-                // Validate interface exists via EntityRegistry using resolver
-                let iface_str = interner.resolve(iface_sym);
-                let interface_type_id = self
-                    .resolver(interner)
-                    .resolve_type_str_or_interface(iface_str, &self.entity_registry);
-
-                if let Some(interface_type_id) = interface_type_id {
-                    // Register implementation in EntityRegistry
-                    self.entity_registry
-                        .add_implementation(entity_type_id, interface_type_id);
-                } else {
-                    self.add_error(
-                        SemanticError::UnknownInterface {
-                            name: format_type_expr(iface_type, interner),
-                            span: span.into(),
-                        },
-                        span,
-                    );
-                }
-            } else {
+            let Some(iface_sym) = interface_base_name(iface_type) else {
                 self.add_error(
                     SemanticError::UnknownInterface {
                         name: format_type_expr(iface_type, interner),
@@ -785,7 +765,26 @@ impl Analyzer {
                     },
                     span,
                 );
-            }
+                continue;
+            };
+
+            let iface_str = interner.resolve(iface_sym);
+            let Some(interface_type_id) = self
+                .resolver(interner)
+                .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+            else {
+                self.add_error(
+                    SemanticError::UnknownInterface {
+                        name: format_type_expr(iface_type, interner),
+                        span: span.into(),
+                    },
+                    span,
+                );
+                continue;
+            };
+
+            self.entity_registry
+                .add_implementation(entity_type_id, interface_type_id);
         }
     }
 

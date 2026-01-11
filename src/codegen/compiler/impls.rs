@@ -529,7 +529,7 @@ impl Compiler<'_> {
                 }
 
                 // Compile method body
-                let mut cf_ctx = ControlFlowCtx::new();
+                let mut cf_ctx = ControlFlowCtx::default();
                 let mut ctx = CompileCtx {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,
@@ -672,7 +672,7 @@ impl Compiler<'_> {
             }
 
             // Compile method body
-            let mut cf_ctx = ControlFlowCtx::new();
+            let mut cf_ctx = ControlFlowCtx::default();
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -811,7 +811,7 @@ impl Compiler<'_> {
             }
 
             // Compile method body
-            let mut cf_ctx = ControlFlowCtx::new();
+            let mut cf_ctx = ControlFlowCtx::default();
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -954,7 +954,7 @@ impl Compiler<'_> {
                 )
             })?;
 
-            let mut cf_ctx = ControlFlowCtx::new();
+            let mut cf_ctx = ControlFlowCtx::default();
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -1073,7 +1073,7 @@ impl Compiler<'_> {
                 }
 
                 // Compile method body
-                let mut cf_ctx = ControlFlowCtx::new();
+                let mut cf_ctx = ControlFlowCtx::default();
                 let mut ctx = CompileCtx {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,

@@ -360,7 +360,7 @@ impl Compiler<'_> {
             }
 
             // Compile function body with module's interner
-            let mut cf_ctx = ControlFlowCtx::new();
+            let mut cf_ctx = ControlFlowCtx::default();
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: module_interner, // Use module's interner
@@ -469,7 +469,7 @@ impl Compiler<'_> {
             }
 
             // Compile function body
-            let mut cf_ctx = ControlFlowCtx::new();
+            let mut cf_ctx = ControlFlowCtx::default();
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -545,7 +545,7 @@ impl Compiler<'_> {
                 let mut variables = HashMap::new();
 
                 // Compile test body
-                let mut cf_ctx = ControlFlowCtx::new();
+                let mut cf_ctx = ControlFlowCtx::default();
                 let mut ctx = CompileCtx {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,
@@ -731,7 +731,7 @@ impl Compiler<'_> {
             }
 
             // Compile function body
-            let mut cf_ctx = ControlFlowCtx::new();
+            let mut cf_ctx = ControlFlowCtx::default();
             let empty_type_metadata = HashMap::new();
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
@@ -796,7 +796,7 @@ impl Compiler<'_> {
             let mut variables = HashMap::new();
 
             // Compile test body
-            let mut cf_ctx = ControlFlowCtx::new();
+            let mut cf_ctx = ControlFlowCtx::default();
             let empty_type_metadata = HashMap::new();
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
@@ -994,7 +994,7 @@ impl Compiler<'_> {
             }
 
             // Compile function body
-            let mut cf_ctx = ControlFlowCtx::new();
+            let mut cf_ctx = ControlFlowCtx::default();
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,

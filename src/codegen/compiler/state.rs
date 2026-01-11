@@ -14,6 +14,7 @@ pub struct TestInfo {
 }
 
 /// Context for control flow during compilation
+#[derive(Default)]
 pub struct ControlFlowCtx {
     /// Stack of loop exit blocks for break statements
     loop_exits: Vec<Block>,
@@ -22,13 +23,6 @@ pub struct ControlFlowCtx {
 }
 
 impl ControlFlowCtx {
-    pub fn new() -> Self {
-        Self {
-            loop_exits: Vec::new(),
-            loop_continues: Vec::new(),
-        }
-    }
-
     pub fn push_loop(&mut self, exit_block: Block, continue_block: Block) {
         self.loop_exits.push(exit_block);
         self.loop_continues.push(continue_block);
@@ -45,11 +39,5 @@ impl ControlFlowCtx {
 
     pub fn current_loop_continue(&self) -> Option<Block> {
         self.loop_continues.last().copied()
-    }
-}
-
-impl Default for ControlFlowCtx {
-    fn default() -> Self {
-        Self::new()
     }
 }
