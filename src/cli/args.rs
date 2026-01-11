@@ -77,6 +77,10 @@ pub enum Commands {
         /// Stop after N test failures (default: 100, 0 = no limit)
         #[arg(short = 'x', long, default_value_t = 100)]
         max_failures: u32,
+
+        /// Include underscore-prefixed files (normally skipped)
+        #[arg(long)]
+        include_skipped: bool,
     },
     /// Inspect compilation output (AST, IR)
     #[command(visible_alias = "i")]

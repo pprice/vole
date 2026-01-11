@@ -91,7 +91,15 @@ fn main() -> ExitCode {
             filter,
             report,
             max_failures,
-        } => run_tests(&paths, filter.as_deref(), report, max_failures, cli.color),
+            include_skipped,
+        } => run_tests(
+            &paths,
+            filter.as_deref(),
+            report,
+            max_failures,
+            include_skipped,
+            cli.color,
+        ),
         Commands::Inspect {
             inspect_type,
             files,

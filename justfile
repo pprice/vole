@@ -55,10 +55,10 @@ fmt-check:
     cargo fmt -- --check
 
 # Run all checks locally (mirrors CI)
-ci: fmt-check clippy build test snap
+ci: fmt-check clippy build test snap unit
 
 # Pre-commit checks and fixes
-pre-commit: fmt clippy-fix clippy build test snap
+pre-commit: fmt clippy-fix clippy build test snap unit
 
 # Show next available error code for a category (lexer, parser, sema)
 dev-next-error category:

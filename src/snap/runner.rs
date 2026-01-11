@@ -11,6 +11,7 @@ use glob::glob;
 
 use super::diff::{unified_diff, unified_diff_colored};
 use super::snapshot::Snapshot;
+use crate::cli::should_skip_path;
 use crate::commands::common::{check_captured, inspect_ast_captured, run_captured};
 
 /// Result of running a single test
@@ -32,7 +33,8 @@ pub struct TestSummary {
 }
 
 /// Discover test files matching patterns.
-/// Excludes underscore-prefixed files unless include_skipped is true.
+/// Excludes underscore-prefixed files/directories unless include_skipped is true.
+/// Skips any path where any component starts with '_' (e.g., `_imports/foo.vole`).
 pub fn discover_tests(
     patterns: &[String],
     include_skipped: bool,
@@ -44,8 +46,7 @@ pub fn discover_tests(
         let path = Path::new(pattern);
 
         if path.is_file() {
-            let basename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-            if !include_skipped && basename.starts_with('_') {
+            if !include_skipped && should_skip_path(path) {
                 skipped_count += 1;
             } else {
                 files.insert(path.to_path_buf());
@@ -53,8 +54,7 @@ pub fn discover_tests(
         } else if path.is_dir() {
             let glob_pattern = format!("{}/**/*.vole", path.display());
             for p in glob(&glob_pattern).map_err(|e| e.to_string())?.flatten() {
-                let basename = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                if !include_skipped && basename.starts_with('_') {
+                if !include_skipped && should_skip_path(&p) {
                     skipped_count += 1;
                 } else {
                     files.insert(p);
@@ -64,8 +64,7 @@ pub fn discover_tests(
             // Treat as glob pattern
             for p in glob(pattern).map_err(|e| e.to_string())?.flatten() {
                 if p.is_file() {
-                    let basename = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                    if !include_skipped && basename.starts_with('_') {
+                    if !include_skipped && should_skip_path(&p) {
                         skipped_count += 1;
                     } else {
                         files.insert(p);

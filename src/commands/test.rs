@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use super::common::{TermColors, parse_and_analyze, read_stdin};
-use crate::cli::{ColorMode, ReportMode, expand_paths};
+use crate::cli::{ColorMode, ReportMode, expand_paths, should_skip_path};
 use crate::codegen::{Compiler, JitContext, TestInfo};
 use crate::runtime::{
     AssertFailure, JmpBuf, call_setjmp, clear_current_test, clear_test_jmp_buf, set_current_file,
@@ -84,6 +84,7 @@ pub fn run_tests(
     filter: Option<&str>,
     report: ReportMode,
     max_failures: u32,
+    include_skipped: bool,
     color: ColorMode,
 ) -> ExitCode {
     let start = Instant::now();
@@ -95,7 +96,7 @@ pub fn run_tests(
     }
 
     // Collect all test files from the given paths
-    let files = match expand_paths(paths) {
+    let all_files = match expand_paths(paths) {
         Ok(files) => files,
         Err(e) => {
             eprintln!("error: {}", e);
@@ -103,8 +104,34 @@ pub fn run_tests(
         }
     };
 
+    // Filter out underscore-prefixed files unless include_skipped is set
+    let (files, skipped_count): (Vec<_>, usize) = if include_skipped {
+        (all_files, 0)
+    } else {
+        let mut skipped = 0;
+        let kept: Vec<_> = all_files
+            .into_iter()
+            .filter(|p| {
+                if should_skip_path(p) {
+                    skipped += 1;
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
+        (kept, skipped)
+    };
+
     if files.is_empty() {
-        eprintln!("error: no test files found");
+        if skipped_count > 0 {
+            eprintln!(
+                "error: no test files found ({} skipped with '_' prefix, use --include-skipped)",
+                skipped_count
+            );
+        } else {
+            eprintln!("error: no test files found");
+        }
         return ExitCode::FAILURE;
     }
 

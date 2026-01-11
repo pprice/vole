@@ -134,6 +134,26 @@ fn has_vole_extension(path: &std::path::Path) -> bool {
     path.extension().is_some_and(|ext| ext == "vole")
 }
 
+/// Check if a path should be skipped due to underscore prefix.
+///
+/// Returns true if any path component starts with '_'.
+/// Examples:
+/// - `_wip.vole` → skipped
+/// - `_imports/foo.vole` → skipped
+/// - `test/_fixtures/helper.vole` → skipped
+/// - `test/valid.vole` → not skipped
+pub fn should_skip_path(path: &std::path::Path) -> bool {
+    for component in path.components() {
+        if let std::path::Component::Normal(name) = component
+            && let Some(s) = name.to_str()
+            && s.starts_with('_')
+        {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
