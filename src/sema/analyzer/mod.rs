@@ -934,6 +934,26 @@ impl Analyzer {
                         // Type aliases are already handled in collect_type_aliases
                     }
                     LetInit::Expr(init_expr) => {
+                        // Check for ambiguous type alias: let Alias = TypeName
+                        if let ExprKind::Identifier(ident_sym) = &init_expr.kind {
+                            let ident_name = interner.resolve(*ident_sym);
+                            if self
+                                .resolver(interner)
+                                .resolve_type(*ident_sym, &self.entity_registry)
+                                .is_some()
+                            {
+                                let let_name = interner.resolve(let_stmt.name);
+                                self.add_error(
+                                    SemanticError::AmbiguousTypeAlias {
+                                        name: let_name.to_string(),
+                                        type_name: ident_name.to_string(),
+                                        span: init_expr.span.into(),
+                                    },
+                                    init_expr.span,
+                                );
+                            }
+                        }
+
                         let declared_type =
                             let_stmt.ty.as_ref().map(|t| self.resolve_type(t, interner));
                         let init_type =

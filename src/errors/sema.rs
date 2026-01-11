@@ -434,4 +434,16 @@ pub enum SemanticError {
         #[label("if expression used as value needs both branches")]
         span: SourceSpan,
     },
+
+    #[error("ambiguous type alias: '{name}' could be a type or a value")]
+    #[diagnostic(
+        code(E2080),
+        help("add explicit ': type' annotation: let {name}: type = {type_name}")
+    )]
+    AmbiguousTypeAlias {
+        name: String,
+        type_name: String,
+        #[label("'{type_name}' is a type, but syntax is ambiguous")]
+        span: SourceSpan,
+    },
 }
