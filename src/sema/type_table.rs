@@ -71,6 +71,10 @@ enum TypeFingerprint {
         element: TypeKey,
         size: usize,
     },
+    Structural {
+        fields: Vec<(NameId, TypeKey)>,
+        methods: Vec<(NameId, Vec<TypeKey>, TypeKey)>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -284,6 +288,25 @@ impl TypeTable {
                         element: elem_key,
                         size: *size,
                     },
+                    ty.clone(),
+                )
+            }
+            Type::Structural(structural) => {
+                let fields: Vec<_> = structural
+                    .fields
+                    .iter()
+                    .map(|f| (f.name, self.key_for_type(&f.ty)))
+                    .collect();
+                let methods: Vec<_> = structural
+                    .methods
+                    .iter()
+                    .map(|m| {
+                        let params: Vec<_> = m.params.iter().map(|p| self.key_for_type(p)).collect();
+                        (m.name, params, self.key_for_type(&m.return_type))
+                    })
+                    .collect();
+                self.intern_fingerprint(
+                    TypeFingerprint::Structural { fields, methods },
                     ty.clone(),
                 )
             }

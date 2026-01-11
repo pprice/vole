@@ -83,6 +83,31 @@ pub enum Type {
         element: Box<Type>,
         size: usize,
     },
+    /// Structural type - duck typing constraint
+    /// e.g., { name: string, func greet() -> string }
+    Structural(StructuralType),
+}
+
+/// Structural type - defines shape constraints for duck typing
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuralType {
+    pub fields: Vec<StructuralFieldType>,
+    pub methods: Vec<StructuralMethodType>,
+}
+
+/// A field in a structural type
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuralFieldType {
+    pub name: NameId,
+    pub ty: Type,
+}
+
+/// A method in a structural type
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuralMethodType {
+    pub name: NameId,
+    pub params: Vec<Type>,
+    pub return_type: Type,
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -339,6 +364,7 @@ impl Type {
             Type::RuntimeIterator(_) => "iterator",
             Type::Tuple(_) => "tuple",
             Type::FixedArray { .. } => "fixed array",
+            Type::Structural(_) => "structural",
         }
     }
 

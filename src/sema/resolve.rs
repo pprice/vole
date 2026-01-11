@@ -8,7 +8,8 @@ use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{TypeParamScope, substitute_type};
 use crate::sema::types::{
-    ErrorTypeInfo, FallibleType, FunctionType, InterfaceMethodType, InterfaceType, Type,
+    ErrorTypeInfo, FallibleType, FunctionType, InterfaceMethodType, InterfaceType,
+    StructuralFieldType, StructuralMethodType, StructuralType, Type,
 };
 use std::collections::HashMap;
 
@@ -280,10 +281,36 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                 size: *size,
             }
         }
-        TypeExpr::Structural { .. } => {
-            // Structural types will be resolved in a later task (vole-mkp5)
-            // For now, return Void as placeholder
-            Type::Void
+        TypeExpr::Structural { fields, methods } => {
+            let resolved_fields = fields
+                .iter()
+                .map(|f| {
+                    let name_id = ctx
+                        .name_table
+                        .intern(ctx.module_id, &[f.name], ctx.interner);
+                    StructuralFieldType {
+                        name: name_id,
+                        ty: resolve_type(&f.ty, ctx),
+                    }
+                })
+                .collect();
+            let resolved_methods = methods
+                .iter()
+                .map(|m| {
+                    let name_id = ctx
+                        .name_table
+                        .intern(ctx.module_id, &[m.name], ctx.interner);
+                    StructuralMethodType {
+                        name: name_id,
+                        params: m.params.iter().map(|p| resolve_type(p, ctx)).collect(),
+                        return_type: resolve_type(&m.return_type, ctx),
+                    }
+                })
+                .collect();
+            Type::Structural(StructuralType {
+                fields: resolved_fields,
+                methods: resolved_methods,
+            })
         }
     }
 }
