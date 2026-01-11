@@ -485,6 +485,7 @@ impl Analyzer {
     }
 
     /// Helper to add a type warning
+    #[allow(dead_code)] // Infrastructure for future warnings
     fn add_warning(&mut self, warning: SemanticWarning, span: Span) {
         self.warnings.push(TypeWarning::new(warning, span));
     }
@@ -506,6 +507,7 @@ impl Analyzer {
     }
 
     /// Format a structural type for warning messages
+    #[allow(dead_code)] // Infrastructure for future warnings
     fn format_structural_type(&mut self, structural: &StructuralType) -> String {
         let mut parts = Vec::new();
 
@@ -956,24 +958,6 @@ impl Analyzer {
                 match &let_stmt.init {
                     LetInit::TypeAlias(type_expr) => {
                         let aliased_type = self.resolve_type(type_expr, interner);
-
-                        // Warn if creating a type alias to a structural type with methods
-                        // (simple field-only structural types are fine for duck typing)
-                        if let Type::Structural(structural) = &aliased_type {
-                            if !structural.methods.is_empty() {
-                                let alias_name = interner.resolve(let_stmt.name).to_string();
-                                let fields = self.format_structural_type(structural);
-                                self.add_warning(
-                                    SemanticWarning::StructuralTypeAlias {
-                                        name: alias_name,
-                                        fields,
-                                        span: let_stmt.span.into(),
-                                    },
-                                    let_stmt.span,
-                                );
-                            }
-                        }
-
                         self.type_aliases
                             .insert(let_stmt.name, aliased_type.clone());
                         self.register_named_type(let_stmt.name, aliased_type, interner);
@@ -982,23 +966,6 @@ impl Analyzer {
                         // Legacy: handle let X: type = SomeType
                         if let ExprKind::TypeLiteral(type_expr) = &init_expr.kind {
                             let aliased_type = self.resolve_type(type_expr, interner);
-
-                            // Warn if creating a type alias to a structural type with methods
-                            if let Type::Structural(structural) = &aliased_type {
-                                if !structural.methods.is_empty() {
-                                    let alias_name = interner.resolve(let_stmt.name).to_string();
-                                    let fields = self.format_structural_type(structural);
-                                    self.add_warning(
-                                        SemanticWarning::StructuralTypeAlias {
-                                            name: alias_name,
-                                            fields,
-                                            span: let_stmt.span.into(),
-                                        },
-                                        let_stmt.span,
-                                    );
-                                }
-                            }
-
                             self.type_aliases
                                 .insert(let_stmt.name, aliased_type.clone());
                             self.register_named_type(let_stmt.name, aliased_type, interner);
