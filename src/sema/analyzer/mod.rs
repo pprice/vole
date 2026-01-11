@@ -706,9 +706,10 @@ impl Analyzer {
         }
     }
 
-    /// Record the resolved type for an expression
-    fn record_expr_type(&mut self, expr: &Expr, ty: Type) {
-        self.expr_types.insert(expr.id, ty);
+    /// Record the resolved type for an expression, returning the type for chaining
+    fn record_expr_type(&mut self, expr: &Expr, ty: Type) -> Type {
+        self.expr_types.insert(expr.id, ty.clone());
+        ty
     }
 
     /// Check if we're currently inside a lambda

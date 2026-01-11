@@ -10,8 +10,7 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
         let ty = self.check_expr_expecting_inner(expr, expected, interner)?;
-        self.record_expr_type(expr, ty.clone());
-        Ok(ty)
+        Ok(self.record_expr_type(expr, ty))
     }
 
     fn check_expr_expecting_inner(
@@ -217,12 +216,10 @@ impl Analyzer {
                         if let Some(target) = expected
                             && literal_fits(negated, target)
                         {
-                            self.record_expr_type(&un.operand, target.clone());
-                            return Ok(target.clone());
+                            return Ok(self.record_expr_type(&un.operand, target.clone()));
                         }
                         // Fall back to i64 if no expected type or doesn't fit
-                        self.record_expr_type(&un.operand, Type::I64);
-                        return Ok(Type::I64);
+                        return Ok(self.record_expr_type(&un.operand, Type::I64));
                     }
 
                     // Propagate expected type through negation

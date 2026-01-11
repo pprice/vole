@@ -7,13 +7,12 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
         let ty = self.check_expr_inner(expr, interner)?;
-        self.record_expr_type(expr, ty.clone());
         tracing::trace!(
             line = expr.span.line,
             inferred_type = %self.type_display(&ty),
             "type inferred"
         );
-        Ok(ty)
+        Ok(self.record_expr_type(expr, ty))
     }
 
     fn check_expr_inner(
@@ -331,8 +330,7 @@ impl Analyzer {
                     // Try to infer literal's type from tested type (won't error on mismatch)
                     let inferred = self.infer_literal_type(&is_expr.value, &tested_type, interner);
                     // Record the inferred type so codegen uses it
-                    self.record_expr_type(&is_expr.value, inferred.clone());
-                    inferred
+                    self.record_expr_type(&is_expr.value, inferred)
                 } else {
                     self.check_expr(&is_expr.value, interner)?
                 };
