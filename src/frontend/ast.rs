@@ -437,6 +437,12 @@ pub enum ExprKind {
 
     /// Yield expression (generator yield)
     Yield(Box<YieldExpr>),
+
+    /// Block expression: { stmts; trailing_expr }
+    Block(Box<BlockExpr>),
+
+    /// If expression: if cond { then } else { else }
+    If(Box<IfExpr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
@@ -641,6 +647,25 @@ pub struct MethodCallExpr {
 #[derive(Debug, Clone)]
 pub struct YieldExpr {
     pub value: Expr,
+    pub span: Span,
+}
+
+/// Block expression: { stmts; trailing_expr }
+/// Evaluates to the trailing expression if present, otherwise void/nil
+#[derive(Debug, Clone)]
+pub struct BlockExpr {
+    pub stmts: Vec<Stmt>,
+    pub trailing_expr: Option<Expr>,
+    pub span: Span,
+}
+
+/// If expression: if cond { then_expr } else { else_expr }
+/// Both branches evaluate to values of the same type
+#[derive(Debug, Clone)]
+pub struct IfExpr {
+    pub condition: Expr,
+    pub then_branch: Expr,
+    pub else_branch: Option<Expr>,
     pub span: Span,
 }
 

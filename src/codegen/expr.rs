@@ -8,7 +8,9 @@ use cranelift_module::Module;
 
 use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
-use crate::frontend::{AssignTarget, Expr, ExprKind, MatchExpr, Pattern, RangeExpr, UnaryOp};
+use crate::frontend::{
+    AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, MatchExpr, Pattern, RangeExpr, UnaryOp,
+};
 use crate::identity::NamerLookup;
 use crate::sema::Type;
 
@@ -95,6 +97,8 @@ impl Cg<'_, '_, '_> {
                 // Yield should be caught in semantic analysis
                 Err(CodegenError::unsupported("yield expression outside generator context").into())
             }
+            ExprKind::Block(block_expr) => self.block_expr(block_expr),
+            ExprKind::If(if_expr) => self.if_expr(if_expr),
         }
     }
 
@@ -1483,5 +1487,96 @@ impl Cg<'_, '_, '_> {
             ty: payload_ty,
             vole_type: success_type,
         })
+    }
+
+    /// Compile a block expression: { stmts; trailing_expr }
+    fn block_expr(&mut self, block: &BlockExpr) -> Result<CompiledValue, String> {
+        // Compile statements
+        for stmt in &block.stmts {
+            self.stmt(stmt)?;
+        }
+
+        // Compile trailing expression if present, otherwise return void
+        if let Some(ref trailing) = block.trailing_expr {
+            self.expr(trailing)
+        } else {
+            Ok(self.void_value())
+        }
+    }
+
+    /// Compile an if expression: if cond { then } else { else }
+    fn if_expr(&mut self, if_expr: &IfExpr) -> Result<CompiledValue, String> {
+        let condition = self.expr(&if_expr.condition)?;
+
+        // Get the result type from semantic analysis
+        let result_type = self
+            .ctx
+            .analyzed
+            .expr_types
+            .get(&if_expr.then_branch.id)
+            .cloned()
+            .unwrap_or(Type::Void);
+
+        let result_cranelift_type = type_to_cranelift(&result_type, self.ctx.pointer_type);
+
+        // Create basic blocks
+        let then_block = self.builder.create_block();
+        let else_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+
+        // Add block parameter for the result
+        if result_type != Type::Void {
+            self.builder
+                .append_block_param(merge_block, result_cranelift_type);
+        }
+
+        // Branch based on condition
+        self.builder
+            .ins()
+            .brif(condition.value, then_block, &[], else_block, &[]);
+
+        // Compile then branch
+        self.builder.switch_to_block(then_block);
+        self.builder.seal_block(then_block);
+        let then_result = self.expr(&if_expr.then_branch)?;
+        if result_type != Type::Void {
+            self.builder
+                .ins()
+                .jump(merge_block, &[then_result.value.into()]);
+        } else {
+            self.builder.ins().jump(merge_block, &[]);
+        }
+
+        // Compile else branch
+        self.builder.switch_to_block(else_block);
+        self.builder.seal_block(else_block);
+        let else_result = if let Some(ref else_branch) = if_expr.else_branch {
+            self.expr(else_branch)?
+        } else {
+            // No else branch - result is void/nil
+            self.void_value()
+        };
+        if result_type != Type::Void {
+            self.builder
+                .ins()
+                .jump(merge_block, &[else_result.value.into()]);
+        } else {
+            self.builder.ins().jump(merge_block, &[]);
+        }
+
+        // Continue in merge block
+        self.builder.switch_to_block(merge_block);
+        self.builder.seal_block(merge_block);
+
+        if result_type != Type::Void {
+            let result = self.builder.block_params(merge_block)[0];
+            Ok(CompiledValue {
+                value: result,
+                ty: result_cranelift_type,
+                vole_type: result_type,
+            })
+        } else {
+            Ok(self.void_value())
+        }
     }
 }

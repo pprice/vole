@@ -226,6 +226,21 @@ impl<'a> GeneratorTransformer<'a> {
                 StringPart::Literal(_) => false,
                 StringPart::Expr(e) => self.expr_contains_yield(e),
             }),
+            ExprKind::Block(block) => {
+                block.stmts.iter().any(|s| self.stmt_contains_yield(s))
+                    || block
+                        .trailing_expr
+                        .as_ref()
+                        .is_some_and(|e| self.expr_contains_yield(e))
+            }
+            ExprKind::If(if_expr) => {
+                self.expr_contains_yield(&if_expr.condition)
+                    || self.expr_contains_yield(&if_expr.then_branch)
+                    || if_expr
+                        .else_branch
+                        .as_ref()
+                        .is_some_and(|e| self.expr_contains_yield(e))
+            }
             // Leaf expressions that can't contain yield
             ExprKind::IntLiteral(_)
             | ExprKind::FloatLiteral(_)
@@ -477,6 +492,21 @@ impl<'a> GeneratorTransformer<'a> {
                     if let StringPart::Expr(e) = part {
                         self.collect_yields_from_expr(e, yields);
                     }
+                }
+            }
+            ExprKind::Block(block) => {
+                for stmt in &block.stmts {
+                    self.collect_yields_from_stmt(stmt, yields);
+                }
+                if let Some(trailing) = &block.trailing_expr {
+                    self.collect_yields_from_expr(trailing, yields);
+                }
+            }
+            ExprKind::If(if_expr) => {
+                self.collect_yields_from_expr(&if_expr.condition, yields);
+                self.collect_yields_from_expr(&if_expr.then_branch, yields);
+                if let Some(else_branch) = &if_expr.else_branch {
+                    self.collect_yields_from_expr(else_branch, yields);
                 }
             }
             // Leaf expressions

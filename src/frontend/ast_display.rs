@@ -682,6 +682,42 @@ impl<'a> AstPrinter<'a> {
                 out.push_str("Yield ");
                 self.write_expr(out, &yield_expr.value);
             }
+
+            ExprKind::Block(block) => {
+                self.write_indent(out);
+                out.push_str("Block\n");
+                let inner = self.indented();
+                if !block.stmts.is_empty() {
+                    inner.write_indent(out);
+                    out.push_str("stmts:\n");
+                    let stmts_inner = inner.indented();
+                    for stmt in &block.stmts {
+                        stmts_inner.write_stmt(out, stmt);
+                    }
+                }
+                if let Some(trailing) = &block.trailing_expr {
+                    inner.write_indent(out);
+                    out.push_str("trailing_expr:\n");
+                    inner.indented().write_expr(out, trailing);
+                }
+            }
+
+            ExprKind::If(if_expr) => {
+                self.write_indent(out);
+                out.push_str("If\n");
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("condition:\n");
+                inner.indented().write_expr(out, &if_expr.condition);
+                inner.write_indent(out);
+                out.push_str("then_branch:\n");
+                inner.indented().write_expr(out, &if_expr.then_branch);
+                if let Some(else_branch) = &if_expr.else_branch {
+                    inner.write_indent(out);
+                    out.push_str("else_branch:\n");
+                    inner.indented().write_expr(out, else_branch);
+                }
+            }
         }
     }
 

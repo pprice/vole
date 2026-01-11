@@ -385,6 +385,7 @@ impl<'src> Parser<'src> {
                 })
             }
             TokenType::KwMatch => self.match_expr(),
+            TokenType::KwIf => self.if_expr(),
             TokenType::KwTry => self.try_expr(),
             TokenType::KwYield => self.yield_expr(),
             // Type keywords in expression position: `let X = i32`
@@ -488,6 +489,108 @@ impl<'src> Parser<'src> {
         Ok(Expr {
             id: self.next_id(),
             kind: ExprKind::StructLiteral(Box::new(StructLiteralExpr { name, fields })),
+            span: start_span.merge(end_span),
+        })
+    }
+
+    /// Parse an if expression: if cond { then } [else { else }]
+    pub(super) fn if_expr(&mut self) -> Result<Expr, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'if'
+
+        // Parse condition
+        let condition = self.expression(0)?;
+
+        // Parse then branch as block expression
+        self.consume(TokenType::LBrace, "expected '{' after if condition")?;
+        let then_branch = self.block_expr(start_span)?;
+
+        // Parse optional else branch
+        self.skip_newlines();
+        let else_branch = if self.match_token(TokenType::KwElse) {
+            if self.check(TokenType::KwIf) {
+                // else if - parse as another if expression
+                Some(self.if_expr()?)
+            } else {
+                // else { block }
+                self.consume(TokenType::LBrace, "expected '{' after else")?;
+                Some(self.block_expr(start_span)?)
+            }
+        } else {
+            None
+        };
+
+        let end_span = else_branch
+            .as_ref()
+            .map(|e| e.span)
+            .unwrap_or(then_branch.span);
+
+        Ok(Expr {
+            id: self.next_id(),
+            kind: ExprKind::If(Box::new(IfExpr {
+                condition,
+                then_branch,
+                else_branch,
+                span: start_span.merge(end_span),
+            })),
+            span: start_span.merge(end_span),
+        })
+    }
+
+    /// Parse a block expression: { stmts; trailing_expr }
+    /// Called after consuming the opening '{'
+    fn block_expr(&mut self, start_span: Span) -> Result<Expr, ParseError> {
+        self.skip_newlines();
+
+        let mut stmts = Vec::new();
+        let mut trailing_expr = None;
+
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            self.skip_newlines();
+            if self.check(TokenType::RBrace) {
+                break;
+            }
+
+            // Check for statement keywords (must be parsed as statements)
+            if self.check(TokenType::KwLet)
+                || self.check(TokenType::KwWhile)
+                || self.check(TokenType::KwFor)
+                || self.check(TokenType::KwBreak)
+                || self.check(TokenType::KwContinue)
+                || self.check(TokenType::KwReturn)
+                || self.check(TokenType::KwRaise)
+            {
+                stmts.push(self.statement()?);
+                self.skip_newlines();
+                continue;
+            }
+
+            // Try to parse as expression
+            let expr = self.expression(0)?;
+
+            // Check what follows
+            self.skip_newlines();
+            if self.check(TokenType::RBrace) {
+                // This is the trailing expression
+                trailing_expr = Some(expr);
+                break;
+            } else {
+                // This is an expression statement
+                let span = expr.span;
+                stmts.push(Stmt::Expr(ExprStmt { expr, span }));
+            }
+        }
+
+        let end_span = self.current.span;
+        self.consume(TokenType::RBrace, "expected '}' after block")?;
+
+        Ok(Expr {
+            id: self.next_id(),
+            kind: ExprKind::Block(Box::new(BlockExpr {
+                stmts,
+                trailing_expr,
+                span: start_span.merge(end_span),
+            })),
             span: start_span.merge(end_span),
         })
     }

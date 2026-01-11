@@ -423,6 +423,61 @@ impl Analyzer {
                 // the expression itself doesn't produce a value in the control flow)
                 Ok(Type::Void)
             }
+
+            ExprKind::Block(block) => {
+                // Type check all statements
+                for stmt in &block.stmts {
+                    self.check_stmt(stmt, interner)?;
+                }
+
+                // Block evaluates to its trailing expression, if present
+                if let Some(trailing) = &block.trailing_expr {
+                    self.check_expr(trailing, interner)
+                } else {
+                    Ok(Type::Void)
+                }
+            }
+
+            ExprKind::If(if_expr) => {
+                // Type check the condition (must be bool)
+                let cond_ty = self.check_expr(&if_expr.condition, interner)?;
+                if cond_ty != Type::Bool {
+                    self.type_error("bool", &cond_ty, if_expr.condition.span);
+                }
+
+                // Type check then branch
+                let then_ty = self.check_expr(&if_expr.then_branch, interner)?;
+
+                // If expression requires else branch
+                let Some(else_branch) = &if_expr.else_branch else {
+                    self.add_error(
+                        SemanticError::IfExprMissingElse {
+                            span: if_expr.span.into(),
+                        },
+                        if_expr.span,
+                    );
+                    return Ok(Type::Error);
+                };
+
+                let else_ty = self.check_expr(else_branch, interner)?;
+
+                // Both branches must have compatible types
+                if !self.types_compatible(&then_ty, &else_ty, interner) {
+                    let expected = self.type_display(&then_ty);
+                    let found = self.type_display(&else_ty);
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected,
+                            found,
+                            span: else_branch.span.into(),
+                        },
+                        else_branch.span,
+                    );
+                    Ok(Type::Error)
+                } else {
+                    Ok(then_ty)
+                }
+            }
         }
     }
 }

@@ -365,6 +365,36 @@ fn print_expr<'a>(
             .text("yield")
             .append(arena.space())
             .append(print_expr(arena, &yield_expr.value, interner)),
+        ExprKind::Block(block) => {
+            let mut doc = arena.text("{");
+            if !block.stmts.is_empty() || block.trailing_expr.is_some() {
+                doc = doc.append(arena.hardline());
+            }
+            for stmt in &block.stmts {
+                doc = doc.append(print_stmt(arena, stmt, interner).nest(INDENT));
+                doc = doc.append(arena.hardline());
+            }
+            if let Some(trailing) = &block.trailing_expr {
+                doc = doc.append(print_expr(arena, trailing, interner).nest(INDENT));
+                doc = doc.append(arena.hardline());
+            }
+            doc.append(arena.text("}"))
+        }
+        ExprKind::If(if_expr) => {
+            let mut doc = arena
+                .text("if ")
+                .append(print_expr(arena, &if_expr.condition, interner))
+                .append(arena.text(" "))
+                .append(print_expr(arena, &if_expr.then_branch, interner));
+            if let Some(else_branch) = &if_expr.else_branch {
+                doc = doc.append(arena.text(" else ")).append(print_expr(
+                    arena,
+                    else_branch,
+                    interner,
+                ));
+            }
+            doc
+        }
     }
 }
 

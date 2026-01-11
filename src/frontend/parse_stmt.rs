@@ -27,7 +27,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse a statement
-    fn statement(&mut self) -> Result<Stmt, ParseError> {
+    pub fn statement(&mut self) -> Result<Stmt, ParseError> {
         match self.current.ty {
             TokenType::KwLet => self.let_stmt(),
             TokenType::KwWhile => self.while_stmt(),

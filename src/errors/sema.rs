@@ -424,4 +424,14 @@ pub enum SemanticError {
         #[label("interface requires static method")]
         span: SourceSpan,
     },
+
+    #[error("if expression requires an else branch")]
+    #[diagnostic(
+        code(E2079),
+        help("add an else branch: if cond {{ ... }} else {{ ... }}")
+    )]
+    IfExprMissingElse {
+        #[label("if expression used as value needs both branches")]
+        span: SourceSpan,
+    },
 }
