@@ -170,53 +170,68 @@ impl Analyzer {
         let name_id = self
             .name_table
             .intern(self.current_module, &[class.name], interner);
-        // Register in EntityRegistry (single source of truth)
-        let entity_type_id =
-            self.entity_registry
-                .register_type(name_id, TypeDefKind::Class, self.current_module);
 
-        // Register fields in EntityRegistry
-        let builtin_module = self.name_table.builtin_module();
-        for (i, field) in class.fields.iter().enumerate() {
-            let field_name_str = interner.resolve(field.name);
-            let field_name_id = self
-                .name_table
-                .intern_raw(builtin_module, &[field_name_str]);
-            let full_field_name_id = self.name_table.intern_raw(
+        // Handle generic classes vs non-generic classes
+        if class.type_params.is_empty() {
+            // Non-generic class: Register in EntityRegistry (single source of truth)
+            let entity_type_id = self.entity_registry.register_type(
+                name_id,
+                TypeDefKind::Class,
                 self.current_module,
-                &[interner.resolve(class.name), field_name_str],
             );
-            let field_ty = self.resolve_type(&field.ty, interner);
-            self.entity_registry.register_field(
-                entity_type_id,
-                field_name_id,
-                full_field_name_id,
-                field_ty,
-                i,
-            );
-        }
 
-        // Register in type_table for type resolution
-        let class_type = self
-            .entity_registry
-            .build_class_type(entity_type_id, &self.name_table);
-        if let Some(ref ct) = class_type {
-            self.register_named_type(class.name, Type::Class(ct.clone()), interner);
-        }
+            // Register fields in EntityRegistry
+            let builtin_module = self.name_table.builtin_module();
+            for (i, field) in class.fields.iter().enumerate() {
+                let field_name_str = interner.resolve(field.name);
+                let field_name_id = self
+                    .name_table
+                    .intern_raw(builtin_module, &[field_name_str]);
+                let full_field_name_id = self.name_table.intern_raw(
+                    self.current_module,
+                    &[interner.resolve(class.name), field_name_str],
+                );
+                let field_ty = self.resolve_type(&field.ty, interner);
+                self.entity_registry.register_field(
+                    entity_type_id,
+                    field_name_id,
+                    full_field_name_id,
+                    field_ty,
+                    i,
+                );
+            }
 
-        // Register and validate implements list
-        if !class.implements.is_empty() {
-            let mut iface_names = Vec::new();
-            for iface_type in &class.implements {
-                if let Some(iface_sym) = interface_base_name(iface_type) {
-                    // Validate interface exists via EntityRegistry using resolver
-                    let iface_str = interner.resolve(iface_sym);
-                    let iface_exists = self
-                        .resolver(interner)
-                        .resolve_type_str_or_interface(iface_str, &self.entity_registry)
-                        .is_some();
+            // Register in type_table for type resolution
+            let class_type = self
+                .entity_registry
+                .build_class_type(entity_type_id, &self.name_table);
+            if let Some(ref ct) = class_type {
+                self.register_named_type(class.name, Type::Class(ct.clone()), interner);
+            }
 
-                    if !iface_exists {
+            // Register and validate implements list
+            if !class.implements.is_empty() {
+                let mut iface_names = Vec::new();
+                for iface_type in &class.implements {
+                    if let Some(iface_sym) = interface_base_name(iface_type) {
+                        // Validate interface exists via EntityRegistry using resolver
+                        let iface_str = interner.resolve(iface_sym);
+                        let iface_exists = self
+                            .resolver(interner)
+                            .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+                            .is_some();
+
+                        if !iface_exists {
+                            self.add_error(
+                                SemanticError::UnknownInterface {
+                                    name: format_type_expr(iface_type, interner),
+                                    span: class.span.into(),
+                                },
+                                class.span,
+                            );
+                        }
+                        iface_names.push(iface_sym);
+                    } else {
                         self.add_error(
                             SemanticError::UnknownInterface {
                                 name: format_type_expr(iface_type, interner),
@@ -225,94 +240,217 @@ impl Analyzer {
                             class.span,
                         );
                     }
-                    iface_names.push(iface_sym);
-                } else {
-                    self.add_error(
-                        SemanticError::UnknownInterface {
-                            name: format_type_expr(iface_type, interner),
-                            span: class.span.into(),
-                        },
-                        class.span,
-                    );
                 }
+                self.type_implements.insert(class.name, iface_names);
             }
-            self.type_implements.insert(class.name, iface_names);
-        }
 
-        // Register methods in EntityRegistry (single source of truth)
-        // Use class_type as Self for resolving method signatures
-        let self_type_for_methods = class_type.map(Type::Class);
-        let builtin_module = self.name_table.builtin_module();
-        for method in &class.methods {
-            let method_name_str = interner.resolve(method.name);
-            let method_name_id = self
-                .name_table
-                .intern_raw(builtin_module, &[method_name_str]);
-            let full_method_name_id = self.name_table.intern_raw(
-                self.current_module,
-                &[interner.resolve(class.name), method_name_str],
-            );
-            let params: Vec<Type> = method
-                .params
-                .iter()
-                .map(|p| {
-                    self.resolve_type_with_self(&p.ty, interner, self_type_for_methods.clone())
-                })
-                .collect();
-            let return_type = method
-                .return_type
-                .as_ref()
-                .map(|t| self.resolve_type_with_self(t, interner, self_type_for_methods.clone()))
-                .unwrap_or(Type::Void);
-            let signature = FunctionType {
-                params,
-                return_type: Box::new(return_type),
-                is_closure: false,
-            };
-            self.entity_registry.register_method(
-                entity_type_id,
-                method_name_id,
-                full_method_name_id,
-                signature,
-                false, // class methods don't have defaults
-            );
-        }
-
-        // Register static methods in EntityRegistry
-        if let Some(ref statics) = class.statics {
+            // Register methods in EntityRegistry (single source of truth)
+            // Use class_type as Self for resolving method signatures
+            let self_type_for_methods = class_type.map(Type::Class);
             let builtin_module = self.name_table.builtin_module();
-            let class_name_str = interner.resolve(class.name);
-            for method in &statics.methods {
+            for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
                 let method_name_id = self
                     .name_table
                     .intern_raw(builtin_module, &[method_name_str]);
-                let full_method_name_id = self
-                    .name_table
-                    .intern_raw(self.current_module, &[class_name_str, method_name_str]);
+                let full_method_name_id = self.name_table.intern_raw(
+                    self.current_module,
+                    &[interner.resolve(class.name), method_name_str],
+                );
                 let params: Vec<Type> = method
                     .params
                     .iter()
-                    .map(|p| self.resolve_type(&p.ty, interner))
+                    .map(|p| {
+                        self.resolve_type_with_self(&p.ty, interner, self_type_for_methods.clone())
+                    })
                     .collect();
                 let return_type = method
                     .return_type
                     .as_ref()
-                    .map(|t| self.resolve_type(t, interner))
+                    .map(|t| self.resolve_type_with_self(t, interner, self_type_for_methods.clone()))
                     .unwrap_or(Type::Void);
                 let signature = FunctionType {
                     params,
                     return_type: Box::new(return_type),
                     is_closure: false,
                 };
-                let has_default = method.is_default || method.body.is_some();
-                self.entity_registry.register_static_method(
+                self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
                     full_method_name_id,
                     signature,
-                    has_default,
+                    false, // class methods don't have defaults
                 );
+            }
+
+            // Register static methods in EntityRegistry
+            if let Some(ref statics) = class.statics {
+                let builtin_module = self.name_table.builtin_module();
+                let class_name_str = interner.resolve(class.name);
+                for method in &statics.methods {
+                    let method_name_str = interner.resolve(method.name);
+                    let method_name_id = self
+                        .name_table
+                        .intern_raw(builtin_module, &[method_name_str]);
+                    let full_method_name_id = self
+                        .name_table
+                        .intern_raw(self.current_module, &[class_name_str, method_name_str]);
+                    let params: Vec<Type> = method
+                        .params
+                        .iter()
+                        .map(|p| self.resolve_type(&p.ty, interner))
+                        .collect();
+                    let return_type = method
+                        .return_type
+                        .as_ref()
+                        .map(|t| self.resolve_type(t, interner))
+                        .unwrap_or(Type::Void);
+                    let signature = FunctionType {
+                        params,
+                        return_type: Box::new(return_type),
+                        is_closure: false,
+                    };
+                    let has_default = method.is_default || method.body.is_some();
+                    self.entity_registry.register_static_method(
+                        entity_type_id,
+                        method_name_id,
+                        full_method_name_id,
+                        signature,
+                        has_default,
+                    );
+                }
+            }
+        } else {
+            // Generic class: store with type params as placeholders
+            let builtin_mod = self.name_table.builtin_module();
+
+            let type_params: Vec<TypeParamInfo> = class
+                .type_params
+                .iter()
+                .map(|tp| {
+                    let tp_name_str = interner.resolve(tp.name);
+                    let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
+                    TypeParamInfo {
+                        name: tp.name,
+                        name_id: tp_name_id,
+                        constraint: None,
+                    }
+                })
+                .collect();
+
+            let mut type_param_scope = TypeParamScope::new();
+            for info in &type_params {
+                type_param_scope.add(info.clone());
+            }
+
+            // Resolve field types with type params in scope
+            let module_id = self.current_module;
+            let mut ctx = TypeResolutionContext::with_type_params(
+                &self.type_aliases,
+                &self.error_types,
+                &self.entity_registry,
+                interner,
+                &mut self.name_table,
+                module_id,
+                &type_param_scope,
+            );
+
+            let field_names: Vec<Symbol> = class.fields.iter().map(|f| f.name).collect();
+            let field_types: Vec<Type> = class
+                .fields
+                .iter()
+                .map(|f| resolve_type(&f.ty, &mut ctx))
+                .collect();
+
+            self.generic_classes.insert(
+                class.name,
+                GenericClassDef {
+                    name_id,
+                    type_params,
+                    field_names,
+                    field_types,
+                },
+            );
+
+            // Also register in EntityRegistry with TypeParam placeholders
+            // This allows struct literal checking to find the class definition
+            let entity_type_id = self.entity_registry.register_type(
+                name_id,
+                TypeDefKind::Class,
+                self.current_module,
+            );
+
+            // Register fields with placeholder types
+            let builtin_module = self.name_table.builtin_module();
+            for (i, field) in class.fields.iter().enumerate() {
+                let field_name_str = interner.resolve(field.name);
+                let field_name_id = self
+                    .name_table
+                    .intern_raw(builtin_module, &[field_name_str]);
+                let full_field_name_id = self.name_table.intern_raw(
+                    self.current_module,
+                    &[interner.resolve(class.name), field_name_str],
+                );
+                let mut ctx = TypeResolutionContext::with_type_params(
+                    &self.type_aliases,
+                    &self.error_types,
+                    &self.entity_registry,
+                    interner,
+                    &mut self.name_table,
+                    module_id,
+                    &type_param_scope,
+                );
+                let field_ty = resolve_type(&field.ty, &mut ctx);
+                self.entity_registry.register_field(
+                    entity_type_id,
+                    field_name_id,
+                    full_field_name_id,
+                    field_ty,
+                    i,
+                );
+            }
+
+            // Build and register class type with TypeParam placeholders
+            let class_type = self
+                .entity_registry
+                .build_class_type(entity_type_id, &self.name_table);
+            if let Some(ref ct) = class_type {
+                self.register_named_type(class.name, Type::Class(ct.clone()), interner);
+            }
+
+            // Register and validate implements list (for generic classes)
+            if !class.implements.is_empty() {
+                let mut iface_names = Vec::new();
+                for iface_type in &class.implements {
+                    if let Some(iface_sym) = interface_base_name(iface_type) {
+                        // Validate interface exists via EntityRegistry using resolver
+                        let iface_str = interner.resolve(iface_sym);
+                        let iface_exists = self
+                            .resolver(interner)
+                            .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+                            .is_some();
+
+                        if !iface_exists {
+                            self.add_error(
+                                SemanticError::UnknownInterface {
+                                    name: format_type_expr(iface_type, interner),
+                                    span: class.span.into(),
+                                },
+                                class.span,
+                            );
+                        }
+                        iface_names.push(iface_sym);
+                    } else {
+                        self.add_error(
+                            SemanticError::UnknownInterface {
+                                name: format_type_expr(iface_type, interner),
+                                span: class.span.into(),
+                            },
+                            class.span,
+                        );
+                    }
+                }
+                self.type_implements.insert(class.name, iface_names);
             }
         }
     }

@@ -27,6 +27,7 @@ fn compile_and_run(source: &str) -> i64 {
         module_programs: HashMap::new(),
         generic_functions: HashMap::new(),
         generic_records: HashMap::new(),
+        generic_classes: HashMap::new(),
         monomorph_cache: MonomorphCache::new(),
         generic_calls: HashMap::new(),
         external_func_info: HashMap::new(),

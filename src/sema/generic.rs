@@ -96,6 +96,19 @@ pub struct GenericRecordDef {
     pub field_types: Vec<Type>,
 }
 
+/// Information about a generic class definition
+#[derive(Debug, Clone)]
+pub struct GenericClassDef {
+    /// The class's NameId for cross-interner lookups
+    pub name_id: NameId,
+    /// The class's type parameters (e.g., T, K, V)
+    pub type_params: Vec<TypeParamInfo>,
+    /// Field names
+    pub field_names: Vec<Symbol>,
+    /// Field types with TypeParam placeholders (e.g., [TypeParam(T), i64])
+    pub field_types: Vec<Type>,
+}
+
 /// Key for looking up monomorphized function instances.
 /// Uses a string representation for hashability since Type doesn't implement Hash.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

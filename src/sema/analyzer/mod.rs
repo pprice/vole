@@ -14,8 +14,8 @@ use crate::module::ModuleLoader;
 use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
-    GenericFuncDef, GenericRecordDef, MonomorphCache, MonomorphInstance, MonomorphKey,
-    TypeParamInfo, TypeParamScope, substitute_type,
+    GenericClassDef, GenericFuncDef, GenericRecordDef, MonomorphCache, MonomorphInstance,
+    MonomorphKey, TypeParamInfo, TypeParamScope, substitute_type,
 };
 use crate::sema::implement_registry::{
     ExternalMethodInfo, ImplementRegistry, MethodImpl, PrimitiveTypeId, TypeId,
@@ -23,7 +23,7 @@ use crate::sema::implement_registry::{
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::types::{ConstantValue, ModuleType, StructuralType};
 use crate::sema::{
-    ErrorTypeInfo, FunctionType, RecordType, StructField, Type, TypeKey, WellKnownTypes,
+    ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type, TypeKey, WellKnownTypes,
     compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
@@ -124,6 +124,8 @@ pub struct Analyzer {
     generic_functions: HashMap<Symbol, GenericFuncDef>,
     /// Generic record definitions (with type params)
     generic_records: HashMap<Symbol, GenericRecordDef>,
+    /// Generic class definitions (with type params)
+    generic_classes: HashMap<Symbol, GenericClassDef>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: MonomorphCache,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
@@ -175,6 +177,7 @@ impl Analyzer {
             loading_prelude: false,
             generic_functions: HashMap::new(),
             generic_records: HashMap::new(),
+            generic_classes: HashMap::new(),
             monomorph_cache: MonomorphCache::new(),
             generic_calls: HashMap::new(),
             name_table,
@@ -434,6 +437,7 @@ impl Analyzer {
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
             generic_functions: HashMap::new(),
             generic_records: HashMap::new(),
+            generic_classes: HashMap::new(),
             monomorph_cache: MonomorphCache::new(),
             generic_calls: HashMap::new(),
             name_table: NameTable::new(),
@@ -701,6 +705,7 @@ impl Analyzer {
         HashMap<String, HashMap<NodeId, Type>>,
         HashMap<Symbol, GenericFuncDef>,
         HashMap<Symbol, GenericRecordDef>,
+        HashMap<Symbol, GenericClassDef>,
         MonomorphCache,
         HashMap<NodeId, MonomorphKey>,
         HashMap<String, ExternalMethodInfo>,
@@ -720,6 +725,7 @@ impl Analyzer {
             self.module_expr_types,
             self.generic_functions,
             self.generic_records,
+            self.generic_classes,
             self.monomorph_cache,
             self.generic_calls,
             self.external_func_info,
