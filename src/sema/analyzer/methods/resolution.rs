@@ -183,9 +183,45 @@ impl Analyzer {
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
         // 1. Check implement registry (works for all types)
-        let method_id = self.method_name_id(method_name, interner);
+        let method_name_id = self.method_name_id(method_name, interner);
+        // Try EntityRegistry first for method bindings
+        let type_def_id = match object_type {
+            Type::Class(c) => self.entity_registry.type_by_name(c.name_id),
+            Type::Record(r) => self.entity_registry.type_by_name(r.name_id),
+            Type::I8 => self.entity_registry.type_by_name(self.name_table.primitives.i8),
+            Type::I16 => self.entity_registry.type_by_name(self.name_table.primitives.i16),
+            Type::I32 => self.entity_registry.type_by_name(self.name_table.primitives.i32),
+            Type::I64 => self.entity_registry.type_by_name(self.name_table.primitives.i64),
+            Type::I128 => self.entity_registry.type_by_name(self.name_table.primitives.i128),
+            Type::U8 => self.entity_registry.type_by_name(self.name_table.primitives.u8),
+            Type::U16 => self.entity_registry.type_by_name(self.name_table.primitives.u16),
+            Type::U32 => self.entity_registry.type_by_name(self.name_table.primitives.u32),
+            Type::U64 => self.entity_registry.type_by_name(self.name_table.primitives.u64),
+            Type::F32 => self.entity_registry.type_by_name(self.name_table.primitives.f32),
+            Type::F64 => self.entity_registry.type_by_name(self.name_table.primitives.f64),
+            Type::Bool => self.entity_registry.type_by_name(self.name_table.primitives.bool),
+            Type::String => self.entity_registry.type_by_name(self.name_table.primitives.string),
+            _ => None,
+        };
+        if let Some(type_def_id) = type_def_id
+            && let Some((interface_id, binding)) =
+                self.entity_registry.find_method_binding_with_interface(type_def_id, method_name_id)
+        {
+            // Get trait name Symbol from interface_id
+            let trait_name = self
+                .name_table
+                .last_segment_str(self.entity_registry.get_type(interface_id).name_id)
+                .and_then(|s| interner.lookup(&s));
+            return Some(ResolvedMethod::Implemented {
+                trait_name,
+                func_type: binding.func_type.clone(),
+                is_builtin: binding.is_builtin,
+                external_info: binding.external_info.clone(),
+            });
+        }
+        // Fall back to old implement_registry for backward compatibility
         if let Some(type_id) = TypeId::from_type(object_type, &self.type_table)
-            && let Some(impl_) = self.implement_registry.get_method(&type_id, method_id)
+            && let Some(impl_) = self.implement_registry.get_method(&type_id, method_name_id)
         {
             return Some(ResolvedMethod::Implemented {
                 trait_name: impl_.trait_name,
@@ -348,41 +384,72 @@ impl Analyzer {
         }
 
         // 4. Default methods from implemented interfaces
-        // Find the type symbol by matching name_id via EntityRegistry
-        let type_sym = match object_type {
-            Type::Class(class_type) => {
-                self.get_type_symbol_by_name_id(class_type.name_id, interner)
-            }
-            Type::Record(record_type) => {
-                self.get_type_symbol_by_name_id(record_type.name_id, interner)
-            }
-            _ => None,
+        // Get type_def_id from the object type (reusing earlier logic or via name_id)
+        let (type_sym, type_name_id) = match object_type {
+            Type::Class(class_type) => (
+                self.get_type_symbol_by_name_id(class_type.name_id, interner),
+                Some(class_type.name_id),
+            ),
+            Type::Record(record_type) => (
+                self.get_type_symbol_by_name_id(record_type.name_id, interner),
+                Some(record_type.name_id),
+            ),
+            _ => (None, None),
         };
         if let Some(type_sym) = type_sym
-            && let Some(interfaces) = self.type_implements.get(&type_sym).cloned()
+            && let Some(type_name_id) = type_name_id
+            && let Some(type_def_id) = self.entity_registry.type_by_name(type_name_id)
         {
             let method_name_str = interner.resolve(method_name);
-            for interface_name in &interfaces {
-                // Look up interface via Resolver with interface fallback
-                let type_def_id = self
-                    .resolver(interner)
-                    .resolve_type_or_interface(*interface_name, &self.entity_registry);
-
-                if let Some(type_def_id) = type_def_id {
-                    let interface_def = self.entity_registry.get_type(type_def_id);
-                    for &method_id in &interface_def.methods {
-                        let method = self.entity_registry.get_method(method_id);
-                        let def_method_name = self
+            // Use EntityRegistry's implemented interfaces
+            for interface_id in self.entity_registry.get_implemented_interfaces(type_def_id) {
+                let interface_def = self.entity_registry.get_type(interface_id);
+                for &method_id in &interface_def.methods {
+                    let method = self.entity_registry.get_method(method_id);
+                    let def_method_name = self
+                        .name_table
+                        .last_segment_str(method.name_id)
+                        .unwrap_or_default();
+                    if def_method_name == method_name_str && method.has_default {
+                        // Get interface name Symbol
+                        let interface_name = self
                             .name_table
-                            .last_segment_str(method.name_id)
-                            .unwrap_or_default();
-                        if def_method_name == method_name_str && method.has_default {
-                            return Some(ResolvedMethod::DefaultMethod {
-                                interface_name: *interface_name,
-                                type_name: type_sym,
-                                method_name,
-                                func_type: method.signature.clone(),
-                            });
+                            .last_segment_str(interface_def.name_id)
+                            .and_then(|s| interner.lookup(&s))
+                            .unwrap_or(Symbol(0));
+                        return Some(ResolvedMethod::DefaultMethod {
+                            interface_name,
+                            type_name: type_sym,
+                            method_name,
+                            func_type: method.signature.clone(),
+                        });
+                    }
+                }
+            }
+            // Fall back to old type_implements for backward compatibility
+            if let Some(interfaces) = self.type_implements.get(&type_sym).cloned() {
+                for interface_name in &interfaces {
+                    // Look up interface via Resolver with interface fallback
+                    let interface_type_id = self
+                        .resolver(interner)
+                        .resolve_type_or_interface(*interface_name, &self.entity_registry);
+
+                    if let Some(interface_type_id) = interface_type_id {
+                        let interface_def = self.entity_registry.get_type(interface_type_id);
+                        for &method_id in &interface_def.methods {
+                            let method = self.entity_registry.get_method(method_id);
+                            let def_method_name = self
+                                .name_table
+                                .last_segment_str(method.name_id)
+                                .unwrap_or_default();
+                            if def_method_name == method_name_str && method.has_default {
+                                return Some(ResolvedMethod::DefaultMethod {
+                                    interface_name: *interface_name,
+                                    type_name: type_sym,
+                                    method_name,
+                                    func_type: method.signature.clone(),
+                                });
+                            }
                         }
                     }
                 }

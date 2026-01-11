@@ -400,6 +400,87 @@ impl EntityRegistry {
         self.type_defs[type_id.index() as usize].error_info = Some(info);
     }
 
+    /// Add an interface implementation to a type
+    pub fn add_implementation(
+        &mut self,
+        type_id: TypeDefId,
+        interface_id: TypeDefId,
+    ) {
+        use crate::sema::entity_defs::Implementation;
+        self.type_defs[type_id.index() as usize]
+            .implements
+            .push(Implementation {
+                interface: interface_id,
+                method_bindings: Vec::new(),
+            });
+    }
+
+    /// Add a method binding to an existing implementation
+    pub fn add_method_binding(
+        &mut self,
+        type_id: TypeDefId,
+        interface_id: TypeDefId,
+        binding: crate::sema::entity_defs::MethodBinding,
+    ) {
+        let type_def = &mut self.type_defs[type_id.index() as usize];
+        // Find the implementation for this interface
+        for impl_ in &mut type_def.implements {
+            if impl_.interface == interface_id {
+                impl_.method_bindings.push(binding);
+                return;
+            }
+        }
+        // If no implementation exists yet, create one
+        use crate::sema::entity_defs::Implementation;
+        type_def.implements.push(Implementation {
+            interface: interface_id,
+            method_bindings: vec![binding],
+        });
+    }
+
+    /// Get all interface TypeDefIds that a type implements
+    pub fn get_implemented_interfaces(&self, type_id: TypeDefId) -> Vec<TypeDefId> {
+        self.type_defs[type_id.index() as usize]
+            .implements
+            .iter()
+            .map(|impl_| impl_.interface)
+            .collect()
+    }
+
+    /// Find a method binding for a type's interface implementation
+    pub fn find_method_binding(
+        &self,
+        type_id: TypeDefId,
+        method_name: NameId,
+    ) -> Option<&crate::sema::entity_defs::MethodBinding> {
+        let type_def = &self.type_defs[type_id.index() as usize];
+        for impl_ in &type_def.implements {
+            for binding in &impl_.method_bindings {
+                if binding.method_name == method_name {
+                    return Some(binding);
+                }
+            }
+        }
+        None
+    }
+
+    /// Find a method binding with interface info for a type
+    pub fn find_method_binding_with_interface(
+        &self,
+        type_id: TypeDefId,
+        method_name: NameId,
+    ) -> Option<(TypeDefId, &crate::sema::entity_defs::MethodBinding)> {
+        let type_def = &self.type_defs[type_id.index() as usize];
+        for impl_ in &type_def.implements {
+            for binding in &impl_.method_bindings {
+                if binding.method_name == method_name {
+                    return Some((impl_.interface, binding));
+                }
+            }
+        }
+        None
+    }
+
     /// Check if derived extends base (transitive)
     pub fn type_extends(&self, derived: TypeDefId, base: TypeDefId) -> bool {
         if derived == base {

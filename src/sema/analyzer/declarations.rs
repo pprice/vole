@@ -214,12 +214,15 @@ impl Analyzer {
                     if let Some(iface_sym) = interface_base_name(iface_type) {
                         // Validate interface exists via EntityRegistry using resolver
                         let iface_str = interner.resolve(iface_sym);
-                        let iface_exists = self
+                        let interface_type_id = self
                             .resolver(interner)
-                            .resolve_type_str_or_interface(iface_str, &self.entity_registry)
-                            .is_some();
+                            .resolve_type_str_or_interface(iface_str, &self.entity_registry);
 
-                        if !iface_exists {
+                        if let Some(interface_type_id) = interface_type_id {
+                            // Register implementation in EntityRegistry
+                            self.entity_registry
+                                .add_implementation(entity_type_id, interface_type_id);
+                        } else {
                             self.add_error(
                                 SemanticError::UnknownInterface {
                                     name: format_type_expr(iface_type, interner),
@@ -421,12 +424,15 @@ impl Analyzer {
                     if let Some(iface_sym) = interface_base_name(iface_type) {
                         // Validate interface exists via EntityRegistry using resolver
                         let iface_str = interner.resolve(iface_sym);
-                        let iface_exists = self
+                        let interface_type_id = self
                             .resolver(interner)
-                            .resolve_type_str_or_interface(iface_str, &self.entity_registry)
-                            .is_some();
+                            .resolve_type_str_or_interface(iface_str, &self.entity_registry);
 
-                        if !iface_exists {
+                        if let Some(interface_type_id) = interface_type_id {
+                            // Register implementation in EntityRegistry
+                            self.entity_registry
+                                .add_implementation(entity_type_id, interface_type_id);
+                        } else {
                             self.add_error(
                                 SemanticError::UnknownInterface {
                                     name: format_type_expr(iface_type, interner),
@@ -501,12 +507,15 @@ impl Analyzer {
                     if let Some(iface_sym) = interface_base_name(iface_type) {
                         // Validate interface exists via EntityRegistry using resolver
                         let iface_str = interner.resolve(iface_sym);
-                        let iface_exists = self
+                        let interface_type_id = self
                             .resolver(interner)
-                            .resolve_type_str_or_interface(iface_str, &self.entity_registry)
-                            .is_some();
+                            .resolve_type_str_or_interface(iface_str, &self.entity_registry);
 
-                        if !iface_exists {
+                        if let Some(interface_type_id) = interface_type_id {
+                            // Register implementation in EntityRegistry
+                            self.entity_registry
+                                .add_implementation(entity_type_id, interface_type_id);
+                        } else {
                             self.add_error(
                                 SemanticError::UnknownInterface {
                                     name: format_type_expr(iface_type, interner),
@@ -689,6 +698,21 @@ impl Analyzer {
             };
             self.register_named_type(record.name, Type::Record(record_type.clone()), interner);
 
+            // Register methods in EntityRegistry (with type params in scope)
+            // Note: The signature stored has type params as placeholders
+            let builtin_module = self.name_table.builtin_module();
+            // Get or create the type in EntityRegistry - must be done before implements processing
+            let entity_type_id = self
+                .entity_registry
+                .type_by_name(name_id)
+                .unwrap_or_else(|| {
+                    self.entity_registry.register_type(
+                        name_id,
+                        TypeDefKind::Record,
+                        self.current_module,
+                    )
+                });
+
             // Register and validate implements list (for generic records)
             if !record.implements.is_empty() {
                 let mut iface_names = Vec::new();
@@ -696,12 +720,15 @@ impl Analyzer {
                     if let Some(iface_sym) = interface_base_name(iface_type) {
                         // Validate interface exists via EntityRegistry using resolver
                         let iface_str = interner.resolve(iface_sym);
-                        let iface_exists = self
+                        let interface_type_id = self
                             .resolver(interner)
-                            .resolve_type_str_or_interface(iface_str, &self.entity_registry)
-                            .is_some();
+                            .resolve_type_str_or_interface(iface_str, &self.entity_registry);
 
-                        if !iface_exists {
+                        if let Some(interface_type_id) = interface_type_id {
+                            // Register implementation in EntityRegistry
+                            self.entity_registry
+                                .add_implementation(entity_type_id, interface_type_id);
+                        } else {
                             self.add_error(
                                 SemanticError::UnknownInterface {
                                     name: format_type_expr(iface_type, interner),
@@ -723,21 +750,6 @@ impl Analyzer {
                 }
                 self.type_implements.insert(record.name, iface_names);
             }
-
-            // Register methods in EntityRegistry (with type params in scope)
-            // Note: The signature stored has type params as placeholders
-            let builtin_module = self.name_table.builtin_module();
-            // Get or create the type in EntityRegistry
-            let entity_type_id = self
-                .entity_registry
-                .type_by_name(name_id)
-                .unwrap_or_else(|| {
-                    self.entity_registry.register_type(
-                        name_id,
-                        TypeDefKind::Record,
-                        self.current_module,
-                    )
-                });
 
             // Register fields in EntityRegistry (needed for self.field access in methods)
             for (i, field) in record.fields.iter().enumerate() {
@@ -1208,6 +1220,33 @@ impl Analyzer {
         }
 
         if let Some(type_id) = TypeId::from_type(&target_type, &self.type_table) {
+            // Get TypeDefId for the target type (for EntityRegistry updates)
+            let entity_type_id = match &target_type {
+                Type::Record(r) => self.entity_registry.type_by_name(r.name_id),
+                Type::Class(c) => self.entity_registry.type_by_name(c.name_id),
+                Type::I8 => self.entity_registry.type_by_name(self.name_table.primitives.i8),
+                Type::I16 => self.entity_registry.type_by_name(self.name_table.primitives.i16),
+                Type::I32 => self.entity_registry.type_by_name(self.name_table.primitives.i32),
+                Type::I64 => self.entity_registry.type_by_name(self.name_table.primitives.i64),
+                Type::I128 => self.entity_registry.type_by_name(self.name_table.primitives.i128),
+                Type::U8 => self.entity_registry.type_by_name(self.name_table.primitives.u8),
+                Type::U16 => self.entity_registry.type_by_name(self.name_table.primitives.u16),
+                Type::U32 => self.entity_registry.type_by_name(self.name_table.primitives.u32),
+                Type::U64 => self.entity_registry.type_by_name(self.name_table.primitives.u64),
+                Type::F32 => self.entity_registry.type_by_name(self.name_table.primitives.f32),
+                Type::F64 => self.entity_registry.type_by_name(self.name_table.primitives.f64),
+                Type::Bool => self.entity_registry.type_by_name(self.name_table.primitives.bool),
+                Type::String => self.entity_registry.type_by_name(self.name_table.primitives.string),
+                _ => None,
+            };
+
+            // Get interface TypeDefId if implementing an interface
+            let interface_type_id = trait_name.and_then(|name| {
+                let iface_str = interner.resolve(name);
+                self.resolver(interner)
+                    .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+            });
+
             for method in &impl_block.methods {
                 let func_type = FunctionType {
                     params: method
@@ -1225,17 +1264,34 @@ impl Analyzer {
                     is_closure: false,
                 };
 
-                let method_id = self.method_name_id(method.name, interner);
+                let method_name_id = self.method_name_id(method.name, interner);
                 self.implement_registry.register_method(
                     type_id,
-                    method_id,
+                    method_name_id,
                     MethodImpl {
                         trait_name,
-                        func_type,
+                        func_type: func_type.clone(),
                         is_builtin: false,
                         external_info: None,
                     },
                 );
+
+                // Also register in EntityRegistry if we have a type and interface
+                if let (Some(entity_type_id), Some(interface_type_id)) =
+                    (entity_type_id, interface_type_id)
+                {
+                    use crate::sema::entity_defs::MethodBinding;
+                    self.entity_registry.add_method_binding(
+                        entity_type_id,
+                        interface_type_id,
+                        MethodBinding {
+                            method_name: method_name_id,
+                            func_type,
+                            is_builtin: false,
+                            external_info: None,
+                        },
+                    );
+                }
             }
 
             // Analyze external block if present
