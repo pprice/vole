@@ -375,7 +375,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if this is a call to a generic function (via monomorphization)
-        if let Some(monomorph_key) = self.ctx.analyzed.expression_data.get_generic(call_expr_id)
+        if let Some(monomorph_key) = self.ctx.analyzed.query().monomorph_for(call_expr_id)
             && let Some(instance) = self.ctx.monomorph_cache.get(monomorph_key)
         {
             let func_key = self.ctx.func_registry.intern_name_id(instance.mangled_name);

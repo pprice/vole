@@ -143,13 +143,13 @@ impl<'a> CompileCtx<'a> {
         // When compiling module code, NodeIds are relative to that module's program
         // Use module-specific expr_types if available
         if let Some(module_path) = self.current_module
-            && let Some(module_types) = self.analyzed.expression_data.module_types(module_path)
+            && let Some(module_types) = self.analyzed.query().expr_data().module_types(module_path)
             && let Some(ty) = module_types.get(node_id)
         {
             return Some(ty);
         }
-        // Fall back to main program expr_types
-        self.analyzed.expression_data.types().get(node_id)
+        // Fall back to main program expr_types via query interface
+        self.analyzed.query().type_of(*node_id)
     }
 }
 
