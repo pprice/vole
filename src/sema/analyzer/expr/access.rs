@@ -109,7 +109,11 @@ impl Analyzer {
 
         // Get fields from inner type
         let Some((type_name, fields)) = self.get_struct_info(&inner_type) else {
-            self.type_error("optional class or record", &object_type, opt_chain.object.span);
+            self.type_error(
+                "optional class or record",
+                &object_type,
+                opt_chain.object.span,
+            );
             return Ok(Type::Error);
         };
 
@@ -313,11 +317,7 @@ impl Analyzer {
 
             // Check argument count
             if method_call.args.len() != func_type.params.len() {
-                self.add_wrong_arg_count(
-                    func_type.params.len(),
-                    method_call.args.len(),
-                    expr.span,
-                );
+                self.add_wrong_arg_count(func_type.params.len(), method_call.args.len(), expr.span);
             }
 
             // Check argument types

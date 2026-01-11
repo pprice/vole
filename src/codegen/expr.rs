@@ -1048,8 +1048,7 @@ impl Cg<'_, '_, '_> {
                         .clone();
                     let var_val = self.builder.use_var(var);
 
-                    let cmp =
-                        self.compile_equality_check(&var_type, scrutinee.value, var_val)?;
+                    let cmp = self.compile_equality_check(&var_type, scrutinee.value, var_val)?;
                     Some(cmp)
                 }
                 Pattern::Success { inner, .. } => {

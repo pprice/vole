@@ -3,6 +3,7 @@
 //! ExpressionData encapsulates all metadata that is keyed by NodeId,
 //! including type information, method resolutions, and generic instantiations.
 
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
 use crate::frontend::NodeId;
@@ -21,7 +22,7 @@ pub struct ExpressionData {
     /// Monomorphization key for generic function calls
     generics: HashMap<NodeId, MonomorphKey>,
     /// Per-module type mappings (for multi-module compilation)
-    module_types: HashMap<String, HashMap<NodeId, Type>>,
+    module_types: FxHashMap<String, HashMap<NodeId, Type>>,
 }
 
 impl ExpressionData {
@@ -35,7 +36,7 @@ impl ExpressionData {
         types: HashMap<NodeId, Type>,
         methods: HashMap<NodeId, ResolvedMethod>,
         generics: HashMap<NodeId, MonomorphKey>,
-        module_types: HashMap<String, HashMap<NodeId, Type>>,
+        module_types: FxHashMap<String, HashMap<NodeId, Type>>,
     ) -> Self {
         Self {
             types,
@@ -116,7 +117,7 @@ impl ExpressionData {
     }
 
     /// Get all module type mappings
-    pub fn all_module_types(&self) -> &HashMap<String, HashMap<NodeId, Type>> {
+    pub fn all_module_types(&self) -> &FxHashMap<String, HashMap<NodeId, Type>> {
         &self.module_types
     }
 }

@@ -5,7 +5,7 @@ use std::io::{self, IsTerminal, Read, Write};
 
 use miette::NamedSource;
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext};
@@ -28,7 +28,7 @@ pub struct AnalyzedProgram {
     /// Methods added via implement blocks (includes external_func_info)
     pub implement_registry: ImplementRegistry,
     /// Parsed module programs for compiling pure Vole functions
-    pub module_programs: HashMap<String, (Program, Interner)>,
+    pub module_programs: FxHashMap<String, (Program, Interner)>,
     /// Qualified name interner for printable identities
     pub name_table: NameTable,
     /// Entity registry for first-class type/method/field/function identity (includes type_table)

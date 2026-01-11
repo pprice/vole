@@ -28,6 +28,7 @@ use crate::sema::{
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
 };
+use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
 
 /// Information about a captured variable during lambda analysis
@@ -74,7 +75,7 @@ pub struct AnalysisOutput {
     /// Methods added via implement blocks (includes external_func_info)
     pub implement_registry: ImplementRegistry,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
-    pub module_programs: HashMap<String, (Program, Interner)>,
+    pub module_programs: FxHashMap<String, (Program, Interner)>,
     /// Fully-qualified name interner for printable identities
     pub name_table: NameTable,
     /// Entity registry for first-class type/method/field/function identity (includes type_table)
@@ -85,7 +86,7 @@ pub struct Analyzer {
     scope: Scope,
     functions: HashMap<Symbol, FunctionType>,
     /// Functions registered by string name (for prelude functions that cross interner boundaries)
-    functions_by_name: HashMap<String, FunctionType>,
+    functions_by_name: FxHashMap<String, FunctionType>,
     globals: HashMap<Symbol, Type>,
     current_function_return: Option<Type>,
     /// Current function's error type (if fallible)
@@ -118,12 +119,12 @@ pub struct Analyzer {
     /// Module loader for handling imports
     module_loader: ModuleLoader,
     /// Analyzed module types by import path
-    module_types: HashMap<String, ModuleType>,
+    module_types: FxHashMap<String, ModuleType>,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
-    module_programs: HashMap<String, (Program, Interner)>,
+    module_programs: FxHashMap<String, (Program, Interner)>,
     /// Expression types for module programs (keyed by module path -> NodeId -> Type)
     /// Stored separately since NodeIds are per-program and can't be merged into main expr_types
-    pub module_expr_types: HashMap<String, HashMap<NodeId, Type>>,
+    pub module_expr_types: FxHashMap<String, HashMap<NodeId, Type>>,
     /// Flag to prevent recursive prelude loading
     loading_prelude: bool,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
@@ -145,7 +146,7 @@ impl Analyzer {
         let mut analyzer = Self {
             scope: Scope::new(),
             functions: HashMap::new(),
-            functions_by_name: HashMap::new(),
+            functions_by_name: FxHashMap::default(),
             globals: HashMap::new(),
             current_function_return: None,
             current_function_error_type: None,
@@ -161,9 +162,9 @@ impl Analyzer {
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
-            module_types: HashMap::new(),
-            module_programs: HashMap::new(),
-            module_expr_types: HashMap::new(),
+            module_types: FxHashMap::default(),
+            module_programs: FxHashMap::default(),
+            module_expr_types: FxHashMap::default(),
             loading_prelude: false,
             generic_calls: HashMap::new(),
             name_table,
@@ -405,7 +406,7 @@ impl Analyzer {
         let mut sub_analyzer = Analyzer {
             scope: Scope::new(),
             functions: HashMap::new(),
-            functions_by_name: HashMap::new(),
+            functions_by_name: FxHashMap::default(),
             globals: HashMap::new(),
             current_function_return: None,
             current_function_error_type: None,
@@ -421,9 +422,9 @@ impl Analyzer {
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
-            module_types: HashMap::new(),
-            module_programs: HashMap::new(),
-            module_expr_types: HashMap::new(),
+            module_types: FxHashMap::default(),
+            module_programs: FxHashMap::default(),
+            module_expr_types: FxHashMap::default(),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
             generic_calls: HashMap::new(),
             name_table: NameTable::new(),

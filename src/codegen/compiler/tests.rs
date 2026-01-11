@@ -1,3 +1,5 @@
+use rustc_hash::FxHashMap;
+
 use super::*;
 use crate::commands::common::AnalyzedProgram;
 use crate::frontend::Parser;
@@ -16,7 +18,7 @@ fn compile_and_run(source: &str) -> i64 {
         interner,
         expression_data: ExpressionData::new(),
         implement_registry: ImplementRegistry::new(),
-        module_programs: HashMap::new(),
+        module_programs: FxHashMap::default(),
         name_table: NameTable::new(),
         entity_registry: EntityRegistry::new(),
     };

@@ -380,12 +380,7 @@ impl Type {
                 let non_nil: Vec<_> = types.iter().filter(|t| **t != Type::Nil).cloned().collect();
                 match non_nil.len() {
                     0 => None,
-                    1 => Some(
-                        non_nil
-                            .into_iter()
-                            .next()
-                            .expect("len checked to be 1"),
-                    ),
+                    1 => Some(non_nil.into_iter().next().expect("len checked to be 1")),
                     _ => Some(Type::Union(non_nil)),
                 }
             }
@@ -417,10 +412,7 @@ impl Type {
 
         // Unwrap single-element union
         if flattened.len() == 1 {
-            flattened
-                .into_iter()
-                .next()
-                .expect("len checked to be 1")
+            flattened.into_iter().next().expect("len checked to be 1")
         } else {
             Type::Union(flattened)
         }

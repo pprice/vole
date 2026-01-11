@@ -4,7 +4,7 @@
 //! method resolutions, and other analysis results. It encapsulates
 //! access to multiple internal structures, reducing boilerplate in codegen.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::frontend::{Interner, NodeId, Program, Symbol};
 use crate::identity::{MethodId, ModuleId, NameId, NameTable, TypeDefId};
@@ -39,7 +39,7 @@ pub struct ProgramQuery<'a> {
     name_table: &'a NameTable,
     interner: &'a Interner,
     implement_registry: &'a ImplementRegistry,
-    module_programs: &'a HashMap<String, (Program, Interner)>,
+    module_programs: &'a FxHashMap<String, (Program, Interner)>,
 }
 
 impl<'a> ProgramQuery<'a> {
@@ -50,7 +50,7 @@ impl<'a> ProgramQuery<'a> {
         name_table: &'a NameTable,
         interner: &'a Interner,
         implement_registry: &'a ImplementRegistry,
-        module_programs: &'a HashMap<String, (Program, Interner)>,
+        module_programs: &'a FxHashMap<String, (Program, Interner)>,
     ) -> Self {
         Self {
             registry,

@@ -128,8 +128,7 @@ impl Analyzer {
             return false;
         }
 
-        let type_name_id =
-            type_name_id.expect("checked is_none above and returned early");
+        let type_name_id = type_name_id.expect("checked is_none above and returned early");
 
         // Check direct methods on the type via EntityRegistry
         if let Some(type_def_id) = self.entity_registry.type_by_name(type_name_id)
@@ -638,8 +637,7 @@ impl Analyzer {
             return false;
         }
 
-        let type_name_id =
-            type_name_id.expect("checked is_none above and returned early");
+        let type_name_id = type_name_id.expect("checked is_none above and returned early");
 
         // Check direct methods on the type via EntityRegistry
         if let Some(type_def_id) = self.entity_registry.type_by_name(type_name_id)
