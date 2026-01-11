@@ -15,7 +15,7 @@ use crate::sema::EntityRegistry;
 use crate::sema::ExpressionData;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
-    MonomorphCache, MonomorphInstance, MonomorphKey, TypeParamInfo, TypeParamScope, substitute_type,
+    MonomorphInstance, MonomorphKey, TypeParamInfo, TypeParamScope, substitute_type,
 };
 use crate::sema::implement_registry::{
     ExternalMethodInfo, ImplementRegistry, MethodImpl, PrimitiveTypeId, TypeId,
@@ -23,11 +23,10 @@ use crate::sema::implement_registry::{
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::types::{ConstantValue, ModuleType, StructuralType};
 use crate::sema::{
-    ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type, TypeKey, WellKnownTypes,
+    ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type, TypeKey,
     compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
-    type_table::TypeTable,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -76,15 +75,9 @@ pub struct AnalysisOutput {
     pub implement_registry: ImplementRegistry,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     pub module_programs: HashMap<String, (Program, Interner)>,
-    /// Cache of monomorphized function instances
-    pub monomorph_cache: MonomorphCache,
     /// Fully-qualified name interner for printable identities
     pub name_table: NameTable,
-    /// Opaque type identities for named types
-    pub type_table: TypeTable,
-    /// Well-known stdlib type NameIds for fast comparison
-    pub well_known: WellKnownTypes,
-    /// Entity registry for first-class type/method/field/function identity
+    /// Entity registry for first-class type/method/field/function identity (includes type_table)
     pub entity_registry: EntityRegistry,
 }
 
@@ -133,19 +126,13 @@ pub struct Analyzer {
     pub module_expr_types: HashMap<String, HashMap<NodeId, Type>>,
     /// Flag to prevent recursive prelude loading
     loading_prelude: bool,
-    /// Cache of monomorphized function instances
-    pub monomorph_cache: MonomorphCache,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
     generic_calls: HashMap<NodeId, MonomorphKey>,
     /// Fully-qualified name interner for printable identities
     name_table: NameTable,
-    /// Opaque type identities for named types
-    type_table: TypeTable,
     /// Current module being analyzed (for proper NameId registration)
     current_module: ModuleId,
-    /// Well-known stdlib type NameIds for fast comparison
-    pub well_known: WellKnownTypes,
-    /// Entity registry for first-class type/method/field/function identity
+    /// Entity registry for first-class type/method/field/function identity (includes type_table)
     pub entity_registry: EntityRegistry,
 }
 
@@ -178,12 +165,9 @@ impl Analyzer {
             module_programs: HashMap::new(),
             module_expr_types: HashMap::new(),
             loading_prelude: false,
-            monomorph_cache: MonomorphCache::new(),
             generic_calls: HashMap::new(),
             name_table,
-            type_table: TypeTable::new(),
             current_module: main_module,
-            well_known: WellKnownTypes::new(),
             entity_registry: EntityRegistry::new(),
         };
 
@@ -239,8 +223,9 @@ impl Analyzer {
         let mut method_id = |name: &str| namer.intern_raw(builtin_module, &[name]);
         let method_len = method_id("length");
         let method_iter = method_id("iter");
-        let array_id = self.type_table.array_name_id().map(TypeId::from_name_id);
+        let array_id = self.entity_registry.type_table.array_name_id().map(TypeId::from_name_id);
         let string_id = self
+            .entity_registry
             .type_table
             .primitive_name_id(PrimitiveTypeId::String)
             .map(TypeId::from_name_id);
@@ -299,6 +284,7 @@ impl Analyzer {
 
         // Range.iter() -> Iterator<i64>
         let range_id = self
+            .entity_registry
             .type_table
             .primitive_name_id(PrimitiveTypeId::Range)
             .map(TypeId::from_name_id);
@@ -346,10 +332,10 @@ impl Analyzer {
             } else {
                 namer.intern_raw(builtin_module, &[prim.name()])
             };
-            self.type_table.register_primitive_name(prim, name_id);
+            self.entity_registry.type_table.register_primitive_name(prim, name_id);
         }
         let array_name = namer.intern_raw(builtin_module, &["array"]);
-        self.type_table.register_array_name(array_name);
+        self.entity_registry.type_table.register_array_name(array_name);
     }
 
     /// Load prelude files (trait definitions and primitive type implementations)
@@ -431,18 +417,14 @@ impl Analyzer {
             module_programs: HashMap::new(),
             module_expr_types: HashMap::new(),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
-            monomorph_cache: MonomorphCache::new(),
             generic_calls: HashMap::new(),
             name_table: NameTable::new(),
-            type_table: TypeTable::new(),
             current_module: prelude_module, // Use the prelude module path!
-            well_known: WellKnownTypes::new(),
             entity_registry: EntityRegistry::new(),
         };
 
         // Copy existing registries so prelude files can reference earlier definitions
         sub_analyzer.name_table = self.name_table.clone();
-        sub_analyzer.type_table = self.type_table.clone();
         sub_analyzer.entity_registry = self.entity_registry.clone();
 
         // Analyze the prelude file
@@ -459,9 +441,9 @@ impl Analyzer {
                 self.functions_by_name.insert(name, func_type);
             }
             // Note: external_func_info is now part of implement_registry and merged via merge() above
-            // Keep name/type tables in sync with prelude interned ids.
+            // Keep name table in sync with prelude interned ids.
+            // Note: type_table is now in entity_registry and merged via merge() above
             self.name_table = sub_analyzer.name_table;
-            self.type_table = sub_analyzer.type_table;
 
             // Store prelude program for codegen (needed for implement block compilation)
             self.module_programs
@@ -485,11 +467,11 @@ impl Analyzer {
     }
 
     fn type_key_for(&mut self, ty: &Type) -> TypeKey {
-        self.type_table.key_for_type(ty)
+        self.entity_registry.type_table.key_for_type(ty)
     }
 
     fn type_display(&mut self, ty: &Type) -> String {
-        self.type_table.display_type(ty, &mut self.name_table)
+        self.entity_registry.type_table.display_type(ty, &mut self.name_table)
     }
 
     fn type_display_pair(&mut self, left: &Type, right: &Type) -> String {
@@ -682,10 +664,7 @@ impl Analyzer {
             expression_data,
             implement_registry: self.implement_registry,
             module_programs: self.module_programs,
-            monomorph_cache: self.monomorph_cache,
             name_table: self.name_table,
-            type_table: self.type_table,
-            well_known: self.well_known,
             entity_registry: self.entity_registry,
         }
     }
@@ -741,7 +720,7 @@ impl Analyzer {
         let name_id = self
             .name_table
             .intern(self.current_module, &[name], interner);
-        self.type_table.insert_named(ty, name_id);
+        self.entity_registry.type_table.insert_named(ty, name_id);
     }
 
     fn module_name_id(&self, module_id: ModuleId, name: &str) -> Option<NameId> {
@@ -865,7 +844,7 @@ impl Analyzer {
         self.load_prelude(interner);
 
         // Populate well-known types after prelude has registered all interfaces
-        self.well_known.populate(&mut self.name_table);
+        self.name_table.populate_well_known();
 
         // Pass 0: Collect type aliases first (so they're available for function signatures)
         self.collect_type_aliases(program, interner);
@@ -936,7 +915,7 @@ impl Analyzer {
         let name_id = self
             .name_table
             .intern(self.current_module, &[name], interner);
-        let type_key = self.type_table.key_for_type(&aliased_type);
+        let type_key = self.entity_registry.type_table.key_for_type(&aliased_type);
         self.entity_registry.register_alias(
             name_id,
             self.current_module,
@@ -944,7 +923,7 @@ impl Analyzer {
             type_key,
         );
         // Also in type_table for display
-        self.type_table.insert_named(aliased_type, name_id);
+        self.entity_registry.type_table.insert_named(aliased_type, name_id);
     }
 
     /// Process global let declarations (type check and add to scope)
@@ -1402,7 +1381,7 @@ impl Analyzer {
         trait_name: Option<Symbol>,
         interner: &Interner,
     ) {
-        let type_id = match TypeId::from_type(target_type, &self.type_table) {
+        let type_id = match TypeId::from_type(target_type, &self.entity_registry.type_table) {
             Some(id) => id,
             None => return, // Skip non-registerable types
         };
@@ -1512,7 +1491,7 @@ impl Analyzer {
         let Type::Interface(interface_type) = ty else {
             return None;
         };
-        if !self.well_known.is_iterator(interface_type.name_id) {
+        if !self.name_table.well_known.is_iterator(interface_type.name_id) {
             return None;
         }
         interface_type.type_args.first().cloned()

@@ -17,7 +17,7 @@ use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, substitute_type};
-use crate::sema::{EntityRegistry, FunctionType, Type, TypeId, TypeKey};
+use crate::sema::{EntityRegistry, FunctionType, ProgramQuery, Type, TypeId, TypeKey};
 
 /// Compiled value with its type
 #[derive(Clone)]
@@ -578,6 +578,24 @@ pub(crate) fn resolve_type_expr_full(
         type_metadata,
         interner,
         name_table,
+        module_id,
+    )
+}
+
+/// Resolve a type expression using a ProgramQuery and type metadata.
+/// Cleaner interface for codegen that avoids direct field access.
+pub(crate) fn resolve_type_expr_query(
+    ty: &TypeExpr,
+    query: &ProgramQuery,
+    type_metadata: &HashMap<Symbol, TypeMetadata>,
+    module_id: ModuleId,
+) -> Type {
+    resolve_type_expr_with_metadata(
+        ty,
+        query.registry(),
+        type_metadata,
+        query.interner(),
+        query.name_table(),
         module_id,
     )
 }

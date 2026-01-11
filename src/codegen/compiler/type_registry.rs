@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::Compiler;
-use crate::codegen::types::{MethodInfo, TypeMetadata, method_name_id};
+use crate::codegen::types::{MethodInfo, TypeMetadata, resolve_type_expr_query};
 use crate::frontend::{
     ClassDecl, Decl, InterfaceDecl, Program, RecordDecl, StaticsBlock, Symbol, TypeExpr,
 };
@@ -49,14 +49,8 @@ impl Compiler<'_> {
     /// Resolve a type expression using type_metadata (for record/class field types)
     /// This allows resolving types like `Person?` where Person is another record/class
     pub(super) fn resolve_type_with_metadata(&self, ty: &TypeExpr) -> Type {
-        crate::codegen::types::resolve_type_expr_with_metadata(
-            ty,
-            &self.analyzed.entity_registry,
-            &self.type_metadata,
-            &self.analyzed.interner,
-            &self.analyzed.name_table,
-            self.analyzed.name_table.main_module(),
-        )
+        let query = self.query();
+        resolve_type_expr_query(ty, &query, &self.type_metadata, query.main_module())
     }
 
     /// Pre-register a class type (just the name and type_id)
@@ -65,23 +59,13 @@ impl Compiler<'_> {
         let type_id = self.next_type_id;
         self.next_type_id += 1;
 
-        let type_key = self
-            .analyzed
-            .name_table
-            .name_id(
-                self.analyzed.name_table.main_module(),
-                &[class.name],
-                &self.analyzed.interner,
-            )
-            .and_then(|name_id| self.analyzed.type_table.by_name(name_id));
-        let name_id = self
-            .analyzed
-            .name_table
-            .name_id(
-                self.analyzed.name_table.main_module(),
-                &[class.name],
-                &self.analyzed.interner,
-            )
+        let query = self.query();
+        let module_id = query.main_module();
+        let type_key = query
+            .name_id(module_id, &[class.name])
+            .and_then(|name_id| query.type_key_by_name(name_id));
+        let name_id = query
+            .name_id(module_id, &[class.name])
             .expect("class name_id should be registered");
 
         // Create a placeholder vole_type (will be replaced in finalize_class)
@@ -112,12 +96,15 @@ impl Compiler<'_> {
             .expect("class should be pre-registered")
             .type_id;
 
+        let query = self.query();
+        let module_id = query.main_module();
+
         // Build field slots map and StructField list
         let mut field_slots = HashMap::new();
         let mut struct_fields = Vec::new();
         let mut field_type_tags = Vec::new();
         for (i, field) in class.fields.iter().enumerate() {
-            let field_name = self.analyzed.interner.resolve(field.name).to_string();
+            let field_name = query.resolve_symbol(field.name).to_string();
             field_slots.insert(field_name.clone(), i);
             let field_type = self.resolve_type_with_metadata(&field.ty);
             field_type_tags.push(type_to_field_tag(&field_type));
@@ -133,20 +120,14 @@ impl Compiler<'_> {
 
         // Create the Vole type
         let vole_type = Type::Class(ClassType {
-            name_id: self
-                .analyzed
-                .name_table
-                .name_id(
-                    self.analyzed.name_table.main_module(),
-                    &[class.name],
-                    &self.analyzed.interner,
-                )
+            name_id: query
+                .name_id(module_id, &[class.name])
                 .expect("class name_id should be registered"),
             fields: struct_fields,
         });
 
         // Collect method return types
-        let module_id = self.func_registry.main_module();
+        let func_module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
         for method in &class.methods {
             let return_type = method
@@ -155,23 +136,19 @@ impl Compiler<'_> {
                 .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(Type::Void);
             let sig = self.create_method_signature(method);
-            let func_key = self.func_registry.intern_qualified(
-                module_id,
-                &[class.name, method.name],
-                &self.analyzed.interner,
-            );
+            let func_key = self.intern_func(func_module_id, &[class.name, method.name]);
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
-            let method_id = method_name_id(self.analyzed, &self.analyzed.interner, method.name)
-                .unwrap_or_else(|| {
-                    let type_name_str = self.analyzed.interner.resolve(class.name);
-                    let method_name_str = self.analyzed.interner.resolve(method.name);
-                    panic!(
-                        "codegen error: method name not interned for class '{}': '{}'",
-                        type_name_str, method_name_str
-                    );
-                });
+            let method_id = self.query().method_name_id(method.name).unwrap_or_else(|| {
+                let q = self.query();
+                let type_name_str = q.resolve_symbol(class.name);
+                let method_name_str = q.resolve_symbol(method.name);
+                panic!(
+                    "codegen error: method name not interned for class '{}': '{}'",
+                    type_name_str, method_name_str
+                );
+            });
             method_infos.insert(
                 method_id,
                 MethodInfo {
@@ -187,73 +164,60 @@ impl Compiler<'_> {
 
         // Also add return types for default methods from implemented interfaces
         // Look up class type_def_id via immutable name_id lookup
-        if let Some(class_name_id) = self.analyzed.name_table.name_id(
-            self.analyzed.name_table.main_module(),
-            &[class.name],
-            &self.analyzed.interner,
-        ) {
-            if let Some(type_def_id) = self.analyzed.entity_registry.type_by_name(class_name_id) {
-                for interface_id in
-                    self.analyzed.entity_registry.get_implemented_interfaces(type_def_id)
-                {
-                    let interface_def = self.analyzed.entity_registry.get_type(interface_id);
-                    // Look up interface name Symbol
-                    if let Some(interface_name_str) = self
-                        .analyzed
-                        .name_table
-                        .last_segment_str(interface_def.name_id)
-                    {
-                        if let Some(interface_name) =
-                            self.analyzed.interner.lookup(&interface_name_str)
-                        {
-                            if let Some(interface_decl) =
-                                self.find_interface_decl(program, interface_name)
-                            {
-                                for method in &interface_decl.methods {
-                                    if method.body.is_some()
-                                        && !direct_methods.contains(&method.name)
-                                    {
-                                        let return_type = method
-                                            .return_type
-                                            .as_ref()
-                                            .map(|t| self.resolve_type_with_metadata(t))
-                                            .unwrap_or(Type::Void);
-                                        let sig = self.create_interface_method_signature(method);
-                                        let func_key = self.func_registry.intern_qualified(
-                                            module_id,
-                                            &[class.name, method.name],
-                                            &self.analyzed.interner,
-                                        );
-                                        let display_name = self.func_registry.display(func_key);
-                                        let func_id =
-                                            self.jit.declare_function(&display_name, &sig);
-                                        self.func_registry.set_func_id(func_key, func_id);
-                                        let method_id = method_name_id(
-                                            self.analyzed,
-                                            &self.analyzed.interner,
-                                            method.name,
-                                        )
-                                        .unwrap_or_else(|| {
-                                            let type_name_str =
-                                                self.analyzed.interner.resolve(class.name);
-                                            let method_name_str =
-                                                self.analyzed.interner.resolve(method.name);
-                                            panic!(
-                                                "codegen error: default method name not interned for class '{}': '{}'",
-                                                type_name_str, method_name_str
-                                            );
-                                        });
-                                        method_infos.insert(
-                                            method_id,
-                                            MethodInfo {
-                                                func_key,
-                                                return_type,
-                                            },
-                                        );
-                                    }
-                                }
-                            }
-                        }
+        // Collect interface info first to avoid borrow conflicts
+        let interfaces_to_process: Vec<_> = {
+            let query = self.query();
+            if let Some(class_name_id) = query.name_id(module_id, &[class.name]) {
+                if let Some(type_def_id) = query.type_def_by_name(class_name_id) {
+                    query
+                        .implemented_interfaces(type_def_id)
+                        .into_iter()
+                        .filter_map(|interface_id| {
+                            let interface_def = query.get_type(interface_id);
+                            let interface_name_str = query.last_segment(interface_def.name_id)?;
+                            let interface_name = query.lookup_symbol(&interface_name_str)?;
+                            Some(interface_name)
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            }
+        };
+
+        for interface_name in interfaces_to_process {
+            if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
+                for method in &interface_decl.methods {
+                    if method.body.is_some() && !direct_methods.contains(&method.name) {
+                        let return_type = method
+                            .return_type
+                            .as_ref()
+                            .map(|t| self.resolve_type_with_metadata(t))
+                            .unwrap_or(Type::Void);
+                        let sig = self.create_interface_method_signature(method);
+                        let func_key = self.intern_func(func_module_id, &[class.name, method.name]);
+                        let display_name = self.func_registry.display(func_key);
+                        let func_id = self.jit.declare_function(&display_name, &sig);
+                        self.func_registry.set_func_id(func_key, func_id);
+                        let method_id =
+                            self.query().method_name_id(method.name).unwrap_or_else(|| {
+                                let q = self.query();
+                                let type_name_str = q.resolve_symbol(class.name);
+                                let method_name_str = q.resolve_symbol(method.name);
+                                panic!(
+                                    "codegen error: default method name not interned for class '{}': '{}'",
+                                    type_name_str, method_name_str
+                                );
+                            });
+                        method_infos.insert(
+                            method_id,
+                            MethodInfo {
+                                func_key,
+                                return_type,
+                            },
+                        );
                     }
                 }
             }
@@ -264,19 +228,14 @@ impl Compiler<'_> {
             self.register_static_methods(statics, class.name);
         }
 
+        let query = self.query();
         self.type_metadata.insert(
             class.name,
             TypeMetadata {
                 type_id,
-                type_key: self
-                    .analyzed
-                    .name_table
-                    .name_id(
-                        self.analyzed.name_table.main_module(),
-                        &[class.name],
-                        &self.analyzed.interner,
-                    )
-                    .and_then(|name_id| self.analyzed.type_table.by_name(name_id)),
+                type_key: query
+                    .name_id(module_id, &[class.name])
+                    .and_then(|name_id| query.type_key_by_name(name_id)),
                 field_slots,
                 is_class: true,
                 vole_type,
@@ -291,23 +250,13 @@ impl Compiler<'_> {
         let type_id = self.next_type_id;
         self.next_type_id += 1;
 
-        let type_key = self
-            .analyzed
-            .name_table
-            .name_id(
-                self.analyzed.name_table.main_module(),
-                &[record.name],
-                &self.analyzed.interner,
-            )
-            .and_then(|name_id| self.analyzed.type_table.by_name(name_id));
-        let name_id = self
-            .analyzed
-            .name_table
-            .name_id(
-                self.analyzed.name_table.main_module(),
-                &[record.name],
-                &self.analyzed.interner,
-            )
+        let query = self.query();
+        let module_id = query.main_module();
+        let type_key = query
+            .name_id(module_id, &[record.name])
+            .and_then(|name_id| query.type_key_by_name(name_id));
+        let name_id = query
+            .name_id(module_id, &[record.name])
             .expect("record name_id should be registered");
 
         // Create a placeholder vole_type (will be replaced in finalize_record)
@@ -339,12 +288,15 @@ impl Compiler<'_> {
             .expect("record should be pre-registered")
             .type_id;
 
+        let query = self.query();
+        let module_id = query.main_module();
+
         // Build field slots map and StructField list
         let mut field_slots = HashMap::new();
         let mut struct_fields = Vec::new();
         let mut field_type_tags = Vec::new();
         for (i, field) in record.fields.iter().enumerate() {
-            let field_name = self.analyzed.interner.resolve(field.name).to_string();
+            let field_name = query.resolve_symbol(field.name).to_string();
             field_slots.insert(field_name.clone(), i);
             let field_type = self.resolve_type_with_metadata(&field.ty);
             field_type_tags.push(type_to_field_tag(&field_type));
@@ -360,21 +312,15 @@ impl Compiler<'_> {
 
         // Create the Vole type
         let vole_type = Type::Record(RecordType {
-            name_id: self
-                .analyzed
-                .name_table
-                .name_id(
-                    self.analyzed.name_table.main_module(),
-                    &[record.name],
-                    &self.analyzed.interner,
-                )
+            name_id: query
+                .name_id(module_id, &[record.name])
                 .expect("record name_id should be registered"),
             fields: struct_fields,
             type_args: vec![],
         });
 
         // Collect method return types
-        let module_id = self.func_registry.main_module();
+        let func_module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
         for method in &record.methods {
             let return_type = method
@@ -383,23 +329,19 @@ impl Compiler<'_> {
                 .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(Type::Void);
             let sig = self.create_method_signature(method);
-            let func_key = self.func_registry.intern_qualified(
-                module_id,
-                &[record.name, method.name],
-                &self.analyzed.interner,
-            );
+            let func_key = self.intern_func(func_module_id, &[record.name, method.name]);
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
-            let method_id = method_name_id(self.analyzed, &self.analyzed.interner, method.name)
-                .unwrap_or_else(|| {
-                    let type_name_str = self.analyzed.interner.resolve(record.name);
-                    let method_name_str = self.analyzed.interner.resolve(method.name);
-                    panic!(
-                        "codegen error: method name not interned for record '{}': '{}'",
-                        type_name_str, method_name_str
-                    );
-                });
+            let method_id = self.query().method_name_id(method.name).unwrap_or_else(|| {
+                let q = self.query();
+                let type_name_str = q.resolve_symbol(record.name);
+                let method_name_str = q.resolve_symbol(method.name);
+                panic!(
+                    "codegen error: method name not interned for record '{}': '{}'",
+                    type_name_str, method_name_str
+                );
+            });
             method_infos.insert(
                 method_id,
                 MethodInfo {
@@ -415,73 +357,60 @@ impl Compiler<'_> {
 
         // Also add return types for default methods from implemented interfaces
         // Look up record type_def_id via immutable name_id lookup
-        if let Some(record_name_id) = self.analyzed.name_table.name_id(
-            self.analyzed.name_table.main_module(),
-            &[record.name],
-            &self.analyzed.interner,
-        ) {
-            if let Some(type_def_id) = self.analyzed.entity_registry.type_by_name(record_name_id) {
-                for interface_id in
-                    self.analyzed.entity_registry.get_implemented_interfaces(type_def_id)
-                {
-                    let interface_def = self.analyzed.entity_registry.get_type(interface_id);
-                    // Look up interface name Symbol
-                    if let Some(interface_name_str) = self
-                        .analyzed
-                        .name_table
-                        .last_segment_str(interface_def.name_id)
-                    {
-                        if let Some(interface_name) =
-                            self.analyzed.interner.lookup(&interface_name_str)
-                        {
-                            if let Some(interface_decl) =
-                                self.find_interface_decl(program, interface_name)
-                            {
-                                for method in &interface_decl.methods {
-                                    if method.body.is_some()
-                                        && !direct_methods.contains(&method.name)
-                                    {
-                                        let return_type = method
-                                            .return_type
-                                            .as_ref()
-                                            .map(|t| self.resolve_type_with_metadata(t))
-                                            .unwrap_or(Type::Void);
-                                        let sig = self.create_interface_method_signature(method);
-                                        let func_key = self.func_registry.intern_qualified(
-                                            module_id,
-                                            &[record.name, method.name],
-                                            &self.analyzed.interner,
-                                        );
-                                        let display_name = self.func_registry.display(func_key);
-                                        let func_id =
-                                            self.jit.declare_function(&display_name, &sig);
-                                        self.func_registry.set_func_id(func_key, func_id);
-                                        let method_id = method_name_id(
-                                            self.analyzed,
-                                            &self.analyzed.interner,
-                                            method.name,
-                                        )
-                                        .unwrap_or_else(|| {
-                                            let type_name_str =
-                                                self.analyzed.interner.resolve(record.name);
-                                            let method_name_str =
-                                                self.analyzed.interner.resolve(method.name);
-                                            panic!(
-                                                "codegen error: default method name not interned for record '{}': '{}'",
-                                                type_name_str, method_name_str
-                                            );
-                                        });
-                                        method_infos.insert(
-                                            method_id,
-                                            MethodInfo {
-                                                func_key,
-                                                return_type,
-                                            },
-                                        );
-                                    }
-                                }
-                            }
-                        }
+        // Collect interface info first to avoid borrow conflicts
+        let interfaces_to_process: Vec<_> = {
+            let query = self.query();
+            if let Some(record_name_id) = query.name_id(module_id, &[record.name]) {
+                if let Some(type_def_id) = query.type_def_by_name(record_name_id) {
+                    query
+                        .implemented_interfaces(type_def_id)
+                        .into_iter()
+                        .filter_map(|interface_id| {
+                            let interface_def = query.get_type(interface_id);
+                            let interface_name_str = query.last_segment(interface_def.name_id)?;
+                            let interface_name = query.lookup_symbol(&interface_name_str)?;
+                            Some(interface_name)
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            }
+        };
+
+        for interface_name in interfaces_to_process {
+            if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
+                for method in &interface_decl.methods {
+                    if method.body.is_some() && !direct_methods.contains(&method.name) {
+                        let return_type = method
+                            .return_type
+                            .as_ref()
+                            .map(|t| self.resolve_type_with_metadata(t))
+                            .unwrap_or(Type::Void);
+                        let sig = self.create_interface_method_signature(method);
+                        let func_key = self.intern_func(func_module_id, &[record.name, method.name]);
+                        let display_name = self.func_registry.display(func_key);
+                        let func_id = self.jit.declare_function(&display_name, &sig);
+                        self.func_registry.set_func_id(func_key, func_id);
+                        let method_id =
+                            self.query().method_name_id(method.name).unwrap_or_else(|| {
+                                let q = self.query();
+                                let type_name_str = q.resolve_symbol(record.name);
+                                let method_name_str = q.resolve_symbol(method.name);
+                                panic!(
+                                    "codegen error: default method name not interned for record '{}': '{}'",
+                                    type_name_str, method_name_str
+                                );
+                            });
+                        method_infos.insert(
+                            method_id,
+                            MethodInfo {
+                                func_key,
+                                return_type,
+                            },
+                        );
                     }
                 }
             }
@@ -492,19 +421,14 @@ impl Compiler<'_> {
             self.register_static_methods(statics, record.name);
         }
 
+        let query = self.query();
         self.type_metadata.insert(
             record.name,
             TypeMetadata {
                 type_id,
-                type_key: self
-                    .analyzed
-                    .name_table
-                    .name_id(
-                        self.analyzed.name_table.main_module(),
-                        &[record.name],
-                        &self.analyzed.interner,
-                    )
-                    .and_then(|name_id| self.analyzed.type_table.by_name(name_id)),
+                type_key: query
+                    .name_id(module_id, &[record.name])
+                    .and_then(|name_id| query.type_key_by_name(name_id)),
                 field_slots,
                 is_class: false,
                 vole_type,
@@ -515,17 +439,13 @@ impl Compiler<'_> {
 
     /// Register static methods from a statics block for a type
     fn register_static_methods(&mut self, statics: &StaticsBlock, type_name: Symbol) {
-        let module_id = self.func_registry.main_module();
+        let func_module_id = self.func_registry.main_module();
 
         // Get the TypeDefId for this type from entity_registry
-        let type_name_id = self.analyzed.name_table.name_id(
-            self.analyzed.name_table.main_module(),
-            &[type_name],
-            &self.analyzed.interner,
-        );
-
-        let type_def_id =
-            type_name_id.and_then(|name_id| self.analyzed.entity_registry.type_by_name(name_id));
+        let query = self.query();
+        let module_id = query.main_module();
+        let type_name_id = query.name_id(module_id, &[type_name]);
+        let type_def_id = type_name_id.and_then(|name_id| query.type_def_by_name(name_id));
 
         for method in &statics.methods {
             // Only register methods with bodies (not abstract ones)
@@ -543,19 +463,14 @@ impl Compiler<'_> {
             let sig = self.create_static_method_signature(method);
 
             // Function key: TypeName::methodName
-            let func_key = self.func_registry.intern_qualified(
-                module_id,
-                &[type_name, method.name],
-                &self.analyzed.interner,
-            );
+            let func_key = self.intern_func(func_module_id, &[type_name, method.name]);
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
 
             // Register in static_method_infos for codegen lookup
             if let Some(type_def_id) = type_def_id {
-                let method_name_id =
-                    method_name_id(self.analyzed, &self.analyzed.interner, method.name);
+                let method_name_id = self.query().method_name_id(method.name);
                 if let Some(method_name_id) = method_name_id {
                     self.static_method_infos.insert(
                         (type_def_id, method_name_id),

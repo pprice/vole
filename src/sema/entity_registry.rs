@@ -8,7 +8,8 @@ use std::collections::{HashMap, HashSet};
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 use crate::sema::implement_registry::ExternalMethodInfo;
-use crate::sema::type_table::TypeKey;
+use crate::sema::generic::MonomorphCache;
+use crate::sema::type_table::{TypeKey, TypeTable};
 use crate::sema::{FunctionType, Type};
 
 /// Central registry for all language entities
@@ -34,6 +35,12 @@ pub struct EntityRegistry {
 
     // Alias index: maps a TypeKey to all aliases that resolve to that type
     pub(crate) alias_index: HashMap<TypeKey, Vec<TypeDefId>>,
+
+    /// Type interning table for deduplication and display
+    pub type_table: TypeTable,
+
+    /// Cache of monomorphized generic function instances
+    pub monomorph_cache: MonomorphCache,
 }
 
 impl EntityRegistry {
@@ -51,6 +58,8 @@ impl EntityRegistry {
             fields_by_type: HashMap::new(),
             static_methods_by_type: HashMap::new(),
             alias_index: HashMap::new(),
+            type_table: TypeTable::new(),
+            monomorph_cache: MonomorphCache::new(),
         }
     }
 
@@ -767,6 +776,12 @@ impl EntityRegistry {
                 self.function_by_name.insert(*name_id, new_id);
             }
         }
+
+        // Type table: take other's (it was cloned from ours, so it has all our types plus new ones)
+        self.type_table = other.type_table.clone();
+
+        // Monomorph cache: take other's (it was cloned from ours, so it has all our instances plus new ones)
+        self.monomorph_cache = other.monomorph_cache.clone();
     }
 
     /// Get all type aliases that resolve to a given type.

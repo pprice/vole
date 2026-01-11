@@ -13,10 +13,9 @@ use crate::errors::{LexerError, render_to_stderr, render_to_writer};
 use crate::frontend::{AstPrinter, Interner, ParseError, Parser, ast::Program};
 use crate::identity::NameTable;
 use crate::runtime::set_stdout_capture;
-use crate::sema::generic::MonomorphCache;
 use crate::sema::{
     AnalysisOutput, Analyzer, EntityRegistry, ExpressionData, ImplementRegistry, ProgramQuery,
-    TypeError, TypeTable, TypeWarning, WellKnownTypes,
+    TypeError, TypeWarning,
 };
 use crate::transforms;
 
@@ -30,15 +29,9 @@ pub struct AnalyzedProgram {
     pub implement_registry: ImplementRegistry,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: HashMap<String, (Program, Interner)>,
-    /// Cache of monomorphized function instances
-    pub monomorph_cache: MonomorphCache,
     /// Qualified name interner for printable identities
     pub name_table: NameTable,
-    /// Opaque type identities for named types
-    pub type_table: TypeTable,
-    /// Well-known stdlib type NameIds for fast comparison
-    pub well_known: WellKnownTypes,
-    /// Entity registry for first-class type/method/field/function identity
+    /// Entity registry for first-class type/method/field/function identity (includes type_table)
     pub entity_registry: EntityRegistry,
 }
 
@@ -51,17 +44,20 @@ impl AnalyzedProgram {
             expression_data: output.expression_data,
             implement_registry: output.implement_registry,
             module_programs: output.module_programs,
-            monomorph_cache: output.monomorph_cache,
             name_table: output.name_table,
-            type_table: output.type_table,
-            well_known: output.well_known,
             entity_registry: output.entity_registry,
         }
     }
 
     /// Get a query interface for accessing type information and analysis results.
     pub fn query(&self) -> ProgramQuery<'_> {
-        ProgramQuery::new(&self.entity_registry, &self.expression_data)
+        ProgramQuery::new(
+            &self.entity_registry,
+            &self.expression_data,
+            &self.name_table,
+            &self.interner,
+            &self.implement_registry,
+        )
     }
 }
 

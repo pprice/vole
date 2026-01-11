@@ -163,8 +163,8 @@ impl Analyzer {
                 };
                 let key = MonomorphKey::new(name_id, type_keys);
 
-                if !self.monomorph_cache.contains(&key) {
-                    let id = self.monomorph_cache.next_unique_id();
+                if !self.entity_registry.monomorph_cache.contains(&key) {
+                    let id = self.entity_registry.monomorph_cache.next_unique_id();
                     let module_id = self.name_table.module_of(name_id);
                     let base_str = self
                         .name_table
@@ -174,7 +174,7 @@ impl Analyzer {
                         let mut namer = Namer::new(&mut self.name_table, interner);
                         namer.monomorph_str(module_id, &base_str, id)
                     };
-                    self.monomorph_cache.insert(
+                    self.entity_registry.monomorph_cache.insert(
                         key.clone(),
                         MonomorphInstance {
                             original_name: name_id,

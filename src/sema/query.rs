@@ -1,15 +1,18 @@
 //! Query interface for analyzed programs.
 //!
 //! ProgramQuery provides a clean API for querying type information,
-//! method resolutions, and other analysis results.
+//! method resolutions, and other analysis results. It encapsulates
+//! access to multiple internal structures, reducing boilerplate in codegen.
 
-use crate::frontend::NodeId;
-use crate::identity::TypeDefId;
-use crate::sema::entity_defs::{Implementation, TypeDef};
+use crate::frontend::{Interner, NodeId, Symbol};
+use crate::identity::{MethodId, ModuleId, NameId, NameTable, TypeDefId};
+use crate::sema::entity_defs::{Implementation, MethodDef, TypeDef};
 use crate::sema::entity_registry::EntityRegistry;
 use crate::sema::expression_data::ExpressionData;
-use crate::sema::generic::MonomorphKey;
+use crate::sema::generic::{MonomorphInstance, MonomorphKey};
+use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::sema::resolution::ResolvedMethod;
+use crate::sema::type_table::TypeKey;
 use crate::sema::types::Type;
 
 /// Information about a call site, bundling all call-related data.
@@ -24,23 +27,39 @@ pub struct CallInfo<'a> {
 }
 
 /// Query interface for accessing analyzed program data.
+///
 /// Provides a unified API for type queries, method resolution lookups,
-/// and other analysis results.
+/// name resolution, and other analysis results. Designed to reduce
+/// boilerplate in codegen by encapsulating common multi-step lookups.
 pub struct ProgramQuery<'a> {
     registry: &'a EntityRegistry,
     expr_data: &'a ExpressionData,
+    name_table: &'a NameTable,
+    interner: &'a Interner,
+    implement_registry: &'a ImplementRegistry,
 }
 
 impl<'a> ProgramQuery<'a> {
     /// Create a new query interface
-    pub fn new(registry: &'a EntityRegistry, expr_data: &'a ExpressionData) -> Self {
+    pub fn new(
+        registry: &'a EntityRegistry,
+        expr_data: &'a ExpressionData,
+        name_table: &'a NameTable,
+        interner: &'a Interner,
+        implement_registry: &'a ImplementRegistry,
+    ) -> Self {
         Self {
             registry,
             expr_data,
+            name_table,
+            interner,
+            implement_registry,
         }
     }
 
-    // ===== Expression queries =====
+    // =========================================================================
+    // Expression queries
+    // =========================================================================
 
     /// Get the type of an expression by its NodeId
     pub fn type_of(&self, node: NodeId) -> Option<&'a Type> {
@@ -58,7 +77,7 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Get bundled information about a call site
-    pub fn info_for_call(&self, node: NodeId) -> CallInfo<'a> {
+    pub fn call_info(&self, node: NodeId) -> CallInfo<'a> {
         CallInfo {
             result_type: self.type_of(node),
             method: self.method_at(node),
@@ -66,18 +85,85 @@ impl<'a> ProgramQuery<'a> {
         }
     }
 
-    // ===== Type queries =====
+    // =========================================================================
+    // Name resolution (high-frequency in codegen)
+    // =========================================================================
+
+    /// Get the main module ID
+    pub fn main_module(&self) -> ModuleId {
+        self.name_table.main_module()
+    }
+
+    /// Display a NameId as a qualified string (e.g., "module::Type::method")
+    pub fn display_name(&self, name_id: NameId) -> String {
+        self.name_table.display(name_id)
+    }
+
+    /// Resolve a Symbol to its string representation
+    pub fn resolve_symbol(&self, sym: Symbol) -> &'a str {
+        self.interner.resolve(sym)
+    }
+
+    /// Look up a Symbol in the interner, returning None if not found
+    pub fn lookup_symbol(&self, s: &str) -> Option<Symbol> {
+        self.interner.lookup(s)
+    }
+
+    /// Convert Symbols to a NameId in the given module
+    pub fn name_id(&self, module: ModuleId, segments: &[Symbol]) -> Option<NameId> {
+        self.name_table.name_id(module, segments, self.interner)
+    }
+
+    /// Convert a single Symbol to a NameId in the main module
+    pub fn name_id_in_main(&self, sym: Symbol) -> Option<NameId> {
+        self.name_id(self.main_module(), &[sym])
+    }
+
+    /// Get the module path for a module ID
+    pub fn module_path(&self, module: ModuleId) -> &str {
+        self.name_table.module_path(module)
+    }
+
+    /// Look up a module ID by path, returning None if not found
+    pub fn module_id_if_known(&self, path: &str) -> Option<ModuleId> {
+        self.name_table.module_id_if_known(path)
+    }
+
+    /// Look up a module ID by path, falling back to main module if not found
+    pub fn module_id_or_main(&self, path: &str) -> ModuleId {
+        self.name_table
+            .module_id_if_known(path)
+            .unwrap_or_else(|| self.main_module())
+    }
+
+    /// Get the last segment of a NameId as a string
+    pub fn last_segment(&self, name_id: NameId) -> Option<String> {
+        self.name_table.last_segment_str(name_id)
+    }
+
+    // =========================================================================
+    // Type queries
+    // =========================================================================
 
     /// Get a type definition by ID
     pub fn get_type(&self, type_id: TypeDefId) -> &'a TypeDef {
         self.registry.get_type(type_id)
     }
 
+    /// Look up a TypeDefId by its NameId
+    pub fn type_def_by_name(&self, name_id: NameId) -> Option<TypeDefId> {
+        self.registry.type_by_name(name_id)
+    }
+
+    /// Look up a TypeKey by NameId (for type_table lookups)
+    pub fn type_key_by_name(&self, name_id: NameId) -> Option<TypeKey> {
+        self.registry.type_table.by_name(name_id)
+    }
+
     /// Resolve a type alias to its underlying type.
     /// Returns None if the type is not an alias or has no aliased_type.
     pub fn resolve_alias(&self, type_id: TypeDefId) -> Option<&'a Type> {
-        let type_def = self.registry.get_type(type_id);
-        type_def.aliased_type.as_ref()
+        self.registry.get_type(type_id).aliased_type.as_ref()
     }
 
     /// Get all interface implementations for a type
@@ -85,7 +171,95 @@ impl<'a> ProgramQuery<'a> {
         &self.registry.get_type(type_id).implements
     }
 
-    // ===== Registry access =====
+    /// Get all interface TypeDefIds that a type implements
+    pub fn implemented_interfaces(&self, type_id: TypeDefId) -> Vec<TypeDefId> {
+        self.registry.get_implemented_interfaces(type_id)
+    }
+
+    /// Check if a type is a functional interface (single abstract method).
+    /// Returns the single method's ID if it's a functional interface.
+    pub fn is_functional_interface(&self, type_id: TypeDefId) -> Option<MethodId> {
+        self.registry.is_functional(type_id)
+    }
+
+    // =========================================================================
+    // Method queries
+    // =========================================================================
+
+    /// Get a method definition by ID
+    pub fn get_method(&self, method_id: MethodId) -> &'a MethodDef {
+        self.registry.get_method(method_id)
+    }
+
+    /// Find a method on a type by its short name
+    pub fn find_method(&self, type_id: TypeDefId, name_id: NameId) -> Option<MethodId> {
+        self.registry.find_method_on_type(type_id, name_id)
+    }
+
+    /// Resolve a method on a type, checking inherited methods too
+    pub fn resolve_method(&self, type_id: TypeDefId, method_name: NameId) -> Option<MethodId> {
+        self.registry.resolve_method(type_id, method_name)
+    }
+
+    /// Get the external binding for a method (if any)
+    pub fn method_external_binding(&self, method_id: MethodId) -> Option<&'a ExternalMethodInfo> {
+        self.registry.get_external_binding(method_id)
+    }
+
+    /// Look up a method NameId by Symbol
+    pub fn method_name_id(&self, name: Symbol) -> Option<NameId> {
+        use crate::identity::NamerLookup;
+        let namer = NamerLookup::new(self.name_table, self.interner);
+        namer.method(name)
+    }
+
+    /// Look up a method NameId by string name
+    pub fn method_name_id_by_str(&self, name_str: &str) -> Option<NameId> {
+        crate::identity::method_name_id_by_str(self.name_table, self.interner, name_str)
+    }
+
+    // =========================================================================
+    // Well-known type checks
+    // =========================================================================
+
+    /// Check if a NameId refers to the Iterator interface
+    pub fn is_iterator(&self, name_id: NameId) -> bool {
+        self.name_table.well_known.is_iterator(name_id)
+    }
+
+    /// Check if a NameId refers to the Iterable interface
+    pub fn is_iterable(&self, name_id: NameId) -> bool {
+        self.name_table.well_known.is_iterable(name_id)
+    }
+
+    // =========================================================================
+    // Monomorphization
+    // =========================================================================
+
+    /// Iterate over all monomorphized function instances
+    pub fn monomorph_instances(
+        &self,
+    ) -> impl Iterator<Item = (&'a MonomorphKey, &'a MonomorphInstance)> {
+        self.registry.monomorph_cache.instances()
+    }
+
+    /// Look up a specific monomorphized instance
+    pub fn get_monomorph(&self, key: &MonomorphKey) -> Option<&'a MonomorphInstance> {
+        self.registry.monomorph_cache.get(key)
+    }
+
+    // =========================================================================
+    // External function lookups
+    // =========================================================================
+
+    /// Get external function info by name (for builtin calls)
+    pub fn get_external_func(&self, name: &str) -> Option<&'a ExternalMethodInfo> {
+        self.implement_registry.get_external_func(name)
+    }
+
+    // =========================================================================
+    // Escape hatches (for edge cases not covered by query methods)
+    // =========================================================================
 
     /// Get direct access to the entity registry for advanced queries
     pub fn registry(&self) -> &'a EntityRegistry {
@@ -95,5 +269,20 @@ impl<'a> ProgramQuery<'a> {
     /// Get direct access to expression data for advanced queries
     pub fn expr_data(&self) -> &'a ExpressionData {
         self.expr_data
+    }
+
+    /// Get direct access to the name table for advanced queries
+    pub fn name_table(&self) -> &'a NameTable {
+        self.name_table
+    }
+
+    /// Get direct access to the interner for advanced queries
+    pub fn interner(&self) -> &'a Interner {
+        self.interner
+    }
+
+    /// Get direct access to the implement registry for advanced queries
+    pub fn implement_registry(&self) -> &'a ImplementRegistry {
+        self.implement_registry
     }
 }

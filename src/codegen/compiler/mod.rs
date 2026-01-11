@@ -19,7 +19,7 @@ use crate::commands::common::AnalyzedProgram;
 use crate::frontend::{LetStmt, Symbol};
 use crate::identity::{NameId, TypeDefId};
 use crate::runtime::NativeRegistry;
-use crate::sema::TypeId;
+use crate::sema::{ProgramQuery, TypeId};
 
 pub use state::{ControlFlowCtx, TestInfo};
 
@@ -84,6 +84,41 @@ impl<'a> Compiler<'a> {
             func_registry,
             native_registry,
         }
+    }
+
+    /// Get a query interface for the analyzed program
+    fn query(&self) -> ProgramQuery<'_> {
+        self.analyzed.query()
+    }
+
+    /// Intern a qualified function name (encapsulates borrow of interner + func_registry)
+    fn intern_func(&mut self, module: crate::identity::ModuleId, segments: &[Symbol]) -> crate::codegen::FunctionKey {
+        self.func_registry.intern_qualified(module, segments, &self.analyzed.interner)
+    }
+
+    /// Intern a function name with a NameId prefix (for implement block methods)
+    fn intern_func_prefixed(&mut self, prefix: NameId, method: Symbol) -> crate::codegen::FunctionKey {
+        self.func_registry.intern_with_prefix(prefix, method, &self.analyzed.interner)
+    }
+
+    /// Resolve a Symbol to a string (owned, for use across mutable operations)
+    fn resolve_symbol(&self, sym: Symbol) -> String {
+        self.analyzed.interner.resolve(sym).to_string()
+    }
+
+    /// Look up the "self" keyword symbol
+    fn lookup_self_symbol(&self) -> Option<Symbol> {
+        self.analyzed.interner.lookup("self")
+    }
+
+    /// Look up a method NameId by Symbol
+    fn method_name_id(&self, name: Symbol) -> Option<NameId> {
+        self.query().method_name_id(name)
+    }
+
+    /// Get TypeId from a Type (wraps TypeId::from_type with entity_registry.type_table)
+    fn type_id_from_type(&self, ty: &crate::sema::Type) -> Option<TypeId> {
+        TypeId::from_type(ty, &self.analyzed.entity_registry.type_table)
     }
 
     /// Set the source file path for error reporting.

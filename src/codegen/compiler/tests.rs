@@ -5,9 +5,6 @@ use crate::identity::NameTable;
 use crate::sema::EntityRegistry;
 use crate::sema::ExpressionData;
 use crate::sema::ImplementRegistry;
-use crate::sema::TypeTable;
-use crate::sema::WellKnownTypes;
-use crate::sema::generic::MonomorphCache;
 
 fn compile_and_run(source: &str) -> i64 {
     let mut parser = Parser::new(source);
@@ -20,10 +17,7 @@ fn compile_and_run(source: &str) -> i64 {
         expression_data: ExpressionData::new(),
         implement_registry: ImplementRegistry::new(),
         module_programs: HashMap::new(),
-        monomorph_cache: MonomorphCache::new(),
         name_table: NameTable::new(),
-        type_table: TypeTable::new(),
-        well_known: WellKnownTypes::new(),
         entity_registry: EntityRegistry::new(),
     };
 

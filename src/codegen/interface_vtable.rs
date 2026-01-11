@@ -71,7 +71,7 @@ impl InterfaceVtableRegistry {
                 is_closure: func_type.is_closure,
             },
             _ => {
-                let type_id = TypeId::from_type(concrete_type, &ctx.analyzed.type_table)
+                let type_id = TypeId::from_type(concrete_type, &ctx.analyzed.entity_registry.type_table)
                     .ok_or_else(|| {
                         format!(
                             "cannot build vtable for unsupported type {:?}",
@@ -674,7 +674,7 @@ fn resolve_vtable_target(
         });
     }
 
-    let type_id = TypeId::from_type(concrete_type, &ctx.analyzed.type_table).ok_or_else(|| {
+    let type_id = TypeId::from_type(concrete_type, &ctx.analyzed.entity_registry.type_table).ok_or_else(|| {
         format!(
             "cannot resolve interface method {} on {:?}",
             method_name_str, concrete_type

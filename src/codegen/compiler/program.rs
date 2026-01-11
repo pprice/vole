@@ -14,17 +14,21 @@ use crate::sema::generic::MonomorphInstance;
 
 impl Compiler<'_> {
     fn main_function_key_and_name(&mut self, sym: Symbol) -> (FunctionKey, String) {
-        let namer = NamerLookup::new(&self.analyzed.name_table, &self.analyzed.interner);
-        let name_id = namer.function(self.analyzed.name_table.main_module(), sym);
-        let display_name = self.analyzed.interner.resolve(sym).to_string();
+        // Collect info using query (immutable borrow)
+        let (name_id, display_name) = {
+            let query = self.query();
+            let namer = NamerLookup::new(query.name_table(), query.interner());
+            (
+                namer.function(query.main_module(), sym),
+                query.resolve_symbol(sym).to_string(),
+            )
+        };
+        // Mutable operations on func_registry
+        let func_module = self.func_registry.main_module();
         let key = if let Some(name_id) = name_id {
             self.func_registry.intern_name_id(name_id)
         } else {
-            self.func_registry.intern_qualified(
-                self.func_registry.main_module(),
-                &[sym],
-                &self.analyzed.interner,
-            )
+            self.intern_func(func_module, &[sym])
         };
         (key, display_name)
     }
@@ -206,15 +210,11 @@ impl Compiler<'_> {
             // First pass: declare pure Vole functions
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
-                    let module_id = self
-                        .analyzed
-                        .name_table
-                        .module_id_if_known(module_path)
-                        .unwrap_or_else(|| self.analyzed.name_table.main_module());
+                    let module_id = self.query().module_id_or_main(module_path);
                     let name_id = NamerLookup::new(&self.analyzed.name_table, module_interner)
                         .function(module_id, func.name)
                         .expect("module function name_id should be registered");
-                    let display_name = self.analyzed.name_table.display(name_id);
+                    let display_name = self.query().display_name(name_id);
 
                     // Create signature and declare function
                     let sig = self.create_function_signature(func);
@@ -251,11 +251,7 @@ impl Compiler<'_> {
             // Second pass: compile pure Vole function bodies
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
-                    let module_id = self
-                        .analyzed
-                        .name_table
-                        .module_id_if_known(module_path)
-                        .unwrap_or_else(|| self.analyzed.name_table.main_module());
+                    let module_id = self.query().module_id_or_main(module_path);
                     let name_id = NamerLookup::new(&self.analyzed.name_table, module_interner)
                         .function(module_id, func.name)
                         .expect("module function name_id should be registered");
@@ -297,16 +293,12 @@ impl Compiler<'_> {
         module_globals: &[LetStmt],
     ) -> Result<(), String> {
         let func_key = self.func_registry.intern_name_id(name_id);
-        let display_name = self.analyzed.name_table.display(name_id);
+        let display_name = self.query().display_name(name_id);
         let func_id = self
             .func_registry
             .func_id(func_key)
             .ok_or_else(|| format!("Module function {} not declared", display_name))?;
-        let module_id = self
-            .analyzed
-            .name_table
-            .module_id_if_known(module_path)
-            .unwrap_or_else(|| self.analyzed.name_table.main_module());
+        let module_id = self.query().module_id_or_main(module_path);
 
         // Create function signature
         let sig = self.create_function_signature(func);
@@ -404,7 +396,7 @@ impl Compiler<'_> {
                 current_function_return_type: return_type,
                 native_registry: &self.native_registry,
                 current_module: Some(module_path), // We're compiling module code
-                monomorph_cache: &self.analyzed.monomorph_cache,
+                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -431,7 +423,7 @@ impl Compiler<'_> {
     }
 
     fn compile_function(&mut self, func: &FuncDecl) -> Result<(), String> {
-        let module_id = self.analyzed.name_table.main_module();
+        let module_id = self.query().main_module();
         let (func_key, display_name) = self.main_function_key_and_name(func.name);
         let func_id = self
             .func_registry
@@ -534,7 +526,7 @@ impl Compiler<'_> {
                 current_function_return_type: return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.monomorph_cache,
+                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -610,7 +602,7 @@ impl Compiler<'_> {
                     current_function_return_type: None, // Tests don't have a declared return type
                     native_registry: &self.native_registry,
                     current_module: None,
-                        monomorph_cache: &self.analyzed.monomorph_cache,
+                        monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -658,7 +650,7 @@ impl Compiler<'_> {
         writer: &mut W,
         include_tests: bool,
     ) -> Result<(), String> {
-        let module_id = self.analyzed.name_table.main_module();
+        let module_id = self.query().main_module();
         // First pass: declare all functions so they can reference each other
         let mut test_count = 0usize;
         for decl in &program.declarations {
@@ -728,7 +720,7 @@ impl Compiler<'_> {
     /// Build IR for a single function without defining it.
     /// Similar to compile_function but doesn't call define_function.
     fn build_function_ir(&mut self, func: &FuncDecl) -> Result<(), String> {
-        let module_id = self.analyzed.name_table.main_module();
+        let module_id = self.query().main_module();
         // Create function signature
         let sig = self.create_function_signature(func);
         self.jit.ctx.func.signature = sig;
@@ -826,7 +818,7 @@ impl Compiler<'_> {
                 current_function_return_type: return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.monomorph_cache,
+                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -891,7 +883,7 @@ impl Compiler<'_> {
                 current_function_return_type: None, // Tests don't have a declared return type
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.monomorph_cache,
+                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -922,13 +914,14 @@ impl Compiler<'_> {
         // Collect instances to avoid borrow issues
         let instances: Vec<_> = self
             .analyzed
+            .entity_registry
             .monomorph_cache
             .instances()
             .map(|(key, instance)| (key.clone(), instance.clone()))
             .collect();
 
         for (_key, instance) in instances {
-            let mangled_name = self.analyzed.name_table.display(instance.mangled_name);
+            let mangled_name = self.query().display_name(instance.mangled_name);
 
             // Create signature from the concrete function type
             let mut params = Vec::new();
@@ -980,6 +973,7 @@ impl Compiler<'_> {
         // Collect instances to avoid borrow issues
         let instances: Vec<_> = self
             .analyzed
+            .entity_registry
             .monomorph_cache
             .instances()
             .map(|(key, instance)| (key.clone(), instance.clone()))
@@ -991,7 +985,7 @@ impl Compiler<'_> {
                 .ok_or_else(|| {
                     format!(
                         "Internal error: generic function AST not found for {}",
-                        self.analyzed.name_table.display(instance.original_name)
+                        self.query().display_name(instance.original_name)
                     )
                 })?;
 
@@ -1007,7 +1001,7 @@ impl Compiler<'_> {
         func: &FuncDecl,
         instance: &MonomorphInstance,
     ) -> Result<(), String> {
-        let mangled_name = self.analyzed.name_table.display(instance.mangled_name);
+        let mangled_name = self.query().display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
         let func_id = self
             .func_registry
@@ -1089,7 +1083,7 @@ impl Compiler<'_> {
                 current_function_return_type: return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.monomorph_cache,
+                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,

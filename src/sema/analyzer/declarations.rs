@@ -1231,7 +1231,7 @@ impl Analyzer {
             );
         }
 
-        if let Some(type_id) = TypeId::from_type(&target_type, &self.type_table) {
+        if let Some(type_id) = TypeId::from_type(&target_type, &self.entity_registry.type_table) {
             // Get TypeDefId for the target type (for EntityRegistry updates)
             let entity_type_id = match &target_type {
                 Type::Record(r) => self.entity_registry.type_by_name(r.name_id),

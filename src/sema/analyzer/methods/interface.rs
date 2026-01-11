@@ -117,7 +117,7 @@ impl Analyzer {
 
         // For primitives/arrays, check implement registry
         if type_name_id.is_none() {
-            if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
+            if let Some(type_id) = TypeId::from_type(ty, &self.entity_registry.type_table)
                 && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             {
                 return self
@@ -144,7 +144,7 @@ impl Analyzer {
         }
 
         // Check implement registry
-        if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
+        if let Some(type_id) = TypeId::from_type(ty, &self.entity_registry.type_table)
             && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             && self
                 .implement_registry
@@ -194,7 +194,7 @@ impl Analyzer {
     /// Check if a type implements Stringable (has to_string() -> string method)
     pub fn satisfies_stringable(&self, ty: &Type, interner: &Interner) -> bool {
         // Use the well-known Stringable NameId if available
-        if let Some(stringable_id) = self.well_known.stringable {
+        if let Some(stringable_id) = self.name_table.well_known.stringable {
             return self.satisfies_interface_via_entity_registry(ty, stringable_id, interner);
         }
         // Fallback: try to find "Stringable" via Resolver with interface fallback
@@ -530,6 +530,7 @@ impl Analyzer {
 
             if !self.type_has_field_with_type(ty, &field_name_str, &field.ty, interner) {
                 let type_str = self
+                    .entity_registry
                     .type_table
                     .clone()
                     .display_type(&field.ty, &mut self.name_table.clone());
@@ -558,13 +559,15 @@ impl Analyzer {
                     .params
                     .iter()
                     .map(|p| {
-                        self.type_table
+                        self.entity_registry
+                            .type_table
                             .clone()
                             .display_type(p, &mut self.name_table.clone())
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
                 let ret_str = self
+                    .entity_registry
                     .type_table
                     .clone()
                     .display_type(&method.return_type, &mut self.name_table.clone());
@@ -620,7 +623,7 @@ impl Analyzer {
 
         // For primitives/arrays, check implement registry
         if type_name_id.is_none() {
-            if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
+            if let Some(type_id) = TypeId::from_type(ty, &self.entity_registry.type_table)
                 && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
                 && let Some(method_impl) = self.implement_registry.get_method(&type_id, method_id)
             {
@@ -655,7 +658,7 @@ impl Analyzer {
         }
 
         // Check implement registry
-        if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
+        if let Some(type_id) = TypeId::from_type(ty, &self.entity_registry.type_table)
             && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             && let Some(method_impl) = self.implement_registry.get_method(&type_id, method_id)
         {

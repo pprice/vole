@@ -65,7 +65,7 @@ impl Cg<'_, '_, '_> {
     /// Returns the resulting string value.
     fn call_to_string(&mut self, val: &CompiledValue) -> Result<Value, String> {
         // Look up the to_string method in the implement registry
-        let type_id = TypeId::from_type(&val.vole_type, &self.ctx.analyzed.type_table)
+        let type_id = TypeId::from_type(&val.vole_type, &self.ctx.analyzed.entity_registry.type_table)
             .ok_or_else(|| format!("Cannot find TypeId for {:?}", val.vole_type))?;
 
         // Use NamerLookup to find the method by string name (cross-interner safe)

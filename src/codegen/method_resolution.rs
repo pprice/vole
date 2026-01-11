@@ -148,7 +148,7 @@ pub(crate) fn resolve_method_target(
                         return_type: (*func_type.return_type).clone(),
                     });
                 }
-                let type_id = TypeId::from_type(input.object_type, &input.analyzed.type_table)
+                let type_id = TypeId::from_type(input.object_type, &input.analyzed.entity_registry.type_table)
                     .ok_or_else(|| {
                         CodegenError::not_found(
                             "method",
@@ -256,7 +256,7 @@ pub(crate) fn resolve_method_target(
     }
 
     // Try implement block methods
-    if let Some(type_id) = TypeId::from_type(input.object_type, &input.analyzed.type_table)
+    if let Some(type_id) = TypeId::from_type(input.object_type, &input.analyzed.entity_registry.type_table)
         && let Ok(method_info) = lookup_impl_method(type_id)
     {
         let return_type = method_info.return_type.clone();

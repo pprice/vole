@@ -197,7 +197,7 @@ impl Analyzer {
                     // Accept Iterator<T> directly - extract element type
                     Type::GenericInstance { def, args } => {
                         // GenericInstance is used for Iterator<T> from method return types
-                        if self.well_known.is_iterator(*def) {
+                        if self.name_table.well_known.is_iterator(*def) {
                             args.first().cloned().unwrap_or(Type::Unknown)
                         } else {
                             self.type_error(

@@ -13,7 +13,7 @@ use crate::frontend::{
     Symbol, TypeExpr,
 };
 use crate::identity::ModuleId;
-use crate::sema::{Type, TypeId};
+use crate::sema::Type;
 
 impl Compiler<'_> {
     /// Compile methods for a class
@@ -29,7 +29,7 @@ impl Compiler<'_> {
             .ok_or_else(|| {
                 format!(
                     "Internal error: class {} not registered",
-                    self.analyzed.interner.resolve(class.name)
+                    self.query().resolve_symbol(class.name)
                 )
             })?;
 
@@ -40,42 +40,34 @@ impl Compiler<'_> {
         // Compile default methods from implemented interfaces
         let direct_methods: std::collections::HashSet<_> =
             class.methods.iter().map(|m| m.name).collect();
-        // Look up class type_def_id via immutable name_id lookup
-        if let Some(class_name_id) = self.analyzed.name_table.name_id(
-            self.analyzed.name_table.main_module(),
-            &[class.name],
-            &self.analyzed.interner,
-        ) {
-            if let Some(type_def_id) = self.analyzed.entity_registry.type_by_name(class_name_id) {
-                for interface_id in
-                    self.analyzed.entity_registry.get_implemented_interfaces(type_def_id)
-                {
-                    let interface_def = self.analyzed.entity_registry.get_type(interface_id);
-                    // Look up interface name Symbol
-                    if let Some(interface_name_str) = self
-                        .analyzed
-                        .name_table
-                        .last_segment_str(interface_def.name_id)
-                    {
-                        if let Some(interface_name) =
-                            self.analyzed.interner.lookup(&interface_name_str)
-                        {
-                            if let Some(interface_decl) =
-                                self.find_interface_decl(program, interface_name)
-                            {
-                                for method in &interface_decl.methods {
-                                    if method.body.is_some()
-                                        && !direct_methods.contains(&method.name)
-                                    {
-                                        self.compile_default_method(
-                                            method,
-                                            class.name,
-                                            &metadata,
-                                        )?;
-                                    }
-                                }
-                            }
-                        }
+
+        // Collect interface names using query (avoids borrow conflicts with compile_default_method)
+        let interface_names: Vec<Symbol> = {
+            let query = self.query();
+            query
+                .name_id(query.main_module(), &[class.name])
+                .and_then(|class_name_id| query.type_def_by_name(class_name_id))
+                .map(|type_def_id| {
+                    query
+                        .implemented_interfaces(type_def_id)
+                        .into_iter()
+                        .filter_map(|interface_id| {
+                            let interface_def = query.get_type(interface_id);
+                            query
+                                .last_segment(interface_def.name_id)
+                                .and_then(|name_str| query.lookup_symbol(&name_str))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        // Compile default methods for each interface
+        for interface_name in interface_names {
+            if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
+                for method in &interface_decl.methods {
+                    if method.body.is_some() && !direct_methods.contains(&method.name) {
+                        self.compile_default_method(method, class.name, &metadata)?;
                     }
                 }
             }
@@ -102,7 +94,7 @@ impl Compiler<'_> {
             .ok_or_else(|| {
                 format!(
                     "Internal error: record {} not registered",
-                    self.analyzed.interner.resolve(record.name)
+                    self.query().resolve_symbol(record.name)
                 )
             })?;
 
@@ -113,42 +105,34 @@ impl Compiler<'_> {
         // Compile default methods from implemented interfaces
         let direct_methods: std::collections::HashSet<_> =
             record.methods.iter().map(|m| m.name).collect();
-        // Look up record type_def_id via immutable name_id lookup
-        if let Some(record_name_id) = self.analyzed.name_table.name_id(
-            self.analyzed.name_table.main_module(),
-            &[record.name],
-            &self.analyzed.interner,
-        ) {
-            if let Some(type_def_id) = self.analyzed.entity_registry.type_by_name(record_name_id) {
-                for interface_id in
-                    self.analyzed.entity_registry.get_implemented_interfaces(type_def_id)
-                {
-                    let interface_def = self.analyzed.entity_registry.get_type(interface_id);
-                    // Look up interface name Symbol
-                    if let Some(interface_name_str) = self
-                        .analyzed
-                        .name_table
-                        .last_segment_str(interface_def.name_id)
-                    {
-                        if let Some(interface_name) =
-                            self.analyzed.interner.lookup(&interface_name_str)
-                        {
-                            if let Some(interface_decl) =
-                                self.find_interface_decl(program, interface_name)
-                            {
-                                for method in &interface_decl.methods {
-                                    if method.body.is_some()
-                                        && !direct_methods.contains(&method.name)
-                                    {
-                                        self.compile_default_method(
-                                            method,
-                                            record.name,
-                                            &metadata,
-                                        )?;
-                                    }
-                                }
-                            }
-                        }
+
+        // Collect interface names using query (avoids borrow conflicts with compile_default_method)
+        let interface_names: Vec<Symbol> = {
+            let query = self.query();
+            query
+                .name_id(query.main_module(), &[record.name])
+                .and_then(|record_name_id| query.type_def_by_name(record_name_id))
+                .map(|type_def_id| {
+                    query
+                        .implemented_interfaces(type_def_id)
+                        .into_iter()
+                        .filter_map(|interface_id| {
+                            let interface_def = query.get_type(interface_id);
+                            query
+                                .last_segment(interface_def.name_id)
+                                .and_then(|name_str| query.lookup_symbol(&name_str))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        // Compile default methods for each interface
+        for interface_name in interface_names {
+            if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
+                for method in &interface_decl.methods {
+                    if method.body.is_some() && !direct_methods.contains(&method.name) {
+                        self.compile_default_method(method, record.name, &metadata)?;
                     }
                 }
             }
@@ -178,7 +162,7 @@ impl Compiler<'_> {
     fn get_type_name_from_expr(&self, ty: &TypeExpr) -> Option<String> {
         match ty {
             TypeExpr::Primitive(p) => Some(Type::from_primitive(*p).name().to_string()),
-            TypeExpr::Named(sym) => Some(self.analyzed.interner.resolve(*sym).to_string()),
+            TypeExpr::Named(sym) => Some(self.query().resolve_symbol(*sym).to_string()),
             _ => None,
         }
     }
@@ -194,7 +178,7 @@ impl Compiler<'_> {
         impl_block: &ImplementBlock,
         interner: &Interner,
     ) {
-        let module_id = self.analyzed.name_table.main_module();
+        let module_id = self.query().main_module();
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return; // Unsupported type for implement block
@@ -225,7 +209,7 @@ impl Compiler<'_> {
             ),
         };
 
-        let type_id = TypeId::from_type(&self_vole_type, &self.analyzed.type_table);
+        let type_id = self.type_id_from_type(&self_vole_type);
 
         // Declare methods as functions: TypeName::methodName (implement block convention)
         for method in &impl_block.methods {
@@ -281,7 +265,7 @@ impl Compiler<'_> {
                 }
                 TypeExpr::Named(sym) => {
                     let name_id = self.analyzed.name_table.name_id(
-                        self.analyzed.name_table.main_module(),
+                        self.query().main_module(),
                         &[*sym],
                         interner,
                     );
@@ -345,7 +329,7 @@ impl Compiler<'_> {
         &mut self,
         impl_block: &ImplementBlock,
     ) -> Result<(), String> {
-        let module_id = self.analyzed.name_table.main_module();
+        let module_id = self.query().main_module();
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return Ok(()); // Unsupported type for implement block
@@ -377,10 +361,9 @@ impl Compiler<'_> {
         };
 
         for method in &impl_block.methods {
-            let method_key = TypeId::from_type(&self_vole_type, &self.analyzed.type_table)
+            let method_key = self.type_id_from_type(&self_vole_type)
                 .and_then(|type_id| {
-                    let method_id =
-                        method_name_id(self.analyzed, &self.analyzed.interner, method.name)?;
+                    let method_id = self.method_name_id(method.name)?;
                     self.impl_method_infos.get(&(type_id, method_id)).cloned()
                 });
             self.compile_implement_method(
@@ -439,7 +422,7 @@ impl Compiler<'_> {
         module_path: Option<&str>,
         interner: &Interner,
     ) -> Result<(), String> {
-        let module_id = self.analyzed.name_table.main_module();
+        let module_id = self.query().main_module();
 
         for method in &statics.methods {
             // Only compile methods with bodies
@@ -562,7 +545,7 @@ impl Compiler<'_> {
                     current_function_return_type: Some(return_type.clone()),
                     native_registry: &self.native_registry,
                     current_module: module_path,
-                    monomorph_cache: &self.analyzed.monomorph_cache,
+                    monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 };
                 let terminated =
                     compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -594,25 +577,17 @@ impl Compiler<'_> {
         self_vole_type: &Type,
         method_info: Option<MethodInfo>,
     ) -> Result<(), String> {
-        let module_id = self.analyzed.name_table.main_module();
+        let module_id = self.query().main_module();
         let func_key = if let Some(info) = method_info {
             info.func_key
         } else if let Some(type_sym) = type_sym {
-            self.func_registry.intern_qualified(
-                func_module,
-                &[type_sym, method.name],
-                &self.analyzed.interner,
-            )
-        } else if let Some(type_id) = TypeId::from_type(self_vole_type, &self.analyzed.type_table) {
-            self.func_registry.intern_with_prefix(
-                type_id.name_id(),
-                method.name,
-                &self.analyzed.interner,
-            )
+            self.intern_func(func_module, &[type_sym, method.name])
+        } else if let Some(type_id) = self.type_id_from_type(self_vole_type) {
+            self.intern_func_prefixed(type_id.name_id(), method.name)
         } else {
-            let method_name_str = self.analyzed.interner.resolve(method.name);
+            let method_name_str = self.resolve_symbol(method.name);
             self.func_registry
-                .intern_raw_qualified(func_module, &[type_name, method_name_str])
+                .intern_raw_qualified(func_module, &[type_name, &method_name_str])
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             let display = self.func_registry.display(func_key);
@@ -658,8 +633,11 @@ impl Compiler<'_> {
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
-        // Get source file pointer before borrowing ctx.func
+        // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
+        let self_sym = self
+            .lookup_self_symbol()
+            .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
 
         // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -677,11 +655,6 @@ impl Compiler<'_> {
             let params = builder.block_params(entry_block).to_vec();
 
             // Bind `self` as the first parameter (using correct type for primitives)
-            let self_sym = self
-                .analyzed
-                .interner
-                .lookup("self")
-                .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
             let self_var = builder.declare_var(self_cranelift_type);
             builder.def_var(self_var, params[0]);
             variables.insert(self_sym, (self_var, self_type));
@@ -728,7 +701,7 @@ impl Compiler<'_> {
                 current_function_return_type: method_return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.monomorph_cache,
+                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -764,14 +737,15 @@ impl Compiler<'_> {
         type_name: Symbol,
         metadata: &TypeMetadata,
     ) -> Result<(), String> {
-        let type_name_str = self.analyzed.interner.resolve(type_name);
-        let method_name_str = self.analyzed.interner.resolve(method.name);
-        let module_id = self.analyzed.name_table.main_module();
+        let type_name_str = self.query().resolve_symbol(type_name).to_string();
+        let method_name_str = self.query().resolve_symbol(method.name).to_string();
+        let module_id = self.query().main_module();
 
         let func_key = metadata
             .method_infos
             .get(
-                &method_name_id(self.analyzed, &self.analyzed.interner, method.name)
+                &self
+                    .method_name_id(method.name)
                     .expect("method name_id should be registered"),
             )
             .map(|info| info.func_key)
@@ -822,8 +796,11 @@ impl Compiler<'_> {
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
-        // Get source file pointer before borrowing ctx.func
+        // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
+        let self_sym = self
+            .lookup_self_symbol()
+            .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
 
         // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -841,12 +818,6 @@ impl Compiler<'_> {
             let params = builder.block_params(entry_block).to_vec();
 
             // Bind `self` as the first parameter
-            // Note: "self" should already be interned during parsing of method bodies
-            let self_sym = self
-                .analyzed
-                .interner
-                .lookup("self")
-                .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
             let self_var = builder.declare_var(self.pointer_type);
             builder.def_var(self_var, params[0]);
             variables.insert(self_sym, (self_var, self_vole_type));
@@ -881,7 +852,7 @@ impl Compiler<'_> {
                 current_function_return_type: None, // Methods don't use raise statements yet
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.monomorph_cache,
+                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -914,14 +885,15 @@ impl Compiler<'_> {
         type_name: Symbol,
         metadata: &TypeMetadata,
     ) -> Result<(), String> {
-        let type_name_str = self.analyzed.interner.resolve(type_name);
-        let method_name_str = self.analyzed.interner.resolve(method.name);
-        let module_id = self.analyzed.name_table.main_module();
+        let type_name_str = self.query().resolve_symbol(type_name).to_string();
+        let method_name_str = self.query().resolve_symbol(method.name).to_string();
+        let module_id = self.query().main_module();
 
         let func_key = metadata
             .method_infos
             .get(
-                &method_name_id(self.analyzed, &self.analyzed.interner, method.name)
+                &self
+                    .method_name_id(method.name)
                     .expect("method name_id should be registered"),
             )
             .map(|info| info.func_key)
@@ -972,8 +944,11 @@ impl Compiler<'_> {
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
-        // Get source file pointer before borrowing ctx.func
+        // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
+        let self_sym = self
+            .lookup_self_symbol()
+            .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
 
         // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -991,11 +966,6 @@ impl Compiler<'_> {
             let params = builder.block_params(entry_block).to_vec();
 
             // Bind `self` as the first parameter with the concrete type
-            let self_sym = self
-                .analyzed
-                .interner
-                .lookup("self")
-                .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
             let self_var = builder.declare_var(self.pointer_type);
             builder.def_var(self_var, params[0]);
             variables.insert(self_sym, (self_var, self_vole_type));
@@ -1037,7 +1007,7 @@ impl Compiler<'_> {
                 current_function_return_type: None, // Default methods don't use raise statements yet
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.monomorph_cache,
+                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
             };
             let terminated =
                 compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -1064,7 +1034,7 @@ impl Compiler<'_> {
         statics: &StaticsBlock,
         type_name: Symbol,
     ) -> Result<(), String> {
-        let module_id = self.analyzed.name_table.main_module();
+        let module_id = self.query().main_module();
         let func_module = self.func_registry.main_module();
 
         for method in &statics.methods {
@@ -1075,14 +1045,10 @@ impl Compiler<'_> {
             };
 
             // Look up the registered function
-            let func_key = self.func_registry.intern_qualified(
-                func_module,
-                &[type_name, method.name],
-                &self.analyzed.interner,
-            );
+            let func_key = self.intern_func(func_module, &[type_name, method.name]);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-                let type_name_str = self.analyzed.interner.resolve(type_name);
-                let method_name_str = self.analyzed.interner.resolve(method.name);
+                let type_name_str = self.query().resolve_symbol(type_name);
+                let method_name_str = self.query().resolve_symbol(method.name);
                 format!(
                     "Internal error: static method {}::{} not declared",
                     type_name_str, method_name_str
@@ -1175,7 +1141,7 @@ impl Compiler<'_> {
                     current_function_return_type: None,
                     native_registry: &self.native_registry,
                     current_module: None,
-                    monomorph_cache: &self.analyzed.monomorph_cache,
+                    monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 };
                 let terminated =
                     compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;

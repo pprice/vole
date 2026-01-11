@@ -220,7 +220,7 @@ impl Analyzer {
             });
         }
         // Fall back to old implement_registry for backward compatibility
-        if let Some(type_id) = TypeId::from_type(object_type, &self.type_table)
+        if let Some(type_id) = TypeId::from_type(object_type, &self.entity_registry.type_table)
             && let Some(impl_) = self.implement_registry.get_method(&type_id, method_name_id)
         {
             return Some(ResolvedMethod::Implemented {

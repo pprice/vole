@@ -107,6 +107,89 @@ impl Primitives {
     }
 }
 
+/// Well-known type identifiers from the stdlib prelude.
+/// These are populated after prelude loading for fast type identification.
+#[derive(Debug, Clone, Default)]
+pub struct WellKnownTypes {
+    // NameId fields (for compatibility with existing code)
+    /// std:prelude/traits::Iterator (NameId)
+    pub iterator: Option<NameId>,
+    /// std:prelude/traits::Iterable (NameId)
+    pub iterable: Option<NameId>,
+    /// std:prelude/traits::Equatable (NameId)
+    pub equatable: Option<NameId>,
+    /// std:prelude/traits::Comparable (NameId)
+    pub comparable: Option<NameId>,
+    /// std:prelude/traits::Hashable (NameId)
+    pub hashable: Option<NameId>,
+    /// std:prelude/traits::Stringable (NameId)
+    pub stringable: Option<NameId>,
+
+    // TypeDefId fields (for EntityRegistry integration)
+    /// std:prelude/traits::Iterator (TypeDefId)
+    pub iterator_type_def: Option<TypeDefId>,
+    /// std:prelude/traits::Iterable (TypeDefId)
+    pub iterable_type_def: Option<TypeDefId>,
+    /// std:prelude/traits::Equatable (TypeDefId)
+    pub equatable_type_def: Option<TypeDefId>,
+    /// std:prelude/traits::Comparable (TypeDefId)
+    pub comparable_type_def: Option<TypeDefId>,
+    /// std:prelude/traits::Hashable (TypeDefId)
+    pub hashable_type_def: Option<TypeDefId>,
+    /// std:prelude/traits::Stringable (TypeDefId)
+    pub stringable_type_def: Option<TypeDefId>,
+}
+
+impl WellKnownTypes {
+    /// Create an empty WellKnownTypes (before prelude is loaded)
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Check if a NameId is the Iterator interface
+    pub fn is_iterator(&self, name_id: NameId) -> bool {
+        self.iterator == Some(name_id)
+    }
+
+    /// Check if a NameId is the Iterable interface
+    pub fn is_iterable(&self, name_id: NameId) -> bool {
+        self.iterable == Some(name_id)
+    }
+
+    /// Check if a TypeDefId is the Iterator interface
+    pub fn is_iterator_type_def(&self, type_def_id: TypeDefId) -> bool {
+        self.iterator_type_def == Some(type_def_id)
+    }
+
+    /// Check if a TypeDefId is the Iterable interface
+    pub fn is_iterable_type_def(&self, type_def_id: TypeDefId) -> bool {
+        self.iterable_type_def == Some(type_def_id)
+    }
+}
+
+/// Well-known method MethodIds from the stdlib prelude.
+#[derive(Debug, Clone, Default)]
+pub struct WellKnownMethods {
+    /// Iterator::next
+    pub iterator_next: Option<MethodId>,
+    /// Iterable::iter
+    pub iterable_iter: Option<MethodId>,
+    /// Stringable::to_string
+    pub stringable_to_string: Option<MethodId>,
+    /// Equatable::equals
+    pub equatable_equals: Option<MethodId>,
+    /// Comparable::compare
+    pub comparable_compare: Option<MethodId>,
+    /// Hashable::hash
+    pub hashable_hash: Option<MethodId>,
+}
+
+impl WellKnownMethods {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct NameTable {
     modules: Vec<String>,
@@ -116,6 +199,7 @@ pub struct NameTable {
     main_module: ModuleId,
     diagnostics: HashMap<NameId, DefLocation>,
     pub primitives: Primitives,
+    pub well_known: WellKnownTypes,
 }
 
 impl NameTable {
@@ -145,6 +229,7 @@ impl NameTable {
                 string: placeholder,
                 nil: placeholder,
             },
+            well_known: WellKnownTypes::new(),
         };
         let main_module = table.module_id("main");
         table.main_module = main_module;
@@ -153,6 +238,18 @@ impl NameTable {
         // Register primitives in the builtin module
         table.primitives = table.register_primitives();
         table
+    }
+
+    /// Populate well-known type NameIds after prelude has been loaded.
+    pub fn populate_well_known(&mut self) {
+        let traits_module = self.module_id("std:prelude/traits");
+
+        self.well_known.iterator = Some(self.intern_raw(traits_module, &["Iterator"]));
+        self.well_known.iterable = Some(self.intern_raw(traits_module, &["Iterable"]));
+        self.well_known.equatable = Some(self.intern_raw(traits_module, &["Equatable"]));
+        self.well_known.comparable = Some(self.intern_raw(traits_module, &["Comparable"]));
+        self.well_known.hashable = Some(self.intern_raw(traits_module, &["Hashable"]));
+        self.well_known.stringable = Some(self.intern_raw(traits_module, &["Stringable"]));
     }
 
     fn register_primitives(&mut self) -> Primitives {
