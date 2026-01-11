@@ -104,6 +104,8 @@ impl Analyzer {
         let (name_id, type_args) = match object_type {
             Type::Interface(iface) => (Some(iface.name_id), iface.type_args.as_slice()),
             Type::GenericInstance { def, args } => (Some(*def), args.as_slice()),
+            Type::Record(r) => (Some(r.name_id), r.type_args.as_slice()),
+            Type::Class(c) => (Some(c.name_id), &[] as &[Type]), // Classes don't have type_args yet
             _ => (None, &[] as &[Type]),
         };
 

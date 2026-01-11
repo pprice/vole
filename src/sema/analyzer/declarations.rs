@@ -525,6 +525,10 @@ impl Analyzer {
                 .map(|f| resolve_type(&f.ty, &mut ctx))
                 .collect();
 
+            // Extract type param name IDs before moving type_params
+            let type_param_name_ids: Vec<NameId> =
+                type_params.iter().map(|tp| tp.name_id).collect();
+
             self.generic_records.insert(
                 record.name,
                 GenericRecordDef {
@@ -614,6 +618,41 @@ impl Analyzer {
                         self.current_module,
                     )
                 });
+
+            // Register fields in EntityRegistry (needed for self.field access in methods)
+            for (i, field) in record.fields.iter().enumerate() {
+                let field_name_str = interner.resolve(field.name);
+                let field_name_id = self
+                    .name_table
+                    .intern_raw(builtin_module, &[field_name_str]);
+                let full_field_name_id = self.name_table.intern_raw(
+                    self.current_module,
+                    &[interner.resolve(record.name), field_name_str],
+                );
+                let field_ty = {
+                    let mut ctx = TypeResolutionContext::with_type_params(
+                        &self.type_aliases,
+                        &self.error_types,
+                        &self.entity_registry,
+                        interner,
+                        &mut self.name_table,
+                        module_id,
+                        &type_param_scope,
+                    );
+                    resolve_type(&field.ty, &mut ctx)
+                };
+                self.entity_registry.register_field(
+                    entity_type_id,
+                    field_name_id,
+                    full_field_name_id,
+                    field_ty,
+                    i,
+                );
+            }
+
+            // Set type params on the type definition
+            self.entity_registry
+                .set_type_params(entity_type_id, type_param_name_ids);
 
             for method in &record.methods {
                 // First resolve types, then intern names (to avoid borrow conflicts)
