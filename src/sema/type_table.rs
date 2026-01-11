@@ -301,14 +301,12 @@ impl TypeTable {
                     .methods
                     .iter()
                     .map(|m| {
-                        let params: Vec<_> = m.params.iter().map(|p| self.key_for_type(p)).collect();
+                        let params: Vec<_> =
+                            m.params.iter().map(|p| self.key_for_type(p)).collect();
                         (m.name, params, self.key_for_type(&m.return_type))
                     })
                     .collect();
-                self.intern_fingerprint(
-                    TypeFingerprint::Structural { fields, methods },
-                    ty.clone(),
-                )
+                self.intern_fingerprint(TypeFingerprint::Structural { fields, methods }, ty.clone())
             }
         }
     }

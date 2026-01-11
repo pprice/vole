@@ -1224,6 +1224,44 @@ impl Analyzer {
                 let resolved = types.iter().map(|ty| resolve_type(ty, &mut ctx)).collect();
                 Some(crate::sema::generic::TypeConstraint::Union(resolved))
             }
+            TypeConstraint::Structural { fields, methods } => {
+                let module_id = self.current_module;
+                let mut ctx = TypeResolutionContext::with_type_params(
+                    &self.type_aliases,
+                    &self.error_types,
+                    &self.entity_registry,
+                    interner,
+                    &mut self.name_table,
+                    module_id,
+                    type_param_scope,
+                );
+                // Convert AST structural to sema structural
+                let resolved_fields = fields
+                    .iter()
+                    .map(|f| crate::sema::types::StructuralFieldType {
+                        name: ctx
+                            .name_table
+                            .intern(ctx.module_id, &[f.name], ctx.interner),
+                        ty: resolve_type(&f.ty, &mut ctx),
+                    })
+                    .collect();
+                let resolved_methods = methods
+                    .iter()
+                    .map(|m| crate::sema::types::StructuralMethodType {
+                        name: ctx
+                            .name_table
+                            .intern(ctx.module_id, &[m.name], ctx.interner),
+                        params: m.params.iter().map(|p| resolve_type(p, &mut ctx)).collect(),
+                        return_type: resolve_type(&m.return_type, &mut ctx),
+                    })
+                    .collect();
+                Some(crate::sema::generic::TypeConstraint::Structural(
+                    crate::sema::types::StructuralType {
+                        fields: resolved_fields,
+                        methods: resolved_methods,
+                    },
+                ))
+            }
         }
     }
 
@@ -1266,6 +1304,22 @@ impl Analyzer {
                                 type_param: interner.resolve(param.name).to_string(),
                                 expected: expected_display,
                                 found: found_display,
+                                span: span.into(),
+                            },
+                            span,
+                        );
+                    }
+                }
+                crate::sema::generic::TypeConstraint::Structural(structural) => {
+                    if let Some(mismatch) =
+                        self.check_structural_constraint(found, structural, interner)
+                    {
+                        let found_display = self.type_display(found);
+                        self.add_error(
+                            SemanticError::StructuralConstraintMismatch {
+                                type_param: interner.resolve(param.name).to_string(),
+                                found: found_display,
+                                mismatch,
                                 span: span.into(),
                             },
                             span,

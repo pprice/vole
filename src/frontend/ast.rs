@@ -28,6 +28,11 @@ pub enum TypeConstraint {
     Interface(Symbol),
     /// Union of types: T: i32 | i64
     Union(Vec<TypeExpr>),
+    /// Structural constraint: T: { name: string, func get() -> i32 }
+    Structural {
+        fields: Vec<StructuralField>,
+        methods: Vec<StructuralMethod>,
+    },
 }
 
 /// A complete program

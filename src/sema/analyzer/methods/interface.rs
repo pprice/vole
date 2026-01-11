@@ -1,5 +1,6 @@
 use crate::identity::{NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
+use crate::sema::types::StructuralType;
 
 use super::super::*;
 
@@ -508,5 +509,192 @@ impl Analyzer {
         }
 
         method_sigs
+    }
+
+    /// Check if a type satisfies a structural constraint.
+    /// Returns None if satisfied, or Some(mismatch_description) if not.
+    pub fn check_structural_constraint(
+        &self,
+        ty: &Type,
+        structural: &StructuralType,
+        interner: &Interner,
+    ) -> Option<String> {
+        let mut mismatches = Vec::new();
+
+        // Check required fields
+        for field in &structural.fields {
+            let field_name_str = self
+                .name_table
+                .last_segment_str(field.name)
+                .unwrap_or_default();
+
+            if !self.type_has_field_with_type(ty, &field_name_str, &field.ty, interner) {
+                let type_str = self
+                    .type_table
+                    .clone()
+                    .display_type(&field.ty, &mut self.name_table.clone());
+                mismatches.push(format!(
+                    "missing field '{}' of type '{}'",
+                    field_name_str, type_str
+                ));
+            }
+        }
+
+        // Check required methods
+        for method in &structural.methods {
+            let method_name_str = self
+                .name_table
+                .last_segment_str(method.name)
+                .unwrap_or_default();
+
+            if !self.type_has_structural_method(
+                ty,
+                &method_name_str,
+                &method.params,
+                &method.return_type,
+                interner,
+            ) {
+                let params_str = method
+                    .params
+                    .iter()
+                    .map(|p| {
+                        self.type_table
+                            .clone()
+                            .display_type(p, &mut self.name_table.clone())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ret_str = self
+                    .type_table
+                    .clone()
+                    .display_type(&method.return_type, &mut self.name_table.clone());
+                mismatches.push(format!(
+                    "missing method '{}({}) -> {}'",
+                    method_name_str, params_str, ret_str
+                ));
+            }
+        }
+
+        if mismatches.is_empty() {
+            None
+        } else {
+            Some(mismatches.join(", "))
+        }
+    }
+
+    /// Check if a type has a field with compatible type
+    fn type_has_field_with_type(
+        &self,
+        ty: &Type,
+        field_name: &str,
+        expected_type: &Type,
+        interner: &Interner,
+    ) -> bool {
+        match ty {
+            Type::Record(r) => r.fields.iter().any(|f| {
+                f.name == field_name && self.types_compatible(&f.ty, expected_type, interner)
+            }),
+            Type::Class(c) => c.fields.iter().any(|f| {
+                f.name == field_name && self.types_compatible(&f.ty, expected_type, interner)
+            }),
+            _ => false,
+        }
+    }
+
+    /// Check if a type has a method with compatible signature for structural constraints
+    /// Uses covariant return types and contravariant parameter types
+    fn type_has_structural_method(
+        &self,
+        ty: &Type,
+        method_name: &str,
+        expected_params: &[Type],
+        expected_return: &Type,
+        interner: &Interner,
+    ) -> bool {
+        // Get type name_id for method lookup
+        let type_name_id = match ty {
+            Type::Record(r) => Some(r.name_id),
+            Type::Class(c) => Some(c.name_id),
+            _ => None,
+        };
+
+        // For primitives/arrays, check implement registry
+        if type_name_id.is_none() {
+            if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
+                && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
+                && let Some(method_impl) = self.implement_registry.get_method(&type_id, method_id)
+            {
+                return self.check_structural_method_signature(
+                    expected_params,
+                    expected_return,
+                    &method_impl.func_type,
+                    interner,
+                );
+            }
+            return false;
+        }
+
+        let type_name_id = type_name_id.unwrap();
+
+        // Check direct methods on the type via EntityRegistry
+        if let Some(type_def_id) = self.entity_registry.type_by_name(type_name_id)
+            && let Some(method_name_id) = self.method_name_id_by_str(method_name, interner)
+            && let Some(method_id) = self
+                .entity_registry
+                .find_method_on_type(type_def_id, method_name_id)
+        {
+            let method_def = self.entity_registry.get_method(method_id);
+            if self.check_structural_method_signature(
+                expected_params,
+                expected_return,
+                &method_def.signature,
+                interner,
+            ) {
+                return true;
+            }
+        }
+
+        // Check implement registry
+        if let Some(type_id) = TypeId::from_type(ty, &self.type_table)
+            && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
+            && let Some(method_impl) = self.implement_registry.get_method(&type_id, method_id)
+        {
+            return self.check_structural_method_signature(
+                expected_params,
+                expected_return,
+                &method_impl.func_type,
+                interner,
+            );
+        }
+
+        false
+    }
+
+    /// Check if a method signature satisfies structural constraints.
+    /// Uses covariant return types (actual can be narrower) and
+    /// contravariant parameter types (actual can be wider).
+    fn check_structural_method_signature(
+        &self,
+        expected_params: &[Type],
+        expected_return: &Type,
+        actual: &FunctionType,
+        interner: &Interner,
+    ) -> bool {
+        // Check parameter count
+        if expected_params.len() != actual.params.len() {
+            return false;
+        }
+
+        // Contravariant parameters: actual param types must be same or wider than expected
+        // For now, use exact matching (full contravariance requires more complex subtyping)
+        for (expected_param, actual_param) in expected_params.iter().zip(actual.params.iter()) {
+            if !self.types_compatible(actual_param, expected_param, interner) {
+                return false;
+            }
+        }
+
+        // Covariant return: actual return type must be same or narrower than expected
+        // For now, use exact matching (full covariance requires more complex subtyping)
+        self.types_compatible(&actual.return_type, expected_return, interner)
     }
 }

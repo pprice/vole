@@ -54,7 +54,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    /// Parse a type constraint: Interface or Type1 | Type2
+    /// Parse a type constraint: Interface, Type1 | Type2, or { fields/methods }
     fn parse_type_constraint(&mut self) -> Result<TypeConstraint, ParseError> {
         // Parse first type
         let first = self.parse_type()?;
@@ -68,9 +68,12 @@ impl<'src> Parser<'src> {
             return Ok(TypeConstraint::Union(types));
         }
 
-        // Single interface constraint
+        // Check what kind of constraint we have
         match first {
             TypeExpr::Named(sym) => Ok(TypeConstraint::Interface(sym)),
+            TypeExpr::Structural { fields, methods } => {
+                Ok(TypeConstraint::Structural { fields, methods })
+            }
             _ => Ok(TypeConstraint::Union(vec![first])),
         }
     }

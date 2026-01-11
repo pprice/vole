@@ -7,7 +7,7 @@
 use crate::frontend::Symbol;
 use crate::identity::NameId;
 use crate::sema::TypeKey;
-use crate::sema::types::{FunctionType, Type};
+use crate::sema::types::{FunctionType, StructuralType, Type};
 use std::collections::HashMap;
 
 /// Information about a type parameter in scope
@@ -28,6 +28,8 @@ pub enum TypeConstraint {
     Interface(Symbol),
     /// Union constraint: T: i32 | i64
     Union(Vec<Type>),
+    /// Structural constraint: T: { name: string, func get() -> i32 }
+    Structural(StructuralType),
 }
 
 /// Tracks type parameters currently in scope during type checking.

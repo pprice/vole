@@ -446,4 +446,14 @@ pub enum SemanticError {
         #[label("'{type_name}' is a type, but syntax is ambiguous")]
         span: SourceSpan,
     },
+
+    #[error("type '{found}' does not satisfy structural constraint for '{type_param}'")]
+    #[diagnostic(code(E2081), help("{mismatch}"))]
+    StructuralConstraintMismatch {
+        type_param: String,
+        found: String,
+        mismatch: String,
+        #[label("structural constraint not satisfied")]
+        span: SourceSpan,
+    },
 }
