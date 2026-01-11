@@ -69,6 +69,7 @@ impl RcInstance {
     /// # Safety
     /// The pointer must point to a valid, properly initialized `RcInstance`,
     /// and `slot` must be less than `field_count`.
+    #[inline]
     pub unsafe fn get_field(ptr: *const Self, slot: usize) -> u64 {
         unsafe {
             let fields = Self::fields_ptr_const(ptr);
@@ -81,6 +82,7 @@ impl RcInstance {
     /// # Safety
     /// The pointer must point to a valid, properly initialized `RcInstance`,
     /// and `slot` must be less than `field_count`.
+    #[inline]
     pub unsafe fn set_field(ptr: *mut Self, slot: usize, value: u64) {
         unsafe {
             let fields = Self::fields_ptr(ptr);
@@ -92,6 +94,7 @@ impl RcInstance {
     ///
     /// # Safety
     /// The pointer must be null or point to a valid, properly initialized `RcInstance`.
+    #[inline]
     pub unsafe fn inc_ref(ptr: *mut Self) {
         if !ptr.is_null() {
             unsafe { (*ptr).header.inc() };
@@ -107,6 +110,7 @@ impl RcInstance {
     /// 1. Looks up field types from the runtime type registry
     /// 2. Decrements reference counts for any reference-typed fields (strings, arrays, instances)
     /// 3. Frees the instance memory
+    #[inline]
     pub unsafe fn dec_ref(ptr: *mut Self) {
         if ptr.is_null() {
             return;

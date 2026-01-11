@@ -17,10 +17,12 @@ impl RcHeader {
         }
     }
 
+    #[inline]
     pub fn inc(&self) {
         self.ref_count.fetch_add(1, Ordering::Relaxed);
     }
 
+    #[inline]
     pub fn dec(&self) -> u32 {
         self.ref_count.fetch_sub(1, Ordering::AcqRel)
     }

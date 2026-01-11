@@ -70,6 +70,7 @@ impl Closure {
     /// # Safety
     /// - The closure pointer must be valid and properly initialized.
     /// - The index must be less than num_captures.
+    #[inline]
     pub unsafe fn get_capture(closure: *const Closure, index: usize) -> *mut u8 {
         unsafe {
             debug_assert!(index < (*closure).num_captures);
@@ -84,6 +85,7 @@ impl Closure {
     /// - The closure pointer must be valid and properly initialized.
     /// - The index must be less than num_captures.
     /// - The ptr must be valid or null.
+    #[inline]
     pub unsafe fn set_capture(closure: *mut Closure, index: usize, ptr: *mut u8) {
         unsafe {
             debug_assert!(index < (*closure).num_captures);
@@ -96,6 +98,7 @@ impl Closure {
     ///
     /// # Safety
     /// The closure pointer must be valid and properly initialized.
+    #[inline]
     pub unsafe fn get_func(closure: *const Closure) -> *const u8 {
         unsafe { (*closure).func_ptr }
     }

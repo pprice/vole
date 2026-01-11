@@ -96,6 +96,7 @@ impl RcArray {
     /// # Safety
     /// `arr` must be a valid pointer to an initialized `RcArray` and
     /// `index` must be less than the array length
+    #[inline]
     pub unsafe fn get(arr: *const Self, index: usize) -> TaggedValue {
         unsafe {
             debug_assert!(index < (*arr).len);
@@ -108,6 +109,7 @@ impl RcArray {
     /// # Safety
     /// `arr` must be a valid pointer to an initialized `RcArray` and
     /// `index` must be less than the array length
+    #[inline]
     pub unsafe fn set(arr: *mut Self, index: usize, value: TaggedValue) {
         unsafe {
             debug_assert!(index < (*arr).len);
@@ -119,6 +121,7 @@ impl RcArray {
     ///
     /// # Safety
     /// `arr` must be a valid pointer to an initialized `RcArray`
+    #[inline]
     pub unsafe fn len(arr: *const Self) -> usize {
         unsafe { (*arr).len }
     }
@@ -127,6 +130,7 @@ impl RcArray {
     ///
     /// # Safety
     /// `ptr` must be null or a valid pointer to an initialized `RcArray`
+    #[inline]
     pub unsafe fn inc_ref(ptr: *mut Self) {
         unsafe {
             if !ptr.is_null() {
@@ -139,6 +143,7 @@ impl RcArray {
     ///
     /// # Safety
     /// `ptr` must be null or a valid pointer to an initialized `RcArray`
+    #[inline]
     pub unsafe fn dec_ref(ptr: *mut Self) {
         if ptr.is_null() {
             return;

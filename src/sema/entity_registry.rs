@@ -133,6 +133,7 @@ impl EntityRegistry {
     }
 
     /// Look up a type by its NameId
+    #[must_use]
     pub fn type_by_name(&self, name_id: NameId) -> Option<TypeDefId> {
         self.type_by_name.get(&name_id).copied()
     }
@@ -295,6 +296,7 @@ impl EntityRegistry {
     }
 
     /// Find a method on a type by its short name (not inherited)
+    #[must_use]
     pub fn find_method_on_type(&self, type_id: TypeDefId, name_id: NameId) -> Option<MethodId> {
         self.methods_by_type
             .get(&type_id)
@@ -458,6 +460,7 @@ impl EntityRegistry {
     }
 
     /// Find a method binding for a type's interface implementation
+    #[must_use]
     pub fn find_method_binding(
         &self,
         type_id: TypeDefId,
@@ -475,6 +478,7 @@ impl EntityRegistry {
     }
 
     /// Find a method binding with interface info for a type
+    #[must_use]
     pub fn find_method_binding_with_interface(
         &self,
         type_id: TypeDefId,
@@ -513,6 +517,7 @@ impl EntityRegistry {
     }
 
     /// Resolve a method on a type, checking inherited methods too
+    #[must_use]
     pub fn resolve_method(&self, type_id: TypeDefId, method_name: NameId) -> Option<MethodId> {
         // Check direct methods first
         if let Some(method_id) = self.find_method_on_type(type_id, method_name) {
@@ -556,6 +561,7 @@ impl EntityRegistry {
 
     /// Check if a type is a functional interface (single abstract method, no fields).
     /// Returns the single abstract method's ID if it's a functional interface.
+    #[must_use]
     pub fn is_functional(&self, type_id: TypeDefId) -> Option<MethodId> {
         let type_def = self.get_type(type_id);
 
@@ -581,6 +587,7 @@ impl EntityRegistry {
     }
 
     /// Get the external binding for a method (if any)
+    #[must_use]
     pub fn get_external_binding(&self, method_id: MethodId) -> Option<&ExternalMethodInfo> {
         self.get_method(method_id).external_binding.as_ref()
     }

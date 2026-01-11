@@ -75,6 +75,7 @@ impl RcString {
     /// # Safety
     /// The caller must ensure `self` points to a valid, properly initialized `RcString`
     /// containing valid UTF-8 data.
+    #[inline]
     pub unsafe fn as_str(&self) -> &str {
         unsafe { str::from_utf8_unchecked(self.data()) }
     }
@@ -83,6 +84,7 @@ impl RcString {
     ///
     /// # Safety
     /// The pointer must be null or point to a valid, properly initialized `RcString`.
+    #[inline]
     pub unsafe fn inc_ref(ptr: *mut Self) {
         if !ptr.is_null() {
             unsafe { (*ptr).header.inc() };
@@ -93,6 +95,7 @@ impl RcString {
     ///
     /// # Safety
     /// The pointer must be null or point to a valid, properly initialized `RcString`.
+    #[inline]
     pub unsafe fn dec_ref(ptr: *mut Self) {
         if ptr.is_null() {
             return;

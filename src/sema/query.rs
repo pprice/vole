@@ -67,21 +67,25 @@ impl<'a> ProgramQuery<'a> {
     // =========================================================================
 
     /// Get the type of an expression by its NodeId
+    #[must_use]
     pub fn type_of(&self, node: NodeId) -> Option<&'a Type> {
         self.expr_data.get_type(node)
     }
 
     /// Get the resolved method at a call site
+    #[must_use]
     pub fn method_at(&self, node: NodeId) -> Option<&'a ResolvedMethod> {
         self.expr_data.get_method(node)
     }
 
     /// Get the monomorphization key for a generic call
+    #[must_use]
     pub fn monomorph_for(&self, node: NodeId) -> Option<&'a MonomorphKey> {
         self.expr_data.get_generic(node)
     }
 
     /// Get bundled information about a call site
+    #[must_use]
     pub fn call_info(&self, node: NodeId) -> CallInfo<'a> {
         CallInfo {
             result_type: self.type_of(node),
@@ -117,6 +121,7 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Look up a Symbol in the interner, returning None if not found
+    #[must_use]
     pub fn try_symbol(&self, s: &str) -> Option<Symbol> {
         self.interner.lookup(s)
     }
@@ -132,6 +137,7 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Convert Symbols to a NameId in the given module, returning None if not found
+    #[must_use]
     pub fn try_name_id(&self, module: ModuleId, segments: &[Symbol]) -> Option<NameId> {
         self.name_table.name_id(module, segments, self.interner)
     }
@@ -142,6 +148,7 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Convert a single Symbol to a NameId in the main module, returning None if not found
+    #[must_use]
     pub fn try_name_id_in_main(&self, sym: Symbol) -> Option<NameId> {
         self.try_name_id(self.main_module(), &[sym])
     }
@@ -152,6 +159,7 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Look up a module ID by path, returning None if not found
+    #[must_use]
     pub fn module_id_if_known(&self, path: &str) -> Option<ModuleId> {
         self.name_table.module_id_if_known(path)
     }
@@ -164,6 +172,7 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Get the last segment of a NameId as a string
+    #[must_use]
     pub fn last_segment(&self, name_id: NameId) -> Option<String> {
         self.name_table.last_segment_str(name_id)
     }
@@ -185,17 +194,20 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Look up a TypeDefId by its NameId, returning None if not found
+    #[must_use]
     pub fn try_type_def_id(&self, name_id: NameId) -> Option<TypeDefId> {
         self.registry.type_by_name(name_id)
     }
 
     /// Look up a TypeKey by NameId (for type_table lookups)
+    #[must_use]
     pub fn type_key_by_name(&self, name_id: NameId) -> Option<TypeKey> {
         self.registry.type_table.by_name(name_id)
     }
 
     /// Resolve a type alias to its underlying type.
     /// Returns None if the type is not an alias or has no aliased_type.
+    #[must_use]
     pub fn resolve_alias(&self, type_id: TypeDefId) -> Option<&'a Type> {
         self.registry.get_type(type_id).aliased_type.as_ref()
     }
@@ -212,6 +224,7 @@ impl<'a> ProgramQuery<'a> {
 
     /// Check if a type is a functional interface (single abstract method).
     /// Returns the single method's ID if it's a functional interface.
+    #[must_use]
     pub fn is_functional_interface(&self, type_id: TypeDefId) -> Option<MethodId> {
         self.registry.is_functional(type_id)
     }
@@ -226,16 +239,19 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Find a method on a type by its short name
+    #[must_use]
     pub fn find_method(&self, type_id: TypeDefId, name_id: NameId) -> Option<MethodId> {
         self.registry.find_method_on_type(type_id, name_id)
     }
 
     /// Resolve a method on a type, checking inherited methods too
+    #[must_use]
     pub fn resolve_method(&self, type_id: TypeDefId, method_name: NameId) -> Option<MethodId> {
         self.registry.resolve_method(type_id, method_name)
     }
 
     /// Get the external binding for a method (if any)
+    #[must_use]
     pub fn method_external_binding(&self, method_id: MethodId) -> Option<&'a ExternalMethodInfo> {
         self.registry.get_external_binding(method_id)
     }
@@ -253,6 +269,7 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Look up a method NameId by Symbol, returning None if not found
+    #[must_use]
     pub fn try_method_name_id(&self, name: Symbol) -> Option<NameId> {
         use crate::identity::NamerLookup;
         let namer = NamerLookup::new(self.name_table, self.interner);
@@ -266,6 +283,7 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Look up a method NameId by string name, returning None if not found
+    #[must_use]
     pub fn try_method_name_id_by_str(&self, name_str: &str) -> Option<NameId> {
         crate::identity::method_name_id_by_str(self.name_table, self.interner, name_str)
     }
@@ -283,6 +301,7 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Look up a function NameId by Symbol, returning None if not found
+    #[must_use]
     pub fn try_function_name_id(&self, module: ModuleId, name: Symbol) -> Option<NameId> {
         use crate::identity::NamerLookup;
         let namer = NamerLookup::new(self.name_table, self.interner);
@@ -294,11 +313,13 @@ impl<'a> ProgramQuery<'a> {
     // =========================================================================
 
     /// Check if a NameId refers to the Iterator interface
+    #[must_use]
     pub fn is_iterator(&self, name_id: NameId) -> bool {
         self.name_table.well_known.is_iterator(name_id)
     }
 
     /// Check if a NameId refers to the Iterable interface
+    #[must_use]
     pub fn is_iterable(&self, name_id: NameId) -> bool {
         self.name_table.well_known.is_iterable(name_id)
     }
@@ -315,6 +336,7 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Look up a specific monomorphized instance
+    #[must_use]
     pub fn get_monomorph(&self, key: &MonomorphKey) -> Option<&'a MonomorphInstance> {
         self.registry.monomorph_cache.get(key)
     }
@@ -329,6 +351,7 @@ impl<'a> ProgramQuery<'a> {
     // =========================================================================
 
     /// Get external function info by name (for builtin calls)
+    #[must_use]
     pub fn get_external_func(&self, name: &str) -> Option<&'a ExternalMethodInfo> {
         self.implement_registry.get_external_func(name)
     }
@@ -372,6 +395,7 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Get a module program and its interner by path
+    #[must_use]
     pub fn module_program(&self, path: &str) -> Option<(&'a Program, &'a Interner)> {
         self.module_programs
             .get(path)
