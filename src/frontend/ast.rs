@@ -24,8 +24,8 @@ pub struct TypeParam {
 /// Constraint on a type parameter
 #[derive(Debug, Clone)]
 pub enum TypeConstraint {
-    /// Single interface: T: Stringable
-    Interface(Symbol),
+    /// Interface constraints: T: Stringable or T: Hashable + Eq
+    Interface(Vec<Symbol>),
     /// Union of types: T: i32 | i64
     Union(Vec<TypeExpr>),
     /// Structural constraint: T: { name: string, func get() -> i32 }

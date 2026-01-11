@@ -1250,43 +1250,50 @@ impl Analyzer {
         span: Span,
     ) -> Option<crate::sema::generic::TypeConstraint> {
         match constraint {
-            TypeConstraint::Interface(sym) => {
-                // First check if this is a type alias (e.g., let Numeric = i32 | i64)
-                if let Some(type_def_id) = self
-                    .resolver(interner)
-                    .resolve_type(*sym, &self.entity_registry)
-                {
-                    let type_def = self.entity_registry.get_type(type_def_id);
-                    if type_def.kind == TypeDefKind::Alias
-                        && let Some(ref aliased_type) = type_def.aliased_type
+            TypeConstraint::Interface(syms) => {
+                // For single interface, check if it's a type alias first
+                if syms.len() == 1 {
+                    let sym = syms[0];
+                    if let Some(type_def_id) = self
+                        .resolver(interner)
+                        .resolve_type(sym, &self.entity_registry)
                     {
-                        // Convert the aliased type to a union constraint
-                        let types = match aliased_type {
-                            Type::Union(types) => types.clone(),
-                            other => vec![other.clone()],
-                        };
-                        return Some(crate::sema::generic::TypeConstraint::Union(types));
+                        let type_def = self.entity_registry.get_type(type_def_id);
+                        if type_def.kind == TypeDefKind::Alias
+                            && let Some(ref aliased_type) = type_def.aliased_type
+                        {
+                            // Convert the aliased type to a union constraint
+                            let types = match aliased_type {
+                                Type::Union(types) => types.clone(),
+                                other => vec![other.clone()],
+                            };
+                            return Some(crate::sema::generic::TypeConstraint::Union(types));
+                        }
                     }
                 }
 
-                // Validate interface exists via EntityRegistry using resolver
-                let iface_str = interner.resolve(*sym);
-                let iface_exists = self
-                    .resolver(interner)
-                    .resolve_type_str_or_interface(iface_str, &self.entity_registry)
-                    .is_some();
+                // Validate all interfaces exist via EntityRegistry using resolver
+                for sym in syms {
+                    let iface_str = interner.resolve(*sym);
+                    let iface_exists = self
+                        .resolver(interner)
+                        .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+                        .is_some();
 
-                if !iface_exists {
-                    self.add_error(
-                        SemanticError::UnknownInterface {
-                            name: interner.resolve(*sym).to_string(),
-                            span: span.into(),
-                        },
-                        span,
-                    );
-                    return None;
+                    if !iface_exists {
+                        self.add_error(
+                            SemanticError::UnknownInterface {
+                                name: iface_str.to_string(),
+                                span: span.into(),
+                            },
+                            span,
+                        );
+                        return None;
+                    }
                 }
-                Some(crate::sema::generic::TypeConstraint::Interface(*sym))
+                Some(crate::sema::generic::TypeConstraint::Interface(
+                    syms.clone(),
+                ))
             }
             TypeConstraint::Union(types) => {
                 let module_id = self.current_module;
@@ -1354,18 +1361,21 @@ impl Analyzer {
                 continue;
             };
             match constraint {
-                crate::sema::generic::TypeConstraint::Interface(interface_name) => {
-                    if !self.satisfies_interface(found, *interface_name, interner) {
-                        let found_display = self.type_display(found);
-                        self.add_error(
-                            SemanticError::TypeParamConstraintMismatch {
-                                type_param: interner.resolve(param.name).to_string(),
-                                expected: interner.resolve(*interface_name).to_string(),
-                                found: found_display,
-                                span: span.into(),
-                            },
-                            span,
-                        );
+                crate::sema::generic::TypeConstraint::Interface(interface_names) => {
+                    // Must satisfy all interfaces in the constraint
+                    for interface_name in interface_names {
+                        if !self.satisfies_interface(found, *interface_name, interner) {
+                            let found_display = self.type_display(found);
+                            self.add_error(
+                                SemanticError::TypeParamConstraintMismatch {
+                                    type_param: interner.resolve(param.name).to_string(),
+                                    expected: interner.resolve(*interface_name).to_string(),
+                                    found: found_display,
+                                    span: span.into(),
+                                },
+                                span,
+                            );
+                        }
                     }
                 }
                 crate::sema::generic::TypeConstraint::Union(variants) => {

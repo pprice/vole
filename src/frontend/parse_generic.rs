@@ -2,6 +2,8 @@
 //
 // Generic type parameter parsing for Vole.
 
+use crate::errors::ParserError;
+
 use super::TokenType;
 use super::ast::{TypeConstraint, TypeExpr, TypeParam};
 use super::parser::{ParseError, Parser};
@@ -54,7 +56,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    /// Parse a type constraint: Interface, Type1 | Type2, or { fields/methods }
+    /// Parse a type constraint: Interface, Interface + Interface, Type1 | Type2, or { fields/methods }
     fn parse_type_constraint(&mut self) -> Result<TypeConstraint, ParseError> {
         // Parse first type
         let first = self.parse_type()?;
@@ -68,9 +70,40 @@ impl<'src> Parser<'src> {
             return Ok(TypeConstraint::Union(types));
         }
 
+        // Check for multiple interface constraints: T: Hashable + Eq
+        if self.check(TokenType::Plus) {
+            // First must be a named type (interface)
+            let TypeExpr::Named(first_sym) = first else {
+                return Err(ParseError::new(
+                    ParserError::ExpectedToken {
+                        expected: "interface name before '+'".to_string(),
+                        found: "non-interface type".to_string(),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            };
+            let mut interfaces = vec![first_sym];
+            while self.match_token(TokenType::Plus) {
+                let next = self.parse_type()?;
+                let TypeExpr::Named(sym) = next else {
+                    return Err(ParseError::new(
+                        ParserError::ExpectedToken {
+                            expected: "interface name after '+'".to_string(),
+                            found: "non-interface type".to_string(),
+                            span: self.previous.span.into(),
+                        },
+                        self.previous.span,
+                    ));
+                };
+                interfaces.push(sym);
+            }
+            return Ok(TypeConstraint::Interface(interfaces));
+        }
+
         // Check what kind of constraint we have
         match first {
-            TypeExpr::Named(sym) => Ok(TypeConstraint::Interface(sym)),
+            TypeExpr::Named(sym) => Ok(TypeConstraint::Interface(vec![sym])),
             TypeExpr::Structural { fields, methods } => {
                 Ok(TypeConstraint::Structural { fields, methods })
             }

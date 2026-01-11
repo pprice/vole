@@ -1,0 +1,59 @@
+// Test: Multiple interface constraints with + syntax
+// This tests the ability to require a type parameter to satisfy multiple interfaces
+
+interface Hashable {
+    func hash() -> i64
+}
+
+interface Eq {
+    func equals(other: Self) -> bool
+}
+
+interface Stringable {
+    func to_string() -> string
+}
+
+// Two constraints
+func needs_hash_and_eq<T: Hashable + Eq>(x: T) -> i64 {
+    return x.hash()
+}
+
+// Three constraints
+func needs_all<T: Hashable + Eq + Stringable>(x: T) -> string {
+    return x.to_string()
+}
+
+record Point {
+    x: i64
+    y: i64
+}
+
+implement Hashable for Point {
+    func hash() -> i64 {
+        return self.x * 31 + self.y
+    }
+}
+
+implement Eq for Point {
+    func equals(other: Point) -> bool {
+        return self.x == other.x && self.y == other.y
+    }
+}
+
+implement Stringable for Point {
+    func to_string() -> string {
+        return "Point"
+    }
+}
+
+tests {
+    test "two constraints" {
+        let p = Point { x: 10, y: 20 }
+        assert(needs_hash_and_eq(p) == 330)  // 10 * 31 + 20
+    }
+
+    test "three constraints" {
+        let p = Point { x: 1, y: 2 }
+        assert(needs_all(p) == "Point")
+    }
+}
