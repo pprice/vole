@@ -57,7 +57,7 @@ tests "union types" {
     test "narrowing - string.length after is check" {
         let x: i32 | string = "hello"
         if x is string {
-            assert(x.length == 5)
+            assert(x.length() == 5)
         }
     }
 
@@ -73,7 +73,7 @@ tests "union types" {
         if x is nil {
             assert(false)
         } else {
-            assert(x.length == 4)
+            assert(x.length() == 4)
         }
     }
 }
@@ -111,7 +111,7 @@ tests "match expressions" {
         let x: i32 | string = "hello"
         let result = match x {
             i32 => 0
-            string => x.length
+            string => x.length()
         }
         assert(result == 5)
     }
@@ -183,7 +183,7 @@ tests "match expressions" {
         let x: i32 | string = "hello"
         let result = match x {
             i32 => 0
-            _ => x.length  // _ narrows to string, so .length works
+            _ => x.length()  // _ narrows to string, so .length() works
         }
         assert(result == 5)
     }

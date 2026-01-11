@@ -96,7 +96,9 @@ impl Analyzer {
                 let narrowing_info = if let ExprKind::Is(is_expr) = &if_stmt.condition.kind {
                     if let ExprKind::Identifier(sym) = &is_expr.value.kind {
                         let tested_type = self.resolve_type(&is_expr.type_expr, interner);
-                        Some((*sym, tested_type))
+                        // Get original type of variable for else-branch narrowing
+                        let original_type = self.get_variable_type(*sym);
+                        Some((*sym, tested_type, original_type))
                     } else {
                         None
                     }
@@ -110,7 +112,7 @@ impl Analyzer {
                 // Then branch (with narrowing if applicable)
                 let parent = std::mem::take(&mut self.scope);
                 self.scope = Scope::with_parent(parent);
-                if let Some((sym, narrowed_type)) = &narrowing_info {
+                if let Some((sym, narrowed_type, _)) = &narrowing_info {
                     self.type_overrides.insert(*sym, narrowed_type.clone());
                 }
                 self.check_block(&if_stmt.then_branch, interner)?;
@@ -118,12 +120,30 @@ impl Analyzer {
                     self.scope = parent;
                 }
 
-                // Restore overrides for else branch (no narrowing there for now)
+                // Restore overrides for else branch
                 self.type_overrides = saved_overrides.clone();
 
                 if let Some(else_branch) = &if_stmt.else_branch {
                     let parent = std::mem::take(&mut self.scope);
                     self.scope = Scope::with_parent(parent);
+
+                    // Apply else-branch narrowing: if x is T, else branch has x: (original - T)
+                    if let Some((sym, tested_type, Some(Type::Union(variants)))) = &narrowing_info {
+                        // Remove tested type from union
+                        let remaining: Vec<_> = variants
+                            .iter()
+                            .filter(|v| *v != tested_type)
+                            .cloned()
+                            .collect();
+                        if remaining.len() == 1 {
+                            // Single type remaining - narrow to that
+                            self.type_overrides.insert(*sym, remaining[0].clone());
+                        } else if remaining.len() > 1 {
+                            // Multiple types remaining - narrow to smaller union
+                            self.type_overrides.insert(*sym, Type::Union(remaining));
+                        }
+                    }
+
                     self.check_block(else_branch, interner)?;
                     if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
                         self.scope = parent;

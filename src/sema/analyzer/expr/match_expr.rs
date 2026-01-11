@@ -1,6 +1,19 @@
 use super::super::*;
 
 impl Analyzer {
+    /// Check if a pattern is a type pattern (matches a class/record/primitive type name)
+    fn is_type_pattern(&self, pattern: &Pattern, interner: &Interner) -> bool {
+        match pattern {
+            Pattern::Identifier { name, .. } => {
+                // Check if this identifier resolves to a type name
+                self.resolver(interner)
+                    .resolve_type(*name, &self.entity_registry)
+                    .is_some()
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn check_match_expr(
         &mut self,
         match_expr: &MatchExpr,
@@ -52,6 +65,9 @@ impl Analyzer {
         let mut result_type: Option<Type> = None;
         let mut first_arm_span: Option<Span> = None;
 
+        // Track covered types for wildcard narrowing
+        let mut covered_types: Vec<Type> = Vec::new();
+
         for arm in &match_expr.arms {
             // Enter new scope for arm (bindings live here)
             self.scope = Scope::with_parent(std::mem::take(&mut self.scope));
@@ -62,8 +78,38 @@ impl Analyzer {
             // Check pattern and get narrowing info
             let narrowed_type = self.check_pattern(&arm.pattern, &scrutinee_type, interner);
 
+            // For wildcard patterns on union types, compute remaining type
+            let effective_narrowed = if matches!(arm.pattern, Pattern::Wildcard(_))
+                || matches!(arm.pattern, Pattern::Identifier { .. }
+                    if !self.is_type_pattern(&arm.pattern, interner))
+            {
+                // Wildcard or binding pattern - narrow to remaining types
+                if let Type::Union(variants) = &scrutinee_type {
+                    let remaining: Vec<_> = variants
+                        .iter()
+                        .filter(|v| !covered_types.contains(v))
+                        .cloned()
+                        .collect();
+                    if remaining.len() == 1 {
+                        Some(remaining[0].clone())
+                    } else if remaining.len() > 1 {
+                        Some(Type::Union(remaining))
+                    } else {
+                        narrowed_type
+                    }
+                } else {
+                    narrowed_type
+                }
+            } else {
+                // Track this type as covered for future wildcard narrowing
+                if let Some(ref ty) = narrowed_type {
+                    covered_types.push(ty.clone());
+                }
+                narrowed_type
+            };
+
             // Apply type narrowing if scrutinee is an identifier and pattern provides narrowing
-            if let (Some(sym), Some(narrow_ty)) = (scrutinee_sym, &narrowed_type) {
+            if let (Some(sym), Some(narrow_ty)) = (scrutinee_sym, &effective_narrowed) {
                 self.type_overrides.insert(sym, narrow_ty.clone());
             }
 
