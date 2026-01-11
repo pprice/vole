@@ -73,6 +73,8 @@ vole-snap test test/snapshot/ --include-skipped
 cargo run -- test test/unit/language/_raw_strings.vole
 ```
 
+WIP test files live in `test/unit/language/_*.vole`.
+
 ## Verification
 
 **ALWAYS run `just check` after ANY code change.**
