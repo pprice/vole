@@ -1,0 +1,54 @@
+// stdlib/prelude/u64.vole
+
+implement Equatable for u64 {
+    external("std:intrinsics") {
+        func "u64_equals" as equals(other: Self) -> bool
+    }
+}
+
+implement Comparable for u64 {
+    external("std:intrinsics") {
+        func "u64_compare" as compare(other: Self) -> i32
+    }
+}
+
+implement Hashable for u64 {
+    external("std:intrinsics") {
+        func "u64_hash" as hash() -> i64
+    }
+}
+
+implement Default for u64 {
+    statics {
+        func default_value() -> u64 {
+            return 0
+        }
+    }
+}
+
+implement Zero for u64 {
+    statics {
+        func zero() -> u64 {
+            return 0
+        }
+    }
+}
+
+implement One for u64 {
+    statics {
+        func one() -> u64 {
+            return 1
+        }
+    }
+}
+
+implement Bounded for u64 {
+    statics {
+        func min_value() -> u64 {
+            return 0
+        }
+        func max_value() -> u64 {
+            return 18446744073709551615
+        }
+    }
+}

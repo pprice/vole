@@ -1,0 +1,54 @@
+// stdlib/prelude/u32.vole
+
+implement Equatable for u32 {
+    external("std:intrinsics") {
+        func "u32_equals" as equals(other: Self) -> bool
+    }
+}
+
+implement Comparable for u32 {
+    external("std:intrinsics") {
+        func "u32_compare" as compare(other: Self) -> i32
+    }
+}
+
+implement Hashable for u32 {
+    external("std:intrinsics") {
+        func "u32_hash" as hash() -> i64
+    }
+}
+
+implement Default for u32 {
+    statics {
+        func default_value() -> u32 {
+            return 0
+        }
+    }
+}
+
+implement Zero for u32 {
+    statics {
+        func zero() -> u32 {
+            return 0
+        }
+    }
+}
+
+implement One for u32 {
+    statics {
+        func one() -> u32 {
+            return 1
+        }
+    }
+}
+
+implement Bounded for u32 {
+    statics {
+        func min_value() -> u32 {
+            return 0
+        }
+        func max_value() -> u32 {
+            return 4294967295
+        }
+    }
+}

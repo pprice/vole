@@ -1,0 +1,54 @@
+// stdlib/prelude/u16.vole
+
+implement Equatable for u16 {
+    external("std:intrinsics") {
+        func "u16_equals" as equals(other: Self) -> bool
+    }
+}
+
+implement Comparable for u16 {
+    external("std:intrinsics") {
+        func "u16_compare" as compare(other: Self) -> i32
+    }
+}
+
+implement Hashable for u16 {
+    external("std:intrinsics") {
+        func "u16_hash" as hash() -> i64
+    }
+}
+
+implement Default for u16 {
+    statics {
+        func default_value() -> u16 {
+            return 0
+        }
+    }
+}
+
+implement Zero for u16 {
+    statics {
+        func zero() -> u16 {
+            return 0
+        }
+    }
+}
+
+implement One for u16 {
+    statics {
+        func one() -> u16 {
+            return 1
+        }
+    }
+}
+
+implement Bounded for u16 {
+    statics {
+        func min_value() -> u16 {
+            return 0
+        }
+        func max_value() -> u16 {
+            return 65535
+        }
+    }
+}

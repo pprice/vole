@@ -1,0 +1,43 @@
+// stdlib/prelude/f32.vole
+
+implement Equatable for f32 {
+    external("std:intrinsics") {
+        func "f32_equals" as equals(other: Self) -> bool
+    }
+}
+
+implement Comparable for f32 {
+    external("std:intrinsics") {
+        func "f32_compare" as compare(other: Self) -> i32
+    }
+}
+
+implement Hashable for f32 {
+    external("std:intrinsics") {
+        func "f32_hash" as hash() -> i64
+    }
+}
+
+implement Default for f32 {
+    statics {
+        func default_value() -> f32 {
+            return 0.0
+        }
+    }
+}
+
+implement Zero for f32 {
+    statics {
+        func zero() -> f32 {
+            return 0.0
+        }
+    }
+}
+
+implement One for f32 {
+    statics {
+        func one() -> f32 {
+            return 1.0
+        }
+    }
+}

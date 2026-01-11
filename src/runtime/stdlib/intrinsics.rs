@@ -127,6 +127,180 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // i8 functions
+    m.register(
+        "i8_equals",
+        i8_equals as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I8, NativeType::I8],
+            return_type: NativeType::Bool,
+        },
+    );
+    m.register(
+        "i8_compare",
+        i8_compare as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I8, NativeType::I8],
+            return_type: NativeType::I32,
+        },
+    );
+    m.register(
+        "i8_hash",
+        i8_hash as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I8],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // i16 functions
+    m.register(
+        "i16_equals",
+        i16_equals as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I16, NativeType::I16],
+            return_type: NativeType::Bool,
+        },
+    );
+    m.register(
+        "i16_compare",
+        i16_compare as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I16, NativeType::I16],
+            return_type: NativeType::I32,
+        },
+    );
+    m.register(
+        "i16_hash",
+        i16_hash as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I16],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // u8 functions
+    m.register(
+        "u8_equals",
+        u8_equals as *const u8,
+        NativeSignature {
+            params: vec![NativeType::U8, NativeType::U8],
+            return_type: NativeType::Bool,
+        },
+    );
+    m.register(
+        "u8_compare",
+        u8_compare as *const u8,
+        NativeSignature {
+            params: vec![NativeType::U8, NativeType::U8],
+            return_type: NativeType::I32,
+        },
+    );
+    m.register(
+        "u8_hash",
+        u8_hash as *const u8,
+        NativeSignature {
+            params: vec![NativeType::U8],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // u16 functions
+    m.register(
+        "u16_equals",
+        u16_equals as *const u8,
+        NativeSignature {
+            params: vec![NativeType::U16, NativeType::U16],
+            return_type: NativeType::Bool,
+        },
+    );
+    m.register(
+        "u16_compare",
+        u16_compare as *const u8,
+        NativeSignature {
+            params: vec![NativeType::U16, NativeType::U16],
+            return_type: NativeType::I32,
+        },
+    );
+    m.register(
+        "u16_hash",
+        u16_hash as *const u8,
+        NativeSignature {
+            params: vec![NativeType::U16],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // u32 functions
+    m.register(
+        "u32_equals",
+        u32_equals as *const u8,
+        NativeSignature {
+            params: vec![NativeType::U32, NativeType::U32],
+            return_type: NativeType::Bool,
+        },
+    );
+    m.register(
+        "u32_compare",
+        u32_compare as *const u8,
+        NativeSignature {
+            params: vec![NativeType::U32, NativeType::U32],
+            return_type: NativeType::I32,
+        },
+    );
+    m.register(
+        "u32_hash",
+        u32_hash as *const u8,
+        NativeSignature {
+            params: vec![NativeType::U32],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // u64 functions
+    m.register(
+        "u64_equals",
+        u64_equals as *const u8,
+        NativeSignature {
+            params: vec![NativeType::U64, NativeType::U64],
+            return_type: NativeType::Bool,
+        },
+    );
+    m.register(
+        "u64_compare",
+        u64_compare as *const u8,
+        NativeSignature {
+            params: vec![NativeType::U64, NativeType::U64],
+            return_type: NativeType::I32,
+        },
+    );
+    m.register(
+        "u64_hash",
+        u64_hash as *const u8,
+        NativeSignature {
+            params: vec![NativeType::U64],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // f32 functions
+    m.register(
+        "f32_equals",
+        f32_equals as *const u8,
+        NativeSignature {
+            params: vec![NativeType::F32, NativeType::F32],
+            return_type: NativeType::Bool,
+        },
+    );
+    m.register(
+        "f32_compare",
+        f32_compare as *const u8,
+        NativeSignature {
+            params: vec![NativeType::F32, NativeType::F32],
+            return_type: NativeType::I32,
+        },
+    );
+
     // Iterator intrinsics
     m.register(
         "array_iter",
@@ -529,6 +703,183 @@ pub extern "C" fn bool_equals(a: i8, b: i8) -> i8 {
 #[unsafe(no_mangle)]
 pub extern "C" fn bool_to_string(b: i8) -> *const RcString {
     RcString::new(if b != 0 { "true" } else { "false" })
+}
+
+// =============================================================================
+// i8 functions
+// =============================================================================
+
+/// Check if two i8 values are equal
+#[unsafe(no_mangle)]
+pub extern "C" fn i8_equals(a: i8, b: i8) -> i8 {
+    if a == b { 1 } else { 0 }
+}
+
+/// Compare two i8 values, returns -1, 0, or 1
+#[unsafe(no_mangle)]
+pub extern "C" fn i8_compare(a: i8, b: i8) -> i32 {
+    match a.cmp(&b) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+/// Hash an i8 value
+#[unsafe(no_mangle)]
+pub extern "C" fn i8_hash(n: i8) -> i64 {
+    hash_bits(n as u64)
+}
+
+// =============================================================================
+// i16 functions
+// =============================================================================
+
+/// Check if two i16 values are equal
+#[unsafe(no_mangle)]
+pub extern "C" fn i16_equals(a: i16, b: i16) -> i8 {
+    if a == b { 1 } else { 0 }
+}
+
+/// Compare two i16 values, returns -1, 0, or 1
+#[unsafe(no_mangle)]
+pub extern "C" fn i16_compare(a: i16, b: i16) -> i32 {
+    match a.cmp(&b) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+/// Hash an i16 value
+#[unsafe(no_mangle)]
+pub extern "C" fn i16_hash(n: i16) -> i64 {
+    hash_bits(n as u64)
+}
+
+// =============================================================================
+// u8 functions
+// =============================================================================
+
+/// Check if two u8 values are equal
+#[unsafe(no_mangle)]
+pub extern "C" fn u8_equals(a: u8, b: u8) -> i8 {
+    if a == b { 1 } else { 0 }
+}
+
+/// Compare two u8 values, returns -1, 0, or 1
+#[unsafe(no_mangle)]
+pub extern "C" fn u8_compare(a: u8, b: u8) -> i32 {
+    match a.cmp(&b) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+/// Hash a u8 value
+#[unsafe(no_mangle)]
+pub extern "C" fn u8_hash(n: u8) -> i64 {
+    hash_bits(n as u64)
+}
+
+// =============================================================================
+// u16 functions
+// =============================================================================
+
+/// Check if two u16 values are equal
+#[unsafe(no_mangle)]
+pub extern "C" fn u16_equals(a: u16, b: u16) -> i8 {
+    if a == b { 1 } else { 0 }
+}
+
+/// Compare two u16 values, returns -1, 0, or 1
+#[unsafe(no_mangle)]
+pub extern "C" fn u16_compare(a: u16, b: u16) -> i32 {
+    match a.cmp(&b) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+/// Hash a u16 value
+#[unsafe(no_mangle)]
+pub extern "C" fn u16_hash(n: u16) -> i64 {
+    hash_bits(n as u64)
+}
+
+// =============================================================================
+// u32 functions
+// =============================================================================
+
+/// Check if two u32 values are equal
+#[unsafe(no_mangle)]
+pub extern "C" fn u32_equals(a: u32, b: u32) -> i8 {
+    if a == b { 1 } else { 0 }
+}
+
+/// Compare two u32 values, returns -1, 0, or 1
+#[unsafe(no_mangle)]
+pub extern "C" fn u32_compare(a: u32, b: u32) -> i32 {
+    match a.cmp(&b) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+/// Hash a u32 value
+#[unsafe(no_mangle)]
+pub extern "C" fn u32_hash(n: u32) -> i64 {
+    hash_bits(n as u64)
+}
+
+// =============================================================================
+// u64 functions
+// =============================================================================
+
+/// Check if two u64 values are equal
+#[unsafe(no_mangle)]
+pub extern "C" fn u64_equals(a: u64, b: u64) -> i8 {
+    if a == b { 1 } else { 0 }
+}
+
+/// Compare two u64 values, returns -1, 0, or 1
+#[unsafe(no_mangle)]
+pub extern "C" fn u64_compare(a: u64, b: u64) -> i32 {
+    match a.cmp(&b) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+/// Hash a u64 value
+#[unsafe(no_mangle)]
+pub extern "C" fn u64_hash(n: u64) -> i64 {
+    hash_bits(n)
+}
+
+// =============================================================================
+// f32 functions
+// =============================================================================
+
+/// Check if two f32 values are equal
+#[unsafe(no_mangle)]
+pub extern "C" fn f32_equals(a: f32, b: f32) -> i8 {
+    if a == b { 1 } else { 0 }
+}
+
+/// Compare two f32 values, returns -1, 0, or 1 (NaN returns 0)
+#[unsafe(no_mangle)]
+pub extern "C" fn f32_compare(a: f32, b: f32) -> i32 {
+    match a.partial_cmp(&b) {
+        Some(std::cmp::Ordering::Less) => -1,
+        Some(std::cmp::Ordering::Equal) => 0,
+        Some(std::cmp::Ordering::Greater) => 1,
+        None => 0, // NaN comparison returns 0
+    }
 }
 
 #[cfg(test)]

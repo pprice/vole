@@ -1,0 +1,54 @@
+// stdlib/prelude/i8.vole
+
+implement Equatable for i8 {
+    external("std:intrinsics") {
+        func "i8_equals" as equals(other: Self) -> bool
+    }
+}
+
+implement Comparable for i8 {
+    external("std:intrinsics") {
+        func "i8_compare" as compare(other: Self) -> i32
+    }
+}
+
+implement Hashable for i8 {
+    external("std:intrinsics") {
+        func "i8_hash" as hash() -> i64
+    }
+}
+
+implement Default for i8 {
+    statics {
+        func default_value() -> i8 {
+            return 0
+        }
+    }
+}
+
+implement Zero for i8 {
+    statics {
+        func zero() -> i8 {
+            return 0
+        }
+    }
+}
+
+implement One for i8 {
+    statics {
+        func one() -> i8 {
+            return 1
+        }
+    }
+}
+
+implement Bounded for i8 {
+    statics {
+        func min_value() -> i8 {
+            return -128
+        }
+        func max_value() -> i8 {
+            return 127
+        }
+    }
+}
