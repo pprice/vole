@@ -2,8 +2,12 @@
 
 use cranelift::prelude::*;
 use cranelift_module::Module;
+use smallvec::{SmallVec, smallvec};
 
 use crate::codegen::RuntimeFn;
+
+/// SmallVec for call arguments - most calls have <= 8 args
+type ArgVec = SmallVec<[Value; 8]>;
 use crate::codegen::context::Cg;
 use crate::codegen::interface_vtable::box_interface_value;
 use crate::codegen::method_resolution::{
@@ -185,7 +189,7 @@ impl Cg<'_, '_, '_> {
                 return_type,
             } => {
                 let param_types = resolution.map(|resolved| resolved.func_type().params.clone());
-                let mut args = vec![obj.value];
+                let mut args: ArgVec = smallvec![obj.value];
                 if let Some(param_types) = &param_types {
                     for (arg, param_type) in mc.args.iter().zip(param_types.iter()) {
                         let compiled = self.expr(arg)?;
@@ -240,7 +244,7 @@ impl Cg<'_, '_, '_> {
         let method_func_ref = self.func_ref(method_info.func_key)?;
 
         let param_types = resolution.map(|resolved| resolved.func_type().params.clone());
-        let mut args = vec![obj.value];
+        let mut args: ArgVec = smallvec![obj.value];
         if let Some(param_types) = &param_types {
             for (arg, param_type) in mc.args.iter().zip(param_types.iter()) {
                 let compiled = self.expr(arg)?;
@@ -404,7 +408,7 @@ impl Cg<'_, '_, '_> {
         let return_type = self.convert_iterator_return_type(return_type, iter_type_id);
 
         // Build args: self (iterator ptr) + method args
-        let mut args = vec![obj.value];
+        let mut args: ArgVec = smallvec![obj.value];
         for arg in &mc.args {
             let compiled = self.expr(arg)?;
             args.push(compiled.value);
@@ -519,7 +523,7 @@ impl Cg<'_, '_, '_> {
             let sig_ref = self.builder.import_signature(sig);
 
             // Compile arguments - closure pointer first, then user args
-            let mut args = vec![func_ptr_or_closure];
+            let mut args: ArgVec = smallvec![func_ptr_or_closure];
             for arg in &mc.args {
                 let compiled = self.expr(arg)?;
                 args.push(compiled.value);
@@ -648,7 +652,7 @@ impl Cg<'_, '_, '_> {
         // Pass the full boxed interface pointer (not just data_word) so wrappers can
         // access both data and vtable. This is needed for Iterator methods that create
         // UnifiedIterator adapters via vole_interface_iter.
-        let mut call_args = vec![obj.value];
+        let mut call_args: ArgVec = smallvec![obj.value];
         for arg in args {
             let compiled = self.expr(arg)?;
             let word = value_to_word(self.builder, &compiled, word_type, Some(heap_alloc_ref))?;

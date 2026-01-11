@@ -5,8 +5,12 @@
 use cranelift::prelude::*;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
+use smallvec::{SmallVec, smallvec};
 
 use crate::errors::CodegenError;
+
+/// SmallVec for call arguments - most calls have <= 8 args
+type ArgVec = SmallVec<[Value; 8]>;
 use crate::frontend::{CallExpr, ExprKind, LetInit, NodeId, StringPart};
 use crate::runtime::native_registry::NativeType;
 use crate::sema::{FunctionType, Type};
@@ -812,7 +816,7 @@ impl Cg<'_, '_, '_> {
 
         let sig_ref = self.builder.import_signature(sig);
 
-        let mut args = vec![closure_ptr];
+        let mut args: ArgVec = smallvec![closure_ptr];
         for (arg, param_type) in call.args.iter().zip(func_type.params.iter()) {
             let compiled = self.expr(arg)?;
             let compiled = if matches!(param_type, Type::Interface(_)) {

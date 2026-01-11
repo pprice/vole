@@ -1,15 +1,19 @@
-use cranelift::prelude::Signature;
+use cranelift::prelude::{Signature, Type as CraneliftType};
+use smallvec::{SmallVec, smallvec};
 
 use super::Compiler;
 use crate::codegen::types::{resolve_type_expr_query, type_to_cranelift};
 use crate::frontend::{FuncDecl, InterfaceMethod};
 use crate::sema::Type;
 
+/// SmallVec for function parameters - most functions have <= 8 params
+type ParamVec = SmallVec<[CraneliftType; 8]>;
+
 impl Compiler<'_> {
     pub(super) fn create_function_signature(&self, func: &FuncDecl) -> Signature {
         let query = self.query();
         let module_id = query.main_module();
-        let mut params = Vec::new();
+        let mut params: ParamVec = SmallVec::new();
         for param in &func.params {
             params.push(type_to_cranelift(
                 &resolve_type_expr_query(&param.ty, &query, &self.type_metadata, module_id),
@@ -32,7 +36,7 @@ impl Compiler<'_> {
         let query = self.query();
         let module_id = query.main_module();
         // Methods have `self` as implicit first parameter (pointer to instance)
-        let mut params = vec![self.pointer_type];
+        let mut params: ParamVec = smallvec![self.pointer_type];
         for param in &method.params {
             params.push(type_to_cranelift(
                 &resolve_type_expr_query(&param.ty, &query, &self.type_metadata, module_id),
@@ -61,7 +65,7 @@ impl Compiler<'_> {
         // For implement blocks, `self` type depends on the target type
         // Primitives use their actual type, classes/records use pointer
         let self_cranelift_type = type_to_cranelift(self_type, self.pointer_type);
-        let mut params = vec![self_cranelift_type];
+        let mut params: ParamVec = smallvec![self_cranelift_type];
         for param in &method.params {
             params.push(type_to_cranelift(
                 &resolve_type_expr_query(&param.ty, &query, &self.type_metadata, module_id),
@@ -84,7 +88,7 @@ impl Compiler<'_> {
         let query = self.query();
         let module_id = query.main_module();
         // Methods have `self` as implicit first parameter (pointer to instance)
-        let mut params = vec![self.pointer_type];
+        let mut params: ParamVec = smallvec![self.pointer_type];
         for param in &method.params {
             params.push(type_to_cranelift(
                 &resolve_type_expr_query(&param.ty, &query, &self.type_metadata, module_id),
@@ -107,7 +111,7 @@ impl Compiler<'_> {
         let query = self.query();
         let module_id = query.main_module();
         // Static methods have NO self parameter
-        let mut params = Vec::new();
+        let mut params: ParamVec = SmallVec::new();
         for param in &method.params {
             params.push(type_to_cranelift(
                 &resolve_type_expr_query(&param.ty, &query, &self.type_metadata, module_id),
