@@ -22,7 +22,6 @@ fn compile_and_run(source: &str) -> i64 {
         method_resolutions: MethodResolutions::new(),
         implement_registry: ImplementRegistry::new(),
         type_implements: HashMap::new(),
-        error_types: HashMap::new(),
         module_programs: HashMap::new(),
         generic_functions: HashMap::new(),
         monomorph_cache: MonomorphCache::new(),

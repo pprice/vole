@@ -52,7 +52,6 @@ impl Compiler<'_> {
         crate::codegen::types::resolve_type_expr_with_metadata(
             ty,
             &self.analyzed.entity_registry,
-            &self.analyzed.error_types,
             &self.type_metadata,
             &self.analyzed.interner,
             &self.analyzed.name_table,

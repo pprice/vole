@@ -136,7 +136,6 @@ impl Analyzer {
             // Resolve param types with type params in scope
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext::with_type_params(
-                &self.error_types,
                 &self.entity_registry,
                 interner,
                 &mut self.name_table,
@@ -347,7 +346,6 @@ impl Analyzer {
             // Resolve field types with type params in scope
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext::with_type_params(
-                &self.error_types,
                 &self.entity_registry,
                 interner,
                 &mut self.name_table,
@@ -392,7 +390,6 @@ impl Analyzer {
                     &[interner.resolve(class.name), field_name_str],
                 );
                 let mut ctx = TypeResolutionContext::with_type_params(
-                    &self.error_types,
                     &self.entity_registry,
                     interner,
                     &mut self.name_table,
@@ -646,7 +643,6 @@ impl Analyzer {
             // Resolve field types with type params in scope
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext::with_type_params(
-                &self.error_types,
                 &self.entity_registry,
                 interner,
                 &mut self.name_table,
@@ -673,7 +669,6 @@ impl Analyzer {
                 .enumerate()
                 .map(|(i, f)| {
                     let mut ctx = TypeResolutionContext::with_type_params(
-                        &self.error_types,
                         &self.entity_registry,
                         interner,
                         &mut self.name_table,
@@ -756,7 +751,6 @@ impl Analyzer {
                 );
                 let field_ty = {
                     let mut ctx = TypeResolutionContext::with_type_params(
-                        &self.error_types,
                         &self.entity_registry,
                         interner,
                         &mut self.name_table,
@@ -792,7 +786,6 @@ impl Analyzer {
                 // First resolve types, then intern names (to avoid borrow conflicts)
                 let params: Vec<Type> = {
                     let mut ctx = TypeResolutionContext::with_type_params(
-                        &self.error_types,
                         &self.entity_registry,
                         interner,
                         &mut self.name_table,
@@ -808,7 +801,6 @@ impl Analyzer {
                 };
                 let return_type: Type = {
                     let mut ctx = TypeResolutionContext::with_type_params(
-                        &self.error_types,
                         &self.entity_registry,
                         interner,
                         &mut self.name_table,
@@ -884,7 +876,6 @@ impl Analyzer {
 
         let module_id = self.current_module;
         let mut type_ctx = TypeResolutionContext::with_type_params(
-            &self.error_types,
             &self.entity_registry,
             interner,
             &mut self.name_table,
@@ -1103,7 +1094,6 @@ impl Analyzer {
 
                 // Create a fresh type context for each static method
                 let mut static_type_ctx = TypeResolutionContext::with_type_params(
-                    &self.error_types,
                     &self.entity_registry,
                     interner,
                     &mut self.name_table,

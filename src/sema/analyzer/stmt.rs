@@ -406,8 +406,25 @@ impl Analyzer {
             return Type::Error;
         };
 
-        // Look up the error type
-        let Some(error_info) = self.error_types.get(&stmt.error_name).cloned() else {
+        // Look up the error type via resolver
+        let type_id_opt = self
+            .resolver(interner)
+            .resolve_type(stmt.error_name, &self.entity_registry);
+
+        let Some(type_id) = type_id_opt else {
+            self.add_error(
+                SemanticError::UndefinedError {
+                    name: interner.resolve(stmt.error_name).to_string(),
+                    span: stmt.span.into(),
+                },
+                stmt.span,
+            );
+            return Type::Error;
+        };
+
+        let type_def = self.entity_registry.get_type(type_id);
+        let Some(error_info) = type_def.error_info.clone() else {
+            // Type exists but is not an error type
             self.add_error(
                 SemanticError::UndefinedError {
                     name: interner.resolve(stmt.error_name).to_string(),
@@ -491,11 +508,7 @@ impl Analyzer {
 
         if !is_compatible {
             let declared_str = self.type_display(&error_type);
-            let raised_info = self.error_types.get(&stmt.error_name).cloned();
-            let raised_str = match raised_info {
-                Some(info) => self.type_display(&Type::ErrorType(info)),
-                None => interner.resolve(stmt.error_name).to_string(),
-            };
+            let raised_str = self.type_display(&Type::ErrorType(error_info));
 
             self.add_error(
                 SemanticError::IncompatibleRaiseError {

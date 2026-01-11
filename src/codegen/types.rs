@@ -17,7 +17,7 @@ use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, MonomorphKey, substitute_type};
-use crate::sema::{EntityRegistry, ErrorTypeInfo, FunctionType, Type, TypeId, TypeKey};
+use crate::sema::{EntityRegistry, FunctionType, Type, TypeId, TypeKey};
 
 /// Compiled value with its type
 #[derive(Clone)]
@@ -164,7 +164,6 @@ pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
     resolve_type_expr_with_metadata(
         ty,
         &ctx.analyzed.entity_registry,
-        &ctx.analyzed.error_types,
         ctx.type_metadata,
         ctx.interner,
         &ctx.analyzed.name_table,
@@ -295,7 +294,6 @@ fn build_interface_type_from_entity(
 pub(crate) fn resolve_type_expr_with_metadata(
     ty: &TypeExpr,
     entity_registry: &EntityRegistry,
-    error_types: &HashMap<Symbol, ErrorTypeInfo>,
     type_metadata: &HashMap<Symbol, TypeMetadata>,
     interner: &Interner,
     name_table: &NameTable,
@@ -327,20 +325,23 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         }
                         build_interface_type_from_entity(type_def_id, entity_registry, Vec::new())
                     }
+                    TypeDefKind::ErrorType => {
+                        // Error type - get info from EntityRegistry
+                        if let Some(error_info) = type_def.error_info.clone() {
+                            Type::ErrorType(error_info)
+                        } else {
+                            Type::Error
+                        }
+                    }
                     _ => {
-                        // Not an alias or interface, check other sources
-                        if let Some(error_info) = error_types.get(sym) {
-                            Type::ErrorType(error_info.clone())
-                        } else if let Some(metadata) = type_metadata.get(sym) {
+                        // Record, Class, or Primitive - check type metadata
+                        if let Some(metadata) = type_metadata.get(sym) {
                             metadata.vole_type.clone()
                         } else {
                             Type::Error
                         }
                     }
                 }
-            } else if let Some(error_info) = error_types.get(sym) {
-                // Not in entity registry, check error types
-                Type::ErrorType(error_info.clone())
             } else if let Some(metadata) = type_metadata.get(sym) {
                 metadata.vole_type.clone()
             } else {
@@ -351,7 +352,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
             let elem_ty = resolve_type_expr_with_metadata(
                 elem,
                 entity_registry,
-                error_types,
                 type_metadata,
                 interner,
                 name_table,
@@ -364,7 +364,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
             let inner_ty = resolve_type_expr_with_metadata(
                 inner,
                 entity_registry,
-                error_types,
                 type_metadata,
                 interner,
                 name_table,
@@ -379,7 +378,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     resolve_type_expr_with_metadata(
                         v,
                         entity_registry,
-                        error_types,
                         type_metadata,
                         interner,
                         name_table,
@@ -401,7 +399,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     resolve_type_expr_with_metadata(
                         p,
                         entity_registry,
-                        error_types,
                         type_metadata,
                         interner,
                         name_table,
@@ -412,7 +409,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
             let ret_type = resolve_type_expr_with_metadata(
                 return_type,
                 entity_registry,
-                error_types,
                 type_metadata,
                 interner,
                 name_table,
@@ -435,7 +431,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
             let success = resolve_type_expr_with_metadata(
                 success_type,
                 entity_registry,
-                error_types,
                 type_metadata,
                 interner,
                 name_table,
@@ -444,7 +439,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
             let error = resolve_type_expr_with_metadata(
                 error_type,
                 entity_registry,
-                error_types,
                 type_metadata,
                 interner,
                 name_table,
@@ -463,7 +457,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     resolve_type_expr_with_metadata(
                         a,
                         entity_registry,
-                        error_types,
                         type_metadata,
                         interner,
                         name_table,
@@ -541,7 +534,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     resolve_type_expr_with_metadata(
                         e,
                         entity_registry,
-                        error_types,
                         type_metadata,
                         interner,
                         name_table,
@@ -555,7 +547,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
             let elem_ty = resolve_type_expr_with_metadata(
                 element,
                 entity_registry,
-                error_types,
                 type_metadata,
                 interner,
                 name_table,
@@ -573,12 +564,11 @@ pub(crate) fn resolve_type_expr_with_metadata(
     }
 }
 
-/// Resolve a type expression using entity registry, error types, and type metadata
+/// Resolve a type expression using entity registry and type metadata
 /// This is used when CompileCtx is not available (e.g., during Compiler setup)
 pub(crate) fn resolve_type_expr_full(
     ty: &TypeExpr,
     entity_registry: &EntityRegistry,
-    error_types: &HashMap<Symbol, ErrorTypeInfo>,
     type_metadata: &HashMap<Symbol, TypeMetadata>,
     interner: &Interner,
     name_table: &NameTable,
@@ -587,7 +577,6 @@ pub(crate) fn resolve_type_expr_full(
     resolve_type_expr_with_metadata(
         ty,
         entity_registry,
-        error_types,
         type_metadata,
         interner,
         name_table,

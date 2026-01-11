@@ -273,7 +273,7 @@ impl Analyzer {
                             }
                             TypeDefKind::ErrorType => {
                                 // Error type destructuring: error Overflow { value, max }
-                                if let Some(error_info) = self.error_types.get(name).cloned() {
+                                if let Some(error_info) = type_def.error_info.clone() {
                                     let fields_ref = error_info.fields.clone();
                                     (Some(Type::ErrorType(error_info)), fields_ref)
                                 } else {

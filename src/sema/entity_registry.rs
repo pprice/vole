@@ -79,6 +79,7 @@ impl EntityRegistry {
             static_methods: Vec::new(),
             aliased_type: None,
             generic_info: None,
+            error_info: None,
             implements: Vec::new(),
         });
         self.type_by_name.insert(name_id, id);
@@ -388,6 +389,15 @@ impl EntityRegistry {
         info: crate::sema::entity_defs::GenericTypeInfo,
     ) {
         self.type_defs[type_id.index() as usize].generic_info = Some(info);
+    }
+
+    /// Set error type info for an error type
+    pub fn set_error_info(
+        &mut self,
+        type_id: TypeDefId,
+        info: crate::sema::ErrorTypeInfo,
+    ) {
+        self.type_defs[type_id.index() as usize].error_info = Some(info);
     }
 
     /// Check if derived extends base (transitive)
@@ -700,6 +710,7 @@ impl EntityRegistry {
             static_methods: Vec::new(),
             aliased_type: Some(aliased_type),
             generic_info: None,
+            error_info: None,
             implements: Vec::new(),
         });
         self.type_by_name.insert(name_id, id);

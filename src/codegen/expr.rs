@@ -13,6 +13,7 @@ use crate::frontend::{
     UnaryOp,
 };
 use crate::identity::NamerLookup;
+use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::Type;
 
 use super::context::Cg;
@@ -1133,8 +1134,17 @@ impl Cg<'_, '_, '_> {
                         // Inner pattern could be identifier (catch-all) or type (specific error)
                         match inner_pat.as_ref() {
                             Pattern::Identifier { name, .. } => {
-                                // Check if this is an error type name
-                                if let Some(_error_info) = self.ctx.analyzed.error_types.get(name) {
+                                // Check if this is an error type name via EntityRegistry
+                                let is_error_type = self
+                                    .ctx
+                                    .resolver()
+                                    .resolve_type(*name, &self.ctx.analyzed.entity_registry)
+                                    .map(|type_id| {
+                                        self.ctx.analyzed.entity_registry.get_type(type_id).kind
+                                            == TypeDefKind::ErrorType
+                                    })
+                                    .unwrap_or(false);
+                                if is_error_type {
                                     // Specific error type: error DivByZero => ...
                                     // Get the fallible type to look up the tag
                                     if let Type::Fallible(ft) = &scrutinee.vole_type {
@@ -1190,7 +1200,21 @@ impl Cg<'_, '_, '_> {
                                 ..
                             } => {
                                 // Error type with destructuring: error Overflow { value, max } => ...
-                                if let Some(error_info) = self.ctx.analyzed.error_types.get(name) {
+                                // Look up error_info via EntityRegistry
+                                let error_info_opt = self
+                                    .ctx
+                                    .resolver()
+                                    .resolve_type(*name, &self.ctx.analyzed.entity_registry)
+                                    .and_then(|type_id| {
+                                        let type_def =
+                                            self.ctx.analyzed.entity_registry.get_type(type_id);
+                                        if type_def.kind == TypeDefKind::ErrorType {
+                                            type_def.error_info.clone()
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                if let Some(error_info) = error_info_opt {
                                     // Check if this error type matches
                                     if let Type::Fallible(ft) = &scrutinee.vole_type {
                                         let error_tag =

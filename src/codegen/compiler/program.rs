@@ -230,7 +230,6 @@ impl Compiler<'_> {
                             resolve_type_expr_full(
                                 t,
                                 &self.analyzed.entity_registry,
-                                &self.analyzed.error_types,
                                 &self.type_metadata,
                                 &self.analyzed.interner,
                                 &self.analyzed.name_table,
@@ -322,7 +321,6 @@ impl Compiler<'_> {
                     &resolve_type_expr_full(
                         &p.ty,
                         &self.analyzed.entity_registry,
-                        &self.analyzed.error_types,
                         &self.type_metadata,
                         &self.analyzed.interner,
                         &self.analyzed.name_table,
@@ -339,7 +337,6 @@ impl Compiler<'_> {
                 resolve_type_expr_full(
                     &p.ty,
                     &self.analyzed.entity_registry,
-                    &self.analyzed.error_types,
                     &self.type_metadata,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
@@ -354,7 +351,6 @@ impl Compiler<'_> {
             resolve_type_expr_full(
                 t,
                 &self.analyzed.entity_registry,
-                &self.analyzed.error_types,
                 &self.type_metadata,
                 &self.analyzed.interner,
                 &self.analyzed.name_table,
@@ -456,7 +452,6 @@ impl Compiler<'_> {
                     &resolve_type_expr_full(
                         &p.ty,
                         &self.analyzed.entity_registry,
-                        &self.analyzed.error_types,
                         &self.type_metadata,
                         &self.analyzed.interner,
                         &self.analyzed.name_table,
@@ -473,7 +468,6 @@ impl Compiler<'_> {
                 resolve_type_expr_full(
                     &p.ty,
                     &self.analyzed.entity_registry,
-                    &self.analyzed.error_types,
                     &self.type_metadata,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
@@ -488,7 +482,6 @@ impl Compiler<'_> {
             resolve_type_expr_full(
                 t,
                 &self.analyzed.entity_registry,
-                &self.analyzed.error_types,
                 &self.type_metadata,
                 &self.analyzed.interner,
                 &self.analyzed.name_table,
@@ -686,7 +679,6 @@ impl Compiler<'_> {
                             resolve_type_expr_full(
                                 t,
                                 &self.analyzed.entity_registry,
-                                &self.analyzed.error_types,
                                 &self.type_metadata,
                                 &self.analyzed.interner,
                                 &self.analyzed.name_table,
@@ -753,7 +745,6 @@ impl Compiler<'_> {
                     &resolve_type_expr_full(
                         &p.ty,
                         &self.analyzed.entity_registry,
-                        &self.analyzed.error_types,
                         &self.type_metadata,
                         &self.analyzed.interner,
                         &self.analyzed.name_table,
@@ -770,7 +761,6 @@ impl Compiler<'_> {
                 resolve_type_expr_full(
                     &p.ty,
                     &self.analyzed.entity_registry,
-                    &self.analyzed.error_types,
                     &self.type_metadata,
                     &self.analyzed.interner,
                     &self.analyzed.name_table,
@@ -785,7 +775,6 @@ impl Compiler<'_> {
             resolve_type_expr_full(
                 t,
                 &self.analyzed.entity_registry,
-                &self.analyzed.error_types,
                 &self.type_metadata,
                 &self.analyzed.interner,
                 &self.analyzed.name_table,

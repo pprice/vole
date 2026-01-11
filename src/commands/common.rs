@@ -15,8 +15,8 @@ use crate::identity::NameTable;
 use crate::runtime::set_stdout_capture;
 use crate::sema::generic::{GenericFuncDef, MonomorphCache, MonomorphKey};
 use crate::sema::{
-    Analyzer, EntityRegistry, ErrorTypeInfo, ImplementRegistry, MethodResolutions, Type, TypeError,
-    TypeTable, TypeWarning, WellKnownTypes,
+    Analyzer, EntityRegistry, ImplementRegistry, MethodResolutions, Type, TypeError, TypeTable,
+    TypeWarning, WellKnownTypes,
 };
 use crate::transforms;
 
@@ -29,8 +29,6 @@ pub struct AnalyzedProgram {
     pub implement_registry: ImplementRegistry,
     /// Tracks which interfaces each type implements: type_name -> [interface_names]
     pub type_implements: HashMap<Symbol, Vec<Symbol>>,
-    /// Error type definitions
-    pub error_types: HashMap<Symbol, ErrorTypeInfo>,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: HashMap<String, (Program, Interner)>,
     /// Expression types for module programs (keyed by module path -> NodeId -> Type)
@@ -190,7 +188,6 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         method_resolutions,
         implement_registry,
         type_implements,
-        error_types,
         module_programs,
         module_expr_types,
         generic_functions,
@@ -209,7 +206,6 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         method_resolutions,
         implement_registry,
         type_implements,
-        error_types,
         module_programs,
         module_expr_types,
         generic_functions,
@@ -397,7 +393,6 @@ pub fn run_captured<W: Write + Send + 'static>(
         method_resolutions,
         implement_registry,
         type_implements,
-        error_types,
         module_programs,
         module_expr_types,
         generic_functions,
@@ -417,7 +412,6 @@ pub fn run_captured<W: Write + Send + 'static>(
         method_resolutions,
         implement_registry,
         type_implements,
-        error_types,
         module_programs,
         module_expr_types,
         generic_functions,

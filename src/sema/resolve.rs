@@ -8,14 +8,13 @@ use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{TypeParamScope, substitute_type};
 use crate::sema::types::{
-    ErrorTypeInfo, FallibleType, FunctionType, InterfaceMethodType, InterfaceType,
-    StructuralFieldType, StructuralMethodType, StructuralType, Type,
+    FallibleType, FunctionType, InterfaceMethodType, InterfaceType, StructuralFieldType,
+    StructuralMethodType, StructuralType, Type,
 };
 use std::collections::HashMap;
 
 /// Context needed for type resolution
 pub struct TypeResolutionContext<'a> {
-    pub error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
     pub entity_registry: &'a EntityRegistry,
     pub interner: &'a Interner,
     pub name_table: &'a mut NameTable,
@@ -93,14 +92,12 @@ fn interface_instance(
 
 impl<'a> TypeResolutionContext<'a> {
     pub fn new(
-        error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
         entity_registry: &'a EntityRegistry,
         interner: &'a Interner,
         name_table: &'a mut NameTable,
         module_id: ModuleId,
     ) -> Self {
         Self {
-            error_types,
             entity_registry,
             interner,
             name_table,
@@ -111,9 +108,7 @@ impl<'a> TypeResolutionContext<'a> {
     }
 
     /// Create a context with type parameters in scope
-    #[allow(clippy::too_many_arguments)]
     pub fn with_type_params(
-        error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
         entity_registry: &'a EntityRegistry,
         interner: &'a Interner,
         name_table: &'a mut NameTable,
@@ -121,7 +116,6 @@ impl<'a> TypeResolutionContext<'a> {
         type_params: &'a TypeParamScope,
     ) -> Self {
         Self {
-            error_types,
             entity_registry,
             interner,
             name_table,
@@ -183,9 +177,9 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                         interface_instance(*sym, Vec::new(), ctx).unwrap_or(Type::Error)
                     }
                     TypeDefKind::ErrorType => {
-                        // Fall through to ctx.error_types lookup for proper ErrorTypeInfo
-                        if let Some(error_info) = ctx.error_types.get(sym) {
-                            Type::ErrorType(error_info.clone())
+                        // Get error info from EntityRegistry
+                        if let Some(error_info) = type_def.error_info.clone() {
+                            Type::ErrorType(error_info)
                         } else {
                             Type::Error
                         }
@@ -201,9 +195,6 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                 }
             } else if let Some(interface) = interface_instance(*sym, Vec::new(), ctx) {
                 interface
-            } else if let Some(error_info) = ctx.error_types.get(sym) {
-                // Check if it's an error type
-                Type::ErrorType(error_info.clone())
             } else {
                 Type::Error // Unknown type name
             }
@@ -326,15 +317,12 @@ mod tests {
     {
         use crate::identity::NameTable;
 
-        static EMPTY_ERRORS: std::sync::LazyLock<HashMap<Symbol, ErrorTypeInfo>> =
-            std::sync::LazyLock::new(HashMap::new);
         static EMPTY_ENTITY_REGISTRY: std::sync::LazyLock<EntityRegistry> =
             std::sync::LazyLock::new(EntityRegistry::new);
 
         let mut name_table = NameTable::new();
         let module_id = name_table.main_module();
         let mut ctx = TypeResolutionContext::new(
-            &EMPTY_ERRORS,
             &EMPTY_ENTITY_REGISTRY,
             interner,
             &mut name_table,
@@ -419,8 +407,6 @@ mod tests {
         // Create a context with an interner that has the symbol
         use crate::frontend::Interner;
 
-        static EMPTY_ERRORS: std::sync::LazyLock<HashMap<Symbol, ErrorTypeInfo>> =
-            std::sync::LazyLock::new(HashMap::new);
         static EMPTY_ENTITY_REGISTRY: std::sync::LazyLock<EntityRegistry> =
             std::sync::LazyLock::new(EntityRegistry::new);
         static TEST_INTERNER: std::sync::LazyLock<Interner> = std::sync::LazyLock::new(|| {
@@ -432,7 +418,6 @@ mod tests {
         let mut name_table = NameTable::new();
         let module_id = name_table.main_module();
         let mut ctx = TypeResolutionContext::new(
-            &EMPTY_ERRORS,
             &EMPTY_ENTITY_REGISTRY,
             &TEST_INTERNER,
             &mut name_table,

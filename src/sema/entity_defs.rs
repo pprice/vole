@@ -77,6 +77,8 @@ pub struct TypeDef {
     pub aliased_type: Option<Type>,
     /// For generic records/classes - type parameter and field type info
     pub generic_info: Option<GenericTypeInfo>,
+    /// For TypeDefKind::ErrorType - the error type info with fields
+    pub error_info: Option<crate::sema::ErrorTypeInfo>,
     /// Interface implementations for this type
     pub implements: Vec<Implementation>,
 }

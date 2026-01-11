@@ -96,8 +96,6 @@ pub struct Analyzer {
     lambda_locals: Vec<HashSet<Symbol>>,
     /// Stack of side effect flags for currently analyzed lambdas
     lambda_side_effects: Vec<bool>,
-    /// Registered error types (e.g., DivByZero, OutOfRange)
-    error_types: HashMap<Symbol, ErrorTypeInfo>,
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their resolved types, including narrowed types
     expr_types: HashMap<NodeId, Type>,
@@ -158,7 +156,6 @@ impl Analyzer {
             lambda_captures: Vec::new(),
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
-            error_types: HashMap::new(),
             expr_types: HashMap::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
@@ -415,7 +412,6 @@ impl Analyzer {
             lambda_captures: Vec::new(),
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
-            error_types: HashMap::new(),
             expr_types: HashMap::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
@@ -677,7 +673,6 @@ impl Analyzer {
         MethodResolutions,
         ImplementRegistry,
         HashMap<Symbol, Vec<Symbol>>,
-        HashMap<Symbol, ErrorTypeInfo>,
         HashMap<String, (Program, Interner)>,
         HashMap<String, HashMap<NodeId, Type>>,
         HashMap<Symbol, GenericFuncDef>,
@@ -694,7 +689,6 @@ impl Analyzer {
             self.method_resolutions,
             self.implement_registry,
             self.type_implements,
-            self.error_types,
             self.module_programs,
             self.module_expr_types,
             self.generic_functions,
@@ -917,7 +911,6 @@ impl Analyzer {
     ) -> Type {
         let module_id = self.current_module;
         let mut ctx = TypeResolutionContext {
-            error_types: &self.error_types,
             entity_registry: &self.entity_registry,
             interner,
             name_table: &mut self.name_table,
@@ -1157,7 +1150,6 @@ impl Analyzer {
         for (slot, field) in decl.fields.iter().enumerate() {
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext {
-                error_types: &self.error_types,
                 entity_registry: &self.entity_registry,
                 interner,
                 name_table: &mut self.name_table,
@@ -1184,8 +1176,7 @@ impl Analyzer {
             fields: fields.clone(),
         };
 
-        self.error_types.insert(decl.name, error_info.clone());
-        self.register_named_type(decl.name, Type::ErrorType(error_info), interner);
+        self.register_named_type(decl.name, Type::ErrorType(error_info.clone()), interner);
 
         // Register in EntityRegistry (parallel migration)
         let entity_type_id = self.entity_registry.register_type(
@@ -1193,6 +1184,9 @@ impl Analyzer {
             TypeDefKind::ErrorType,
             self.current_module,
         );
+
+        // Set error info for lookup
+        self.entity_registry.set_error_info(entity_type_id, error_info);
 
         // Register fields in EntityRegistry
         let builtin_module = self.name_table.builtin_module();
@@ -1265,7 +1259,6 @@ impl Analyzer {
             TypeConstraint::Union(types) => {
                 let module_id = self.current_module;
                 let mut ctx = TypeResolutionContext::with_type_params(
-                    &self.error_types,
                     &self.entity_registry,
                     interner,
                     &mut self.name_table,
@@ -1278,7 +1271,6 @@ impl Analyzer {
             TypeConstraint::Structural { fields, methods } => {
                 let module_id = self.current_module;
                 let mut ctx = TypeResolutionContext::with_type_params(
-                    &self.error_types,
                     &self.entity_registry,
                     interner,
                     &mut self.name_table,
@@ -1828,7 +1820,6 @@ impl Analyzer {
                     // Build function type from signature
                     let (params, return_type) = {
                         let mut ctx = TypeResolutionContext {
-                            error_types: &self.error_types,
                             entity_registry: &self.entity_registry,
                             interner: &module_interner,
                             name_table: &mut self.name_table,
@@ -1890,7 +1881,6 @@ impl Analyzer {
                     for func in &ext.functions {
                         let (params, return_type) = {
                             let mut ctx = TypeResolutionContext {
-                                error_types: &self.error_types,
                                 entity_registry: &self.entity_registry,
                                 interner: &module_interner,
                                 name_table: &mut self.name_table,
