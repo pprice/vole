@@ -34,6 +34,24 @@ tests "is operator" {
         assert(!(j is i32))
     }
 
+    test "literal bidirectional inference" {
+        // Literals use bidirectional inference - 42 CAN be i32, so it is
+        assert(42 is i32)
+        assert(42 is i64)
+        assert(42 is u8)    // 42 fits in u8
+        assert(!(300 is u8))  // 300 doesn't fit in u8
+
+        // Float literals
+        assert(3.14 is f64)
+        assert(3.14 is f32)
+        assert(!(3.14 is i32))  // Float is not int
+
+        // String/bool/nil are fixed
+        assert("hello" is string)
+        assert(true is bool)
+        assert(nil is nil)
+    }
+
     test "negative checks" {
         let i = 42
         let s = "hello"

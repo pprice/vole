@@ -44,7 +44,15 @@ impl Cg<'_, '_, '_> {
                     .unwrap_or(Type::I64);
                 Ok(self.int_const(*n, vole_type))
             }
-            ExprKind::FloatLiteral(n) => Ok(self.f64_const(*n)),
+            ExprKind::FloatLiteral(n) => {
+                // Look up inferred type from semantic analysis for bidirectional type inference
+                let vole_type = self
+                    .ctx
+                    .get_expr_type(&expr.id)
+                    .cloned()
+                    .unwrap_or(Type::F64);
+                Ok(self.float_const(*n, vole_type))
+            }
             ExprKind::BoolLiteral(b) => Ok(self.bool_const(*b)),
             ExprKind::Identifier(sym) => self.identifier(*sym, expr),
             ExprKind::Binary(bin) => self.binary(bin),
@@ -313,7 +321,7 @@ impl Cg<'_, '_, '_> {
         let operand = self.expr(&un.operand)?;
         let result = match un.op {
             UnaryOp::Neg => {
-                if operand.ty == types::F64 {
+                if operand.ty.is_float() {
                     self.builder.ins().fneg(operand.value)
                 } else {
                     self.builder.ins().ineg(operand.value)

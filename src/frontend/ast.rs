@@ -360,6 +360,20 @@ pub struct Expr {
     pub span: Span,
 }
 
+impl Expr {
+    /// Returns true if this expression is a literal value (int, float, bool, string, nil)
+    pub fn is_literal(&self) -> bool {
+        matches!(
+            self.kind,
+            ExprKind::IntLiteral(_)
+                | ExprKind::FloatLiteral(_)
+                | ExprKind::BoolLiteral(_)
+                | ExprKind::StringLiteral(_)
+                | ExprKind::Nil
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     // Literals

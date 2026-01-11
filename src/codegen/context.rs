@@ -238,19 +238,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Wrap a Cranelift value as an F64 CompiledValue
-    pub fn f64_value(&self, value: Value) -> CompiledValue {
+    /// Create a float constant with explicit type (for bidirectional inference)
+    pub fn float_const(&mut self, n: f64, vole_type: Type) -> CompiledValue {
+        let (ty, value) = match vole_type {
+            Type::F32 => {
+                let v = self.builder.ins().f32const(n as f32);
+                (types::F32, v)
+            }
+            _ => {
+                // Default to F64
+                let v = self.builder.ins().f64const(n);
+                (types::F64, v)
+            }
+        };
         CompiledValue {
             value,
-            ty: types::F64,
-            vole_type: Type::F64,
+            ty,
+            vole_type,
         }
-    }
-
-    /// Create an F64 constant
-    pub fn f64_const(&mut self, n: f64) -> CompiledValue {
-        let value = self.builder.ins().f64const(n);
-        self.f64_value(value)
     }
 
     /// Create a nil value

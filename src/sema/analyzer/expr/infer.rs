@@ -323,8 +323,19 @@ impl Analyzer {
             }
 
             ExprKind::Is(is_expr) => {
-                let value_type = self.check_expr(&is_expr.value, interner)?;
                 let tested_type = self.resolve_type(&is_expr.type_expr, interner);
+
+                // For literals, use bidirectional type inference so `42 is i32` works
+                // For non-literals, just check normally (no type coercion)
+                let value_type = if is_expr.value.is_literal() {
+                    // Try to infer literal's type from tested type (won't error on mismatch)
+                    let inferred = self.infer_literal_type(&is_expr.value, &tested_type, interner);
+                    // Record the inferred type so codegen uses it
+                    self.record_expr_type(&is_expr.value, inferred.clone());
+                    inferred
+                } else {
+                    self.check_expr(&is_expr.value, interner)?
+                };
 
                 // Warn/error if tested type is not a variant of value's union
                 if let Type::Union(variants) = &value_type
@@ -478,6 +489,42 @@ impl Analyzer {
                     Ok(then_ty)
                 }
             }
+        }
+    }
+
+    /// Infer a literal's type from a type hint for bidirectional type inference.
+    /// Returns the hint type if the literal can be that type, otherwise returns
+    /// the default type for the literal.
+    ///
+    /// This is used for the `is` operator so that `42 is i32` works correctly -
+    /// since 42 CAN be i32, we type it as i32 and the `is` check returns true.
+    pub(crate) fn infer_literal_type(
+        &mut self,
+        expr: &Expr,
+        hint: &Type,
+        _interner: &Interner,
+    ) -> Type {
+        match &expr.kind {
+            ExprKind::IntLiteral(value) => {
+                if literal_fits(*value, hint) {
+                    hint.clone()
+                } else {
+                    Type::I64 // Default
+                }
+            }
+            ExprKind::FloatLiteral(_) => {
+                if matches!(hint, Type::F32 | Type::F64) {
+                    hint.clone()
+                } else {
+                    Type::F64 // Default
+                }
+            }
+            // Bool, String, and Nil have only one possible type
+            ExprKind::BoolLiteral(_) => Type::Bool,
+            ExprKind::StringLiteral(_) => Type::String,
+            ExprKind::Nil => Type::Nil,
+            // Not a literal - this shouldn't happen if is_literal() was checked
+            _ => Type::Error,
         }
     }
 }
