@@ -15,8 +15,8 @@ use crate::identity::NameTable;
 use crate::runtime::set_stdout_capture;
 use crate::sema::generic::{GenericFuncDef, MonomorphCache};
 use crate::sema::{
-    Analyzer, EntityRegistry, ExpressionData, ImplementRegistry, TypeError, TypeTable, TypeWarning,
-    WellKnownTypes,
+    Analyzer, EntityRegistry, ExpressionData, ImplementRegistry, ProgramQuery, TypeError, TypeTable,
+    TypeWarning, WellKnownTypes,
 };
 use crate::transforms;
 
@@ -43,6 +43,13 @@ pub struct AnalyzedProgram {
     pub well_known: WellKnownTypes,
     /// Entity registry for first-class type/method/field/function identity
     pub entity_registry: EntityRegistry,
+}
+
+impl AnalyzedProgram {
+    /// Get a query interface for accessing type information and analysis results.
+    pub fn query(&self) -> ProgramQuery<'_> {
+        ProgramQuery::new(&self.entity_registry, &self.expression_data)
+    }
 }
 
 /// Render a lexer error to stderr with source context
