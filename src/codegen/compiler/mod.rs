@@ -106,13 +106,14 @@ impl<'a> Compiler<'a> {
         self.analyzed.interner.resolve(sym).to_string()
     }
 
-    /// Look up the "self" keyword symbol
-    fn lookup_self_symbol(&self) -> Option<Symbol> {
+    /// Get the "self" keyword symbol (panics if not interned - should never happen)
+    fn self_symbol(&self) -> Symbol {
         self.analyzed.interner.lookup("self")
+            .expect("'self' keyword should always be interned")
     }
 
-    /// Look up a method NameId by Symbol
-    fn method_name_id(&self, name: Symbol) -> Option<NameId> {
+    /// Look up a method NameId by Symbol (panics if not found)
+    fn method_name_id(&self, name: Symbol) -> NameId {
         self.query().method_name_id(name)
     }
 

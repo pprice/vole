@@ -61,12 +61,8 @@ impl Compiler<'_> {
 
         let query = self.query();
         let module_id = query.main_module();
-        let type_key = query
-            .name_id(module_id, &[class.name])
-            .and_then(|name_id| query.type_key_by_name(name_id));
-        let name_id = query
-            .name_id(module_id, &[class.name])
-            .expect("class name_id should be registered");
+        let name_id = query.name_id(module_id, &[class.name]);
+        let type_key = query.type_key_by_name(name_id);
 
         // Create a placeholder vole_type (will be replaced in finalize_class)
         let placeholder_type = Type::Class(ClassType {
@@ -120,9 +116,7 @@ impl Compiler<'_> {
 
         // Create the Vole type
         let vole_type = Type::Class(ClassType {
-            name_id: query
-                .name_id(module_id, &[class.name])
-                .expect("class name_id should be registered"),
+            name_id: query.name_id(module_id, &[class.name]),
             fields: struct_fields,
         });
 
@@ -140,15 +134,7 @@ impl Compiler<'_> {
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
-            let method_id = self.query().method_name_id(method.name).unwrap_or_else(|| {
-                let q = self.query();
-                let type_name_str = q.resolve_symbol(class.name);
-                let method_name_str = q.resolve_symbol(method.name);
-                panic!(
-                    "codegen error: method name not interned for class '{}': '{}'",
-                    type_name_str, method_name_str
-                );
-            });
+            let method_id = self.query().method_name_id(method.name);
             method_infos.insert(
                 method_id,
                 MethodInfo {
@@ -167,24 +153,22 @@ impl Compiler<'_> {
         // Collect interface info first to avoid borrow conflicts
         let interfaces_to_process: Vec<_> = {
             let query = self.query();
-            if let Some(class_name_id) = query.name_id(module_id, &[class.name]) {
-                if let Some(type_def_id) = query.type_def_by_name(class_name_id) {
+            query
+                .try_name_id(module_id, &[class.name])
+                .and_then(|class_name_id| query.try_type_def_id(class_name_id))
+                .map(|type_def_id| {
                     query
                         .implemented_interfaces(type_def_id)
                         .into_iter()
                         .filter_map(|interface_id| {
                             let interface_def = query.get_type(interface_id);
                             let interface_name_str = query.last_segment(interface_def.name_id)?;
-                            let interface_name = query.lookup_symbol(&interface_name_str)?;
+                            let interface_name = query.try_symbol(&interface_name_str)?;
                             Some(interface_name)
                         })
                         .collect()
-                } else {
-                    vec![]
-                }
-            } else {
-                vec![]
-            }
+                })
+                .unwrap_or_default()
         };
 
         for interface_name in interfaces_to_process {
@@ -202,15 +186,7 @@ impl Compiler<'_> {
                         let func_id = self.jit.declare_function(&display_name, &sig);
                         self.func_registry.set_func_id(func_key, func_id);
                         let method_id =
-                            self.query().method_name_id(method.name).unwrap_or_else(|| {
-                                let q = self.query();
-                                let type_name_str = q.resolve_symbol(class.name);
-                                let method_name_str = q.resolve_symbol(method.name);
-                                panic!(
-                                    "codegen error: default method name not interned for class '{}': '{}'",
-                                    type_name_str, method_name_str
-                                );
-                            });
+                            self.query().method_name_id(method.name);
                         method_infos.insert(
                             method_id,
                             MethodInfo {
@@ -229,13 +205,12 @@ impl Compiler<'_> {
         }
 
         let query = self.query();
+        let name_id = query.name_id(module_id, &[class.name]);
         self.type_metadata.insert(
             class.name,
             TypeMetadata {
                 type_id,
-                type_key: query
-                    .name_id(module_id, &[class.name])
-                    .and_then(|name_id| query.type_key_by_name(name_id)),
+                type_key: query.type_key_by_name(name_id),
                 field_slots,
                 is_class: true,
                 vole_type,
@@ -252,12 +227,8 @@ impl Compiler<'_> {
 
         let query = self.query();
         let module_id = query.main_module();
-        let type_key = query
-            .name_id(module_id, &[record.name])
-            .and_then(|name_id| query.type_key_by_name(name_id));
-        let name_id = query
-            .name_id(module_id, &[record.name])
-            .expect("record name_id should be registered");
+        let name_id = query.name_id(module_id, &[record.name]);
+        let type_key = query.type_key_by_name(name_id);
 
         // Create a placeholder vole_type (will be replaced in finalize_record)
         let placeholder_type = Type::Record(RecordType {
@@ -312,9 +283,7 @@ impl Compiler<'_> {
 
         // Create the Vole type
         let vole_type = Type::Record(RecordType {
-            name_id: query
-                .name_id(module_id, &[record.name])
-                .expect("record name_id should be registered"),
+            name_id: query.name_id(module_id, &[record.name]),
             fields: struct_fields,
             type_args: vec![],
         });
@@ -333,15 +302,7 @@ impl Compiler<'_> {
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
-            let method_id = self.query().method_name_id(method.name).unwrap_or_else(|| {
-                let q = self.query();
-                let type_name_str = q.resolve_symbol(record.name);
-                let method_name_str = q.resolve_symbol(method.name);
-                panic!(
-                    "codegen error: method name not interned for record '{}': '{}'",
-                    type_name_str, method_name_str
-                );
-            });
+            let method_id = self.query().method_name_id(method.name);
             method_infos.insert(
                 method_id,
                 MethodInfo {
@@ -360,24 +321,22 @@ impl Compiler<'_> {
         // Collect interface info first to avoid borrow conflicts
         let interfaces_to_process: Vec<_> = {
             let query = self.query();
-            if let Some(record_name_id) = query.name_id(module_id, &[record.name]) {
-                if let Some(type_def_id) = query.type_def_by_name(record_name_id) {
+            query
+                .try_name_id(module_id, &[record.name])
+                .and_then(|record_name_id| query.try_type_def_id(record_name_id))
+                .map(|type_def_id| {
                     query
                         .implemented_interfaces(type_def_id)
                         .into_iter()
                         .filter_map(|interface_id| {
                             let interface_def = query.get_type(interface_id);
                             let interface_name_str = query.last_segment(interface_def.name_id)?;
-                            let interface_name = query.lookup_symbol(&interface_name_str)?;
+                            let interface_name = query.try_symbol(&interface_name_str)?;
                             Some(interface_name)
                         })
                         .collect()
-                } else {
-                    vec![]
-                }
-            } else {
-                vec![]
-            }
+                })
+                .unwrap_or_default()
         };
 
         for interface_name in interfaces_to_process {
@@ -395,15 +354,7 @@ impl Compiler<'_> {
                         let func_id = self.jit.declare_function(&display_name, &sig);
                         self.func_registry.set_func_id(func_key, func_id);
                         let method_id =
-                            self.query().method_name_id(method.name).unwrap_or_else(|| {
-                                let q = self.query();
-                                let type_name_str = q.resolve_symbol(record.name);
-                                let method_name_str = q.resolve_symbol(method.name);
-                                panic!(
-                                    "codegen error: default method name not interned for record '{}': '{}'",
-                                    type_name_str, method_name_str
-                                );
-                            });
+                            self.query().method_name_id(method.name);
                         method_infos.insert(
                             method_id,
                             MethodInfo {
@@ -422,13 +373,12 @@ impl Compiler<'_> {
         }
 
         let query = self.query();
+        let name_id = query.name_id(module_id, &[record.name]);
         self.type_metadata.insert(
             record.name,
             TypeMetadata {
                 type_id,
-                type_key: query
-                    .name_id(module_id, &[record.name])
-                    .and_then(|name_id| query.type_key_by_name(name_id)),
+                type_key: query.type_key_by_name(name_id),
                 field_slots,
                 is_class: false,
                 vole_type,
@@ -445,7 +395,7 @@ impl Compiler<'_> {
         let query = self.query();
         let module_id = query.main_module();
         let type_name_id = query.name_id(module_id, &[type_name]);
-        let type_def_id = type_name_id.and_then(|name_id| query.type_def_by_name(name_id));
+        let type_def_id = query.try_type_def_id(type_name_id);
 
         for method in &statics.methods {
             // Only register methods with bodies (not abstract ones)
@@ -470,16 +420,14 @@ impl Compiler<'_> {
 
             // Register in static_method_infos for codegen lookup
             if let Some(type_def_id) = type_def_id {
-                let method_name_id = self.query().method_name_id(method.name);
-                if let Some(method_name_id) = method_name_id {
-                    self.static_method_infos.insert(
-                        (type_def_id, method_name_id),
-                        MethodInfo {
-                            func_key,
-                            return_type,
-                        },
-                    );
-                }
+                let method_name_id = self.method_name_id(method.name);
+                self.static_method_infos.insert(
+                    (type_def_id, method_name_id),
+                    MethodInfo {
+                        func_key,
+                        return_type,
+                    },
+                );
             }
         }
     }

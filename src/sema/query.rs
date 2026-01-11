@@ -104,19 +104,39 @@ impl<'a> ProgramQuery<'a> {
         self.interner.resolve(sym)
     }
 
+    /// Look up a Symbol in the interner (panics if not found)
+    pub fn symbol(&self, s: &str) -> Symbol {
+        self.interner.lookup(s).unwrap_or_else(|| {
+            panic!("symbol '{}' not interned", s)
+        })
+    }
+
     /// Look up a Symbol in the interner, returning None if not found
-    pub fn lookup_symbol(&self, s: &str) -> Option<Symbol> {
+    pub fn try_symbol(&self, s: &str) -> Option<Symbol> {
         self.interner.lookup(s)
     }
 
-    /// Convert Symbols to a NameId in the given module
-    pub fn name_id(&self, module: ModuleId, segments: &[Symbol]) -> Option<NameId> {
+    /// Convert Symbols to a NameId in the given module (panics if not found)
+    pub fn name_id(&self, module: ModuleId, segments: &[Symbol]) -> NameId {
+        self.name_table.name_id(module, segments, self.interner).unwrap_or_else(|| {
+            let names: Vec<_> = segments.iter().map(|s| self.interner.resolve(*s)).collect();
+            panic!("name_id not found for {:?} in module {:?}", names, module)
+        })
+    }
+
+    /// Convert Symbols to a NameId in the given module, returning None if not found
+    pub fn try_name_id(&self, module: ModuleId, segments: &[Symbol]) -> Option<NameId> {
         self.name_table.name_id(module, segments, self.interner)
     }
 
-    /// Convert a single Symbol to a NameId in the main module
-    pub fn name_id_in_main(&self, sym: Symbol) -> Option<NameId> {
+    /// Convert a single Symbol to a NameId in the main module (panics if not found)
+    pub fn name_id_in_main(&self, sym: Symbol) -> NameId {
         self.name_id(self.main_module(), &[sym])
+    }
+
+    /// Convert a single Symbol to a NameId in the main module, returning None if not found
+    pub fn try_name_id_in_main(&self, sym: Symbol) -> Option<NameId> {
+        self.try_name_id(self.main_module(), &[sym])
     }
 
     /// Get the module path for a module ID
@@ -150,8 +170,15 @@ impl<'a> ProgramQuery<'a> {
         self.registry.get_type(type_id)
     }
 
-    /// Look up a TypeDefId by its NameId
-    pub fn type_def_by_name(&self, name_id: NameId) -> Option<TypeDefId> {
+    /// Look up a TypeDefId by its NameId (panics if not found)
+    pub fn type_def_id(&self, name_id: NameId) -> TypeDefId {
+        self.registry.type_by_name(name_id).unwrap_or_else(|| {
+            panic!("type not found for name_id {:?}", name_id)
+        })
+    }
+
+    /// Look up a TypeDefId by its NameId, returning None if not found
+    pub fn try_type_def_id(&self, name_id: NameId) -> Option<TypeDefId> {
         self.registry.type_by_name(name_id)
     }
 
@@ -206,15 +233,32 @@ impl<'a> ProgramQuery<'a> {
         self.registry.get_external_binding(method_id)
     }
 
-    /// Look up a method NameId by Symbol
-    pub fn method_name_id(&self, name: Symbol) -> Option<NameId> {
+    /// Look up a method NameId by Symbol (panics if not found)
+    pub fn method_name_id(&self, name: Symbol) -> NameId {
+        use crate::identity::NamerLookup;
+        let namer = NamerLookup::new(self.name_table, self.interner);
+        namer.method(name).unwrap_or_else(|| {
+            panic!("method name_id not found for '{}'", self.interner.resolve(name))
+        })
+    }
+
+    /// Look up a method NameId by Symbol, returning None if not found
+    pub fn try_method_name_id(&self, name: Symbol) -> Option<NameId> {
         use crate::identity::NamerLookup;
         let namer = NamerLookup::new(self.name_table, self.interner);
         namer.method(name)
     }
 
-    /// Look up a method NameId by string name
-    pub fn method_name_id_by_str(&self, name_str: &str) -> Option<NameId> {
+    /// Look up a method NameId by string name (panics if not found)
+    pub fn method_name_id_by_str(&self, name_str: &str) -> NameId {
+        crate::identity::method_name_id_by_str(self.name_table, self.interner, name_str)
+            .unwrap_or_else(|| {
+                panic!("method name_id not found for '{}'", name_str)
+            })
+    }
+
+    /// Look up a method NameId by string name, returning None if not found
+    pub fn try_method_name_id_by_str(&self, name_str: &str) -> Option<NameId> {
         crate::identity::method_name_id_by_str(self.name_table, self.interner, name_str)
     }
 

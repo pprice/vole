@@ -45,8 +45,8 @@ impl Compiler<'_> {
         let interface_names: Vec<Symbol> = {
             let query = self.query();
             query
-                .name_id(query.main_module(), &[class.name])
-                .and_then(|class_name_id| query.type_def_by_name(class_name_id))
+                .try_name_id(query.main_module(), &[class.name])
+                .and_then(|class_name_id| query.try_type_def_id(class_name_id))
                 .map(|type_def_id| {
                     query
                         .implemented_interfaces(type_def_id)
@@ -55,7 +55,7 @@ impl Compiler<'_> {
                             let interface_def = query.get_type(interface_id);
                             query
                                 .last_segment(interface_def.name_id)
-                                .and_then(|name_str| query.lookup_symbol(&name_str))
+                                .and_then(|name_str| query.try_symbol(&name_str))
                         })
                         .collect()
                 })
@@ -110,8 +110,8 @@ impl Compiler<'_> {
         let interface_names: Vec<Symbol> = {
             let query = self.query();
             query
-                .name_id(query.main_module(), &[record.name])
-                .and_then(|record_name_id| query.type_def_by_name(record_name_id))
+                .try_name_id(query.main_module(), &[record.name])
+                .and_then(|record_name_id| query.try_type_def_id(record_name_id))
                 .map(|type_def_id| {
                     query
                         .implemented_interfaces(type_def_id)
@@ -120,7 +120,7 @@ impl Compiler<'_> {
                             let interface_def = query.get_type(interface_id);
                             query
                                 .last_segment(interface_def.name_id)
-                                .and_then(|name_str| query.lookup_symbol(&name_str))
+                                .and_then(|name_str| query.try_symbol(&name_str))
                         })
                         .collect()
                 })
@@ -363,7 +363,7 @@ impl Compiler<'_> {
         for method in &impl_block.methods {
             let method_key = self.type_id_from_type(&self_vole_type)
                 .and_then(|type_id| {
-                    let method_id = self.method_name_id(method.name)?;
+                    let method_id = self.method_name_id(method.name);
                     self.impl_method_infos.get(&(type_id, method_id)).cloned()
                 });
             self.compile_implement_method(
@@ -635,9 +635,7 @@ impl Compiler<'_> {
 
         // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
-        let self_sym = self
-            .lookup_self_symbol()
-            .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
+        let self_sym = self.self_symbol();
 
         // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -744,9 +742,7 @@ impl Compiler<'_> {
         let func_key = metadata
             .method_infos
             .get(
-                &self
-                    .method_name_id(method.name)
-                    .expect("method name_id should be registered"),
+                &self.method_name_id(method.name),
             )
             .map(|info| info.func_key)
             .ok_or_else(|| {
@@ -798,9 +794,7 @@ impl Compiler<'_> {
 
         // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
-        let self_sym = self
-            .lookup_self_symbol()
-            .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
+        let self_sym = self.self_symbol();
 
         // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -892,9 +886,7 @@ impl Compiler<'_> {
         let func_key = metadata
             .method_infos
             .get(
-                &self
-                    .method_name_id(method.name)
-                    .expect("method name_id should be registered"),
+                &self.method_name_id(method.name),
             )
             .map(|info| info.func_key)
             .ok_or_else(|| {
@@ -946,9 +938,7 @@ impl Compiler<'_> {
 
         // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
-        let self_sym = self
-            .lookup_self_symbol()
-            .ok_or_else(|| "Internal error: 'self' keyword not interned".to_string())?;
+        let self_sym = self.self_symbol();
 
         // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
