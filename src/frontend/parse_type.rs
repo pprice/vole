@@ -4,7 +4,7 @@
 // This module contains methods for parsing type expressions and function parameters.
 
 use super::TokenType;
-use super::ast::{Param, PrimitiveType, TypeExpr};
+use super::ast::{Param, PrimitiveType, StructuralField, StructuralMethod, TypeExpr};
 use super::parser::{ParseError, Parser};
 use crate::errors::ParserError;
 
@@ -199,6 +199,11 @@ impl<'src> Parser<'src> {
                     error_type: Box::new(error_type),
                 })
             }
+            TokenType::LBrace => {
+                // Structural type: { name: Type, func method() -> Type }
+                self.advance(); // consume '{'
+                self.parse_structural_type()
+            }
             TokenType::Identifier => {
                 self.advance();
                 let sym = self.interner.intern(&token.lexeme);
@@ -252,5 +257,87 @@ impl<'src> Parser<'src> {
                 token.span,
             )
         })
+    }
+
+    /// Parse a structural type: { name: Type, func method() -> Type }
+    fn parse_structural_type(&mut self) -> Result<TypeExpr, ParseError> {
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+
+        // Handle empty structural type
+        if self.check(TokenType::RBrace) {
+            self.advance(); // consume '}'
+            return Ok(TypeExpr::Structural { fields, methods });
+        }
+
+        loop {
+            let member_token = self.current.clone();
+
+            if self.check(TokenType::KwFunc) {
+                // Method: func name(params) -> ReturnType
+                self.advance(); // consume 'func'
+                let name_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected method name")?;
+                let name = self.interner.intern(&name_token.lexeme);
+
+                self.consume(TokenType::LParen, "expected '(' after method name")?;
+                let mut params = Vec::new();
+                if !self.check(TokenType::RParen) {
+                    params.push(self.parse_type()?);
+                    while self.match_token(TokenType::Comma) {
+                        if self.check(TokenType::RParen) {
+                            break; // trailing comma
+                        }
+                        params.push(self.parse_type()?);
+                    }
+                }
+                self.consume(TokenType::RParen, "expected ')' after method parameters")?;
+
+                self.consume(TokenType::Arrow, "expected '->' after method parameters")?;
+                let return_type = self.parse_type()?;
+
+                methods.push(StructuralMethod {
+                    name,
+                    params,
+                    return_type,
+                    span: name_token.span,
+                });
+            } else if self.check(TokenType::Identifier) {
+                // Field: name: Type
+                self.advance(); // consume identifier
+                let name = self.interner.intern(&member_token.lexeme);
+
+                self.consume(TokenType::Colon, "expected ':' after field name")?;
+                let ty = self.parse_type()?;
+
+                fields.push(StructuralField {
+                    name,
+                    ty,
+                    span: member_token.span,
+                });
+            } else {
+                return Err(ParseError::new(
+                    ParserError::ExpectedToken {
+                        expected: "field or method".to_string(),
+                        found: self.current.ty.as_str().to_string(),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            }
+
+            // Check for comma or end
+            if self.match_token(TokenType::Comma) {
+                // Allow trailing comma
+                if self.check(TokenType::RBrace) {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        self.consume(TokenType::RBrace, "expected '}' after structural type")?;
+        Ok(TypeExpr::Structural { fields, methods })
     }
 }

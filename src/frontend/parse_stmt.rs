@@ -16,6 +16,27 @@ impl<'src> Parser<'src> {
     /// - Identifier followed by `|` where next is also a type-like token
     /// - Primitive type followed by `?` (e.g., `i32?`)
     fn is_unambiguous_type_pattern(&self) -> bool {
+        // Pattern: { ... } - structural type (blocks have statements, not field: type)
+        if self.check(TokenType::LBrace) {
+            // Peek ahead to see if this looks like a structural type
+            // { identifier : ... } is a structural type
+            // { statement... } is a block
+            let mut lexer_copy = self.lexer.clone();
+            let next = lexer_copy.next_token();
+            if next.ty == TokenType::Identifier || next.ty == TokenType::KwFunc {
+                let after = lexer_copy.next_token();
+                // { name: ... } or { func ... } - structural type
+                if after.ty == TokenType::Colon || next.ty == TokenType::KwFunc {
+                    return true;
+                }
+            }
+            // Empty structural type { }
+            if next.ty == TokenType::RBrace {
+                return true;
+            }
+            return false;
+        }
+
         // Check if current token is a type-like token
         let is_type_token = self.is_primitive_type_token() || self.check(TokenType::Identifier);
 
