@@ -6,7 +6,8 @@ use cranelift_module::Module;
 use super::{Compiler, ControlFlowCtx};
 use crate::codegen::stmt::compile_block;
 use crate::codegen::types::{
-    CompileCtx, MethodInfo, TypeMetadata, method_name_id, resolve_type_expr_full, type_to_cranelift,
+    CompileCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_full,
+    type_to_cranelift,
 };
 use crate::frontend::{
     ClassDecl, FuncDecl, ImplementBlock, InterfaceMethod, Interner, RecordDecl, StaticsBlock,
@@ -243,7 +244,7 @@ impl Compiler<'_> {
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
             if let Some(type_id) = type_id {
-                let method_id = method_name_id(self.analyzed, interner, method.name)
+                let method_id = method_name_id_with_interner(self.analyzed, interner, method.name)
                     .expect("implement method name_id should be registered");
                 self.impl_method_infos.insert(
                     (type_id, method_id),
@@ -309,8 +310,9 @@ impl Compiler<'_> {
 
                 // Register in static_method_infos for codegen lookup
                 if let Some(type_def_id) = type_def_id {
-                    let method_name_id = method_name_id(self.analyzed, interner, method.name);
-                    if let Some(method_name_id) = method_name_id {
+                    if let Some(method_name_id) =
+                        method_name_id_with_interner(self.analyzed, interner, method.name)
+                    {
                         self.static_method_infos.insert(
                             (type_def_id, method_name_id),
                             MethodInfo {

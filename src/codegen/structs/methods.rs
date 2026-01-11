@@ -10,7 +10,7 @@ use crate::codegen::method_resolution::{
     MethodResolutionInput, MethodTarget, resolve_method_target,
 };
 use crate::codegen::types::{
-    CompiledValue, method_name_id, module_name_id, type_to_cranelift, value_to_word, word_to_value,
+    CompiledValue, module_name_id, type_to_cranelift, value_to_word, word_to_value,
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId};
@@ -124,13 +124,7 @@ impl Cg<'_, '_, '_> {
             return self.runtime_iterator_method(&obj, mc, method_name_str, elem_ty);
         }
 
-        let method_id = method_name_id(self.ctx.analyzed, self.ctx.interner, mc.method)
-            .ok_or_else(|| {
-                format!(
-                    "codegen error: method name not interned (method: {})",
-                    method_name_str
-                )
-            })?;
+        let method_id = self.ctx.analyzed.query().method_name_id(mc.method);
 
         // Look up method resolution to determine naming convention and return type
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
@@ -162,9 +156,8 @@ impl Cg<'_, '_, '_> {
                         .analyzed
                         .entity_registry
                         .type_by_name(interface_type.name_id)
-                    && let Some(method_name_id) =
-                        method_name_id(self.ctx.analyzed, self.ctx.interner, mc.method)
                 {
+                    let method_name_id = self.ctx.analyzed.query().method_name_id(mc.method);
                     return self.interface_dispatch_call_args_by_type_def_id(
                         &obj,
                         &mc.args,

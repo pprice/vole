@@ -182,7 +182,8 @@ pub(crate) fn module_name_id(
         .name_id(module_id, &[sym], module_interner)
 }
 
-pub(crate) fn method_name_id(
+/// Look up a method NameId by Symbol with explicit interner (for cross-interner usage)
+pub(crate) fn method_name_id_with_interner(
     analyzed: &AnalyzedProgram,
     interner: &Interner,
     name: Symbol,
