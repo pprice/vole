@@ -11,9 +11,21 @@ record Animal {
     species: string,
 }
 
-// Function with structural constraint
+// Implement greet method for Person
+implement Person {
+    func greet() -> string {
+        return "Hello, " + self.name
+    }
+}
+
+// Function with structural field constraint
 func getName<T: { name: string }>(x: T) -> string {
     return x.name
+}
+
+// Function with structural method constraint
+func callGreet<T: { func greet() -> string }>(x: T) -> string {
+    return x.greet()
 }
 
 tests {
@@ -28,6 +40,12 @@ tests {
         let a = Animal { name: "Fluffy", species: "Cat" }
         let result = getName(a)
         assert(result == "Fluffy")
+    }
+
+    test "generics::constraints::method constraint" {
+        let p = Person { name: "Bob", age: 25 }
+        let result = callGreet(p)
+        assert(result == "Hello, Bob")
     }
 }
 
