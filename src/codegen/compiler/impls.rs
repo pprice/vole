@@ -309,18 +309,17 @@ impl Compiler<'_> {
                 self.func_registry.set_func_id(func_key, func_id);
 
                 // Register in static_method_infos for codegen lookup
-                if let Some(type_def_id) = type_def_id {
-                    if let Some(method_name_id) =
+                if let Some(type_def_id) = type_def_id
+                    && let Some(method_name_id) =
                         method_name_id_with_interner(self.analyzed, interner, method.name)
-                    {
-                        self.static_method_infos.insert(
-                            (type_def_id, method_name_id),
-                            MethodInfo {
-                                func_key,
-                                return_type,
-                            },
-                        );
-                    }
+                {
+                    self.static_method_infos.insert(
+                        (type_def_id, method_name_id),
+                        MethodInfo {
+                            func_key,
+                            return_type,
+                        },
+                    );
                 }
             }
         }

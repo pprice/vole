@@ -225,7 +225,6 @@ impl Analyzer {
 
             // Register and validate implements list
             if !class.implements.is_empty() {
-                let mut iface_names = Vec::new();
                 for iface_type in &class.implements {
                     if let Some(iface_sym) = interface_base_name(iface_type) {
                         // Validate interface exists via EntityRegistry using resolver
@@ -247,7 +246,6 @@ impl Analyzer {
                                 class.span,
                             );
                         }
-                        iface_names.push(iface_sym);
                     } else {
                         self.add_error(
                             SemanticError::UnknownInterface {
@@ -434,7 +432,6 @@ impl Analyzer {
 
             // Register and validate implements list (for generic classes)
             if !class.implements.is_empty() {
-                let mut iface_names = Vec::new();
                 for iface_type in &class.implements {
                     if let Some(iface_sym) = interface_base_name(iface_type) {
                         // Validate interface exists via EntityRegistry using resolver
@@ -456,7 +453,6 @@ impl Analyzer {
                                 class.span,
                             );
                         }
-                        iface_names.push(iface_sym);
                     } else {
                         self.add_error(
                             SemanticError::UnknownInterface {
@@ -516,7 +512,6 @@ impl Analyzer {
 
             // Register and validate implements list
             if !record.implements.is_empty() {
-                let mut iface_names = Vec::new();
                 for iface_type in &record.implements {
                     if let Some(iface_sym) = interface_base_name(iface_type) {
                         // Validate interface exists via EntityRegistry using resolver
@@ -538,7 +533,6 @@ impl Analyzer {
                                 record.span,
                             );
                         }
-                        iface_names.push(iface_sym);
                     } else {
                         self.add_error(
                             SemanticError::UnknownInterface {
@@ -728,7 +722,6 @@ impl Analyzer {
 
             // Register and validate implements list (for generic records)
             if !record.implements.is_empty() {
-                let mut iface_names = Vec::new();
                 for iface_type in &record.implements {
                     if let Some(iface_sym) = interface_base_name(iface_type) {
                         // Validate interface exists via EntityRegistry using resolver
@@ -750,7 +743,6 @@ impl Analyzer {
                                 record.span,
                             );
                         }
-                        iface_names.push(iface_sym);
                     } else {
                         self.add_error(
                             SemanticError::UnknownInterface {

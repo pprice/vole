@@ -1007,8 +1007,8 @@ mod tests {
 
     #[test]
     fn test_f64_equals() {
-        assert_eq!(f64_equals(3.14, 3.14), 1);
-        assert_eq!(f64_equals(3.14, 3.15), 0);
+        assert_eq!(f64_equals(3.25, 3.25), 1);
+        assert_eq!(f64_equals(3.25, 3.26), 0);
         assert_eq!(f64_equals(0.0, -0.0), 1); // IEEE 754: +0 == -0
     }
 
@@ -1029,9 +1029,9 @@ mod tests {
 
     #[test]
     fn test_f64_to_string() {
-        let s = f64_to_string(3.14);
+        let s = f64_to_string(3.25);
         unsafe {
-            assert_eq!((*s).as_str(), "3.14");
+            assert_eq!((*s).as_str(), "3.25");
             RcString::dec_ref(s as *mut RcString);
         }
     }

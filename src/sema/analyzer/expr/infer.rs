@@ -400,7 +400,10 @@ impl Analyzer {
                 // Check if we're inside a generator function (Iterator<T> return type)
                 let Some(element_type) = self.current_generator_element_type.clone() else {
                     // Not a generator - report error with actual return type
-                    let return_type = self.current_function_return.clone().unwrap();
+                    let return_type = self
+                        .current_function_return
+                        .clone()
+                        .expect("yield only valid inside function");
                     let found = self.type_display(&return_type);
                     self.add_error(
                         SemanticError::YieldInNonGenerator {

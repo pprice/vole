@@ -200,7 +200,7 @@ mod tests {
         let type_id = TypeId(array_name);
 
         registry.register_method(
-            type_id.clone(),
+            type_id,
             method_id,
             MethodImpl {
                 trait_name: Some(sym(2)), // "Sized"
@@ -274,7 +274,7 @@ mod tests {
         let type_id = TypeId(string_name);
 
         registry.register_method(
-            type_id.clone(),
+            type_id,
             length_id,
             MethodImpl {
                 trait_name: None,
@@ -289,7 +289,7 @@ mod tests {
         );
 
         registry.register_method(
-            type_id.clone(),
+            type_id,
             to_upper_id,
             MethodImpl {
                 trait_name: None,

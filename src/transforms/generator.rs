@@ -1005,8 +1005,8 @@ mod tests {
         let interner = parser.into_interner();
 
         if let Decl::Function(func) = &program.declarations[0] {
-            let mut interner_copy = interner.clone();
-            let transformer = GeneratorTransformer::new(&mut interner_copy);
+            let mut interner = interner;
+            let transformer = GeneratorTransformer::new(&mut interner);
             assert!(transformer.contains_yield(&func.body));
         }
     }
@@ -1023,8 +1023,8 @@ mod tests {
         let interner = parser.into_interner();
 
         if let Decl::Function(func) = &program.declarations[0] {
-            let mut interner_copy = interner.clone();
-            let transformer = GeneratorTransformer::new(&mut interner_copy);
+            let mut interner = interner;
+            let transformer = GeneratorTransformer::new(&mut interner);
             assert!(!transformer.contains_yield(&func.body));
         }
     }

@@ -223,7 +223,9 @@ impl Analyzer {
                 .iter()
                 .position(|n| *n == field_init.name)
             {
-                let actual_ty = field_value_types.get(&field_init.name).unwrap();
+                let actual_ty = field_value_types
+                    .get(&field_init.name)
+                    .expect("field was validated in type check phase");
                 let expected_ty = &concrete_field_types[idx];
 
                 if !self.types_compatible(actual_ty, expected_ty, interner) {
@@ -350,7 +352,9 @@ impl Analyzer {
                 .iter()
                 .position(|n| *n == field_init.name)
             {
-                let actual_ty = field_value_types.get(&field_init.name).unwrap();
+                let actual_ty = field_value_types
+                    .get(&field_init.name)
+                    .expect("field was validated in type check phase");
                 let expected_ty = &concrete_field_types[idx];
 
                 if !self.types_compatible(actual_ty, expected_ty, interner) {

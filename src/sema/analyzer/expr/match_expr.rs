@@ -147,7 +147,9 @@ impl Analyzer {
                         SemanticError::MatchArmTypeMismatch {
                             expected: expected_str,
                             found,
-                            first_arm: first_arm_span.unwrap().into(),
+                            first_arm: first_arm_span
+                                .expect("first_arm_span set when result_type became Some")
+                                .into(),
                             span: arm.body.span.into(),
                         },
                         arm.body.span,

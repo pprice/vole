@@ -300,7 +300,7 @@ mod tests {
         assert_eq!(math_abs(-5.0), 5.0);
         assert_eq!(math_abs(0.0), 0.0);
         assert_eq!(math_abs(-0.0), 0.0);
-        assert!((math_abs(-3.14) - 3.14).abs() < 1e-10);
+        assert!((math_abs(-3.25) - 3.25).abs() < 1e-10);
     }
 
     // ==========================================================================

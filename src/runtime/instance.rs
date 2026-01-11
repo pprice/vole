@@ -48,12 +48,20 @@ impl RcInstance {
         Layout::from_size_align(size, align).unwrap()
     }
 
-    /// Get pointer to the fields array
+    /// Get pointer to the fields array (mutable)
     ///
     /// # Safety
     /// The pointer must point to a valid, properly initialized `RcInstance`.
     pub unsafe fn fields_ptr(ptr: *mut Self) -> *mut u64 {
         unsafe { (ptr as *mut u8).add(size_of::<RcInstance>()) as *mut u64 }
+    }
+
+    /// Get pointer to the fields array (const)
+    ///
+    /// # Safety
+    /// The pointer must point to a valid, properly initialized `RcInstance`.
+    unsafe fn fields_ptr_const(ptr: *const Self) -> *const u64 {
+        unsafe { (ptr as *const u8).add(size_of::<RcInstance>()) as *const u64 }
     }
 
     /// Get field value by slot index
@@ -63,7 +71,7 @@ impl RcInstance {
     /// and `slot` must be less than `field_count`.
     pub unsafe fn get_field(ptr: *const Self, slot: usize) -> u64 {
         unsafe {
-            let fields = Self::fields_ptr(ptr as *mut Self);
+            let fields = Self::fields_ptr_const(ptr);
             *fields.add(slot)
         }
     }

@@ -1042,28 +1042,24 @@ impl Analyzer {
                     if let Some(class_name_id) =
                         self.name_table
                             .name_id(self.current_module, &[class.name], interner)
+                        && let Some(type_def_id) = self.entity_registry.type_by_name(class_name_id)
                     {
-                        if let Some(type_def_id) = self.entity_registry.type_by_name(class_name_id)
+                        let type_methods = self.get_type_method_signatures(class.name, interner);
+                        for interface_id in
+                            self.entity_registry.get_implemented_interfaces(type_def_id)
                         {
-                            let type_methods =
-                                self.get_type_method_signatures(class.name, interner);
-                            for interface_id in
-                                self.entity_registry.get_implemented_interfaces(type_def_id)
+                            let interface_def = self.entity_registry.get_type(interface_id);
+                            if let Some(iface_name_str) =
+                                self.name_table.last_segment_str(interface_def.name_id)
+                                && let Some(iface_name) = interner.lookup(&iface_name_str)
                             {
-                                let interface_def = self.entity_registry.get_type(interface_id);
-                                if let Some(iface_name_str) =
-                                    self.name_table.last_segment_str(interface_def.name_id)
-                                {
-                                    if let Some(iface_name) = interner.lookup(&iface_name_str) {
-                                        self.validate_interface_satisfaction(
-                                            class.name,
-                                            iface_name,
-                                            &type_methods,
-                                            class.span,
-                                            interner,
-                                        );
-                                    }
-                                }
+                                self.validate_interface_satisfaction(
+                                    class.name,
+                                    iface_name,
+                                    &type_methods,
+                                    class.span,
+                                    interner,
+                                );
                             }
                         }
                     }
@@ -1082,28 +1078,24 @@ impl Analyzer {
                     if let Some(record_name_id) =
                         self.name_table
                             .name_id(self.current_module, &[record.name], interner)
+                        && let Some(type_def_id) = self.entity_registry.type_by_name(record_name_id)
                     {
-                        if let Some(type_def_id) = self.entity_registry.type_by_name(record_name_id)
+                        let type_methods = self.get_type_method_signatures(record.name, interner);
+                        for interface_id in
+                            self.entity_registry.get_implemented_interfaces(type_def_id)
                         {
-                            let type_methods =
-                                self.get_type_method_signatures(record.name, interner);
-                            for interface_id in
-                                self.entity_registry.get_implemented_interfaces(type_def_id)
+                            let interface_def = self.entity_registry.get_type(interface_id);
+                            if let Some(iface_name_str) =
+                                self.name_table.last_segment_str(interface_def.name_id)
+                                && let Some(iface_name) = interner.lookup(&iface_name_str)
                             {
-                                let interface_def = self.entity_registry.get_type(interface_id);
-                                if let Some(iface_name_str) =
-                                    self.name_table.last_segment_str(interface_def.name_id)
-                                {
-                                    if let Some(iface_name) = interner.lookup(&iface_name_str) {
-                                        self.validate_interface_satisfaction(
-                                            record.name,
-                                            iface_name,
-                                            &type_methods,
-                                            record.span,
-                                            interner,
-                                        );
-                                    }
-                                }
+                                self.validate_interface_satisfaction(
+                                    record.name,
+                                    iface_name,
+                                    &type_methods,
+                                    record.span,
+                                    interner,
+                                );
                             }
                         }
                     }
@@ -1454,7 +1446,11 @@ impl Analyzer {
             return Ok(());
         }
 
-        let func_type = self.functions.get(&func.name).cloned().unwrap();
+        let func_type = self
+            .functions
+            .get(&func.name)
+            .cloned()
+            .expect("function registered in signature collection pass");
         let return_type = *func_type.return_type.clone();
         self.current_function_return = Some(return_type.clone());
 

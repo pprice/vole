@@ -144,18 +144,18 @@ impl SharedBuffer {
 
     fn into_bytes(self) -> Vec<u8> {
         Arc::try_unwrap(self.0)
-            .map(|m| m.into_inner().unwrap())
-            .unwrap_or_else(|arc| arc.lock().unwrap().clone())
+            .map(|m| m.into_inner().unwrap_or_else(|e| e.into_inner()))
+            .unwrap_or_else(|arc| arc.lock().unwrap_or_else(|e| e.into_inner()).clone())
     }
 }
 
 impl Write for SharedBuffer {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().write(buf)
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).write(buf)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.0.lock().unwrap().flush()
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).flush()
     }
 }
 

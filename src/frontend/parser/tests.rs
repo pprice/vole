@@ -12,10 +12,10 @@ fn parse_int_literal() {
 
 #[test]
 fn parse_float_literal() {
-    let mut parser = Parser::new("3.14");
+    let mut parser = Parser::new("3.25");
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
-        ExprKind::FloatLiteral(n) => assert!((n - 3.14).abs() < 0.001),
+        ExprKind::FloatLiteral(n) => assert!((n - 3.25).abs() < 0.001),
         _ => panic!("expected float literal"),
     }
 }

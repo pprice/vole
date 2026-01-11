@@ -297,9 +297,9 @@ mod tests {
 
     #[test]
     fn test_f64_to_string() {
-        let result = vole_f64_to_string(3.14);
+        let result = vole_f64_to_string(3.25);
         unsafe {
-            assert!((*result).as_str().starts_with("3.14"));
+            assert!((*result).as_str().starts_with("3.25"));
             // Safety: result is valid from vole_f64_to_string
             RcString::dec_ref(result);
         }
