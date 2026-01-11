@@ -1306,33 +1306,54 @@ impl Cg<'_, '_, '_> {
                     type_name, fields, ..
                 } => {
                     // Record destructuring in match - TypeName { x, y } or { x, y }
-                    let pattern_check = if let Some(name) = type_name {
+                    let (pattern_check, pattern_type) = if let Some(name) = type_name {
                         // Typed record pattern - need to check type first
                         if let Some(type_meta) = self.ctx.type_metadata.get(name) {
-                            self.compile_type_pattern_check(&scrutinee, &type_meta.vole_type)?
+                            (
+                                self.compile_type_pattern_check(&scrutinee, &type_meta.vole_type)?,
+                                Some(type_meta.vole_type.clone()),
+                            )
                         } else {
                             // Unknown type name - never matches
-                            Some(self.builder.ins().iconst(types::I8, 0))
+                            (Some(self.builder.ins().iconst(types::I8, 0)), None)
                         }
                     } else {
                         // Untyped record pattern - always matches (type checked in sema)
-                        None
+                        (None, None)
                     };
+
+                    // Determine the value to extract fields from
+                    // If scrutinee is a union, extract the payload first
+                    let (field_source, field_source_type) =
+                        if let Type::Union(_) = &scrutinee.vole_type {
+                            if let Some(ref pt) = pattern_type {
+                                // Extract payload from union at offset 8
+                                let payload = self.builder.ins().load(
+                                    types::I64,
+                                    MemFlags::new(),
+                                    scrutinee.value,
+                                    8,
+                                );
+                                (payload, pt.clone())
+                            } else {
+                                (scrutinee.value, scrutinee.vole_type.clone())
+                            }
+                        } else {
+                            (scrutinee.value, scrutinee.vole_type.clone())
+                        };
 
                     // Extract and bind fields
                     for field_pattern in fields {
                         let field_name = self.ctx.interner.resolve(field_pattern.field_name);
 
-                        // Get slot and type for this field
+                        // Get slot and type for this field using the correct type
                         let (slot, field_type) =
-                            get_field_slot_and_type(&scrutinee.vole_type, field_name, self.ctx)?;
+                            get_field_slot_and_type(&field_source_type, field_name, self.ctx)?;
 
                         // Use runtime to get field value
                         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-                        let result_raw = self.call_runtime(
-                            RuntimeFn::InstanceGetField,
-                            &[scrutinee.value, slot_val],
-                        )?;
+                        let result_raw = self
+                            .call_runtime(RuntimeFn::InstanceGetField, &[field_source, slot_val])?;
 
                         // Convert the raw i64 result to the proper type
                         let (result_val, cranelift_ty) =
@@ -1411,10 +1432,22 @@ impl Cg<'_, '_, '_> {
         self.builder.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);
 
-        let result = self.builder.block_params(merge_block)[0];
+        let merged_value = self.builder.block_params(merge_block)[0];
+
+        // Reduce back to the correct type based on result_vole_type
+        let target_cty = type_to_cranelift(&result_vole_type, self.ctx.pointer_type);
+        let (result, result_ty) = if target_cty != types::I64 && target_cty.is_int() {
+            (
+                self.builder.ins().ireduce(target_cty, merged_value),
+                target_cty,
+            )
+        } else {
+            (merged_value, types::I64)
+        };
+
         Ok(CompiledValue {
             value: result,
-            ty: types::I64,
+            ty: result_ty,
             vole_type: result_vole_type,
         })
     }
