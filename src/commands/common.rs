@@ -10,13 +10,13 @@ use std::collections::HashMap;
 use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext};
 use crate::errors::{LexerError, render_to_stderr, render_to_writer};
-use crate::frontend::{AstPrinter, Interner, NodeId, ParseError, Parser, Symbol, ast::Program};
+use crate::frontend::{AstPrinter, Interner, ParseError, Parser, Symbol, ast::Program};
 use crate::identity::NameTable;
 use crate::runtime::set_stdout_capture;
-use crate::sema::generic::{GenericFuncDef, MonomorphCache, MonomorphKey};
+use crate::sema::generic::{GenericFuncDef, MonomorphCache};
 use crate::sema::{
-    Analyzer, EntityRegistry, ImplementRegistry, MethodResolutions, Type, TypeError, TypeTable,
-    TypeWarning, WellKnownTypes,
+    Analyzer, EntityRegistry, ExpressionData, ImplementRegistry, TypeError, TypeTable, TypeWarning,
+    WellKnownTypes,
 };
 use crate::transforms;
 
@@ -24,20 +24,15 @@ use crate::transforms;
 pub struct AnalyzedProgram {
     pub program: Program,
     pub interner: Interner,
-    pub expr_types: HashMap<NodeId, Type>,
-    pub method_resolutions: MethodResolutions,
+    /// All expression-level metadata (types, method resolutions, generic calls)
+    pub expression_data: ExpressionData,
     pub implement_registry: ImplementRegistry,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: HashMap<String, (Program, Interner)>,
-    /// Expression types for module programs (keyed by module path -> NodeId -> Type)
-    /// Stored separately since NodeIds are per-program
-    pub module_expr_types: HashMap<String, HashMap<NodeId, Type>>,
     /// Generic function definitions (for monomorphization)
     pub generic_functions: HashMap<Symbol, GenericFuncDef>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: MonomorphCache,
-    /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
-    pub generic_calls: HashMap<NodeId, MonomorphKey>,
     /// External function info by string name (module path and native name) for prelude functions
     pub external_func_info: HashMap<String, crate::sema::implement_registry::ExternalMethodInfo>,
     /// Qualified name interner for printable identities
@@ -182,14 +177,11 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
     }
 
     let (
-        expr_types,
-        method_resolutions,
+        expression_data,
         implement_registry,
         module_programs,
-        module_expr_types,
         generic_functions,
         monomorph_cache,
-        generic_calls,
         external_func_info,
         name_table,
         type_table,
@@ -199,14 +191,11 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
     Ok(AnalyzedProgram {
         program,
         interner,
-        expr_types,
-        method_resolutions,
+        expression_data,
         implement_registry,
         module_programs,
-        module_expr_types,
         generic_functions,
         monomorph_cache,
-        generic_calls,
         external_func_info,
         name_table,
         type_table,
@@ -385,14 +374,11 @@ pub fn run_captured<W: Write + Send + 'static>(
         return Err(());
     }
     let (
-        expr_types,
-        method_resolutions,
+        expression_data,
         implement_registry,
         module_programs,
-        module_expr_types,
         generic_functions,
         monomorph_cache,
-        generic_calls,
         external_func_info,
         name_table,
         type_table,
@@ -403,14 +389,11 @@ pub fn run_captured<W: Write + Send + 'static>(
     let analyzed = AnalyzedProgram {
         program,
         interner,
-        expr_types,
-        method_resolutions,
+        expression_data,
         implement_registry,
         module_programs,
-        module_expr_types,
         generic_functions,
         monomorph_cache,
-        generic_calls,
         external_func_info,
         name_table,
         type_table,

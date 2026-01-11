@@ -29,8 +29,8 @@ impl Cg<'_, '_, '_> {
         let vole_type = self
             .ctx
             .analyzed
-            .expr_types
-            .get(&expr.id)
+            .expression_data
+            .get_type(expr.id)
             .cloned()
             .unwrap_or_else(|| metadata.vole_type.clone());
         let field_slots = metadata.field_slots.clone();

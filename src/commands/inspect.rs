@@ -103,14 +103,11 @@ pub fn inspect_files(
                     continue;
                 }
                 let (
-                    expr_types,
-                    method_resolutions,
+                    expression_data,
                     implement_registry,
                     module_programs,
-                    module_expr_types,
                     generic_functions,
                     monomorph_cache,
-                    generic_calls,
                     external_func_info,
                     name_table,
                     type_table,
@@ -122,14 +119,11 @@ pub fn inspect_files(
                 let analyzed = AnalyzedProgram {
                     program,
                     interner,
-                    expr_types,
-                    method_resolutions,
+                    expression_data,
                     implement_registry,
                     module_programs,
-                    module_expr_types,
                     generic_functions,
                     monomorph_cache,
-                    generic_calls,
                     external_func_info,
                     name_table,
                     type_table,

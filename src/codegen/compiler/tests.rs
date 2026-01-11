@@ -3,11 +3,11 @@ use crate::commands::common::AnalyzedProgram;
 use crate::frontend::Parser;
 use crate::identity::NameTable;
 use crate::sema::EntityRegistry;
+use crate::sema::ExpressionData;
 use crate::sema::ImplementRegistry;
 use crate::sema::TypeTable;
 use crate::sema::WellKnownTypes;
 use crate::sema::generic::MonomorphCache;
-use crate::sema::resolution::MethodResolutions;
 
 fn compile_and_run(source: &str) -> i64 {
     let mut parser = Parser::new(source);
@@ -17,14 +17,11 @@ fn compile_and_run(source: &str) -> i64 {
     let analyzed = AnalyzedProgram {
         program,
         interner,
-        expr_types: HashMap::new(),
-        module_expr_types: HashMap::new(),
-        method_resolutions: MethodResolutions::new(),
+        expression_data: ExpressionData::new(),
         implement_registry: ImplementRegistry::new(),
         module_programs: HashMap::new(),
         generic_functions: HashMap::new(),
         monomorph_cache: MonomorphCache::new(),
-        generic_calls: HashMap::new(),
         external_func_info: HashMap::new(),
         name_table: NameTable::new(),
         type_table: TypeTable::new(),

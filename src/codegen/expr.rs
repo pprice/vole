@@ -93,8 +93,8 @@ impl Cg<'_, '_, '_> {
                 let vole_type = self
                     .ctx
                     .analyzed
-                    .expr_types
-                    .get(&expr.id)
+                    .expression_data
+                    .get_type(expr.id)
                     .cloned()
                     .unwrap_or(Type::Unknown);
                 Ok(CompiledValue {
@@ -390,8 +390,8 @@ impl Cg<'_, '_, '_> {
         let inferred_type = self
             .ctx
             .analyzed
-            .expr_types
-            .get(&expr.id)
+            .expression_data
+            .get_type(expr.id)
             .cloned()
             .unwrap_or(Type::Unknown);
 
@@ -485,8 +485,8 @@ impl Cg<'_, '_, '_> {
         let elem_type = self
             .ctx
             .analyzed
-            .expr_types
-            .get(&element.id)
+            .expression_data
+            .get_type(element.id)
             .cloned()
             .unwrap_or(Type::Unknown);
 
@@ -522,8 +522,8 @@ impl Cg<'_, '_, '_> {
         let vole_type = self
             .ctx
             .analyzed
-            .expr_types
-            .get(&expr.id)
+            .expression_data
+            .get_type(expr.id)
             .cloned()
             .unwrap_or(Type::FixedArray {
                 element: Box::new(elem_type),
@@ -1581,8 +1581,8 @@ impl Cg<'_, '_, '_> {
         let result_type = self
             .ctx
             .analyzed
-            .expr_types
-            .get(&if_expr.then_branch.id)
+            .expression_data
+            .get_type(if_expr.then_branch.id)
             .cloned()
             .unwrap_or(Type::Void);
 

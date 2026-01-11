@@ -152,14 +152,11 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
     let (
-        expr_types,
-        method_resolutions,
+        expression_data,
         implement_registry,
         module_programs,
-        module_expr_types,
         generic_functions,
         monomorph_cache,
-        generic_calls,
         external_func_info,
         name_table,
         type_table,
@@ -171,14 +168,11 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
     let analyzed = AnalyzedProgram {
         program,
         interner,
-        expr_types,
-        method_resolutions,
+        expression_data,
         implement_registry,
         module_programs,
-        module_expr_types,
         generic_functions,
         monomorph_cache,
-        generic_calls,
         external_func_info,
         name_table,
         type_table,
@@ -235,14 +229,11 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
     let (
-        expr_types,
-        method_resolutions,
+        expression_data,
         implement_registry,
         module_programs,
-        module_expr_types,
         generic_functions,
         monomorph_cache,
-        generic_calls,
         external_func_info,
         name_table,
         type_table,
@@ -253,14 +244,11 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     let analyzed = AnalyzedProgram {
         program,
         interner,
-        expr_types,
-        method_resolutions,
+        expression_data,
         implement_registry,
         module_programs,
-        module_expr_types,
         generic_functions,
         monomorph_cache,
-        generic_calls,
         external_func_info,
         name_table,
         type_table,

@@ -562,7 +562,6 @@ impl Compiler<'_> {
                     current_function_return_type: Some(return_type.clone()),
                     native_registry: &self.native_registry,
                     current_module: module_path,
-                    generic_calls: &self.analyzed.generic_calls,
                     monomorph_cache: &self.analyzed.monomorph_cache,
                 };
                 let terminated =
@@ -729,7 +728,6 @@ impl Compiler<'_> {
                 current_function_return_type: method_return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.analyzed.generic_calls,
                 monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
@@ -883,7 +881,6 @@ impl Compiler<'_> {
                 current_function_return_type: None, // Methods don't use raise statements yet
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.analyzed.generic_calls,
                 monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
@@ -1040,7 +1037,6 @@ impl Compiler<'_> {
                 current_function_return_type: None, // Default methods don't use raise statements yet
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.analyzed.generic_calls,
                 monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated =
@@ -1179,7 +1175,6 @@ impl Compiler<'_> {
                     current_function_return_type: None,
                     native_registry: &self.native_registry,
                     current_module: None,
-                    generic_calls: &self.analyzed.generic_calls,
                     monomorph_cache: &self.analyzed.monomorph_cache,
                 };
                 let terminated =

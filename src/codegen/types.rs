@@ -16,7 +16,7 @@ use crate::identity::{self, ModuleId, NameId, NameTable, NamerLookup, Resolver, 
 use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
-use crate::sema::generic::{MonomorphCache, MonomorphKey, substitute_type};
+use crate::sema::generic::{MonomorphCache, substitute_type};
 use crate::sema::{EntityRegistry, FunctionType, Type, TypeId, TypeKey};
 
 /// Compiled value with its type
@@ -119,8 +119,6 @@ pub(crate) struct CompileCtx<'a> {
     /// Current module path when compiling module code (e.g., "std:math")
     /// None when compiling main program code
     pub current_module: Option<&'a str>,
-    /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
-    pub generic_calls: &'a HashMap<NodeId, MonomorphKey>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: &'a MonomorphCache,
 }
@@ -145,13 +143,13 @@ impl<'a> CompileCtx<'a> {
         // When compiling module code, NodeIds are relative to that module's program
         // Use module-specific expr_types if available
         if let Some(module_path) = self.current_module
-            && let Some(module_types) = self.analyzed.module_expr_types.get(module_path)
+            && let Some(module_types) = self.analyzed.expression_data.module_types(module_path)
             && let Some(ty) = module_types.get(node_id)
         {
             return Some(ty);
         }
         // Fall back to main program expr_types
-        self.analyzed.expr_types.get(node_id)
+        self.analyzed.expression_data.types().get(node_id)
     }
 }
 

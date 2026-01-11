@@ -31,7 +31,7 @@ impl Cg<'_, '_, '_> {
             type_def_id,
             method_id,
             func_type,
-        }) = self.ctx.analyzed.method_resolutions.get(expr_id)
+        }) = self.ctx.analyzed.expression_data.get_method(expr_id)
         {
             return self.static_method_call(*type_def_id, *method_id, func_type.clone(), mc);
         }
@@ -57,7 +57,7 @@ impl Cg<'_, '_, '_> {
                 .module_path(module_type.module_id);
             let name_id = module_name_id(self.ctx.analyzed, module_type.module_id, method_name_str);
             // Get the method resolution
-            let resolution = self.ctx.analyzed.method_resolutions.get(expr_id);
+            let resolution = self.ctx.analyzed.expression_data.get_method(expr_id);
             if let Some(ResolvedMethod::Implemented {
                 external_info,
                 func_type,
@@ -134,7 +134,7 @@ impl Cg<'_, '_, '_> {
 
         // Look up method resolution to determine naming convention and return type
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
-        let resolution = self.ctx.analyzed.method_resolutions.get(expr_id);
+        let resolution = self.ctx.analyzed.expression_data.get_method(expr_id);
 
         tracing::debug!(
             obj_type = ?obj.vole_type,

@@ -12,6 +12,7 @@ use crate::frontend::*;
 use crate::identity::{self, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
 use crate::module::ModuleLoader;
 use crate::sema::EntityRegistry;
+use crate::sema::ExpressionData;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
     GenericFuncDef, MonomorphCache, MonomorphInstance, MonomorphKey, TypeParamInfo, TypeParamScope,
@@ -665,29 +666,29 @@ impl Analyzer {
     pub fn into_analysis_results(
         self,
     ) -> (
-        HashMap<NodeId, Type>,
-        MethodResolutions,
+        ExpressionData,
         ImplementRegistry,
         HashMap<String, (Program, Interner)>,
-        HashMap<String, HashMap<NodeId, Type>>,
         HashMap<Symbol, GenericFuncDef>,
         MonomorphCache,
-        HashMap<NodeId, MonomorphKey>,
         HashMap<String, ExternalMethodInfo>,
         NameTable,
         TypeTable,
         WellKnownTypes,
         EntityRegistry,
     ) {
-        (
+        let expression_data = ExpressionData::from_analysis(
             self.expr_types,
-            self.method_resolutions,
+            self.method_resolutions.into_inner(),
+            self.generic_calls,
+            self.module_expr_types,
+        );
+        (
+            expression_data,
             self.implement_registry,
             self.module_programs,
-            self.module_expr_types,
             self.generic_functions,
             self.monomorph_cache,
-            self.generic_calls,
             self.external_func_info,
             self.name_table,
             self.type_table,

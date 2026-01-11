@@ -30,6 +30,21 @@ impl ExpressionData {
         Self::default()
     }
 
+    /// Create ExpressionData from analysis results
+    pub fn from_analysis(
+        types: HashMap<NodeId, Type>,
+        methods: HashMap<NodeId, ResolvedMethod>,
+        generics: HashMap<NodeId, MonomorphKey>,
+        module_types: HashMap<String, HashMap<NodeId, Type>>,
+    ) -> Self {
+        Self {
+            types,
+            methods,
+            generics,
+            module_types,
+        }
+    }
+
     /// Get the type of an expression by its NodeId
     pub fn get_type(&self, node: NodeId) -> Option<&Type> {
         self.types.get(&node)

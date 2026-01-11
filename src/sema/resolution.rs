@@ -92,6 +92,11 @@ impl MethodResolutions {
     pub fn get(&self, node_id: NodeId) -> Option<&ResolvedMethod> {
         self.resolutions.get(&node_id)
     }
+
+    /// Consume and return the inner HashMap
+    pub fn into_inner(self) -> HashMap<NodeId, ResolvedMethod> {
+        self.resolutions
+    }
 }
 
 #[cfg(test)]

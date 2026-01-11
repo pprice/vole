@@ -404,7 +404,6 @@ impl Compiler<'_> {
                 current_function_return_type: return_type,
                 native_registry: &self.native_registry,
                 current_module: Some(module_path), // We're compiling module code
-                generic_calls: &self.analyzed.generic_calls,
                 monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
@@ -535,7 +534,6 @@ impl Compiler<'_> {
                 current_function_return_type: return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.analyzed.generic_calls,
                 monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
@@ -612,8 +610,7 @@ impl Compiler<'_> {
                     current_function_return_type: None, // Tests don't have a declared return type
                     native_registry: &self.native_registry,
                     current_module: None,
-                    generic_calls: &self.analyzed.generic_calls,
-                    monomorph_cache: &self.analyzed.monomorph_cache,
+                        monomorph_cache: &self.analyzed.monomorph_cache,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -829,7 +826,6 @@ impl Compiler<'_> {
                 current_function_return_type: return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.analyzed.generic_calls,
                 monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
@@ -895,7 +891,6 @@ impl Compiler<'_> {
                 current_function_return_type: None, // Tests don't have a declared return type
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.analyzed.generic_calls,
                 monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
@@ -1094,7 +1089,6 @@ impl Compiler<'_> {
                 current_function_return_type: return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
-                generic_calls: &self.analyzed.generic_calls,
                 monomorph_cache: &self.analyzed.monomorph_cache,
             };
             let terminated = compile_block(
