@@ -72,14 +72,12 @@ impl TypeWarning {
 pub struct AnalysisOutput {
     /// All expression-level metadata (types, method resolutions, generic calls)
     pub expression_data: ExpressionData,
-    /// Methods added via implement blocks
+    /// Methods added via implement blocks (includes external_func_info)
     pub implement_registry: ImplementRegistry,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     pub module_programs: HashMap<String, (Program, Interner)>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: MonomorphCache,
-    /// External function info by string name (module path and native name)
-    pub external_func_info: HashMap<String, ExternalMethodInfo>,
     /// Fully-qualified name interner for printable identities
     pub name_table: NameTable,
     /// Opaque type identities for named types
@@ -95,8 +93,6 @@ pub struct Analyzer {
     functions: HashMap<Symbol, FunctionType>,
     /// Functions registered by string name (for prelude functions that cross interner boundaries)
     functions_by_name: HashMap<String, FunctionType>,
-    /// External function info by string name (module path and native name)
-    pub external_func_info: HashMap<String, ExternalMethodInfo>,
     globals: HashMap<Symbol, Type>,
     current_function_return: Option<Type>,
     /// Current function's error type (if fallible)
@@ -163,7 +159,6 @@ impl Analyzer {
             scope: Scope::new(),
             functions: HashMap::new(),
             functions_by_name: HashMap::new(),
-            external_func_info: HashMap::new(),
             globals: HashMap::new(),
             current_function_return: None,
             current_function_error_type: None,
@@ -417,7 +412,6 @@ impl Analyzer {
             scope: Scope::new(),
             functions: HashMap::new(),
             functions_by_name: HashMap::new(),
-            external_func_info: HashMap::new(),
             globals: HashMap::new(),
             current_function_return: None,
             current_function_error_type: None,
@@ -464,10 +458,7 @@ impl Analyzer {
             for (name, func_type) in sub_analyzer.functions_by_name {
                 self.functions_by_name.insert(name, func_type);
             }
-            // Merge external function info (module path and native name)
-            for (name, info) in sub_analyzer.external_func_info {
-                self.external_func_info.insert(name, info);
-            }
+            // Note: external_func_info is now part of implement_registry and merged via merge() above
             // Keep name/type tables in sync with prelude interned ids.
             self.name_table = sub_analyzer.name_table;
             self.type_table = sub_analyzer.type_table;
@@ -692,7 +683,6 @@ impl Analyzer {
             implement_registry: self.implement_registry,
             module_programs: self.module_programs,
             monomorph_cache: self.monomorph_cache,
-            external_func_info: self.external_func_info,
             name_table: self.name_table,
             type_table: self.type_table,
             well_known: self.well_known,

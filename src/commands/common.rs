@@ -26,13 +26,12 @@ pub struct AnalyzedProgram {
     pub interner: Interner,
     /// All expression-level metadata (types, method resolutions, generic calls)
     pub expression_data: ExpressionData,
+    /// Methods added via implement blocks (includes external_func_info)
     pub implement_registry: ImplementRegistry,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: HashMap<String, (Program, Interner)>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: MonomorphCache,
-    /// External function info by string name (module path and native name) for prelude functions
-    pub external_func_info: HashMap<String, crate::sema::implement_registry::ExternalMethodInfo>,
     /// Qualified name interner for printable identities
     pub name_table: NameTable,
     /// Opaque type identities for named types
@@ -53,7 +52,6 @@ impl AnalyzedProgram {
             implement_registry: output.implement_registry,
             module_programs: output.module_programs,
             monomorph_cache: output.monomorph_cache,
-            external_func_info: output.external_func_info,
             name_table: output.name_table,
             type_table: output.type_table,
             well_known: output.well_known,

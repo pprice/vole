@@ -21,7 +21,6 @@ fn compile_and_run(source: &str) -> i64 {
         implement_registry: ImplementRegistry::new(),
         module_programs: HashMap::new(),
         monomorph_cache: MonomorphCache::new(),
-        external_func_info: HashMap::new(),
         name_table: NameTable::new(),
         type_table: TypeTable::new(),
         well_known: WellKnownTypes::new(),

@@ -120,11 +120,23 @@ pub struct MethodImpl {
 #[derive(Debug, Default)]
 pub struct ImplementRegistry {
     methods: HashMap<MethodKey, MethodImpl>,
+    /// External function info by string name (module path and native name) for prelude functions
+    external_func_info: HashMap<String, ExternalMethodInfo>,
 }
 
 impl ImplementRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Register external function info for a function name
+    pub fn register_external_func(&mut self, name: String, info: ExternalMethodInfo) {
+        self.external_func_info.insert(name, info);
+    }
+
+    /// Look up external function info by name
+    pub fn get_external_func(&self, name: &str) -> Option<&ExternalMethodInfo> {
+        self.external_func_info.get(name)
     }
 
     /// Register a method for a type
@@ -158,6 +170,9 @@ impl ImplementRegistry {
     pub fn merge(&mut self, other: &ImplementRegistry) {
         for (key, method) in &other.methods {
             self.methods.insert(key.clone(), method.clone());
+        }
+        for (name, info) in &other.external_func_info {
+            self.external_func_info.insert(name.clone(), info.clone());
         }
     }
 }

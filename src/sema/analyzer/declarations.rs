@@ -1490,7 +1490,7 @@ impl Analyzer {
 
             // Store the external info (module path and native name) for codegen
             let native_name = func.native_name.clone().unwrap_or_else(|| name_str.clone());
-            self.external_func_info.insert(
+            self.implement_registry.register_external_func(
                 name_str,
                 ExternalMethodInfo {
                     module_path: ext_block.module_path.clone(),
