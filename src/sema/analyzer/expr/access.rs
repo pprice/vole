@@ -211,12 +211,9 @@ impl Analyzer {
                 if let Type::Function(func_type) = export_type {
                     // Check argument count
                     if method_call.args.len() != func_type.params.len() {
-                        self.add_error(
-                            SemanticError::WrongArgumentCount {
-                                expected: func_type.params.len(),
-                                found: method_call.args.len(),
-                                span: expr.span.into(),
-                            },
+                        self.add_wrong_arg_count(
+                            func_type.params.len(),
+                            method_call.args.len(),
                             expr.span,
                         );
                     }
@@ -225,16 +222,7 @@ impl Analyzer {
                     for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                         let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
                         if !self.types_compatible(&arg_ty, param_ty, interner) {
-                            let expected = self.type_display(param_ty);
-                            let found = self.type_display(&arg_ty);
-                            self.add_error(
-                                SemanticError::TypeMismatch {
-                                    expected,
-                                    found,
-                                    span: arg.span.into(),
-                                },
-                                arg.span,
-                            );
+                            self.add_type_mismatch(param_ty, &arg_ty, arg.span);
                         }
                     }
 
@@ -325,12 +313,9 @@ impl Analyzer {
 
             // Check argument count
             if method_call.args.len() != func_type.params.len() {
-                self.add_error(
-                    SemanticError::WrongArgumentCount {
-                        expected: func_type.params.len(),
-                        found: method_call.args.len(),
-                        span: expr.span.into(),
-                    },
+                self.add_wrong_arg_count(
+                    func_type.params.len(),
+                    method_call.args.len(),
                     expr.span,
                 );
             }
@@ -339,16 +324,7 @@ impl Analyzer {
             for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                 let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
                 if !self.types_compatible(&arg_ty, param_ty, interner) {
-                    let expected = self.type_display(param_ty);
-                    let found = self.type_display(&arg_ty);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected,
-                            found,
-                            span: arg.span.into(),
-                        },
-                        arg.span,
-                    );
+                    self.add_type_mismatch(param_ty, &arg_ty, arg.span);
                 }
             }
 
@@ -436,30 +412,14 @@ impl Analyzer {
 
             // Check argument count
             if args.len() != func_type.params.len() {
-                self.add_error(
-                    SemanticError::WrongArgumentCount {
-                        expected: func_type.params.len(),
-                        found: args.len(),
-                        span: expr.span.into(),
-                    },
-                    expr.span,
-                );
+                self.add_wrong_arg_count(func_type.params.len(), args.len(), expr.span);
             }
 
             // Check argument types
             for (arg, param_ty) in args.iter().zip(func_type.params.iter()) {
                 let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
                 if !self.types_compatible(&arg_ty, param_ty, interner) {
-                    let expected = self.type_display(param_ty);
-                    let found = self.type_display(&arg_ty);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected,
-                            found,
-                            span: arg.span.into(),
-                        },
-                        arg.span,
-                    );
+                    self.add_type_mismatch(param_ty, &arg_ty, arg.span);
                 }
             }
 

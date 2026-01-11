@@ -21,14 +21,7 @@ impl Analyzer {
     ) -> Result<(), Vec<TypeError>> {
         // Check argument count
         if args.len() != param_types.len() {
-            self.add_error(
-                SemanticError::WrongArgumentCount {
-                    expected: param_types.len(),
-                    found: args.len(),
-                    span: call_span.into(),
-                },
-                call_span,
-            );
+            self.add_wrong_arg_count(param_types.len(), args.len(), call_span);
         }
 
         // Check each argument against its expected parameter type
@@ -51,16 +44,7 @@ impl Analyzer {
             };
 
             if !self.types_compatible(&arg_ty, param_ty, interner) {
-                let expected = self.type_display(param_ty);
-                let found = self.type_display(&arg_ty);
-                self.add_error(
-                    SemanticError::TypeMismatch {
-                        expected,
-                        found,
-                        span: arg.span.into(),
-                    },
-                    arg.span,
-                );
+                self.add_type_mismatch(param_ty, &arg_ty, arg.span);
             }
         }
 

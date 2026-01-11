@@ -229,16 +229,7 @@ impl Analyzer {
                 let expected_ty = &concrete_field_types[idx];
 
                 if !self.types_compatible(actual_ty, expected_ty, interner) {
-                    let expected = self.type_display(expected_ty);
-                    let found = self.type_display(actual_ty);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected,
-                            found,
-                            span: field_init.value.span.into(),
-                        },
-                        field_init.value.span,
-                    );
+                    self.add_type_mismatch(expected_ty, actual_ty, field_init.value.span);
                 }
             } else {
                 self.add_error(
@@ -358,16 +349,7 @@ impl Analyzer {
                 let expected_ty = &concrete_field_types[idx];
 
                 if !self.types_compatible(actual_ty, expected_ty, interner) {
-                    let expected = self.type_display(expected_ty);
-                    let found = self.type_display(actual_ty);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected,
-                            found,
-                            span: field_init.value.span.into(),
-                        },
-                        field_init.value.span,
-                    );
+                    self.add_type_mismatch(expected_ty, actual_ty, field_init.value.span);
                 }
             } else {
                 self.add_error(

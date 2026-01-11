@@ -115,14 +115,7 @@ impl Analyzer {
 
                 // Check arg count
                 if call.args.len() != concrete_params.len() {
-                    self.add_error(
-                        SemanticError::WrongArgumentCount {
-                            expected: concrete_params.len(),
-                            found: call.args.len(),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
+                    self.add_wrong_arg_count(concrete_params.len(), call.args.len(), expr.span);
                     return Ok(Type::Error);
                 }
 
@@ -131,16 +124,7 @@ impl Analyzer {
                 {
                     let arg_ty = &arg_types[i];
                     if !types_compatible_core(arg_ty, expected) {
-                        let expected = self.type_display(expected);
-                        let found = self.type_display(arg_ty);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected,
-                                found,
-                                span: arg.span.into(),
-                            },
-                            arg.span,
-                        );
+                        self.add_type_mismatch(expected, arg_ty, arg.span);
                     }
                 }
 

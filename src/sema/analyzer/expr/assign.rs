@@ -159,16 +159,7 @@ impl Analyzer {
 
         // Check type compatibility (for non-literal types that couldn't be inferred)
         if target_valid && !self.types_compatible(&value_ty, &target_ty, interner) {
-            let expected = self.type_display(&target_ty);
-            let found = self.type_display(&value_ty);
-            self.add_error(
-                SemanticError::TypeMismatch {
-                    expected,
-                    found,
-                    span: assign.value.span.into(),
-                },
-                assign.value.span,
-            );
+            self.add_type_mismatch(&target_ty, &value_ty, assign.value.span);
         }
 
         Ok(target_ty)

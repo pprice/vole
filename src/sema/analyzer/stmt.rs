@@ -467,16 +467,7 @@ impl Analyzer {
             if let Some(field) = error_info.fields.iter().find(|f| f.name == field_init_name) {
                 // Known field - check type compatibility
                 if !types_compatible_core(&value_type, &field.ty) {
-                    let expected = self.type_display(&field.ty);
-                    let found = self.type_display(&value_type);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected,
-                            found,
-                            span: field_init.span.into(),
-                        },
-                        field_init.span,
-                    );
+                    self.add_type_mismatch(&field.ty, &value_type, field_init.span);
                 }
             } else {
                 // Unknown field

@@ -477,16 +477,7 @@ impl Analyzer {
 
                 // Both branches must have compatible types
                 if !self.types_compatible(&then_ty, &else_ty, interner) {
-                    let expected = self.type_display(&then_ty);
-                    let found = self.type_display(&else_ty);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected,
-                            found,
-                            span: else_branch.span.into(),
-                        },
-                        else_branch.span,
-                    );
+                    self.add_type_mismatch(&then_ty, &else_ty, else_branch.span);
                     Ok(Type::Error)
                 } else {
                     Ok(then_ty)

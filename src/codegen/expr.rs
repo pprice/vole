@@ -813,6 +813,33 @@ impl Cg<'_, '_, '_> {
         }
     }
 
+    /// Compile an equality check for two values based on their Vole type.
+    /// Handles string comparison via runtime function, f64 via fcmp, and integers via icmp.
+    fn compile_equality_check(
+        &mut self,
+        ty: &Type,
+        left: Value,
+        right: Value,
+    ) -> Result<Value, String> {
+        Ok(match ty {
+            Type::String => {
+                if self
+                    .ctx
+                    .func_registry
+                    .runtime_key(RuntimeFn::StringEq)
+                    .and_then(|key| self.ctx.func_registry.func_id(key))
+                    .is_some()
+                {
+                    self.call_runtime(RuntimeFn::StringEq, &[left, right])?
+                } else {
+                    self.builder.ins().icmp(IntCC::Equal, left, right)
+                }
+            }
+            Type::F64 => self.builder.ins().fcmp(FloatCC::Equal, left, right),
+            _ => self.builder.ins().icmp(IntCC::Equal, left, right),
+        })
+    }
+
     /// Compile a null coalesce expression (??)
     fn null_coalesce(
         &mut self,
@@ -1012,37 +1039,11 @@ impl Cg<'_, '_, '_> {
                     arm_variables = std::mem::replace(&mut *self.vars, saved_vars);
 
                     // Use Vole type (not Cranelift type) to determine comparison method
-                    let cmp = match &scrutinee.vole_type {
-                        Type::String => {
-                            if self
-                                .ctx
-                                .func_registry
-                                .runtime_key(RuntimeFn::StringEq)
-                                .and_then(|key| self.ctx.func_registry.func_id(key))
-                                .is_some()
-                            {
-                                self.call_runtime(
-                                    RuntimeFn::StringEq,
-                                    &[scrutinee.value, lit_val.value],
-                                )?
-                            } else {
-                                self.builder.ins().icmp(
-                                    IntCC::Equal,
-                                    scrutinee.value,
-                                    lit_val.value,
-                                )
-                            }
-                        }
-                        Type::F64 => {
-                            self.builder
-                                .ins()
-                                .fcmp(FloatCC::Equal, scrutinee.value, lit_val.value)
-                        }
-                        _ => self
-                            .builder
-                            .ins()
-                            .icmp(IntCC::Equal, scrutinee.value, lit_val.value),
-                    };
+                    let cmp = self.compile_equality_check(
+                        &scrutinee.vole_type,
+                        scrutinee.value,
+                        lit_val.value,
+                    )?;
                     Some(cmp)
                 }
                 Pattern::Val { name, .. } => {
@@ -1053,32 +1054,8 @@ impl Cg<'_, '_, '_> {
                         .clone();
                     let var_val = self.builder.use_var(var);
 
-                    let cmp = match var_type {
-                        Type::F64 => {
-                            self.builder
-                                .ins()
-                                .fcmp(FloatCC::Equal, scrutinee.value, var_val)
-                        }
-                        Type::String => {
-                            if self
-                                .ctx
-                                .func_registry
-                                .runtime_key(RuntimeFn::StringEq)
-                                .and_then(|key| self.ctx.func_registry.func_id(key))
-                                .is_some()
-                            {
-                                self.call_runtime(RuntimeFn::StringEq, &[scrutinee.value, var_val])?
-                            } else {
-                                self.builder
-                                    .ins()
-                                    .icmp(IntCC::Equal, scrutinee.value, var_val)
-                            }
-                        }
-                        _ => self
-                            .builder
-                            .ins()
-                            .icmp(IntCC::Equal, scrutinee.value, var_val),
-                    };
+                    let cmp =
+                        self.compile_equality_check(&var_type, scrutinee.value, var_val)?;
                     Some(cmp)
                 }
                 Pattern::Success { inner, .. } => {

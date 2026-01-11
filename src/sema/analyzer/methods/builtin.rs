@@ -20,28 +20,14 @@ impl Analyzer {
             // Array.length() -> i64
             (Type::Array(_), "length") => {
                 if !args.is_empty() {
-                    self.add_error(
-                        SemanticError::WrongArgumentCount {
-                            expected: 0,
-                            found: args.len(),
-                            span: args[0].span.into(),
-                        },
-                        args[0].span,
-                    );
+                    self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
                 Some(method_type(vec![], Type::I64))
             }
             // Array.iter() -> Iterator<T>
             (Type::Array(elem_ty), "iter") => {
                 if !args.is_empty() {
-                    self.add_error(
-                        SemanticError::WrongArgumentCount {
-                            expected: 0,
-                            found: args.len(),
-                            span: args[0].span.into(),
-                        },
-                        args[0].span,
-                    );
+                    self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
                 let iter_type =
                     self.interface_type("Iterator", vec![*elem_ty.clone()], interner)?;
@@ -50,14 +36,7 @@ impl Analyzer {
             // Range.iter() -> Iterator<i64>
             (Type::Range, "iter") => {
                 if !args.is_empty() {
-                    self.add_error(
-                        SemanticError::WrongArgumentCount {
-                            expected: 0,
-                            found: args.len(),
-                            span: args[0].span.into(),
-                        },
-                        args[0].span,
-                    );
+                    self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
                 let iter_type = self.interface_type("Iterator", vec![Type::I64], interner)?;
                 Some(method_type(vec![], iter_type))
@@ -65,28 +44,14 @@ impl Analyzer {
             // String.length() -> i64
             (Type::String, "length") => {
                 if !args.is_empty() {
-                    self.add_error(
-                        SemanticError::WrongArgumentCount {
-                            expected: 0,
-                            found: args.len(),
-                            span: args[0].span.into(),
-                        },
-                        args[0].span,
-                    );
+                    self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
                 Some(method_type(vec![], Type::I64))
             }
             // String.iter() -> Iterator<string>
             (Type::String, "iter") => {
                 if !args.is_empty() {
-                    self.add_error(
-                        SemanticError::WrongArgumentCount {
-                            expected: 0,
-                            found: args.len(),
-                            span: args[0].span.into(),
-                        },
-                        args[0].span,
-                    );
+                    self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
                 let iter_type = self.interface_type("Iterator", vec![Type::String], interner)?;
                 Some(method_type(vec![], iter_type))

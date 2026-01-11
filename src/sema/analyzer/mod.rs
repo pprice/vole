@@ -564,6 +564,32 @@ impl Analyzer {
         );
     }
 
+    /// Helper to add a type mismatch error with two Type arguments
+    pub(crate) fn add_type_mismatch(&mut self, expected: &Type, found: &Type, span: Span) {
+        let expected_str = self.type_display(expected);
+        let found_str = self.type_display(found);
+        self.add_error(
+            SemanticError::TypeMismatch {
+                expected: expected_str,
+                found: found_str,
+                span: span.into(),
+            },
+            span,
+        );
+    }
+
+    /// Helper to add a wrong argument count error
+    pub(crate) fn add_wrong_arg_count(&mut self, expected: usize, found: usize, span: Span) {
+        self.add_error(
+            SemanticError::WrongArgumentCount {
+                expected,
+                found,
+                span: span.into(),
+            },
+            span,
+        );
+    }
+
     /// Infer type parameters from argument types.
     /// Given type params like [T, U], param types like [T, [U]], and arg types like [i64, [string]],
     /// returns a map {NameId -> Type} for substitution.
