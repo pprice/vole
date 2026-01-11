@@ -20,24 +20,20 @@ impl Analyzer {
                 let generic_info = generic_info.clone();
                 let name_id = type_def.name_id;
                 return match type_def.kind {
-                    TypeDefKind::Record => {
-                        self.check_generic_struct_literal(
-                            expr,
-                            struct_lit,
-                            name_id,
-                            &generic_info,
-                            interner,
-                        )
-                    }
-                    TypeDefKind::Class => {
-                        self.check_generic_class_literal(
-                            expr,
-                            struct_lit,
-                            name_id,
-                            &generic_info,
-                            interner,
-                        )
-                    }
+                    TypeDefKind::Record => self.check_generic_struct_literal(
+                        expr,
+                        struct_lit,
+                        name_id,
+                        &generic_info,
+                        interner,
+                    ),
+                    TypeDefKind::Class => self.check_generic_class_literal(
+                        expr,
+                        struct_lit,
+                        name_id,
+                        &generic_info,
+                        interner,
+                    ),
                     _ => Ok(Type::Error),
                 };
             }
@@ -189,7 +185,12 @@ impl Analyzer {
             self.infer_type_params(&generic_info.type_params, &expected_types, &actual_types);
 
         // Check type parameter constraints
-        self.check_type_param_constraints(&generic_info.type_params, &inferred, expr.span, interner);
+        self.check_type_param_constraints(
+            &generic_info.type_params,
+            &inferred,
+            expr.span,
+            interner,
+        );
 
         // Substitute inferred types into field types to get concrete field types
         let concrete_field_types: Vec<Type> = generic_info
@@ -311,7 +312,12 @@ impl Analyzer {
             self.infer_type_params(&generic_info.type_params, &expected_types, &actual_types);
 
         // Check type parameter constraints
-        self.check_type_param_constraints(&generic_info.type_params, &inferred, expr.span, interner);
+        self.check_type_param_constraints(
+            &generic_info.type_params,
+            &inferred,
+            expr.span,
+            interner,
+        );
 
         // Substitute inferred types into field types to get concrete field types
         let concrete_field_types: Vec<Type> = generic_info

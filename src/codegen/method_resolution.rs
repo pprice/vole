@@ -148,22 +148,25 @@ pub(crate) fn resolve_method_target(
                         return_type: (*func_type.return_type).clone(),
                     });
                 }
-                let type_id = TypeId::from_type(input.object_type, &input.analyzed.entity_registry.type_table)
-                    .ok_or_else(|| {
-                        CodegenError::not_found(
-                            "method",
-                            format!(
-                                "{} on {}",
-                                input.method_name_str,
-                                crate::codegen::types::display_type(
-                                    input.analyzed,
-                                    &input.analyzed.interner,
-                                    input.object_type
-                                )
-                            ),
-                        )
-                        .to_string()
-                    })?;
+                let type_id = TypeId::from_type(
+                    input.object_type,
+                    &input.analyzed.entity_registry.type_table,
+                )
+                .ok_or_else(|| {
+                    CodegenError::not_found(
+                        "method",
+                        format!(
+                            "{} on {}",
+                            input.method_name_str,
+                            crate::codegen::types::display_type(
+                                input.analyzed,
+                                &input.analyzed.interner,
+                                input.object_type
+                            )
+                        ),
+                    )
+                    .to_string()
+                })?;
                 let method_info = lookup_impl_method(type_id)?;
                 Ok(MethodTarget::Implemented {
                     method_info,
@@ -256,8 +259,10 @@ pub(crate) fn resolve_method_target(
     }
 
     // Try implement block methods
-    if let Some(type_id) = TypeId::from_type(input.object_type, &input.analyzed.entity_registry.type_table)
-        && let Ok(method_info) = lookup_impl_method(type_id)
+    if let Some(type_id) = TypeId::from_type(
+        input.object_type,
+        &input.analyzed.entity_registry.type_table,
+    ) && let Ok(method_info) = lookup_impl_method(type_id)
     {
         let return_type = method_info.return_type.clone();
         return Ok(MethodTarget::Implemented {

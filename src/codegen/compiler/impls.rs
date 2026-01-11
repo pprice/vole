@@ -7,7 +7,7 @@ use super::{Compiler, ControlFlowCtx};
 use crate::codegen::stmt::compile_block;
 use crate::codegen::types::{
     CompileCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_full,
-    type_to_cranelift,
+    resolve_type_expr_query, type_to_cranelift,
 };
 use crate::frontend::{
     ClassDecl, FuncDecl, ImplementBlock, InterfaceMethod, Interner, RecordDecl, StaticsBlock,
@@ -346,14 +346,15 @@ impl Compiler<'_> {
                 .get(sym)
                 .map(|m| m.vole_type.clone())
                 .unwrap_or(Type::Error),
-            _ => resolve_type_expr_full(
-                &impl_block.target_type,
-                &self.analyzed.entity_registry,
-                &self.type_metadata,
-                &self.analyzed.interner,
-                &self.analyzed.name_table,
-                module_id,
-            ),
+            _ => {
+                let query = self.query();
+                resolve_type_expr_query(
+                    &impl_block.target_type,
+                    &query,
+                    &self.type_metadata,
+                    module_id,
+                )
+            }
         };
         let type_sym = self.get_type_name_symbol(&impl_block.target_type);
         let func_module = if matches!(&impl_block.target_type, TypeExpr::Primitive(_)) {
@@ -363,11 +364,10 @@ impl Compiler<'_> {
         };
 
         for method in &impl_block.methods {
-            let method_key = self.type_id_from_type(&self_vole_type)
-                .and_then(|type_id| {
-                    let method_id = self.method_name_id(method.name);
-                    self.impl_method_infos.get(&(type_id, method_id)).cloned()
-                });
+            let method_key = self.type_id_from_type(&self_vole_type).and_then(|type_id| {
+                let method_id = self.method_name_id(method.name);
+                self.impl_method_infos.get(&(type_id, method_id)).cloned()
+            });
             self.compile_implement_method(
                 method,
                 &type_name,
@@ -607,18 +607,12 @@ impl Compiler<'_> {
         let self_type = self_vole_type.clone();
 
         // Helper to resolve param type, substituting Self with the concrete type
+        let query = self.query();
         let resolve_param_type = |ty: &TypeExpr| -> Type {
             if matches!(ty, TypeExpr::SelfType) {
                 self_type.clone()
             } else {
-                resolve_type_expr_full(
-                    ty,
-                    &self.analyzed.entity_registry,
-                    &self.type_metadata,
-                    &self.analyzed.interner,
-                    &self.analyzed.name_table,
-                    module_id,
-                )
+                resolve_type_expr_query(ty, &query, &self.type_metadata, module_id)
             }
         };
 
@@ -638,6 +632,13 @@ impl Compiler<'_> {
         // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
+
+        // Compute the method's return type for proper union wrapping
+        let query = self.query();
+        let method_return_type = method
+            .return_type
+            .as_ref()
+            .map(|t| resolve_type_expr_query(t, &query, &self.type_metadata, module_id));
 
         // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -670,18 +671,6 @@ impl Compiler<'_> {
                 builder.def_var(var, *val);
                 variables.insert(*name, (var, vole_ty.clone()));
             }
-
-            // Compute the method's return type for proper union wrapping
-            let method_return_type = method.return_type.as_ref().map(|t| {
-                resolve_type_expr_full(
-                    t,
-                    &self.analyzed.entity_registry,
-                    &self.type_metadata,
-                    &self.analyzed.interner,
-                    &self.analyzed.name_table,
-                    module_id,
-                )
-            });
 
             // Compile method body
             let mut cf_ctx = ControlFlowCtx::new();
@@ -743,9 +732,7 @@ impl Compiler<'_> {
 
         let func_key = metadata
             .method_infos
-            .get(
-                &self.method_name_id(method.name),
-            )
+            .get(&self.method_name_id(method.name))
             .map(|info| info.func_key)
             .ok_or_else(|| {
                 format!(
@@ -766,18 +753,12 @@ impl Compiler<'_> {
         let self_vole_type = metadata.vole_type.clone();
 
         // Helper to resolve param type, substituting Self with the concrete type
+        let query = self.query();
         let resolve_param_type = |ty: &TypeExpr| -> Type {
             if matches!(ty, TypeExpr::SelfType) {
                 self_vole_type.clone()
             } else {
-                resolve_type_expr_full(
-                    ty,
-                    &self.analyzed.entity_registry,
-                    &self.type_metadata,
-                    &self.analyzed.interner,
-                    &self.analyzed.name_table,
-                    module_id,
-                )
+                resolve_type_expr_query(ty, &query, &self.type_metadata, module_id)
             }
         };
 
@@ -887,9 +868,7 @@ impl Compiler<'_> {
 
         let func_key = metadata
             .method_infos
-            .get(
-                &self.method_name_id(method.name),
-            )
+            .get(&self.method_name_id(method.name))
             .map(|info| info.func_key)
             .ok_or_else(|| {
                 format!(
@@ -910,18 +889,12 @@ impl Compiler<'_> {
         let self_vole_type = metadata.vole_type.clone();
 
         // Helper to resolve param type, substituting Self with the concrete type
+        let query = self.query();
         let resolve_param_type = |ty: &TypeExpr| -> Type {
             if matches!(ty, TypeExpr::SelfType) {
                 self_vole_type.clone()
             } else {
-                resolve_type_expr_full(
-                    ty,
-                    &self.analyzed.entity_registry,
-                    &self.type_metadata,
-                    &self.analyzed.interner,
-                    &self.analyzed.name_table,
-                    module_id,
-                )
+                resolve_type_expr_query(ty, &query, &self.type_metadata, module_id)
             }
         };
 
@@ -1052,19 +1025,13 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             // Collect param types
+            let query = self.query();
             let param_types: Vec<types::Type> = method
                 .params
                 .iter()
                 .map(|p| {
                     type_to_cranelift(
-                        &resolve_type_expr_full(
-                            &p.ty,
-                            &self.analyzed.entity_registry,
-                            &self.type_metadata,
-                            &self.analyzed.interner,
-                            &self.analyzed.name_table,
-                            module_id,
-                        ),
+                        &resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id),
                         self.pointer_type,
                     )
                 })
@@ -1072,16 +1039,7 @@ impl Compiler<'_> {
             let param_vole_types: Vec<Type> = method
                 .params
                 .iter()
-                .map(|p| {
-                    resolve_type_expr_full(
-                        &p.ty,
-                        &self.analyzed.entity_registry,
-                        &self.type_metadata,
-                        &self.analyzed.interner,
-                        &self.analyzed.name_table,
-                        module_id,
-                    )
-                })
+                .map(|p| resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id))
                 .collect();
             let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 

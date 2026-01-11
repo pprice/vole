@@ -71,13 +71,14 @@ impl InterfaceVtableRegistry {
                 is_closure: func_type.is_closure,
             },
             _ => {
-                let type_id = TypeId::from_type(concrete_type, &ctx.analyzed.entity_registry.type_table)
-                    .ok_or_else(|| {
-                        format!(
-                            "cannot build vtable for unsupported type {:?}",
-                            concrete_type
-                        )
-                    })?;
+                let type_id =
+                    TypeId::from_type(concrete_type, &ctx.analyzed.entity_registry.type_table)
+                        .ok_or_else(|| {
+                            format!(
+                                "cannot build vtable for unsupported type {:?}",
+                                concrete_type
+                            )
+                        })?;
                 InterfaceConcreteType::TypeId(type_id)
             }
         };
@@ -674,12 +675,13 @@ fn resolve_vtable_target(
         });
     }
 
-    let type_id = TypeId::from_type(concrete_type, &ctx.analyzed.entity_registry.type_table).ok_or_else(|| {
-        format!(
-            "cannot resolve interface method {} on {:?}",
-            method_name_str, concrete_type
-        )
-    })?;
+    let type_id = TypeId::from_type(concrete_type, &ctx.analyzed.entity_registry.type_table)
+        .ok_or_else(|| {
+            format!(
+                "cannot resolve interface method {} on {:?}",
+                method_name_str, concrete_type
+            )
+        })?;
     // Use string-based lookup for cross-interner safety (method_def is from stdlib interner)
     // This may return None for default interface methods that aren't explicitly implemented
     let method_name_id = method_name_id_by_str(ctx.analyzed, ctx.interner, &method_name_str);

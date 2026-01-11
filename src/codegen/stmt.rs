@@ -512,9 +512,12 @@ impl Cg<'_, '_, '_> {
     /// Check if a type is an Iterator<T> type
     fn is_iterator_type(&self, ty: &Type) -> bool {
         match ty {
-            Type::Interface(iface) => {
-                self.ctx.analyzed.name_table.well_known.is_iterator(iface.name_id)
-            }
+            Type::Interface(iface) => self
+                .ctx
+                .analyzed
+                .name_table
+                .well_known
+                .is_iterator(iface.name_id),
             Type::GenericInstance { def, .. } => {
                 self.ctx.analyzed.name_table.well_known.is_iterator(*def)
             }

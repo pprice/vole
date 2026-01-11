@@ -223,7 +223,11 @@ impl Analyzer {
         let mut method_id = |name: &str| namer.intern_raw(builtin_module, &[name]);
         let method_len = method_id("length");
         let method_iter = method_id("iter");
-        let array_id = self.entity_registry.type_table.array_name_id().map(TypeId::from_name_id);
+        let array_id = self
+            .entity_registry
+            .type_table
+            .array_name_id()
+            .map(TypeId::from_name_id);
         let string_id = self
             .entity_registry
             .type_table
@@ -332,10 +336,14 @@ impl Analyzer {
             } else {
                 namer.intern_raw(builtin_module, &[prim.name()])
             };
-            self.entity_registry.type_table.register_primitive_name(prim, name_id);
+            self.entity_registry
+                .type_table
+                .register_primitive_name(prim, name_id);
         }
         let array_name = namer.intern_raw(builtin_module, &["array"]);
-        self.entity_registry.type_table.register_array_name(array_name);
+        self.entity_registry
+            .type_table
+            .register_array_name(array_name);
     }
 
     /// Load prelude files (trait definitions and primitive type implementations)
@@ -471,7 +479,9 @@ impl Analyzer {
     }
 
     fn type_display(&mut self, ty: &Type) -> String {
-        self.entity_registry.type_table.display_type(ty, &mut self.name_table)
+        self.entity_registry
+            .type_table
+            .display_type(ty, &mut self.name_table)
     }
 
     fn type_display_pair(&mut self, left: &Type, right: &Type) -> String {
@@ -923,7 +933,9 @@ impl Analyzer {
             type_key,
         );
         // Also in type_table for display
-        self.entity_registry.type_table.insert_named(aliased_type, name_id);
+        self.entity_registry
+            .type_table
+            .insert_named(aliased_type, name_id);
     }
 
     /// Process global let declarations (type check and add to scope)
@@ -1027,11 +1039,10 @@ impl Analyzer {
                         }
                     }
                     // Validate interface satisfaction via EntityRegistry
-                    if let Some(class_name_id) = self.name_table.name_id(
-                        self.current_module,
-                        &[class.name],
-                        interner,
-                    ) {
+                    if let Some(class_name_id) =
+                        self.name_table
+                            .name_id(self.current_module, &[class.name], interner)
+                    {
                         if let Some(type_def_id) = self.entity_registry.type_by_name(class_name_id)
                         {
                             let type_methods =
@@ -1068,11 +1079,10 @@ impl Analyzer {
                         }
                     }
                     // Validate interface satisfaction via EntityRegistry
-                    if let Some(record_name_id) = self.name_table.name_id(
-                        self.current_module,
-                        &[record.name],
-                        interner,
-                    ) {
+                    if let Some(record_name_id) =
+                        self.name_table
+                            .name_id(self.current_module, &[record.name], interner)
+                    {
                         if let Some(type_def_id) = self.entity_registry.type_by_name(record_name_id)
                         {
                             let type_methods =
@@ -1187,7 +1197,8 @@ impl Analyzer {
         );
 
         // Set error info for lookup
-        self.entity_registry.set_error_info(entity_type_id, error_info);
+        self.entity_registry
+            .set_error_info(entity_type_id, error_info);
 
         // Register fields in EntityRegistry
         let builtin_module = self.name_table.builtin_module();
@@ -1491,7 +1502,11 @@ impl Analyzer {
         let Type::Interface(interface_type) = ty else {
             return None;
         };
-        if !self.name_table.well_known.is_iterator(interface_type.name_id) {
+        if !self
+            .name_table
+            .well_known
+            .is_iterator(interface_type.name_id)
+        {
             return None;
         }
         interface_type.type_args.first().cloned()

@@ -185,8 +185,7 @@ impl Compiler<'_> {
                         let display_name = self.func_registry.display(func_key);
                         let func_id = self.jit.declare_function(&display_name, &sig);
                         self.func_registry.set_func_id(func_key, func_id);
-                        let method_id =
-                            self.query().method_name_id(method.name);
+                        let method_id = self.query().method_name_id(method.name);
                         method_infos.insert(
                             method_id,
                             MethodInfo {
@@ -349,12 +348,12 @@ impl Compiler<'_> {
                             .map(|t| self.resolve_type_with_metadata(t))
                             .unwrap_or(Type::Void);
                         let sig = self.create_interface_method_signature(method);
-                        let func_key = self.intern_func(func_module_id, &[record.name, method.name]);
+                        let func_key =
+                            self.intern_func(func_module_id, &[record.name, method.name]);
                         let display_name = self.func_registry.display(func_key);
                         let func_id = self.jit.declare_function(&display_name, &sig);
                         self.func_registry.set_func_id(func_key, func_id);
-                        let method_id =
-                            self.query().method_name_id(method.name);
+                        let method_id = self.query().method_name_id(method.name);
                         method_infos.insert(
                             method_id,
                             MethodInfo {

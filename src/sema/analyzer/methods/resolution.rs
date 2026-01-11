@@ -188,24 +188,51 @@ impl Analyzer {
         let type_def_id = match object_type {
             Type::Class(c) => self.entity_registry.type_by_name(c.name_id),
             Type::Record(r) => self.entity_registry.type_by_name(r.name_id),
-            Type::I8 => self.entity_registry.type_by_name(self.name_table.primitives.i8),
-            Type::I16 => self.entity_registry.type_by_name(self.name_table.primitives.i16),
-            Type::I32 => self.entity_registry.type_by_name(self.name_table.primitives.i32),
-            Type::I64 => self.entity_registry.type_by_name(self.name_table.primitives.i64),
-            Type::I128 => self.entity_registry.type_by_name(self.name_table.primitives.i128),
-            Type::U8 => self.entity_registry.type_by_name(self.name_table.primitives.u8),
-            Type::U16 => self.entity_registry.type_by_name(self.name_table.primitives.u16),
-            Type::U32 => self.entity_registry.type_by_name(self.name_table.primitives.u32),
-            Type::U64 => self.entity_registry.type_by_name(self.name_table.primitives.u64),
-            Type::F32 => self.entity_registry.type_by_name(self.name_table.primitives.f32),
-            Type::F64 => self.entity_registry.type_by_name(self.name_table.primitives.f64),
-            Type::Bool => self.entity_registry.type_by_name(self.name_table.primitives.bool),
-            Type::String => self.entity_registry.type_by_name(self.name_table.primitives.string),
+            Type::I8 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.i8),
+            Type::I16 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.i16),
+            Type::I32 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.i32),
+            Type::I64 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.i64),
+            Type::I128 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.i128),
+            Type::U8 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.u8),
+            Type::U16 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.u16),
+            Type::U32 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.u32),
+            Type::U64 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.u64),
+            Type::F32 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.f32),
+            Type::F64 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.f64),
+            Type::Bool => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.bool),
+            Type::String => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.string),
             _ => None,
         };
         if let Some(type_def_id) = type_def_id
-            && let Some((interface_id, binding)) =
-                self.entity_registry.find_method_binding_with_interface(type_def_id, method_name_id)
+            && let Some((interface_id, binding)) = self
+                .entity_registry
+                .find_method_binding_with_interface(type_def_id, method_name_id)
         {
             // Get trait name Symbol from interface_id
             let trait_name = self

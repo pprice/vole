@@ -57,6 +57,7 @@ impl AnalyzedProgram {
             &self.name_table,
             &self.interner,
             &self.implement_registry,
+            &self.module_programs,
         )
     }
 }

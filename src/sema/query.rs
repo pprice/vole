@@ -4,12 +4,14 @@
 //! method resolutions, and other analysis results. It encapsulates
 //! access to multiple internal structures, reducing boilerplate in codegen.
 
-use crate::frontend::{Interner, NodeId, Symbol};
+use std::collections::HashMap;
+
+use crate::frontend::{Interner, NodeId, Program, Symbol};
 use crate::identity::{MethodId, ModuleId, NameId, NameTable, TypeDefId};
 use crate::sema::entity_defs::{Implementation, MethodDef, TypeDef};
 use crate::sema::entity_registry::EntityRegistry;
 use crate::sema::expression_data::ExpressionData;
-use crate::sema::generic::{MonomorphInstance, MonomorphKey};
+use crate::sema::generic::{MonomorphCache, MonomorphInstance, MonomorphKey};
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_table::TypeKey;
@@ -37,6 +39,7 @@ pub struct ProgramQuery<'a> {
     name_table: &'a NameTable,
     interner: &'a Interner,
     implement_registry: &'a ImplementRegistry,
+    module_programs: &'a HashMap<String, (Program, Interner)>,
 }
 
 impl<'a> ProgramQuery<'a> {
@@ -47,6 +50,7 @@ impl<'a> ProgramQuery<'a> {
         name_table: &'a NameTable,
         interner: &'a Interner,
         implement_registry: &'a ImplementRegistry,
+        module_programs: &'a HashMap<String, (Program, Interner)>,
     ) -> Self {
         Self {
             registry,
@@ -54,6 +58,7 @@ impl<'a> ProgramQuery<'a> {
             name_table,
             interner,
             implement_registry,
+            module_programs,
         }
     }
 
@@ -106,9 +111,9 @@ impl<'a> ProgramQuery<'a> {
 
     /// Look up a Symbol in the interner (panics if not found)
     pub fn symbol(&self, s: &str) -> Symbol {
-        self.interner.lookup(s).unwrap_or_else(|| {
-            panic!("symbol '{}' not interned", s)
-        })
+        self.interner
+            .lookup(s)
+            .unwrap_or_else(|| panic!("symbol '{}' not interned", s))
     }
 
     /// Look up a Symbol in the interner, returning None if not found
@@ -118,10 +123,12 @@ impl<'a> ProgramQuery<'a> {
 
     /// Convert Symbols to a NameId in the given module (panics if not found)
     pub fn name_id(&self, module: ModuleId, segments: &[Symbol]) -> NameId {
-        self.name_table.name_id(module, segments, self.interner).unwrap_or_else(|| {
-            let names: Vec<_> = segments.iter().map(|s| self.interner.resolve(*s)).collect();
-            panic!("name_id not found for {:?} in module {:?}", names, module)
-        })
+        self.name_table
+            .name_id(module, segments, self.interner)
+            .unwrap_or_else(|| {
+                let names: Vec<_> = segments.iter().map(|s| self.interner.resolve(*s)).collect();
+                panic!("name_id not found for {:?} in module {:?}", names, module)
+            })
     }
 
     /// Convert Symbols to a NameId in the given module, returning None if not found
@@ -172,9 +179,9 @@ impl<'a> ProgramQuery<'a> {
 
     /// Look up a TypeDefId by its NameId (panics if not found)
     pub fn type_def_id(&self, name_id: NameId) -> TypeDefId {
-        self.registry.type_by_name(name_id).unwrap_or_else(|| {
-            panic!("type not found for name_id {:?}", name_id)
-        })
+        self.registry
+            .type_by_name(name_id)
+            .unwrap_or_else(|| panic!("type not found for name_id {:?}", name_id))
     }
 
     /// Look up a TypeDefId by its NameId, returning None if not found
@@ -238,7 +245,10 @@ impl<'a> ProgramQuery<'a> {
         use crate::identity::NamerLookup;
         let namer = NamerLookup::new(self.name_table, self.interner);
         namer.method(name).unwrap_or_else(|| {
-            panic!("method name_id not found for '{}'", self.interner.resolve(name))
+            panic!(
+                "method name_id not found for '{}'",
+                self.interner.resolve(name)
+            )
         })
     }
 
@@ -252,14 +262,31 @@ impl<'a> ProgramQuery<'a> {
     /// Look up a method NameId by string name (panics if not found)
     pub fn method_name_id_by_str(&self, name_str: &str) -> NameId {
         crate::identity::method_name_id_by_str(self.name_table, self.interner, name_str)
-            .unwrap_or_else(|| {
-                panic!("method name_id not found for '{}'", name_str)
-            })
+            .unwrap_or_else(|| panic!("method name_id not found for '{}'", name_str))
     }
 
     /// Look up a method NameId by string name, returning None if not found
     pub fn try_method_name_id_by_str(&self, name_str: &str) -> Option<NameId> {
         crate::identity::method_name_id_by_str(self.name_table, self.interner, name_str)
+    }
+
+    /// Look up a function NameId by Symbol (panics if not found)
+    pub fn function_name_id(&self, module: ModuleId, name: Symbol) -> NameId {
+        use crate::identity::NamerLookup;
+        let namer = NamerLookup::new(self.name_table, self.interner);
+        namer.function(module, name).unwrap_or_else(|| {
+            panic!(
+                "function name_id not found for '{}'",
+                self.interner.resolve(name)
+            )
+        })
+    }
+
+    /// Look up a function NameId by Symbol, returning None if not found
+    pub fn try_function_name_id(&self, module: ModuleId, name: Symbol) -> Option<NameId> {
+        use crate::identity::NamerLookup;
+        let namer = NamerLookup::new(self.name_table, self.interner);
+        namer.function(module, name)
     }
 
     // =========================================================================
@@ -290,6 +317,11 @@ impl<'a> ProgramQuery<'a> {
     /// Look up a specific monomorphized instance
     pub fn get_monomorph(&self, key: &MonomorphKey) -> Option<&'a MonomorphInstance> {
         self.registry.monomorph_cache.get(key)
+    }
+
+    /// Get the monomorph cache reference (for CompileCtx creation)
+    pub fn monomorph_cache(&self) -> &'a MonomorphCache {
+        &self.registry.monomorph_cache
     }
 
     // =========================================================================
@@ -328,5 +360,21 @@ impl<'a> ProgramQuery<'a> {
     /// Get direct access to the implement registry for advanced queries
     pub fn implement_registry(&self) -> &'a ImplementRegistry {
         self.implement_registry
+    }
+
+    // =========================================================================
+    // Module programs
+    // =========================================================================
+
+    /// Get the paths of all imported module programs
+    pub fn module_paths(&self) -> impl Iterator<Item = &'a str> {
+        self.module_programs.keys().map(String::as_str)
+    }
+
+    /// Get a module program and its interner by path
+    pub fn module_program(&self, path: &str) -> Option<(&'a Program, &'a Interner)> {
+        self.module_programs
+            .get(path)
+            .map(|(prog, int)| (prog, int))
     }
 }

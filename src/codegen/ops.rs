@@ -7,7 +7,6 @@ use cranelift::prelude::*;
 
 use crate::codegen::RuntimeFn;
 use crate::frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr};
-use crate::identity::NamerLookup;
 use crate::sema::Type;
 use crate::sema::implement_registry::TypeId;
 
@@ -65,14 +64,14 @@ impl Cg<'_, '_, '_> {
     /// Returns the resulting string value.
     fn call_to_string(&mut self, val: &CompiledValue) -> Result<Value, String> {
         // Look up the to_string method in the implement registry
-        let type_id = TypeId::from_type(&val.vole_type, &self.ctx.analyzed.entity_registry.type_table)
-            .ok_or_else(|| format!("Cannot find TypeId for {:?}", val.vole_type))?;
+        let type_id = TypeId::from_type(
+            &val.vole_type,
+            &self.ctx.analyzed.entity_registry.type_table,
+        )
+        .ok_or_else(|| format!("Cannot find TypeId for {:?}", val.vole_type))?;
 
-        // Use NamerLookup to find the method by string name (cross-interner safe)
-        let namer = NamerLookup::new(&self.ctx.analyzed.name_table, self.ctx.interner);
-        let method_id = namer
-            .method_by_str("to_string")
-            .ok_or_else(|| "to_string method not found in name table".to_string())?;
+        // Look up to_string method via query
+        let method_id = self.ctx.analyzed.query().method_name_id_by_str("to_string");
 
         let method_impl = self
             .ctx

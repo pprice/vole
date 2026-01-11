@@ -174,8 +174,9 @@ pub(crate) fn module_name_id(
     module_id: ModuleId,
     name: &str,
 ) -> Option<NameId> {
-    let module_path = analyzed.name_table.module_path(module_id);
-    let (_, module_interner) = analyzed.module_programs.get(module_path)?;
+    let query = analyzed.query();
+    let module_path = query.module_path(module_id);
+    let (_, module_interner) = query.module_program(module_path)?;
     let sym = module_interner.lookup(name)?;
     analyzed
         .name_table
@@ -199,6 +200,17 @@ pub(crate) fn method_name_id_by_str(
     name_str: &str,
 ) -> Option<NameId> {
     identity::method_name_id_by_str(&analyzed.name_table, interner, name_str)
+}
+
+/// Look up a function NameId by Symbol with explicit interner (for cross-interner usage)
+pub(crate) fn function_name_id_with_interner(
+    analyzed: &AnalyzedProgram,
+    interner: &Interner,
+    module: ModuleId,
+    name: Symbol,
+) -> Option<NameId> {
+    let namer = NamerLookup::new(&analyzed.name_table, interner);
+    namer.function(module, name)
 }
 
 #[allow(clippy::only_used_in_recursion)]

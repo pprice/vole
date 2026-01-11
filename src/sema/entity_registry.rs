@@ -7,8 +7,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
-use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::generic::MonomorphCache;
+use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_table::{TypeKey, TypeTable};
 use crate::sema::{FunctionType, Type};
 
@@ -410,20 +410,12 @@ impl EntityRegistry {
     }
 
     /// Set error type info for an error type
-    pub fn set_error_info(
-        &mut self,
-        type_id: TypeDefId,
-        info: crate::sema::ErrorTypeInfo,
-    ) {
+    pub fn set_error_info(&mut self, type_id: TypeDefId, info: crate::sema::ErrorTypeInfo) {
         self.type_defs[type_id.index() as usize].error_info = Some(info);
     }
 
     /// Add an interface implementation to a type
-    pub fn add_implementation(
-        &mut self,
-        type_id: TypeDefId,
-        interface_id: TypeDefId,
-    ) {
+    pub fn add_implementation(&mut self, type_id: TypeDefId, interface_id: TypeDefId) {
         use crate::sema::entity_defs::Implementation;
         self.type_defs[type_id.index() as usize]
             .implements

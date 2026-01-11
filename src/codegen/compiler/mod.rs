@@ -92,13 +92,23 @@ impl<'a> Compiler<'a> {
     }
 
     /// Intern a qualified function name (encapsulates borrow of interner + func_registry)
-    fn intern_func(&mut self, module: crate::identity::ModuleId, segments: &[Symbol]) -> crate::codegen::FunctionKey {
-        self.func_registry.intern_qualified(module, segments, &self.analyzed.interner)
+    fn intern_func(
+        &mut self,
+        module: crate::identity::ModuleId,
+        segments: &[Symbol],
+    ) -> crate::codegen::FunctionKey {
+        self.func_registry
+            .intern_qualified(module, segments, &self.analyzed.interner)
     }
 
     /// Intern a function name with a NameId prefix (for implement block methods)
-    fn intern_func_prefixed(&mut self, prefix: NameId, method: Symbol) -> crate::codegen::FunctionKey {
-        self.func_registry.intern_with_prefix(prefix, method, &self.analyzed.interner)
+    fn intern_func_prefixed(
+        &mut self,
+        prefix: NameId,
+        method: Symbol,
+    ) -> crate::codegen::FunctionKey {
+        self.func_registry
+            .intern_with_prefix(prefix, method, &self.analyzed.interner)
     }
 
     /// Resolve a Symbol to a string (owned, for use across mutable operations)
@@ -108,7 +118,9 @@ impl<'a> Compiler<'a> {
 
     /// Get the "self" keyword symbol (panics if not interned - should never happen)
     fn self_symbol(&self) -> Symbol {
-        self.analyzed.interner.lookup("self")
+        self.analyzed
+            .interner
+            .lookup("self")
             .expect("'self' keyword should always be interned")
     }
 

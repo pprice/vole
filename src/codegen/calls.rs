@@ -458,7 +458,11 @@ impl Cg<'_, '_, '_> {
                 } else {
                     // Try to get declared Vole return type from implement_registry
                     // Fall back to native type conversion
-                    let ext_info = self.ctx.analyzed.implement_registry.get_external_func(callee_name);
+                    let ext_info = self
+                        .ctx
+                        .analyzed
+                        .implement_registry
+                        .get_external_func(callee_name);
                     let vole_type = ext_info
                         .and_then(|info| info.return_type.as_ref().map(|t| (**t).clone()))
                         .unwrap_or_else(|| {
@@ -483,7 +487,11 @@ impl Cg<'_, '_, '_> {
 
         // No module context - try prelude external functions
         // Look up the external info (module path and native name) from implement_registry
-        let ext_info = self.ctx.analyzed.implement_registry.get_external_func(callee_name);
+        let ext_info = self
+            .ctx
+            .analyzed
+            .implement_registry
+            .get_external_func(callee_name);
         let native_func = ext_info.and_then(|info| {
             self.ctx
                 .native_registry

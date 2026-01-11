@@ -12,9 +12,8 @@ use crate::frontend::{
     AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, LetInit, MatchExpr, Pattern, RangeExpr,
     UnaryOp,
 };
-use crate::identity::NamerLookup;
-use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::Type;
+use crate::sema::entity_defs::TypeDefKind;
 
 use super::context::Cg;
 use super::interface_vtable::box_interface_value;
@@ -178,11 +177,8 @@ impl Cg<'_, '_, '_> {
         use cranelift::prelude::FunctionBuilderContext;
 
         // Look up the original function's FuncId using the name table
-        let namer = NamerLookup::new(&self.ctx.analyzed.name_table, self.ctx.interner);
-        let module_id = self.ctx.analyzed.name_table.main_module();
-        let name_id = namer.function(module_id, sym).ok_or_else(|| {
-            CodegenError::not_found("function", self.ctx.interner.resolve(sym)).to_string()
-        })?;
+        let query = self.ctx.analyzed.query();
+        let name_id = query.function_name_id(query.main_module(), sym);
 
         let orig_func_key = self.ctx.func_registry.intern_name_id(name_id);
         let orig_func_id = self

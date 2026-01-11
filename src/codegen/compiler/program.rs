@@ -6,9 +6,11 @@ use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, t
 use super::{Compiler, ControlFlowCtx, TestInfo};
 use crate::codegen::FunctionKey;
 use crate::codegen::stmt::compile_block;
-use crate::codegen::types::{CompileCtx, resolve_type_expr_full, type_to_cranelift};
+use crate::codegen::types::{
+    CompileCtx, function_name_id_with_interner, resolve_type_expr_query, type_to_cranelift,
+};
 use crate::frontend::{Decl, FuncDecl, Interner, LetStmt, Program, Symbol, TestCase, TestsDecl};
-use crate::identity::{NameId, NamerLookup};
+use crate::identity::NameId;
 use crate::sema::Type;
 use crate::sema::generic::MonomorphInstance;
 
@@ -17,9 +19,8 @@ impl Compiler<'_> {
         // Collect info using query (immutable borrow)
         let (name_id, display_name) = {
             let query = self.query();
-            let namer = NamerLookup::new(query.name_table(), query.interner());
             (
-                namer.function(query.main_module(), sym),
+                query.try_function_name_id(query.main_module(), sym),
                 query.resolve_symbol(sym).to_string(),
             )
         };
@@ -190,9 +191,10 @@ impl Compiler<'_> {
     /// These are functions defined in module files (not external FFI functions).
     fn compile_module_functions(&mut self) -> Result<(), String> {
         // Collect module paths first to avoid borrow issues
-        let module_paths: Vec<_> = self.analyzed.module_programs.keys().cloned().collect();
+        let module_paths: Vec<_> = self.query().module_paths().map(String::from).collect();
 
         for module_path in &module_paths {
+            // Access module_programs directly to avoid borrow conflict with mutable self operations
             let (program, module_interner) = &self.analyzed.module_programs[module_path];
             // Extract module globals (let statements)
             let module_globals: Vec<LetStmt> = program
@@ -211,9 +213,13 @@ impl Compiler<'_> {
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
                     let module_id = self.query().module_id_or_main(module_path);
-                    let name_id = NamerLookup::new(&self.analyzed.name_table, module_interner)
-                        .function(module_id, func.name)
-                        .expect("module function name_id should be registered");
+                    let name_id = function_name_id_with_interner(
+                        self.analyzed,
+                        module_interner,
+                        module_id,
+                        func.name,
+                    )
+                    .expect("module function name_id should be registered");
                     let display_name = self.query().display_name(name_id);
 
                     // Create signature and declare function
@@ -223,19 +229,11 @@ impl Compiler<'_> {
                     self.func_registry.set_func_id(func_key, func_id);
 
                     // Record return type
+                    let query = self.query();
                     let return_type = func
                         .return_type
                         .as_ref()
-                        .map(|t| {
-                            resolve_type_expr_full(
-                                t,
-                                &self.analyzed.entity_registry,
-                                &self.type_metadata,
-                                &self.analyzed.interner,
-                                &self.analyzed.name_table,
-                                module_id,
-                            )
-                        })
+                        .map(|t| resolve_type_expr_query(t, &query, &self.type_metadata, module_id))
                         .unwrap_or(Type::Void);
                     self.func_registry.set_return_type(func_key, return_type);
                 }
@@ -252,9 +250,13 @@ impl Compiler<'_> {
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
                     let module_id = self.query().module_id_or_main(module_path);
-                    let name_id = NamerLookup::new(&self.analyzed.name_table, module_interner)
-                        .function(module_id, func.name)
-                        .expect("module function name_id should be registered");
+                    let name_id = function_name_id_with_interner(
+                        self.analyzed,
+                        module_interner,
+                        module_id,
+                        func.name,
+                    )
+                    .expect("module function name_id should be registered");
                     self.compile_module_function(
                         module_path,
                         name_id,
@@ -305,19 +307,13 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Collect param types
+        let query = self.query();
         let param_types: Vec<types::Type> = func
             .params
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_full(
-                        &p.ty,
-                        &self.analyzed.entity_registry,
-                        &self.type_metadata,
-                        &self.analyzed.interner,
-                        &self.analyzed.name_table,
-                        module_id,
-                    ),
+                    &resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id),
                     self.pointer_type,
                 )
             })
@@ -325,30 +321,15 @@ impl Compiler<'_> {
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| {
-                resolve_type_expr_full(
-                    &p.ty,
-                    &self.analyzed.entity_registry,
-                    &self.type_metadata,
-                    &self.analyzed.interner,
-                    &self.analyzed.name_table,
-                    module_id,
-                )
-            })
+            .map(|p| resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id))
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type
-        let return_type = func.return_type.as_ref().map(|t| {
-            resolve_type_expr_full(
-                t,
-                &self.analyzed.entity_registry,
-                &self.type_metadata,
-                &self.analyzed.interner,
-                &self.analyzed.name_table,
-                module_id,
-            )
-        });
+        let return_type = func
+            .return_type
+            .as_ref()
+            .map(|t| resolve_type_expr_query(t, &query, &self.type_metadata, module_id));
 
         // Get source file pointer
         let source_file_ptr = self.source_file_ptr();
@@ -435,19 +416,13 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Collect param types before borrowing ctx.func
+        let query = self.query();
         let param_types: Vec<types::Type> = func
             .params
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_full(
-                        &p.ty,
-                        &self.analyzed.entity_registry,
-                        &self.type_metadata,
-                        &self.analyzed.interner,
-                        &self.analyzed.name_table,
-                        module_id,
-                    ),
+                    &resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id),
                     self.pointer_type,
                 )
             })
@@ -455,30 +430,15 @@ impl Compiler<'_> {
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| {
-                resolve_type_expr_full(
-                    &p.ty,
-                    &self.analyzed.entity_registry,
-                    &self.type_metadata,
-                    &self.analyzed.interner,
-                    &self.analyzed.name_table,
-                    module_id,
-                )
-            })
+            .map(|p| resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id))
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type (needed for raise statements in fallible functions)
-        let return_type = func.return_type.as_ref().map(|t| {
-            resolve_type_expr_full(
-                t,
-                &self.analyzed.entity_registry,
-                &self.type_metadata,
-                &self.analyzed.interner,
-                &self.analyzed.name_table,
-                module_id,
-            )
-        });
+        let return_type = func
+            .return_type
+            .as_ref()
+            .map(|t| resolve_type_expr_query(t, &query, &self.type_metadata, module_id));
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -602,7 +562,7 @@ impl Compiler<'_> {
                     current_function_return_type: None, // Tests don't have a declared return type
                     native_registry: &self.native_registry,
                     current_module: None,
-                        monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                    monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -661,19 +621,11 @@ impl Compiler<'_> {
                     let func_id = self.jit.declare_function(&display_name, &sig);
                     self.func_registry.set_func_id(func_key, func_id);
                     // Record return type for use in call expressions
+                    let query = self.query();
                     let return_type = func
                         .return_type
                         .as_ref()
-                        .map(|t| {
-                            resolve_type_expr_full(
-                                t,
-                                &self.analyzed.entity_registry,
-                                &self.type_metadata,
-                                &self.analyzed.interner,
-                                &self.analyzed.name_table,
-                                module_id,
-                            )
-                        })
+                        .map(|t| resolve_type_expr_query(t, &query, &self.type_metadata, module_id))
                         .unwrap_or(Type::Void);
                     self.func_registry.set_return_type(func_key, return_type);
                 }
@@ -726,19 +678,13 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Collect param types before borrowing ctx.func
+        let query = self.query();
         let param_types: Vec<types::Type> = func
             .params
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_full(
-                        &p.ty,
-                        &self.analyzed.entity_registry,
-                        &self.type_metadata,
-                        &self.analyzed.interner,
-                        &self.analyzed.name_table,
-                        module_id,
-                    ),
+                    &resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id),
                     self.pointer_type,
                 )
             })
@@ -746,30 +692,15 @@ impl Compiler<'_> {
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| {
-                resolve_type_expr_full(
-                    &p.ty,
-                    &self.analyzed.entity_registry,
-                    &self.type_metadata,
-                    &self.analyzed.interner,
-                    &self.analyzed.name_table,
-                    module_id,
-                )
-            })
+            .map(|p| resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id))
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type (needed for raise statements in fallible functions)
-        let return_type = func.return_type.as_ref().map(|t| {
-            resolve_type_expr_full(
-                t,
-                &self.analyzed.entity_registry,
-                &self.type_metadata,
-                &self.analyzed.interner,
-                &self.analyzed.name_table,
-                module_id,
-            )
-        });
+        let return_type = func
+            .return_type
+            .as_ref()
+            .map(|t| resolve_type_expr_query(t, &query, &self.type_metadata, module_id));
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -959,11 +890,8 @@ impl Compiler<'_> {
                 if let Decl::Function(func) = decl
                     && !func.type_params.is_empty()
                 {
-                    let namer =
-                        NamerLookup::new(&self.analyzed.name_table, &self.analyzed.interner);
-                    let name_id = namer
-                        .function(self.analyzed.name_table.main_module(), func.name)
-                        .expect("generic function name_id should be registered");
+                    let query = self.query();
+                    let name_id = query.function_name_id(query.main_module(), func.name);
                     return Some((name_id, func));
                 }
                 None
