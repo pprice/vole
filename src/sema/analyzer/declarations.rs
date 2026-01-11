@@ -224,39 +224,12 @@ impl Analyzer {
             }
 
             // Register and validate implements list
-            if !class.implements.is_empty() {
-                for iface_type in &class.implements {
-                    if let Some(iface_sym) = interface_base_name(iface_type) {
-                        // Validate interface exists via EntityRegistry using resolver
-                        let iface_str = interner.resolve(iface_sym);
-                        let interface_type_id = self
-                            .resolver(interner)
-                            .resolve_type_str_or_interface(iface_str, &self.entity_registry);
-
-                        if let Some(interface_type_id) = interface_type_id {
-                            // Register implementation in EntityRegistry
-                            self.entity_registry
-                                .add_implementation(entity_type_id, interface_type_id);
-                        } else {
-                            self.add_error(
-                                SemanticError::UnknownInterface {
-                                    name: format_type_expr(iface_type, interner),
-                                    span: class.span.into(),
-                                },
-                                class.span,
-                            );
-                        }
-                    } else {
-                        self.add_error(
-                            SemanticError::UnknownInterface {
-                                name: format_type_expr(iface_type, interner),
-                                span: class.span.into(),
-                            },
-                            class.span,
-                        );
-                    }
-                }
-            }
+            self.validate_and_register_implements(
+                entity_type_id,
+                &class.implements,
+                class.span,
+                interner,
+            );
 
             // Register methods in EntityRegistry (single source of truth)
             // Use class_type as Self for resolving method signatures
@@ -431,39 +404,12 @@ impl Analyzer {
             }
 
             // Register and validate implements list (for generic classes)
-            if !class.implements.is_empty() {
-                for iface_type in &class.implements {
-                    if let Some(iface_sym) = interface_base_name(iface_type) {
-                        // Validate interface exists via EntityRegistry using resolver
-                        let iface_str = interner.resolve(iface_sym);
-                        let interface_type_id = self
-                            .resolver(interner)
-                            .resolve_type_str_or_interface(iface_str, &self.entity_registry);
-
-                        if let Some(interface_type_id) = interface_type_id {
-                            // Register implementation in EntityRegistry
-                            self.entity_registry
-                                .add_implementation(entity_type_id, interface_type_id);
-                        } else {
-                            self.add_error(
-                                SemanticError::UnknownInterface {
-                                    name: format_type_expr(iface_type, interner),
-                                    span: class.span.into(),
-                                },
-                                class.span,
-                            );
-                        }
-                    } else {
-                        self.add_error(
-                            SemanticError::UnknownInterface {
-                                name: format_type_expr(iface_type, interner),
-                                span: class.span.into(),
-                            },
-                            class.span,
-                        );
-                    }
-                }
-            }
+            self.validate_and_register_implements(
+                entity_type_id,
+                &class.implements,
+                class.span,
+                interner,
+            );
         }
     }
 
@@ -511,39 +457,12 @@ impl Analyzer {
             }
 
             // Register and validate implements list
-            if !record.implements.is_empty() {
-                for iface_type in &record.implements {
-                    if let Some(iface_sym) = interface_base_name(iface_type) {
-                        // Validate interface exists via EntityRegistry using resolver
-                        let iface_str = interner.resolve(iface_sym);
-                        let interface_type_id = self
-                            .resolver(interner)
-                            .resolve_type_str_or_interface(iface_str, &self.entity_registry);
-
-                        if let Some(interface_type_id) = interface_type_id {
-                            // Register implementation in EntityRegistry
-                            self.entity_registry
-                                .add_implementation(entity_type_id, interface_type_id);
-                        } else {
-                            self.add_error(
-                                SemanticError::UnknownInterface {
-                                    name: format_type_expr(iface_type, interner),
-                                    span: record.span.into(),
-                                },
-                                record.span,
-                            );
-                        }
-                    } else {
-                        self.add_error(
-                            SemanticError::UnknownInterface {
-                                name: format_type_expr(iface_type, interner),
-                                span: record.span.into(),
-                            },
-                            record.span,
-                        );
-                    }
-                }
-            }
+            self.validate_and_register_implements(
+                entity_type_id,
+                &record.implements,
+                record.span,
+                interner,
+            );
 
             // Register methods in EntityRegistry (single source of truth)
             // Use record_type as Self for resolving method signatures
@@ -721,39 +640,12 @@ impl Analyzer {
                 });
 
             // Register and validate implements list (for generic records)
-            if !record.implements.is_empty() {
-                for iface_type in &record.implements {
-                    if let Some(iface_sym) = interface_base_name(iface_type) {
-                        // Validate interface exists via EntityRegistry using resolver
-                        let iface_str = interner.resolve(iface_sym);
-                        let interface_type_id = self
-                            .resolver(interner)
-                            .resolve_type_str_or_interface(iface_str, &self.entity_registry);
-
-                        if let Some(interface_type_id) = interface_type_id {
-                            // Register implementation in EntityRegistry
-                            self.entity_registry
-                                .add_implementation(entity_type_id, interface_type_id);
-                        } else {
-                            self.add_error(
-                                SemanticError::UnknownInterface {
-                                    name: format_type_expr(iface_type, interner),
-                                    span: record.span.into(),
-                                },
-                                record.span,
-                            );
-                        }
-                    } else {
-                        self.add_error(
-                            SemanticError::UnknownInterface {
-                                name: format_type_expr(iface_type, interner),
-                                span: record.span.into(),
-                            },
-                            record.span,
-                        );
-                    }
-                }
-            }
+            self.validate_and_register_implements(
+                entity_type_id,
+                &record.implements,
+                record.span,
+                interner,
+            );
 
             // Register fields in EntityRegistry (needed for self.field access in methods)
             for (i, field) in record.fields.iter().enumerate() {
@@ -850,6 +742,48 @@ impl Analyzer {
                     full_method_name_id,
                     signature,
                     false,
+                );
+            }
+        }
+    }
+
+    /// Validate and register interface implementations for a type.
+    /// Reports errors for unknown interfaces.
+    fn validate_and_register_implements(
+        &mut self,
+        entity_type_id: TypeDefId,
+        implements: &[TypeExpr],
+        span: Span,
+        interner: &Interner,
+    ) {
+        for iface_type in implements {
+            if let Some(iface_sym) = interface_base_name(iface_type) {
+                // Validate interface exists via EntityRegistry using resolver
+                let iface_str = interner.resolve(iface_sym);
+                let interface_type_id = self
+                    .resolver(interner)
+                    .resolve_type_str_or_interface(iface_str, &self.entity_registry);
+
+                if let Some(interface_type_id) = interface_type_id {
+                    // Register implementation in EntityRegistry
+                    self.entity_registry
+                        .add_implementation(entity_type_id, interface_type_id);
+                } else {
+                    self.add_error(
+                        SemanticError::UnknownInterface {
+                            name: format_type_expr(iface_type, interner),
+                            span: span.into(),
+                        },
+                        span,
+                    );
+                }
+            } else {
+                self.add_error(
+                    SemanticError::UnknownInterface {
+                        name: format_type_expr(iface_type, interner),
+                        span: span.into(),
+                    },
+                    span,
                 );
             }
         }
