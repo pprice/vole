@@ -1,5 +1,8 @@
 // WIP: Generic class with structural method constraints
-// Requires: structural constraints T: { func method() -> Type }
+// BLOCKED:
+// 1. Generic class instantiation with type annotations doesn't work (Box<i32>)
+// 2. Structural constraint checking doesn't find methods defined inside classes
+// Related issues: vole-963b (record parameters fail at codegen)
 
 // Simple generic box class
 class Box<T> {
