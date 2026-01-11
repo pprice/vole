@@ -13,7 +13,6 @@ impl Compiler<'_> {
             params.push(type_to_cranelift(
                 &resolve_type_expr_full(
                     &param.ty,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,
@@ -29,7 +28,6 @@ impl Compiler<'_> {
             type_to_cranelift(
                 &resolve_type_expr_full(
                     t,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,
@@ -53,7 +51,6 @@ impl Compiler<'_> {
             params.push(type_to_cranelift(
                 &resolve_type_expr_full(
                     &param.ty,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,
@@ -69,7 +66,6 @@ impl Compiler<'_> {
             type_to_cranelift(
                 &resolve_type_expr_full(
                     t,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,
@@ -99,7 +95,6 @@ impl Compiler<'_> {
             params.push(type_to_cranelift(
                 &resolve_type_expr_full(
                     &param.ty,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,
@@ -115,7 +110,6 @@ impl Compiler<'_> {
             type_to_cranelift(
                 &resolve_type_expr_full(
                     t,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,
@@ -139,7 +133,6 @@ impl Compiler<'_> {
             params.push(type_to_cranelift(
                 &resolve_type_expr_full(
                     &param.ty,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,
@@ -155,7 +148,6 @@ impl Compiler<'_> {
             type_to_cranelift(
                 &resolve_type_expr_full(
                     t,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,
@@ -179,7 +171,6 @@ impl Compiler<'_> {
             params.push(type_to_cranelift(
                 &resolve_type_expr_full(
                     &param.ty,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,
@@ -195,7 +186,6 @@ impl Compiler<'_> {
             type_to_cranelift(
                 &resolve_type_expr_full(
                     t,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,

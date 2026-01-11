@@ -17,7 +17,6 @@ fn compile_and_run(source: &str) -> i64 {
     let analyzed = AnalyzedProgram {
         program,
         interner,
-        type_aliases: HashMap::new(),
         expr_types: HashMap::new(),
         module_expr_types: HashMap::new(),
         method_resolutions: MethodResolutions::new(),

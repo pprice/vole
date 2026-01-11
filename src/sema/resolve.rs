@@ -15,7 +15,6 @@ use std::collections::HashMap;
 
 /// Context needed for type resolution
 pub struct TypeResolutionContext<'a> {
-    pub type_aliases: &'a HashMap<Symbol, Type>,
     pub error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
     pub entity_registry: &'a EntityRegistry,
     pub interner: &'a Interner,
@@ -93,9 +92,7 @@ fn interface_instance(
 }
 
 impl<'a> TypeResolutionContext<'a> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        type_aliases: &'a HashMap<Symbol, Type>,
         error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
         entity_registry: &'a EntityRegistry,
         interner: &'a Interner,
@@ -103,7 +100,6 @@ impl<'a> TypeResolutionContext<'a> {
         module_id: ModuleId,
     ) -> Self {
         Self {
-            type_aliases,
             error_types,
             entity_registry,
             interner,
@@ -117,7 +113,6 @@ impl<'a> TypeResolutionContext<'a> {
     /// Create a context with type parameters in scope
     #[allow(clippy::too_many_arguments)]
     pub fn with_type_params(
-        type_aliases: &'a HashMap<Symbol, Type>,
         error_types: &'a HashMap<Symbol, ErrorTypeInfo>,
         entity_registry: &'a EntityRegistry,
         interner: &'a Interner,
@@ -126,7 +121,6 @@ impl<'a> TypeResolutionContext<'a> {
         type_params: &'a TypeParamScope,
     ) -> Self {
         Self {
-            type_aliases,
             error_types,
             entity_registry,
             interner,
@@ -332,8 +326,6 @@ mod tests {
     {
         use crate::identity::NameTable;
 
-        static EMPTY_ALIASES: std::sync::LazyLock<HashMap<Symbol, Type>> =
-            std::sync::LazyLock::new(HashMap::new);
         static EMPTY_ERRORS: std::sync::LazyLock<HashMap<Symbol, ErrorTypeInfo>> =
             std::sync::LazyLock::new(HashMap::new);
         static EMPTY_ENTITY_REGISTRY: std::sync::LazyLock<EntityRegistry> =
@@ -342,7 +334,6 @@ mod tests {
         let mut name_table = NameTable::new();
         let module_id = name_table.main_module();
         let mut ctx = TypeResolutionContext::new(
-            &EMPTY_ALIASES,
             &EMPTY_ERRORS,
             &EMPTY_ENTITY_REGISTRY,
             interner,
@@ -428,8 +419,6 @@ mod tests {
         // Create a context with an interner that has the symbol
         use crate::frontend::Interner;
 
-        static EMPTY_ALIASES: std::sync::LazyLock<HashMap<Symbol, Type>> =
-            std::sync::LazyLock::new(HashMap::new);
         static EMPTY_ERRORS: std::sync::LazyLock<HashMap<Symbol, ErrorTypeInfo>> =
             std::sync::LazyLock::new(HashMap::new);
         static EMPTY_ENTITY_REGISTRY: std::sync::LazyLock<EntityRegistry> =
@@ -443,7 +432,6 @@ mod tests {
         let mut name_table = NameTable::new();
         let module_id = name_table.main_module();
         let mut ctx = TypeResolutionContext::new(
-            &EMPTY_ALIASES,
             &EMPTY_ERRORS,
             &EMPTY_ENTITY_REGISTRY,
             &TEST_INTERNER,

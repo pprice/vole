@@ -6,9 +6,9 @@
 use std::collections::HashMap;
 
 use crate::frontend::NodeId;
+use crate::sema::Type;
 use crate::sema::generic::MonomorphKey;
 use crate::sema::resolution::ResolvedMethod;
-use crate::sema::Type;
 
 /// Encapsulates all NodeId-keyed metadata from semantic analysis.
 /// This includes expression types, method resolutions, and generic instantiation info.

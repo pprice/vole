@@ -5,12 +5,12 @@
 
 use crate::frontend::NodeId;
 use crate::identity::TypeDefId;
+use crate::sema::entity_defs::{Implementation, TypeDef};
 use crate::sema::entity_registry::EntityRegistry;
 use crate::sema::expression_data::ExpressionData;
 use crate::sema::generic::MonomorphKey;
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::types::Type;
-use crate::sema::entity_defs::{Implementation, TypeDef};
 
 /// Information about a call site, bundling all call-related data.
 #[derive(Debug, Clone)]
@@ -34,7 +34,10 @@ pub struct ProgramQuery<'a> {
 impl<'a> ProgramQuery<'a> {
     /// Create a new query interface
     pub fn new(registry: &'a EntityRegistry, expr_data: &'a ExpressionData) -> Self {
-        Self { registry, expr_data }
+        Self {
+            registry,
+            expr_data,
+        }
     }
 
     // ===== Expression queries =====

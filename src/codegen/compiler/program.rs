@@ -229,7 +229,6 @@ impl Compiler<'_> {
                         .map(|t| {
                             resolve_type_expr_full(
                                 t,
-                                &self.analyzed.type_aliases,
                                 &self.analyzed.entity_registry,
                                 &self.analyzed.error_types,
                                 &self.type_metadata,
@@ -322,7 +321,6 @@ impl Compiler<'_> {
                 type_to_cranelift(
                     &resolve_type_expr_full(
                         &p.ty,
-                        &self.analyzed.type_aliases,
                         &self.analyzed.entity_registry,
                         &self.analyzed.error_types,
                         &self.type_metadata,
@@ -340,7 +338,6 @@ impl Compiler<'_> {
             .map(|p| {
                 resolve_type_expr_full(
                     &p.ty,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,
@@ -356,7 +353,6 @@ impl Compiler<'_> {
         let return_type = func.return_type.as_ref().map(|t| {
             resolve_type_expr_full(
                 t,
-                &self.analyzed.type_aliases,
                 &self.analyzed.entity_registry,
                 &self.analyzed.error_types,
                 &self.type_metadata,
@@ -459,7 +455,6 @@ impl Compiler<'_> {
                 type_to_cranelift(
                     &resolve_type_expr_full(
                         &p.ty,
-                        &self.analyzed.type_aliases,
                         &self.analyzed.entity_registry,
                         &self.analyzed.error_types,
                         &self.type_metadata,
@@ -477,7 +472,6 @@ impl Compiler<'_> {
             .map(|p| {
                 resolve_type_expr_full(
                     &p.ty,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,
@@ -493,7 +487,6 @@ impl Compiler<'_> {
         let return_type = func.return_type.as_ref().map(|t| {
             resolve_type_expr_full(
                 t,
-                &self.analyzed.type_aliases,
                 &self.analyzed.entity_registry,
                 &self.analyzed.error_types,
                 &self.type_metadata,
@@ -692,7 +685,6 @@ impl Compiler<'_> {
                         .map(|t| {
                             resolve_type_expr_full(
                                 t,
-                                &self.analyzed.type_aliases,
                                 &self.analyzed.entity_registry,
                                 &self.analyzed.error_types,
                                 &self.type_metadata,
@@ -760,7 +752,6 @@ impl Compiler<'_> {
                 type_to_cranelift(
                     &resolve_type_expr_full(
                         &p.ty,
-                        &self.analyzed.type_aliases,
                         &self.analyzed.entity_registry,
                         &self.analyzed.error_types,
                         &self.type_metadata,
@@ -778,7 +769,6 @@ impl Compiler<'_> {
             .map(|p| {
                 resolve_type_expr_full(
                     &p.ty,
-                    &self.analyzed.type_aliases,
                     &self.analyzed.entity_registry,
                     &self.analyzed.error_types,
                     &self.type_metadata,
@@ -794,7 +784,6 @@ impl Compiler<'_> {
         let return_type = func.return_type.as_ref().map(|t| {
             resolve_type_expr_full(
                 t,
-                &self.analyzed.type_aliases,
                 &self.analyzed.entity_registry,
                 &self.analyzed.error_types,
                 &self.type_metadata,

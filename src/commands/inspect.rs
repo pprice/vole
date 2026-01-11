@@ -103,7 +103,6 @@ pub fn inspect_files(
                     continue;
                 }
                 let (
-                    type_aliases,
                     expr_types,
                     method_resolutions,
                     implement_registry,
@@ -127,7 +126,6 @@ pub fn inspect_files(
                 let analyzed = AnalyzedProgram {
                     program,
                     interner,
-                    type_aliases,
                     expr_types,
                     method_resolutions,
                     implement_registry,

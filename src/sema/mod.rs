@@ -16,10 +16,10 @@ pub mod well_known;
 
 pub use analyzer::{Analyzer, TypeError, TypeWarning};
 pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
-pub use expression_data::ExpressionData;
 pub use entity_registry::EntityRegistry;
-pub use query::{CallInfo, ProgramQuery};
+pub use expression_data::ExpressionData;
 pub use implement_registry::{ImplementRegistry, MethodImpl, MethodKey, PrimitiveTypeId, TypeId};
+pub use query::{CallInfo, ProgramQuery};
 pub use resolution::{MethodResolutions, ResolvedMethod};
 pub use type_table::{TypeInfo, TypeKey, TypeTable};
 pub use types::{

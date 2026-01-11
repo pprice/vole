@@ -26,7 +26,6 @@ use crate::transforms;
 pub struct AnalyzedProgram {
     pub program: Program,
     pub interner: Interner,
-    pub type_aliases: HashMap<Symbol, Type>,
     pub expr_types: HashMap<NodeId, Type>,
     pub method_resolutions: MethodResolutions,
     pub implement_registry: ImplementRegistry,
@@ -193,7 +192,6 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
     }
 
     let (
-        type_aliases,
         expr_types,
         method_resolutions,
         implement_registry,
@@ -215,7 +213,6 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
     Ok(AnalyzedProgram {
         program,
         interner,
-        type_aliases,
         expr_types,
         method_resolutions,
         implement_registry,
@@ -406,7 +403,6 @@ pub fn run_captured<W: Write + Send + 'static>(
         return Err(());
     }
     let (
-        type_aliases,
         expr_types,
         method_resolutions,
         implement_registry,
@@ -429,7 +425,6 @@ pub fn run_captured<W: Write + Send + 'static>(
     let analyzed = AnalyzedProgram {
         program,
         interner,
-        type_aliases,
         expr_types,
         method_resolutions,
         implement_registry,

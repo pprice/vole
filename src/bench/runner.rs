@@ -152,7 +152,6 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
     let (
-        type_aliases,
         expr_types,
         method_resolutions,
         implement_registry,
@@ -176,7 +175,6 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
     let analyzed = AnalyzedProgram {
         program,
         interner,
-        type_aliases,
         expr_types,
         method_resolutions,
         implement_registry,
@@ -245,7 +243,6 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
     let (
-        type_aliases,
         expr_types,
         method_resolutions,
         implement_registry,
@@ -268,7 +265,6 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     let analyzed = AnalyzedProgram {
         program,
         interner,
-        type_aliases,
         expr_types,
         method_resolutions,
         implement_registry,

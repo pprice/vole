@@ -91,7 +91,7 @@ pub(crate) fn type_metadata_by_name_id(
 /// Context for compiling expressions and statements
 /// Bundles common parameters to reduce function argument count
 pub(crate) struct CompileCtx<'a> {
-    /// Analyzed program containing type_aliases, expr_types, method_resolutions, etc.
+    /// Analyzed program containing expr_types, method_resolutions, etc.
     pub analyzed: &'a AnalyzedProgram,
     /// Interner for symbol resolution (may differ from analyzed.interner for module code)
     pub interner: &'a Interner,
@@ -163,7 +163,6 @@ pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
         .unwrap_or_else(|| ctx.analyzed.name_table.main_module());
     resolve_type_expr_with_metadata(
         ty,
-        &ctx.analyzed.type_aliases,
         &ctx.analyzed.entity_registry,
         &ctx.analyzed.error_types,
         ctx.type_metadata,
@@ -290,12 +289,11 @@ fn build_interface_type_from_entity(
     })
 }
 
-/// Resolve a type expression using aliases, entity registry, error types, and type metadata
+/// Resolve a type expression using entity registry, error types, and type metadata
 /// This is the full resolution function that handles all named types including classes/records
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_type_expr_with_metadata(
     ty: &TypeExpr,
-    type_aliases: &HashMap<Symbol, Type>,
     entity_registry: &EntityRegistry,
     error_types: &HashMap<Symbol, ErrorTypeInfo>,
     type_metadata: &HashMap<Symbol, TypeMetadata>,
@@ -309,41 +307,49 @@ pub(crate) fn resolve_type_expr_with_metadata(
     match ty {
         TypeExpr::Primitive(p) => Type::from_primitive(*p),
         TypeExpr::Named(sym) => {
-            // Look up type alias first
-            if let Some(aliased) = type_aliases.get(sym) {
-                aliased.clone()
-            } else {
-                // Check entity registry for interface via Resolver
-                let type_def_id = resolver.resolve_type_or_interface(*sym, entity_registry);
+            // Check entity registry for type definition (aliases, interfaces, etc.)
+            let type_def_id = resolver.resolve_type_or_interface(*sym, entity_registry);
 
-                if let Some(type_def_id) = type_def_id {
-                    let type_def = entity_registry.get_type(type_def_id);
-                    if type_def.kind == TypeDefKind::Interface {
+            if let Some(type_def_id) = type_def_id {
+                let type_def = entity_registry.get_type(type_def_id);
+                match type_def.kind {
+                    TypeDefKind::Alias => {
+                        // Type alias - return the aliased type
+                        if let Some(ref aliased) = type_def.aliased_type {
+                            return aliased.clone();
+                        }
+                        Type::Error
+                    }
+                    TypeDefKind::Interface => {
                         // Generic interface without type args is an error
                         if !type_def.type_params.is_empty() {
                             return Type::Error;
                         }
-                        return build_interface_type_from_entity(
-                            type_def_id,
-                            entity_registry,
-                            Vec::new(),
-                        );
+                        build_interface_type_from_entity(type_def_id, entity_registry, Vec::new())
+                    }
+                    _ => {
+                        // Not an alias or interface, check other sources
+                        if let Some(error_info) = error_types.get(sym) {
+                            Type::ErrorType(error_info.clone())
+                        } else if let Some(metadata) = type_metadata.get(sym) {
+                            metadata.vole_type.clone()
+                        } else {
+                            Type::Error
+                        }
                     }
                 }
-                // Not an interface, check other sources
-                if let Some(error_info) = error_types.get(sym) {
-                    Type::ErrorType(error_info.clone())
-                } else if let Some(metadata) = type_metadata.get(sym) {
-                    metadata.vole_type.clone()
-                } else {
-                    Type::Error
-                }
+            } else if let Some(error_info) = error_types.get(sym) {
+                // Not in entity registry, check error types
+                Type::ErrorType(error_info.clone())
+            } else if let Some(metadata) = type_metadata.get(sym) {
+                metadata.vole_type.clone()
+            } else {
+                Type::Error
             }
         }
         TypeExpr::Array(elem) => {
             let elem_ty = resolve_type_expr_with_metadata(
                 elem,
-                type_aliases,
                 entity_registry,
                 error_types,
                 type_metadata,
@@ -357,7 +363,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
             // T? desugars to T | nil
             let inner_ty = resolve_type_expr_with_metadata(
                 inner,
-                type_aliases,
                 entity_registry,
                 error_types,
                 type_metadata,
@@ -373,7 +378,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 .map(|v| {
                     resolve_type_expr_with_metadata(
                         v,
-                        type_aliases,
                         entity_registry,
                         error_types,
                         type_metadata,
@@ -396,7 +400,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 .map(|p| {
                     resolve_type_expr_with_metadata(
                         p,
-                        type_aliases,
                         entity_registry,
                         error_types,
                         type_metadata,
@@ -408,7 +411,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 .collect();
             let ret_type = resolve_type_expr_with_metadata(
                 return_type,
-                type_aliases,
                 entity_registry,
                 error_types,
                 type_metadata,
@@ -432,7 +434,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
         } => {
             let success = resolve_type_expr_with_metadata(
                 success_type,
-                type_aliases,
                 entity_registry,
                 error_types,
                 type_metadata,
@@ -442,7 +443,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
             );
             let error = resolve_type_expr_with_metadata(
                 error_type,
-                type_aliases,
                 entity_registry,
                 error_types,
                 type_metadata,
@@ -462,7 +462,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 .map(|a| {
                     resolve_type_expr_with_metadata(
                         a,
-                        type_aliases,
                         entity_registry,
                         error_types,
                         type_metadata,
@@ -541,7 +540,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 .map(|e| {
                     resolve_type_expr_with_metadata(
                         e,
-                        type_aliases,
                         entity_registry,
                         error_types,
                         type_metadata,
@@ -556,7 +554,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
         TypeExpr::FixedArray { element, size } => {
             let elem_ty = resolve_type_expr_with_metadata(
                 element,
-                type_aliases,
                 entity_registry,
                 error_types,
                 type_metadata,
@@ -576,12 +573,10 @@ pub(crate) fn resolve_type_expr_with_metadata(
     }
 }
 
-/// Resolve a type expression using aliases, entity registry, error types, and type metadata
+/// Resolve a type expression using entity registry, error types, and type metadata
 /// This is used when CompileCtx is not available (e.g., during Compiler setup)
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_type_expr_full(
     ty: &TypeExpr,
-    type_aliases: &HashMap<Symbol, Type>,
     entity_registry: &EntityRegistry,
     error_types: &HashMap<Symbol, ErrorTypeInfo>,
     type_metadata: &HashMap<Symbol, TypeMetadata>,
@@ -591,7 +586,6 @@ pub(crate) fn resolve_type_expr_full(
 ) -> Type {
     resolve_type_expr_with_metadata(
         ty,
-        type_aliases,
         entity_registry,
         error_types,
         type_metadata,

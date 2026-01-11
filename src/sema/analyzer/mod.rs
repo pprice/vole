@@ -96,8 +96,6 @@ pub struct Analyzer {
     lambda_locals: Vec<HashSet<Symbol>>,
     /// Stack of side effect flags for currently analyzed lambdas
     lambda_side_effects: Vec<bool>,
-    /// Type aliases: `let MyType = i32` stores MyType -> i32
-    type_aliases: HashMap<Symbol, Type>,
     /// Registered error types (e.g., DivByZero, OutOfRange)
     error_types: HashMap<Symbol, ErrorTypeInfo>,
     /// Resolved types for each expression node (for codegen)
@@ -164,7 +162,6 @@ impl Analyzer {
             lambda_captures: Vec::new(),
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
-            type_aliases: HashMap::new(),
             error_types: HashMap::new(),
             expr_types: HashMap::new(),
             implement_registry: ImplementRegistry::new(),
@@ -424,7 +421,6 @@ impl Analyzer {
             lambda_captures: Vec::new(),
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
-            type_aliases: HashMap::new(),
             error_types: HashMap::new(),
             expr_types: HashMap::new(),
             implement_registry: ImplementRegistry::new(),
@@ -657,16 +653,6 @@ impl Analyzer {
         }
     }
 
-    /// Get the collected type aliases (for use by codegen)
-    pub fn type_aliases(&self) -> &HashMap<Symbol, Type> {
-        &self.type_aliases
-    }
-
-    /// Take ownership of the type aliases (consuming self)
-    pub fn into_type_aliases(self) -> HashMap<Symbol, Type> {
-        self.type_aliases
-    }
-
     /// Get the resolved expression types (for use by codegen)
     pub fn expr_types(&self) -> &HashMap<NodeId, Type> {
         &self.expr_types
@@ -695,7 +681,6 @@ impl Analyzer {
     pub fn into_analysis_results(
         self,
     ) -> (
-        HashMap<Symbol, Type>,
         HashMap<NodeId, Type>,
         MethodResolutions,
         ImplementRegistry,
@@ -715,7 +700,6 @@ impl Analyzer {
         EntityRegistry,
     ) {
         (
-            self.type_aliases,
             self.expr_types,
             self.method_resolutions,
             self.implement_registry,
@@ -945,7 +929,6 @@ impl Analyzer {
     ) -> Type {
         let module_id = self.current_module;
         let mut ctx = TypeResolutionContext {
-            type_aliases: &self.type_aliases,
             error_types: &self.error_types,
             entity_registry: &self.entity_registry,
             interner,
@@ -978,7 +961,7 @@ impl Analyzer {
         }
     }
 
-    /// Register a type alias in both EntityRegistry and type_aliases HashMap
+    /// Register a type alias in EntityRegistry
     fn register_type_alias(&mut self, name: Symbol, aliased_type: Type, interner: &Interner) {
         // Register in EntityRegistry for resolution via TypeDefKind::Alias
         let name_id = self
@@ -991,9 +974,7 @@ impl Analyzer {
             aliased_type.clone(),
             type_key,
         );
-        // Also keep in type_aliases HashMap for backwards compatibility during migration
-        self.type_aliases.insert(name, aliased_type.clone());
-        // And in type_table for display
+        // Also in type_table for display
         self.type_table.insert_named(aliased_type, name_id);
     }
 
@@ -1188,7 +1169,6 @@ impl Analyzer {
         for (slot, field) in decl.fields.iter().enumerate() {
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext {
-                type_aliases: &self.type_aliases,
                 error_types: &self.error_types,
                 entity_registry: &self.entity_registry,
                 interner,
@@ -1258,13 +1238,21 @@ impl Analyzer {
         match constraint {
             TypeConstraint::Interface(sym) => {
                 // First check if this is a type alias (e.g., let Numeric = i32 | i64)
-                if let Some(aliased_type) = self.type_aliases.get(sym) {
-                    // Convert the aliased type to a union constraint
-                    let types = match aliased_type {
-                        Type::Union(types) => types.clone(),
-                        other => vec![other.clone()],
-                    };
-                    return Some(crate::sema::generic::TypeConstraint::Union(types));
+                if let Some(type_def_id) = self
+                    .resolver(interner)
+                    .resolve_type(*sym, &self.entity_registry)
+                {
+                    let type_def = self.entity_registry.get_type(type_def_id);
+                    if type_def.kind == TypeDefKind::Alias
+                        && let Some(ref aliased_type) = type_def.aliased_type
+                    {
+                        // Convert the aliased type to a union constraint
+                        let types = match aliased_type {
+                            Type::Union(types) => types.clone(),
+                            other => vec![other.clone()],
+                        };
+                        return Some(crate::sema::generic::TypeConstraint::Union(types));
+                    }
                 }
 
                 // Validate interface exists via EntityRegistry using resolver
@@ -1289,7 +1277,6 @@ impl Analyzer {
             TypeConstraint::Union(types) => {
                 let module_id = self.current_module;
                 let mut ctx = TypeResolutionContext::with_type_params(
-                    &self.type_aliases,
                     &self.error_types,
                     &self.entity_registry,
                     interner,
@@ -1303,7 +1290,6 @@ impl Analyzer {
             TypeConstraint::Structural { fields, methods } => {
                 let module_id = self.current_module;
                 let mut ctx = TypeResolutionContext::with_type_params(
-                    &self.type_aliases,
                     &self.error_types,
                     &self.entity_registry,
                     interner,
@@ -1854,7 +1840,6 @@ impl Analyzer {
                     // Build function type from signature
                     let (params, return_type) = {
                         let mut ctx = TypeResolutionContext {
-                            type_aliases: &self.type_aliases,
                             error_types: &self.error_types,
                             entity_registry: &self.entity_registry,
                             interner: &module_interner,
@@ -1917,7 +1902,6 @@ impl Analyzer {
                     for func in &ext.functions {
                         let (params, return_type) = {
                             let mut ctx = TypeResolutionContext {
-                                type_aliases: &self.type_aliases,
                                 error_types: &self.error_types,
                                 entity_registry: &self.entity_registry,
                                 interner: &module_interner,

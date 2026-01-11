@@ -663,7 +663,9 @@ impl EntityRegistry {
     /// Get all type aliases that resolve to a given type.
     /// Returns an empty slice if no aliases point to this type.
     pub fn aliases_for(&self, type_key: TypeKey) -> &[TypeDefId] {
-        self.alias_index.get(&type_key).map_or(&[], |v| v.as_slice())
+        self.alias_index
+            .get(&type_key)
+            .map_or(&[], |v| v.as_slice())
     }
 
     /// Register a type alias and update the alias index.

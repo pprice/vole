@@ -51,7 +51,6 @@ impl Compiler<'_> {
     pub(super) fn resolve_type_with_metadata(&self, ty: &TypeExpr) -> Type {
         crate::codegen::types::resolve_type_expr_with_metadata(
             ty,
-            &self.analyzed.type_aliases,
             &self.analyzed.entity_registry,
             &self.analyzed.error_types,
             &self.type_metadata,
