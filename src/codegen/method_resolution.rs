@@ -241,12 +241,34 @@ pub(crate) fn resolve_method_target(
         };
     }
 
-    // No resolution found - try direct method lookup for default method bodies.
+    // No resolution found - try direct method lookup first, then implement block methods.
+    // This happens in monomorphized generic functions where the resolution was computed
+    // for the type parameter, not the concrete type.
     let type_name_id = get_type_name_id(input.object_type)?;
-    let method_info = lookup_direct_method(type_name_id)?;
-    let return_type = method_info.return_type.clone();
-    Ok(MethodTarget::Direct {
-        method_info,
-        return_type,
-    })
+
+    // Try direct methods (methods defined inside class/record)
+    if let Ok(method_info) = lookup_direct_method(type_name_id) {
+        let return_type = method_info.return_type.clone();
+        return Ok(MethodTarget::Direct {
+            method_info,
+            return_type,
+        });
+    }
+
+    // Try implement block methods
+    if let Some(type_id) = TypeId::from_type(input.object_type, &input.analyzed.type_table)
+        && let Ok(method_info) = lookup_impl_method(type_id)
+    {
+        let return_type = method_info.return_type.clone();
+        return Ok(MethodTarget::Implemented {
+            method_info,
+            return_type,
+        });
+    }
+
+    // Neither found - return error
+    Err(format!(
+        "Method {} not found on type {:?}",
+        input.method_name_str, type_name_id
+    ))
 }
