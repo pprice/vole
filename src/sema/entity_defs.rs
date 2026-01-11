@@ -3,7 +3,9 @@
 //! These structs hold the full information about types, methods, fields, and functions.
 //! The corresponding ID types (TypeDefId, etc.) are indices into vectors of these.
 
+use crate::frontend::Symbol;
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
+use crate::sema::generic::TypeParamInfo;
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::{FunctionType, Type};
 
@@ -15,6 +17,45 @@ pub enum TypeDefKind {
     Record,
     ErrorType,
     Primitive,
+    /// Type alias (e.g., `type Numeric = i32 | i64`)
+    Alias,
+}
+
+/// Generic type information for records and classes.
+/// Stores the type parameters and field types needed for type inference
+/// when instantiating generic types.
+#[derive(Debug, Clone)]
+pub struct GenericTypeInfo {
+    /// The type parameters (e.g., T, K, V) with names and constraints
+    pub type_params: Vec<TypeParamInfo>,
+    /// Field names (Symbols from parsing)
+    pub field_names: Vec<Symbol>,
+    /// Field types with TypeParam placeholders (e.g., [TypeParam(T), i64])
+    pub field_types: Vec<Type>,
+}
+
+/// A method binding within an implementation block.
+/// Maps an interface method to a concrete implementation.
+#[derive(Debug, Clone)]
+pub struct MethodBinding {
+    /// The method name
+    pub method_name: NameId,
+    /// The method signature
+    pub func_type: FunctionType,
+    /// Whether this is a builtin method (array.length(), etc.)
+    pub is_builtin: bool,
+    /// External (native) method info
+    pub external_info: Option<ExternalMethodInfo>,
+}
+
+/// An implementation of an interface for a type.
+/// Tracks which interface is implemented and how each method is bound.
+#[derive(Debug, Clone)]
+pub struct Implementation {
+    /// The interface being implemented
+    pub interface: TypeDefId,
+    /// Method bindings for this implementation
+    pub method_bindings: Vec<MethodBinding>,
 }
 
 /// A type definition (interface, class, record, etc.)
@@ -32,6 +73,12 @@ pub struct TypeDef {
     pub type_params: Vec<NameId>,
     /// Static methods (called on the type, not on instances)
     pub static_methods: Vec<MethodId>,
+    /// For TypeDefKind::Alias - the type this alias resolves to
+    pub aliased_type: Option<Type>,
+    /// For generic records/classes - type parameter and field type info
+    pub generic_info: Option<GenericTypeInfo>,
+    /// Interface implementations for this type
+    pub implements: Vec<Implementation>,
 }
 
 /// A method definition (always belongs to a type)
@@ -60,6 +107,18 @@ pub struct FieldDef {
     pub slot: usize,
 }
 
+/// Generic function information.
+/// Stores the type parameters and parameter/return types needed for monomorphization.
+#[derive(Debug, Clone)]
+pub struct GenericFuncInfo {
+    /// The type parameters (e.g., T, U) with names and constraints
+    pub type_params: Vec<TypeParamInfo>,
+    /// Parameter types with TypeParam placeholders
+    pub param_types: Vec<Type>,
+    /// Return type with TypeParam placeholder
+    pub return_type: Type,
+}
+
 /// A free function definition (belongs to a module)
 #[derive(Debug, Clone)]
 pub struct FunctionDef {
@@ -68,4 +127,6 @@ pub struct FunctionDef {
     pub full_name_id: NameId, // "math::sin"
     pub module: ModuleId,
     pub signature: FunctionType,
+    /// For generic functions - type parameter and signature info
+    pub generic_info: Option<GenericFuncInfo>,
 }

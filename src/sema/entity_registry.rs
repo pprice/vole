@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 use crate::sema::implement_registry::ExternalMethodInfo;
+use crate::sema::type_table::TypeKey;
 use crate::sema::{FunctionType, Type};
 
 /// Central registry for all language entities
@@ -30,6 +31,9 @@ pub struct EntityRegistry {
     pub(crate) fields_by_type: HashMap<TypeDefId, HashMap<NameId, FieldId>>,
     // Static method lookups: (type, static_method_name) -> MethodId
     pub(crate) static_methods_by_type: HashMap<TypeDefId, HashMap<NameId, MethodId>>,
+
+    // Alias index: maps a TypeKey to all aliases that resolve to that type
+    pub(crate) alias_index: HashMap<TypeKey, Vec<TypeDefId>>,
 }
 
 impl EntityRegistry {
@@ -46,6 +50,7 @@ impl EntityRegistry {
             methods_by_type: HashMap::new(),
             fields_by_type: HashMap::new(),
             static_methods_by_type: HashMap::new(),
+            alias_index: HashMap::new(),
         }
     }
 
@@ -72,6 +77,9 @@ impl EntityRegistry {
             extends: Vec::new(),
             type_params: Vec::new(),
             static_methods: Vec::new(),
+            aliased_type: None,
+            generic_info: None,
+            implements: Vec::new(),
         });
         self.type_by_name.insert(name_id, id);
         self.methods_by_type.insert(id, HashMap::new());
@@ -347,6 +355,7 @@ impl EntityRegistry {
             full_name_id,
             module,
             signature,
+            generic_info: None,
         });
         self.function_by_name.insert(full_name_id, id);
         id
@@ -649,6 +658,48 @@ impl EntityRegistry {
                 self.function_by_name.insert(*name_id, new_id);
             }
         }
+    }
+
+    /// Get all type aliases that resolve to a given type.
+    /// Returns an empty slice if no aliases point to this type.
+    pub fn aliases_for(&self, type_key: TypeKey) -> &[TypeDefId] {
+        self.alias_index.get(&type_key).map_or(&[], |v| v.as_slice())
+    }
+
+    /// Register a type alias and update the alias index.
+    /// The type_key should be obtained from TypeTable::key_for_type for the aliased type.
+    pub fn register_alias(
+        &mut self,
+        name_id: NameId,
+        module: ModuleId,
+        aliased_type: Type,
+        type_key: TypeKey,
+    ) -> TypeDefId {
+        // Register the type with kind Alias
+        let id = TypeDefId::new(self.type_defs.len() as u32);
+        self.type_defs.push(TypeDef {
+            id,
+            name_id,
+            kind: TypeDefKind::Alias,
+            module,
+            methods: Vec::new(),
+            fields: Vec::new(),
+            extends: Vec::new(),
+            type_params: Vec::new(),
+            static_methods: Vec::new(),
+            aliased_type: Some(aliased_type),
+            generic_info: None,
+            implements: Vec::new(),
+        });
+        self.type_by_name.insert(name_id, id);
+        self.methods_by_type.insert(id, HashMap::new());
+        self.fields_by_type.insert(id, HashMap::new());
+        self.static_methods_by_type.insert(id, HashMap::new());
+
+        // Update the alias index for inverse lookups
+        self.alias_index.entry(type_key).or_default().push(id);
+
+        id
     }
 }
 

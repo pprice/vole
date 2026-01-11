@@ -66,7 +66,7 @@ impl Analyzer {
                             && let ExprKind::TypeLiteral(type_expr) = &init_expr.kind
                         {
                             let aliased_type = self.resolve_type(type_expr, interner);
-                            self.type_aliases.insert(let_stmt.name, aliased_type);
+                            self.register_type_alias(let_stmt.name, aliased_type, interner);
                         }
 
                         self.scope.define(
@@ -83,7 +83,7 @@ impl Analyzer {
                     LetInit::TypeAlias(type_expr) => {
                         // Type alias: let Numeric = i32 | i64
                         let aliased_type = self.resolve_type(type_expr, interner);
-                        self.type_aliases.insert(let_stmt.name, aliased_type);
+                        self.register_type_alias(let_stmt.name, aliased_type, interner);
                     }
                 }
             }

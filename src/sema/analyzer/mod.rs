@@ -964,22 +964,37 @@ impl Analyzer {
                 match &let_stmt.init {
                     LetInit::TypeAlias(type_expr) => {
                         let aliased_type = self.resolve_type(type_expr, interner);
-                        self.type_aliases
-                            .insert(let_stmt.name, aliased_type.clone());
-                        self.register_named_type(let_stmt.name, aliased_type, interner);
+                        self.register_type_alias(let_stmt.name, aliased_type, interner);
                     }
                     LetInit::Expr(init_expr) => {
                         // Legacy: handle let X: type = SomeType
                         if let ExprKind::TypeLiteral(type_expr) = &init_expr.kind {
                             let aliased_type = self.resolve_type(type_expr, interner);
-                            self.type_aliases
-                                .insert(let_stmt.name, aliased_type.clone());
-                            self.register_named_type(let_stmt.name, aliased_type, interner);
+                            self.register_type_alias(let_stmt.name, aliased_type, interner);
                         }
                     }
                 }
             }
         }
+    }
+
+    /// Register a type alias in both EntityRegistry and type_aliases HashMap
+    fn register_type_alias(&mut self, name: Symbol, aliased_type: Type, interner: &Interner) {
+        // Register in EntityRegistry for resolution via TypeDefKind::Alias
+        let name_id = self
+            .name_table
+            .intern(self.current_module, &[name], interner);
+        let type_key = self.type_table.key_for_type(&aliased_type);
+        self.entity_registry.register_alias(
+            name_id,
+            self.current_module,
+            aliased_type.clone(),
+            type_key,
+        );
+        // Also keep in type_aliases HashMap for backwards compatibility during migration
+        self.type_aliases.insert(name, aliased_type.clone());
+        // And in type_table for display
+        self.type_table.insert_named(aliased_type, name_id);
     }
 
     /// Process global let declarations (type check and add to scope)
@@ -1037,7 +1052,7 @@ impl Analyzer {
                             && let ExprKind::TypeLiteral(type_expr) = &init_expr.kind
                         {
                             let aliased_type = self.resolve_type(type_expr, interner);
-                            self.type_aliases.insert(let_stmt.name, aliased_type);
+                            self.register_type_alias(let_stmt.name, aliased_type, interner);
                         }
 
                         self.globals.insert(let_stmt.name, var_type.clone());

@@ -159,10 +159,8 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
             {
                 return Type::TypeParam(tp_info.name_id);
             }
-            // Look up type alias first
-            if let Some(aliased) = ctx.type_aliases.get(sym) {
-                aliased.clone()
-            } else if let Some(type_id) = ctx.resolver().resolve_type(*sym, ctx.entity_registry) {
+            // Look up type via EntityRegistry (handles aliases via TypeDefKind::Alias)
+            if let Some(type_id) = ctx.resolver().resolve_type(*sym, ctx.entity_registry) {
                 // Look up via EntityRegistry
                 let type_def = ctx.entity_registry.get_type(type_id);
                 match type_def.kind {
@@ -199,6 +197,13 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                         }
                     }
                     TypeDefKind::Primitive => Type::Error,
+                    TypeDefKind::Alias => {
+                        if let Some(ref aliased) = type_def.aliased_type {
+                            aliased.clone()
+                        } else {
+                            Type::Error
+                        }
+                    }
                 }
             } else if let Some(interface) = interface_instance(*sym, Vec::new(), ctx) {
                 interface
