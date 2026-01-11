@@ -38,6 +38,6 @@ jobs:
       - name: Test
         run: just test${{ matrix.profile == 'release' && '-release' || '' }}
       - name: Snapshot Tests
-        run: just snap${{ matrix.profile == 'release' && '-release' || '' }}
+        run: just snap-ci
       - name: Vole Unit Tests
-        run: just unit${{ matrix.profile == 'release' && '-release' || '' }}
+        run: just unit-ci

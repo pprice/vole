@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use glob::glob;
 
+use super::ReportMode;
 use super::diff::{unified_diff, unified_diff_colored};
 use super::snapshot::Snapshot;
 use crate::cli::should_skip_path;
@@ -306,7 +307,12 @@ pub fn bless_test(test_path: &Path) -> Result<bool, String> {
 }
 
 /// Run all tests matching patterns
-pub fn run_tests(patterns: &[String], include_skipped: bool, use_color: bool) -> TestSummary {
+pub fn run_tests(
+    patterns: &[String],
+    include_skipped: bool,
+    use_color: bool,
+    report_mode: ReportMode,
+) -> TestSummary {
     let (tests, skipped) = match discover_tests(patterns, include_skipped) {
         Ok(t) => t,
         Err(e) => {
@@ -329,6 +335,7 @@ pub fn run_tests(patterns: &[String], include_skipped: bool, use_color: bool) ->
 
     let mut summary = TestSummary::default();
     let colors = Colors::new(use_color);
+    let show_all = matches!(report_mode, ReportMode::All);
 
     for test_path in &tests {
         let result = run_test(test_path, use_color);
@@ -337,7 +344,9 @@ pub fn run_tests(patterns: &[String], include_skipped: bool, use_color: bool) ->
         match result {
             TestResult::Pass => {
                 summary.passed += 1;
-                println!("{}✓{} {}", colors.green(), colors.reset(), path_display);
+                if show_all {
+                    println!("{}✓{} {}", colors.green(), colors.reset(), path_display);
+                }
             }
             TestResult::Fail(diff) => {
                 summary.failed += 1;
@@ -355,14 +364,16 @@ pub fn run_tests(patterns: &[String], include_skipped: bool, use_color: bool) ->
             TestResult::New => {
                 summary.new += 1;
                 summary.new_tests.push(path_display.clone());
-                println!(
-                    "{}○{} {} {}(new){}",
-                    colors.yellow(),
-                    colors.reset(),
-                    path_display,
-                    colors.dim(),
-                    colors.reset()
-                );
+                if show_all {
+                    println!(
+                        "{}○{} {} {}(new){}",
+                        colors.yellow(),
+                        colors.reset(),
+                        path_display,
+                        colors.dim(),
+                        colors.reset()
+                    );
+                }
             }
         }
     }

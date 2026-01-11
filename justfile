@@ -55,10 +55,18 @@ fmt-check:
     cargo fmt -- --check
 
 # Run all checks locally (mirrors CI)
-ci: fmt-check clippy build test snap unit
+ci: fmt-check clippy build test snap-ci unit-ci
 
 # Pre-commit checks and fixes
-pre-commit: fmt clippy-fix clippy build test snap unit
+pre-commit: fmt clippy-fix clippy build test snap-ci unit-ci
+
+# Snapshot tests for CI (failures only)
+snap-ci:
+    cargo run --bin vole-snap -- test test/snapshot/ --report=failures
+
+# Vole unit tests for CI (failures only)
+unit-ci:
+    cargo run --bin vole -- test test/unit/ --report=failures
 
 # Show next available error code for a category (lexer, parser, sema)
 dev-next-error category:

@@ -151,7 +151,8 @@ pub fn run_tests(
         }
 
         // Print file path BEFORE processing for immediate feedback
-        if !matches!(report, ReportMode::Results) {
+        // (only in 'all' mode - failures/results modes show less output)
+        if matches!(report, ReportMode::All) {
             println!("\n{}", file.display());
             let _ = io::stdout().flush();
         }
@@ -208,8 +209,8 @@ fn run_stdin_tests(
     let stdin_path = PathBuf::from("<stdin>");
     let mut all_results = TestResults::new();
 
-    // Print file path BEFORE processing
-    if !matches!(report, ReportMode::Results) {
+    // Print file path only in 'all' mode
+    if matches!(report, ReportMode::All) {
         println!("\n{}", stdin_path.display());
         let _ = io::stdout().flush();
     }
@@ -322,6 +323,10 @@ fn execute_tests_with_progress(
             None => {
                 // Print failure immediately
                 if !matches!(report, ReportMode::Results) {
+                    // In failures mode, print file path before failure
+                    if matches!(report, ReportMode::Failures) {
+                        println!("\n{}", file_path.display());
+                    }
                     println!(
                         "  {}\u{2717}{} {} - could not find test function",
                         colors.red(),
@@ -403,6 +408,10 @@ fn execute_tests_with_progress(
                     }
                 }
                 TestStatus::Failed(failure) => {
+                    // In failures mode, print file path before failure
+                    if matches!(report, ReportMode::Failures) {
+                        println!("\n{}", file_path.display());
+                    }
                     print!(
                         "  {}\u{2717}{} {} {}({}){}",
                         colors.red(),
@@ -420,6 +429,10 @@ fn execute_tests_with_progress(
                     let _ = io::stdout().flush();
                 }
                 TestStatus::Panicked(msg) => {
+                    // In failures mode, print file path before failure
+                    if matches!(report, ReportMode::Failures) {
+                        println!("\n{}", file_path.display());
+                    }
                     println!(
                         "  {}\u{2620}{} {} {}({}){}",
                         colors.red(),

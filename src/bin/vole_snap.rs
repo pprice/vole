@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use vole::snap::{bless_tests, run_tests};
+use vole::snap::{ReportMode, bless_tests, run_tests};
 
 #[derive(Parser)]
 #[command(name = "vole-snap")]
@@ -28,6 +28,10 @@ enum Commands {
         /// Include underscore-prefixed files (normally skipped)
         #[arg(long)]
         include_skipped: bool,
+
+        /// Report mode: all (default), failures
+        #[arg(short, long, value_enum, default_value_t = ReportMode::All)]
+        report: ReportMode,
     },
     /// Create or update snapshot files
     Bless {
@@ -52,8 +56,9 @@ fn main() -> ExitCode {
         Commands::Test {
             patterns,
             include_skipped,
+            report,
         } => {
-            let summary = run_tests(&patterns, include_skipped, use_color);
+            let summary = run_tests(&patterns, include_skipped, use_color, report);
 
             // Print summary
             println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
