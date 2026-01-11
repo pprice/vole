@@ -1,0 +1,50 @@
+// Type alias tests
+// Tests for the let Name = TypeExpr syntax
+
+let Numeric = i32 | i64 | f64
+let OptionalInt = i32?
+let IntOrString = i32 | string
+
+tests "type aliases" {
+    test "union type alias - i32" {
+        let x: Numeric = 42
+        assert(x is i32)
+        if x is i32 {
+            assert(x == 42)
+        }
+    }
+
+    test "union type alias - i64" {
+        let num: i64 = 100
+        let x: Numeric = num
+        assert(x is i64)
+    }
+
+    test "union type alias - f64" {
+        let x: Numeric = 3.14
+        assert(x is f64)
+    }
+
+    test "optional type alias" {
+        let x: OptionalInt = 42
+        assert(x is i32)
+
+        let y: OptionalInt = nil
+        assert(y is nil)
+    }
+
+    test "type alias with string variant" {
+        let x: IntOrString = "hello"
+        assert(x is string)
+
+        let y: IntOrString = 123
+        assert(y is i32)
+    }
+
+    test "type alias in variable declaration" {
+        let a: Numeric = 1
+        let b: Numeric = 2.5
+        assert(a is i32)
+        assert(b is f64)
+    }
+}
