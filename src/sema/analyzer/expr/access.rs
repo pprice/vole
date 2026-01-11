@@ -408,7 +408,7 @@ impl Analyzer {
                 if let TypeExpr::Primitive(prim) = type_expr {
                     let name_id = self.name_table.primitives.from_ast(*prim);
                     let type_def_id = self.entity_registry.type_by_name(name_id)?;
-                    let type_name = self.name_table.display(name_id).to_string();
+                    let type_name = self.name_table.display(name_id);
                     tracing::trace!(%type_name, ?type_def_id, "resolved static call target (primitive)");
                     Some((type_def_id, type_name))
                 } else {

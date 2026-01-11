@@ -24,6 +24,10 @@ impl<'src> Parser<'src> {
                 if !self.match_token(TokenType::Comma) {
                     break;
                 }
+                // Allow trailing comma
+                if self.check_gt_in_type_context() {
+                    break;
+                }
             }
         }
 

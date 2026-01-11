@@ -267,6 +267,24 @@ pub enum Stmt {
     Raise(RaiseStmt),
 }
 
+impl Stmt {
+    /// Get the span of this statement
+    pub fn span(&self) -> Span {
+        match self {
+            Stmt::Let(s) => s.span,
+            Stmt::LetTuple(s) => s.span,
+            Stmt::Expr(s) => s.span,
+            Stmt::While(s) => s.span,
+            Stmt::For(s) => s.span,
+            Stmt::If(s) => s.span,
+            Stmt::Break(span) => *span,
+            Stmt::Continue(span) => *span,
+            Stmt::Return(s) => s.span,
+            Stmt::Raise(s) => s.span,
+        }
+    }
+}
+
 /// Let binding: let x = expr or let mut x = expr
 #[derive(Debug, Clone)]
 pub struct LetStmt {

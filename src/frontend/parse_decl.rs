@@ -53,6 +53,10 @@ impl<'src> Parser<'src> {
                 if !self.match_token(TokenType::Comma) {
                     break;
                 }
+                // Allow trailing comma
+                if self.check(TokenType::RParen) {
+                    break;
+                }
             }
         }
 
@@ -361,6 +365,10 @@ impl<'src> Parser<'src> {
                 let param = self.parse_param()?;
                 params.push(param);
                 if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+                // Allow trailing comma
+                if self.check(TokenType::RParen) {
                     break;
                 }
             }

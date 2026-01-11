@@ -145,6 +145,41 @@ pub extern "C" fn vole_bool_to_string(value: i8) -> *mut RcString {
     RcString::new(s)
 }
 
+/// Convert nil to string
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_nil_to_string() -> *mut RcString {
+    RcString::new("nil")
+}
+
+/// Convert an i64 array to string representation
+/// Shows first 5 elements, then "..." for truncation
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_array_i64_to_string(ptr: *const RcArray) -> *mut RcString {
+    if ptr.is_null() {
+        return RcString::new("[]");
+    }
+    unsafe {
+        let len = (*ptr).len;
+        let mut result = String::from("[");
+        let show_count = len.min(5);
+
+        for i in 0..show_count {
+            if i > 0 {
+                result.push_str(", ");
+            }
+            let elem = RcArray::get(ptr, i);
+            result.push_str(&elem.as_i64().to_string());
+        }
+
+        if len > 5 {
+            result.push_str(", ...");
+        }
+        result.push(']');
+        RcString::new(&result)
+    }
+}
+
 /// Flush stdout (useful for interactive output)
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_flush() {

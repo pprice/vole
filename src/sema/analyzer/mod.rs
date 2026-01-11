@@ -169,7 +169,9 @@ impl Analyzer {
         };
 
         // Register primitives in EntityRegistry so they can have static methods
-        analyzer.entity_registry.register_primitives(&analyzer.name_table);
+        analyzer
+            .entity_registry
+            .register_primitives(&analyzer.name_table);
 
         // Register built-in interfaces and implementations
         // NOTE: This is temporary - will eventually come from stdlib/traits.void

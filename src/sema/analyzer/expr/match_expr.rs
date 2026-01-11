@@ -82,8 +82,8 @@ impl Analyzer {
                 }
             }
 
-            // Check body expression
-            let body_type = self.check_expr(&arm.body, interner)?;
+            // Check body expression with expected type from first arm (if known)
+            let body_type = self.check_expr_expecting(&arm.body, result_type.as_ref(), interner)?;
 
             // Restore type overrides
             self.type_overrides = saved_overrides;

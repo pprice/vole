@@ -1,0 +1,39 @@
+// Unicode identifier tests
+
+let café = 42
+let naïve_count = 100
+
+tests "unicode identifiers" {
+    test "accented latin characters" {
+        assert(café == 42)
+    }
+
+    test "local unicode identifier" {
+        let naïve = 100
+        assert(naïve == 100)
+    }
+
+    test "module level with diacritics" {
+        assert(naïve_count == 100)
+    }
+
+    test "greek letters" {
+        let Ω = 3.14159
+        assert(Ω > 3.0)
+    }
+
+    test "cjk characters" {
+        let 日本語 = "Japanese"
+        assert(日本語 == "Japanese")
+    }
+
+    test "mixed ascii and unicode" {
+        let value_é = 42
+        assert(value_é == 42)
+    }
+
+    test "underscore with unicode" {
+        let _résultat = 123
+        assert(_résultat == 123)
+    }
+}

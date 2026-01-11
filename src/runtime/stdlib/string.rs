@@ -33,6 +33,16 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // str_byte_len: (string) -> i64 - Byte count
+    m.register(
+        "str_byte_len",
+        str_byte_len as *const u8,
+        NativeSignature {
+            params: vec![NativeType::String],
+            return_type: NativeType::I64,
+        },
+    );
+
     // str_equals: (string, string) -> bool
     m.register(
         "str_equals",
@@ -213,6 +223,16 @@ pub extern "C" fn str_len(s: *const RcString) -> i64 {
         return 0;
     }
     unsafe { (*s).as_str().chars().count() as i64 }
+}
+
+/// Get the length of a string in bytes (not characters!)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn str_byte_len(s: *const RcString) -> i64 {
+    if s.is_null() {
+        return 0;
+    }
+    unsafe { (*s).as_str().len() as i64 }
 }
 
 /// Check if two strings are equal

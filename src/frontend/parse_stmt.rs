@@ -288,7 +288,17 @@ impl<'src> Parser<'src> {
         let then_branch = self.block()?;
 
         let else_branch = if self.match_token(TokenType::KwElse) {
-            Some(self.block()?)
+            // Support `else if` by parsing another if statement and wrapping in a block
+            if self.check(TokenType::KwIf) {
+                let if_stmt = self.if_stmt()?;
+                let span = if_stmt.span();
+                Some(Block {
+                    stmts: vec![if_stmt],
+                    span,
+                })
+            } else {
+                Some(self.block()?)
+            }
         } else {
             None
         };

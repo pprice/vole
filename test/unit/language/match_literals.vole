@@ -1,7 +1,15 @@
-// WIP: Match patterns requiring unimplemented features
-// Requires: raw strings (@"..."), guard patterns (_ if condition)
+// Match expression with literal patterns
 
-tests "raw string literal patterns" {
+tests "string literal patterns" {
+    test "match string" {
+        let s = "hello"
+        let result = match s {
+            "hello" => "matched"
+            _ => "other"
+        }
+        assert(result == "matched")
+    }
+
     test "match raw string with backslashes" {
         let path = @"C:\Windows\System32"
         let result = match path {

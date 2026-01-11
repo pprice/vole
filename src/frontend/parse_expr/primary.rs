@@ -160,6 +160,17 @@ impl<'src> Parser<'src> {
                     span: token.span,
                 })
             }
+            TokenType::RawStringLiteral => {
+                self.advance();
+                // Remove @" prefix and " suffix, no escape processing
+                let lexeme = &token.lexeme;
+                let content = lexeme[2..lexeme.len() - 1].to_string();
+                Ok(Expr {
+                    id: self.next_id(),
+                    kind: ExprKind::StringLiteral(content),
+                    span: token.span,
+                })
+            }
             TokenType::StringInterpStart => self.parse_interpolated_string(),
             TokenType::Identifier => {
                 self.advance();

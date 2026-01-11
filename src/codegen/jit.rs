@@ -119,6 +119,14 @@ impl JitContext {
         let sig = self.create_signature(&[types::I8], Some(ptr_ty));
         self.import_function("vole_bool_to_string", &sig);
 
+        // vole_nil_to_string() -> *mut RcString
+        let sig = self.create_signature(&[], Some(ptr_ty));
+        self.import_function("vole_nil_to_string", &sig);
+
+        // vole_array_i64_to_string(arr: *const RcArray) -> *mut RcString
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_array_i64_to_string", &sig);
+
         // vole_flush()
         let sig = self.create_signature(&[], None);
         self.import_function("vole_flush", &sig);
@@ -485,6 +493,14 @@ impl JitContext {
         builder.symbol(
             "vole_bool_to_string",
             crate::runtime::builtins::vole_bool_to_string as *const u8,
+        );
+        builder.symbol(
+            "vole_nil_to_string",
+            crate::runtime::builtins::vole_nil_to_string as *const u8,
+        );
+        builder.symbol(
+            "vole_array_i64_to_string",
+            crate::runtime::builtins::vole_array_i64_to_string as *const u8,
         );
 
         // Assert functions

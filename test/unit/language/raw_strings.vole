@@ -1,0 +1,40 @@
+// Raw string literals - no escape processing
+
+tests "raw strings" {
+    test "basic raw string" {
+        let s = @"hello"
+        assert(s == "hello")
+    }
+
+    test "raw string with backslash" {
+        // In a raw string, backslashes are literal
+        let s = @"C:\Users\name"
+        // Compare with regular string using escape sequences
+        assert(s == "C:\\Users\\name")
+    }
+
+    test "raw string preserves backslashes" {
+        let s = @"C:\path\to\file"
+        assert(s == @"C:\path\to\file")
+    }
+
+    test "raw string vs regular string" {
+        // These should be equal
+        let raw = @"line1\nline2"
+        let regular = "line1\\nline2"
+        assert(raw == regular)
+    }
+
+    test "raw string with quotes inside" {
+        // Can't have " inside raw string, but can compare
+        let s = @"hello world"
+        assert(s == "hello world")
+    }
+
+    test "raw string concatenation" {
+        let a = @"C:\path"
+        let b = @"\to\file"
+        let c = a + b
+        assert(c == "C:\\path\\to\\file")
+    }
+}

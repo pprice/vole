@@ -9,7 +9,7 @@ use crate::codegen::types::{
     CompileCtx, MethodInfo, TypeMetadata, method_name_id, resolve_type_expr_full, type_to_cranelift,
 };
 use crate::frontend::{
-    ClassDecl, FuncDecl, ImplementBlock, Interner, InterfaceMethod, RecordDecl, StaticsBlock,
+    ClassDecl, FuncDecl, ImplementBlock, InterfaceMethod, Interner, RecordDecl, StaticsBlock,
     Symbol, TypeExpr,
 };
 use crate::identity::ModuleId;
@@ -189,17 +189,11 @@ impl Compiler<'_> {
                 .unwrap_or(Type::Void);
             let sig = self.create_implement_method_signature(method, &self_vole_type);
             let func_key = if let Some(type_sym) = type_sym {
-                self.func_registry.intern_qualified(
-                    func_module,
-                    &[type_sym, method.name],
-                    interner,
-                )
+                self.func_registry
+                    .intern_qualified(func_module, &[type_sym, method.name], interner)
             } else if let Some(type_id) = type_id {
-                self.func_registry.intern_with_prefix(
-                    type_id.name_id(),
-                    method.name,
-                    interner,
-                )
+                self.func_registry
+                    .intern_with_prefix(type_id.name_id(), method.name, interner)
             } else {
                 let method_name_str = interner.resolve(method.name);
                 self.func_registry
@@ -266,17 +260,17 @@ impl Compiler<'_> {
                 let sig = self.create_static_method_signature(method);
 
                 // Function key: TypeName::methodName
-                let func_key = self
-                    .func_registry
-                    .intern_raw_qualified(func_module, &[type_name.as_str(), interner.resolve(method.name)]);
+                let func_key = self.func_registry.intern_raw_qualified(
+                    func_module,
+                    &[type_name.as_str(), interner.resolve(method.name)],
+                );
                 let display_name = self.func_registry.display(func_key);
                 let func_id = self.jit.declare_function(&display_name, &sig);
                 self.func_registry.set_func_id(func_key, func_id);
 
                 // Register in static_method_infos for codegen lookup
                 if let Some(type_def_id) = type_def_id {
-                    let method_name_id =
-                        method_name_id(self.analyzed, interner, method.name);
+                    let method_name_id = method_name_id(self.analyzed, interner, method.name);
                     if let Some(method_name_id) = method_name_id {
                         self.static_method_infos.insert(
                             (type_def_id, method_name_id),
@@ -371,7 +365,13 @@ impl Compiler<'_> {
         };
 
         if let Some(ref statics) = impl_block.statics {
-            self.compile_implement_statics(statics, &type_name, func_module, module_path, interner)?;
+            self.compile_implement_statics(
+                statics,
+                &type_name,
+                func_module,
+                module_path,
+                interner,
+            )?;
         }
         Ok(())
     }

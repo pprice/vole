@@ -34,6 +34,52 @@ tests "if" {
     }
 }
 
+tests "else-if chains" {
+    test "first branch matches" {
+        let mut result = ""
+        if 10 > 5 {
+            result = "big"
+        } else if 10 > 0 {
+            result = "small"
+        }
+        assert(result == "big")
+    }
+
+    test "second branch matches" {
+        let mut result = ""
+        if 3 > 5 {
+            result = "big"
+        } else if 3 > 0 {
+            result = "small"
+        }
+        assert(result == "small")
+    }
+
+    test "else branch negative" {
+        let mut result = ""
+        if -5 > 0 {
+            result = "positive"
+        } else if -5 < 0 {
+            result = "negative"
+        } else {
+            result = "zero"
+        }
+        assert(result == "negative")
+    }
+
+    test "else branch zero" {
+        let mut result = ""
+        if 0 > 0 {
+            result = "positive"
+        } else if 0 < 0 {
+            result = "negative"
+        } else {
+            result = "zero"
+        }
+        assert(result == "zero")
+    }
+}
+
 tests "while" {
     test "simple while" {
         let mut i = 0

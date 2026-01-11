@@ -1,0 +1,39 @@
+// Unicode string tests
+
+tests "unicode strings" {
+    test "length is codepoints" {
+        // "Café" = 4 codepoints (C, a, f, é) but 5 bytes
+        let s = "Café"
+        assert(s.length() == 4)
+    }
+
+    test "byte_length is bytes" {
+        let s = "Café"
+        assert(s.byte_length() == 5)
+    }
+
+    test "emoji length" {
+        let emoji = "😀"
+        assert(emoji.length() == 1)
+        assert(emoji.byte_length() == 4)
+    }
+
+    test "ascii same length" {
+        let s = "hello"
+        assert(s.length() == 5)
+        assert(s.byte_length() == 5)
+    }
+
+    test "chinese characters" {
+        // Each Chinese character is 1 codepoint but 3 bytes
+        let s = "中文"
+        assert(s.length() == 2)
+        assert(s.byte_length() == 6)
+    }
+
+    test "mixed content" {
+        let s = "hi 👋"
+        assert(s.length() == 4)  // h, i, space, emoji
+        assert(s.byte_length() == 7)  // 1+1+1+4
+    }
+}

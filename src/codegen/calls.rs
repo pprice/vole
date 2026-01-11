@@ -145,6 +145,23 @@ impl Cg<'_, '_, '_> {
             return Ok(val.value);
         }
 
+        // Handle arrays
+        if matches!(val.vole_type, Type::Array(_)) {
+            return self.call_runtime(RuntimeFn::ArrayI64ToString, &[val.value]);
+        }
+
+        // Handle nil type directly
+        if matches!(val.vole_type, Type::Nil) {
+            return self.call_runtime(RuntimeFn::NilToString, &[]);
+        }
+
+        // Handle optionals (unions with nil variant)
+        if let Type::Union(variants) = &val.vole_type
+            && let Some(nil_idx) = variants.iter().position(|v| matches!(v, Type::Nil))
+        {
+            return self.optional_to_string(val.value, variants, nil_idx);
+        }
+
         let (runtime, call_val) = if val.ty == types::F64 {
             (RuntimeFn::F64ToString, val.value)
         } else if val.ty == types::I8 {
@@ -159,6 +176,65 @@ impl Cg<'_, '_, '_> {
         };
 
         self.call_runtime(runtime, &[call_val])
+    }
+
+    /// Convert an optional (union with nil) to string
+    fn optional_to_string(
+        &mut self,
+        ptr: Value,
+        variants: &[Type],
+        nil_idx: usize,
+    ) -> Result<Value, String> {
+        use crate::codegen::types::type_to_cranelift;
+
+        // Load the tag from offset 0
+        let tag = self.builder.ins().load(types::I8, MemFlags::new(), ptr, 0);
+        let nil_tag = self.builder.ins().iconst(types::I8, nil_idx as i64);
+        let is_nil = self.builder.ins().icmp(IntCC::Equal, tag, nil_tag);
+
+        // Create blocks for branching
+        let nil_block = self.builder.create_block();
+        let some_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+
+        // Add block param for the result string
+        self.builder
+            .append_block_param(merge_block, self.ctx.pointer_type);
+
+        self.builder
+            .ins()
+            .brif(is_nil, nil_block, &[], some_block, &[]);
+
+        // Nil case: return "nil"
+        self.builder.switch_to_block(nil_block);
+        let nil_str = self.call_runtime(RuntimeFn::NilToString, &[])?;
+        self.builder.ins().jump(merge_block, &[nil_str.into()]);
+
+        // Some case: extract inner value and convert to string
+        self.builder.switch_to_block(some_block);
+        // Find the non-nil variant
+        let inner_type = variants
+            .iter()
+            .find(|v| !matches!(v, Type::Nil))
+            .cloned()
+            .unwrap_or(Type::Nil);
+        let inner_cr_type = type_to_cranelift(&inner_type, self.ctx.pointer_type);
+        let inner_val = self
+            .builder
+            .ins()
+            .load(inner_cr_type, MemFlags::new(), ptr, 8);
+
+        let inner_compiled = CompiledValue {
+            value: inner_val,
+            ty: inner_cr_type,
+            vole_type: inner_type,
+        };
+        let some_str = self.value_to_string(inner_compiled)?;
+        self.builder.ins().jump(merge_block, &[some_str.into()]);
+
+        // Merge and return result
+        self.builder.switch_to_block(merge_block);
+        Ok(self.builder.block_params(merge_block)[0])
     }
 
     /// Compile a function call

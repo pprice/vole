@@ -33,6 +33,7 @@ implement Default for string {
 implement string {
     external("std:string") {
         func "str_len" as length() -> i64
+        func "str_byte_len" as byte_length() -> i64
         func "str_contains" as contains(needle: string) -> bool
         func "str_starts_with" as starts_with(prefix: string) -> bool
         func "str_ends_with" as ends_with(suffix: string) -> bool

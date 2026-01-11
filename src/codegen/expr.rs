@@ -998,18 +998,9 @@ impl Cg<'_, '_, '_> {
                     let lit_val = self.expr(lit_expr)?;
                     arm_variables = std::mem::replace(&mut *self.vars, saved_vars);
 
-                    let cmp = match scrutinee.ty {
-                        types::I64 | types::I32 | types::I8 => {
-                            self.builder
-                                .ins()
-                                .icmp(IntCC::Equal, scrutinee.value, lit_val.value)
-                        }
-                        types::F64 => {
-                            self.builder
-                                .ins()
-                                .fcmp(FloatCC::Equal, scrutinee.value, lit_val.value)
-                        }
-                        _ => {
+                    // Use Vole type (not Cranelift type) to determine comparison method
+                    let cmp = match &scrutinee.vole_type {
+                        Type::String => {
                             if self
                                 .ctx
                                 .func_registry
@@ -1029,6 +1020,15 @@ impl Cg<'_, '_, '_> {
                                 )
                             }
                         }
+                        Type::F64 => {
+                            self.builder
+                                .ins()
+                                .fcmp(FloatCC::Equal, scrutinee.value, lit_val.value)
+                        }
+                        _ => self
+                            .builder
+                            .ins()
+                            .icmp(IntCC::Equal, scrutinee.value, lit_val.value),
                     };
                     Some(cmp)
                 }

@@ -12,11 +12,26 @@ impl<'src> Parser<'src> {
             // arr.iter()
             //    .map(...)
             //    .filter(...)
-            // Skip newlines if followed by . or ?. to continue the chain
+            // Only skip newlines if followed by . or ?. to continue the chain
             if self.check(TokenType::Newline) {
-                self.skip_newlines();
-                // If not a continuation token, break out of the loop
-                if !self.check(TokenType::Dot) && !self.check(TokenType::QuestionDot) {
+                // Peek past newlines to check for continuation tokens
+                let mut peek_lexer = self.lexer.clone();
+                loop {
+                    let next = peek_lexer.next_token();
+                    if next.ty != TokenType::Newline {
+                        // Found non-newline token - check if continuation
+                        if next.ty == TokenType::Dot || next.ty == TokenType::QuestionDot {
+                            // It's a continuation - consume newlines and continue
+                            self.skip_newlines();
+                        } else {
+                            // Not a continuation - break without consuming newlines
+                            break;
+                        }
+                        break;
+                    }
+                }
+                if self.check(TokenType::Newline) {
+                    // We didn't consume newlines, so break
                     break;
                 }
             }
@@ -53,6 +68,10 @@ impl<'src> Parser<'src> {
                         loop {
                             args.push(self.expression(0)?);
                             if !self.match_token(TokenType::Comma) {
+                                break;
+                            }
+                            // Allow trailing comma
+                            if self.check(TokenType::RParen) {
                                 break;
                             }
                         }
@@ -117,6 +136,10 @@ impl<'src> Parser<'src> {
             loop {
                 args.push(self.expression(0)?);
                 if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+                // Allow trailing comma
+                if self.check(TokenType::RParen) {
                     break;
                 }
             }

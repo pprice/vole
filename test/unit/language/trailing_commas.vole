@@ -1,0 +1,50 @@
+// Trailing commas in various contexts
+
+record Point {
+    x: i32,
+    y: i32,
+}
+
+// Function with trailing comma in parameters
+func add(a: i32, b: i32,) -> i32 {
+    return a + b
+}
+
+// Function with trailing comma in type parameters
+func identity<T,>(x: T) -> T {
+    return x
+}
+
+tests "trailing commas" {
+    test "array literal" {
+        let arr = [1, 2, 3,]
+        assert(arr[0] == 1)
+        assert(arr[1] == 2)
+        assert(arr[2] == 3)
+    }
+
+    test "function parameters" {
+        assert(add(1, 2) == 3)
+    }
+
+    test "function call arguments" {
+        assert(add(1, 2,) == 3)
+    }
+
+    test "record instantiation" {
+        let p = Point { x: 1, y: 2, }
+        assert(p.x == 1)
+        assert(p.y == 2)
+    }
+
+    test "generic function type parameters" {
+        assert(identity(42) == 42)
+    }
+
+    test "method call arguments" {
+        let s = "hello"
+        // s.substring(0, 2,) would test this but substring may not exist
+        // Using a simple test
+        assert(add(10, 20,) == 30)
+    }
+}

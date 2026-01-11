@@ -3,6 +3,7 @@
 use crate::errors::LexerError;
 use crate::frontend::{Span, Token, TokenType};
 
+#[derive(Clone)]
 pub struct Lexer<'src> {
     source: &'src str,
     chars: std::iter::Peekable<std::str::CharIndices<'src>>,
@@ -226,8 +227,19 @@ impl<'src> Lexer<'src> {
             // Number literal
             c if c.is_ascii_digit() => self.number(),
 
-            // Identifier or keyword
-            c if c.is_ascii_alphabetic() || c == '_' => self.identifier(),
+            // Identifier or keyword (supports Unicode XID, bans invisible chars)
+            c if c == '_' || (unicode_ident::is_xid_start(c) && !Self::is_banned_unicode(c)) => {
+                self.identifier()
+            }
+
+            // Raw string literal: @"..."
+            '@' => {
+                if self.match_char('"') {
+                    self.raw_string()
+                } else {
+                    self.error_unexpected_char(c)
+                }
+            }
 
             _ => self.error_unexpected_char(c),
         }
@@ -353,10 +365,10 @@ impl<'src> Lexer<'src> {
         Token::new(TokenType::Error, message, span)
     }
 
-    /// Scan an identifier or keyword
+    /// Scan an identifier or keyword (supports Unicode XID)
     fn identifier(&mut self) -> Token {
         while let Some(c) = self.peek() {
-            if c.is_ascii_alphanumeric() || c == '_' {
+            if unicode_ident::is_xid_continue(c) && !Self::is_banned_unicode(c) {
                 self.advance();
             } else {
                 break;
@@ -366,6 +378,31 @@ impl<'src> Lexer<'src> {
         let text = &self.source[self.start..self.current];
         let ty = Self::keyword_type(text).unwrap_or(TokenType::Identifier);
         self.make_token(ty)
+    }
+
+    /// Check if a Unicode character is banned from identifiers
+    /// (invisible, zero-width, or potentially confusing)
+    fn is_banned_unicode(c: char) -> bool {
+        matches!(
+            c,
+            // Zero-width characters
+            '\u{200B}'   // Zero Width Space
+            | '\u{200C}' // Zero Width Non-Joiner (ZWNJ)
+            | '\u{200D}' // Zero Width Joiner (ZWJ)
+            | '\u{FEFF}' // Zero Width No-Break Space (BOM)
+            // Invisible formatting
+            | '\u{00AD}' // Soft Hyphen
+            | '\u{034F}' // Combining Grapheme Joiner
+            | '\u{061C}' // Arabic Letter Mark
+            | '\u{115F}'..='\u{1160}' // Hangul fillers
+            | '\u{17B4}'..='\u{17B5}' // Khmer invisible
+            | '\u{180B}'..='\u{180E}' // Mongolian format
+            | '\u{2060}'..='\u{206F}' // General punctuation invisibles (includes LRI, RLI, FSI, PDI)
+            | '\u{3164}' // Hangul Filler
+            | '\u{FFA0}' // Halfwidth Hangul Filler
+            // Bidirectional overrides (security risk)
+            | '\u{202A}'..='\u{202E}' // LRE, RLE, PDF, LRO, RLO
+        )
     }
 
     /// Check if a string is a keyword and return its token type
@@ -503,6 +540,31 @@ impl<'src> Lexer<'src> {
                 }
                 Some('\n') => {
                     return self.error_unterminated_string();
+                }
+                Some(_) => {
+                    self.advance();
+                }
+            }
+        }
+    }
+
+    /// Scan a raw string literal @"..." (no escape processing)
+    fn raw_string(&mut self) -> Token {
+        // Opening @" already consumed
+        loop {
+            match self.peek() {
+                None => {
+                    return self.error_unterminated_string();
+                }
+                Some('"') => {
+                    self.advance();
+                    return self.make_token(TokenType::RawStringLiteral);
+                }
+                Some('\n') => {
+                    // Raw strings can span multiple lines
+                    self.line += 1;
+                    self.column = 1;
+                    self.advance();
                 }
                 Some(_) => {
                     self.advance();

@@ -194,7 +194,7 @@ impl<'src> Parser<'src> {
                 Ok(Pattern::Literal(expr))
             }
             // String literal pattern
-            TokenType::StringLiteral => {
+            TokenType::StringLiteral | TokenType::RawStringLiteral => {
                 let expr = self.primary()?;
                 Ok(Pattern::Literal(expr))
             }

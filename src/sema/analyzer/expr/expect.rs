@@ -214,11 +214,11 @@ impl Analyzer {
                     // value doesn't fit but the negated value does
                     if let ExprKind::IntLiteral(value) = &un.operand.kind {
                         let negated = value.wrapping_neg();
-                        if let Some(target) = expected {
-                            if literal_fits(negated, target) {
-                                self.record_expr_type(&un.operand, target.clone());
-                                return Ok(target.clone());
-                            }
+                        if let Some(target) = expected
+                            && literal_fits(negated, target)
+                        {
+                            self.record_expr_type(&un.operand, target.clone());
+                            return Ok(target.clone());
                         }
                         // Fall back to i64 if no expected type or doesn't fit
                         self.record_expr_type(&un.operand, Type::I64);

@@ -7,6 +7,7 @@ pub enum TokenType {
     IntLiteral,
     FloatLiteral,
     StringLiteral,
+    RawStringLiteral,   // @"..."
     StringInterpStart,  // "text{
     StringInterpMiddle, // }text{
     StringInterpEnd,    // }text"
@@ -129,6 +130,7 @@ impl TokenType {
             Self::IntLiteral => "integer",
             Self::FloatLiteral => "float",
             Self::StringLiteral => "string",
+            Self::RawStringLiteral => "raw string",
             Self::StringInterpStart => "string interpolation",
             Self::StringInterpMiddle => "string interpolation",
             Self::StringInterpEnd => "string interpolation",

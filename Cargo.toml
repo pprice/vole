@@ -60,6 +60,7 @@ serde_json = "1.0"
 # Tracing/observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+unicode-ident = "1.0.22"
 
 [dev-dependencies]
 pretty_assertions = "1.4"
