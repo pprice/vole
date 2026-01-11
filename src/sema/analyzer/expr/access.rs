@@ -2,6 +2,26 @@ use super::super::*;
 use crate::identity::TypeDefId;
 
 impl Analyzer {
+    /// Get struct name and fields from a type (for field access operations).
+    /// Returns None for non-struct types.
+    fn get_struct_info<'a>(&self, ty: &'a Type) -> Option<(String, &'a [StructField])> {
+        match ty {
+            Type::Class(class_type) => Some((
+                self.name_table
+                    .last_segment_str(class_type.name_id)
+                    .unwrap_or_else(|| "class".to_string()),
+                &class_type.fields,
+            )),
+            Type::Record(record_type) => Some((
+                self.name_table
+                    .last_segment_str(record_type.name_id)
+                    .unwrap_or_else(|| "record".to_string()),
+                &record_type.fields,
+            )),
+            _ => None,
+        }
+    }
+
     pub(super) fn check_field_access_expr(
         &mut self,
         field_access: &FieldAccessExpr,
@@ -33,43 +53,29 @@ impl Analyzer {
             }
         }
 
-        // Get fields from object type
-        let (type_name, fields) = match &object_type {
-            Type::Class(class_type) => (
-                self.name_table
-                    .last_segment_str(class_type.name_id)
-                    .unwrap_or_else(|| "class".to_string()),
-                Some(&class_type.fields),
-            ),
-            Type::Record(record_type) => (
-                self.name_table
-                    .last_segment_str(record_type.name_id)
-                    .unwrap_or_else(|| "record".to_string()),
-                Some(&record_type.fields),
-            ),
-            Type::Error => return Ok(Type::Error),
-            _ => (self.type_display(&object_type), None),
-        };
-
-        // Try to find the field (for class/record types)
-        let field_name = interner.resolve(field_access.field);
-        if let Some(fields) = fields
-            && let Some(field) = fields.iter().find(|f| f.name == field_name)
-        {
-            return Ok(field.ty.clone());
+        // Handle Type::Error early
+        if matches!(object_type, Type::Error) {
+            return Ok(Type::Error);
         }
 
-        // No field found - report appropriate error
-        if fields.is_some() {
+        // Get fields from object type
+        let field_name = interner.resolve(field_access.field);
+        if let Some((type_name, fields)) = self.get_struct_info(&object_type) {
+            // Try to find the field
+            if let Some(field) = fields.iter().find(|f| f.name == field_name) {
+                return Ok(field.ty.clone());
+            }
+            // Field not found on struct type
             self.add_error(
                 SemanticError::UnknownField {
                     ty: type_name,
-                    field: interner.resolve(field_access.field).to_string(),
+                    field: field_name.to_string(),
                     span: field_access.field_span.into(),
                 },
                 field_access.field_span,
             );
         } else {
+            // Not a struct type
             self.type_error("class or record", &object_type, field_access.object.span);
         }
         Ok(Type::Error)
@@ -96,29 +102,15 @@ impl Analyzer {
             object_type.clone()
         };
 
+        // Handle Type::Error early
+        if matches!(inner_type, Type::Error) {
+            return Ok(Type::Error);
+        }
+
         // Get fields from inner type
-        let (type_name, fields) = match &inner_type {
-            Type::Class(class_type) => (
-                self.name_table
-                    .last_segment_str(class_type.name_id)
-                    .unwrap_or_else(|| "class".to_string()),
-                &class_type.fields,
-            ),
-            Type::Record(record_type) => (
-                self.name_table
-                    .last_segment_str(record_type.name_id)
-                    .unwrap_or_else(|| "record".to_string()),
-                &record_type.fields,
-            ),
-            Type::Error => return Ok(Type::Error),
-            _ => {
-                self.type_error(
-                    "optional class or record",
-                    &object_type,
-                    opt_chain.object.span,
-                );
-                return Ok(Type::Error);
-            }
+        let Some((type_name, fields)) = self.get_struct_info(&inner_type) else {
+            self.type_error("optional class or record", &object_type, opt_chain.object.span);
+            return Ok(Type::Error);
         };
 
         // Find the field
@@ -135,7 +127,7 @@ impl Analyzer {
             self.add_error(
                 SemanticError::UnknownField {
                     ty: type_name,
-                    field: interner.resolve(opt_chain.field).to_string(),
+                    field: field_name.to_string(),
                     span: opt_chain.field_span.into(),
                 },
                 opt_chain.field_span,
