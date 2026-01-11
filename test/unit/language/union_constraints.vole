@@ -3,10 +3,10 @@
 
 // === Type Aliases ===
 
-type Numeric = i32 | i64 | f64
-type Integer = i32 | i64
-type StringOrInt = string | i32
-type Addable = i32 | f64
+let Numeric = i32 | i64 | f64
+let Integer = i32 | i64
+let StringOrInt = string | i32
+let Addable = i32 | f64
 
 // === Generic Functions ===
 
@@ -60,13 +60,16 @@ tests {
 
     test "union constraint preserves type" {
         let s = identity("hello")
-        let n = identity(42)
+        let num: i32 = 42
+        let n = identity(num)
         assert(s == "hello")
         assert(n == 42)
     }
 
     test "union constraint with two params" {
-        assert(add(10, 20) == 30)
+        let a: i32 = 10
+        let b: i32 = 20
+        assert(add(a, b) == 30)
         assert(add(1.5, 2.5) == 4.0)
     }
 
@@ -86,16 +89,21 @@ tests {
     }
 
     test "identity with zero" {
-        let n = identity(0)
+        let zero: i32 = 0
+        let n = identity(zero)
         assert(n == 0)
     }
 
     test "add negatives" {
-        assert(add(-5, -3) == -8)
+        let a: i32 = -5
+        let b: i32 = -3
+        assert(add(a, b) == -8)
     }
 
     test "add mixed sign" {
-        assert(add(10, -3) == 7)
+        let a: i32 = 10
+        let b: i32 = -3
+        assert(add(a, b) == 7)
     }
 
     test "integer-only constraint" {

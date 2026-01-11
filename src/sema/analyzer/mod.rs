@@ -1181,6 +1181,16 @@ impl Analyzer {
     ) -> Option<crate::sema::generic::TypeConstraint> {
         match constraint {
             TypeConstraint::Interface(sym) => {
+                // First check if this is a type alias (e.g., let Numeric = i32 | i64)
+                if let Some(aliased_type) = self.type_aliases.get(sym) {
+                    // Convert the aliased type to a union constraint
+                    let types = match aliased_type {
+                        Type::Union(types) => types.clone(),
+                        other => vec![other.clone()],
+                    };
+                    return Some(crate::sema::generic::TypeConstraint::Union(types));
+                }
+
                 // Validate interface exists via EntityRegistry using resolver
                 let iface_str = interner.resolve(*sym);
                 let iface_exists = self
