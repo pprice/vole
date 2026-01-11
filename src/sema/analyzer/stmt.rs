@@ -83,6 +83,21 @@ impl Analyzer {
                     LetInit::TypeAlias(type_expr) => {
                         // Type alias: let Numeric = i32 | i64
                         let aliased_type = self.resolve_type(type_expr, interner);
+
+                        // Warn if creating a type alias to a structural type
+                        if let Type::Structural(structural) = &aliased_type {
+                            let alias_name = interner.resolve(let_stmt.name).to_string();
+                            let fields = self.format_structural_type(structural);
+                            self.add_warning(
+                                SemanticWarning::StructuralTypeAlias {
+                                    name: alias_name,
+                                    fields,
+                                    span: let_stmt.span.into(),
+                                },
+                                let_stmt.span,
+                            );
+                        }
+
                         self.type_aliases.insert(let_stmt.name, aliased_type);
                     }
                 }

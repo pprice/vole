@@ -15,4 +15,4 @@ pub use parser::ParserError;
 pub use report::{
     get_color_mode, render_to_stderr, render_to_string, render_to_writer, set_color_mode,
 };
-pub use sema::SemanticError;
+pub use sema::{SemanticError, SemanticWarning};

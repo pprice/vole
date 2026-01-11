@@ -16,7 +16,7 @@ use crate::runtime::set_stdout_capture;
 use crate::sema::generic::{GenericFuncDef, GenericRecordDef, MonomorphCache, MonomorphKey};
 use crate::sema::{
     Analyzer, EntityRegistry, ErrorTypeInfo, ImplementRegistry, MethodResolutions, Type, TypeError,
-    TypeTable, WellKnownTypes,
+    TypeTable, TypeWarning, WellKnownTypes,
 };
 use crate::transforms;
 
@@ -109,6 +109,13 @@ fn render_sema_error_to<W: Write>(err: &TypeError, file_path: &str, source: &str
     let _ = render_to_writer(report.as_ref(), writer);
 }
 
+/// Render a semantic warning to stderr
+fn render_sema_warning(warn: &TypeWarning, file_path: &str, source: &str) {
+    let report = miette::Report::new(warn.warning.clone())
+        .with_source_code(NamedSource::new(file_path, source.to_string()));
+    render_to_stderr(report.as_ref());
+}
+
 /// Parse and analyze a source file, rendering any diagnostics on error.
 ///
 /// Returns `Ok(AnalyzedProgram)` on success, or `Err(())` if there were
@@ -163,7 +170,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
     }
 
     // Sema phase (type checking)
-    let analyzer = {
+    let mut analyzer = {
         let _span = tracing::info_span!("sema").entered();
         let mut analyzer = Analyzer::new(file_path, source);
         if let Err(errors) = analyzer.analyze(&program, &interner) {
@@ -175,6 +182,11 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         tracing::debug!("type checking complete");
         analyzer
     };
+
+    // Render any warnings (non-fatal diagnostics)
+    for warn in &analyzer.take_warnings() {
+        render_sema_warning(warn, file_path, source);
+    }
 
     let (
         type_aliases,

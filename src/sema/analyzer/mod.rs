@@ -7,7 +7,7 @@ mod methods;
 mod patterns;
 mod stmt;
 
-use crate::errors::SemanticError;
+use crate::errors::{SemanticError, SemanticWarning};
 use crate::frontend::*;
 use crate::identity::{self, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
 use crate::module::ModuleLoader;
@@ -21,7 +21,7 @@ use crate::sema::implement_registry::{
     ExternalMethodInfo, ImplementRegistry, MethodImpl, PrimitiveTypeId, TypeId,
 };
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
-use crate::sema::types::{ConstantValue, ModuleType};
+use crate::sema::types::{ConstantValue, ModuleType, StructuralType};
 use crate::sema::{
     ErrorTypeInfo, FunctionType, RecordType, StructField, Type, TypeKey, WellKnownTypes,
     compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
@@ -53,6 +53,20 @@ impl TypeError {
     }
 }
 
+/// A type warning wrapping a miette-enabled SemanticWarning
+#[derive(Debug, Clone)]
+pub struct TypeWarning {
+    pub warning: SemanticWarning,
+    pub span: Span,
+}
+
+impl TypeWarning {
+    /// Create a new type warning
+    pub fn new(warning: SemanticWarning, span: Span) -> Self {
+        Self { warning, span }
+    }
+}
+
 pub struct Analyzer {
     scope: Scope,
     functions: HashMap<Symbol, FunctionType>,
@@ -71,6 +85,7 @@ pub struct Analyzer {
     /// None means we're not in a static method.
     current_static_method: Option<String>,
     errors: Vec<TypeError>,
+    warnings: Vec<TypeWarning>,
     /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
     type_overrides: HashMap<Symbol, Type>,
     /// Stack of lambda scopes for capture analysis. Each entry is a HashMap
@@ -142,6 +157,7 @@ impl Analyzer {
             current_generator_element_type: None,
             current_static_method: None,
             errors: Vec::new(),
+            warnings: Vec::new(),
             type_overrides: HashMap::new(),
             lambda_captures: Vec::new(),
             lambda_locals: Vec::new(),
@@ -400,6 +416,7 @@ impl Analyzer {
             current_generator_element_type: None,
             current_static_method: None,
             errors: Vec::new(),
+            warnings: Vec::new(),
             type_overrides: HashMap::new(),
             lambda_captures: Vec::new(),
             lambda_locals: Vec::new(),
@@ -467,6 +484,11 @@ impl Analyzer {
         self.errors.push(TypeError::new(error, span));
     }
 
+    /// Helper to add a type warning
+    fn add_warning(&mut self, warning: SemanticWarning, span: Span) {
+        self.warnings.push(TypeWarning::new(warning, span));
+    }
+
     fn type_key_for(&mut self, ty: &Type) -> TypeKey {
         self.type_table.key_for_type(ty)
     }
@@ -481,6 +503,32 @@ impl Analyzer {
             self.type_display(left),
             self.type_display(right)
         )
+    }
+
+    /// Format a structural type for warning messages
+    fn format_structural_type(&mut self, structural: &StructuralType) -> String {
+        let mut parts = Vec::new();
+
+        for field in &structural.fields {
+            let name = self
+                .name_table
+                .last_segment_str(field.name)
+                .unwrap_or_else(|| "<unknown>".to_string());
+            let ty = self.type_display(&field.ty);
+            parts.push(format!("{}: {}", name, ty));
+        }
+
+        for method in &structural.methods {
+            let name = self
+                .name_table
+                .last_segment_str(method.name)
+                .unwrap_or_else(|| "<unknown>".to_string());
+            let params: Vec<String> = method.params.iter().map(|p| self.type_display(p)).collect();
+            let ret = self.type_display(&method.return_type);
+            parts.push(format!("func {}({}) -> {}", name, params.join(", "), ret));
+        }
+
+        parts.join(", ")
     }
 
     /// Helper to add a type mismatch error (string version)
@@ -629,6 +677,11 @@ impl Analyzer {
     /// Take ownership of the expression types (consuming self)
     pub fn into_expr_types(self) -> HashMap<NodeId, Type> {
         self.expr_types
+    }
+
+    /// Take accumulated warnings, leaving the warnings list empty
+    pub fn take_warnings(&mut self) -> Vec<TypeWarning> {
+        std::mem::take(&mut self.warnings)
     }
 
     /// Take ownership of analysis results (consuming self)
@@ -903,6 +956,21 @@ impl Analyzer {
                 match &let_stmt.init {
                     LetInit::TypeAlias(type_expr) => {
                         let aliased_type = self.resolve_type(type_expr, interner);
+
+                        // Warn if creating a type alias to a structural type
+                        if let Type::Structural(structural) = &aliased_type {
+                            let alias_name = interner.resolve(let_stmt.name).to_string();
+                            let fields = self.format_structural_type(structural);
+                            self.add_warning(
+                                SemanticWarning::StructuralTypeAlias {
+                                    name: alias_name,
+                                    fields,
+                                    span: let_stmt.span.into(),
+                                },
+                                let_stmt.span,
+                            );
+                        }
+
                         self.type_aliases
                             .insert(let_stmt.name, aliased_type.clone());
                         self.register_named_type(let_stmt.name, aliased_type, interner);
@@ -911,6 +979,21 @@ impl Analyzer {
                         // Legacy: handle let X: type = SomeType
                         if let ExprKind::TypeLiteral(type_expr) = &init_expr.kind {
                             let aliased_type = self.resolve_type(type_expr, interner);
+
+                            // Warn if creating a type alias to a structural type
+                            if let Type::Structural(structural) = &aliased_type {
+                                let alias_name = interner.resolve(let_stmt.name).to_string();
+                                let fields = self.format_structural_type(structural);
+                                self.add_warning(
+                                    SemanticWarning::StructuralTypeAlias {
+                                        name: alias_name,
+                                        fields,
+                                        span: let_stmt.span.into(),
+                                    },
+                                    let_stmt.span,
+                                );
+                            }
+
                             self.type_aliases
                                 .insert(let_stmt.name, aliased_type.clone());
                             self.register_named_type(let_stmt.name, aliased_type, interner);
@@ -1256,7 +1339,7 @@ impl Analyzer {
                     })
                     .collect();
                 Some(crate::sema::generic::TypeConstraint::Structural(
-                    crate::sema::types::StructuralType {
+                    StructuralType {
                         fields: resolved_fields,
                         methods: resolved_methods,
                     },
