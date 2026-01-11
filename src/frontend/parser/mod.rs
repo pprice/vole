@@ -127,6 +127,12 @@ impl<'src> Parser<'src> {
         self.current.ty == ty
     }
 
+    /// Peek at the next token without consuming the current one
+    pub(super) fn peek_token(&self) -> Token {
+        let mut lexer_copy = self.lexer.clone();
+        lexer_copy.next_token()
+    }
+
     /// Consume the current token if it matches, otherwise return false
     pub(super) fn match_token(&mut self, ty: TokenType) -> bool {
         if self.check(ty) {

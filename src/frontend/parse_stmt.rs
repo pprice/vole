@@ -8,6 +8,59 @@ use super::token::{Span, TokenType};
 use crate::errors::ParserError;
 
 impl<'src> Parser<'src> {
+    /// Check if the current position starts an unambiguous type expression.
+    /// This is used for type alias detection in `let Name = TypeExpr`.
+    ///
+    /// Unambiguous patterns:
+    /// - Primitive type followed by `|` (e.g., `i32 | i64`)
+    /// - Identifier followed by `|` where next is also a type-like token
+    /// - Primitive type followed by `?` (e.g., `i32?`)
+    fn is_unambiguous_type_pattern(&self) -> bool {
+        // Check if current token is a type-like token
+        let is_type_token = self.is_primitive_type_token() || self.check(TokenType::Identifier);
+
+        if !is_type_token {
+            return false;
+        }
+
+        // Peek at the next token
+        let next = self.peek_token();
+
+        // Pattern: TypeToken | ... - definitely a union type
+        if next.ty == TokenType::Pipe {
+            return true;
+        }
+
+        // Pattern: PrimitiveType? - definitely an optional type
+        // (Identifier? could be ternary, so we only do this for primitives)
+        if self.is_primitive_type_token() && next.ty == TokenType::Question {
+            return true;
+        }
+
+        false
+    }
+
+    /// Check if the current token is a primitive type keyword
+    fn is_primitive_type_token(&self) -> bool {
+        matches!(
+            self.current.ty,
+            TokenType::KwI8
+                | TokenType::KwI16
+                | TokenType::KwI32
+                | TokenType::KwI64
+                | TokenType::KwI128
+                | TokenType::KwU8
+                | TokenType::KwU16
+                | TokenType::KwU32
+                | TokenType::KwU64
+                | TokenType::KwF32
+                | TokenType::KwF64
+                | TokenType::KwBool
+                | TokenType::KwString
+                | TokenType::KwNil
+        )
+    }
+
     /// Parse a block: `{ statements }`
     pub(super) fn block(&mut self) -> Result<Block, ParseError> {
         let start_span = self.current.span;
@@ -106,14 +159,25 @@ impl<'src> Parser<'src> {
         };
 
         self.consume(TokenType::Eq, "expected '=' in let statement")?;
-        let init_expr = self.expression(0)?;
-        let span = start_span.merge(init_expr.span);
+
+        // Check if RHS is unambiguously a type expression
+        let (init, end_span) = if self.is_unambiguous_type_pattern() {
+            let type_expr = self.parse_type()?;
+            let end = self.previous.span;
+            (LetInit::TypeAlias(type_expr), end)
+        } else {
+            let expr = self.expression(0)?;
+            let end = expr.span;
+            (LetInit::Expr(expr), end)
+        };
+
+        let span = start_span.merge(end_span);
 
         Ok(LetStmt {
             name,
             ty,
             mutable,
-            init: LetInit::Expr(init_expr),
+            init,
             span,
         })
     }
