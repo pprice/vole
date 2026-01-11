@@ -102,34 +102,10 @@ pub fn inspect_files(
                     had_error = true;
                     continue;
                 }
-                let (
-                    expression_data,
-                    implement_registry,
-                    module_programs,
-                    generic_functions,
-                    monomorph_cache,
-                    external_func_info,
-                    name_table,
-                    type_table,
-                    well_known,
-                    entity_registry,
-                ) = analyzer.into_analysis_results();
+                let output = analyzer.into_analysis_results();
 
                 // Generate IR
-                let analyzed = AnalyzedProgram {
-                    program,
-                    interner,
-                    expression_data,
-                    implement_registry,
-                    module_programs,
-                    generic_functions,
-                    monomorph_cache,
-                    external_func_info,
-                    name_table,
-                    type_table,
-                    well_known,
-                    entity_registry,
-                };
+                let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
                 let mut jit = JitContext::new();
                 let mut compiler = Compiler::new(&mut jit, &analyzed);
                 let include_tests = !no_tests;

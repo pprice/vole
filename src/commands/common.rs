@@ -15,8 +15,8 @@ use crate::identity::NameTable;
 use crate::runtime::set_stdout_capture;
 use crate::sema::generic::{GenericFuncDef, MonomorphCache};
 use crate::sema::{
-    Analyzer, EntityRegistry, ExpressionData, ImplementRegistry, ProgramQuery, TypeError, TypeTable,
-    TypeWarning, WellKnownTypes,
+    AnalysisOutput, Analyzer, EntityRegistry, ExpressionData, ImplementRegistry, ProgramQuery,
+    TypeError, TypeTable, TypeWarning, WellKnownTypes,
 };
 use crate::transforms;
 
@@ -46,6 +46,24 @@ pub struct AnalyzedProgram {
 }
 
 impl AnalyzedProgram {
+    /// Construct AnalyzedProgram from parsed program and analysis output.
+    pub fn from_analysis(program: Program, interner: Interner, output: AnalysisOutput) -> Self {
+        Self {
+            program,
+            interner,
+            expression_data: output.expression_data,
+            implement_registry: output.implement_registry,
+            module_programs: output.module_programs,
+            generic_functions: output.generic_functions,
+            monomorph_cache: output.monomorph_cache,
+            external_func_info: output.external_func_info,
+            name_table: output.name_table,
+            type_table: output.type_table,
+            well_known: output.well_known,
+            entity_registry: output.entity_registry,
+        }
+    }
+
     /// Get a query interface for accessing type information and analysis results.
     pub fn query(&self) -> ProgramQuery<'_> {
         ProgramQuery::new(&self.entity_registry, &self.expression_data)
@@ -183,32 +201,8 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         render_sema_warning(warn, file_path, source);
     }
 
-    let (
-        expression_data,
-        implement_registry,
-        module_programs,
-        generic_functions,
-        monomorph_cache,
-        external_func_info,
-        name_table,
-        type_table,
-        well_known,
-        entity_registry,
-    ) = analyzer.into_analysis_results();
-    Ok(AnalyzedProgram {
-        program,
-        interner,
-        expression_data,
-        implement_registry,
-        module_programs,
-        generic_functions,
-        monomorph_cache,
-        external_func_info,
-        name_table,
-        type_table,
-        well_known,
-        entity_registry,
-    })
+    let output = analyzer.into_analysis_results();
+    Ok(AnalyzedProgram::from_analysis(program, interner, output))
 }
 
 /// Check if stdout supports color output.
@@ -380,33 +374,8 @@ pub fn run_captured<W: Write + Send + 'static>(
         }
         return Err(());
     }
-    let (
-        expression_data,
-        implement_registry,
-        module_programs,
-        generic_functions,
-        monomorph_cache,
-        external_func_info,
-        name_table,
-        type_table,
-        well_known,
-        entity_registry,
-    ) = analyzer.into_analysis_results();
-
-    let analyzed = AnalyzedProgram {
-        program,
-        interner,
-        expression_data,
-        implement_registry,
-        module_programs,
-        generic_functions,
-        monomorph_cache,
-        external_func_info,
-        name_table,
-        type_table,
-        well_known,
-        entity_registry,
-    };
+    let output = analyzer.into_analysis_results();
+    let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
 
     // Compile
     let mut jit = JitContext::new();

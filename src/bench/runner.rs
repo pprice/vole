@@ -151,34 +151,10 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
     analyzer
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
-    let (
-        expression_data,
-        implement_registry,
-        module_programs,
-        generic_functions,
-        monomorph_cache,
-        external_func_info,
-        name_table,
-        type_table,
-        well_known,
-        entity_registry,
-    ) = analyzer.into_analysis_results();
+    let output = analyzer.into_analysis_results();
     let sema_ns = sema_start.elapsed().as_nanos() as u64;
 
-    let analyzed = AnalyzedProgram {
-        program,
-        interner,
-        expression_data,
-        implement_registry,
-        module_programs,
-        generic_functions,
-        monomorph_cache,
-        external_func_info,
-        name_table,
-        type_table,
-        well_known,
-        entity_registry,
-    };
+    let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
 
     // Codegen phase
     let codegen_start = Instant::now();
@@ -228,33 +204,9 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     analyzer
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
-    let (
-        expression_data,
-        implement_registry,
-        module_programs,
-        generic_functions,
-        monomorph_cache,
-        external_func_info,
-        name_table,
-        type_table,
-        well_known,
-        entity_registry,
-    ) = analyzer.into_analysis_results();
+    let output = analyzer.into_analysis_results();
 
-    let analyzed = AnalyzedProgram {
-        program,
-        interner,
-        expression_data,
-        implement_registry,
-        module_programs,
-        generic_functions,
-        monomorph_cache,
-        external_func_info,
-        name_table,
-        type_table,
-        well_known,
-        entity_registry,
-    };
+    let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
 
     // Compile
     let mut jit = JitContext::new();

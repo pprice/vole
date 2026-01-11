@@ -14,7 +14,7 @@ pub mod type_table;
 pub mod types;
 pub mod well_known;
 
-pub use analyzer::{Analyzer, TypeError, TypeWarning};
+pub use analyzer::{AnalysisOutput, Analyzer, TypeError, TypeWarning};
 pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 pub use entity_registry::EntityRegistry;
 pub use expression_data::ExpressionData;

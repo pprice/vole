@@ -68,6 +68,31 @@ impl TypeWarning {
     }
 }
 
+/// Output from semantic analysis, bundling all analysis results.
+/// Used to construct AnalyzedProgram with program and interner.
+pub struct AnalysisOutput {
+    /// All expression-level metadata (types, method resolutions, generic calls)
+    pub expression_data: ExpressionData,
+    /// Methods added via implement blocks
+    pub implement_registry: ImplementRegistry,
+    /// Parsed module programs and their interners (for compiling pure Vole functions)
+    pub module_programs: HashMap<String, (Program, Interner)>,
+    /// Generic function definitions (with type params)
+    pub generic_functions: HashMap<Symbol, GenericFuncDef>,
+    /// Cache of monomorphized function instances
+    pub monomorph_cache: MonomorphCache,
+    /// External function info by string name (module path and native name)
+    pub external_func_info: HashMap<String, ExternalMethodInfo>,
+    /// Fully-qualified name interner for printable identities
+    pub name_table: NameTable,
+    /// Opaque type identities for named types
+    pub type_table: TypeTable,
+    /// Well-known stdlib type NameIds for fast comparison
+    pub well_known: WellKnownTypes,
+    /// Entity registry for first-class type/method/field/function identity
+    pub entity_registry: EntityRegistry,
+}
+
 pub struct Analyzer {
     scope: Scope,
     functions: HashMap<Symbol, FunctionType>,
@@ -662,39 +687,25 @@ impl Analyzer {
     }
 
     /// Take ownership of analysis results (consuming self)
-    #[allow(clippy::type_complexity)]
-    pub fn into_analysis_results(
-        self,
-    ) -> (
-        ExpressionData,
-        ImplementRegistry,
-        HashMap<String, (Program, Interner)>,
-        HashMap<Symbol, GenericFuncDef>,
-        MonomorphCache,
-        HashMap<String, ExternalMethodInfo>,
-        NameTable,
-        TypeTable,
-        WellKnownTypes,
-        EntityRegistry,
-    ) {
+    pub fn into_analysis_results(self) -> AnalysisOutput {
         let expression_data = ExpressionData::from_analysis(
             self.expr_types,
             self.method_resolutions.into_inner(),
             self.generic_calls,
             self.module_expr_types,
         );
-        (
+        AnalysisOutput {
             expression_data,
-            self.implement_registry,
-            self.module_programs,
-            self.generic_functions,
-            self.monomorph_cache,
-            self.external_func_info,
-            self.name_table,
-            self.type_table,
-            self.well_known,
-            self.entity_registry,
-        )
+            implement_registry: self.implement_registry,
+            module_programs: self.module_programs,
+            generic_functions: self.generic_functions,
+            monomorph_cache: self.monomorph_cache,
+            external_func_info: self.external_func_info,
+            name_table: self.name_table,
+            type_table: self.type_table,
+            well_known: self.well_known,
+            entity_registry: self.entity_registry,
+        }
     }
 
     /// Record the resolved type for an expression
