@@ -285,13 +285,32 @@ impl Stmt {
     }
 }
 
+/// Initializer for let bindings - either a value expression or a type alias
+#[derive(Debug, Clone)]
+pub enum LetInit {
+    /// Regular value expression: let x = 42
+    Expr(Expr),
+    /// Type alias: let Numeric = i32 | i64
+    TypeAlias(TypeExpr),
+}
+
+impl LetInit {
+    /// Returns the expression if this is a value init, None for type aliases
+    pub fn as_expr(&self) -> Option<&Expr> {
+        match self {
+            LetInit::Expr(e) => Some(e),
+            LetInit::TypeAlias(_) => None,
+        }
+    }
+}
+
 /// Let binding: let x = expr or let mut x = expr
 #[derive(Debug, Clone)]
 pub struct LetStmt {
     pub name: Symbol,
     pub ty: Option<TypeExpr>,
     pub mutable: bool,
-    pub init: Expr,
+    pub init: LetInit,
     pub span: Span,
 }
 

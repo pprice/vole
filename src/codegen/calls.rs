@@ -7,7 +7,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 
 use crate::errors::CodegenError;
-use crate::frontend::{CallExpr, ExprKind, NodeId, StringPart};
+use crate::frontend::{CallExpr, ExprKind, LetInit, NodeId, StringPart};
 use crate::runtime::native_registry::NativeType;
 use crate::sema::{FunctionType, Type};
 
@@ -301,8 +301,12 @@ impl Cg<'_, '_, '_> {
 
         // Check if it's a global lambda or global functional interface
         if let Some(global) = self.ctx.globals.iter().find(|g| g.name == callee_sym) {
-            // First, compile the global to get its value
-            let lambda_val = self.expr(&global.init)?;
+            // First, compile the global to get its value (skip type aliases)
+            let init_expr = match &global.init {
+                LetInit::Expr(e) => e,
+                LetInit::TypeAlias(_) => return Err("cannot call a type alias".to_string()),
+            };
+            let lambda_val = self.expr(init_expr)?;
 
             // Check if the global has a declared type (e.g., `let x: Predicate = ...`)
             if let Some(ref ty_expr) = global.ty {

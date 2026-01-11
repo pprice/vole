@@ -706,7 +706,7 @@ fn parse_lambda_no_params() {
     assert!(result.is_ok(), "parse failed: {:?}", result.err());
     let program = result.unwrap();
     if let Decl::Let(let_stmt) = &program.declarations[0] {
-        if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
+        if let ExprKind::Lambda(lambda) = &let_stmt.init.as_expr().unwrap().kind {
             assert_eq!(lambda.params.len(), 0);
         } else {
             panic!("expected lambda expression");
@@ -723,7 +723,7 @@ fn parse_lambda_one_param() {
     assert!(result.is_ok(), "parse failed: {:?}", result.err());
     let program = result.unwrap();
     if let Decl::Let(let_stmt) = &program.declarations[0] {
-        if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
+        if let ExprKind::Lambda(lambda) = &let_stmt.init.as_expr().unwrap().kind {
             assert_eq!(lambda.params.len(), 1);
             assert!(lambda.params[0].ty.is_none());
         } else {
@@ -741,7 +741,7 @@ fn parse_lambda_typed_param() {
     assert!(result.is_ok(), "parse failed: {:?}", result.err());
     let program = result.unwrap();
     if let Decl::Let(let_stmt) = &program.declarations[0] {
-        if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
+        if let ExprKind::Lambda(lambda) = &let_stmt.init.as_expr().unwrap().kind {
             assert_eq!(lambda.params.len(), 1);
             assert!(lambda.params[0].ty.is_some());
         } else {
@@ -759,7 +759,7 @@ fn parse_lambda_multiple_params() {
     assert!(result.is_ok(), "parse failed: {:?}", result.err());
     let program = result.unwrap();
     if let Decl::Let(let_stmt) = &program.declarations[0] {
-        if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
+        if let ExprKind::Lambda(lambda) = &let_stmt.init.as_expr().unwrap().kind {
             assert_eq!(lambda.params.len(), 2);
         } else {
             panic!("expected lambda expression");
@@ -776,7 +776,7 @@ fn parse_lambda_block_body() {
     assert!(result.is_ok(), "parse failed: {:?}", result.err());
     let program = result.unwrap();
     if let Decl::Let(let_stmt) = &program.declarations[0] {
-        if let ExprKind::Lambda(lambda) = &let_stmt.init.kind {
+        if let ExprKind::Lambda(lambda) = &let_stmt.init.as_expr().unwrap().kind {
             assert!(matches!(lambda.body, LambdaBody::Block(_)));
         } else {
             panic!("expected lambda expression");
@@ -794,9 +794,12 @@ fn parse_grouping_not_lambda() {
     let program = result.unwrap();
     if let Decl::Let(let_stmt) = &program.declarations[0] {
         assert!(
-            matches!(&let_stmt.init.kind, ExprKind::Grouping(_)),
+            matches!(
+                &let_stmt.init.as_expr().unwrap().kind,
+                ExprKind::Grouping(_)
+            ),
             "expected Grouping, got {:?}",
-            let_stmt.init.kind
+            let_stmt.init.as_expr().unwrap().kind
         );
     } else {
         panic!("expected let declaration");
@@ -812,9 +815,12 @@ fn parse_grouping_ident() {
     if let Decl::Let(let_stmt) = &program.declarations[0] {
         // (y) without => should be grouping
         assert!(
-            matches!(&let_stmt.init.kind, ExprKind::Grouping(_)),
+            matches!(
+                &let_stmt.init.as_expr().unwrap().kind,
+                ExprKind::Grouping(_)
+            ),
             "expected Grouping, got {:?}",
-            let_stmt.init.kind
+            let_stmt.init.as_expr().unwrap().kind
         );
     } else {
         panic!("expected let declaration");
@@ -948,7 +954,7 @@ fn parse_import_expr() {
     assert_eq!(program.declarations.len(), 1);
 
     if let Decl::Let(let_stmt) = &program.declarations[0] {
-        if let ExprKind::Import(path) = &let_stmt.init.kind {
+        if let ExprKind::Import(path) = &let_stmt.init.as_expr().unwrap().kind {
             assert_eq!(path, "std:math");
         } else {
             panic!("Expected Import expression");
@@ -1246,7 +1252,7 @@ fn test_parse_repeat_literal() {
     let program = parser.parse_program().expect("should parse repeat literal");
 
     if let Decl::Let(l) = &program.declarations[0] {
-        if let ExprKind::RepeatLiteral { element, count } = &l.init.kind {
+        if let ExprKind::RepeatLiteral { element, count } = &l.init.as_expr().unwrap().kind {
             assert_eq!(*count, 10);
             if let ExprKind::IntLiteral(n) = &element.kind {
                 assert_eq!(*n, 0);
@@ -1269,7 +1275,7 @@ fn test_parse_repeat_literal_with_expression() {
         .expect("should parse repeat literal with expression");
 
     if let Decl::Let(l) = &program.declarations[0] {
-        if let ExprKind::RepeatLiteral { element, count } = &l.init.kind {
+        if let ExprKind::RepeatLiteral { element, count } = &l.init.as_expr().unwrap().kind {
             assert_eq!(*count, 5);
             assert!(matches!(&element.kind, ExprKind::Binary(_)));
         } else {
@@ -1286,7 +1292,10 @@ fn test_parse_array_vs_repeat_disambiguation() {
     let program1 = parser1.parse_program().expect("should parse array literal");
 
     if let Decl::Let(l) = &program1.declarations[0] {
-        assert!(matches!(&l.init.kind, ExprKind::ArrayLiteral(_)));
+        assert!(matches!(
+            &l.init.as_expr().unwrap().kind,
+            ExprKind::ArrayLiteral(_)
+        ));
     }
 
     let source2 = "let b = [x; 5]";
@@ -1296,6 +1305,9 @@ fn test_parse_array_vs_repeat_disambiguation() {
         .expect("should parse repeat literal");
 
     if let Decl::Let(l) = &program2.declarations[0] {
-        assert!(matches!(&l.init.kind, ExprKind::RepeatLiteral { .. }));
+        assert!(matches!(
+            &l.init.as_expr().unwrap().kind,
+            ExprKind::RepeatLiteral { .. }
+        ));
     }
 }

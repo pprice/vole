@@ -219,7 +219,8 @@ fn get_first_lambda(program: &Program) -> &LambdaExpr {
         if let Decl::Function(func) = decl {
             for stmt in &func.body.stmts {
                 if let Stmt::Let(let_stmt) = stmt
-                    && let ExprKind::Lambda(lambda) = &let_stmt.init.kind
+                    && let Some(init_expr) = let_stmt.init.as_expr()
+                    && let ExprKind::Lambda(lambda) = &init_expr.kind
                 {
                     return lambda;
                 }

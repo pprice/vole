@@ -106,14 +106,14 @@ impl<'src> Parser<'src> {
         };
 
         self.consume(TokenType::Eq, "expected '=' in let statement")?;
-        let init = self.expression(0)?;
-        let span = start_span.merge(init.span);
+        let init_expr = self.expression(0)?;
+        let span = start_span.merge(init_expr.span);
 
         Ok(LetStmt {
             name,
             ty,
             mutable,
-            init,
+            init: LetInit::Expr(init_expr),
             span,
         })
     }

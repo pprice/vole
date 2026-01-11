@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 
 use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
-use crate::frontend::{self, ExprKind, Pattern, RaiseStmt, Stmt, Symbol};
+use crate::frontend::{self, ExprKind, LetInit, Pattern, RaiseStmt, Stmt, Symbol};
 use crate::sema::Type;
 
 use super::compiler::ControlFlowCtx;
@@ -124,7 +124,12 @@ impl Cg<'_, '_, '_> {
     pub fn stmt(&mut self, stmt: &Stmt) -> Result<bool, String> {
         match stmt {
             Stmt::Let(let_stmt) => {
-                let init = self.expr(&let_stmt.init)?;
+                // Type aliases don't generate code
+                let init_expr = match &let_stmt.init {
+                    LetInit::Expr(e) => e,
+                    LetInit::TypeAlias(_) => return Ok(false),
+                };
+                let init = self.expr(init_expr)?;
 
                 let mut declared_type_opt = None;
                 let (mut final_value, mut final_type) = if let Some(ty_expr) = &let_stmt.ty {

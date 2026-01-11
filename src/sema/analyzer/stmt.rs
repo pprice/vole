@@ -21,40 +21,50 @@ impl Analyzer {
     ) -> Result<(), Vec<TypeError>> {
         match stmt {
             Stmt::Let(let_stmt) => {
-                let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t, interner));
-                let init_type =
-                    self.check_expr_expecting(&let_stmt.init, declared_type.as_ref(), interner)?;
+                match &let_stmt.init {
+                    LetInit::Expr(init_expr) => {
+                        let declared_type =
+                            let_stmt.ty.as_ref().map(|t| self.resolve_type(t, interner));
+                        let init_type =
+                            self.check_expr_expecting(init_expr, declared_type.as_ref(), interner)?;
 
-                // Check if trying to use void return value
-                if init_type == Type::Void {
-                    self.add_error(
-                        SemanticError::VoidReturnUsed {
-                            span: let_stmt.init.span.into(),
-                        },
-                        let_stmt.init.span,
-                    );
+                        // Check if trying to use void return value
+                        if init_type == Type::Void {
+                            self.add_error(
+                                SemanticError::VoidReturnUsed {
+                                    span: init_expr.span.into(),
+                                },
+                                init_expr.span,
+                            );
+                        }
+
+                        let var_type = declared_type.unwrap_or(init_type);
+
+                        // If this is a type alias (RHS is a type expression), store it
+                        if var_type == Type::Type
+                            && let ExprKind::TypeLiteral(type_expr) = &init_expr.kind
+                        {
+                            let aliased_type = self.resolve_type(type_expr, interner);
+                            self.type_aliases.insert(let_stmt.name, aliased_type);
+                        }
+
+                        self.scope.define(
+                            let_stmt.name,
+                            Variable {
+                                ty: var_type,
+                                mutable: let_stmt.mutable,
+                            },
+                        );
+
+                        // Track as a local if inside a lambda
+                        self.add_lambda_local(let_stmt.name);
+                    }
+                    LetInit::TypeAlias(type_expr) => {
+                        // Type alias: let Numeric = i32 | i64
+                        let aliased_type = self.resolve_type(type_expr, interner);
+                        self.type_aliases.insert(let_stmt.name, aliased_type);
+                    }
                 }
-
-                let var_type = declared_type.unwrap_or(init_type);
-
-                // If this is a type alias (RHS is a type expression), store it
-                if var_type == Type::Type
-                    && let ExprKind::TypeLiteral(type_expr) = &let_stmt.init.kind
-                {
-                    let aliased_type = self.resolve_type(type_expr, interner);
-                    self.type_aliases.insert(let_stmt.name, aliased_type);
-                }
-
-                self.scope.define(
-                    let_stmt.name,
-                    Variable {
-                        ty: var_type,
-                        mutable: let_stmt.mutable,
-                    },
-                );
-
-                // Track as a local if inside a lambda
-                self.add_lambda_local(let_stmt.name);
             }
             Stmt::Expr(expr_stmt) => {
                 self.check_expr(&expr_stmt.expr, interner)?;

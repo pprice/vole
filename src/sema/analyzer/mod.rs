@@ -899,13 +899,24 @@ impl Analyzer {
     /// Pass 0: Collect type aliases (so they're available for function signatures)
     fn collect_type_aliases(&mut self, program: &Program, interner: &Interner) {
         for decl in &program.declarations {
-            if let Decl::Let(let_stmt) = decl
-                && let ExprKind::TypeLiteral(type_expr) = &let_stmt.init.kind
-            {
-                let aliased_type = self.resolve_type(type_expr, interner);
-                self.type_aliases
-                    .insert(let_stmt.name, aliased_type.clone());
-                self.register_named_type(let_stmt.name, aliased_type, interner);
+            if let Decl::Let(let_stmt) = decl {
+                match &let_stmt.init {
+                    LetInit::TypeAlias(type_expr) => {
+                        let aliased_type = self.resolve_type(type_expr, interner);
+                        self.type_aliases
+                            .insert(let_stmt.name, aliased_type.clone());
+                        self.register_named_type(let_stmt.name, aliased_type, interner);
+                    }
+                    LetInit::Expr(init_expr) => {
+                        // Legacy: handle let X: type = SomeType
+                        if let ExprKind::TypeLiteral(type_expr) = &init_expr.kind {
+                            let aliased_type = self.resolve_type(type_expr, interner);
+                            self.type_aliases
+                                .insert(let_stmt.name, aliased_type.clone());
+                            self.register_named_type(let_stmt.name, aliased_type, interner);
+                        }
+                    }
+                }
             }
         }
     }
@@ -918,38 +929,46 @@ impl Analyzer {
     ) -> Result<(), Vec<TypeError>> {
         for decl in &program.declarations {
             if let Decl::Let(let_stmt) = decl {
-                let declared_type = let_stmt.ty.as_ref().map(|t| self.resolve_type(t, interner));
-                let init_type =
-                    self.check_expr_expecting(&let_stmt.init, declared_type.as_ref(), interner)?;
+                match &let_stmt.init {
+                    LetInit::TypeAlias(_) => {
+                        // Type aliases are already handled in collect_type_aliases
+                    }
+                    LetInit::Expr(init_expr) => {
+                        let declared_type =
+                            let_stmt.ty.as_ref().map(|t| self.resolve_type(t, interner));
+                        let init_type =
+                            self.check_expr_expecting(init_expr, declared_type.as_ref(), interner)?;
 
-                // Check if trying to use void return value
-                if init_type == Type::Void {
-                    self.add_error(
-                        SemanticError::VoidReturnUsed {
-                            span: let_stmt.init.span.into(),
-                        },
-                        let_stmt.init.span,
-                    );
+                        // Check if trying to use void return value
+                        if init_type == Type::Void {
+                            self.add_error(
+                                SemanticError::VoidReturnUsed {
+                                    span: init_expr.span.into(),
+                                },
+                                init_expr.span,
+                            );
+                        }
+
+                        let var_type = declared_type.unwrap_or(init_type.clone());
+
+                        // If this is a type alias (RHS is a type expression), store it
+                        if var_type == Type::Type
+                            && let ExprKind::TypeLiteral(type_expr) = &init_expr.kind
+                        {
+                            let aliased_type = self.resolve_type(type_expr, interner);
+                            self.type_aliases.insert(let_stmt.name, aliased_type);
+                        }
+
+                        self.globals.insert(let_stmt.name, var_type.clone());
+                        self.scope.define(
+                            let_stmt.name,
+                            Variable {
+                                ty: var_type,
+                                mutable: let_stmt.mutable,
+                            },
+                        );
+                    }
                 }
-
-                let var_type = declared_type.unwrap_or(init_type.clone());
-
-                // If this is a type alias (RHS is a type expression), store it
-                if var_type == Type::Type
-                    && let ExprKind::TypeLiteral(type_expr) = &let_stmt.init.kind
-                {
-                    let aliased_type = self.resolve_type(type_expr, interner);
-                    self.type_aliases.insert(let_stmt.name, aliased_type);
-                }
-
-                self.globals.insert(let_stmt.name, var_type.clone());
-                self.scope.define(
-                    let_stmt.name,
-                    Variable {
-                        ty: var_type,
-                        mutable: let_stmt.mutable,
-                    },
-                );
             }
         }
         Ok(())
@@ -1710,12 +1729,16 @@ impl Analyzer {
                     exports.insert(name_id, func_type);
                 }
                 Decl::Let(l) if !l.mutable => {
-                    // Only export immutable let bindings
+                    // Only export immutable let bindings (skip type aliases for now)
+                    let init_expr = match &l.init {
+                        LetInit::Expr(e) => e,
+                        LetInit::TypeAlias(_) => continue, // Type aliases handled separately
+                    };
                     // Infer type from literal for constants and store the value
                     let name_id = self
                         .name_table
                         .intern(module_id, &[l.name], &module_interner);
-                    let (ty, const_val) = match &l.init.kind {
+                    let (ty, const_val) = match &init_expr.kind {
                         ExprKind::FloatLiteral(v) => (Type::F64, Some(ConstantValue::F64(*v))),
                         ExprKind::IntLiteral(v) => (Type::I64, Some(ConstantValue::I64(*v))),
                         ExprKind::BoolLiteral(v) => (Type::Bool, Some(ConstantValue::Bool(*v))),

@@ -5,8 +5,8 @@ use std::fmt::Write;
 
 use crate::frontend::{
     AssignTarget, BinaryOp, Block, CompoundOp, Decl, ErrorDecl, Expr, ExprKind, FuncDecl, Interner,
-    LetStmt, Param, PrimitiveType, Program, Stmt, StringPart, TestCase, TestsDecl, TypeExpr,
-    UnaryOp,
+    LetInit, LetStmt, Param, PrimitiveType, Program, Stmt, StringPart, TestCase, TestsDecl,
+    TypeExpr, UnaryOp,
 };
 
 /// Pretty-printer for AST nodes that resolves symbols via an Interner.
@@ -365,7 +365,15 @@ impl<'a> AstPrinter<'a> {
         }
         inner.write_indent(out);
         out.push_str("init:\n");
-        inner.indented().write_expr(out, &l.init);
+        match &l.init {
+            LetInit::Expr(e) => inner.indented().write_expr(out, e),
+            LetInit::TypeAlias(ty) => {
+                inner.indented().write_indent(out);
+                write!(out, "TypeAlias: ").unwrap();
+                inner.indented().write_type_inline(out, ty);
+                out.push('\n');
+            }
+        }
     }
 
     fn write_expr_stmt(&self, out: &mut String, expr: &Expr) {

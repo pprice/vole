@@ -153,7 +153,10 @@ impl<'a> GeneratorTransformer<'a> {
     fn stmt_contains_yield(&self, stmt: &Stmt) -> bool {
         match stmt {
             Stmt::Expr(expr_stmt) => self.expr_contains_yield(&expr_stmt.expr),
-            Stmt::Let(let_stmt) => self.expr_contains_yield(&let_stmt.init),
+            Stmt::Let(let_stmt) => match &let_stmt.init {
+                LetInit::Expr(e) => self.expr_contains_yield(e),
+                LetInit::TypeAlias(_) => false,
+            },
             Stmt::While(while_stmt) => {
                 self.expr_contains_yield(&while_stmt.condition)
                     || self.contains_yield(&while_stmt.body)
@@ -378,7 +381,11 @@ impl<'a> GeneratorTransformer<'a> {
     fn collect_yields_from_stmt(&self, stmt: &Stmt, yields: &mut Vec<Expr>) {
         match stmt {
             Stmt::Expr(expr_stmt) => self.collect_yields_from_expr(&expr_stmt.expr, yields),
-            Stmt::Let(let_stmt) => self.collect_yields_from_expr(&let_stmt.init, yields),
+            Stmt::Let(let_stmt) => {
+                if let LetInit::Expr(e) = &let_stmt.init {
+                    self.collect_yields_from_expr(e, yields);
+                }
+            }
             Stmt::While(while_stmt) => {
                 self.collect_yields_from_expr(&while_stmt.condition, yields);
                 self.collect_yields_from_block(&while_stmt.body, yields);

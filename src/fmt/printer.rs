@@ -69,11 +69,16 @@ fn print_let_stmt<'a>(
         arena.nil()
     };
 
+    let init_doc = match &stmt.init {
+        LetInit::Expr(e) => print_expr(arena, e, interner),
+        LetInit::TypeAlias(ty) => print_type_expr(arena, ty, interner),
+    };
+
     keyword
         .append(name)
         .append(type_annotation)
         .append(arena.text(" = "))
-        .append(print_expr(arena, &stmt.init, interner))
+        .append(init_doc)
 }
 
 /// Print a let tuple destructuring statement.

@@ -9,7 +9,8 @@ use cranelift_module::Module;
 use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
 use crate::frontend::{
-    AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, MatchExpr, Pattern, RangeExpr, UnaryOp,
+    AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, LetInit, MatchExpr, Pattern, RangeExpr,
+    UnaryOp,
 };
 use crate::identity::NamerLookup;
 use crate::sema::Type;
@@ -141,8 +142,11 @@ impl Cg<'_, '_, '_> {
                 vole_type: vole_type.clone(),
             })
         } else if let Some(global) = self.ctx.globals.iter().find(|g| g.name == sym) {
-            // Compile global's initializer inline
-            let global_init = global.init.clone();
+            // Compile global's initializer inline (skip type aliases)
+            let global_init = match &global.init {
+                LetInit::Expr(e) => e.clone(),
+                LetInit::TypeAlias(_) => return Err("cannot use type alias as a value".to_string()),
+            };
             let mut value = self.expr(&global_init)?;
 
             // If the global has a declared interface type, box the value
