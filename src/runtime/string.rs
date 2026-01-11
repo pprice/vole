@@ -46,7 +46,7 @@ impl RcString {
     fn layout_for_len(len: usize) -> Layout {
         let size = size_of::<RcString>() + len;
         let align = align_of::<RcString>();
-        Layout::from_size_align(size, align).unwrap()
+        Layout::from_size_align(size, align).expect("string layout overflow")
     }
 
     fn compute_hash(bytes: &[u8]) -> u64 {

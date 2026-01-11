@@ -823,13 +823,7 @@ impl Cg<'_, '_, '_> {
     ) -> Result<Value, String> {
         Ok(match ty {
             Type::String => {
-                if self
-                    .ctx
-                    .func_registry
-                    .runtime_key(RuntimeFn::StringEq)
-                    .and_then(|key| self.ctx.func_registry.func_id(key))
-                    .is_some()
-                {
+                if self.ctx.func_registry.has_runtime(RuntimeFn::StringEq) {
                     self.call_runtime(RuntimeFn::StringEq, &[left, right])?
                 } else {
                     self.builder.ins().icmp(IntCC::Equal, left, right)

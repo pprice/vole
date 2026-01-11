@@ -45,7 +45,7 @@ impl RcInstance {
     fn layout_for_fields(field_count: usize) -> Layout {
         let size = size_of::<RcInstance>() + field_count * 8;
         let align = align_of::<RcInstance>();
-        Layout::from_size_align(size, align).unwrap()
+        Layout::from_size_align(size, align).expect("instance layout overflow")
     }
 
     /// Get pointer to the fields array (mutable)

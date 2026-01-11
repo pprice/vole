@@ -32,7 +32,7 @@ impl Closure {
         let total_size = size_of::<Closure>()
             .checked_add(captures_size)
             .expect("closure total size overflow");
-        Layout::from_size_align(total_size, align_of::<Closure>()).unwrap()
+        Layout::from_size_align(total_size, align_of::<Closure>()).expect("closure layout overflow")
     }
 
     /// Get pointer to the captures array

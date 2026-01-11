@@ -390,13 +390,7 @@ impl Cg<'_, '_, '_> {
 
     /// String equality comparison
     fn string_eq(&mut self, left: Value, right: Value) -> Result<Value, String> {
-        if self
-            .ctx
-            .func_registry
-            .runtime_key(RuntimeFn::StringEq)
-            .and_then(|key| self.ctx.func_registry.func_id(key))
-            .is_some()
-        {
+        if self.ctx.func_registry.has_runtime(RuntimeFn::StringEq) {
             self.call_runtime(RuntimeFn::StringEq, &[left, right])
         } else {
             Ok(self.builder.ins().icmp(IntCC::Equal, left, right))

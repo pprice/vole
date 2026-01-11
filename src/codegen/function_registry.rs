@@ -345,6 +345,14 @@ impl FunctionRegistry {
         self.runtime_lookup.get(&runtime).copied()
     }
 
+    /// Check if a runtime function is registered and has a compiled func_id
+    #[must_use]
+    pub fn has_runtime(&self, runtime: RuntimeFn) -> bool {
+        self.runtime_key(runtime)
+            .and_then(|key| self.func_id(key))
+            .is_some()
+    }
+
     pub fn name_table(&self) -> &NameTable {
         &self.names
     }
