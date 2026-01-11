@@ -1083,6 +1083,13 @@ fn print_type_expr<'a>(
                 .append(arena.intersperse(parts, arena.text(", ")))
                 .append(arena.text(" }"))
         }
+        TypeExpr::Combination(parts) => {
+            let type_docs: Vec<_> = parts
+                .iter()
+                .map(|t| print_type_expr(arena, t, interner))
+                .collect();
+            arena.intersperse(type_docs, arena.text(" + "))
+        }
     }
 }
 

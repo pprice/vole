@@ -302,6 +302,11 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                 methods: resolved_methods,
             })
         }
+        TypeExpr::Combination(_) => {
+            // Type combinations are constraint-only, not resolved to a concrete Type
+            // Semantic analysis handles these specially in constraint contexts
+            Type::Error
+        }
     }
 }
 

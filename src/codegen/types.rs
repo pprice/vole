@@ -572,6 +572,10 @@ pub(crate) fn resolve_type_expr_with_metadata(
             // Structural types are constraint-only, not concrete types for codegen
             Type::Void
         }
+        TypeExpr::Combination(_) => {
+            // Type combinations are constraint-only, not concrete types for codegen
+            Type::Void
+        }
     }
 }
 

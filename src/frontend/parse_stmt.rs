@@ -181,8 +181,13 @@ impl<'src> Parser<'src> {
 
         self.consume(TokenType::Eq, "expected '=' in let statement")?;
 
-        // Check if RHS is unambiguously a type expression
-        let (init, end_span) = if self.is_unambiguous_type_pattern() {
+        // Check if RHS is a type expression:
+        // 1. Explicit `: type` annotation forces type parsing
+        // 2. Unambiguous type patterns (union, structural, etc.)
+        let is_type_alias = ty.as_ref().is_some_and(|t| matches!(t, TypeExpr::Named(s) if self.interner.resolve(*s) == "type"))
+            || self.is_unambiguous_type_pattern();
+
+        let (init, end_span) = if is_type_alias {
             let type_expr = self.parse_type()?;
             let end = self.previous.span;
             (LetInit::TypeAlias(type_expr), end)

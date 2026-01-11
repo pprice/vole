@@ -35,6 +35,20 @@ impl<'src> Parser<'src> {
             base = TypeExpr::Optional(Box::new(base));
         }
 
+        // Check for type combination: A + B + C (binds tighter than |)
+        if self.check(TokenType::Plus) {
+            let mut parts = vec![base];
+            while self.match_token(TokenType::Plus) {
+                let mut part = self.parse_base_type()?;
+                // Handle optional on each part
+                while self.match_token(TokenType::Question) {
+                    part = TypeExpr::Optional(Box::new(part));
+                }
+                parts.push(part);
+            }
+            return Ok(TypeExpr::Combination(parts));
+        }
+
         // Check for union: A | B | C
         if self.check(TokenType::Pipe) {
             let mut variants = vec![base];

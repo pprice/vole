@@ -292,6 +292,14 @@ impl<'a> AstPrinter<'a> {
                 }
                 out.push_str(" }");
             }
+            TypeExpr::Combination(parts) => {
+                for (i, ty) in parts.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(" + ");
+                    }
+                    self.write_type_inline(out, ty);
+                }
+            }
         }
     }
 
@@ -941,6 +949,14 @@ impl<'a> AstPrinter<'a> {
                     self.write_type_expr_inline(out, &method.return_type);
                 }
                 out.push_str(" }");
+            }
+            TypeExpr::Combination(parts) => {
+                for (i, ty) in parts.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(" + ");
+                    }
+                    self.write_type_expr_inline(out, ty);
+                }
             }
         }
     }

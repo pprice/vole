@@ -1,0 +1,65 @@
+// Test type combination aliases using + syntax
+// This is a follow-up to multiple_constraints.vole
+
+interface Hashable {
+    func hash() -> i64
+}
+
+interface Eq {
+    func equals(other: Self) -> bool
+}
+
+interface Stringable {
+    func to_string() -> string
+}
+
+// Type alias for combined interface constraints
+let HashEq: type = Hashable + Eq
+
+// Type alias combining three interfaces
+let HashEqStr: type = Hashable + Eq + Stringable
+
+// Function using the type alias as a constraint
+func process<T: HashEq>(x: T) -> i64 {
+    return x.hash()
+}
+
+// Function using triple combination
+func describe<T: HashEqStr>(x: T) -> string {
+    return x.to_string()
+}
+
+record Point {
+    x: i64
+    y: i64
+}
+
+implement Hashable for Point {
+    func hash() -> i64 {
+        return self.x * 31 + self.y
+    }
+}
+
+implement Eq for Point {
+    func equals(other: Point) -> bool {
+        return self.x == other.x && self.y == other.y
+    }
+}
+
+implement Stringable for Point {
+    func to_string() -> string {
+        return "Point"
+    }
+}
+
+tests {
+    test "type alias with two interfaces" {
+        let p = Point { x: 10, y: 20 }
+        assert(process(p) == 330)  // 10 * 31 + 20
+    }
+
+    test "type alias with three interfaces" {
+        let p = Point { x: 1, y: 2 }
+        assert(describe(p) == "Point")
+    }
+}

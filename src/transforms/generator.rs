@@ -688,6 +688,11 @@ impl<'a> GeneratorTransformer<'a> {
                 }
                 format!("{{ {} }}", parts.join(", "))
             }
+            TypeExpr::Combination(parts) => parts
+                .iter()
+                .map(|p| self.type_expr_to_string(p))
+                .collect::<Vec<_>>()
+                .join(" + "),
         }
     }
 
