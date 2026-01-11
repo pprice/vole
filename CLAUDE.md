@@ -73,8 +73,6 @@ vole-snap test test/snapshot/ --include-skipped
 cargo run -- test test/unit/language/_raw_strings.vole
 ```
 
-WIP test files in `test/unit/language/_*.vole` - see `bd search "WIP test"` for tracking beads.
-
 ## Verification
 
 **ALWAYS run `just check` after ANY code change.**
