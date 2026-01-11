@@ -27,8 +27,6 @@ pub struct AnalyzedProgram {
     pub expr_types: HashMap<NodeId, Type>,
     pub method_resolutions: MethodResolutions,
     pub implement_registry: ImplementRegistry,
-    /// Tracks which interfaces each type implements: type_name -> [interface_names]
-    pub type_implements: HashMap<Symbol, Vec<Symbol>>,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: HashMap<String, (Program, Interner)>,
     /// Expression types for module programs (keyed by module path -> NodeId -> Type)
@@ -187,7 +185,6 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         expr_types,
         method_resolutions,
         implement_registry,
-        type_implements,
         module_programs,
         module_expr_types,
         generic_functions,
@@ -205,7 +202,6 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
         expr_types,
         method_resolutions,
         implement_registry,
-        type_implements,
         module_programs,
         module_expr_types,
         generic_functions,
@@ -392,7 +388,6 @@ pub fn run_captured<W: Write + Send + 'static>(
         expr_types,
         method_resolutions,
         implement_registry,
-        type_implements,
         module_programs,
         module_expr_types,
         generic_functions,
@@ -411,7 +406,6 @@ pub fn run_captured<W: Write + Send + 'static>(
         expr_types,
         method_resolutions,
         implement_registry,
-        type_implements,
         module_programs,
         module_expr_types,
         generic_functions,

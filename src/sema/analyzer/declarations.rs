@@ -242,7 +242,6 @@ impl Analyzer {
                         );
                     }
                 }
-                self.type_implements.insert(class.name, iface_names);
             }
 
             // Register methods in EntityRegistry (single source of truth)
@@ -452,7 +451,6 @@ impl Analyzer {
                         );
                     }
                 }
-                self.type_implements.insert(class.name, iface_names);
             }
         }
     }
@@ -535,7 +533,6 @@ impl Analyzer {
                         );
                     }
                 }
-                self.type_implements.insert(record.name, iface_names);
             }
 
             // Register methods in EntityRegistry (single source of truth)
@@ -748,7 +745,6 @@ impl Analyzer {
                         );
                     }
                 }
-                self.type_implements.insert(record.name, iface_names);
             }
 
             // Register fields in EntityRegistry (needed for self.field access in methods)

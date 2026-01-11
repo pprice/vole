@@ -249,23 +249,11 @@ impl Analyzer {
                 substitutions.insert(*param_name_id, arg.clone());
             }
 
-            // Get interface Symbol by looking up from type_implements or by name
+            // Get interface Symbol by looking up from name_id
             let interface_sym = self
-                .type_implements
-                .values()
-                .flat_map(|syms| syms.iter())
-                .find(|&&sym| {
-                    let sym_str = interner.resolve(sym);
-                    self.name_table
-                        .last_segment_str(name_id)
-                        .is_some_and(|n| n == sym_str)
-                })
-                .copied()
-                .or_else(|| {
-                    self.name_table
-                        .last_segment_str(name_id)
-                        .and_then(|name_str| interner.lookup(&name_str))
-                });
+                .name_table
+                .last_segment_str(name_id)
+                .and_then(|name_str| interner.lookup(&name_str));
 
             // Traverse interface hierarchy via EntityRegistry
             let mut stack = vec![type_def_id];
@@ -423,34 +411,6 @@ impl Analyzer {
                             method_name,
                             func_type: method.signature.clone(),
                         });
-                    }
-                }
-            }
-            // Fall back to old type_implements for backward compatibility
-            if let Some(interfaces) = self.type_implements.get(&type_sym).cloned() {
-                for interface_name in &interfaces {
-                    // Look up interface via Resolver with interface fallback
-                    let interface_type_id = self
-                        .resolver(interner)
-                        .resolve_type_or_interface(*interface_name, &self.entity_registry);
-
-                    if let Some(interface_type_id) = interface_type_id {
-                        let interface_def = self.entity_registry.get_type(interface_type_id);
-                        for &method_id in &interface_def.methods {
-                            let method = self.entity_registry.get_method(method_id);
-                            let def_method_name = self
-                                .name_table
-                                .last_segment_str(method.name_id)
-                                .unwrap_or_default();
-                            if def_method_name == method_name_str && method.has_default {
-                                return Some(ResolvedMethod::DefaultMethod {
-                                    interface_name: *interface_name,
-                                    type_name: type_sym,
-                                    method_name,
-                                    func_type: method.signature.clone(),
-                                });
-                            }
-                        }
                     }
                 }
             }

@@ -40,12 +40,41 @@ impl Compiler<'_> {
         // Compile default methods from implemented interfaces
         let direct_methods: std::collections::HashSet<_> =
             class.methods.iter().map(|m| m.name).collect();
-        if let Some(interfaces) = self.analyzed.type_implements.get(&class.name).cloned() {
-            for interface_name in &interfaces {
-                if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
-                    for method in &interface_decl.methods {
-                        if method.body.is_some() && !direct_methods.contains(&method.name) {
-                            self.compile_default_method(method, class.name, &metadata)?;
+        // Look up class type_def_id via immutable name_id lookup
+        if let Some(class_name_id) = self.analyzed.name_table.name_id(
+            self.analyzed.name_table.main_module(),
+            &[class.name],
+            &self.analyzed.interner,
+        ) {
+            if let Some(type_def_id) = self.analyzed.entity_registry.type_by_name(class_name_id) {
+                for interface_id in
+                    self.analyzed.entity_registry.get_implemented_interfaces(type_def_id)
+                {
+                    let interface_def = self.analyzed.entity_registry.get_type(interface_id);
+                    // Look up interface name Symbol
+                    if let Some(interface_name_str) = self
+                        .analyzed
+                        .name_table
+                        .last_segment_str(interface_def.name_id)
+                    {
+                        if let Some(interface_name) =
+                            self.analyzed.interner.lookup(&interface_name_str)
+                        {
+                            if let Some(interface_decl) =
+                                self.find_interface_decl(program, interface_name)
+                            {
+                                for method in &interface_decl.methods {
+                                    if method.body.is_some()
+                                        && !direct_methods.contains(&method.name)
+                                    {
+                                        self.compile_default_method(
+                                            method,
+                                            class.name,
+                                            &metadata,
+                                        )?;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -84,12 +113,41 @@ impl Compiler<'_> {
         // Compile default methods from implemented interfaces
         let direct_methods: std::collections::HashSet<_> =
             record.methods.iter().map(|m| m.name).collect();
-        if let Some(interfaces) = self.analyzed.type_implements.get(&record.name).cloned() {
-            for interface_name in &interfaces {
-                if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
-                    for method in &interface_decl.methods {
-                        if method.body.is_some() && !direct_methods.contains(&method.name) {
-                            self.compile_default_method(method, record.name, &metadata)?;
+        // Look up record type_def_id via immutable name_id lookup
+        if let Some(record_name_id) = self.analyzed.name_table.name_id(
+            self.analyzed.name_table.main_module(),
+            &[record.name],
+            &self.analyzed.interner,
+        ) {
+            if let Some(type_def_id) = self.analyzed.entity_registry.type_by_name(record_name_id) {
+                for interface_id in
+                    self.analyzed.entity_registry.get_implemented_interfaces(type_def_id)
+                {
+                    let interface_def = self.analyzed.entity_registry.get_type(interface_id);
+                    // Look up interface name Symbol
+                    if let Some(interface_name_str) = self
+                        .analyzed
+                        .name_table
+                        .last_segment_str(interface_def.name_id)
+                    {
+                        if let Some(interface_name) =
+                            self.analyzed.interner.lookup(&interface_name_str)
+                        {
+                            if let Some(interface_decl) =
+                                self.find_interface_decl(program, interface_name)
+                            {
+                                for method in &interface_decl.methods {
+                                    if method.body.is_some()
+                                        && !direct_methods.contains(&method.name)
+                                    {
+                                        self.compile_default_method(
+                                            method,
+                                            record.name,
+                                            &metadata,
+                                        )?;
+                                    }
+                                }
+                            }
                         }
                     }
                 }

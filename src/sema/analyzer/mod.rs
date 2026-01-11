@@ -103,8 +103,6 @@ pub struct Analyzer {
     pub implement_registry: ImplementRegistry,
     /// Resolved method calls for codegen
     pub method_resolutions: MethodResolutions,
-    /// Tracks which interfaces each type implements: type_name -> [interface_names]
-    type_implements: HashMap<Symbol, Vec<Symbol>>,
     /// Module loader for handling imports
     module_loader: ModuleLoader,
     /// Analyzed module types by import path
@@ -159,7 +157,6 @@ impl Analyzer {
             expr_types: HashMap::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
-            type_implements: HashMap::new(),
             module_loader: ModuleLoader::new(),
             module_types: HashMap::new(),
             module_programs: HashMap::new(),
@@ -415,7 +412,6 @@ impl Analyzer {
             expr_types: HashMap::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
-            type_implements: HashMap::new(),
             module_loader: ModuleLoader::new(),
             module_types: HashMap::new(),
             module_programs: HashMap::new(),
@@ -672,7 +668,6 @@ impl Analyzer {
         HashMap<NodeId, Type>,
         MethodResolutions,
         ImplementRegistry,
-        HashMap<Symbol, Vec<Symbol>>,
         HashMap<String, (Program, Interner)>,
         HashMap<String, HashMap<NodeId, Type>>,
         HashMap<Symbol, GenericFuncDef>,
@@ -688,7 +683,6 @@ impl Analyzer {
             self.expr_types,
             self.method_resolutions,
             self.implement_registry,
-            self.type_implements,
             self.module_programs,
             self.module_expr_types,
             self.generic_functions,
@@ -1059,17 +1053,34 @@ impl Analyzer {
                             self.check_static_method(method, class.name, interner)?;
                         }
                     }
-                    // Validate interface satisfaction
-                    if let Some(interfaces) = self.type_implements.get(&class.name).cloned() {
-                        let type_methods = self.get_type_method_signatures(class.name, interner);
-                        for iface_name in interfaces {
-                            self.validate_interface_satisfaction(
-                                class.name,
-                                iface_name,
-                                &type_methods,
-                                class.span,
-                                interner,
-                            );
+                    // Validate interface satisfaction via EntityRegistry
+                    if let Some(class_name_id) = self.name_table.name_id(
+                        self.current_module,
+                        &[class.name],
+                        interner,
+                    ) {
+                        if let Some(type_def_id) = self.entity_registry.type_by_name(class_name_id)
+                        {
+                            let type_methods =
+                                self.get_type_method_signatures(class.name, interner);
+                            for interface_id in
+                                self.entity_registry.get_implemented_interfaces(type_def_id)
+                            {
+                                let interface_def = self.entity_registry.get_type(interface_id);
+                                if let Some(iface_name_str) =
+                                    self.name_table.last_segment_str(interface_def.name_id)
+                                {
+                                    if let Some(iface_name) = interner.lookup(&iface_name_str) {
+                                        self.validate_interface_satisfaction(
+                                            class.name,
+                                            iface_name,
+                                            &type_methods,
+                                            class.span,
+                                            interner,
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1083,17 +1094,34 @@ impl Analyzer {
                             self.check_static_method(method, record.name, interner)?;
                         }
                     }
-                    // Validate interface satisfaction
-                    if let Some(interfaces) = self.type_implements.get(&record.name).cloned() {
-                        let type_methods = self.get_type_method_signatures(record.name, interner);
-                        for iface_name in interfaces {
-                            self.validate_interface_satisfaction(
-                                record.name,
-                                iface_name,
-                                &type_methods,
-                                record.span,
-                                interner,
-                            );
+                    // Validate interface satisfaction via EntityRegistry
+                    if let Some(record_name_id) = self.name_table.name_id(
+                        self.current_module,
+                        &[record.name],
+                        interner,
+                    ) {
+                        if let Some(type_def_id) = self.entity_registry.type_by_name(record_name_id)
+                        {
+                            let type_methods =
+                                self.get_type_method_signatures(record.name, interner);
+                            for interface_id in
+                                self.entity_registry.get_implemented_interfaces(type_def_id)
+                            {
+                                let interface_def = self.entity_registry.get_type(interface_id);
+                                if let Some(iface_name_str) =
+                                    self.name_table.last_segment_str(interface_def.name_id)
+                                {
+                                    if let Some(iface_name) = interner.lookup(&iface_name_str) {
+                                        self.validate_interface_satisfaction(
+                                            record.name,
+                                            iface_name,
+                                            &type_methods,
+                                            record.span,
+                                            interner,
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                 }

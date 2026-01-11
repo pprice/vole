@@ -186,44 +186,73 @@ impl Compiler<'_> {
             class.methods.iter().map(|m| m.name).collect();
 
         // Also add return types for default methods from implemented interfaces
-        if let Some(interfaces) = self.analyzed.type_implements.get(&class.name).cloned() {
-            for interface_name in &interfaces {
-                if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
-                    for method in &interface_decl.methods {
-                        if method.body.is_some() && !direct_methods.contains(&method.name) {
-                            let return_type = method
-                                .return_type
-                                .as_ref()
-                                .map(|t| self.resolve_type_with_metadata(t))
-                                .unwrap_or(Type::Void);
-                            let sig = self.create_interface_method_signature(method);
-                            let func_key = self.func_registry.intern_qualified(
-                                module_id,
-                                &[class.name, method.name],
-                                &self.analyzed.interner,
-                            );
-                            let display_name = self.func_registry.display(func_key);
-                            let func_id = self.jit.declare_function(&display_name, &sig);
-                            self.func_registry.set_func_id(func_key, func_id);
-                            let method_id =
-                                method_name_id(self.analyzed, &self.analyzed.interner, method.name)
-                                    .unwrap_or_else(|| {
-                                        let type_name_str =
-                                            self.analyzed.interner.resolve(class.name);
-                                        let method_name_str =
-                                            self.analyzed.interner.resolve(method.name);
-                                        panic!(
-                                            "codegen error: default method name not interned for class '{}': '{}'",
-                                            type_name_str, method_name_str
+        // Look up class type_def_id via immutable name_id lookup
+        if let Some(class_name_id) = self.analyzed.name_table.name_id(
+            self.analyzed.name_table.main_module(),
+            &[class.name],
+            &self.analyzed.interner,
+        ) {
+            if let Some(type_def_id) = self.analyzed.entity_registry.type_by_name(class_name_id) {
+                for interface_id in
+                    self.analyzed.entity_registry.get_implemented_interfaces(type_def_id)
+                {
+                    let interface_def = self.analyzed.entity_registry.get_type(interface_id);
+                    // Look up interface name Symbol
+                    if let Some(interface_name_str) = self
+                        .analyzed
+                        .name_table
+                        .last_segment_str(interface_def.name_id)
+                    {
+                        if let Some(interface_name) =
+                            self.analyzed.interner.lookup(&interface_name_str)
+                        {
+                            if let Some(interface_decl) =
+                                self.find_interface_decl(program, interface_name)
+                            {
+                                for method in &interface_decl.methods {
+                                    if method.body.is_some()
+                                        && !direct_methods.contains(&method.name)
+                                    {
+                                        let return_type = method
+                                            .return_type
+                                            .as_ref()
+                                            .map(|t| self.resolve_type_with_metadata(t))
+                                            .unwrap_or(Type::Void);
+                                        let sig = self.create_interface_method_signature(method);
+                                        let func_key = self.func_registry.intern_qualified(
+                                            module_id,
+                                            &[class.name, method.name],
+                                            &self.analyzed.interner,
                                         );
-                                    });
-                            method_infos.insert(
-                                method_id,
-                                MethodInfo {
-                                    func_key,
-                                    return_type,
-                                },
-                            );
+                                        let display_name = self.func_registry.display(func_key);
+                                        let func_id =
+                                            self.jit.declare_function(&display_name, &sig);
+                                        self.func_registry.set_func_id(func_key, func_id);
+                                        let method_id = method_name_id(
+                                            self.analyzed,
+                                            &self.analyzed.interner,
+                                            method.name,
+                                        )
+                                        .unwrap_or_else(|| {
+                                            let type_name_str =
+                                                self.analyzed.interner.resolve(class.name);
+                                            let method_name_str =
+                                                self.analyzed.interner.resolve(method.name);
+                                            panic!(
+                                                "codegen error: default method name not interned for class '{}': '{}'",
+                                                type_name_str, method_name_str
+                                            );
+                                        });
+                                        method_infos.insert(
+                                            method_id,
+                                            MethodInfo {
+                                                func_key,
+                                                return_type,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -385,44 +414,73 @@ impl Compiler<'_> {
             record.methods.iter().map(|m| m.name).collect();
 
         // Also add return types for default methods from implemented interfaces
-        if let Some(interfaces) = self.analyzed.type_implements.get(&record.name).cloned() {
-            for interface_name in &interfaces {
-                if let Some(interface_decl) = self.find_interface_decl(program, *interface_name) {
-                    for method in &interface_decl.methods {
-                        if method.body.is_some() && !direct_methods.contains(&method.name) {
-                            let return_type = method
-                                .return_type
-                                .as_ref()
-                                .map(|t| self.resolve_type_with_metadata(t))
-                                .unwrap_or(Type::Void);
-                            let sig = self.create_interface_method_signature(method);
-                            let func_key = self.func_registry.intern_qualified(
-                                module_id,
-                                &[record.name, method.name],
-                                &self.analyzed.interner,
-                            );
-                            let display_name = self.func_registry.display(func_key);
-                            let func_id = self.jit.declare_function(&display_name, &sig);
-                            self.func_registry.set_func_id(func_key, func_id);
-                            let method_id =
-                                method_name_id(self.analyzed, &self.analyzed.interner, method.name)
-                                    .unwrap_or_else(|| {
-                                        let type_name_str =
-                                            self.analyzed.interner.resolve(record.name);
-                                        let method_name_str =
-                                            self.analyzed.interner.resolve(method.name);
-                                        panic!(
-                                            "codegen error: default method name not interned for record '{}': '{}'",
-                                            type_name_str, method_name_str
+        // Look up record type_def_id via immutable name_id lookup
+        if let Some(record_name_id) = self.analyzed.name_table.name_id(
+            self.analyzed.name_table.main_module(),
+            &[record.name],
+            &self.analyzed.interner,
+        ) {
+            if let Some(type_def_id) = self.analyzed.entity_registry.type_by_name(record_name_id) {
+                for interface_id in
+                    self.analyzed.entity_registry.get_implemented_interfaces(type_def_id)
+                {
+                    let interface_def = self.analyzed.entity_registry.get_type(interface_id);
+                    // Look up interface name Symbol
+                    if let Some(interface_name_str) = self
+                        .analyzed
+                        .name_table
+                        .last_segment_str(interface_def.name_id)
+                    {
+                        if let Some(interface_name) =
+                            self.analyzed.interner.lookup(&interface_name_str)
+                        {
+                            if let Some(interface_decl) =
+                                self.find_interface_decl(program, interface_name)
+                            {
+                                for method in &interface_decl.methods {
+                                    if method.body.is_some()
+                                        && !direct_methods.contains(&method.name)
+                                    {
+                                        let return_type = method
+                                            .return_type
+                                            .as_ref()
+                                            .map(|t| self.resolve_type_with_metadata(t))
+                                            .unwrap_or(Type::Void);
+                                        let sig = self.create_interface_method_signature(method);
+                                        let func_key = self.func_registry.intern_qualified(
+                                            module_id,
+                                            &[record.name, method.name],
+                                            &self.analyzed.interner,
                                         );
-                                    });
-                            method_infos.insert(
-                                method_id,
-                                MethodInfo {
-                                    func_key,
-                                    return_type,
-                                },
-                            );
+                                        let display_name = self.func_registry.display(func_key);
+                                        let func_id =
+                                            self.jit.declare_function(&display_name, &sig);
+                                        self.func_registry.set_func_id(func_key, func_id);
+                                        let method_id = method_name_id(
+                                            self.analyzed,
+                                            &self.analyzed.interner,
+                                            method.name,
+                                        )
+                                        .unwrap_or_else(|| {
+                                            let type_name_str =
+                                                self.analyzed.interner.resolve(record.name);
+                                            let method_name_str =
+                                                self.analyzed.interner.resolve(method.name);
+                                            panic!(
+                                                "codegen error: default method name not interned for record '{}': '{}'",
+                                                type_name_str, method_name_str
+                                            );
+                                        });
+                                        method_infos.insert(
+                                            method_id,
+                                            MethodInfo {
+                                                func_key,
+                                                return_type,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                 }
