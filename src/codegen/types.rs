@@ -576,26 +576,25 @@ pub(crate) fn resolve_type_expr_with_metadata(
     }
 }
 
-/// Resolve a type expression using aliases, entity registry, and error types
+/// Resolve a type expression using aliases, entity registry, error types, and type metadata
 /// This is used when CompileCtx is not available (e.g., during Compiler setup)
-/// Note: This does NOT resolve class/record types from type_metadata - use resolve_type_expr for that
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_type_expr_full(
     ty: &TypeExpr,
     type_aliases: &HashMap<Symbol, Type>,
     entity_registry: &EntityRegistry,
     error_types: &HashMap<Symbol, ErrorTypeInfo>,
+    type_metadata: &HashMap<Symbol, TypeMetadata>,
     interner: &Interner,
     name_table: &NameTable,
     module_id: ModuleId,
 ) -> Type {
-    // Use empty type_metadata for backward compatibility
-    let empty_type_metadata = HashMap::new();
     resolve_type_expr_with_metadata(
         ty,
         type_aliases,
         entity_registry,
         error_types,
-        &empty_type_metadata,
+        type_metadata,
         interner,
         name_table,
         module_id,
