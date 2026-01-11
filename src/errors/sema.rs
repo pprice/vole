@@ -458,12 +458,13 @@ pub enum SemanticError {
     },
 }
 
-/// Semantic warnings (W2xxx) - these don't prevent compilation but indicate potential issues
+/// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues
+/// Note: W3xxx to avoid overlap with E2xxx error codes
 #[derive(Error, Debug, Diagnostic, Clone)]
 pub enum SemanticWarning {
     #[error("structural type alias '{name}' is unusual")]
     #[diagnostic(
-        code(W2001),
+        code(W3001),
         help(
             "structural types are typically used inline as constraints: func foo<T: {{ {fields} }}>(x: T)"
         )
