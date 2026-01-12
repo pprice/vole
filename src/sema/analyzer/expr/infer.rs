@@ -199,8 +199,8 @@ impl Analyzer {
 
             ExprKind::ArrayLiteral(elements) => {
                 if elements.is_empty() {
-                    // Empty array needs type annotation or we use Unknown
-                    Ok(Type::Array(Box::new(Type::Unknown)))
+                    // Empty array needs type annotation or we use unknown placeholder
+                    Ok(Type::Array(Box::new(Type::unknown())))
                 } else {
                     // Infer types for all elements
                     let elem_types: Vec<Type> = elements
@@ -267,7 +267,7 @@ impl Analyzer {
                         } else {
                             // Non-constant index - return union of all element types
                             // For now, just return first element type (common case: 2-tuples)
-                            Ok(elements.first().cloned().unwrap_or(Type::Unknown))
+                            Ok(elements.first().cloned().unwrap_or_else(Type::unknown))
                         }
                     }
                     Type::FixedArray { element, .. } => Ok(*element),

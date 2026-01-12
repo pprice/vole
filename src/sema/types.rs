@@ -115,6 +115,28 @@ impl std::fmt::Display for AnalysisError {
     }
 }
 
+/// What kind of type is being deferred as a placeholder.
+/// This provides clarity about why a type is not yet resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlaceholderKind {
+    /// Generic type inference placeholder (e.g., empty array element type)
+    Inference,
+    /// Type parameter (e.g., T in Box<T>) - carries the parameter name for debugging
+    TypeParam(String),
+    /// Self type in interface signatures - resolved when interface is implemented
+    SelfType,
+}
+
+impl std::fmt::Display for PlaceholderKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlaceholderKind::Inference => write!(f, "?"),
+            PlaceholderKind::TypeParam(name) => write!(f, "{}", name),
+            PlaceholderKind::SelfType => write!(f, "Self"),
+        }
+    }
+}
+
 /// Resolved types in the type system
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -153,8 +175,9 @@ pub enum Type {
     Array(Box<Type>),
     /// Function type
     Function(FunctionType),
-    /// Unknown (for type inference)
-    Unknown,
+    /// Placeholder type - waiting for substitution or inference.
+    /// Use PlaceholderKind to understand what type is being deferred.
+    Placeholder(PlaceholderKind),
     /// Invalid type - analysis failed, carries error chain for debugging
     Invalid(AnalysisError),
     /// The metatype - the type of types themselves
@@ -464,7 +487,7 @@ impl Type {
             Type::Range => "range",
             Type::Array(_) => "array",
             Type::Function(_) => "function",
-            Type::Unknown => "unknown",
+            Type::Placeholder(_) => "placeholder",
             Type::Invalid(_) => "<invalid>",
             Type::Type => "type",
             Type::Class(_) => "class",
@@ -535,6 +558,26 @@ impl Type {
     /// Check if this type is invalid (analysis failed)
     pub fn is_invalid(&self) -> bool {
         matches!(self, Type::Invalid(_))
+    }
+
+    /// Create an inference placeholder (for type inference during analysis)
+    pub fn unknown() -> Type {
+        Type::Placeholder(PlaceholderKind::Inference)
+    }
+
+    /// Create a type parameter placeholder (for generic type parameters like T)
+    pub fn type_param_placeholder(name: impl Into<String>) -> Type {
+        Type::Placeholder(PlaceholderKind::TypeParam(name.into()))
+    }
+
+    /// Create a Self type placeholder (for interface method signatures)
+    pub fn self_placeholder() -> Type {
+        Type::Placeholder(PlaceholderKind::SelfType)
+    }
+
+    /// Check if this is a placeholder type
+    pub fn is_placeholder(&self) -> bool {
+        matches!(self, Type::Placeholder(_))
     }
 
     /// Get the analysis error if this is an invalid type

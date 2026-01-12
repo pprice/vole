@@ -290,7 +290,7 @@ impl Analyzer {
                     if let Some(Type::Array(elem)) = expected {
                         return Ok(Type::Array(elem.clone()));
                     }
-                    return Ok(Type::Array(Box::new(Type::Unknown)));
+                    return Ok(Type::Array(Box::new(Type::unknown())));
                 }
 
                 // Infer types for all elements, passing expected element type to each

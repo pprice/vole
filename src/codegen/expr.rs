@@ -97,7 +97,7 @@ impl Cg<'_, '_, '_> {
                     .query()
                     .type_of(expr.id)
                     .cloned()
-                    .unwrap_or(Type::Unknown);
+                    .unwrap_or(Type::unknown());
                 Ok(CompiledValue {
                     value: self.builder.ins().iconst(types::I64, 0),
                     ty: types::I64,
@@ -387,7 +387,7 @@ impl Cg<'_, '_, '_> {
             .query()
             .type_of(expr.id)
             .cloned()
-            .unwrap_or(Type::Unknown);
+            .unwrap_or(Type::unknown());
 
         // If it's a tuple, use stack allocation
         if let Type::Tuple(ref elem_types) = inferred_type {
@@ -403,7 +403,7 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| "vole_array_push not found".to_string())?;
         let array_push_ref = self.func_ref(array_push_key)?;
 
-        let mut elem_type = Type::Unknown;
+        let mut elem_type = Type::unknown();
 
         for (i, elem) in elements.iter().enumerate() {
             let compiled = self.expr(elem)?;
@@ -482,7 +482,7 @@ impl Cg<'_, '_, '_> {
             .query()
             .type_of(element.id)
             .cloned()
-            .unwrap_or(Type::Unknown);
+            .unwrap_or(Type::unknown());
 
         // Compile the element once
         let elem_value = self.expr(element)?;

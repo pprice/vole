@@ -438,12 +438,12 @@ pub(crate) fn resolve_type_expr_with_metadata(
             } else if let Some(metadata) = type_metadata.get(sym) {
                 metadata.vole_type.clone()
             } else {
-                // This might be a type parameter (e.g., T in Box<T>).
+                // This is a type parameter (e.g., T in Box<T>).
                 // Type parameters are resolved when the generic is instantiated.
-                // For now, return Unknown as a placeholder.
+                // Use Placeholder with the param name for debugging clarity.
                 let name = interner.resolve(*sym);
-                tracing::trace!(name, "type parameter in codegen, using Unknown placeholder");
-                Type::Unknown
+                tracing::trace!(name, "type parameter in codegen, using Placeholder");
+                Type::type_param_placeholder(name)
             }
         }
         TypeExpr::Array(elem) => {
@@ -520,9 +520,9 @@ pub(crate) fn resolve_type_expr_with_metadata(
         }
         TypeExpr::SelfType => {
             // Self type in interface signatures is resolved when the interface is implemented.
-            // For interface method signature compilation, we use Unknown as a placeholder.
+            // For interface method signature compilation, we use a Self placeholder.
             // The actual Self type is substituted when compiling implement blocks.
-            Type::Unknown
+            Type::self_placeholder()
         }
         TypeExpr::Fallible {
             success_type,
@@ -910,7 +910,7 @@ pub(crate) fn cranelift_to_vole_type(ty: types::Type) -> Type {
         types::I128 => Type::I128,
         types::F32 => Type::F32,
         types::F64 => Type::F64,
-        _ => Type::Unknown, // Pointer types, etc. stay Unknown for now
+        _ => Type::unknown(), // Pointer types, etc. use inference placeholder for now
     }
 }
 

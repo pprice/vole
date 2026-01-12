@@ -262,7 +262,7 @@ impl Analyzer {
                 method_iter,
                 FunctionType {
                     params: vec![],
-                    return_type: Box::new(Type::Unknown),
+                    return_type: Box::new(Type::unknown()),
                     is_closure: false,
                 },
                 Some(ExternalMethodInfo {
@@ -288,7 +288,7 @@ impl Analyzer {
                 method_iter,
                 FunctionType {
                     params: vec![],
-                    return_type: Box::new(Type::Unknown), // Will be refined by check_builtin_method
+                    return_type: Box::new(Type::unknown()), // Will be refined by check_builtin_method
                     is_closure: false,
                 },
                 Some(ExternalMethodInfo {
@@ -311,7 +311,7 @@ impl Analyzer {
                 method_iter,
                 FunctionType {
                     params: vec![],
-                    return_type: Box::new(Type::Unknown), // Will be refined by check_builtin_method
+                    return_type: Box::new(Type::unknown()), // Will be refined by check_builtin_method
                     is_closure: false,
                 },
                 Some(ExternalMethodInfo {
@@ -2061,7 +2061,7 @@ impl Analyzer {
                         ExprKind::StringLiteral(v) => {
                             (Type::String, Some(ConstantValue::String(v.clone())))
                         }
-                        _ => (Type::Unknown, None), // Complex expressions need full analysis
+                        _ => (Type::unknown(), None), // Complex expressions need full analysis
                     };
                     exports.insert(name_id, ty);
                     if let Some(cv) = const_val {

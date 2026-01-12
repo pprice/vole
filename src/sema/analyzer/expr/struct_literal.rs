@@ -383,7 +383,7 @@ impl Analyzer {
                 inferred
                     .get(&param.name_id)
                     .cloned()
-                    .unwrap_or(Type::Unknown)
+                    .unwrap_or_else(Type::unknown)
             })
             .collect();
 

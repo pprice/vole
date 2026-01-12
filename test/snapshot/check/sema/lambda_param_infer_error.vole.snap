@@ -10,7 +10,7 @@
  4 | }
    `----
   help: add a type annotation: (x: Type) => ...
-  x [E2001]: expected numeric or string, found error and i64
+  x [E2001]: expected numeric or string, found <invalid> and i64
    ,-[<path>/lambda_param_infer_error.vole:3:20]
  2 | func main() {
  3 |     let f = (x) => x + 1

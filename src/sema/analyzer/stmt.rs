@@ -198,7 +198,7 @@ impl Analyzer {
                     Type::GenericInstance { def, args } => {
                         // GenericInstance is used for Iterator<T> from method return types
                         if self.name_table.well_known.is_iterator(*def) {
-                            args.first().cloned().unwrap_or(Type::Unknown)
+                            args.first().cloned().unwrap_or_else(Type::unknown)
                         } else {
                             self.type_error(
                                 "iterable (range, array, string, or Iterator<T>)",
