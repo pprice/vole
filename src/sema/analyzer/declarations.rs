@@ -358,16 +358,32 @@ impl Analyzer {
             // Generic class: store with type params as placeholders
             let builtin_mod = self.name_table.builtin_module();
 
+            // First pass: create name_scope for constraint resolution (same pattern as functions)
+            let mut name_scope = TypeParamScope::new();
+            for tp in &class.type_params {
+                let tp_name_str = interner.resolve(tp.name);
+                let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
+                name_scope.add(TypeParamInfo {
+                    name: tp.name,
+                    name_id: tp_name_id,
+                    constraint: None,
+                });
+            }
+
+            // Second pass: resolve constraints with name_scope available
             let type_params: Vec<TypeParamInfo> = class
                 .type_params
                 .iter()
                 .map(|tp| {
                     let tp_name_str = interner.resolve(tp.name);
                     let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
+                    let constraint = tp.constraint.as_ref().and_then(|c| {
+                        self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
+                    });
                     TypeParamInfo {
                         name: tp.name,
                         name_id: tp_name_id,
-                        constraint: None,
+                        constraint,
                     }
                 })
                 .collect();
@@ -785,6 +801,8 @@ impl Analyzer {
         } else {
             // Generic record: store with type params as placeholders
             let builtin_mod = self.name_table.builtin_module();
+
+            // First pass: create name_scope for constraint resolution (same pattern as functions)
             let mut name_scope = TypeParamScope::new();
             for tp in &record.type_params {
                 let tp_name_str = interner.resolve(tp.name);
@@ -792,20 +810,24 @@ impl Analyzer {
                 name_scope.add(TypeParamInfo {
                     name: tp.name,
                     name_id: tp_name_id,
-                    constraint: None, // TODO: handle constraints
+                    constraint: None,
                 });
             }
 
+            // Second pass: resolve constraints with name_scope available
             let type_params: Vec<TypeParamInfo> = record
                 .type_params
                 .iter()
                 .map(|tp| {
                     let tp_name_str = interner.resolve(tp.name);
                     let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
+                    let constraint = tp.constraint.as_ref().and_then(|c| {
+                        self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
+                    });
                     TypeParamInfo {
                         name: tp.name,
                         name_id: tp_name_id,
-                        constraint: None,
+                        constraint,
                     }
                 })
                 .collect();

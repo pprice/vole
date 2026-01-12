@@ -138,6 +138,9 @@ pub struct Analyzer {
     current_module: ModuleId,
     /// Entity registry for first-class type/method/field/function identity (includes type_table)
     pub entity_registry: EntityRegistry,
+    /// Current type parameter scope (set when analyzing methods in generic classes/records)
+    /// Used for resolving methods on Type::TypeParam via constraint interfaces
+    current_type_param_scope: Option<TypeParamScope>,
 }
 
 impl Analyzer {
@@ -174,6 +177,7 @@ impl Analyzer {
             name_table,
             current_module: main_module,
             entity_registry: EntityRegistry::new(),
+            current_type_param_scope: None,
         };
 
         // Register primitives in EntityRegistry so they can have static methods
@@ -437,6 +441,7 @@ impl Analyzer {
             name_table: NameTable::new(),
             current_module: prelude_module, // Use the prelude module path!
             entity_registry: EntityRegistry::new(),
+            current_type_param_scope: None,
         };
 
         // Copy existing registries so prelude files can reference earlier definitions
@@ -1074,6 +1079,23 @@ impl Analyzer {
                     // Already processed in process_global_lets
                 }
                 Decl::Class(class) => {
+                    // Set up type param scope for generic class methods
+                    // This allows method resolution to use constraint interfaces
+                    if !class.type_params.is_empty()
+                        && let Some(class_name_id) =
+                            self.name_table
+                                .name_id(self.current_module, &[class.name], interner)
+                        && let Some(type_def_id) = self.entity_registry.type_by_name(class_name_id)
+                        && let Some(generic_info) =
+                            self.entity_registry.get_generic_info(type_def_id)
+                    {
+                        let mut scope = TypeParamScope::new();
+                        for tp in &generic_info.type_params {
+                            scope.add(tp.clone());
+                        }
+                        self.current_type_param_scope = Some(scope);
+                    }
+
                     for method in &class.methods {
                         self.check_method(method, class.name, interner)?;
                     }
@@ -1083,6 +1105,9 @@ impl Analyzer {
                             self.check_static_method(method, class.name, interner)?;
                         }
                     }
+
+                    // Clear type param scope after checking methods
+                    self.current_type_param_scope = None;
                     // Validate interface satisfaction via EntityRegistry
                     if let Some(class_name_id) =
                         self.name_table
@@ -1110,6 +1135,23 @@ impl Analyzer {
                     }
                 }
                 Decl::Record(record) => {
+                    // Set up type param scope for generic record methods
+                    // This allows method resolution to use constraint interfaces
+                    if !record.type_params.is_empty()
+                        && let Some(record_name_id) =
+                            self.name_table
+                                .name_id(self.current_module, &[record.name], interner)
+                        && let Some(type_def_id) = self.entity_registry.type_by_name(record_name_id)
+                        && let Some(generic_info) =
+                            self.entity_registry.get_generic_info(type_def_id)
+                    {
+                        let mut scope = TypeParamScope::new();
+                        for tp in &generic_info.type_params {
+                            scope.add(tp.clone());
+                        }
+                        self.current_type_param_scope = Some(scope);
+                    }
+
                     for method in &record.methods {
                         self.check_method(method, record.name, interner)?;
                     }
@@ -1119,6 +1161,10 @@ impl Analyzer {
                             self.check_static_method(method, record.name, interner)?;
                         }
                     }
+
+                    // Clear type param scope after checking methods
+                    self.current_type_param_scope = None;
+
                     // Validate interface satisfaction via EntityRegistry
                     if let Some(record_name_id) =
                         self.name_table

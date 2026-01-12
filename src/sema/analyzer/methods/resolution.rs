@@ -31,6 +31,11 @@ impl Analyzer {
         method_name: Symbol,
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
+        // Handle Type::TypeParam by looking up constraint interfaces
+        if let Type::TypeParam(param_name_id) = object_type {
+            return self.resolve_method_on_type_param(*param_name_id, method_name, interner);
+        }
+
         // Try to get TypeDefId from the object type
         let type_def_id = self.get_type_def_id_for_type(object_type);
 
@@ -173,6 +178,65 @@ impl Analyzer {
         } else {
             None
         }
+    }
+
+    /// Resolve a method on a type parameter by looking up its constraint interfaces.
+    /// Returns an InterfaceMethod resolution since the actual concrete type will be
+    /// substituted at monomorphization time.
+    fn resolve_method_on_type_param(
+        &mut self,
+        param_name_id: NameId,
+        method_name: Symbol,
+        interner: &Interner,
+    ) -> Option<ResolvedMethod> {
+        // Look up the type parameter in current_type_param_scope
+        let type_param_scope = self.current_type_param_scope.as_ref()?;
+
+        // Find the type parameter by name_id
+        let type_param = type_param_scope
+            .params()
+            .iter()
+            .find(|tp| tp.name_id == param_name_id)?;
+
+        // Get the constraint (must be an interface constraint for method calls)
+        let constraint = type_param.constraint.as_ref()?;
+        let constraint_interfaces = match constraint {
+            crate::sema::generic::TypeConstraint::Interface(symbols) => symbols,
+            _ => return None, // Union/Structural constraints don't support method calls this way
+        };
+
+        // Try to find the method in one of the constraint interfaces
+        let method_name_str = interner.resolve(method_name);
+        for interface_sym in constraint_interfaces {
+            // Look up interface by Symbol in EntityRegistry
+            if let Some(interface_type_id) = self
+                .resolver(interner)
+                .resolve_type(*interface_sym, &self.entity_registry)
+            {
+                let interface_def = self.entity_registry.get_type(interface_type_id);
+
+                // Search for the method in this interface
+                for &method_id in &interface_def.methods {
+                    let method_def = self.entity_registry.get_method(method_id);
+                    let method_def_name = self
+                        .name_table
+                        .last_segment_str(method_def.name_id)
+                        .unwrap_or_default();
+
+                    if method_def_name == method_name_str {
+                        // Found the method - return InterfaceMethod resolution
+                        // The actual dispatch will happen at runtime via vtable
+                        return Some(ResolvedMethod::InterfaceMethod {
+                            interface_name: *interface_sym,
+                            method_name,
+                            func_type: method_def.signature.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     /// Resolve a method call to a normalized resolution for later validation/codegen.

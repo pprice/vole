@@ -1,0 +1,28 @@
+// Test: Generic class/record with type parameter constraints (sema-only)
+// This tests that sema correctly resolves constraint methods on type parameters.
+//
+// NOTE: Full codegen support for constraint method calls on type parameters
+// requires class/record monomorphization, which is not yet implemented.
+// This is a check-only test that verifies sema analysis passes.
+
+interface Printable {
+    func print() -> string
+}
+
+// Sema should resolve self.value.print() via the Printable constraint
+class Holder<T: Printable> {
+    value: T,
+
+    func show() -> string {
+        return self.value.print()
+    }
+}
+
+// Record with constraint
+record Wrapper<T: Printable> {
+    item: T,
+
+    func display() -> string {
+        return self.item.print()
+    }
+}

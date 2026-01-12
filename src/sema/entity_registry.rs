@@ -434,6 +434,16 @@ impl EntityRegistry {
         self.type_defs[type_id.index() as usize].generic_info = Some(info);
     }
 
+    /// Get generic type info (type params with constraints) for a record or class
+    pub fn get_generic_info(
+        &self,
+        type_id: TypeDefId,
+    ) -> Option<&crate::sema::entity_defs::GenericTypeInfo> {
+        self.type_defs[type_id.index() as usize]
+            .generic_info
+            .as_ref()
+    }
+
     /// Set error type info for an error type
     pub fn set_error_info(&mut self, type_id: TypeDefId, info: crate::sema::ErrorTypeInfo) {
         self.type_defs[type_id.index() as usize].error_info = Some(info);
