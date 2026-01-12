@@ -189,6 +189,13 @@ impl Analyzer {
         method_name: Symbol,
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
+        let method_name_str = interner.resolve(method_name);
+        tracing::trace!(
+            ?param_name_id,
+            method = %method_name_str,
+            "resolve_method_on_type_param: starting"
+        );
+
         // Look up the type parameter in current_type_param_scope
         let type_param_scope = self.current_type_param_scope.as_ref()?;
 
@@ -196,24 +203,54 @@ impl Analyzer {
         let type_param = type_param_scope
             .params()
             .iter()
-            .find(|tp| tp.name_id == param_name_id)?;
+            .find(|tp| tp.name_id == param_name_id);
 
-        // Get the constraint (must be an interface constraint for method calls)
-        let constraint = type_param.constraint.as_ref()?;
-        let constraint_interfaces = match constraint {
-            crate::sema::generic::TypeConstraint::Interface(symbols) => symbols,
-            _ => return None, // Union/Structural constraints don't support method calls this way
+        let type_param = match type_param {
+            Some(tp) => tp,
+            None => {
+                tracing::trace!(?param_name_id, "type param not found in scope");
+                return None;
+            }
         };
 
+        // Get the constraint (must be an interface constraint for method calls)
+        let constraint = match type_param.constraint.as_ref() {
+            Some(c) => c,
+            None => {
+                tracing::trace!(?param_name_id, "type param has no constraint");
+                return None;
+            }
+        };
+
+        let constraint_interfaces = match constraint {
+            crate::sema::generic::TypeConstraint::Interface(symbols) => symbols,
+            other => {
+                tracing::trace!(?param_name_id, constraint = ?other, "constraint is not interface-based");
+                return None; // Union/Structural constraints don't support method calls this way
+            }
+        };
+
+        tracing::trace!(
+            num_constraints = constraint_interfaces.len(),
+            "searching constraint interfaces"
+        );
+
         // Try to find the method in one of the constraint interfaces
-        let method_name_str = interner.resolve(method_name);
         for interface_sym in constraint_interfaces {
+            let interface_name = interner.resolve(*interface_sym);
+            tracing::trace!(%interface_name, "checking interface");
+
             // Use resolve_type_or_interface to handle prelude interfaces like Hashable
             if let Some(interface_type_id) = self
                 .resolver(interner)
                 .resolve_type_or_interface(*interface_sym, &self.entity_registry)
             {
                 let interface_def = self.entity_registry.get_type(interface_type_id);
+                tracing::trace!(
+                    ?interface_type_id,
+                    num_methods = interface_def.methods.len(),
+                    "found interface def"
+                );
 
                 // Search for the method in this interface
                 for &method_id in &interface_def.methods {
@@ -223,7 +260,19 @@ impl Analyzer {
                         .last_segment_str(method_def.name_id)
                         .unwrap_or_default();
 
+                    tracing::trace!(
+                        ?method_id,
+                        found_method = %method_def_name,
+                        looking_for = %method_name_str,
+                        "checking method"
+                    );
+
                     if method_def_name == method_name_str {
+                        tracing::trace!(
+                            ?method_id,
+                            %interface_name,
+                            "found method on constraint interface"
+                        );
                         // Found the method - return InterfaceMethod resolution
                         // The actual dispatch will happen at runtime via vtable
                         return Some(ResolvedMethod::InterfaceMethod {
@@ -233,9 +282,16 @@ impl Analyzer {
                         });
                     }
                 }
+            } else {
+                tracing::trace!(%interface_name, "could not resolve interface");
             }
         }
 
+        tracing::trace!(
+            method = %method_name_str,
+            ?param_name_id,
+            "method not found on any constraint interface"
+        );
         None
     }
 

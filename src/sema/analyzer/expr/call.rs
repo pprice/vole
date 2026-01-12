@@ -28,7 +28,7 @@ impl Analyzer {
             }
 
             let arg_ty = self.check_expr(&call.args[0], interner)?;
-            if arg_ty != Type::Bool && arg_ty != Type::Error {
+            if arg_ty != Type::Bool && !arg_ty.is_error() {
                 let found = self.type_display(&arg_ty);
                 self.add_error(
                     SemanticError::TypeMismatch {
@@ -116,7 +116,7 @@ impl Analyzer {
                 // Check arg count
                 if call.args.len() != concrete_params.len() {
                     self.add_wrong_arg_count(concrete_params.len(), call.args.len(), expr.span);
-                    return Ok(Type::Error);
+                    return Ok(Type::error("propagate"));
                 }
 
                 // Type check arguments against concrete params
@@ -242,7 +242,7 @@ impl Analyzer {
                 for arg in &call.args {
                     self.check_expr(arg, interner)?;
                 }
-                return Ok(Type::Error);
+                return Ok(Type::error("propagate"));
             }
 
             // Unknown identifier - might be an undefined function
@@ -271,7 +271,7 @@ impl Analyzer {
         }
 
         // Non-callable type
-        if callee_ty != Type::Error {
+        if !callee_ty.is_error() {
             let ty = self.type_display(&callee_ty);
             self.add_error(
                 SemanticError::NotCallable {
@@ -281,6 +281,6 @@ impl Analyzer {
                 call.callee.span,
             );
         }
-        Ok(Type::Error)
+        Ok(Type::error("propagate"))
     }
 }

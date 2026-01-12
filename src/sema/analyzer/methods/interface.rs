@@ -487,7 +487,7 @@ impl Analyzer {
         }
         // Check parameter types, substituting Self (Type::Error) with implementing_type
         for (req_param, found_param) in required_params.iter().zip(found.params.iter()) {
-            let effective_req = if matches!(req_param, Type::Error) {
+            let effective_req = if req_param.is_error() {
                 implementing_type
             } else {
                 req_param
@@ -497,7 +497,7 @@ impl Analyzer {
             }
         }
         // Check return type, substituting Self (Type::Error) with implementing_type
-        let effective_return = if matches!(required_return, Type::Error) {
+        let effective_return = if required_return.is_error() {
             implementing_type
         } else {
             required_return
@@ -528,13 +528,13 @@ impl Analyzer {
             for (i, (req_param, found_param)) in
                 required_params.iter().zip(found.params.iter()).enumerate()
             {
-                let effective_req = if matches!(req_param, Type::Error) {
+                let effective_req = if req_param.is_error() {
                     implementing_type
                 } else {
                     req_param
                 };
                 if effective_req != found_param {
-                    let expected_str = if matches!(req_param, Type::Error) {
+                    let expected_str = if req_param.is_error() {
                         "Self".to_string()
                     } else {
                         self.type_display(req_param)
@@ -551,13 +551,13 @@ impl Analyzer {
         }
 
         // Check return type
-        let effective_return = if matches!(required_return, Type::Error) {
+        let effective_return = if required_return.is_error() {
             implementing_type
         } else {
             required_return
         };
         if effective_return != &*found.return_type {
-            let expected_str = if matches!(required_return, Type::Error) {
+            let expected_str = if required_return.is_error() {
                 "Self".to_string()
             } else {
                 self.type_display(required_return)

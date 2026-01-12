@@ -58,14 +58,15 @@ impl<'src> Parser<'src> {
 
     /// Parse a type constraint: Interface, Interface + Interface, Type1 | Type2, or { fields/methods }
     fn parse_type_constraint(&mut self) -> Result<TypeConstraint, ParseError> {
-        // Parse first type
-        let first = self.parse_type()?;
+        // Use parse_base_type instead of parse_type to avoid consuming '+' as type combination.
+        // For constraints, '+' means multiple interface requirements, not type combination.
+        let first = self.parse_base_type()?;
 
         // Check for union constraint: T: i32 | i64
         if self.check(TokenType::Pipe) {
             let mut types = vec![first];
             while self.match_token(TokenType::Pipe) {
-                types.push(self.parse_type()?);
+                types.push(self.parse_base_type()?);
             }
             return Ok(TypeConstraint::Union(types));
         }
@@ -85,7 +86,7 @@ impl<'src> Parser<'src> {
             };
             let mut interfaces = vec![first_sym];
             while self.match_token(TokenType::Plus) {
-                let next = self.parse_type()?;
+                let next = self.parse_base_type()?;
                 let TypeExpr::Named(sym) = next else {
                     return Err(ParseError::new(
                         ParserError::ExpectedToken {

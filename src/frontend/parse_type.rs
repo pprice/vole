@@ -67,7 +67,8 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse a base type (primitives, arrays, function types, named types)
-    fn parse_base_type(&mut self) -> Result<TypeExpr, ParseError> {
+    /// Public within the crate so parse_generic.rs can use it for constraint parsing.
+    pub(super) fn parse_base_type(&mut self) -> Result<TypeExpr, ParseError> {
         let token = self.current.clone();
         match token.ty {
             TokenType::LParen => {

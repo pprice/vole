@@ -43,7 +43,7 @@ fn interface_instance(
     }
 
     if !type_def.type_params.is_empty() && type_def.type_params.len() != type_args.len() {
-        return Some(Type::Error);
+        return Some(Type::error("propagate"));
     }
 
     // Build substitution map using type param NameIds
@@ -163,7 +163,7 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                         {
                             Type::Record(record)
                         } else {
-                            Type::Error
+                            Type::error("resolve_failed")
                         }
                     }
                     TypeDefKind::Class => {
@@ -173,34 +173,34 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                         {
                             Type::Class(class)
                         } else {
-                            Type::Error
+                            Type::error("resolve_failed")
                         }
                     }
                     TypeDefKind::Interface => {
                         // Use interface_instance for proper method resolution
-                        interface_instance(*sym, Vec::new(), ctx).unwrap_or(Type::Error)
+                        interface_instance(*sym, Vec::new(), ctx).unwrap_or_else(|| Type::error("unwrap_failed"))
                     }
                     TypeDefKind::ErrorType => {
                         // Get error info from EntityRegistry
                         if let Some(error_info) = type_def.error_info.clone() {
                             Type::ErrorType(error_info)
                         } else {
-                            Type::Error
+                            Type::error("resolve_failed")
                         }
                     }
-                    TypeDefKind::Primitive => Type::Error,
+                    TypeDefKind::Primitive => Type::error("resolve_primitive"),
                     TypeDefKind::Alias => {
                         if let Some(ref aliased) = type_def.aliased_type {
                             aliased.clone()
                         } else {
-                            Type::Error
+                            Type::error("resolve_failed")
                         }
                     }
                 }
             } else if let Some(interface) = interface_instance(*sym, Vec::new(), ctx) {
                 interface
             } else {
-                Type::Error // Unknown type name
+                Type::error("unknown_type_name") // Unknown type name
             }
         }
         TypeExpr::Array(elem) => {
@@ -235,7 +235,7 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                 self_type.clone()
             } else {
                 // Return Error to indicate Self can't be used outside method context
-                Type::Error
+                Type::error("resolve_failed")
             }
         }
         TypeExpr::Fallible {
@@ -309,7 +309,7 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
         TypeExpr::Combination(_) => {
             // Type combinations are constraint-only, not resolved to a concrete Type
             // Semantic analysis handles these specially in constraint contexts
-            Type::Error
+            Type::error("resolve_failed")
         }
     }
 }
@@ -433,7 +433,7 @@ mod tests {
             module_id,
         );
         let named = TypeExpr::Named(Symbol(0));
-        assert_eq!(resolve_type(&named, &mut ctx), Type::Error);
+        assert!(resolve_type(&named, &mut ctx).is_error());
     }
 
     #[test]
@@ -441,7 +441,7 @@ mod tests {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
             // Self type is only valid in interface/implement context
-            assert_eq!(resolve_type(&TypeExpr::SelfType, ctx), Type::Error);
+            assert!(resolve_type(&TypeExpr::SelfType, ctx).is_error());
         });
     }
 }

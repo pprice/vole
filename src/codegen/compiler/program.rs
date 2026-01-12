@@ -11,8 +11,10 @@ use crate::codegen::types::{
 };
 use crate::frontend::{Decl, FuncDecl, Interner, LetStmt, Program, Symbol, TestCase, TestsDecl};
 use crate::identity::NameId;
+use crate::sema::entity_defs::TypeDefKind;
+use crate::sema::types::{ClassType, RecordType, StructField};
 use crate::sema::Type;
-use crate::sema::generic::MonomorphInstance;
+use crate::sema::generic::{ClassMethodMonomorphInstance, MonomorphInstance, substitute_type};
 
 impl Compiler<'_> {
     fn main_function_key_and_name(&mut self, sym: Symbol) -> (FunctionKey, String) {
@@ -141,6 +143,7 @@ impl Compiler<'_> {
 
         // Declare monomorphized function instances before second pass
         self.declare_monomorphized_instances()?;
+        self.declare_class_method_monomorphized_instances()?;
 
         // Second pass: compile function bodies and tests
         // Note: Decl::Let globals are handled by inlining their initializers
@@ -183,6 +186,7 @@ impl Compiler<'_> {
 
         // Compile monomorphized instances
         self.compile_monomorphized_instances(program)?;
+        self.compile_class_method_monomorphized_instances(program)?;
 
         Ok(())
     }
@@ -397,6 +401,7 @@ impl Compiler<'_> {
                 native_registry: &self.native_registry,
                 current_module: Some(module_path), // We're compiling module code
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                type_substitutions: None,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -506,6 +511,7 @@ impl Compiler<'_> {
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                type_substitutions: None,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -582,6 +588,7 @@ impl Compiler<'_> {
                     native_registry: &self.native_registry,
                     current_module: None,
                     monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                    type_substitutions: None,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -769,6 +776,7 @@ impl Compiler<'_> {
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                type_substitutions: None,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -834,6 +842,7 @@ impl Compiler<'_> {
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                type_substitutions: None,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1031,6 +1040,7 @@ impl Compiler<'_> {
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                type_substitutions: None,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1054,5 +1064,365 @@ impl Compiler<'_> {
         self.jit.clear();
 
         Ok(())
+    }
+
+    /// Declare all monomorphized class method instances
+    fn declare_class_method_monomorphized_instances(&mut self) -> Result<(), String> {
+        // Collect instances to avoid borrow issues
+        let instances: Vec<_> = self
+            .analyzed
+            .entity_registry
+            .class_method_monomorph_cache
+            .instances()
+            .map(|(key, instance)| (key.clone(), instance.clone()))
+            .collect();
+
+        tracing::debug!(instance_count = instances.len(), "declaring class method monomorphized instances");
+
+        for (_key, instance) in instances {
+            let mangled_name = self.query().display_name(instance.mangled_name);
+
+            // Create signature from the concrete function type
+            // Method signature: self (pointer) + params
+            let mut params = vec![self.pointer_type]; // self parameter
+            for param_type in &instance.func_type.params {
+                params.push(type_to_cranelift(param_type, self.pointer_type));
+            }
+            let ret = if *instance.func_type.return_type == Type::Void {
+                None
+            } else {
+                Some(type_to_cranelift(
+                    &instance.func_type.return_type,
+                    self.pointer_type,
+                ))
+            };
+            let sig = self.jit.create_signature(&params, ret);
+            let func_id = self.jit.declare_function(&mangled_name, &sig);
+            let func_key = self.func_registry.intern_name_id(instance.mangled_name);
+            self.func_registry.set_func_id(func_key, func_id);
+
+            // Record return type for call expressions
+            self.func_registry
+                .set_return_type(func_key, (*instance.func_type.return_type).clone());
+        }
+
+        Ok(())
+    }
+
+    /// Compile all monomorphized class method instances
+    fn compile_class_method_monomorphized_instances(
+        &mut self,
+        program: &Program,
+    ) -> Result<(), String> {
+        // Build a map of class name -> class decl
+        let class_asts: HashMap<NameId, &crate::frontend::ClassDecl> = program
+            .declarations
+            .iter()
+            .filter_map(|decl| {
+                if let Decl::Class(class) = decl
+                    && !class.type_params.is_empty()
+                {
+                    let query = self.query();
+                    let name_id = query.try_name_id(query.main_module(), &[class.name])?;
+                    return Some((name_id, class));
+                }
+                None
+            })
+            .collect();
+
+        // Also include record decls (they can be generic too)
+        let record_asts: HashMap<NameId, &crate::frontend::RecordDecl> = program
+            .declarations
+            .iter()
+            .filter_map(|decl| {
+                if let Decl::Record(record) = decl
+                    && !record.type_params.is_empty()
+                {
+                    let query = self.query();
+                    let name_id = query.try_name_id(query.main_module(), &[record.name])?;
+                    return Some((name_id, record));
+                }
+                None
+            })
+            .collect();
+
+        // Collect instances to avoid borrow issues
+        let instances: Vec<_> = self
+            .analyzed
+            .entity_registry
+            .class_method_monomorph_cache
+            .instances()
+            .map(|(key, instance)| (key.clone(), instance.clone()))
+            .collect();
+
+        tracing::debug!(instance_count = instances.len(), "compiling class method monomorphized instances");
+
+        for (_key, instance) in instances {
+            let class_name_str = self.query().display_name(instance.class_name);
+            tracing::debug!(
+                class_name = %class_name_str,
+                class_name_id = ?instance.class_name,
+                method_name = ?instance.method_name,
+                "looking for method to compile"
+            );
+
+            // Try to find the method in a class first
+            if let Some(class) = class_asts.get(&instance.class_name) {
+                let method_name_str = self.query().display_name(instance.method_name);
+                let method = class.methods.iter().find(|m| {
+                    self.query().resolve_symbol(m.name) == method_name_str
+                });
+                if let Some(method) = method {
+                    self.compile_monomorphized_class_method(method, &instance, class.name)?;
+                    continue;
+                }
+            }
+
+            // Try records
+            if let Some(record) = record_asts.get(&instance.class_name) {
+                let method_name_str = self.query().display_name(instance.method_name);
+                let method = record.methods.iter().find(|m| {
+                    self.query().resolve_symbol(m.name) == method_name_str
+                });
+                if let Some(method) = method {
+                    self.compile_monomorphized_class_method(method, &instance, record.name)?;
+                    continue;
+                }
+            }
+
+            // Method not found - this shouldn't happen if sema was correct
+            let class_name = self.query().display_name(instance.class_name);
+            let method_name = self.query().display_name(instance.method_name);
+            return Err(format!(
+                "Internal error: method {} not found in class/record {}",
+                method_name, class_name
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Compile a single monomorphized class method instance
+    fn compile_monomorphized_class_method(
+        &mut self,
+        method: &FuncDecl,
+        instance: &ClassMethodMonomorphInstance,
+        type_name: Symbol,
+    ) -> Result<(), String> {
+        let mangled_name = self.query().display_name(instance.mangled_name);
+        let func_key = self.func_registry.intern_name_id(instance.mangled_name);
+        let func_id = self
+            .func_registry
+            .func_id(func_key)
+            .ok_or_else(|| format!("Monomorphized class method {} not declared", mangled_name))?;
+
+        // Create method signature (self + params) with concrete types
+        let mut params = vec![self.pointer_type]; // self
+        for param_type in &instance.func_type.params {
+            params.push(type_to_cranelift(param_type, self.pointer_type));
+        }
+        let ret = if *instance.func_type.return_type == Type::Void {
+            None
+        } else {
+            Some(type_to_cranelift(
+                &instance.func_type.return_type,
+                self.pointer_type,
+            ))
+        };
+        let sig = self.jit.create_signature(&params, ret);
+        self.jit.ctx.func.signature = sig;
+
+        // Get parameter names and concrete types
+        let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+        let param_types: Vec<types::Type> = instance
+            .func_type
+            .params
+            .iter()
+            .map(|t| type_to_cranelift(t, self.pointer_type))
+            .collect();
+        let param_vole_types: Vec<Type> = instance.func_type.params.clone();
+
+        // Get return type
+        let return_type = Some((*instance.func_type.return_type).clone());
+
+        // Build self type with concrete type args
+        let self_vole_type = self.build_concrete_self_type(type_name, &instance.substitutions);
+
+        // Get source file pointer and self symbol
+        let source_file_ptr = self.source_file_ptr();
+        let self_sym = self.self_symbol();
+
+        // Create function builder
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+            let entry_block = builder.create_block();
+            builder.append_block_params_for_function_params(entry_block);
+            builder.switch_to_block(entry_block);
+
+            // Build variables map
+            let mut variables = HashMap::new();
+
+            // Get entry block params (self + user params)
+            let block_params = builder.block_params(entry_block).to_vec();
+
+            // Bind `self` as the first parameter
+            let self_var = builder.declare_var(self.pointer_type);
+            builder.def_var(self_var, block_params[0]);
+            variables.insert(self_sym, (self_var, self_vole_type));
+
+            // Bind remaining parameters with concrete types
+            for (((name, ty), vole_ty), val) in param_names
+                .iter()
+                .zip(param_types.iter())
+                .zip(param_vole_types.iter())
+                .zip(block_params[1..].iter())
+            {
+                let var = builder.declare_var(*ty);
+                builder.def_var(var, *val);
+                variables.insert(*name, (var, vole_ty.clone()));
+            }
+
+            // Compile method body
+            let mut cf_ctx = ControlFlowCtx::default();
+            let mut ctx = CompileCtx {
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
+                pointer_type: self.pointer_type,
+                module: &mut self.jit.module,
+                func_registry: &mut self.func_registry,
+                source_file_ptr,
+                globals: &self.globals,
+                lambda_counter: &mut self.lambda_counter,
+                type_metadata: &self.type_metadata,
+                impl_method_infos: &self.impl_method_infos,
+                static_method_infos: &self.static_method_infos,
+                interface_vtables: &self.interface_vtables,
+                current_function_return_type: return_type,
+                native_registry: &self.native_registry,
+                current_module: None,
+                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                type_substitutions: Some(&instance.substitutions),
+            };
+            let terminated = compile_block(
+                &mut builder,
+                &method.body,
+                &mut variables,
+                &mut cf_ctx,
+                &mut ctx,
+            )?;
+
+            // Add implicit return if no explicit return
+            if !terminated {
+                builder.ins().return_(&[]);
+            }
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        // Define the function
+        self.jit.define_function(func_id)?;
+        self.jit.clear();
+
+        Ok(())
+    }
+
+    /// Build the concrete self type with type arguments substituted
+    fn build_concrete_self_type(
+        &self,
+        type_name: Symbol,
+        substitutions: &HashMap<NameId, Type>,
+    ) -> Type {
+        let query = self.query();
+        let module_id = query.main_module();
+        let type_name_str = self.analyzed.interner.resolve(type_name);
+
+        tracing::debug!(
+            type_name = %type_name_str,
+            substitutions = ?substitutions,
+            "build_concrete_self_type"
+        );
+
+        // Try to get NameId for this type
+        if let Some(name_id) = query.try_name_id(module_id, &[type_name]) {
+            tracing::debug!(name_id = ?name_id, "found name_id");
+            // Look up the TypeDef
+            if let Some(type_def_id) = query.try_type_def_id(name_id) {
+                let type_def = query.get_type(type_def_id);
+                tracing::debug!(
+                    type_def_id = ?type_def_id,
+                    has_generic_info = type_def.generic_info.is_some(),
+                    "found type_def"
+                );
+
+                // If it has generic_info, use it to build the type with proper TypeParam substitution
+                if let Some(generic_info) = &type_def.generic_info {
+                    tracing::debug!(
+                        field_types = ?generic_info.field_types,
+                        "using generic_info"
+                    );
+                    // Build struct fields from generic_info
+                    let fields: Vec<StructField> = generic_info
+                        .field_names
+                        .iter()
+                        .zip(generic_info.field_types.iter())
+                        .enumerate()
+                        .map(|(slot, (field_sym, field_type))| {
+                            let field_name = self.analyzed.interner.resolve(*field_sym).to_string();
+                            let substituted_type = substitute_type(field_type, substitutions);
+                            StructField {
+                                name: field_name,
+                                ty: substituted_type,
+                                slot,
+                            }
+                        })
+                        .collect();
+
+                    // Build type_args from substituted type params
+                    let type_args: Vec<Type> = generic_info
+                        .type_params
+                        .iter()
+                        .map(|param| {
+                            substitutions
+                                .get(&param.name_id)
+                                .cloned()
+                                .unwrap_or(Type::TypeParam(param.name_id))
+                        })
+                        .collect();
+
+                    // Determine if it's a class or record based on TypeDefKind
+                    return match &type_def.kind {
+                        TypeDefKind::Record => Type::Record(RecordType {
+                            name_id,
+                            fields,
+                            type_args,
+                        }),
+                        TypeDefKind::Class => Type::Class(ClassType {
+                            name_id,
+                            fields,
+                            type_args,
+                        }),
+                        _ => {
+                            // Fallback for other kinds
+                            Type::Record(RecordType {
+                                name_id,
+                                fields,
+                                type_args,
+                            })
+                        }
+                    };
+                }
+            }
+        }
+
+        // Fallback: use type_metadata (for non-generic types)
+        if let Some(metadata) = self.type_metadata.get(&type_name) {
+            substitute_type(&metadata.vole_type, substitutions)
+        } else {
+            // Final fallback
+            Type::I64
+        }
     }
 }

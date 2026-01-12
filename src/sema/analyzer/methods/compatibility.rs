@@ -126,14 +126,14 @@ impl Analyzer {
         let params_str: Vec<String> = params
             .iter()
             .map(|t| {
-                if matches!(t, Type::Error) {
+                if t.is_error() {
                     "Self".to_string()
                 } else {
                     self.type_display(t)
                 }
             })
             .collect();
-        let return_str = if matches!(return_type, Type::Error) {
+        let return_str = if return_type.is_error() {
             "Self".to_string()
         } else {
             self.type_display(return_type)

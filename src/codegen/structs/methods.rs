@@ -152,11 +152,16 @@ impl Cg<'_, '_, '_> {
 
         // Look up method resolution to determine naming convention and return type
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
-        let resolution = self
-            .ctx
-            .analyzed
-            .query()
-            .method_at_in_module(expr_id, self.ctx.current_module);
+        // In monomorphized context, skip sema resolution because it was computed for the type parameter,
+        // not the concrete type. Let resolve_method_target do dynamic resolution based on object_type.
+        let resolution = if self.ctx.type_substitutions.is_some() {
+            None
+        } else {
+            self.ctx
+                .analyzed
+                .query()
+                .method_at_in_module(expr_id, self.ctx.current_module)
+        };
 
         tracing::debug!(
             obj_type = ?obj.vole_type,
@@ -265,10 +270,36 @@ impl Cg<'_, '_, '_> {
                 return_type,
             } => (method_info, return_type),
         };
-        let method_func_ref = self.func_ref(method_info.func_key)?;
 
-        // Check if this is a generic class method (needs type conversion)
-        let is_generic_class = matches!(&obj.vole_type, Type::Class(c) if !c.type_args.is_empty());
+        // Check if this is a monomorphized class method call
+        // If so, use the monomorphized method's func_key instead
+        let (method_func_ref, is_generic_class) = if let Some(monomorph_key) = self
+            .ctx
+            .analyzed
+            .expression_data
+            .get_class_method_generic(expr_id)
+        {
+            // Look up the monomorphized instance
+            if let Some(instance) = self
+                .ctx
+                .analyzed
+                .entity_registry
+                .class_method_monomorph_cache
+                .get(monomorph_key)
+            {
+                let func_key = self.ctx.func_registry.intern_name_id(instance.mangled_name);
+                // Monomorphized methods have concrete types, no i64 conversion needed
+                (self.func_ref(func_key)?, false)
+            } else {
+                // Fallback to regular method if monomorph not found
+                (self.func_ref(method_info.func_key)?, false)
+            }
+        } else {
+            // Not a monomorphized class method, use regular dispatch
+            let is_generic_class =
+                matches!(&obj.vole_type, Type::Class(c) if !c.type_args.is_empty());
+            (self.func_ref(method_info.func_key)?, is_generic_class)
+        };
 
         let param_types = resolution.map(|resolved| resolved.func_type().params.clone());
         let mut args: ArgVec = smallvec![obj.value];

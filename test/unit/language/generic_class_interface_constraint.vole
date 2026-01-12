@@ -1,0 +1,35 @@
+// Test: generic class method monomorphization with interface constraints
+// This validates that generic class methods can call methods on constrained type params
+
+interface Hashable {
+    func hash() -> i64
+}
+
+// Generic class with constraint
+class HashWrapper<T: Hashable> {
+    value: T,
+
+    // This method calls hash() on T which is constrained to Hashable
+    func getHash() -> i64 {
+        return self.value.hash()
+    }
+}
+
+// Concrete implementation
+record MyInt implements Hashable {
+    n: i64,
+}
+
+implement Hashable for MyInt {
+    func hash() -> i64 {
+        return self.n * 7
+    }
+}
+
+tests {
+    test "generic class calls constraint method" {
+        let wrapped = HashWrapper { value: MyInt { n: 6 } }
+        let h = wrapped.getHash()
+        assert(h == 42)  // 6 * 7 = 42
+    }
+}

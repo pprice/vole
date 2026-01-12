@@ -191,6 +191,94 @@ impl MonomorphCache {
     }
 }
 
+/// Key for looking up monomorphized class method instances.
+/// Identifies a specific instantiation of a generic class method.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ClassMethodMonomorphKey {
+    /// The class's NameId
+    pub class_name: NameId,
+    /// The method's NameId
+    pub method_name: NameId,
+    /// Opaque type keys for the class's concrete type arguments
+    pub type_keys: Vec<TypeKey>,
+}
+
+impl ClassMethodMonomorphKey {
+    /// Create a new key for a class method monomorphization
+    pub fn new(class_name: NameId, method_name: NameId, type_keys: Vec<TypeKey>) -> Self {
+        Self {
+            class_name,
+            method_name,
+            type_keys,
+        }
+    }
+}
+
+/// A monomorphized class method instance
+#[derive(Debug, Clone)]
+pub struct ClassMethodMonomorphInstance {
+    /// The class's NameId
+    pub class_name: NameId,
+    /// Original method name
+    pub method_name: NameId,
+    /// Mangled name for this instance (e.g., "Container_i64__compute_hash")
+    pub mangled_name: NameId,
+    /// Unique ID for this instance
+    pub instance_id: u32,
+    /// The concrete method type after substitution
+    pub func_type: FunctionType,
+    /// Map from type param NameId to concrete type
+    pub substitutions: HashMap<NameId, Type>,
+}
+
+/// Cache of monomorphized class method instances.
+#[derive(Debug, Default, Clone)]
+pub struct ClassMethodMonomorphCache {
+    /// Cached monomorphized method instances
+    instances: HashMap<ClassMethodMonomorphKey, ClassMethodMonomorphInstance>,
+    /// Counter for generating unique names
+    next_id: u32,
+}
+
+impl ClassMethodMonomorphCache {
+    /// Create a new empty cache
+    pub fn new() -> Self {
+        Self {
+            instances: HashMap::new(),
+            next_id: 0,
+        }
+    }
+
+    /// Look up an existing monomorphized instance
+    pub fn get(&self, key: &ClassMethodMonomorphKey) -> Option<&ClassMethodMonomorphInstance> {
+        self.instances.get(key)
+    }
+
+    /// Insert a new monomorphized instance
+    pub fn insert(&mut self, key: ClassMethodMonomorphKey, instance: ClassMethodMonomorphInstance) {
+        self.instances.insert(key, instance);
+    }
+
+    /// Check if an instance exists
+    pub fn contains(&self, key: &ClassMethodMonomorphKey) -> bool {
+        self.instances.contains_key(key)
+    }
+
+    /// Generate the next unique ID for mangled names
+    pub fn next_unique_id(&mut self) -> u32 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    /// Get all cached instances (for codegen)
+    pub fn instances(
+        &self,
+    ) -> impl Iterator<Item = (&ClassMethodMonomorphKey, &ClassMethodMonomorphInstance)> {
+        self.instances.iter()
+    }
+}
+
 /// Substitute concrete types for type parameters in a type
 pub fn substitute_type(ty: &Type, substitutions: &HashMap<NameId, Type>) -> Type {
     match ty {
@@ -247,6 +335,40 @@ pub fn substitute_type(ty: &Type, substitutions: &HashMap<NameId, Type>) -> Type
                 .map(|t| substitute_type(t, substitutions))
                 .collect(),
         ),
+        Type::Record(record_type) => Type::Record(crate::sema::types::RecordType {
+            name_id: record_type.name_id,
+            fields: record_type
+                .fields
+                .iter()
+                .map(|f| crate::sema::types::StructField {
+                    name: f.name.clone(),
+                    ty: substitute_type(&f.ty, substitutions),
+                    slot: f.slot,
+                })
+                .collect(),
+            type_args: record_type
+                .type_args
+                .iter()
+                .map(|t| substitute_type(t, substitutions))
+                .collect(),
+        }),
+        Type::Class(class_type) => Type::Class(crate::sema::types::ClassType {
+            name_id: class_type.name_id,
+            fields: class_type
+                .fields
+                .iter()
+                .map(|f| crate::sema::types::StructField {
+                    name: f.name.clone(),
+                    ty: substitute_type(&f.ty, substitutions),
+                    slot: f.slot,
+                })
+                .collect(),
+            type_args: class_type
+                .type_args
+                .iter()
+                .map(|t| substitute_type(t, substitutions))
+                .collect(),
+        }),
         // All other types don't contain type parameters
         _ => ty.clone(),
     }

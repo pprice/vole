@@ -15,7 +15,8 @@ use crate::sema::EntityRegistry;
 use crate::sema::ExpressionData;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
-    MonomorphInstance, MonomorphKey, TypeParamInfo, TypeParamScope, substitute_type,
+    ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, TypeParamInfo, TypeParamScope,
+    substitute_type,
 };
 use crate::sema::implement_registry::{
     ExternalMethodInfo, ImplementRegistry, MethodImpl, PrimitiveTypeId, TypeId,
@@ -132,6 +133,8 @@ pub struct Analyzer {
     loading_prelude: bool,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
     generic_calls: HashMap<NodeId, MonomorphKey>,
+    /// Mapping from method call expression NodeId to ClassMethodMonomorphKey (for generic class method calls)
+    class_method_calls: HashMap<NodeId, ClassMethodMonomorphKey>,
     /// Fully-qualified name interner for printable identities
     name_table: NameTable,
     /// Current module being analyzed (for proper NameId registration)
@@ -174,6 +177,7 @@ impl Analyzer {
             module_method_resolutions: FxHashMap::default(),
             loading_prelude: false,
             generic_calls: HashMap::new(),
+            class_method_calls: HashMap::new(),
             name_table,
             current_module: main_module,
             entity_registry: EntityRegistry::new(),
@@ -438,6 +442,7 @@ impl Analyzer {
             module_method_resolutions: FxHashMap::default(),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
             generic_calls: HashMap::new(),
+            class_method_calls: HashMap::new(),
             name_table: NameTable::new(),
             current_module: prelude_module, // Use the prelude module path!
             entity_registry: EntityRegistry::new(),
@@ -716,6 +721,7 @@ impl Analyzer {
             self.expr_types,
             self.method_resolutions.into_inner(),
             self.generic_calls,
+            self.class_method_calls,
             self.module_expr_types,
             self.module_method_resolutions,
         );
@@ -804,7 +810,7 @@ impl Analyzer {
 
         // Check type params match
         if !type_def.type_params.is_empty() && type_def.type_params.len() != type_args.len() {
-            return Some(Type::Error);
+            return Some(Type::error("propagate"));
         }
 
         // Build substitution map using type param NameIds
@@ -1312,8 +1318,10 @@ impl Analyzer {
         interner: &Interner,
         span: Span,
     ) -> Option<crate::sema::generic::TypeConstraint> {
+        tracing::debug!(?constraint, "resolve_type_param_constraint");
         match constraint {
             TypeConstraint::Interface(syms) => {
+                tracing::debug!(num_interfaces = syms.len(), "processing interface constraint");
                 // For single interface, check if it's a type alias first
                 if syms.len() == 1 {
                     let sym = syms[0];
@@ -1728,13 +1736,13 @@ impl Analyzer {
                 .entity_registry
                 .build_class_type(type_def_id, &self.name_table)
                 .map(Type::Class)
-                .unwrap_or(Type::Error),
+                .unwrap_or_else(|| Type::error("unwrap_failed")),
             TypeDefKind::Record => self
                 .entity_registry
                 .build_record_type(type_def_id, &self.name_table)
                 .map(Type::Record)
-                .unwrap_or(Type::Error),
-            _ => Type::Error,
+                .unwrap_or_else(|| Type::error("unwrap_failed")),
+            _ => Type::error("fallback"),
         };
         self.scope.define(
             self_sym,

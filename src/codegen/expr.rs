@@ -863,7 +863,7 @@ impl Cg<'_, '_, '_> {
         let not_nil_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
 
-        let result_vole_type = value.vole_type.unwrap_optional().unwrap_or(Type::Error);
+        let result_vole_type = value.vole_type.unwrap_optional().unwrap_or_else(|| Type::error("unwrap_failed"));
         let cranelift_type = type_to_cranelift(&result_vole_type, self.ctx.pointer_type);
         self.builder.append_block_param(merge_block, cranelift_type);
 

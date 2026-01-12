@@ -1,6 +1,8 @@
 use super::super::*;
 use crate::identity::{NameId, TypeDefId};
-use crate::sema::generic::substitute_type;
+use crate::sema::generic::{
+    ClassMethodMonomorphInstance, ClassMethodMonomorphKey, substitute_type,
+};
 use std::collections::HashMap;
 
 impl Analyzer {
@@ -91,13 +93,13 @@ impl Analyzer {
                     },
                     field_access.field_span,
                 );
-                return Ok(Type::Error);
+                return Ok(Type::error("module_no_export"));
             }
         }
 
         // Handle Type::Error early
-        if matches!(object_type, Type::Error) {
-            return Ok(Type::Error);
+        if object_type.is_error() {
+            return Ok(Type::error("propagate_field_access"));
         }
 
         // Get fields from object type
@@ -116,7 +118,7 @@ impl Analyzer {
                 },
                 field_access.field_span,
             );
-            return Ok(Type::Error);
+            return Ok(Type::error("unknown_field"));
         }
 
         // Handle GenericInstance (e.g., Container<i64>)
@@ -139,12 +141,12 @@ impl Analyzer {
                 },
                 field_access.field_span,
             );
-            return Ok(Type::Error);
+            return Ok(Type::error("unknown_generic_field"));
         }
 
         // Not a struct type
         self.type_error("class or record", &object_type, field_access.object.span);
-        Ok(Type::Error)
+        Ok(Type::error("field_access_non_struct"))
     }
 
     pub(super) fn check_optional_chain_expr(
@@ -155,13 +157,15 @@ impl Analyzer {
         let object_type = self.check_expr(&opt_chain.object, interner)?;
 
         // Handle errors early
-        if matches!(object_type, Type::Error) {
-            return Ok(Type::Error);
+        if object_type.is_error() {
+            return Ok(Type::error("propagate_optional_chain"));
         }
 
         // The object must be an optional type (union with nil)
         let inner_type = if object_type.is_optional() {
-            object_type.unwrap_optional().unwrap_or(Type::Error)
+            object_type
+                .unwrap_optional()
+                .unwrap_or_else(|| Type::error("unwrap_optional_failed"))
         } else {
             // If not optional, treat it as regular field access wrapped in optional
             // This allows `obj?.field` where obj is not optional (returns T?)
@@ -169,8 +173,8 @@ impl Analyzer {
         };
 
         // Handle Type::Error early
-        if matches!(inner_type, Type::Error) {
-            return Ok(Type::Error);
+        if inner_type.is_error() {
+            return Ok(Type::error("propagate_optional_inner"));
         }
 
         // Get fields from inner type
@@ -180,7 +184,7 @@ impl Analyzer {
                 &object_type,
                 opt_chain.object.span,
             );
-            return Ok(Type::Error);
+            return Ok(Type::error("optional_chain_non_struct"));
         };
 
         // Find the field
@@ -202,7 +206,7 @@ impl Analyzer {
                 },
                 opt_chain.field_span,
             );
-            Ok(Type::Error)
+            Ok(Type::error("unknown_optional_field"))
         }
     }
 
@@ -232,8 +236,8 @@ impl Analyzer {
         let method_name = interner.resolve(method_call.method);
 
         // Handle Type::Error early
-        if matches!(object_type, Type::Error) {
-            return Ok(Type::Error);
+        if object_type.is_error() {
+            return Ok(Type::error("propagate_method_call"));
         }
 
         // Optional/union method calls require explicit narrowing.
@@ -250,7 +254,7 @@ impl Analyzer {
             for arg in &method_call.args {
                 self.check_expr(arg, interner)?;
             }
-            return Ok(Type::Error);
+            return Ok(Type::error("method_on_optional"));
         }
 
         if matches!(object_type, Type::Union(_)) {
@@ -266,7 +270,7 @@ impl Analyzer {
             for arg in &method_call.args {
                 self.check_expr(arg, interner)?;
             }
-            return Ok(Type::Error);
+            return Ok(Type::error("method_on_union"));
         }
 
         // Handle module method calls (e.g., math.sqrt(16.0))
@@ -324,7 +328,7 @@ impl Analyzer {
                     return Ok(*func_type.return_type.clone());
                 } else {
                     self.type_error("function", export_type, method_call.method_span);
-                    return Ok(Type::Error);
+                    return Ok(Type::error("propagate"));
                 }
             } else {
                 self.add_error(
@@ -338,7 +342,7 @@ impl Analyzer {
                     },
                     method_call.method_span,
                 );
-                return Ok(Type::Error);
+                return Ok(Type::error("propagate"));
             }
         }
 
@@ -395,6 +399,16 @@ impl Analyzer {
             }
 
             self.method_resolutions.insert(expr.id, resolved);
+
+            // Record class method monomorphization for generic classes/records
+            self.record_class_method_monomorph(
+                expr,
+                &object_type,
+                method_call.method,
+                &func_type,
+                interner,
+            );
+
             return Ok(*func_type.return_type);
         }
 
@@ -411,7 +425,7 @@ impl Analyzer {
         for arg in &method_call.args {
             self.check_expr(arg, interner)?;
         }
-        Ok(Type::Error)
+        Ok(Type::error("propagate"))
     }
 
     /// Try to resolve a static method call target from an expression.
@@ -520,6 +534,103 @@ impl Analyzer {
             self.check_expr(arg, interner)?;
         }
 
-        Ok(Type::Error)
+        Ok(Type::error("propagate"))
+    }
+
+    /// Record a class method monomorphization for generic class/record method calls.
+    /// Creates or retrieves a monomorphized instance and records the call site.
+    fn record_class_method_monomorph(
+        &mut self,
+        expr: &Expr,
+        object_type: &Type,
+        method_sym: Symbol,
+        func_type: &FunctionType,
+        interner: &Interner,
+    ) {
+        // Extract class/record name_id and type_args
+        tracing::debug!(object_type = ?object_type, "record_class_method_monomorph called");
+        let (class_name_id, type_args) = match object_type {
+            Type::Class(c) if !c.type_args.is_empty() => (c.name_id, &c.type_args),
+            Type::Record(r) if !r.type_args.is_empty() => (r.name_id, &r.type_args),
+            Type::GenericInstance { def, args } if !args.is_empty() => {
+                tracing::debug!(def = ?def, args = ?args, "matched GenericInstance");
+                (*def, args)
+            }
+            _ => {
+                tracing::debug!("returning early - not a generic type");
+                return; // Not a generic class/record, nothing to record
+            }
+        };
+
+        tracing::debug!(
+            class_name_id = ?class_name_id,
+            type_args = ?type_args,
+            "extracted generic type info"
+        );
+
+        // Get the method name_id
+        let method_name_id = self.method_name_id(method_sym, interner);
+
+        // Create type keys for the type arguments
+        let type_keys: Vec<_> = type_args
+            .iter()
+            .map(|t| self.entity_registry.type_table.key_for_type(t))
+            .collect();
+
+        // Create the monomorph key
+        let key = ClassMethodMonomorphKey::new(class_name_id, method_name_id, type_keys);
+
+        // Create/cache the monomorph instance
+        if !self.entity_registry.class_method_monomorph_cache.contains(&key) {
+            // Get the generic type definition for substitution info
+            let type_def_id = self.entity_registry.type_by_name(class_name_id);
+            let substitutions = if let Some(type_def_id) = type_def_id {
+                let type_def = self.entity_registry.get_type(type_def_id);
+                if let Some(generic_info) = &type_def.generic_info {
+                    let mut subs = HashMap::new();
+                    for (param, arg) in generic_info.type_params.iter().zip(type_args.iter()) {
+                        subs.insert(param.name_id, arg.clone());
+                    }
+                    subs
+                } else {
+                    HashMap::new()
+                }
+            } else {
+                HashMap::new()
+            };
+
+            // Generate unique mangled name
+            let instance_id = self.entity_registry.class_method_monomorph_cache.next_unique_id();
+            let class_name = self
+                .name_table
+                .last_segment_str(class_name_id)
+                .unwrap_or_else(|| "class".to_string());
+            let method_name = interner.resolve(method_sym);
+            let mangled_name_str = format!("{}__method_{}__mono_{}", class_name, method_name, instance_id);
+            let mangled_name = self
+                .name_table
+                .intern_raw(self.current_module, &[&mangled_name_str]);
+
+            let instance = ClassMethodMonomorphInstance {
+                class_name: class_name_id,
+                method_name: method_name_id,
+                mangled_name,
+                instance_id,
+                func_type: func_type.clone(),
+                substitutions,
+            };
+
+            tracing::debug!(
+                mangled_name = %mangled_name_str,
+                "inserting class method monomorph instance"
+            );
+            self.entity_registry
+                .class_method_monomorph_cache
+                .insert(key.clone(), instance);
+        }
+
+        // Record the call site → key mapping
+        tracing::debug!(expr_id = ?expr.id, key = ?key, "recording call site");
+        self.class_method_calls.insert(expr.id, key);
     }
 }

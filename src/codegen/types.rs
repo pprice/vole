@@ -148,6 +148,9 @@ pub(crate) struct CompileCtx<'a> {
     pub current_module: Option<&'a str>,
     /// Cache of monomorphized function instances
     pub monomorph_cache: &'a MonomorphCache,
+    /// Type substitutions for monomorphized class method compilation
+    /// Maps type param NameId -> concrete Type
+    pub type_substitutions: Option<&'a HashMap<NameId, Type>>,
 }
 
 impl<'a> CompileCtx<'a> {
@@ -354,12 +357,12 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         if let Some(ref aliased) = type_def.aliased_type {
                             return aliased.clone();
                         }
-                        Type::Error
+                        Type::error("codegen_resolve")
                     }
                     TypeDefKind::Interface => {
                         // Generic interface without type args is an error
                         if !type_def.type_params.is_empty() {
-                            return Type::Error;
+                            return Type::error("codegen_error");
                         }
                         build_interface_type_from_entity(type_def_id, entity_registry, Vec::new())
                     }
@@ -368,7 +371,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         if let Some(error_info) = type_def.error_info.clone() {
                             Type::ErrorType(error_info)
                         } else {
-                            Type::Error
+                            Type::error("codegen_resolve")
                         }
                     }
                     TypeDefKind::Record | TypeDefKind::Class => {
@@ -401,21 +404,21 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         {
                             return Type::Class(class_type);
                         }
-                        Type::Error
+                        Type::error("codegen_resolve")
                     }
                     _ => {
                         // Primitive or unknown - check type metadata
                         if let Some(metadata) = type_metadata.get(sym) {
                             metadata.vole_type.clone()
                         } else {
-                            Type::Error
+                            Type::error("codegen_resolve")
                         }
                     }
                 }
             } else if let Some(metadata) = type_metadata.get(sym) {
                 metadata.vole_type.clone()
             } else {
-                Type::Error
+                Type::error("codegen_resolve")
             }
         }
         TypeExpr::Array(elem) => {
@@ -492,7 +495,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
         }
         TypeExpr::SelfType => {
             // Self type is resolved during interface/implement compilation
-            Type::Error
+            Type::error("codegen_resolve")
         }
         TypeExpr::Fallible {
             success_type,
@@ -543,7 +546,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     if !type_def.type_params.is_empty()
                         && type_def.type_params.len() != resolved_args.len()
                     {
-                        return Type::Error;
+                        return Type::error("codegen_error");
                     }
                     // Build substitution map using type param NameIds
                     let mut substitutions = HashMap::new();
@@ -590,7 +593,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 }
             }
             let Some(name_id) = name_table.name_id(module_id, &[*name], interner) else {
-                return Type::Error;
+                return Type::error("codegen_error");
             };
             Type::GenericInstance {
                 def: name_id,

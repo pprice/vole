@@ -192,7 +192,7 @@ impl TypeTable {
             Type::Done => self.intern_fingerprint(TypeFingerprint::Done, ty.clone()),
             Type::Range => self.intern_fingerprint(TypeFingerprint::Range, ty.clone()),
             Type::Unknown => self.intern_fingerprint(TypeFingerprint::Unknown, ty.clone()),
-            Type::Error => self.intern_fingerprint(TypeFingerprint::Error, ty.clone()),
+            Type::Error(_) => self.intern_fingerprint(TypeFingerprint::Error, ty.clone()),
             Type::Type => self.intern_fingerprint(TypeFingerprint::Type, ty.clone()),
             Type::Union(variants) => {
                 let mut keys: Vec<TypeKey> = variants

@@ -18,7 +18,13 @@ pub(crate) fn get_field_slot_and_type(
         Type::Class(class_type) => {
             for sf in &class_type.fields {
                 if sf.name == field_name {
-                    return Ok((sf.slot, sf.ty.clone()));
+                    // Apply type substitutions if we're in a monomorphized context
+                    let field_type = if let Some(subs) = ctx.type_substitutions {
+                        substitute_type(&sf.ty, subs)
+                    } else {
+                        sf.ty.clone()
+                    };
+                    return Ok((sf.slot, field_type));
                 }
             }
             Err(CodegenError::not_found("field", format!("{} in class", field_name)).into())
@@ -26,7 +32,13 @@ pub(crate) fn get_field_slot_and_type(
         Type::Record(record_type) => {
             for sf in &record_type.fields {
                 if sf.name == field_name {
-                    return Ok((sf.slot, sf.ty.clone()));
+                    // Apply type substitutions if we're in a monomorphized context
+                    let field_type = if let Some(subs) = ctx.type_substitutions {
+                        substitute_type(&sf.ty, subs)
+                    } else {
+                        sf.ty.clone()
+                    };
+                    return Ok((sf.slot, field_type));
                 }
             }
             Err(CodegenError::not_found("field", format!("{} in record", field_name)).into())

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use crate::frontend::NodeId;
 use crate::sema::Type;
-use crate::sema::generic::MonomorphKey;
+use crate::sema::generic::{ClassMethodMonomorphKey, MonomorphKey};
 use crate::sema::resolution::ResolvedMethod;
 
 /// Encapsulates all NodeId-keyed metadata from semantic analysis.
@@ -21,6 +21,8 @@ pub struct ExpressionData {
     methods: HashMap<NodeId, ResolvedMethod>,
     /// Monomorphization key for generic function calls
     generics: HashMap<NodeId, MonomorphKey>,
+    /// Monomorphization key for generic class method calls
+    class_method_generics: HashMap<NodeId, ClassMethodMonomorphKey>,
     /// Per-module type mappings (for multi-module compilation)
     module_types: FxHashMap<String, HashMap<NodeId, Type>>,
     /// Per-module method resolutions (for multi-module compilation)
@@ -38,6 +40,7 @@ impl ExpressionData {
         types: HashMap<NodeId, Type>,
         methods: HashMap<NodeId, ResolvedMethod>,
         generics: HashMap<NodeId, MonomorphKey>,
+        class_method_generics: HashMap<NodeId, ClassMethodMonomorphKey>,
         module_types: FxHashMap<String, HashMap<NodeId, Type>>,
         module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
     ) -> Self {
@@ -45,6 +48,7 @@ impl ExpressionData {
             types,
             methods,
             generics,
+            class_method_generics,
             module_types,
             module_methods,
         }
@@ -137,6 +141,26 @@ impl ExpressionData {
     /// Get mutable access to monomorphization keys
     pub fn generics_mut(&mut self) -> &mut HashMap<NodeId, MonomorphKey> {
         &mut self.generics
+    }
+
+    /// Get the monomorphization key for a generic class method call
+    pub fn get_class_method_generic(&self, node: NodeId) -> Option<&ClassMethodMonomorphKey> {
+        self.class_method_generics.get(&node)
+    }
+
+    /// Set the monomorphization key for a generic class method call
+    pub fn set_class_method_generic(&mut self, node: NodeId, key: ClassMethodMonomorphKey) {
+        self.class_method_generics.insert(node, key);
+    }
+
+    /// Get all class method monomorphization keys
+    pub fn class_method_generics(&self) -> &HashMap<NodeId, ClassMethodMonomorphKey> {
+        &self.class_method_generics
+    }
+
+    /// Get mutable access to class method monomorphization keys
+    pub fn class_method_generics_mut(&mut self) -> &mut HashMap<NodeId, ClassMethodMonomorphKey> {
+        &mut self.class_method_generics
     }
 
     /// Get types for a specific module

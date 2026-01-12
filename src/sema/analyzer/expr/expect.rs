@@ -107,7 +107,7 @@ impl Analyzer {
                             Ok(Type::String)
                         } else {
                             self.type_error("Stringable", &right_ty, bin.right.span);
-                            Ok(Type::Error)
+                            Ok(Type::error("propagate"))
                         }
                     } else if left_ty.is_numeric() && right_ty.is_numeric() {
                         // Numeric addition
@@ -126,7 +126,7 @@ impl Analyzer {
                         }
                     } else {
                         self.type_error_pair("numeric or string", &left_ty, &right_ty, expr.span);
-                        Ok(Type::Error)
+                        Ok(Type::error("propagate"))
                     }
                 }
                 // Arithmetic ops (except Add): propagate expected type to both operands
@@ -152,7 +152,7 @@ impl Analyzer {
                         }
                     } else {
                         self.type_error_pair("numeric", &left_ty, &right_ty, expr.span);
-                        Ok(Type::Error)
+                        Ok(Type::error("propagate"))
                     }
                 }
                 // Comparison ops: infer left, check right against left
@@ -176,7 +176,7 @@ impl Analyzer {
                         Ok(Type::Bool)
                     } else {
                         self.type_error_pair("bool", &left_ty, &right_ty, expr.span);
-                        Ok(Type::Error)
+                        Ok(Type::error("propagate"))
                     }
                 }
                 // Bitwise ops: both sides must be integer
@@ -202,7 +202,7 @@ impl Analyzer {
                         }
                     } else {
                         self.type_error_pair("integer", &left_ty, &right_ty, expr.span);
-                        Ok(Type::Error)
+                        Ok(Type::error("propagate"))
                     }
                 }
             },
@@ -228,7 +228,7 @@ impl Analyzer {
                         Ok(operand_ty)
                     } else {
                         self.type_error("numeric", &operand_ty, expr.span);
-                        Ok(Type::Error)
+                        Ok(Type::error("propagate"))
                     }
                 }
                 UnaryOp::Not => {
@@ -239,7 +239,7 @@ impl Analyzer {
                         Ok(Type::Bool)
                     } else {
                         self.type_error("bool", &operand_ty, expr.span);
-                        Ok(Type::Error)
+                        Ok(Type::error("propagate"))
                     }
                 }
                 UnaryOp::BitNot => {
@@ -249,7 +249,7 @@ impl Analyzer {
                         Ok(operand_ty)
                     } else {
                         self.type_error("integer", &operand_ty, expr.span);
-                        Ok(Type::Error)
+                        Ok(Type::error("propagate"))
                     }
                 }
             },
@@ -267,7 +267,7 @@ impl Analyzer {
                             },
                             expr.span,
                         );
-                        return Ok(Type::Error);
+                        return Ok(Type::error("propagate"));
                     }
                     // Check each element against its expected type
                     let elem_types: Vec<Type> = elements

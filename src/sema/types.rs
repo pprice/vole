@@ -3,6 +3,39 @@
 use crate::frontend::{PrimitiveType, Symbol};
 use crate::identity::{ModuleId, NameId};
 
+/// Reason for a Type::Error - helps debugging
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErrorReason {
+    pub reason: &'static str,
+    pub context: Option<String>,
+}
+
+impl ErrorReason {
+    pub const fn new(reason: &'static str) -> Self {
+        Self {
+            reason,
+            context: None,
+        }
+    }
+
+    pub fn with_context(reason: &'static str, context: impl Into<String>) -> Self {
+        Self {
+            reason,
+            context: Some(context.into()),
+        }
+    }
+}
+
+impl std::fmt::Display for ErrorReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.reason)?;
+        if let Some(ctx) = &self.context {
+            write!(f, " ({})", ctx)?;
+        }
+        Ok(())
+    }
+}
+
 /// Resolved types in the type system
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -43,8 +76,8 @@ pub enum Type {
     Function(FunctionType),
     /// Unknown (for type inference)
     Unknown,
-    /// Error type (for error recovery)
-    Error,
+    /// Error type (for error recovery) - carries reason for debugging
+    Error(ErrorReason),
     /// The metatype - the type of types themselves
     /// e.g., `i32` has type `Type`, `let MyInt = i32` assigns a type value
     Type,
@@ -353,7 +386,7 @@ impl Type {
             Type::Array(_) => "array",
             Type::Function(_) => "function",
             Type::Unknown => "unknown",
-            Type::Error => "error",
+            Type::Error(_) => "error",
             Type::Type => "type",
             Type::Class(_) => "class",
             Type::Record(_) => "record",
@@ -393,6 +426,24 @@ impl Type {
     /// Create an optional type (T | nil)
     pub fn optional(inner: Type) -> Type {
         Type::Union(vec![inner, Type::Nil])
+    }
+
+    /// Create an error type with a static reason
+    pub fn error(reason: &'static str) -> Type {
+        tracing::trace!(reason, "Type::error created");
+        Type::Error(ErrorReason::new(reason))
+    }
+
+    /// Create an error type with a reason and dynamic context
+    pub fn error_ctx(reason: &'static str, context: impl Into<String>) -> Type {
+        let ctx = context.into();
+        tracing::trace!(reason, context = %ctx, "Type::error_ctx created");
+        Type::Error(ErrorReason::with_context(reason, ctx))
+    }
+
+    /// Check if this type is an error (any reason)
+    pub fn is_error(&self) -> bool {
+        matches!(self, Type::Error(_))
     }
 
     /// Normalize a union: flatten nested unions, sort, dedupe, unwrap single-element

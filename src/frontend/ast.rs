@@ -10,6 +10,12 @@ pub struct Symbol(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct NodeId(pub u32);
 
+impl std::fmt::Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "node#{}", self.0)
+    }
+}
+
 /// For backwards compatibility and clarity in type maps
 pub type ExprId = NodeId;
 

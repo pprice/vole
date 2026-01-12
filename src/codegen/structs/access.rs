@@ -133,7 +133,7 @@ impl Cg<'_, '_, '_> {
         let merge_block = self.builder.create_block();
 
         // Get the inner (non-nil) type for field access
-        let inner_type = obj.vole_type.unwrap_optional().unwrap_or(Type::Error);
+        let inner_type = obj.vole_type.unwrap_optional().unwrap_or_else(|| Type::error("unwrap_failed"));
 
         // Get the field type from the inner type
         let field_name = self.ctx.interner.resolve(oc.field);

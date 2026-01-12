@@ -23,6 +23,11 @@ impl Compiler<'_> {
         class: &ClassDecl,
         program: &crate::frontend::Program,
     ) -> Result<(), String> {
+        // Skip generic classes - they're compiled via monomorphized instances
+        if !class.type_params.is_empty() {
+            return Ok(());
+        }
+
         let metadata = self
             .type_metadata
             .get(&class.name)
@@ -88,6 +93,11 @@ impl Compiler<'_> {
         record: &RecordDecl,
         program: &crate::frontend::Program,
     ) -> Result<(), String> {
+        // Skip generic records - they're compiled via monomorphized instances
+        if !record.type_params.is_empty() {
+            return Ok(());
+        }
+
         let metadata = self
             .type_metadata
             .get(&record.name)
@@ -199,7 +209,7 @@ impl Compiler<'_> {
                 .type_metadata
                 .get(sym)
                 .map(|m| m.vole_type.clone())
-                .unwrap_or(Type::Error),
+                .unwrap_or_else(|| Type::error("unwrap_failed")),
             _ => resolve_type_expr_full(
                 &impl_block.target_type,
                 &self.analyzed.entity_registry,
@@ -344,7 +354,7 @@ impl Compiler<'_> {
                 .type_metadata
                 .get(sym)
                 .map(|m| m.vole_type.clone())
-                .unwrap_or(Type::Error),
+                .unwrap_or_else(|| Type::error("unwrap_failed")),
             _ => {
                 let query = self.query();
                 resolve_type_expr_query(
@@ -547,6 +557,7 @@ impl Compiler<'_> {
                     native_registry: &self.native_registry,
                     current_module: module_path,
                     monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                    type_substitutions: None,
                 };
                 let terminated =
                     compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -690,6 +701,7 @@ impl Compiler<'_> {
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                type_substitutions: None,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -838,6 +850,7 @@ impl Compiler<'_> {
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                type_substitutions: None,
             };
             let terminated = compile_block(
                 &mut builder,
@@ -990,6 +1003,7 @@ impl Compiler<'_> {
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                type_substitutions: None,
             };
             let terminated =
                 compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -1109,6 +1123,7 @@ impl Compiler<'_> {
                     native_registry: &self.native_registry,
                     current_module: None,
                     monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                    type_substitutions: None,
                 };
                 let terminated =
                     compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -1287,6 +1302,7 @@ impl Compiler<'_> {
                     native_registry: &self.native_registry,
                     current_module: Some(module_path),
                     monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                    type_substitutions: None,
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -1433,6 +1449,7 @@ impl Compiler<'_> {
                         native_registry: &self.native_registry,
                         current_module: Some(module_path),
                         monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                        type_substitutions: None,
                     };
                     let terminated =
                         compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
