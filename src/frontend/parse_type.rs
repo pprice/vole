@@ -71,7 +71,9 @@ impl<'src> Parser<'src> {
         let token = self.current.clone();
         match token.ty {
             TokenType::LParen => {
-                // Function type: (T, T) -> R
+                // Could be:
+                // - Function type: (T, T) -> R
+                // - Grouping parentheses: (A | B)
                 self.advance(); // consume '('
 
                 let mut param_types = Vec::new();
@@ -83,15 +85,31 @@ impl<'src> Parser<'src> {
                 }
                 self.consume(
                     TokenType::RParen,
-                    "expected ')' after function parameter types",
+                    "expected ')' after type expression",
                 )?;
-                self.consume(TokenType::Arrow, "expected '->' after function parameters")?;
-                let return_type = self.parse_type()?;
 
-                Ok(TypeExpr::Function {
-                    params: param_types,
-                    return_type: Box::new(return_type),
-                })
+                // If followed by ->, it's a function type
+                if self.match_token(TokenType::Arrow) {
+                    let return_type = self.parse_type()?;
+                    Ok(TypeExpr::Function {
+                        params: param_types,
+                        return_type: Box::new(return_type),
+                    })
+                } else if param_types.len() == 1 {
+                    // Single type in parens - grouping
+                    Ok(param_types.into_iter().next().unwrap())
+                } else {
+                    // Multiple types without -> is ambiguous/invalid
+                    // (could be tuple, but we use [] for tuples)
+                    Err(ParseError::new(
+                        ParserError::ExpectedToken {
+                            expected: "'->' for function type".to_string(),
+                            found: self.current.ty.as_str().to_string(),
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ))
+                }
             }
             TokenType::LBracket => {
                 self.advance(); // consume '['
