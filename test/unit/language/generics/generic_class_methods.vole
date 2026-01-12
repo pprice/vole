@@ -44,7 +44,27 @@ tests {
         assert(box.get() == "hello")
     }
 
-    // Note: bool and f64 have separate codegen issues (vole-mgep)
+    test "generic class method - get bool" {
+        let box = Box { value: true }
+        assert(box.get() == true)
+    }
+
+    test "generic class method - set bool" {
+        let box = Box { value: true }
+        box.set(false)
+        assert(box.get() == false)
+    }
+
+    test "generic class method - get f64" {
+        let box = Box { value: 3.14 }
+        assert(box.get() == 3.14)
+    }
+
+    test "generic class method - set f64" {
+        let box = Box { value: 3.14 }
+        box.set(2.71)
+        assert(box.get() == 2.71)
+    }
 
     test "generic class with two type params" {
         let pair = Pair { first: 10, second: "ten" }

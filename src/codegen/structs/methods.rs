@@ -243,6 +243,9 @@ impl Cg<'_, '_, '_> {
         };
         let method_func_ref = self.func_ref(method_info.func_key)?;
 
+        // Check if this is a generic class method (needs type conversion)
+        let is_generic_class = matches!(&obj.vole_type, Type::Class(c) if !c.type_args.is_empty());
+
         let param_types = resolution.map(|resolved| resolved.func_type().params.clone());
         let mut args: ArgVec = smallvec![obj.value];
         if let Some(param_types) = &param_types {
@@ -253,12 +256,35 @@ impl Cg<'_, '_, '_> {
                 } else {
                     compiled
                 };
-                args.push(compiled.value);
+
+                // Generic class methods expect i64 for TypeParam, convert if needed
+                let arg_value = if is_generic_class && compiled.ty != types::I64 {
+                    value_to_word(
+                        self.builder,
+                        &compiled,
+                        self.ctx.pointer_type,
+                        None, // No heap alloc needed for primitive conversions
+                    )?
+                } else {
+                    compiled.value
+                };
+                args.push(arg_value);
             }
         } else {
             for arg in &mc.args {
                 let compiled = self.expr(arg)?;
-                args.push(compiled.value);
+                // Generic class methods expect i64 for TypeParam, convert if needed
+                let arg_value = if is_generic_class && compiled.ty != types::I64 {
+                    value_to_word(
+                        self.builder,
+                        &compiled,
+                        self.ctx.pointer_type,
+                        None, // No heap alloc needed for primitive conversions
+                    )?
+                } else {
+                    compiled.value
+                };
+                args.push(arg_value);
             }
         }
 
@@ -268,9 +294,22 @@ impl Cg<'_, '_, '_> {
         if results.is_empty() {
             Ok(self.void_value())
         } else {
+            // Generic methods are compiled with TypeParam -> i64, but we may need
+            // a different type (f64, bool, etc). Convert using word_to_value.
+            let expected_ty = type_to_cranelift(&return_type, self.ctx.pointer_type);
+            let actual_result = results[0];
+            let actual_ty = self.builder.func.dfg.value_type(actual_result);
+
+            let result_value = if actual_ty != expected_ty && actual_ty == types::I64 {
+                // Method returned i64 (TypeParam) but we expect a different type
+                word_to_value(self.builder, actual_result, &return_type, self.ctx.pointer_type)
+            } else {
+                actual_result
+            };
+
             Ok(CompiledValue {
-                value: results[0],
-                ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
+                value: result_value,
+                ty: expected_ty,
                 vole_type: return_type,
             })
         }
