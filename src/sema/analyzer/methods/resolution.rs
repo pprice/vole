@@ -208,10 +208,10 @@ impl Analyzer {
         // Try to find the method in one of the constraint interfaces
         let method_name_str = interner.resolve(method_name);
         for interface_sym in constraint_interfaces {
-            // Look up interface by Symbol in EntityRegistry
+            // Use resolve_type_or_interface to handle prelude interfaces like Hashable
             if let Some(interface_type_id) = self
                 .resolver(interner)
-                .resolve_type(*interface_sym, &self.entity_registry)
+                .resolve_type_or_interface(*interface_sym, &self.entity_registry)
             {
                 let interface_def = self.entity_registry.get_type(interface_type_id);
 
