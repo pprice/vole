@@ -1,5 +1,7 @@
 use super::super::*;
-use crate::identity::TypeDefId;
+use crate::identity::{NameId, TypeDefId};
+use crate::sema::generic::substitute_type;
+use std::collections::HashMap;
 
 impl Analyzer {
     /// Get struct name and fields from a type (for field access operations).
@@ -20,6 +22,46 @@ impl Analyzer {
             )),
             _ => None,
         }
+    }
+
+    /// Get field type from a GenericInstance type by looking up the generic definition
+    /// and substituting type arguments.
+    fn get_generic_instance_field(
+        &self,
+        def: &NameId,
+        args: &[Type],
+        field_name: &str,
+        interner: &Interner,
+    ) -> Option<(String, Type)> {
+        // Look up the type definition
+        let type_def_id = self.entity_registry.type_by_name(*def)?;
+        let type_def = self.entity_registry.get_type(type_def_id);
+
+        // Get the generic info (field names and types with type params)
+        let generic_info = type_def.generic_info.as_ref()?;
+
+        // Build substitution map: type param NameId -> concrete type
+        let mut substitutions = HashMap::new();
+        for (param, arg) in generic_info.type_params.iter().zip(args.iter()) {
+            substitutions.insert(param.name_id, arg.clone());
+        }
+
+        // Find the field by name
+        for (i, field_sym) in generic_info.field_names.iter().enumerate() {
+            let name = interner.resolve(*field_sym);
+            if name == field_name {
+                // Substitute type arguments in field type
+                let field_type = &generic_info.field_types[i];
+                let substituted = substitute_type(field_type, &substitutions);
+                let type_name = self
+                    .name_table
+                    .last_segment_str(*def)
+                    .unwrap_or_else(|| "generic".to_string());
+                return Some((type_name, substituted));
+            }
+        }
+
+        None
     }
 
     pub(super) fn check_field_access_expr(
@@ -74,10 +116,34 @@ impl Analyzer {
                 },
                 field_access.field_span,
             );
-        } else {
-            // Not a struct type
-            self.type_error("class or record", &object_type, field_access.object.span);
+            return Ok(Type::Error);
         }
+
+        // Handle GenericInstance (e.g., Container<i64>)
+        if let Type::GenericInstance { def, args } = &object_type {
+            if let Some((_type_name, field_type)) =
+                self.get_generic_instance_field(def, args, field_name, interner)
+            {
+                return Ok(field_type);
+            }
+            // GenericInstance but field not found - report error
+            let type_name = self
+                .name_table
+                .last_segment_str(*def)
+                .unwrap_or_else(|| "generic".to_string());
+            self.add_error(
+                SemanticError::UnknownField {
+                    ty: type_name,
+                    field: field_name.to_string(),
+                    span: field_access.field_span.into(),
+                },
+                field_access.field_span,
+            );
+            return Ok(Type::Error);
+        }
+
+        // Not a struct type
+        self.type_error("class or record", &object_type, field_access.object.span);
         Ok(Type::Error)
     }
 

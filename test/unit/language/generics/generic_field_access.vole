@@ -1,0 +1,59 @@
+// Test: Generic record field access
+// This tests field access on generic record types returned from functions
+// Bug: vole-1yz9 - field access on GenericInstance types was not working
+
+record Container<T> {
+    value: T
+}
+
+// Function returning generic record
+func make_container<T>(v: T) -> Container<T> {
+    return Container { value: v }
+}
+
+// Test with nested generic records
+record Wrapper<T> {
+    inner: Container<T>
+}
+
+func make_wrapper<T>(v: T) -> Wrapper<T> {
+    return Wrapper { inner: Container { value: v } }
+}
+
+// Multi-param generic
+record Pair<A, B> {
+    first: A,
+    second: B
+}
+
+func make_pair<X, Y>(x: X, y: Y) -> Pair<X, Y> {
+    return Pair { first: x, second: y }
+}
+
+tests {
+    test "field access on generic record returned from function" {
+        let c = make_container(42)
+        assert(c.value == 42)
+    }
+
+    test "field access with string type parameter" {
+        let c = make_container("hello")
+        assert(c.value == "hello")
+    }
+
+    test "nested generic field access" {
+        let w = make_wrapper(99)
+        assert(w.inner.value == 99)
+    }
+
+    test "multi-param generic field access" {
+        let p = make_pair(1, "two")
+        assert(p.first == 1)
+        assert(p.second == "two")
+    }
+
+    test "chained operations on generic fields" {
+        let c = make_container("test")
+        assert(c.value.length() == 4)
+    }
+}
