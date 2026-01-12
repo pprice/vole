@@ -410,6 +410,66 @@ impl Analyzer {
                 class.span,
                 interner,
             );
+
+            // Register methods in EntityRegistry with type params in scope
+            let self_type_for_methods = class_type.map(Type::Class);
+            for method in &class.methods {
+                let method_name_str = interner.resolve(method.name);
+                let method_name_id = self
+                    .name_table
+                    .intern_raw(builtin_module, &[method_name_str]);
+                let full_method_name_id = self.name_table.intern_raw(
+                    self.current_module,
+                    &[interner.resolve(class.name), method_name_str],
+                );
+
+                // Resolve parameter types with type params and self in scope
+                let params: Vec<Type> = method
+                    .params
+                    .iter()
+                    .map(|p| {
+                        let mut ctx = TypeResolutionContext {
+                            entity_registry: &self.entity_registry,
+                            interner,
+                            name_table: &mut self.name_table,
+                            module_id,
+                            type_params: Some(&type_param_scope),
+                            self_type: self_type_for_methods.clone(),
+                        };
+                        resolve_type(&p.ty, &mut ctx)
+                    })
+                    .collect();
+
+                // Resolve return type with type params and self in scope
+                let return_type = method
+                    .return_type
+                    .as_ref()
+                    .map(|t| {
+                        let mut ctx = TypeResolutionContext {
+                            entity_registry: &self.entity_registry,
+                            interner,
+                            name_table: &mut self.name_table,
+                            module_id,
+                            type_params: Some(&type_param_scope),
+                            self_type: self_type_for_methods.clone(),
+                        };
+                        resolve_type(t, &mut ctx)
+                    })
+                    .unwrap_or(Type::Void);
+
+                let signature = FunctionType {
+                    params,
+                    return_type: Box::new(return_type),
+                    is_closure: false,
+                };
+                self.entity_registry.register_method(
+                    entity_type_id,
+                    method_name_id,
+                    full_method_name_id,
+                    signature,
+                    false,
+                );
+            }
         }
     }
 
