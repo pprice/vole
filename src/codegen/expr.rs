@@ -1004,6 +1004,8 @@ impl Cg<'_, '_, '_> {
             self.builder.switch_to_block(arm_block);
 
             let mut arm_variables = self.vars.clone();
+            // Track the effective arm block (may change for conditional extraction)
+            let mut effective_arm_block = arm_block;
 
             let pattern_matches = match &arm.pattern {
                 Pattern::Wildcard(_) => None,
@@ -1140,10 +1142,33 @@ impl Cg<'_, '_, '_> {
                         (None, None)
                     };
 
-                    // Determine the value to extract fields from
-                    // If scrutinee is a union, extract the payload first
-                    let (field_source, field_source_type) =
-                        if let Type::Union(_) = &scrutinee.vole_type {
+                    // For typed patterns on union types, we must defer field extraction
+                    // until after the pattern check passes to avoid accessing invalid memory
+                    let is_conditional_extract =
+                        pattern_check.is_some() && matches!(&scrutinee.vole_type, Type::Union(_));
+
+                    if is_conditional_extract {
+                        // Create an extraction block that only runs if pattern matches
+                        let extract_block = self.builder.create_block();
+
+                        // Branch: if pattern matches -> extract_block, else -> next_block
+                        let cond = pattern_check.unwrap();
+                        let cond_i32 = self.cond_to_i32(cond);
+                        self.builder.ins().brif(
+                            cond_i32,
+                            extract_block,
+                            &[],
+                            next_block,
+                            &[],
+                        );
+                        self.builder.seal_block(arm_block);
+                        // extract_block becomes the effective arm block for sealing later
+                        effective_arm_block = extract_block;
+
+                        // Extract block: extract fields from union payload
+                        self.builder.switch_to_block(extract_block);
+
+                        let (field_source, field_source_type) =
                             if let Some(ref pt) = pattern_type {
                                 // Extract payload from union at offset 8
                                 let payload = self.builder.ins().load(
@@ -1155,34 +1180,70 @@ impl Cg<'_, '_, '_> {
                                 (payload, pt.clone())
                             } else {
                                 (scrutinee.value, scrutinee.vole_type.clone())
-                            }
-                        } else {
-                            (scrutinee.value, scrutinee.vole_type.clone())
-                        };
+                            };
 
-                    // Extract and bind fields
-                    for field_pattern in fields {
-                        let field_name = self.ctx.interner.resolve(field_pattern.field_name);
+                        // Extract and bind fields
+                        for field_pattern in fields {
+                            let field_name =
+                                self.ctx.interner.resolve(field_pattern.field_name);
+                            let (slot, field_type) =
+                                get_field_slot_and_type(&field_source_type, field_name, self.ctx)?;
+                            let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+                            let result_raw = self.call_runtime(
+                                RuntimeFn::InstanceGetField,
+                                &[field_source, slot_val],
+                            )?;
+                            let (result_val, cranelift_ty) =
+                                convert_field_value(self.builder, result_raw, &field_type);
+                            let var = self.builder.declare_var(cranelift_ty);
+                            self.builder.def_var(var, result_val);
+                            arm_variables.insert(field_pattern.binding, (var, field_type.clone()));
+                        }
 
-                        // Get slot and type for this field using the correct type
-                        let (slot, field_type) =
-                            get_field_slot_and_type(&field_source_type, field_name, self.ctx)?;
+                        // extract_block continues to guard/body logic
+                        // We stay in extract_block - it becomes the effective "arm block"
+                        // Return None since the pattern check is already done via brif
+                        None
+                    } else {
+                        // Non-conditional case: extract fields directly
+                        // Determine the value to extract fields from
+                        let (field_source, field_source_type) =
+                            if let Type::Union(_) = &scrutinee.vole_type {
+                                if let Some(ref pt) = pattern_type {
+                                    let payload = self.builder.ins().load(
+                                        types::I64,
+                                        MemFlags::new(),
+                                        scrutinee.value,
+                                        8,
+                                    );
+                                    (payload, pt.clone())
+                                } else {
+                                    (scrutinee.value, scrutinee.vole_type.clone())
+                                }
+                            } else {
+                                (scrutinee.value, scrutinee.vole_type.clone())
+                            };
 
-                        // Use runtime to get field value
-                        let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-                        let result_raw = self
-                            .call_runtime(RuntimeFn::InstanceGetField, &[field_source, slot_val])?;
+                        // Extract and bind fields
+                        for field_pattern in fields {
+                            let field_name =
+                                self.ctx.interner.resolve(field_pattern.field_name);
+                            let (slot, field_type) =
+                                get_field_slot_and_type(&field_source_type, field_name, self.ctx)?;
+                            let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+                            let result_raw = self.call_runtime(
+                                RuntimeFn::InstanceGetField,
+                                &[field_source, slot_val],
+                            )?;
+                            let (result_val, cranelift_ty) =
+                                convert_field_value(self.builder, result_raw, &field_type);
+                            let var = self.builder.declare_var(cranelift_ty);
+                            self.builder.def_var(var, result_val);
+                            arm_variables.insert(field_pattern.binding, (var, field_type.clone()));
+                        }
 
-                        // Convert the raw i64 result to the proper type
-                        let (result_val, cranelift_ty) =
-                            convert_field_value(self.builder, result_raw, &field_type);
-
-                        let var = self.builder.declare_var(cranelift_ty);
-                        self.builder.def_var(var, result_val);
-                        arm_variables.insert(field_pattern.binding, (var, field_type.clone()));
+                        pattern_check
                     }
-
-                    pattern_check
                 }
             };
 
@@ -1214,7 +1275,8 @@ impl Cg<'_, '_, '_> {
                 self.builder.ins().jump(body_block, &[]);
             }
 
-            self.builder.seal_block(arm_block);
+            // Seal the effective arm block (may be extract_block for conditional patterns)
+            self.builder.seal_block(effective_arm_block);
 
             self.builder.switch_to_block(body_block);
 

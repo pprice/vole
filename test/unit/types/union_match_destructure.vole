@@ -1,0 +1,63 @@
+// Test: Union type narrowing in match destructuring
+// Bug: vole-p0nv - field extraction happened before type check, causing
+// crashes when destructuring patterns didn't match (e.g., nil case)
+
+record Point { x: i64, y: i64 }
+record Circle { radius: f64 }
+
+tests {
+    test "optional with destructure - some case" {
+        let p: Point? = Point { x: 5, y: 10 }
+        let result = match p {
+            Point { x, y } => x + y
+            nil => 0
+        }
+        assert(result == 15)
+    }
+
+    test "optional with destructure - nil case" {
+        let p: Point? = nil
+        let result = match p {
+            Point { x, y } => x + y
+            nil => -1
+        }
+        assert(result == -1)
+    }
+
+    test "union of records with destructure" {
+        let shape: Point | Circle = Point { x: 10, y: 20 }
+        let result = match shape {
+            Point { x, y } => x + y
+            Circle { radius } => 0
+        }
+        assert(result == 30)
+    }
+
+    test "union of records - second variant" {
+        let shape: Point | Circle = Circle { radius: 5.0 }
+        let result = match shape {
+            Point { x, y } => x + y
+            Circle { radius } => 100
+        }
+        assert(result == 100)
+    }
+
+    test "three-way union with nil and destructure" {
+        let shape: Point | Circle | nil = nil
+        let result = match shape {
+            Point { x, y } => x + y
+            Circle { radius } => 50
+            nil => -1
+        }
+        assert(result == -1)
+    }
+
+    test "partial destructure on union" {
+        let shape: Point | Circle = Point { x: 7, y: 8 }
+        let result = match shape {
+            Point { x } => x
+            Circle => 0
+        }
+        assert(result == 7)
+    }
+}
