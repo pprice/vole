@@ -1,8 +1,79 @@
+use std::collections::HashMap as StdHashMap;
+
 use crate::identity::{NameId, TypeDefId};
+use crate::sema::Type;
 use crate::sema::entity_defs::TypeDefKind;
-use crate::sema::types::StructuralType;
+use crate::sema::types::{InterfaceMethodType, InterfaceType, StructuralType};
 
 use super::super::*;
+
+/// Substitute type parameters in a type with concrete types.
+/// Used when checking interface satisfaction with generic interfaces.
+fn substitute_type(ty: &Type, substitutions: &StdHashMap<NameId, Type>) -> Type {
+    match ty {
+        Type::TypeParam(name_id) => substitutions
+            .get(name_id)
+            .cloned()
+            .unwrap_or_else(|| ty.clone()),
+        Type::Array(inner) => Type::Array(Box::new(substitute_type(inner, substitutions))),
+        Type::Union(variants) => Type::Union(
+            variants
+                .iter()
+                .map(|v| substitute_type(v, substitutions))
+                .collect(),
+        ),
+        Type::Function(ft) => Type::Function(FunctionType {
+            params: ft
+                .params
+                .iter()
+                .map(|p| substitute_type(p, substitutions))
+                .collect(),
+            return_type: Box::new(substitute_type(&ft.return_type, substitutions)),
+            is_closure: ft.is_closure,
+        }),
+        Type::RuntimeIterator(inner) => {
+            Type::RuntimeIterator(Box::new(substitute_type(inner, substitutions)))
+        }
+        Type::GenericInstance { def, args } => Type::GenericInstance {
+            def: *def,
+            args: args
+                .iter()
+                .map(|a| substitute_type(a, substitutions))
+                .collect(),
+        },
+        Type::Interface(iface) => Type::Interface(InterfaceType {
+            name_id: iface.name_id,
+            type_args: iface
+                .type_args
+                .iter()
+                .map(|a| substitute_type(a, substitutions))
+                .collect(),
+            methods: iface
+                .methods
+                .iter()
+                .map(|m| InterfaceMethodType {
+                    name: m.name,
+                    params: m
+                        .params
+                        .iter()
+                        .map(|p| substitute_type(p, substitutions))
+                        .collect(),
+                    return_type: Box::new(substitute_type(&m.return_type, substitutions)),
+                    has_default: m.has_default,
+                })
+                .collect(),
+            extends: iface.extends.clone(),
+        }),
+        Type::Tuple(elements) => Type::Tuple(
+            elements
+                .iter()
+                .map(|e| substitute_type(e, substitutions))
+                .collect(),
+        ),
+        // Primitive and other types don't need substitution
+        _ => ty.clone(),
+    }
+}
 
 impl Analyzer {
     /// Check if a type structurally satisfies an interface by TypeDefId
@@ -269,13 +340,29 @@ impl Analyzer {
             .resolver(interner)
             .resolve_type_or_interface(iface_name, &self.entity_registry);
 
-        if let Some(type_def_id) = type_def_id {
+        if let Some(interface_type_id) = type_def_id {
             // Clone the data we need to avoid borrow conflicts
-            let iface = self.entity_registry.get_type(type_def_id);
+            let iface = self.entity_registry.get_type(interface_type_id);
             let method_ids = iface.methods.clone();
             let extends = iface.extends.clone();
+            let interface_type_params = iface.type_params.clone();
 
-            // Collect method info upfront (name_str, has_default, signature)
+            // Build substitution map for generic interface type parameters
+            // E.g., MapLike<K, V> implemented as MapLike<i64, i64> → {K: i64, V: i64}
+            let substitutions: StdHashMap<NameId, Type> = if let Some(impl_type_id) = type_id_opt {
+                let type_args = self
+                    .entity_registry
+                    .get_implementation_type_args(impl_type_id, interface_type_id);
+                interface_type_params
+                    .iter()
+                    .zip(type_args.iter())
+                    .map(|(param, arg)| (*param, arg.clone()))
+                    .collect()
+            } else {
+                StdHashMap::new()
+            };
+
+            // Collect method info upfront (name_str, has_default, signature with substitutions applied)
             let method_infos: Vec<(String, bool, FunctionType)> = method_ids
                 .iter()
                 .map(|&method_id| {
@@ -284,7 +371,21 @@ impl Analyzer {
                         .name_table
                         .last_segment_str(method.name_id)
                         .unwrap_or_default();
-                    (name, method.has_default, method.signature.clone())
+                    // Apply type parameter substitution to signature
+                    let subst_params: Vec<Type> = method
+                        .signature
+                        .params
+                        .iter()
+                        .map(|p| substitute_type(p, &substitutions))
+                        .collect();
+                    let subst_return =
+                        substitute_type(&method.signature.return_type, &substitutions);
+                    let subst_sig = FunctionType {
+                        params: subst_params,
+                        return_type: Box::new(subst_return),
+                        is_closure: method.signature.is_closure,
+                    };
+                    (name, method.has_default, subst_sig)
                 })
                 .collect();
 

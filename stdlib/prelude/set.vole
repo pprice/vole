@@ -1,7 +1,7 @@
 // stdlib/prelude/set.vole
 // Set - Hash set collection for i64 values
 
-class Set {
+class Set implements SetLike<i64> {
     _ptr: i64,  // Pointer to native VoleSet
 
     statics {

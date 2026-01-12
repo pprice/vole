@@ -1,7 +1,7 @@
 // stdlib/prelude/map.vole
 // Map - Hash map collection for i64 keys and values
 
-class Map {
+class Map implements MapLike<i64, i64> {
     _ptr: i64,  // Pointer to native VoleMap
 
     statics {

@@ -909,8 +909,17 @@ impl Analyzer {
                 continue;
             };
 
+            // Extract and resolve type arguments for generic interfaces
+            let type_args = match iface_type {
+                TypeExpr::Generic { args, .. } => args
+                    .iter()
+                    .map(|arg| self.resolve_type(arg, interner))
+                    .collect(),
+                _ => Vec::new(),
+            };
+
             self.entity_registry
-                .add_implementation(entity_type_id, interface_type_id);
+                .add_implementation(entity_type_id, interface_type_id, type_args);
         }
     }
 

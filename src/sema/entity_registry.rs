@@ -440,12 +440,18 @@ impl EntityRegistry {
     }
 
     /// Add an interface implementation to a type
-    pub fn add_implementation(&mut self, type_id: TypeDefId, interface_id: TypeDefId) {
+    pub fn add_implementation(
+        &mut self,
+        type_id: TypeDefId,
+        interface_id: TypeDefId,
+        type_args: Vec<Type>,
+    ) {
         use crate::sema::entity_defs::Implementation;
         self.type_defs[type_id.index() as usize]
             .implements
             .push(Implementation {
                 interface: interface_id,
+                type_args,
                 method_bindings: Vec::new(),
             });
     }
@@ -465,12 +471,29 @@ impl EntityRegistry {
                 return;
             }
         }
-        // If no implementation exists yet, create one
+        // If no implementation exists yet, create one (with empty type_args for implement blocks)
         use crate::sema::entity_defs::Implementation;
         type_def.implements.push(Implementation {
             interface: interface_id,
+            type_args: Vec::new(),
             method_bindings: vec![binding],
         });
+    }
+
+    /// Get type arguments for a specific interface implementation
+    #[must_use]
+    pub fn get_implementation_type_args(
+        &self,
+        type_id: TypeDefId,
+        interface_id: TypeDefId,
+    ) -> &[Type] {
+        let type_def = &self.type_defs[type_id.index() as usize];
+        for impl_ in &type_def.implements {
+            if impl_.interface == interface_id {
+                return &impl_.type_args;
+            }
+        }
+        &[]
     }
 
     /// Get all interface TypeDefIds that a type implements

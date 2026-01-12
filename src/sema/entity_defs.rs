@@ -54,6 +54,8 @@ pub struct MethodBinding {
 pub struct Implementation {
     /// The interface being implemented
     pub interface: TypeDefId,
+    /// Type arguments for generic interfaces (e.g., [i64, i64] for MapLike<i64, i64>)
+    pub type_args: Vec<Type>,
     /// Method bindings for this implementation
     pub method_bindings: Vec<MethodBinding>,
 }
