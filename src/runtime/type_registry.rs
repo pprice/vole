@@ -138,13 +138,18 @@ mod tests {
         assert_eq!(FieldTypeTag::from_type_id(2), FieldTypeTag::Value); // TYPE_I64
     }
 
+    // Note: These tests use unique type IDs and don't clear the registry to
+    // avoid race conditions when running tests in parallel. The global registry
+    // is safe to share across tests as long as each test uses distinct IDs.
+
     #[test]
     fn test_register_and_get() {
+        // Use a unique type ID for this test (0x1000_0001)
+        let test_type_id = 0x1000_0001;
         init_type_registry();
-        clear_type_registry();
 
         register_instance_type(
-            42,
+            test_type_id,
             vec![
                 FieldTypeTag::Value,
                 FieldTypeTag::String,
@@ -152,27 +157,23 @@ mod tests {
             ],
         );
 
-        let info = get_instance_type_info(42).unwrap();
+        let info = get_instance_type_info(test_type_id).unwrap();
         assert_eq!(info.field_types.len(), 3);
         assert_eq!(info.field_types[0], FieldTypeTag::Value);
         assert_eq!(info.field_types[1], FieldTypeTag::String);
         assert_eq!(info.field_types[2], FieldTypeTag::Instance);
         assert!(info.needs_cleanup());
-
-        // Clean up
-        clear_type_registry();
     }
 
     #[test]
     fn test_no_cleanup_needed() {
+        // Use a unique type ID for this test (0x1000_0002)
+        let test_type_id = 0x1000_0002;
         init_type_registry();
-        clear_type_registry();
 
-        register_instance_type(99, vec![FieldTypeTag::Value, FieldTypeTag::Value]);
+        register_instance_type(test_type_id, vec![FieldTypeTag::Value, FieldTypeTag::Value]);
 
-        let info = get_instance_type_info(99).unwrap();
+        let info = get_instance_type_info(test_type_id).unwrap();
         assert!(!info.needs_cleanup());
-
-        clear_type_registry();
     }
 }

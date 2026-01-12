@@ -14,152 +14,120 @@
 #![allow(clippy::manual_unwrap_or)]
 
 use std::cell::RefCell;
-use std::hash::{BuildHasher, Hasher};
 use std::rc::Rc;
 
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashTable;
 
 use crate::runtime::array::RcArray;
 use crate::runtime::iterator::{ArraySource, IteratorKind, IteratorSource, UnifiedIterator};
 use crate::runtime::value::TaggedValue;
 
 // =============================================================================
+// Equality function type for generic collections
+// =============================================================================
+
+/// Type alias for equality function pointers injected from Vole.
+/// For primitives, this points to native eq functions (fast path).
+/// For custom types, this points to a trampoline that calls Vole's Eq.eq().
+pub type EqFn = extern "C" fn(i64, i64) -> bool;
+
+/// Default equality function for i64 values (most common case).
+pub extern "C" fn i64_eq(a: i64, b: i64) -> bool {
+    a == b
+}
+
+// =============================================================================
 // VoleMap - Hash map for Vole Map<K, V> type
 // =============================================================================
 
 /// A Vole map storing key-value pairs as i64 words.
-/// Keys are stored with their pre-computed hash from Hashable.hash().
-#[derive(Debug)]
+/// Uses HashTable for full control over hashing and equality.
+/// Hash is pre-computed in Vole via Hashable.hash() and stored with entries.
+/// Equality is provided via injected eq_fn at construction.
 pub struct VoleMap {
-    inner: HashMap<HashedKey, i64, PassthroughBuildHasher>,
-}
-
-/// A key with its pre-computed hash value from Vole's Hashable interface.
-#[derive(Debug, Clone, Copy)]
-struct HashedKey {
-    value: i64,
-    hash: u64,
-}
-
-impl PartialEq for HashedKey {
-    fn eq(&self, other: &Self) -> bool {
-        // For Vole values, equality is based on the raw i64 value
-        // This works for integers and reference types (pointer equality)
-        self.value == other.value
-    }
-}
-
-impl Eq for HashedKey {}
-
-impl std::hash::Hash for HashedKey {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        // Use the pre-computed hash from Vole's Hashable interface
-        state.write_u64(self.hash);
-    }
-}
-
-/// A hasher that passes through already-hashed values.
-#[derive(Default)]
-struct PassthroughHasher(u64);
-
-impl Hasher for PassthroughHasher {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-
-    fn write(&mut self, _bytes: &[u8]) {
-        // Not used - we only use write_u64
-    }
-
-    fn write_u64(&mut self, i: u64) {
-        self.0 = i;
-    }
-}
-
-#[derive(Default, Clone)]
-struct PassthroughBuildHasher;
-
-impl BuildHasher for PassthroughBuildHasher {
-    type Hasher = PassthroughHasher;
-
-    fn build_hasher(&self) -> Self::Hasher {
-        PassthroughHasher::default()
-    }
+    table: HashTable<(u64, i64, i64)>, // (hash, key, value) tuples
+    eq_fn: EqFn,
 }
 
 impl VoleMap {
-    pub fn new() -> Self {
+    pub fn new(eq_fn: EqFn) -> Self {
         Self {
-            inner: HashMap::with_hasher(PassthroughBuildHasher),
+            table: HashTable::new(),
+            eq_fn,
         }
     }
 
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn with_capacity(capacity: usize, eq_fn: EqFn) -> Self {
         Self {
-            inner: HashMap::with_capacity_and_hasher(capacity, PassthroughBuildHasher),
+            table: HashTable::with_capacity(capacity),
+            eq_fn,
         }
     }
 
     pub fn get(&self, key: i64, key_hash: i64) -> Option<i64> {
-        let hashed = HashedKey {
-            value: key,
-            hash: key_hash as u64,
-        };
-        self.inner.get(&hashed).copied()
+        let hash = key_hash as u64;
+        self.table
+            .find(hash, |(_, k, _)| (self.eq_fn)(*k, key))
+            .map(|(_, _, v)| *v)
     }
 
     pub fn set(&mut self, key: i64, key_hash: i64, value: i64) {
-        let hashed = HashedKey {
-            value: key,
-            hash: key_hash as u64,
-        };
-        self.inner.insert(hashed, value);
+        let hash = key_hash as u64;
+        let eq_fn = self.eq_fn;
+
+        // Check if key exists and update
+        if let Some((_, _, v)) = self.table.find_mut(hash, |(_, k, _)| eq_fn(*k, key)) {
+            *v = value;
+            return;
+        }
+
+        // Insert new entry with stored hash for resize operations
+        self.table
+            .insert_unique(hash, (hash, key, value), |(h, _, _)| *h);
     }
 
     pub fn remove(&mut self, key: i64, key_hash: i64) -> Option<i64> {
-        let hashed = HashedKey {
-            value: key,
-            hash: key_hash as u64,
-        };
-        self.inner.remove(&hashed)
+        let hash = key_hash as u64;
+        let eq_fn = self.eq_fn;
+
+        match self.table.find_entry(hash, |(_, k, _)| eq_fn(*k, key)) {
+            Ok(entry) => {
+                let (_, _, value) = entry.remove().0;
+                Some(value)
+            }
+            Err(_) => None,
+        }
     }
 
     pub fn contains_key(&self, key: i64, key_hash: i64) -> bool {
-        let hashed = HashedKey {
-            value: key,
-            hash: key_hash as u64,
-        };
-        self.inner.contains_key(&hashed)
+        let hash = key_hash as u64;
+        self.table
+            .find(hash, |(_, k, _)| (self.eq_fn)(*k, key))
+            .is_some()
     }
 
     pub fn len(&self) -> usize {
-        self.inner.len()
+        self.table.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
+        self.table.is_empty()
     }
 
     pub fn clear(&mut self) {
-        self.inner.clear();
+        self.table.clear();
     }
 
     pub fn keys(&self) -> Vec<i64> {
-        self.inner.keys().map(|k| k.value).collect()
+        self.table.iter().map(|(_, k, _)| *k).collect()
     }
 
     pub fn values(&self) -> Vec<i64> {
-        self.inner.values().copied().collect()
+        self.table.iter().map(|(_, _, v)| *v).collect()
     }
 
     pub fn entries(&self) -> Vec<(i64, i64)> {
-        self.inner.iter().map(|(k, v)| (k.value, *v)).collect()
-    }
-}
-
-impl Default for VoleMap {
-    fn default() -> Self {
-        Self::new()
+        self.table.iter().map(|(_, k, v)| (*k, *v)).collect()
     }
 }
 
@@ -171,109 +139,190 @@ pub type RcMap = Rc<RefCell<VoleMap>>;
 // =============================================================================
 
 /// A Vole set storing elements as i64 words with pre-computed hashes.
-#[derive(Debug)]
+/// Uses HashTable for full control over hashing and equality.
 pub struct VoleSet {
-    inner: HashSet<HashedKey, PassthroughBuildHasher>,
+    table: HashTable<(u64, i64)>, // (hash, value) pairs
+    eq_fn: EqFn,
 }
 
 impl VoleSet {
-    pub fn new() -> Self {
+    pub fn new(eq_fn: EqFn) -> Self {
         Self {
-            inner: HashSet::with_hasher(PassthroughBuildHasher),
+            table: HashTable::new(),
+            eq_fn,
         }
     }
 
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn with_capacity(capacity: usize, eq_fn: EqFn) -> Self {
         Self {
-            inner: HashSet::with_capacity_and_hasher(capacity, PassthroughBuildHasher),
+            table: HashTable::with_capacity(capacity),
+            eq_fn,
         }
     }
 
     pub fn add(&mut self, value: i64, hash: i64) -> bool {
-        let hashed = HashedKey {
-            value,
-            hash: hash as u64,
-        };
-        self.inner.insert(hashed)
+        let hash = hash as u64;
+        let eq_fn = self.eq_fn;
+
+        // Check if already present
+        if self.table.find(hash, |(_, v)| eq_fn(*v, value)).is_some() {
+            return false;
+        }
+
+        // Insert new entry
+        self.table.insert_unique(hash, (hash, value), |(h, _)| *h);
+        true
     }
 
     pub fn remove(&mut self, value: i64, hash: i64) -> bool {
-        let hashed = HashedKey {
-            value,
-            hash: hash as u64,
-        };
-        self.inner.remove(&hashed)
+        let hash = hash as u64;
+        let eq_fn = self.eq_fn;
+
+        match self.table.find_entry(hash, |(_, v)| eq_fn(*v, value)) {
+            Ok(entry) => {
+                entry.remove();
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     pub fn contains(&self, value: i64, hash: i64) -> bool {
-        let hashed = HashedKey {
-            value,
-            hash: hash as u64,
-        };
-        self.inner.contains(&hashed)
+        let hash = hash as u64;
+        self.table
+            .find(hash, |(_, v)| (self.eq_fn)(*v, value))
+            .is_some()
     }
 
     pub fn len(&self) -> usize {
-        self.inner.len()
+        self.table.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
+        self.table.is_empty()
     }
 
     pub fn clear(&mut self) {
-        self.inner.clear();
+        self.table.clear();
     }
 
     pub fn values(&self) -> Vec<i64> {
-        self.inner.iter().map(|k| k.value).collect()
+        self.table.iter().map(|(_, v)| *v).collect()
     }
 
-    // Set operations
+    // Set operations - these use self's eq_fn for the result
     pub fn union(&self, other: &VoleSet) -> VoleSet {
-        VoleSet {
-            inner: self.inner.union(&other.inner).copied().collect(),
+        let mut result = VoleSet::new(self.eq_fn);
+        // Add all from self
+        for (hash, value) in self.table.iter() {
+            result
+                .table
+                .insert_unique(*hash, (*hash, *value), |(h, _)| *h);
         }
+        // Add all from other (duplicates handled by eq check)
+        for (hash, value) in other.table.iter() {
+            if result
+                .table
+                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .is_none()
+            {
+                result
+                    .table
+                    .insert_unique(*hash, (*hash, *value), |(h, _)| *h);
+            }
+        }
+        result
     }
 
     pub fn intersection(&self, other: &VoleSet) -> VoleSet {
-        VoleSet {
-            inner: self.inner.intersection(&other.inner).copied().collect(),
+        let mut result = VoleSet::new(self.eq_fn);
+        for (hash, value) in self.table.iter() {
+            if other
+                .table
+                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .is_some()
+            {
+                result
+                    .table
+                    .insert_unique(*hash, (*hash, *value), |(h, _)| *h);
+            }
         }
+        result
     }
 
     pub fn difference(&self, other: &VoleSet) -> VoleSet {
-        VoleSet {
-            inner: self.inner.difference(&other.inner).copied().collect(),
+        let mut result = VoleSet::new(self.eq_fn);
+        for (hash, value) in self.table.iter() {
+            if other
+                .table
+                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .is_none()
+            {
+                result
+                    .table
+                    .insert_unique(*hash, (*hash, *value), |(h, _)| *h);
+            }
         }
+        result
     }
 
     pub fn symmetric_difference(&self, other: &VoleSet) -> VoleSet {
-        VoleSet {
-            inner: self
-                .inner
-                .symmetric_difference(&other.inner)
-                .copied()
-                .collect(),
+        let mut result = VoleSet::new(self.eq_fn);
+        // Add elements in self but not in other
+        for (hash, value) in self.table.iter() {
+            if other
+                .table
+                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .is_none()
+            {
+                result
+                    .table
+                    .insert_unique(*hash, (*hash, *value), |(h, _)| *h);
+            }
         }
+        // Add elements in other but not in self
+        for (hash, value) in other.table.iter() {
+            if self
+                .table
+                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .is_none()
+            {
+                result
+                    .table
+                    .insert_unique(*hash, (*hash, *value), |(h, _)| *h);
+            }
+        }
+        result
     }
 
     pub fn is_subset(&self, other: &VoleSet) -> bool {
-        self.inner.is_subset(&other.inner)
+        for (hash, value) in self.table.iter() {
+            if other
+                .table
+                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .is_none()
+            {
+                return false;
+            }
+        }
+        true
     }
 
     pub fn is_superset(&self, other: &VoleSet) -> bool {
-        self.inner.is_superset(&other.inner)
+        other.is_subset(self)
     }
 
     pub fn is_disjoint(&self, other: &VoleSet) -> bool {
-        self.inner.is_disjoint(&other.inner)
-    }
-}
-
-impl Default for VoleSet {
-    fn default() -> Self {
-        Self::new()
+        for (hash, value) in self.table.iter() {
+            if other
+                .table
+                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .is_some()
+            {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -284,17 +333,22 @@ pub type RcSet = Rc<RefCell<VoleSet>>;
 // FFI Functions for Map<K, V>
 // =============================================================================
 
-/// Create a new empty map
+// Note: These FFI functions currently use i64_eq as the default equality function.
+// When generic Map<K,V> support is added (vole-9x0.2), codegen will inject the
+// appropriate eq_fn based on the type parameter's Eq implementation.
+
+/// Create a new empty map (uses i64 equality by default)
 #[unsafe(no_mangle)]
 pub extern "C" fn map_new() -> *const RefCell<VoleMap> {
-    Rc::into_raw(Rc::new(RefCell::new(VoleMap::new())))
+    Rc::into_raw(Rc::new(RefCell::new(VoleMap::new(i64_eq))))
 }
 
-/// Create a new map with the given capacity
+/// Create a new map with the given capacity (uses i64 equality by default)
 #[unsafe(no_mangle)]
 pub extern "C" fn map_with_capacity(capacity: i64) -> *const RefCell<VoleMap> {
     Rc::into_raw(Rc::new(RefCell::new(VoleMap::with_capacity(
         capacity as usize,
+        i64_eq,
     ))))
 }
 
@@ -451,17 +505,22 @@ pub extern "C" fn map_dec_ref(map_ptr: *const RefCell<VoleMap>) {
 // FFI Functions for Set<T>
 // =============================================================================
 
-/// Create a new empty set
+// Note: These FFI functions currently use i64_eq as the default equality function.
+// When generic Set<T> support is added (vole-9x0.2), codegen will inject the
+// appropriate eq_fn based on the type parameter's Eq implementation.
+
+/// Create a new empty set (uses i64 equality by default)
 #[unsafe(no_mangle)]
 pub extern "C" fn set_new() -> *const RefCell<VoleSet> {
-    Rc::into_raw(Rc::new(RefCell::new(VoleSet::new())))
+    Rc::into_raw(Rc::new(RefCell::new(VoleSet::new(i64_eq))))
 }
 
-/// Create a new set with the given capacity
+/// Create a new set with the given capacity (uses i64 equality by default)
 #[unsafe(no_mangle)]
 pub extern "C" fn set_with_capacity(capacity: i64) -> *const RefCell<VoleSet> {
     Rc::into_raw(Rc::new(RefCell::new(VoleSet::with_capacity(
         capacity as usize,
+        i64_eq,
     ))))
 }
 
@@ -641,14 +700,14 @@ mod tests {
 
     #[test]
     fn test_map_basic_operations() {
-        let map = VoleMap::new();
+        let map = VoleMap::new(i64_eq);
         assert!(map.is_empty());
         assert_eq!(map.len(), 0);
     }
 
     #[test]
     fn test_map_set_get() {
-        let mut map = VoleMap::new();
+        let mut map = VoleMap::new(i64_eq);
 
         // Use simple hash for test (key value as hash)
         map.set(1, 1, 100);
@@ -662,7 +721,7 @@ mod tests {
 
     #[test]
     fn test_map_remove() {
-        let mut map = VoleMap::new();
+        let mut map = VoleMap::new(i64_eq);
         map.set(1, 1, 100);
 
         assert_eq!(map.remove(1, 1), Some(100));
@@ -672,14 +731,14 @@ mod tests {
 
     #[test]
     fn test_set_basic_operations() {
-        let set = VoleSet::new();
+        let set = VoleSet::new(i64_eq);
         assert!(set.is_empty());
         assert_eq!(set.len(), 0);
     }
 
     #[test]
     fn test_set_add_contains() {
-        let mut set = VoleSet::new();
+        let mut set = VoleSet::new(i64_eq);
 
         assert!(set.add(1, 1));
         assert!(!set.add(1, 1)); // Already present
@@ -693,11 +752,11 @@ mod tests {
 
     #[test]
     fn test_set_operations() {
-        let mut a = VoleSet::new();
+        let mut a = VoleSet::new(i64_eq);
         a.add(1, 1);
         a.add(2, 2);
 
-        let mut b = VoleSet::new();
+        let mut b = VoleSet::new(i64_eq);
         b.add(2, 2);
         b.add(3, 3);
 
@@ -711,5 +770,59 @@ mod tests {
         let diff = a.difference(&b);
         assert_eq!(diff.len(), 1);
         assert!(diff.contains(1, 1));
+    }
+
+    // Test custom equality function injection
+    // This simulates comparing "Point" structs where the i64 is a pointer
+    // and equality compares the underlying field values
+
+    /// Custom equality that compares only the lower 32 bits (simulating field comparison)
+    extern "C" fn lower_bits_eq(a: i64, b: i64) -> bool {
+        (a & 0xFFFFFFFF) == (b & 0xFFFFFFFF)
+    }
+
+    #[test]
+    fn test_map_custom_equality() {
+        let mut map = VoleMap::new(lower_bits_eq);
+
+        // Two values with same lower 32 bits but different upper bits
+        let val1: i64 = 0x0000_0001_0000_0005; // lower = 5
+        let val2: i64 = 0x0000_0002_0000_0005; // lower = 5 (same as val1)
+        let val3: i64 = 0x0000_0001_0000_0006; // lower = 6 (different)
+
+        // Use lower bits as hash
+        map.set(val1, 5, 100);
+        assert_eq!(map.get(val1, 5), Some(100));
+
+        // val2 should find the same entry (same lower bits = same key)
+        assert_eq!(map.get(val2, 5), Some(100));
+
+        // Updating with val2 should update the same entry
+        map.set(val2, 5, 200);
+        assert_eq!(map.get(val1, 5), Some(200));
+        assert_eq!(map.len(), 1); // Still just one entry
+
+        // val3 is a different key
+        map.set(val3, 6, 300);
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get(val3, 6), Some(300));
+    }
+
+    #[test]
+    fn test_set_custom_equality() {
+        let mut set = VoleSet::new(lower_bits_eq);
+
+        let val1: i64 = 0x0000_0001_0000_0005; // lower = 5
+        let val2: i64 = 0x0000_0002_0000_0005; // lower = 5 (same as val1)
+        let val3: i64 = 0x0000_0001_0000_0006; // lower = 6 (different)
+
+        assert!(set.add(val1, 5)); // Added
+        assert!(!set.add(val2, 5)); // Not added - considered equal to val1
+        assert!(set.add(val3, 6)); // Added - different key
+
+        assert_eq!(set.len(), 2);
+        assert!(set.contains(val1, 5));
+        assert!(set.contains(val2, 5)); // Found via custom equality
+        assert!(set.contains(val3, 6));
     }
 }

@@ -244,36 +244,43 @@ pub(crate) fn resolve_method_target(
         };
     }
 
-    // No resolution found - try direct method lookup first, then implement block methods.
+    // No resolution found - try implement block methods first, then direct methods.
     // This happens in monomorphized generic functions where the resolution was computed
     // for the type parameter, not the concrete type.
-    let type_name_id = get_type_name_id(input.object_type)?;
-
-    // Try direct methods (methods defined inside class/record)
-    if let Ok(method_info) = lookup_direct_method(type_name_id) {
-        let return_type = method_info.return_type.clone();
-        return Ok(MethodTarget::Direct {
-            method_info,
-            return_type,
-        });
-    }
-
-    // Try implement block methods
+    // Implement block methods work for both primitives and classes, so try them first.
     if let Some(type_id) = TypeId::from_type(
         input.object_type,
         &input.analyzed.entity_registry.type_table,
-    ) && let Ok(method_info) = lookup_impl_method(type_id)
-    {
-        let return_type = method_info.return_type.clone();
-        return Ok(MethodTarget::Implemented {
-            method_info,
-            return_type,
-        });
+    ) {
+        if let Ok(method_info) = lookup_impl_method(type_id) {
+            let return_type = method_info.return_type.clone();
+            return Ok(MethodTarget::Implemented {
+                method_info,
+                return_type,
+            });
+        }
+    }
+
+    // Try direct methods (methods defined inside class/record)
+    // This only works for classes/records, not primitives.
+    if let Ok(type_name_id) = get_type_name_id(input.object_type) {
+        if let Ok(method_info) = lookup_direct_method(type_name_id) {
+            let return_type = method_info.return_type.clone();
+            return Ok(MethodTarget::Direct {
+                method_info,
+                return_type,
+            });
+        }
     }
 
     // Neither found - return error
     Err(format!(
-        "Method {} not found on type {:?}",
-        input.method_name_str, type_name_id
+        "Method {} not found on type {}",
+        input.method_name_str,
+        crate::codegen::types::display_type(
+            input.analyzed,
+            &input.analyzed.interner,
+            input.object_type
+        )
     ))
 }

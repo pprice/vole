@@ -42,7 +42,8 @@ smallvec = "1.13"
 rustc-hash = "2.1"
 
 # High-performance hash map for Map<K,V> and Set<T> collections
-hashbrown = "0.15"
+# HashTable provides low-level API for custom equality function injection
+hashbrown = "0.16"
 
 # Error handling
 thiserror = "2.0"

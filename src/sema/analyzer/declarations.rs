@@ -309,6 +309,51 @@ impl Analyzer {
                     );
                 }
             }
+
+            // Register external methods in EntityRegistry (non-generic class)
+            if let Some(ref external) = class.external {
+                let class_name_str = interner.resolve(class.name);
+                for func in &external.functions {
+                    let method_name_str = interner.resolve(func.vole_name);
+                    let method_name_id = self
+                        .name_table
+                        .intern_raw(builtin_module, &[method_name_str]);
+                    let full_method_name_id = self
+                        .name_table
+                        .intern_raw(self.current_module, &[class_name_str, method_name_str]);
+                    let params: Vec<Type> = func
+                        .params
+                        .iter()
+                        .map(|p| self.resolve_type(&p.ty, interner))
+                        .collect();
+                    let return_type = func
+                        .return_type
+                        .as_ref()
+                        .map(|t| self.resolve_type(t, interner))
+                        .unwrap_or(Type::Void);
+                    let signature = FunctionType {
+                        params,
+                        return_type: Box::new(return_type.clone()),
+                        is_closure: false,
+                    };
+                    let native_name = func
+                        .native_name
+                        .clone()
+                        .unwrap_or_else(|| method_name_str.to_string());
+                    self.entity_registry.register_method_with_binding(
+                        entity_type_id,
+                        method_name_id,
+                        full_method_name_id,
+                        signature,
+                        false, // external methods don't have defaults
+                        Some(ExternalMethodInfo {
+                            module_path: external.module_path.clone(),
+                            native_name,
+                            return_type: Some(Box::new(return_type)),
+                        }),
+                    );
+                }
+            }
         } else {
             // Generic class: store with type params as placeholders
             let builtin_mod = self.name_table.builtin_module();
@@ -533,6 +578,75 @@ impl Analyzer {
                         full_method_name_id,
                         signature,
                         has_default,
+                    );
+                }
+            }
+
+            // Register external methods in EntityRegistry (generic class)
+            // Type params are in scope for resolving K, V, etc.
+            if let Some(ref external) = class.external {
+                let class_name_str = interner.resolve(class.name);
+                for func in &external.functions {
+                    let method_name_str = interner.resolve(func.vole_name);
+                    let method_name_id = self
+                        .name_table
+                        .intern_raw(builtin_module, &[method_name_str]);
+                    let full_method_name_id = self
+                        .name_table
+                        .intern_raw(self.current_module, &[class_name_str, method_name_str]);
+
+                    // Resolve parameter types with type params in scope
+                    let params: Vec<Type> = func
+                        .params
+                        .iter()
+                        .map(|p| {
+                            let mut ctx = TypeResolutionContext::with_type_params(
+                                &self.entity_registry,
+                                interner,
+                                &mut self.name_table,
+                                module_id,
+                                &type_param_scope,
+                            );
+                            resolve_type(&p.ty, &mut ctx)
+                        })
+                        .collect();
+
+                    // Resolve return type with type params in scope
+                    let return_type = func
+                        .return_type
+                        .as_ref()
+                        .map(|t| {
+                            let mut ctx = TypeResolutionContext::with_type_params(
+                                &self.entity_registry,
+                                interner,
+                                &mut self.name_table,
+                                module_id,
+                                &type_param_scope,
+                            );
+                            resolve_type(t, &mut ctx)
+                        })
+                        .unwrap_or(Type::Void);
+
+                    let signature = FunctionType {
+                        params,
+                        return_type: Box::new(return_type.clone()),
+                        is_closure: false,
+                    };
+                    let native_name = func
+                        .native_name
+                        .clone()
+                        .unwrap_or_else(|| method_name_str.to_string());
+                    self.entity_registry.register_method_with_binding(
+                        entity_type_id,
+                        method_name_id,
+                        full_method_name_id,
+                        signature,
+                        false, // external methods don't have defaults
+                        Some(ExternalMethodInfo {
+                            module_path: external.module_path.clone(),
+                            native_name,
+                            return_type: Some(Box::new(return_type)),
+                        }),
                     );
                 }
             }
