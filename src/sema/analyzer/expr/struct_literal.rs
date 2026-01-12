@@ -375,9 +375,22 @@ impl Analyzer {
             })
             .collect();
 
+        // Convert inferred substitutions to ordered type_args based on type param order
+        let type_args: Vec<Type> = generic_info
+            .type_params
+            .iter()
+            .map(|param| {
+                inferred
+                    .get(&param.name_id)
+                    .cloned()
+                    .unwrap_or(Type::Unknown)
+            })
+            .collect();
+
         let concrete_class = ClassType {
             name_id,
             fields: concrete_fields,
+            type_args,
         };
         Ok(Type::Class(concrete_class))
     }

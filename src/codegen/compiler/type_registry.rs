@@ -68,6 +68,7 @@ impl Compiler<'_> {
         let placeholder_type = Type::Class(ClassType {
             name_id,
             fields: vec![],
+            type_args: vec![],
         });
 
         self.type_metadata.insert(
@@ -118,6 +119,7 @@ impl Compiler<'_> {
         let vole_type = Type::Class(ClassType {
             name_id: query.name_id(module_id, &[class.name]),
             fields: struct_fields,
+            type_args: vec![],
         });
 
         // Collect method return types

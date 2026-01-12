@@ -635,6 +635,7 @@ impl EntityRegistry {
         Some(ClassType {
             name_id: type_def.name_id,
             fields,
+            type_args: vec![],
         })
     }
 

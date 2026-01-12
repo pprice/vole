@@ -445,6 +445,7 @@ mod tests {
             Type::Class(crate::sema::ClassType {
                 name_id,
                 fields: vec![],
+                type_args: vec![],
             }),
             name_id,
         );

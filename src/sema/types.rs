@@ -133,6 +133,8 @@ pub struct StructField {
 pub struct ClassType {
     pub name_id: NameId,
     pub fields: Vec<StructField>,
+    /// Type arguments for generic classes (empty for non-generic classes)
+    pub type_args: Vec<Type>,
 }
 
 /// Record type information

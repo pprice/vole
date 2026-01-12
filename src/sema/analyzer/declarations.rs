@@ -357,6 +357,12 @@ impl Analyzer {
                 self.current_module,
             );
 
+            // Set type params on the type definition (needed for method substitutions)
+            let type_param_name_ids: Vec<NameId> =
+                type_params.iter().map(|tp| tp.name_id).collect();
+            self.entity_registry
+                .set_type_params(entity_type_id, type_param_name_ids);
+
             // Set generic info for type inference during struct literal checking
             self.entity_registry.set_generic_info(
                 entity_type_id,

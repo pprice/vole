@@ -1,0 +1,54 @@
+// Test: Generic class methods with type parameter substitution
+// Bug fix: Methods on generic classes like Box<T> now properly substitute
+// type parameters (T -> i32) in method signatures
+
+class Box<T> {
+    value: T,
+
+    func get() -> T {
+        return self.value
+    }
+
+    func set(v: T) {
+        self.value = v
+    }
+}
+
+class Pair<A, B> {
+    first: A,
+    second: B,
+
+    func getFirst() -> A {
+        return self.first
+    }
+
+    func getSecond() -> B {
+        return self.second
+    }
+}
+
+tests {
+    test "generic class method - get i32" {
+        let box = Box { value: 42 }
+        assert(box.get() == 42)
+    }
+
+    test "generic class method - set i32" {
+        let box = Box { value: 42 }
+        box.set(100)
+        assert(box.get() == 100)
+    }
+
+    test "generic class method - get string" {
+        let box = Box { value: "hello" }
+        assert(box.get() == "hello")
+    }
+
+    // Note: bool and f64 have separate codegen issues (vole-mgep)
+
+    test "generic class with two type params" {
+        let pair = Pair { first: 10, second: "ten" }
+        assert(pair.getFirst() == 10)
+        assert(pair.getSecond() == "ten")
+    }
+}
