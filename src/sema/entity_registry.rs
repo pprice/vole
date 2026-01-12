@@ -733,6 +733,7 @@ impl EntityRegistry {
                 // Type already exists, map to existing ID
                 let existing_id = self.type_by_name[&other_type.name_id];
                 type_id_map.insert(other_type.id, existing_id);
+                // Note: implements merging happens after type_id_map is complete (see below)
             } else {
                 // New type - add it
                 let new_id = TypeDefId::new(self.type_defs.len() as u32);
@@ -809,6 +810,50 @@ impl EntityRegistry {
                 .map(|&parent_id| type_id_map[&parent_id])
                 .collect();
             self.type_defs[new_id.index() as usize].extends = extends;
+        }
+
+        // Fifth pass: merge implements (interface implementations with method bindings)
+        // This is crucial for primitives which are registered early but get
+        // their interface implementations (like Hashable for i64) from prelude.
+        // We do this after type_id_map is complete so we can remap interface IDs.
+        for other_type in &other.type_defs {
+            let new_id = type_id_map[&other_type.id];
+            for other_impl in &other_type.implements {
+                // Remap the interface ID
+                let mapped_interface = type_id_map
+                    .get(&other_impl.interface)
+                    .copied()
+                    .unwrap_or(other_impl.interface);
+
+                let existing_type = &mut self.type_defs[new_id.index() as usize];
+                // Check if this interface is already implemented
+                let interface_exists = existing_type
+                    .implements
+                    .iter()
+                    .any(|i| i.interface == mapped_interface);
+                if !interface_exists {
+                    // Clone and remap the implementation
+                    let mut new_impl = other_impl.clone();
+                    new_impl.interface = mapped_interface;
+                    existing_type.implements.push(new_impl);
+                } else {
+                    // Merge method bindings for existing interface implementation
+                    for binding in &other_impl.method_bindings {
+                        let existing_impl = existing_type
+                            .implements
+                            .iter_mut()
+                            .find(|i| i.interface == mapped_interface)
+                            .unwrap();
+                        let binding_exists = existing_impl
+                            .method_bindings
+                            .iter()
+                            .any(|b| b.method_name == binding.method_name);
+                        if !binding_exists {
+                            existing_impl.method_bindings.push(binding.clone());
+                        }
+                    }
+                }
+            }
         }
 
         // Merge functions

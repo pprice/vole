@@ -1444,6 +1444,59 @@ impl Analyzer {
             None => return, // Skip non-registerable types
         };
 
+        // Get EntityRegistry TypeDefId for the target type
+        let entity_type_id = match target_type {
+            Type::Record(r) => self.entity_registry.type_by_name(r.name_id),
+            Type::Class(c) => self.entity_registry.type_by_name(c.name_id),
+            Type::I8 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.i8),
+            Type::I16 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.i16),
+            Type::I32 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.i32),
+            Type::I64 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.i64),
+            Type::I128 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.i128),
+            Type::U8 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.u8),
+            Type::U16 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.u16),
+            Type::U32 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.u32),
+            Type::U64 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.u64),
+            Type::F32 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.f32),
+            Type::F64 => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.f64),
+            Type::Bool => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.bool),
+            Type::String => self
+                .entity_registry
+                .type_by_name(self.name_table.primitives.string),
+            _ => None,
+        };
+
+        // Get interface TypeDefId if implementing an interface
+        let interface_type_id = trait_name.and_then(|name| {
+            let iface_str = interner.resolve(name);
+            self.resolver(interner)
+                .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+        });
+
         for func in &external.functions {
             // Resolve parameter types
             let param_types: Vec<Type> = func
@@ -1472,21 +1525,39 @@ impl Analyzer {
 
             // Register in implement registry
             let method_id = self.method_name_id(func.vole_name, interner);
-            let return_type = (*func_type.return_type).clone();
+            let return_type_clone = (*func_type.return_type).clone();
+            let external_info = ExternalMethodInfo {
+                module_path: external.module_path.clone(),
+                native_name,
+                return_type: Some(Box::new(return_type_clone)),
+            };
             self.implement_registry.register_method(
                 type_id,
                 method_id,
                 MethodImpl {
                     trait_name,
-                    func_type,
+                    func_type: func_type.clone(),
                     is_builtin: false,
-                    external_info: Some(ExternalMethodInfo {
-                        module_path: external.module_path.clone(),
-                        native_name,
-                        return_type: Some(Box::new(return_type)),
-                    }),
+                    external_info: Some(external_info.clone()),
                 },
             );
+
+            // Also register in EntityRegistry if we have both type and interface
+            if let (Some(entity_type_id), Some(interface_type_id)) =
+                (entity_type_id, interface_type_id)
+            {
+                use crate::sema::entity_defs::MethodBinding;
+                self.entity_registry.add_method_binding(
+                    entity_type_id,
+                    interface_type_id,
+                    MethodBinding {
+                        method_name: method_id,
+                        func_type,
+                        is_builtin: false,
+                        external_info: Some(external_info),
+                    },
+                );
+            }
         }
     }
 

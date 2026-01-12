@@ -247,30 +247,84 @@ pub(crate) fn resolve_method_target(
     // No resolution found - try implement block methods first, then direct methods.
     // This happens in monomorphized generic functions where the resolution was computed
     // for the type parameter, not the concrete type.
-    // Implement block methods work for both primitives and classes, so try them first.
-    if let Some(type_id) = TypeId::from_type(
-        input.object_type,
-        &input.analyzed.entity_registry.type_table,
-    ) {
-        if let Ok(method_info) = lookup_impl_method(type_id) {
-            let return_type = method_info.return_type.clone();
+
+    // First, try EntityRegistry method bindings (cross-interner safe, works for all types)
+    // This is the authoritative source for method implementations.
+    if let Some(type_def_id) = get_type_def_id_for_codegen(input.object_type, input.analyzed)
+        && let Some(method_name_id) = method_name_id_by_str(
+            input.analyzed,
+            &input.analyzed.interner,
+            input.method_name_str,
+        )
+        && let Some(binding) = input
+            .analyzed
+            .entity_registry
+            .find_method_binding(type_def_id, method_name_id)
+    {
+        // Found method binding in EntityRegistry - now get the compiled MethodInfo
+        // Try impl_method_infos first (uses TypeId key)
+        if let Some(type_id) = TypeId::from_type(
+            input.object_type,
+            &input.analyzed.entity_registry.type_table,
+        ) && let Some(method_info) = input
+            .impl_method_infos
+            .get(&(type_id, input.method_id))
+            .cloned()
+        {
             return Ok(MethodTarget::Implemented {
                 method_info,
-                return_type,
+                return_type: (*binding.func_type.return_type).clone(),
+            });
+        }
+
+        // Fallback: try looking up by method_name_id from EntityRegistry
+        if let Some(type_id) = TypeId::from_type(
+            input.object_type,
+            &input.analyzed.entity_registry.type_table,
+        ) && let Some(method_info) = input
+            .impl_method_infos
+            .get(&(type_id, method_name_id))
+            .cloned()
+        {
+            return Ok(MethodTarget::Implemented {
+                method_info,
+                return_type: (*binding.func_type.return_type).clone(),
+            });
+        }
+
+        // If binding has external_info, use that directly
+        // This handles external methods from prelude that aren't in impl_method_infos
+        if let Some(external_info) = &binding.external_info {
+            return Ok(MethodTarget::External {
+                external_info: external_info.clone(),
+                return_type: (*binding.func_type.return_type).clone(),
             });
         }
     }
 
+    // Fallback: try impl_method_infos directly (legacy path)
+    if let Some(type_id) = TypeId::from_type(
+        input.object_type,
+        &input.analyzed.entity_registry.type_table,
+    ) && let Ok(method_info) = lookup_impl_method(type_id)
+    {
+        let return_type = method_info.return_type.clone();
+        return Ok(MethodTarget::Implemented {
+            method_info,
+            return_type,
+        });
+    }
+
     // Try direct methods (methods defined inside class/record)
     // This only works for classes/records, not primitives.
-    if let Ok(type_name_id) = get_type_name_id(input.object_type) {
-        if let Ok(method_info) = lookup_direct_method(type_name_id) {
-            let return_type = method_info.return_type.clone();
-            return Ok(MethodTarget::Direct {
-                method_info,
-                return_type,
-            });
-        }
+    if let Ok(type_name_id) = get_type_name_id(input.object_type)
+        && let Ok(method_info) = lookup_direct_method(type_name_id)
+    {
+        let return_type = method_info.return_type.clone();
+        return Ok(MethodTarget::Direct {
+            method_info,
+            return_type,
+        });
     }
 
     // Neither found - return error
@@ -283,4 +337,31 @@ pub(crate) fn resolve_method_target(
             input.object_type
         )
     ))
+}
+
+/// Get TypeDefId for a type during codegen (handles primitives, records, classes)
+fn get_type_def_id_for_codegen(ty: &Type, analyzed: &AnalyzedProgram) -> Option<TypeDefId> {
+    let name_id = match ty {
+        Type::Class(c) => Some(c.name_id),
+        Type::Record(r) => Some(r.name_id),
+        Type::Interface(i) => Some(i.name_id),
+        Type::GenericInstance { def, .. } => Some(*def),
+        // Primitives - look up via well-known NameIds
+        Type::I8 => Some(analyzed.name_table.primitives.i8),
+        Type::I16 => Some(analyzed.name_table.primitives.i16),
+        Type::I32 => Some(analyzed.name_table.primitives.i32),
+        Type::I64 => Some(analyzed.name_table.primitives.i64),
+        Type::I128 => Some(analyzed.name_table.primitives.i128),
+        Type::U8 => Some(analyzed.name_table.primitives.u8),
+        Type::U16 => Some(analyzed.name_table.primitives.u16),
+        Type::U32 => Some(analyzed.name_table.primitives.u32),
+        Type::U64 => Some(analyzed.name_table.primitives.u64),
+        Type::F32 => Some(analyzed.name_table.primitives.f32),
+        Type::F64 => Some(analyzed.name_table.primitives.f64),
+        Type::Bool => Some(analyzed.name_table.primitives.bool),
+        Type::String => Some(analyzed.name_table.primitives.string),
+        _ => None,
+    }?;
+
+    analyzed.entity_registry.type_by_name(name_id)
 }
