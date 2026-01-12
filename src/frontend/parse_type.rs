@@ -83,10 +83,7 @@ impl<'src> Parser<'src> {
                         param_types.push(self.parse_type()?);
                     }
                 }
-                self.consume(
-                    TokenType::RParen,
-                    "expected ')' after type expression",
-                )?;
+                self.consume(TokenType::RParen, "expected ')' after type expression")?;
 
                 // If followed by ->, it's a function type
                 if self.match_token(TokenType::Arrow) {

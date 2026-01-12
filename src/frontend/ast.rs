@@ -221,12 +221,12 @@ pub struct StructuralMethod {
 pub enum TypeExpr {
     Primitive(PrimitiveType),
     Named(Symbol),
-    Array(Box<TypeExpr>),    // [i32], [string], etc.
-    Optional(Box<TypeExpr>), // T? syntax (desugars to Union with Nil)
+    Array(Box<TypeExpr>),       // [i32], [string], etc.
+    Optional(Box<TypeExpr>),    // T? syntax (desugars to Union with Nil)
     Union(Vec<TypeExpr>),       // A | B | C
     Combination(Vec<TypeExpr>), // A + B + C (must satisfy all constraints)
     Nil,                        // nil type
-    Done,                    // Done type (iterator termination sentinel)
+    Done,                       // Done type (iterator termination sentinel)
     Function {
         params: Vec<TypeExpr>,
         return_type: Box<TypeExpr>,

@@ -1154,13 +1154,9 @@ impl Cg<'_, '_, '_> {
                         // Branch: if pattern matches -> extract_block, else -> next_block
                         let cond = pattern_check.unwrap();
                         let cond_i32 = self.cond_to_i32(cond);
-                        self.builder.ins().brif(
-                            cond_i32,
-                            extract_block,
-                            &[],
-                            next_block,
-                            &[],
-                        );
+                        self.builder
+                            .ins()
+                            .brif(cond_i32, extract_block, &[], next_block, &[]);
                         self.builder.seal_block(arm_block);
                         // extract_block becomes the effective arm block for sealing later
                         effective_arm_block = extract_block;
@@ -1168,24 +1164,22 @@ impl Cg<'_, '_, '_> {
                         // Extract block: extract fields from union payload
                         self.builder.switch_to_block(extract_block);
 
-                        let (field_source, field_source_type) =
-                            if let Some(ref pt) = pattern_type {
-                                // Extract payload from union at offset 8
-                                let payload = self.builder.ins().load(
-                                    types::I64,
-                                    MemFlags::new(),
-                                    scrutinee.value,
-                                    8,
-                                );
-                                (payload, pt.clone())
-                            } else {
-                                (scrutinee.value, scrutinee.vole_type.clone())
-                            };
+                        let (field_source, field_source_type) = if let Some(ref pt) = pattern_type {
+                            // Extract payload from union at offset 8
+                            let payload = self.builder.ins().load(
+                                types::I64,
+                                MemFlags::new(),
+                                scrutinee.value,
+                                8,
+                            );
+                            (payload, pt.clone())
+                        } else {
+                            (scrutinee.value, scrutinee.vole_type.clone())
+                        };
 
                         // Extract and bind fields
                         for field_pattern in fields {
-                            let field_name =
-                                self.ctx.interner.resolve(field_pattern.field_name);
+                            let field_name = self.ctx.interner.resolve(field_pattern.field_name);
                             let (slot, field_type) =
                                 get_field_slot_and_type(&field_source_type, field_name, self.ctx)?;
                             let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
@@ -1226,8 +1220,7 @@ impl Cg<'_, '_, '_> {
 
                         // Extract and bind fields
                         for field_pattern in fields {
-                            let field_name =
-                                self.ctx.interner.resolve(field_pattern.field_name);
+                            let field_name = self.ctx.interner.resolve(field_pattern.field_name);
                             let (slot, field_type) =
                                 get_field_slot_and_type(&field_source_type, field_name, self.ctx)?;
                             let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
