@@ -1,0 +1,114 @@
+// Test: Generic class with multiple interface constraints
+// Ensures class method monomorphization works with T: A + B syntax
+
+interface Hashable { func hash() -> i64 }
+interface Eq { func eq(other: Self) -> bool }
+interface Stringable { func str() -> string }
+
+// Class with two constraints
+class Container<T: Hashable + Eq> {
+    item: T,
+
+    func getHash() -> i64 {
+        return self.item.hash()
+    }
+
+    func matches(other: T) -> bool {
+        return self.item.eq(other)
+    }
+
+    // Call both constraint methods in one method
+    func hashIfMatch(other: T) -> i64 {
+        if self.item.eq(other) {
+            return self.item.hash()
+        }
+        return 0
+    }
+}
+
+// Class with three constraints
+class RichContainer<T: Hashable + Eq + Stringable> {
+    item: T,
+
+    func describe() -> string {
+        return self.item.str()
+    }
+
+    func hashAndDescribe() -> i64 {
+        let _ = self.item.str()  // Call Stringable
+        return self.item.hash()   // Call Hashable
+    }
+}
+
+// Two type params with different constraints
+class Pair<K: Hashable, V: Stringable> {
+    key: K,
+    value: V,
+
+    func keyHash() -> i64 {
+        return self.key.hash()
+    }
+
+    func valueStr() -> string {
+        return self.value.str()
+    }
+}
+
+record Id implements Hashable, Eq, Stringable {
+    n: i64,
+}
+
+implement Hashable for Id {
+    func hash() -> i64 { return self.n * 17 }
+}
+
+implement Eq for Id {
+    func eq(other: Id) -> bool { return self.n == other.n }
+}
+
+implement Stringable for Id {
+    func str() -> string { return "Id" }
+}
+
+record Label implements Stringable {
+    text: string,
+}
+
+implement Stringable for Label {
+    func str() -> string { return self.text }
+}
+
+tests {
+    test "class with two constraints - hash" {
+        let c = Container { item: Id { n: 5 } }
+        assert(c.getHash() == 85)  // 5 * 17
+    }
+
+    test "class with two constraints - eq true" {
+        let c = Container { item: Id { n: 5 } }
+        assert(c.matches(Id { n: 5 }) == true)
+    }
+
+    test "class with two constraints - eq false" {
+        let c = Container { item: Id { n: 5 } }
+        assert(c.matches(Id { n: 10 }) == false)
+    }
+
+    test "class method calls both constraints" {
+        let c = Container { item: Id { n: 7 } }
+        assert(c.hashIfMatch(Id { n: 7 }) == 119)  // 7 * 17
+        assert(c.hashIfMatch(Id { n: 99 }) == 0)   // no match
+    }
+
+    test "class with three constraints" {
+        let c = RichContainer { item: Id { n: 3 } }
+        assert(c.describe() == "Id")
+        assert(c.hashAndDescribe() == 51)  // 3 * 17
+    }
+
+    test "two type params different constraints" {
+        let p = Pair { key: Id { n: 4 }, value: Label { text: "four" } }
+        assert(p.keyHash() == 68)  // 4 * 17
+        assert(p.valueStr() == "four")
+    }
+}
