@@ -821,6 +821,11 @@ impl Cg<'_, '_, '_> {
             let compiled = self.expr(arg)?;
             let compiled = if matches!(param_type, Type::Interface(_)) {
                 box_interface_value(self.builder, self.ctx, compiled, param_type)?
+            } else if matches!(param_type, Type::Union(_))
+                && !matches!(&compiled.vole_type, Type::Union(_))
+            {
+                // Box concrete type into union representation
+                self.construct_union(compiled, param_type)?
             } else {
                 compiled
             };

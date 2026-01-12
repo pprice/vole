@@ -1,0 +1,49 @@
+// Test: Union type parameter boxing in lambda calls
+// Bug: vole-nflj - calling lambdas with concrete types when parameter
+// is a union type failed with Cranelift verifier errors
+
+let Numeric: type = i32 | i64 | f64
+
+let checkType = (n: Numeric) -> i64 => {
+    if n is i32 { return 0 }
+    if n is i64 { return 1 }
+    if n is f64 { return 2 }
+    return -1
+}
+
+let isNumeric = (n: Numeric) -> bool => {
+    return (n is i32) || (n is i64) || (n is f64)
+}
+
+tests {
+    test "lambda with union param - i32 literal" {
+        assert(checkType(5) == 0)
+        assert(isNumeric(5))
+    }
+
+    test "lambda with union param - i64 variable" {
+        let x: i64 = 10
+        assert(checkType(x) == 1)
+        assert(isNumeric(x))
+    }
+
+    test "lambda with union param - f64 literal" {
+        assert(checkType(3.14) == 2)
+        assert(isNumeric(3.14))
+    }
+
+    test "lambda with optional param - some" {
+        let check = (x: i64?) -> bool => x is i64
+        assert(check(42))
+    }
+
+    test "lambda with optional param - nil" {
+        let check = (x: i64?) -> bool => x is nil
+        assert(check(nil))
+    }
+
+    test "higher-order lambda with union" {
+        let apply = (f: (Numeric) -> bool, n: Numeric) -> bool => f(n)
+        assert(apply(isNumeric, 100))
+    }
+}
