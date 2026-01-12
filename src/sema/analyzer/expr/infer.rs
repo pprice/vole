@@ -41,7 +41,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    return Ok(Type::error("propagate"));
+                    return Ok(Type::invalid("propagate"));
                 }
 
                 // Use get_variable_type to respect flow-sensitive narrowing
@@ -66,7 +66,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    Ok(Type::error("propagate"))
+                    Ok(Type::invalid("propagate"))
                 }
             }
 
@@ -88,7 +88,7 @@ impl Analyzer {
                             } else {
                                 // Right doesn't implement Stringable
                                 self.type_error("Stringable", &right_ty, bin.right.span);
-                                Ok(Type::error("propagate"))
+                                Ok(Type::invalid("propagate"))
                             }
                         } else if left_ty.is_numeric() && right_ty.is_numeric() {
                             // Numeric addition
@@ -106,7 +106,7 @@ impl Analyzer {
                                 &right_ty,
                                 expr.span,
                             );
-                            Ok(Type::error("propagate"))
+                            Ok(Type::invalid("propagate"))
                         }
                     }
                     BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
@@ -121,7 +121,7 @@ impl Analyzer {
                             }
                         } else {
                             self.type_error_pair("numeric", &left_ty, &right_ty, expr.span);
-                            Ok(Type::error("propagate"))
+                            Ok(Type::invalid("propagate"))
                         }
                     }
                     BinaryOp::Eq
@@ -135,7 +135,7 @@ impl Analyzer {
                             Ok(Type::Bool)
                         } else {
                             self.type_error_pair("bool", &left_ty, &right_ty, expr.span);
-                            Ok(Type::error("propagate"))
+                            Ok(Type::invalid("propagate"))
                         }
                     }
                     BinaryOp::BitAnd
@@ -151,7 +151,7 @@ impl Analyzer {
                             }
                         } else {
                             self.type_error_pair("integer", &left_ty, &right_ty, expr.span);
-                            Ok(Type::error("propagate"))
+                            Ok(Type::invalid("propagate"))
                         }
                     }
                 }
@@ -165,7 +165,7 @@ impl Analyzer {
                             Ok(operand_ty)
                         } else {
                             self.type_error("numeric", &operand_ty, expr.span);
-                            Ok(Type::error("propagate"))
+                            Ok(Type::invalid("propagate"))
                         }
                     }
                     UnaryOp::Not => {
@@ -173,7 +173,7 @@ impl Analyzer {
                             Ok(Type::Bool)
                         } else {
                             self.type_error("bool", &operand_ty, expr.span);
-                            Ok(Type::error("propagate"))
+                            Ok(Type::invalid("propagate"))
                         }
                     }
                     UnaryOp::BitNot => {
@@ -181,7 +181,7 @@ impl Analyzer {
                             Ok(operand_ty)
                         } else {
                             self.type_error("integer", &operand_ty, expr.span);
-                            Ok(Type::error("propagate"))
+                            Ok(Type::invalid("propagate"))
                         }
                     }
                 }
@@ -262,7 +262,7 @@ impl Analyzer {
                                     },
                                     idx.index.span,
                                 );
-                                Ok(Type::error("propagate"))
+                                Ok(Type::invalid("propagate"))
                             }
                         } else {
                             // Non-constant index - return union of all element types
@@ -273,7 +273,7 @@ impl Analyzer {
                     Type::FixedArray { element, .. } => Ok(*element),
                     _ => {
                         self.type_error("array", &obj_ty, idx.object.span);
-                        Ok(Type::error("propagate"))
+                        Ok(Type::invalid("propagate"))
                     }
                 }
             }
@@ -307,11 +307,11 @@ impl Analyzer {
                         },
                         nc.value.span,
                     );
-                    return Ok(Type::error("propagate"));
+                    return Ok(Type::invalid("propagate"));
                 }
 
                 // Get the non-nil type
-                let unwrapped = value_type.unwrap_optional().unwrap_or_else(|| Type::error("unwrap_failed"));
+                let unwrapped = value_type.unwrap_optional().unwrap_or_else(|| Type::invalid("unwrap_failed"));
 
                 // Default must match the unwrapped type
                 let _default_type =
@@ -468,7 +468,7 @@ impl Analyzer {
                         },
                         if_expr.span,
                     );
-                    return Ok(Type::error("propagate"));
+                    return Ok(Type::invalid("propagate"));
                 };
 
                 let else_ty = self.check_expr(else_branch, interner)?;
@@ -476,7 +476,7 @@ impl Analyzer {
                 // Both branches must have compatible types
                 if !self.types_compatible(&then_ty, &else_ty, interner) {
                     self.add_type_mismatch(&then_ty, &else_ty, else_branch.span);
-                    Ok(Type::error("propagate"))
+                    Ok(Type::invalid("propagate"))
                 } else {
                     Ok(then_ty)
                 }
@@ -516,7 +516,7 @@ impl Analyzer {
             ExprKind::StringLiteral(_) => Type::String,
             ExprKind::Nil => Type::Nil,
             // Not a literal - this shouldn't happen if is_literal() was checked
-            _ => Type::error("fallback"),
+            _ => Type::invalid("fallback"),
         }
     }
 }

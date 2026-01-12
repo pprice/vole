@@ -1413,7 +1413,7 @@ impl Analyzer {
         let target_type = self.resolve_type(&impl_block.target_type, interner);
 
         // Validate target type exists
-        if target_type.is_error() {
+        if target_type.is_invalid() {
             let type_name = match &impl_block.target_type {
                 TypeExpr::Named(sym) => interner.resolve(*sym).to_string(),
                 _ => "unknown".to_string(),

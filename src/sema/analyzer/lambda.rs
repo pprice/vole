@@ -34,7 +34,7 @@ impl Analyzer {
                         },
                         param.span,
                     );
-                    Type::error("propagate")
+                    Type::invalid("propagate")
                 }
             } else {
                 // No type info available
@@ -45,7 +45,7 @@ impl Analyzer {
                     },
                     param.span,
                 );
-                Type::error("propagate")
+                Type::invalid("propagate")
             };
             param_types.push(ty);
         }
@@ -80,7 +80,7 @@ impl Analyzer {
                 // For expression body, analyze and use as return type
                 match self.check_expr(expr, interner) {
                     Ok(ty) => ty,
-                    Err(_) => Type::error("fallback"),
+                    Err(_) => Type::invalid("fallback"),
                 }
             }
             LambdaBody::Block(block) => {

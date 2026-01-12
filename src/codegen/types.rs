@@ -357,12 +357,20 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         if let Some(ref aliased) = type_def.aliased_type {
                             return aliased.clone();
                         }
-                        Type::error("codegen_resolve")
+                        panic!(
+                            "INTERNAL ERROR: type alias has no aliased_type\n\
+                             type_def_id: {:?}, name_id: {:?}",
+                            type_def_id, type_def.name_id
+                        )
                     }
                     TypeDefKind::Interface => {
                         // Generic interface without type args is an error
                         if !type_def.type_params.is_empty() {
-                            return Type::error("codegen_error");
+                            panic!(
+                                "INTERNAL ERROR: generic interface used without type args\n\
+                                 type_def_id: {:?}, name_id: {:?}, type_params: {:?}",
+                                type_def_id, type_def.name_id, type_def.type_params
+                            );
                         }
                         build_interface_type_from_entity(type_def_id, entity_registry, Vec::new())
                     }
@@ -371,7 +379,11 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         if let Some(error_info) = type_def.error_info.clone() {
                             Type::ErrorType(error_info)
                         } else {
-                            Type::error("codegen_resolve")
+                            panic!(
+                                "INTERNAL ERROR: error type has no error_info\n\
+                                 type_def_id: {:?}, name_id: {:?}",
+                                type_def_id, type_def.name_id
+                            )
                         }
                     }
                     TypeDefKind::Record | TypeDefKind::Class => {
@@ -404,21 +416,34 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         {
                             return Type::Class(class_type);
                         }
-                        Type::error("codegen_resolve")
+                        panic!(
+                            "INTERNAL ERROR: failed to build record/class type\n\
+                             type_def_id: {:?}, kind: {:?}, name_id: {:?}",
+                            type_def_id, type_def.kind, type_def.name_id
+                        )
                     }
                     _ => {
                         // Primitive or unknown - check type metadata
                         if let Some(metadata) = type_metadata.get(sym) {
                             metadata.vole_type.clone()
                         } else {
-                            Type::error("codegen_resolve")
+                            panic!(
+                                "INTERNAL ERROR: unknown type kind with no metadata\n\
+                                 type_def_id: {:?}, kind: {:?}, sym: {:?}",
+                                type_def_id, type_def.kind, sym
+                            )
                         }
                     }
                 }
             } else if let Some(metadata) = type_metadata.get(sym) {
                 metadata.vole_type.clone()
             } else {
-                Type::error("codegen_resolve")
+                // This might be a type parameter (e.g., T in Box<T>).
+                // Type parameters are resolved when the generic is instantiated.
+                // For now, return Unknown as a placeholder.
+                let name = interner.resolve(*sym);
+                tracing::trace!(name, "type parameter in codegen, using Unknown placeholder");
+                Type::Unknown
             }
         }
         TypeExpr::Array(elem) => {
@@ -494,8 +519,10 @@ pub(crate) fn resolve_type_expr_with_metadata(
             })
         }
         TypeExpr::SelfType => {
-            // Self type is resolved during interface/implement compilation
-            Type::error("codegen_resolve")
+            // Self type in interface signatures is resolved when the interface is implemented.
+            // For interface method signature compilation, we use Unknown as a placeholder.
+            // The actual Self type is substituted when compiling implement blocks.
+            Type::Unknown
         }
         TypeExpr::Fallible {
             success_type,
@@ -546,7 +573,15 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     if !type_def.type_params.is_empty()
                         && type_def.type_params.len() != resolved_args.len()
                     {
-                        return Type::error("codegen_error");
+                        panic!(
+                            "INTERNAL ERROR: generic interface type arg count mismatch\n\
+                             expected {} type args, got {}\n\
+                             type_def_id: {:?}, name_id: {:?}",
+                            type_def.type_params.len(),
+                            resolved_args.len(),
+                            type_def_id,
+                            type_def.name_id
+                        );
                     }
                     // Build substitution map using type param NameIds
                     let mut substitutions = HashMap::new();
@@ -593,7 +628,12 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 }
             }
             let Some(name_id) = name_table.name_id(module_id, &[*name], interner) else {
-                return Type::error("codegen_error");
+                panic!(
+                    "INTERNAL ERROR: failed to get name_id for generic type\n\
+                     name: {:?}, module_id: {:?}",
+                    interner.resolve(*name),
+                    module_id
+                )
             };
             Type::GenericInstance {
                 def: name_id,

@@ -209,7 +209,13 @@ impl Compiler<'_> {
                 .type_metadata
                 .get(sym)
                 .map(|m| m.vole_type.clone())
-                .unwrap_or_else(|| Type::error("unwrap_failed")),
+                .unwrap_or_else(|| {
+                    panic!(
+                        "INTERNAL ERROR: implement block target type not in type_metadata\n\
+                         sym: {:?}",
+                        sym
+                    )
+                }),
             _ => resolve_type_expr_full(
                 &impl_block.target_type,
                 &self.analyzed.entity_registry,
@@ -354,7 +360,13 @@ impl Compiler<'_> {
                 .type_metadata
                 .get(sym)
                 .map(|m| m.vole_type.clone())
-                .unwrap_or_else(|| Type::error("unwrap_failed")),
+                .unwrap_or_else(|| {
+                    panic!(
+                        "INTERNAL ERROR: implement block self type not in type_metadata\n\
+                         sym: {:?}",
+                        sym
+                    )
+                }),
             _ => {
                 let query = self.query();
                 resolve_type_expr_query(

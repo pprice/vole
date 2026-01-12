@@ -205,7 +205,7 @@ impl Analyzer {
                                 &iterable_ty,
                                 for_stmt.iterable.span,
                             );
-                            Type::error("propagate")
+                            Type::invalid("propagate")
                         }
                     }
                     Type::Interface(_) => {
@@ -219,7 +219,7 @@ impl Analyzer {
                                 &iterable_ty,
                                 for_stmt.iterable.span,
                             );
-                            Type::error("propagate")
+                            Type::invalid("propagate")
                         }
                     }
                     _ => {
@@ -228,7 +228,7 @@ impl Analyzer {
                             &iterable_ty,
                             for_stmt.iterable.span,
                         );
-                        Type::error("propagate")
+                        Type::invalid("propagate")
                     }
                 };
 
@@ -403,7 +403,7 @@ impl Analyzer {
                 },
                 stmt.span,
             );
-            return Type::error("propagate");
+            return Type::invalid("propagate");
         };
 
         // Look up the error type via resolver
@@ -419,7 +419,7 @@ impl Analyzer {
                 },
                 stmt.span,
             );
-            return Type::error("propagate");
+            return Type::invalid("propagate");
         };
 
         let type_def = self.entity_registry.get_type(type_id);
@@ -432,7 +432,7 @@ impl Analyzer {
                 },
                 stmt.span,
             );
-            return Type::error("propagate");
+            return Type::invalid("propagate");
         };
 
         // Get the error type name for error messages
@@ -461,7 +461,7 @@ impl Analyzer {
         for field_init in &stmt.fields {
             let value_type = match self.check_expr(&field_init.value, interner) {
                 Ok(ty) => ty,
-                Err(_) => Type::error("fallback"),
+                Err(_) => Type::invalid("fallback"),
             };
             let field_init_name = interner.resolve(field_init.name);
             if let Some(field) = error_info.fields.iter().find(|f| f.name == field_init_name) {
@@ -538,7 +538,7 @@ impl Analyzer {
                     },
                     inner_expr.span,
                 );
-                return Ok(Type::error("propagate"));
+                return Ok(Type::invalid("propagate"));
             }
         };
 

@@ -34,7 +34,7 @@ impl Analyzer {
                         &generic_info,
                         interner,
                     ),
-                    _ => Ok(Type::error("propagate")),
+                    _ => Ok(Type::invalid("propagate")),
                 };
             }
         }
@@ -60,7 +60,7 @@ impl Analyzer {
                             },
                             expr.span,
                         );
-                        return Ok(Type::error("propagate"));
+                        return Ok(Type::invalid("propagate"));
                     }
                 }
                 TypeDefKind::Record => {
@@ -81,7 +81,7 @@ impl Analyzer {
                             },
                             expr.span,
                         );
-                        return Ok(Type::error("propagate"));
+                        return Ok(Type::invalid("propagate"));
                     }
                 }
                 _ => {
@@ -92,7 +92,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    return Ok(Type::error("propagate"));
+                    return Ok(Type::invalid("propagate"));
                 }
             }
         } else {
@@ -103,7 +103,7 @@ impl Analyzer {
                 },
                 expr.span,
             );
-            return Ok(Type::error("propagate"));
+            return Ok(Type::invalid("propagate"));
         };
 
         // Check that all required fields are present

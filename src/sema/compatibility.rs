@@ -68,7 +68,7 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
     }
 
     // Error type is compatible with anything (for error recovery)
-    if from.is_error() || to.is_error() {
+    if from.is_invalid() || to.is_invalid() {
         return true;
     }
 
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_types_compatible_error() {
-        let err = Type::error("test");
+        let err = Type::invalid("test");
         assert!(types_compatible_core(&err, &Type::I32));
         assert!(types_compatible_core(&Type::I32, &err));
     }

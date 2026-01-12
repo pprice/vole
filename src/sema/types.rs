@@ -1,38 +1,117 @@
 // src/sema/types.rs
 
-use crate::frontend::{PrimitiveType, Symbol};
+use crate::frontend::{PrimitiveType, Span, Symbol};
 use crate::identity::{ModuleId, NameId};
 
-/// Reason for a Type::Error - helps debugging
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ErrorReason {
-    pub reason: &'static str,
-    pub context: Option<String>,
+/// Analysis error - represents a type that couldn't be determined.
+/// Designed to be maximally useful for LLM debugging.
+/// Chains to source error for full traceability.
+#[derive(Debug, Clone)]
+pub struct AnalysisError {
+    /// Category for filtering/grouping (e.g., "unknown_field", "type_mismatch")
+    pub kind: &'static str,
+    /// Full human-readable description with all relevant context
+    /// e.g., "field 'foo' not found on Record 'Bar' (has fields: x, y, z)"
+    pub message: String,
+    /// Where it happened in source
+    pub span: Option<Span>,
+    /// The upstream error we're propagating from (if any)
+    pub source: Option<Box<AnalysisError>>,
 }
 
-impl ErrorReason {
-    pub const fn new(reason: &'static str) -> Self {
+impl AnalysisError {
+    /// Create a fresh error with full context (preferred for new code)
+    pub fn new(kind: &'static str, message: impl Into<String>) -> Self {
+        let msg = message.into();
+        tracing::trace!(kind, %msg, "AnalysisError::new");
         Self {
-            reason,
-            context: None,
+            kind,
+            message: msg,
+            span: None,
+            source: None,
         }
     }
 
-    pub fn with_context(reason: &'static str, context: impl Into<String>) -> Self {
+    /// Create a fresh error with location
+    pub fn at(kind: &'static str, message: impl Into<String>, span: Span) -> Self {
+        let msg = message.into();
+        tracing::trace!(kind, %msg, ?span, "AnalysisError::at");
         Self {
-            reason,
-            context: Some(context.into()),
+            kind,
+            message: msg,
+            span: Some(span),
+            source: None,
         }
+    }
+
+    /// Create a simple error (for migration from old API - prefer new() with message)
+    pub fn simple(kind: &'static str) -> Self {
+        Self {
+            kind,
+            message: kind.to_string(),
+            span: None,
+            source: None,
+        }
+    }
+
+    /// Propagate from an existing error, adding context about what we were doing
+    pub fn propagate(source: &AnalysisError, context: impl Into<String>, span: Option<Span>) -> Self {
+        let ctx = context.into();
+        let result = Self {
+            kind: "propagate",
+            message: ctx.clone(),
+            span,
+            source: Some(Box::new(source.clone())),
+        };
+        tracing::trace!(
+            context = %ctx,
+            root_cause = %source.root_cause().message,
+            "AnalysisError::propagate"
+        );
+        result
+    }
+
+    /// Get the root cause of this error chain
+    pub fn root_cause(&self) -> &AnalysisError {
+        match &self.source {
+            Some(src) => src.root_cause(),
+            None => self,
+        }
+    }
+
+    /// Format the full error chain for debugging (multi-line)
+    pub fn full_chain(&self) -> String {
+        let mut parts = vec![self.format_single()];
+        let mut current = &self.source;
+        while let Some(src) = current {
+            parts.push(src.format_single());
+            current = &src.source;
+        }
+        parts.join("\n  <- ")
+    }
+
+    fn format_single(&self) -> String {
+        let mut s = format!("[{}] {}", self.kind, self.message);
+        if let Some(span) = &self.span {
+            s.push_str(&format!(" (line {}:{})", span.line, span.column));
+        }
+        s
     }
 }
 
-impl std::fmt::Display for ErrorReason {
+impl PartialEq for AnalysisError {
+    fn eq(&self, _other: &Self) -> bool {
+        // For type comparison, all Invalid types are equal
+        // (we don't want type mismatches based on error details)
+        true
+    }
+}
+
+impl Eq for AnalysisError {}
+
+impl std::fmt::Display for AnalysisError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.reason)?;
-        if let Some(ctx) = &self.context {
-            write!(f, " ({})", ctx)?;
-        }
-        Ok(())
+        write!(f, "{}", self.full_chain())
     }
 }
 
@@ -76,8 +155,8 @@ pub enum Type {
     Function(FunctionType),
     /// Unknown (for type inference)
     Unknown,
-    /// Error type (for error recovery) - carries reason for debugging
-    Error(ErrorReason),
+    /// Invalid type - analysis failed, carries error chain for debugging
+    Invalid(AnalysisError),
     /// The metatype - the type of types themselves
     /// e.g., `i32` has type `Type`, `let MyInt = i32` assigns a type value
     Type,
@@ -386,7 +465,7 @@ impl Type {
             Type::Array(_) => "array",
             Type::Function(_) => "function",
             Type::Unknown => "unknown",
-            Type::Error(_) => "error",
+            Type::Invalid(_) => "<invalid>",
             Type::Type => "type",
             Type::Class(_) => "class",
             Type::Record(_) => "record",
@@ -428,22 +507,77 @@ impl Type {
         Type::Union(vec![inner, Type::Nil])
     }
 
-    /// Create an error type with a static reason
-    pub fn error(reason: &'static str) -> Type {
-        tracing::trace!(reason, "Type::error created");
-        Type::Error(ErrorReason::new(reason))
+    /// Create an invalid type with just a kind (for migration - prefer invalid_msg)
+    pub fn invalid(kind: &'static str) -> Type {
+        Type::Invalid(AnalysisError::simple(kind))
     }
 
-    /// Create an error type with a reason and dynamic context
-    pub fn error_ctx(reason: &'static str, context: impl Into<String>) -> Type {
-        let ctx = context.into();
-        tracing::trace!(reason, context = %ctx, "Type::error_ctx created");
-        Type::Error(ErrorReason::with_context(reason, ctx))
+    /// Create an invalid type with kind and descriptive message
+    pub fn invalid_msg(kind: &'static str, message: impl Into<String>) -> Type {
+        Type::Invalid(AnalysisError::new(kind, message))
     }
 
-    /// Check if this type is an error (any reason)
-    pub fn is_error(&self) -> bool {
-        matches!(self, Type::Error(_))
+    /// Create an invalid type with kind, message, and location
+    pub fn invalid_at(kind: &'static str, message: impl Into<String>, span: Span) -> Type {
+        Type::Invalid(AnalysisError::at(kind, message, span))
+    }
+
+    /// Propagate an invalid type, chaining to the source error with context
+    pub fn propagate_invalid(source: &Type, context: impl Into<String>, span: Option<Span>) -> Type {
+        if let Type::Invalid(err) = source {
+            Type::Invalid(AnalysisError::propagate(err, context, span))
+        } else {
+            // Shouldn't call this on non-invalid types
+            Type::Invalid(AnalysisError::new("internal", "propagate_invalid called on valid type"))
+        }
+    }
+
+    /// Check if this type is invalid (analysis failed)
+    pub fn is_invalid(&self) -> bool {
+        matches!(self, Type::Invalid(_))
+    }
+
+    /// Get the analysis error if this is an invalid type
+    pub fn analysis_error(&self) -> Option<&AnalysisError> {
+        match self {
+            Type::Invalid(err) => Some(err),
+            _ => None,
+        }
+    }
+
+    /// Assert this type is valid (not Invalid). Panics with context if Invalid.
+    /// Use in codegen where Invalid types indicate a compiler bug.
+    #[track_caller]
+    pub fn expect_valid(&self, context: &str) -> &Self {
+        if let Type::Invalid(err) = self {
+            panic!(
+                "INTERNAL ERROR: Type::Invalid encountered in codegen\n\
+                 Context: {}\n\
+                 Error chain:\n  {}\n\
+                 Location: {}",
+                context,
+                err.full_chain(),
+                std::panic::Location::caller()
+            );
+        }
+        self
+    }
+
+    /// Unwrap optional, panicking with context if it fails.
+    /// Use in codegen where unwrap failure indicates a compiler bug.
+    #[track_caller]
+    pub fn unwrap_optional_or_panic(&self, context: &str) -> Type {
+        self.unwrap_optional().unwrap_or_else(|| {
+            panic!(
+                "INTERNAL ERROR: unwrap_optional failed\n\
+                 Context: {}\n\
+                 Type: {:?}\n\
+                 Location: {}",
+                context,
+                self,
+                std::panic::Location::caller()
+            )
+        })
     }
 
     /// Normalize a union: flatten nested unions, sort, dedupe, unwrap single-element

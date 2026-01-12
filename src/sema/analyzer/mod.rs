@@ -810,7 +810,7 @@ impl Analyzer {
 
         // Check type params match
         if !type_def.type_params.is_empty() && type_def.type_params.len() != type_args.len() {
-            return Some(Type::error("propagate"));
+            return Some(Type::invalid("propagate"));
         }
 
         // Build substitution map using type param NameIds
@@ -1736,13 +1736,13 @@ impl Analyzer {
                 .entity_registry
                 .build_class_type(type_def_id, &self.name_table)
                 .map(Type::Class)
-                .unwrap_or_else(|| Type::error("unwrap_failed")),
+                .unwrap_or_else(|| Type::invalid("unwrap_failed")),
             TypeDefKind::Record => self
                 .entity_registry
                 .build_record_type(type_def_id, &self.name_table)
                 .map(Type::Record)
-                .unwrap_or_else(|| Type::error("unwrap_failed")),
-            _ => Type::error("fallback"),
+                .unwrap_or_else(|| Type::invalid("unwrap_failed")),
+            _ => Type::invalid("fallback"),
         };
         self.scope.define(
             self_sym,

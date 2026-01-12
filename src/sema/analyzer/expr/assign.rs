@@ -21,7 +21,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    (Type::error("propagate"), false, false)
+                    (Type::invalid("propagate"), false, false)
                 }
             }
             AssignTarget::Field {
@@ -48,7 +48,7 @@ impl Analyzer {
                                 },
                                 *field_span,
                             );
-                            (Type::error("propagate"), false, false)
+                            (Type::invalid("propagate"), false, false)
                         }
                     }
                     Type::Record(r) => {
@@ -64,10 +64,10 @@ impl Analyzer {
                             },
                             *field_span,
                         );
-                        (Type::error("propagate"), false, false)
+                        (Type::invalid("propagate"), false, false)
                     }
                     _ => {
-                        if !obj_ty.is_error() {
+                        if !obj_ty.is_invalid() {
                             let ty = self.type_display(&obj_ty);
                             self.add_error(
                                 SemanticError::UnknownField {
@@ -78,7 +78,7 @@ impl Analyzer {
                                 *field_span,
                             );
                         }
-                        (Type::error("propagate"), false, false)
+                        (Type::invalid("propagate"), false, false)
                     }
                 }
             }
@@ -108,7 +108,7 @@ impl Analyzer {
                     Type::Array(elem_ty) => (*elem_ty, true, true),
                     Type::FixedArray { element, .. } => (*element, true, true),
                     _ => {
-                        if !obj_type.is_error() {
+                        if !obj_type.is_invalid() {
                             let found = self.type_display(&obj_type);
                             self.add_error(
                                 SemanticError::TypeMismatch {
@@ -119,14 +119,14 @@ impl Analyzer {
                                 object.span,
                             );
                         }
-                        (Type::error("propagate"), false, false)
+                        (Type::invalid("propagate"), false, false)
                     }
                 }
             }
         };
 
         // Now check the value expression with expected type context
-        let expected_ty = if target_valid && !target_ty.is_error() {
+        let expected_ty = if target_valid && !target_ty.is_invalid() {
             Some(&target_ty)
         } else {
             None
@@ -205,7 +205,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    return Ok(Type::error("propagate"));
+                    return Ok(Type::invalid("propagate"));
                 }
             }
             AssignTarget::Index { object, index } => {
@@ -234,7 +234,7 @@ impl Analyzer {
                     Type::Array(elem_ty) => *elem_ty,
                     Type::FixedArray { element, .. } => *element,
                     _ => {
-                        if !obj_type.is_error() {
+                        if !obj_type.is_invalid() {
                             let found = self.type_display(&obj_type);
                             self.add_error(
                                 SemanticError::TypeMismatch {
@@ -245,7 +245,7 @@ impl Analyzer {
                                 object.span,
                             );
                         }
-                        Type::error("propagate")
+                        Type::invalid("propagate")
                     }
                 }
             }
@@ -273,7 +273,7 @@ impl Analyzer {
                                 },
                                 *field_span,
                             );
-                            Type::error("propagate")
+                            Type::invalid("propagate")
                         }
                     }
                     Type::Record(r) => {
@@ -289,10 +289,10 @@ impl Analyzer {
                             },
                             *field_span,
                         );
-                        Type::error("propagate")
+                        Type::invalid("propagate")
                     }
                     _ => {
-                        if !obj_ty.is_error() {
+                        if !obj_ty.is_invalid() {
                             let ty = self.type_display(&obj_ty);
                             self.add_error(
                                 SemanticError::UnknownField {
@@ -303,14 +303,14 @@ impl Analyzer {
                                 *field_span,
                             );
                         }
-                        Type::error("propagate")
+                        Type::invalid("propagate")
                     }
                 }
             }
         };
 
         // Type-check the value expression with expected type context
-        let expected = if !target_type.is_error() {
+        let expected = if !target_type.is_invalid() {
             Some(&target_type)
         } else {
             None
@@ -319,8 +319,8 @@ impl Analyzer {
 
         // Check operator compatibility - compound assignment operators are arithmetic
         // For +=, -=, *=, /=, %= both operands must be numeric
-        if !target_type.is_error()
-            && !value_type.is_error()
+        if !target_type.is_invalid()
+            && !value_type.is_invalid()
             && (!target_type.is_numeric() || !value_type.is_numeric())
         {
             let found = self.type_display_pair(&target_type, &value_type);
