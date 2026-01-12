@@ -430,9 +430,10 @@ impl Analyzer {
                     return None;
                 }
                 let type_name_str = interner.resolve(*type_sym).to_string();
+                // Use resolve_type_or_interface to also find prelude classes like Map/Set
                 let type_def_id = self
                     .resolver(interner)
-                    .resolve_type(*type_sym, &self.entity_registry)?;
+                    .resolve_type_or_interface(*type_sym, &self.entity_registry)?;
                 tracing::trace!(type_name = %type_name_str, ?type_def_id, "resolved static call target (identifier)");
                 Some((type_def_id, type_name_str))
             }

@@ -1,0 +1,84 @@
+// stdlib/prelude/map.vole
+// Map - Hash map collection for i64 keys and values
+
+class Map {
+    _ptr: i64,  // Pointer to native VoleMap
+
+    statics {
+        func new() -> Map {
+            return Map { _ptr: _map_new() }
+        }
+
+        func with_capacity(capacity: i64) -> Map {
+            return Map { _ptr: _map_with_capacity(capacity) }
+        }
+    }
+
+    func get(key: i64) -> i64? {
+        let h = key.hash()
+        if !_map_has(self._ptr, key, h) {
+            return nil
+        }
+        return _map_get(self._ptr, key, h)
+    }
+
+    func contains_key(key: i64) -> bool {
+        return _map_contains_key(self._ptr, key, key.hash())
+    }
+
+    func len() -> i64 {
+        return _map_len(self._ptr)
+    }
+
+    func is_empty() -> bool {
+        return _map_len(self._ptr) == 0
+    }
+
+    func keys() -> Iterator<i64> {
+        return _map_keys_iter(self._ptr)
+    }
+
+    func values() -> Iterator<i64> {
+        return _map_values_iter(self._ptr)
+    }
+
+    func entries() -> Iterator<[i64, i64]> {
+        return _map_entries_iter(self._ptr)
+    }
+
+    func iter() -> Iterator<[i64, i64]> {
+        return _map_entries_iter(self._ptr)
+    }
+
+    func set(key: i64, value: i64) {
+        _map_set(self._ptr, key, key.hash(), value)
+    }
+
+    func remove(key: i64) -> i64? {
+        let h = key.hash()
+        if !_map_has(self._ptr, key, h) {
+            return nil
+        }
+        return _map_remove(self._ptr, key, h)
+    }
+
+    func clear() {
+        _map_clear(self._ptr)
+    }
+}
+
+// Module-level native functions
+external("std:collections") {
+    func "map_new" as _map_new() -> i64
+    func "map_with_capacity" as _map_with_capacity(capacity: i64) -> i64
+    func "map_get" as _map_get(ptr: i64, key: i64, key_hash: i64) -> i64
+    func "map_has" as _map_has(ptr: i64, key: i64, key_hash: i64) -> bool
+    func "map_set" as _map_set(ptr: i64, key: i64, key_hash: i64, value: i64) -> void
+    func "map_remove" as _map_remove(ptr: i64, key: i64, key_hash: i64) -> i64
+    func "map_contains_key" as _map_contains_key(ptr: i64, key: i64, key_hash: i64) -> bool
+    func "map_len" as _map_len(ptr: i64) -> i64
+    func "map_clear" as _map_clear(ptr: i64) -> void
+    func "map_keys_iter" as _map_keys_iter(ptr: i64) -> Iterator<i64>
+    func "map_values_iter" as _map_values_iter(ptr: i64) -> Iterator<i64>
+    func "map_entries_iter" as _map_entries_iter(ptr: i64) -> Iterator<[i64, i64]>
+}

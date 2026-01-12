@@ -117,7 +117,7 @@ pub struct MethodImpl {
 }
 
 /// Registry of methods added to types via `implement` blocks
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ImplementRegistry {
     methods: HashMap<MethodKey, MethodImpl>,
     /// External function info by string name (module path and native name) for prelude functions

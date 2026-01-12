@@ -23,6 +23,8 @@ pub struct ExpressionData {
     generics: HashMap<NodeId, MonomorphKey>,
     /// Per-module type mappings (for multi-module compilation)
     module_types: FxHashMap<String, HashMap<NodeId, Type>>,
+    /// Per-module method resolutions (for multi-module compilation)
+    module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
 }
 
 impl ExpressionData {
@@ -37,12 +39,14 @@ impl ExpressionData {
         methods: HashMap<NodeId, ResolvedMethod>,
         generics: HashMap<NodeId, MonomorphKey>,
         module_types: FxHashMap<String, HashMap<NodeId, Type>>,
+        module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
     ) -> Self {
         Self {
             types,
             methods,
             generics,
             module_types,
+            module_methods,
         }
     }
 
@@ -58,6 +62,35 @@ impl ExpressionData {
 
     /// Get the resolved method for a method call
     pub fn get_method(&self, node: NodeId) -> Option<&ResolvedMethod> {
+        self.methods.get(&node)
+    }
+
+    /// Get the resolved method for a method call, checking module-specific resolutions first
+    pub fn get_method_in_module(
+        &self,
+        node: NodeId,
+        current_module: Option<&str>,
+    ) -> Option<&ResolvedMethod> {
+        // First check module-specific resolutions
+        if let Some(module) = current_module {
+            tracing::trace!(module, ?node, "Looking up method in module");
+            if let Some(module_methods) = self.module_methods.get(module) {
+                let node_ids: Vec<_> = module_methods.keys().collect();
+                tracing::trace!(
+                    count = module_methods.len(),
+                    ?node_ids,
+                    "Found module methods"
+                );
+                if let Some(method) = module_methods.get(&node) {
+                    tracing::trace!(?method, "Found method resolution in module");
+                    return Some(method);
+                }
+                tracing::trace!(?node, "Method not found in module methods");
+            } else {
+                tracing::trace!("Module not found in module_methods");
+            }
+        }
+        // Fall back to main program resolutions
         self.methods.get(&node)
     }
 
@@ -119,5 +152,20 @@ impl ExpressionData {
     /// Get all module type mappings
     pub fn all_module_types(&self) -> &FxHashMap<String, HashMap<NodeId, Type>> {
         &self.module_types
+    }
+
+    /// Get methods for a specific module
+    pub fn module_methods(&self, module: &str) -> Option<&HashMap<NodeId, ResolvedMethod>> {
+        self.module_methods.get(module)
+    }
+
+    /// Set methods for a specific module
+    pub fn set_module_methods(&mut self, module: String, methods: HashMap<NodeId, ResolvedMethod>) {
+        self.module_methods.insert(module, methods);
+    }
+
+    /// Get all module method mappings
+    pub fn all_module_methods(&self) -> &FxHashMap<String, HashMap<NodeId, ResolvedMethod>> {
+        &self.module_methods
     }
 }

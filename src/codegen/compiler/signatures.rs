@@ -2,8 +2,10 @@ use cranelift::prelude::{Signature, Type as CraneliftType};
 use smallvec::{SmallVec, smallvec};
 
 use super::Compiler;
-use crate::codegen::types::{resolve_type_expr_query, type_to_cranelift};
-use crate::frontend::{FuncDecl, InterfaceMethod};
+use crate::codegen::types::{
+    resolve_type_expr_query, resolve_type_expr_with_metadata, type_to_cranelift,
+};
+use crate::frontend::{FuncDecl, InterfaceMethod, Interner};
 use crate::sema::Type;
 
 /// SmallVec for function parameters - most functions have <= 8 params
@@ -47,6 +49,86 @@ impl Compiler<'_> {
         let ret = method.return_type.as_ref().map(|t| {
             type_to_cranelift(
                 &resolve_type_expr_query(t, &query, &self.type_metadata, module_id),
+                self.pointer_type,
+            )
+        });
+
+        self.jit.create_signature(&params, ret)
+    }
+
+    /// Create a method signature with a specific interner (for module classes)
+    pub(super) fn create_method_signature_with_interner(
+        &self,
+        method: &FuncDecl,
+        interner: &Interner,
+    ) -> Signature {
+        let module_id = self.func_registry.main_module();
+        // Methods have `self` as implicit first parameter (pointer to instance)
+        let mut params: ParamVec = smallvec![self.pointer_type];
+        for param in &method.params {
+            params.push(type_to_cranelift(
+                &resolve_type_expr_with_metadata(
+                    &param.ty,
+                    &self.analyzed.entity_registry,
+                    &self.type_metadata,
+                    interner,
+                    &self.analyzed.name_table,
+                    module_id,
+                ),
+                self.pointer_type,
+            ));
+        }
+
+        let ret = method.return_type.as_ref().map(|t| {
+            type_to_cranelift(
+                &resolve_type_expr_with_metadata(
+                    t,
+                    &self.analyzed.entity_registry,
+                    &self.type_metadata,
+                    interner,
+                    &self.analyzed.name_table,
+                    module_id,
+                ),
+                self.pointer_type,
+            )
+        });
+
+        self.jit.create_signature(&params, ret)
+    }
+
+    /// Create a static method signature with a specific interner (for module classes)
+    pub(super) fn create_static_method_signature_with_interner(
+        &self,
+        method: &InterfaceMethod,
+        interner: &Interner,
+    ) -> Signature {
+        let module_id = self.func_registry.main_module();
+        // Static methods don't have `self` parameter
+        let mut params: ParamVec = SmallVec::new();
+        for param in &method.params {
+            params.push(type_to_cranelift(
+                &resolve_type_expr_with_metadata(
+                    &param.ty,
+                    &self.analyzed.entity_registry,
+                    &self.type_metadata,
+                    interner,
+                    &self.analyzed.name_table,
+                    module_id,
+                ),
+                self.pointer_type,
+            ));
+        }
+
+        let ret = method.return_type.as_ref().map(|t| {
+            type_to_cranelift(
+                &resolve_type_expr_with_metadata(
+                    t,
+                    &self.analyzed.entity_registry,
+                    &self.type_metadata,
+                    interner,
+                    &self.analyzed.name_table,
+                    module_id,
+                ),
                 self.pointer_type,
             )
         });

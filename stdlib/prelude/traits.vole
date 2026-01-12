@@ -112,3 +112,21 @@ interface Iterator<T> {
 interface Iterable<T> {
     func iter() -> Iterator<T>
 }
+
+// Read-only collection interfaces for polymorphic access
+
+interface MapLike<K, V> {
+    func get(key: K) -> V?
+    func contains_key(key: K) -> bool
+    func len() -> i64
+    func is_empty() -> bool
+    func keys() -> Iterator<K>
+    func values() -> Iterator<V>
+    func entries() -> Iterator<[K, V]>
+}
+
+interface SetLike<T> {
+    func contains(value: T) -> bool
+    func len() -> i64
+    func is_empty() -> bool
+}

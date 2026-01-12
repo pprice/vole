@@ -158,6 +158,29 @@ impl EntityRegistry {
         None
     }
 
+    /// Look up a class by its short name (string-based, cross-module)
+    /// This searches through all registered types to find one matching the short name
+    /// and of kind Class. Used for prelude classes like Map and Set.
+    pub fn class_by_short_name(
+        &self,
+        short_name: &str,
+        name_table: &crate::identity::NameTable,
+    ) -> Option<TypeDefId> {
+        tracing::trace!(short_name, "class_by_short_name searching");
+        for type_def in &self.type_defs {
+            if type_def.kind == TypeDefKind::Class {
+                let last_seg = name_table.last_segment_str(type_def.name_id);
+                tracing::trace!(?type_def.name_id, ?last_seg, "checking class");
+                if last_seg.is_some_and(|last_segment| last_segment == short_name) {
+                    tracing::trace!(?type_def.id, "found class by short name");
+                    return Some(type_def.id);
+                }
+            }
+        }
+        tracing::trace!("class not found by short name");
+        None
+    }
+
     /// Register a new method on a type
     pub fn register_method(
         &mut self,

@@ -3,6 +3,7 @@ pub mod array;
 pub mod assert;
 pub mod builtins;
 pub mod closure;
+pub mod collections;
 pub mod instance;
 pub mod iterator;
 pub mod native_registry;

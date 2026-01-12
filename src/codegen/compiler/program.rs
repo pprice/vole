@@ -192,8 +192,13 @@ impl Compiler<'_> {
     fn compile_module_functions(&mut self) -> Result<(), String> {
         // Collect module paths first to avoid borrow issues
         let module_paths: Vec<_> = self.query().module_paths().map(String::from).collect();
+        tracing::debug!(
+            ?module_paths,
+            "compile_module_functions: processing module paths"
+        );
 
         for module_path in &module_paths {
+            tracing::debug!(module_path, "compile_module_functions: processing module");
             // Access module_programs directly to avoid borrow conflict with mutable self operations
             let (program, module_interner) = &self.analyzed.module_programs[module_path];
             // Extract module globals (let statements)
@@ -246,6 +251,13 @@ impl Compiler<'_> {
                 }
             }
 
+            // Finalize module classes (register type metadata, declare methods)
+            for decl in &program.declarations {
+                if let Decl::Class(class) = decl {
+                    self.finalize_module_class(class, module_interner);
+                }
+            }
+
             // Second pass: compile pure Vole function bodies
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
@@ -278,6 +290,13 @@ impl Compiler<'_> {
                         Some(module_path),
                         module_interner,
                     )?;
+                }
+            }
+
+            // Compile module class methods (both instance and static)
+            for decl in &program.declarations {
+                if let Decl::Class(class) = decl {
+                    self.compile_module_class_methods(class, module_interner, module_path)?;
                 }
             }
         }

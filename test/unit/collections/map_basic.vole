@@ -1,0 +1,72 @@
+// Test: Basic Map operations (i64 keys and values)
+// Note: Iterator methods temporarily excluded until RuntimeIterator codegen is fixed
+
+tests {
+    test "map::new creates empty map" {
+        let m = Map.new()
+        assert(m.len() == 0)
+        assert(m.is_empty())
+    }
+
+    test "map::set and get" {
+        let m = Map.new()
+        m.set(1, 100)
+        m.set(2, 200)
+
+        assert(m.len() == 2)
+        assert(m.get(1) == 100)
+        assert(m.get(2) == 200)
+    }
+
+    test "map::get returns nil for missing key" {
+        let m = Map.new()
+        m.set(1, 100)
+
+        assert(m.get(1) == 100)
+        assert(m.get(999) == nil)
+    }
+
+    test "map::contains_key" {
+        let m = Map.new()
+        m.set(1, 100)
+
+        assert(m.contains_key(1))
+        assert(!m.contains_key(2))
+    }
+
+    test "map::remove" {
+        let m = Map.new()
+        m.set(1, 100)
+        m.set(2, 200)
+
+        let removed = m.remove(1)
+        assert(removed == 100)
+        assert(m.len() == 1)
+        assert(!m.contains_key(1))
+        assert(m.contains_key(2))
+    }
+
+    test "map::remove missing key returns nil" {
+        let m = Map.new()
+        assert(m.remove(999) == nil)
+    }
+
+    test "map::clear" {
+        let m = Map.new()
+        m.set(1, 100)
+        m.set(2, 200)
+
+        m.clear()
+        assert(m.len() == 0)
+        assert(m.is_empty())
+    }
+
+    test "map::update existing key" {
+        let m = Map.new()
+        m.set(1, 100)
+        m.set(1, 999)
+
+        assert(m.len() == 1)
+        assert(m.get(1) == 999)
+    }
+}

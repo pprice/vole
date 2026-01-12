@@ -148,7 +148,11 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                 return Type::TypeParam(tp_info.name_id);
             }
             // Look up type via EntityRegistry (handles aliases via TypeDefKind::Alias)
-            if let Some(type_id) = ctx.resolver().resolve_type(*sym, ctx.entity_registry) {
+            // Uses resolve_type_or_interface to also find prelude classes like Map/Set
+            if let Some(type_id) = ctx
+                .resolver()
+                .resolve_type_or_interface(*sym, ctx.entity_registry)
+            {
                 // Look up via EntityRegistry
                 let type_def = ctx.entity_registry.get_type(type_id);
                 match type_def.kind {

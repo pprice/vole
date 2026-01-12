@@ -200,6 +200,20 @@ impl Cg<'_, '_, '_> {
             if right.vole_type.is_optional() && matches!(left.vole_type, Type::Nil) {
                 return self.optional_nil_compare(right, op);
             }
+            // Check if left is optional and right is a compatible value type
+            if let Some(inner_type) = left.vole_type.unwrap_optional()
+                && (inner_type == right.vole_type
+                    || (inner_type.is_integer() && right.vole_type.is_integer()))
+            {
+                return self.optional_value_compare(left, right, op);
+            }
+            // Check if right is optional and left is a compatible value type
+            if let Some(inner_type) = right.vole_type.unwrap_optional()
+                && (inner_type == left.vole_type
+                    || (inner_type.is_integer() && left.vole_type.is_integer()))
+            {
+                return self.optional_value_compare(right, left, op);
+            }
         }
 
         // Determine result type - original behavior: use left's type for integers
@@ -432,6 +446,67 @@ impl Cg<'_, '_, '_> {
                 self.builder.ins().isub(one, is_nil)
             }
             _ => unreachable!("optional_nil_compare only handles Eq and Ne"),
+        };
+
+        Ok(self.bool_value(result))
+    }
+
+    /// Compare an optional value with a non-nil value (e.g., optional == 42)
+    /// Returns false if the optional is nil, otherwise compares the payload
+    fn optional_value_compare(
+        &mut self,
+        optional: CompiledValue,
+        value: CompiledValue,
+        op: BinaryOp,
+    ) -> Result<CompiledValue, String> {
+        let Type::Union(variants) = &optional.vole_type else {
+            return Err("optional_value_compare called on non-union type".into());
+        };
+
+        // Find the position of nil in the variants (this is the nil tag value)
+        let nil_tag = variants
+            .iter()
+            .position(|v| v == &Type::Nil)
+            .unwrap_or(usize::MAX);
+
+        // Load the tag from the optional (first byte)
+        let tag = self
+            .builder
+            .ins()
+            .load(types::I8, MemFlags::new(), optional.value, 0);
+
+        // Check if not nil (tag != nil_tag)
+        let nil_tag_val = self.builder.ins().iconst(types::I8, nil_tag as i64);
+        let is_not_nil = self.builder.ins().icmp(IntCC::NotEqual, tag, nil_tag_val);
+
+        // Load the payload (at offset 8)
+        let payload = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), optional.value, 8);
+
+        // Compare payload with value
+        let values_equal = if value.ty == types::F64 {
+            self.builder
+                .ins()
+                .fcmp(FloatCC::Equal, payload, value.value)
+        } else {
+            self.builder.ins().icmp(IntCC::Equal, payload, value.value)
+        };
+
+        // Result is: is_not_nil AND values_equal
+        let result = match op {
+            BinaryOp::Eq => {
+                // (not nil) AND (values equal)
+                self.builder.ins().band(is_not_nil, values_equal)
+            }
+            BinaryOp::Ne => {
+                // NOT ((not nil) AND (values equal)) = is_nil OR (values not equal)
+                let equal = self.builder.ins().band(is_not_nil, values_equal);
+                let one = self.builder.ins().iconst(types::I8, 1);
+                self.builder.ins().isub(one, equal)
+            }
+            _ => unreachable!("optional_value_compare only handles Eq and Ne"),
         };
 
         Ok(self.bool_value(result))

@@ -486,10 +486,10 @@ impl Cg<'_, '_, '_> {
                 }
             }
 
-            return Err(CodegenError::not_found("function", callee_name).into());
+            // Fall through to try prelude external functions
         }
 
-        // No module context - try prelude external functions
+        // Try prelude external functions (works in module context too)
         // Look up the external info (module path and native name) from implement_registry
         let ext_info = self
             .ctx

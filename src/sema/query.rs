@@ -78,6 +78,16 @@ impl<'a> ProgramQuery<'a> {
         self.expr_data.get_method(node)
     }
 
+    /// Get the resolved method at a call site, checking module-specific resolutions first
+    #[must_use]
+    pub fn method_at_in_module(
+        &self,
+        node: NodeId,
+        current_module: Option<&str>,
+    ) -> Option<&'a ResolvedMethod> {
+        self.expr_data.get_method_in_module(node, current_module)
+    }
+
     /// Get the monomorphization key for a generic call
     #[must_use]
     pub fn monomorph_for(&self, node: NodeId) -> Option<&'a MonomorphKey> {

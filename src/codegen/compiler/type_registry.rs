@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 
 use super::Compiler;
-use crate::codegen::types::{MethodInfo, TypeMetadata, resolve_type_expr_query};
+use crate::codegen::types::{
+    MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_query,
+    resolve_type_expr_with_metadata,
+};
 use crate::frontend::{
-    ClassDecl, Decl, InterfaceDecl, Program, RecordDecl, StaticsBlock, Symbol, TypeExpr,
+    ClassDecl, Decl, InterfaceDecl, Interner, Program, RecordDecl, StaticsBlock, Symbol, TypeExpr,
 };
 use crate::runtime::type_registry::{FieldTypeTag, register_instance_type};
 use crate::sema::{ClassType, RecordType, StructField, Type};
@@ -51,6 +54,19 @@ impl Compiler<'_> {
     pub(super) fn resolve_type_with_metadata(&self, ty: &TypeExpr) -> Type {
         let query = self.query();
         resolve_type_expr_query(ty, &query, &self.type_metadata, query.main_module())
+    }
+
+    /// Resolve a type expression using a specific interner (for module types)
+    /// This is needed because module classes have symbols from their own interner
+    pub(super) fn resolve_type_with_interner(&self, ty: &TypeExpr, interner: &Interner) -> Type {
+        resolve_type_expr_with_metadata(
+            ty,
+            &self.analyzed.entity_registry,
+            &self.type_metadata,
+            interner,
+            &self.analyzed.name_table,
+            self.func_registry.main_module(),
+        )
     }
 
     /// Pre-register a class type (just the name and type_id)
@@ -429,6 +445,187 @@ impl Compiler<'_> {
                         return_type,
                     },
                 );
+            }
+        }
+    }
+
+    /// Register and finalize a module class (uses module interner)
+    /// This handles:
+    /// 1. Pre-registration (type_id allocation)
+    /// 2. Type metadata registration (fields, methods)
+    /// 3. Static method registration
+    pub(super) fn finalize_module_class(&mut self, class: &ClassDecl, module_interner: &Interner) {
+        let type_name_str = module_interner.resolve(class.name);
+        tracing::debug!(type_name = %type_name_str, "finalize_module_class called");
+
+        // Look up the TypeDefId using the class name
+        tracing::debug!(type_name = %type_name_str, "Looking up TypeDefId for module class");
+        let Some(type_def_id) = self
+            .analyzed
+            .entity_registry
+            .class_by_short_name(type_name_str, &self.analyzed.name_table)
+        else {
+            tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module class");
+            return;
+        };
+        tracing::debug!(type_name = %type_name_str, ?type_def_id, "Found TypeDefId for module class");
+
+        // Skip if already registered - check by type name string to avoid Symbol collisions across interners
+        let already_registered = self.type_metadata.values().any(|meta| {
+            if let Type::Class(class_type) = &meta.vole_type {
+                self.analyzed
+                    .name_table
+                    .last_segment_str(class_type.name_id)
+                    .is_some_and(|name| name == type_name_str)
+            } else {
+                false
+            }
+        });
+        if already_registered {
+            tracing::debug!(type_name = %type_name_str, "Skipping - already registered in type_metadata");
+            return;
+        }
+        tracing::debug!(type_name = %type_name_str, "Proceeding with registration");
+
+        // Allocate type_id
+        let type_id = self.next_type_id;
+        self.next_type_id += 1;
+
+        // Build field slots map
+        let mut field_slots = HashMap::new();
+        let mut struct_fields = Vec::new();
+        let mut field_type_tags = Vec::new();
+        for (i, field) in class.fields.iter().enumerate() {
+            let field_name = module_interner.resolve(field.name).to_string();
+            field_slots.insert(field_name.clone(), i);
+            let field_type = self.resolve_type_with_interner(&field.ty, module_interner);
+            field_type_tags.push(type_to_field_tag(&field_type));
+            struct_fields.push(StructField {
+                name: field_name,
+                ty: field_type,
+                slot: i,
+            });
+        }
+
+        // Register field types in runtime type registry
+        register_instance_type(type_id, field_type_tags);
+
+        // Get the NameId from entity registry
+        let type_def = self.analyzed.entity_registry.get_type(type_def_id);
+        let name_id = type_def.name_id;
+        tracing::debug!(type_name = %type_name_str, ?name_id, "Type NameId from entity registry");
+
+        // Create the Vole type
+        let vole_type = Type::Class(ClassType {
+            name_id,
+            fields: struct_fields,
+            type_args: vec![],
+        });
+
+        // Collect method info and declare methods
+        let func_module_id = self.func_registry.main_module();
+        let mut method_infos = HashMap::new();
+
+        tracing::debug!(type_name = %type_name_str, method_count = class.methods.len(), "Registering instance methods");
+        for method in &class.methods {
+            let method_name_str = module_interner.resolve(method.name);
+            tracing::debug!(type_name = %type_name_str, method_name = %method_name_str, "Processing instance method");
+
+            let return_type = method
+                .return_type
+                .as_ref()
+                .map(|t| self.resolve_type_with_interner(t, module_interner))
+                .unwrap_or(Type::Void);
+
+            let sig = self.create_method_signature_with_interner(method, module_interner);
+            let func_key = self
+                .func_registry
+                .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
+            let display_name = self.func_registry.display(func_key);
+            let func_id = self.jit.declare_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, func_id);
+
+            if let Some(method_name_id) =
+                method_name_id_with_interner(self.analyzed, module_interner, method.name)
+            {
+                tracing::debug!(type_name = %type_name_str, method_name = %method_name_str, ?method_name_id, "Registered instance method");
+                method_infos.insert(
+                    method_name_id,
+                    MethodInfo {
+                        func_key,
+                        return_type,
+                    },
+                );
+            } else {
+                tracing::warn!(type_name = %type_name_str, method_name = %method_name_str, "Could not get method_name_id for instance method");
+            }
+        }
+        tracing::debug!(type_name = %type_name_str, registered_count = method_infos.len(), "Finished registering instance methods");
+
+        // Get type_key from entity registry
+        let type_key = self.analyzed.entity_registry.type_table.by_name(name_id);
+
+        // Register type metadata
+        // IMPORTANT: Use the main interner's Symbol for the class name, not the module's Symbol.
+        // Module classes have Symbols from their own interners which may collide (e.g., both
+        // Set and Map might have their class name as Symbol(0) in their respective interners).
+        let main_class_symbol = self
+            .analyzed
+            .interner
+            .lookup(type_name_str)
+            .unwrap_or(class.name);
+        tracing::debug!(type_name = %type_name_str, ?class.name, ?main_class_symbol, "Inserting type_metadata");
+        self.type_metadata.insert(
+            main_class_symbol,
+            TypeMetadata {
+                type_id,
+                type_key,
+                field_slots,
+                is_class: true,
+                vole_type,
+                method_infos,
+            },
+        );
+
+        // Register static methods
+        if let Some(ref statics) = class.statics {
+            for method in &statics.methods {
+                if method.body.is_none() {
+                    continue;
+                }
+
+                let return_type = method
+                    .return_type
+                    .as_ref()
+                    .map(|t| self.resolve_type_with_interner(t, module_interner))
+                    .unwrap_or(Type::Void);
+
+                let sig =
+                    self.create_static_method_signature_with_interner(method, module_interner);
+                let method_name_str = module_interner.resolve(method.name);
+                let func_key = self
+                    .func_registry
+                    .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
+                let display_name = self.func_registry.display(func_key);
+                let func_id = self.jit.declare_function(&display_name, &sig);
+                self.func_registry.set_func_id(func_key, func_id);
+
+                if let Some(method_name_id) =
+                    method_name_id_with_interner(self.analyzed, module_interner, method.name)
+                {
+                    tracing::debug!(
+                        type_name = %type_name_str,
+                        method_name = %method_name_str,
+                        "Registering static method"
+                    );
+                    self.static_method_infos.insert(
+                        (type_def_id, method_name_id),
+                        MethodInfo {
+                            func_key,
+                            return_type,
+                        },
+                    );
+                }
             }
         }
     }

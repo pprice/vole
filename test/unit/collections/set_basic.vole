@@ -1,0 +1,149 @@
+// test/unit/collections/set_basic.vole
+// Tests for Set<i64> hash set
+
+tests {
+    test "set::new creates empty set" {
+        let s = Set.new()
+        assert(s.len() == 0)
+        assert(s.is_empty())
+    }
+
+    test "set::add and contains" {
+        let s = Set.new()
+        assert(s.add(42))  // returns true for new element
+        assert(s.contains(42))
+        assert(s.len() == 1)
+        assert(!s.is_empty())
+    }
+
+    test "set::add duplicate returns false" {
+        let s = Set.new()
+        assert(s.add(42))  // first add returns true
+        assert(!s.add(42)) // second add returns false (already exists)
+        assert(s.len() == 1)
+    }
+
+    test "set::remove" {
+        let s = Set.new()
+        s.add(1)
+        s.add(2)
+        s.add(3)
+        assert(s.len() == 3)
+
+        assert(s.remove(2))  // returns true for existing element
+        assert(s.len() == 2)
+        assert(!s.contains(2))
+        assert(s.contains(1))
+        assert(s.contains(3))
+    }
+
+    test "set::remove missing returns false" {
+        let s = Set.new()
+        assert(!s.remove(999))  // returns false for missing element
+    }
+
+    test "set::clear" {
+        let s = Set.new()
+        s.add(1)
+        s.add(2)
+        s.add(3)
+        assert(s.len() == 3)
+
+        s.clear()
+        assert(s.len() == 0)
+        assert(s.is_empty())
+        assert(!s.contains(1))
+    }
+
+    test "set::with_capacity" {
+        let s = Set.with_capacity(100)
+        assert(s.len() == 0)
+        assert(s.is_empty())
+        s.add(42)
+        assert(s.len() == 1)
+    }
+
+    test "set::union" {
+        let a = Set.new()
+        a.add(1)
+        a.add(2)
+
+        let b = Set.new()
+        b.add(2)
+        b.add(3)
+
+        let u = a.union(b)
+        assert(u.len() == 3)
+        assert(u.contains(1))
+        assert(u.contains(2))
+        assert(u.contains(3))
+    }
+
+    test "set::intersection" {
+        let a = Set.new()
+        a.add(1)
+        a.add(2)
+        a.add(3)
+
+        let b = Set.new()
+        b.add(2)
+        b.add(3)
+        b.add(4)
+
+        let i = a.intersection(b)
+        assert(i.len() == 2)
+        assert(!i.contains(1))
+        assert(i.contains(2))
+        assert(i.contains(3))
+        assert(!i.contains(4))
+    }
+
+    test "set::difference" {
+        let a = Set.new()
+        a.add(1)
+        a.add(2)
+        a.add(3)
+
+        let b = Set.new()
+        b.add(2)
+        b.add(3)
+        b.add(4)
+
+        let d = a.difference(b)
+        assert(d.len() == 1)
+        assert(d.contains(1))
+        assert(!d.contains(2))
+    }
+
+    test "set::is_subset" {
+        let a = Set.new()
+        a.add(1)
+        a.add(2)
+
+        let b = Set.new()
+        b.add(1)
+        b.add(2)
+        b.add(3)
+
+        assert(a.is_subset(b))
+        assert(!b.is_subset(a))
+    }
+
+    test "set::is_disjoint" {
+        let a = Set.new()
+        a.add(1)
+        a.add(2)
+
+        let b = Set.new()
+        b.add(3)
+        b.add(4)
+
+        assert(a.is_disjoint(b))
+
+        let c = Set.new()
+        c.add(2)
+        c.add(3)
+
+        assert(!a.is_disjoint(c))
+    }
+}

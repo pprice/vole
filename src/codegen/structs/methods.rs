@@ -14,16 +14,28 @@ use crate::codegen::method_resolution::{
     MethodResolutionInput, MethodTarget, resolve_method_target,
 };
 use crate::codegen::types::{
-    CompiledValue, module_name_id, type_to_cranelift, value_to_word, word_to_value,
+    CompiledValue, module_name_id, type_size, type_to_cranelift, value_to_word, word_to_value,
 };
 use crate::errors::CodegenError;
-use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId};
+use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
+use crate::identity::NamerLookup;
 use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::generic::substitute_type;
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::{FunctionType, Type};
 
 impl Cg<'_, '_, '_> {
+    /// Look up a method NameId using the context's interner (which may be a module interner)
+    fn method_name_id(&self, name: Symbol) -> NameId {
+        let namer = NamerLookup::new(&self.ctx.analyzed.name_table, self.ctx.interner);
+        namer.method(name).unwrap_or_else(|| {
+            panic!(
+                "method name_id not found for '{}'",
+                self.ctx.interner.resolve(name)
+            )
+        })
+    }
+
     #[tracing::instrument(skip(self, mc), fields(method = %self.ctx.interner.resolve(mc.method)))]
     pub fn method_call(
         &mut self,
@@ -35,7 +47,11 @@ impl Cg<'_, '_, '_> {
             type_def_id,
             method_id,
             func_type,
-        }) = self.ctx.analyzed.query().method_at(expr_id)
+        }) = self
+            .ctx
+            .analyzed
+            .query()
+            .method_at_in_module(expr_id, self.ctx.current_module)
         {
             return self.static_method_call(*type_def_id, *method_id, func_type.clone(), mc);
         }
@@ -61,7 +77,11 @@ impl Cg<'_, '_, '_> {
                 .module_path(module_type.module_id);
             let name_id = module_name_id(self.ctx.analyzed, module_type.module_id, method_name_str);
             // Get the method resolution
-            let resolution = self.ctx.analyzed.query().method_at(expr_id);
+            let resolution = self
+                .ctx
+                .analyzed
+                .query()
+                .method_at_in_module(expr_id, self.ctx.current_module);
             if let Some(ResolvedMethod::Implemented {
                 external_info,
                 func_type,
@@ -128,11 +148,15 @@ impl Cg<'_, '_, '_> {
             return self.runtime_iterator_method(&obj, mc, method_name_str, elem_ty);
         }
 
-        let method_id = self.ctx.analyzed.query().method_name_id(mc.method);
+        let method_id = self.method_name_id(mc.method);
 
         // Look up method resolution to determine naming convention and return type
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
-        let resolution = self.ctx.analyzed.query().method_at(expr_id);
+        let resolution = self
+            .ctx
+            .analyzed
+            .query()
+            .method_at_in_module(expr_id, self.ctx.current_module);
 
         tracing::debug!(
             obj_type = ?obj.vole_type,
@@ -161,7 +185,7 @@ impl Cg<'_, '_, '_> {
                         .entity_registry
                         .type_by_name(interface_type.name_id)
                 {
-                    let method_name_id = self.ctx.analyzed.query().method_name_id(mc.method);
+                    let method_name_id = self.method_name_id(mc.method);
                     return self.interface_dispatch_call_args_by_type_def_id(
                         &obj,
                         &mc.args,
@@ -302,14 +326,51 @@ impl Cg<'_, '_, '_> {
 
             let result_value = if actual_ty != expected_ty && actual_ty == types::I64 {
                 // Method returned i64 (TypeParam) but we expect a different type
-                word_to_value(self.builder, actual_result, &return_type, self.ctx.pointer_type)
+                word_to_value(
+                    self.builder,
+                    actual_result,
+                    &return_type,
+                    self.ctx.pointer_type,
+                )
             } else {
                 actual_result
             };
 
+            // For Union return types, the callee returns a pointer to its stack memory
+            // which becomes invalid after the call. Copy the union to our own stack.
+            let (final_value, final_type) = if matches!(&return_type, Type::Union(_)) {
+                let union_size = type_size(&return_type, self.ctx.pointer_type);
+                let local_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    union_size,
+                    0,
+                ));
+
+                // Copy tag (8 bytes at offset 0) and value (8 bytes at offset 8)
+                let tag = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), result_value, 0);
+                self.builder.ins().stack_store(tag, local_slot, 0);
+
+                let payload = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), result_value, 8);
+                self.builder.ins().stack_store(payload, local_slot, 8);
+
+                let local_ptr = self
+                    .builder
+                    .ins()
+                    .stack_addr(self.ctx.pointer_type, local_slot, 0);
+                (local_ptr, expected_ty)
+            } else {
+                (result_value, expected_ty)
+            };
+
             Ok(CompiledValue {
-                value: result_value,
-                ty: expected_ty,
+                value: final_value,
+                ty: final_type,
                 vole_type: return_type,
             })
         }

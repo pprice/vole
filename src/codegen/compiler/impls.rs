@@ -774,6 +774,15 @@ impl Compiler<'_> {
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
+        // Resolve return type for proper union/fallible wrapping
+        let method_return_type = method.return_type.as_ref().map(|t| {
+            if matches!(t, TypeExpr::SelfType) {
+                metadata.vole_type.clone()
+            } else {
+                resolve_type_expr_query(t, &query, &self.type_metadata, module_id)
+            }
+        });
+
         // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
@@ -825,7 +834,7 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: None, // Methods don't use raise statements yet
+                current_function_return_type: method_return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -910,6 +919,15 @@ impl Compiler<'_> {
             .collect();
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
+        // Resolve return type for proper union/fallible wrapping
+        let method_return_type = method.return_type.as_ref().map(|t| {
+            if matches!(t, TypeExpr::SelfType) {
+                metadata.vole_type.clone()
+            } else {
+                resolve_type_expr_query(t, &query, &self.type_metadata, module_id)
+            }
+        });
+
         // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
@@ -968,7 +986,7 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: None, // Default methods don't use raise statements yet
+                current_function_return_type: method_return_type,
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -1107,6 +1125,330 @@ impl Compiler<'_> {
             // Define the function
             self.jit.define_function(func_id)?;
             self.jit.clear();
+        }
+
+        Ok(())
+    }
+
+    /// Compile methods for a module class (uses module interner)
+    pub(super) fn compile_module_class_methods(
+        &mut self,
+        class: &ClassDecl,
+        module_interner: &Interner,
+        module_path: &str,
+    ) -> Result<(), String> {
+        let type_name_str = module_interner.resolve(class.name);
+        let module_id = self.query().main_module();
+        let func_module_id = self.func_registry.main_module();
+
+        // Find the type metadata by looking for the type name string
+        let metadata = self
+            .type_metadata
+            .values()
+            .find(|meta| {
+                if let Type::Class(class_type) = &meta.vole_type {
+                    self.analyzed
+                        .name_table
+                        .last_segment_str(class_type.name_id)
+                        .is_some_and(|name| name == type_name_str)
+                } else {
+                    false
+                }
+            })
+            .cloned();
+
+        let Some(metadata) = metadata else {
+            tracing::warn!(type_name = %type_name_str, "Could not find metadata for module class");
+            return Ok(());
+        };
+
+        // Compile instance methods
+        for method in &class.methods {
+            let method_name_str = module_interner.resolve(method.name);
+            let func_key = self
+                .func_registry
+                .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
+            let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+                format!(
+                    "Internal error: method {}::{} not declared",
+                    type_name_str, method_name_str
+                )
+            })?;
+
+            // Create method signature with self parameter (use module interner)
+            let sig = self.create_method_signature_with_interner(method, module_interner);
+            self.jit.ctx.func.signature = sig;
+
+            // Resolve param types
+            let param_types: Vec<types::Type> = method
+                .params
+                .iter()
+                .map(|p| {
+                    type_to_cranelift(
+                        &resolve_type_expr_full(
+                            &p.ty,
+                            &self.analyzed.entity_registry,
+                            &self.type_metadata,
+                            module_interner,
+                            &self.analyzed.name_table,
+                            module_id,
+                        ),
+                        self.pointer_type,
+                    )
+                })
+                .collect();
+            let param_vole_types: Vec<Type> = method
+                .params
+                .iter()
+                .map(|p| {
+                    resolve_type_expr_full(
+                        &p.ty,
+                        &self.analyzed.entity_registry,
+                        &self.type_metadata,
+                        module_interner,
+                        &self.analyzed.name_table,
+                        module_id,
+                    )
+                })
+                .collect();
+            let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+
+            // Get source file pointer and self symbol (use module interner for method body)
+            let source_file_ptr = self.source_file_ptr();
+            let self_sym = module_interner
+                .lookup("self")
+                .expect("'self' should be interned in module");
+            let self_vole_type = metadata.vole_type.clone();
+
+            // Resolve return type
+            let return_type = method
+                .return_type
+                .as_ref()
+                .map(|t| {
+                    resolve_type_expr_full(
+                        t,
+                        &self.analyzed.entity_registry,
+                        &self.type_metadata,
+                        module_interner,
+                        &self.analyzed.name_table,
+                        module_id,
+                    )
+                })
+                .unwrap_or(Type::Void);
+
+            // Create function builder
+            let mut builder_ctx = FunctionBuilderContext::new();
+            {
+                let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+                let entry_block = builder.create_block();
+                builder.append_block_params_for_function_params(entry_block);
+                builder.switch_to_block(entry_block);
+
+                // Build variables map
+                let mut variables = HashMap::new();
+
+                // Get entry block params (self + user params)
+                let params = builder.block_params(entry_block).to_vec();
+
+                // Bind `self` as the first parameter
+                let self_var = builder.declare_var(self.pointer_type);
+                builder.def_var(self_var, params[0]);
+                variables.insert(self_sym, (self_var, self_vole_type));
+
+                // Bind remaining parameters
+                for (((name, ty), vole_ty), val) in param_names
+                    .iter()
+                    .zip(param_types.iter())
+                    .zip(param_vole_types.iter())
+                    .zip(params[1..].iter())
+                {
+                    let var = builder.declare_var(*ty);
+                    builder.def_var(var, *val);
+                    variables.insert(*name, (var, vole_ty.clone()));
+                }
+
+                // Compile method body
+                let mut cf_ctx = ControlFlowCtx::default();
+                let mut ctx = CompileCtx {
+                    analyzed: self.analyzed,
+                    interner: module_interner,
+                    pointer_type: self.pointer_type,
+                    module: &mut self.jit.module,
+                    func_registry: &mut self.func_registry,
+                    source_file_ptr,
+                    globals: &self.globals,
+                    lambda_counter: &mut self.lambda_counter,
+                    type_metadata: &self.type_metadata,
+                    impl_method_infos: &self.impl_method_infos,
+                    static_method_infos: &self.static_method_infos,
+                    interface_vtables: &self.interface_vtables,
+                    current_function_return_type: Some(return_type),
+                    native_registry: &self.native_registry,
+                    current_module: Some(module_path),
+                    monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                };
+                let terminated = compile_block(
+                    &mut builder,
+                    &method.body,
+                    &mut variables,
+                    &mut cf_ctx,
+                    &mut ctx,
+                )?;
+
+                if !terminated {
+                    builder.ins().return_(&[]);
+                }
+
+                builder.seal_all_blocks();
+                builder.finalize();
+            }
+
+            // Define the function
+            self.jit.define_function(func_id)?;
+            self.jit.clear();
+        }
+
+        // Compile static methods
+        if let Some(ref statics) = class.statics {
+            for method in &statics.methods {
+                let body = match &method.body {
+                    Some(body) => body,
+                    None => continue,
+                };
+
+                let method_name_str = module_interner.resolve(method.name);
+                let func_key = self
+                    .func_registry
+                    .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
+                let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+                    format!(
+                        "Internal error: static method {}::{} not declared",
+                        type_name_str, method_name_str
+                    )
+                })?;
+
+                // Resolve return type
+                let return_type = method
+                    .return_type
+                    .as_ref()
+                    .map(|t| {
+                        resolve_type_expr_full(
+                            t,
+                            &self.analyzed.entity_registry,
+                            &self.type_metadata,
+                            module_interner,
+                            &self.analyzed.name_table,
+                            module_id,
+                        )
+                    })
+                    .unwrap_or(Type::Void);
+
+                // Create signature (no self parameter) - use module interner
+                let sig =
+                    self.create_static_method_signature_with_interner(method, module_interner);
+                self.jit.ctx.func.signature = sig;
+
+                // Resolve param types
+                let param_types: Vec<types::Type> = method
+                    .params
+                    .iter()
+                    .map(|p| {
+                        type_to_cranelift(
+                            &resolve_type_expr_full(
+                                &p.ty,
+                                &self.analyzed.entity_registry,
+                                &self.type_metadata,
+                                module_interner,
+                                &self.analyzed.name_table,
+                                module_id,
+                            ),
+                            self.pointer_type,
+                        )
+                    })
+                    .collect();
+                let param_vole_types: Vec<Type> = method
+                    .params
+                    .iter()
+                    .map(|p| {
+                        resolve_type_expr_full(
+                            &p.ty,
+                            &self.analyzed.entity_registry,
+                            &self.type_metadata,
+                            module_interner,
+                            &self.analyzed.name_table,
+                            module_id,
+                        )
+                    })
+                    .collect();
+                let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+
+                // Get source file pointer
+                let source_file_ptr = self.source_file_ptr();
+
+                // Create function builder
+                let mut builder_ctx = FunctionBuilderContext::new();
+                {
+                    let mut builder =
+                        FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+                    let entry_block = builder.create_block();
+                    builder.append_block_params_for_function_params(entry_block);
+                    builder.switch_to_block(entry_block);
+
+                    // Build variables map (no self for static methods)
+                    let mut variables = HashMap::new();
+
+                    // Get entry block params (just user params, no self)
+                    let params = builder.block_params(entry_block).to_vec();
+
+                    // Bind parameters
+                    for (((name, ty), vole_ty), val) in param_names
+                        .iter()
+                        .zip(param_types.iter())
+                        .zip(param_vole_types.iter())
+                        .zip(params.iter())
+                    {
+                        let var = builder.declare_var(*ty);
+                        builder.def_var(var, *val);
+                        variables.insert(*name, (var, vole_ty.clone()));
+                    }
+
+                    // Compile method body
+                    let mut cf_ctx = ControlFlowCtx::default();
+                    let mut ctx = CompileCtx {
+                        analyzed: self.analyzed,
+                        interner: module_interner,
+                        pointer_type: self.pointer_type,
+                        module: &mut self.jit.module,
+                        func_registry: &mut self.func_registry,
+                        source_file_ptr,
+                        globals: &self.globals,
+                        lambda_counter: &mut self.lambda_counter,
+                        type_metadata: &self.type_metadata,
+                        impl_method_infos: &self.impl_method_infos,
+                        static_method_infos: &self.static_method_infos,
+                        interface_vtables: &self.interface_vtables,
+                        current_function_return_type: Some(return_type),
+                        native_registry: &self.native_registry,
+                        current_module: Some(module_path),
+                        monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                    };
+                    let terminated =
+                        compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
+
+                    if !terminated {
+                        builder.ins().return_(&[]);
+                    }
+
+                    builder.seal_all_blocks();
+                    builder.finalize();
+                }
+
+                // Define the function
+                self.jit.define_function(func_id)?;
+                self.jit.clear();
+            }
         }
 
         Ok(())

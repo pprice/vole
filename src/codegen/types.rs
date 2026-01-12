@@ -81,11 +81,38 @@ pub(crate) fn type_metadata_by_name_id(
     type_metadata: &HashMap<Symbol, TypeMetadata>,
     name_id: NameId,
 ) -> Option<&TypeMetadata> {
-    type_metadata.values().find(|meta| match &meta.vole_type {
-        Type::Class(c) => c.name_id == name_id,
+    tracing::trace!(
+        ?name_id,
+        count = type_metadata.len(),
+        "type_metadata_by_name_id lookup"
+    );
+    let result = type_metadata.values().find(|meta| match &meta.vole_type {
+        Type::Class(c) => {
+            tracing::trace!(target_name_id = ?name_id, class_name_id = ?c.name_id, "comparing class name_id");
+            c.name_id == name_id
+        }
         Type::Record(r) => r.name_id == name_id,
         _ => false,
-    })
+    });
+    if result.is_none() {
+        // Log all class name_ids for debugging
+        let class_name_ids: Vec<_> = type_metadata
+            .values()
+            .filter_map(|meta| {
+                if let Type::Class(c) = &meta.vole_type {
+                    Some(c.name_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        tracing::debug!(
+            ?name_id,
+            ?class_name_ids,
+            "type_metadata_by_name_id: no match found"
+        );
+    }
+    result
 }
 
 /// Context for compiling expressions and statements
@@ -344,8 +371,40 @@ pub(crate) fn resolve_type_expr_with_metadata(
                             Type::Error
                         }
                     }
+                    TypeDefKind::Record | TypeDefKind::Class => {
+                        // For Record and Class types, first try direct lookup by Symbol
+                        // This works when Symbol is from the main interner
+                        // IMPORTANT: Verify the type matches by name_id to avoid Symbol collisions
+                        // between different interners (module vs main)
+                        if let Some(metadata) = type_metadata.get(sym) {
+                            // Verify this is the right type by comparing name_ids
+                            let matches = match &metadata.vole_type {
+                                Type::Record(r) => r.name_id == type_def.name_id,
+                                Type::Class(c) => c.name_id == type_def.name_id,
+                                _ => false,
+                            };
+                            if matches {
+                                return metadata.vole_type.clone();
+                            }
+                            // Symbol collision - fall through to build from entity registry
+                        }
+                        // Build from entity registry - handles module code where
+                        // Symbols are from module interners
+                        if type_def.kind == TypeDefKind::Record {
+                            if let Some(record_type) =
+                                entity_registry.build_record_type(type_def_id, name_table)
+                            {
+                                return Type::Record(record_type);
+                            }
+                        } else if let Some(class_type) =
+                            entity_registry.build_class_type(type_def_id, name_table)
+                        {
+                            return Type::Class(class_type);
+                        }
+                        Type::Error
+                    }
                     _ => {
-                        // Record, Class, or Primitive - check type metadata
+                        // Primitive or unknown - check type metadata
                         if let Some(metadata) = type_metadata.get(sym) {
                             metadata.vole_type.clone()
                         } else {

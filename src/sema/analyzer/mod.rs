@@ -125,6 +125,9 @@ pub struct Analyzer {
     /// Expression types for module programs (keyed by module path -> NodeId -> Type)
     /// Stored separately since NodeIds are per-program and can't be merged into main expr_types
     pub module_expr_types: FxHashMap<String, HashMap<NodeId, Type>>,
+    /// Method resolutions for module programs (keyed by module path -> NodeId -> ResolvedMethod)
+    /// Stored separately since NodeIds are per-program and can't be merged into main method_resolutions
+    pub module_method_resolutions: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
     /// Flag to prevent recursive prelude loading
     loading_prelude: bool,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
@@ -165,6 +168,7 @@ impl Analyzer {
             module_types: FxHashMap::default(),
             module_programs: FxHashMap::default(),
             module_expr_types: FxHashMap::default(),
+            module_method_resolutions: FxHashMap::default(),
             loading_prelude: false,
             generic_calls: HashMap::new(),
             name_table,
@@ -373,6 +377,8 @@ impl Analyzer {
             "std:prelude/f64",
             "std:prelude/bool",
             "std:prelude/iterators",
+            "std:prelude/map",
+            "std:prelude/set",
         ] {
             self.load_prelude_file(path, interner);
         }
@@ -425,6 +431,7 @@ impl Analyzer {
             module_types: FxHashMap::default(),
             module_programs: FxHashMap::default(),
             module_expr_types: FxHashMap::default(),
+            module_method_resolutions: FxHashMap::default(),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
             generic_calls: HashMap::new(),
             name_table: NameTable::new(),
@@ -435,9 +442,13 @@ impl Analyzer {
         // Copy existing registries so prelude files can reference earlier definitions
         sub_analyzer.name_table = self.name_table.clone();
         sub_analyzer.entity_registry = self.entity_registry.clone();
+        sub_analyzer.implement_registry = self.implement_registry.clone();
 
         // Analyze the prelude file
         let analyze_result = sub_analyzer.analyze(&program, &prelude_interner);
+        if let Err(ref errors) = analyze_result {
+            tracing::warn!(import_path, ?errors, "prelude analysis errors");
+        }
         if analyze_result.is_ok() {
             // Merge the entity registry (types, methods, fields)
             self.entity_registry.merge(&sub_analyzer.entity_registry);
@@ -460,6 +471,11 @@ impl Analyzer {
             // Store module-specific expr_types separately (NodeIds are per-program)
             self.module_expr_types
                 .insert(import_path.to_string(), sub_analyzer.expr_types);
+            // Store module-specific method_resolutions separately (NodeIds are per-program)
+            self.module_method_resolutions.insert(
+                import_path.to_string(),
+                sub_analyzer.method_resolutions.into_inner(),
+            );
         }
         // Silently ignore analysis errors in prelude
     }
@@ -696,6 +712,7 @@ impl Analyzer {
             self.method_resolutions.into_inner(),
             self.generic_calls,
             self.module_expr_types,
+            self.module_method_resolutions,
         );
         AnalysisOutput {
             expression_data,

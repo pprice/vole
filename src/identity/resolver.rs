@@ -88,9 +88,9 @@ impl<'a> Resolver<'a> {
             .and_then(|name_id| registry.type_by_name(name_id))
     }
 
-    /// Resolve a type with fallback to interface short name search.
-    /// This is the common pattern for interface lookups where the interface
-    /// might be in a different module (like prelude interfaces).
+    /// Resolve a type with fallback to interface/class short name search.
+    /// This is the common pattern for type lookups where the type
+    /// might be in a different module (like prelude interfaces and classes).
     pub fn resolve_type_or_interface(
         &self,
         sym: Symbol,
@@ -100,15 +100,21 @@ impl<'a> Resolver<'a> {
         self.resolve_type_str_or_interface(name, registry)
     }
 
-    /// Resolve a type string with fallback to interface short name search.
+    /// Resolve a type string with fallback to interface/class short name search.
+    /// Fallback order: interfaces first, then classes.
     pub fn resolve_type_str_or_interface(
         &self,
         name: &str,
         registry: &EntityRegistry,
     ) -> Option<TypeDefId> {
-        self.resolve_str(name)
+        tracing::trace!(name, "resolve_type_str_or_interface");
+        let result = self
+            .resolve_str(name)
             .and_then(|name_id| registry.type_by_name(name_id))
             .or_else(|| registry.interface_by_short_name(name, self.table))
+            .or_else(|| registry.class_by_short_name(name, self.table));
+        tracing::trace!(?result, "resolve_type_str_or_interface result");
+        result
     }
 
     // --- Direct primitive access (zero lookup cost) ---

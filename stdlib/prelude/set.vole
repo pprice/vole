@@ -1,0 +1,91 @@
+// stdlib/prelude/set.vole
+// Set - Hash set collection for i64 values
+
+class Set {
+    _ptr: i64,  // Pointer to native VoleSet
+
+    statics {
+        func new() -> Set {
+            return Set { _ptr: _set_new() }
+        }
+
+        func with_capacity(capacity: i64) -> Set {
+            return Set { _ptr: _set_with_capacity(capacity) }
+        }
+    }
+
+    func contains(value: i64) -> bool {
+        return _set_contains(self._ptr, value, value.hash())
+    }
+
+    func len() -> i64 {
+        return _set_len(self._ptr)
+    }
+
+    func is_empty() -> bool {
+        return _set_len(self._ptr) == 0
+    }
+
+    func iter() -> Iterator<i64> {
+        return _set_iter(self._ptr)
+    }
+
+    func add(value: i64) -> bool {
+        return _set_add(self._ptr, value, value.hash())
+    }
+
+    func remove(value: i64) -> bool {
+        return _set_remove(self._ptr, value, value.hash())
+    }
+
+    func clear() {
+        _set_clear(self._ptr)
+    }
+
+    func union(other: Set) -> Set {
+        return Set { _ptr: _set_union(self._ptr, other._ptr) }
+    }
+
+    func intersection(other: Set) -> Set {
+        return Set { _ptr: _set_intersection(self._ptr, other._ptr) }
+    }
+
+    func difference(other: Set) -> Set {
+        return Set { _ptr: _set_difference(self._ptr, other._ptr) }
+    }
+
+    func symmetric_difference(other: Set) -> Set {
+        return Set { _ptr: _set_symmetric_difference(self._ptr, other._ptr) }
+    }
+
+    func is_subset(other: Set) -> bool {
+        return _set_is_subset(self._ptr, other._ptr)
+    }
+
+    func is_superset(other: Set) -> bool {
+        return _set_is_superset(self._ptr, other._ptr)
+    }
+
+    func is_disjoint(other: Set) -> bool {
+        return _set_is_disjoint(self._ptr, other._ptr)
+    }
+}
+
+// Module-level native functions
+external("std:collections") {
+    func "set_new" as _set_new() -> i64
+    func "set_with_capacity" as _set_with_capacity(capacity: i64) -> i64
+    func "set_add" as _set_add(ptr: i64, value: i64, hash: i64) -> bool
+    func "set_remove" as _set_remove(ptr: i64, value: i64, hash: i64) -> bool
+    func "set_contains" as _set_contains(ptr: i64, value: i64, hash: i64) -> bool
+    func "set_len" as _set_len(ptr: i64) -> i64
+    func "set_clear" as _set_clear(ptr: i64) -> void
+    func "set_iter" as _set_iter(ptr: i64) -> Iterator<i64>
+    func "set_union" as _set_union(ptr: i64, other: i64) -> i64
+    func "set_intersection" as _set_intersection(ptr: i64, other: i64) -> i64
+    func "set_difference" as _set_difference(ptr: i64, other: i64) -> i64
+    func "set_symmetric_difference" as _set_symmetric_difference(ptr: i64, other: i64) -> i64
+    func "set_is_subset" as _set_is_subset(ptr: i64, other: i64) -> bool
+    func "set_is_superset" as _set_is_superset(ptr: i64, other: i64) -> bool
+    func "set_is_disjoint" as _set_is_disjoint(ptr: i64, other: i64) -> bool
+}

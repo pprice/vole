@@ -214,8 +214,11 @@ impl Cg<'_, '_, '_> {
                 if let Some(value) = &ret.value {
                     let compiled = self.expr(value)?;
 
+                    // Box concrete types to interface representation if needed
+                    // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
                     if let Some(Type::Interface(_)) = &return_type
                         && !matches!(compiled.vole_type, Type::Interface(_))
+                        && !matches!(compiled.vole_type, Type::RuntimeIterator(_))
                     {
                         let return_type =
                             return_type.as_ref().expect("return type should be present");

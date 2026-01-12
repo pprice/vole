@@ -17,11 +17,21 @@ impl Cg<'_, '_, '_> {
         sl: &StructLiteralExpr,
         expr: &Expr,
     ) -> Result<CompiledValue, String> {
+        // Resolve type name to main interner's Symbol for lookup
+        // This is needed because module classes register with main interner Symbols,
+        // but struct literals in module code use module interner Symbols
+        let type_name = self.ctx.interner.resolve(sl.name);
+        let lookup_symbol = self
+            .ctx
+            .analyzed
+            .interner
+            .lookup(type_name)
+            .unwrap_or(sl.name);
         let metadata = self
             .ctx
             .type_metadata
-            .get(&sl.name)
-            .ok_or_else(|| format!("Unknown type: {}", self.ctx.interner.resolve(sl.name)))?;
+            .get(&lookup_symbol)
+            .ok_or_else(|| format!("Unknown type: {}", type_name))?;
 
         let type_id = metadata.type_id;
         let field_count = metadata.field_slots.len() as u32;
