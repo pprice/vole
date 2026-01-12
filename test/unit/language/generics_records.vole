@@ -54,6 +54,30 @@ tests {
         let outer = Wrapper { data: inner }
         assert(outer.data.data == 5)
     }
+
+    test "generics::records::wrapper with f64" {
+        let w = Wrapper { data: 3.14 }
+        assert(w.data == 3.14)
+        assert(w.unwrap() == 3.14)
+    }
+
+    test "generics::records::wrapper with bool" {
+        let w = Wrapper { data: true }
+        assert(w.data == true)
+        assert(w.unwrap() == true)
+    }
+
+    test "generics::records::keyvalue with f64 value" {
+        let kv = KeyValue { key: "pi", value: 3.14159 }
+        assert(kv.getKey() == "pi")
+        assert(kv.getValue() == 3.14159)
+    }
+
+    test "generics::records::keyvalue with bool value" {
+        let kv = KeyValue { key: 1, value: false }
+        assert(kv.getKey() == 1)
+        assert(kv.getValue() == false)
+    }
 }
 
 func main() {
