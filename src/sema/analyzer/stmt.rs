@@ -422,7 +422,10 @@ impl Analyzer {
         };
 
         // Get the error type name for error messages
-        let error_type_name = interner.resolve(error_info.name).to_string();
+        let error_type_name = self
+            .name_table
+            .last_segment_str(self.entity_registry.name_id(error_info.type_def_id))
+            .unwrap_or_else(|| "error".to_string());
 
         // Check for missing fields (fields in error type but not provided in raise)
         let provided_fields: HashSet<String> = stmt
@@ -469,15 +472,26 @@ impl Analyzer {
         }
 
         // Verify that raised error type is compatible with declared error type
+        let stmt_error_name = interner.resolve(stmt.error_name);
         let is_compatible = match &error_type {
             Type::ErrorType(declared_info) => {
                 // Single error type - must match exactly
-                declared_info.name == stmt.error_name
+                let name = self
+                    .name_table
+                    .last_segment_str(self.entity_registry.name_id(declared_info.type_def_id));
+                name.as_deref() == Some(stmt_error_name)
             }
             Type::Union(variants) => {
                 // Union of error types - raised error must be one of the variants
                 variants.iter().any(|variant| {
-                    matches!(variant, Type::ErrorType(info) if info.name == stmt.error_name)
+                    if let Type::ErrorType(info) = variant {
+                        let name = self
+                            .name_table
+                            .last_segment_str(self.entity_registry.name_id(info.type_def_id));
+                        name.as_deref() == Some(stmt_error_name)
+                    } else {
+                        false
+                    }
                 })
             }
             _ => false, // Should not happen if we got past the fallible check

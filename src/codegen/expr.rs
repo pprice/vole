@@ -1595,7 +1595,13 @@ impl Cg<'_, '_, '_> {
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
-        let Some(error_tag) = fallible_error_tag(ft, name, self.ctx.interner) else {
+        let Some(error_tag) = fallible_error_tag(
+            ft,
+            name,
+            self.ctx.interner,
+            &self.ctx.analyzed.name_table,
+            &self.ctx.analyzed.entity_registry,
+        ) else {
             // Error type not found in fallible - will never match
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
@@ -1636,7 +1642,13 @@ impl Cg<'_, '_, '_> {
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
-        let Some(error_tag) = fallible_error_tag(ft, name, self.ctx.interner) else {
+        let Some(error_tag) = fallible_error_tag(
+            ft,
+            name,
+            self.ctx.interner,
+            &self.ctx.analyzed.name_table,
+            &self.ctx.analyzed.entity_registry,
+        ) else {
             // Error type not found in fallible
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };

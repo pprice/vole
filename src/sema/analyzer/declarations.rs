@@ -1654,50 +1654,12 @@ impl Analyzer {
             &self.entity_registry,
         ) {
             // Get TypeDefId for the target type (for EntityRegistry updates)
-            let entity_type_id = match &target_type {
-                Type::Record(r) => Some(r.type_def_id),
-                Type::Class(c) => Some(c.type_def_id),
-                Type::I8 => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.i8),
-                Type::I16 => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.i16),
-                Type::I32 => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.i32),
-                Type::I64 => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.i64),
-                Type::I128 => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.i128),
-                Type::U8 => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.u8),
-                Type::U16 => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.u16),
-                Type::U32 => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.u32),
-                Type::U64 => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.u64),
-                Type::F32 => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.f32),
-                Type::F64 => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.f64),
-                Type::Bool => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.bool),
-                Type::String => self
-                    .entity_registry
-                    .type_by_name(self.name_table.primitives.string),
-                _ => None,
-            };
+            let entity_type_id = target_type.type_def_id().or_else(|| {
+                self.name_table
+                    .primitives
+                    .name_id_for_type(&target_type)
+                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+            });
 
             // Get interface TypeDefId if implementing an interface
             let interface_type_id = trait_name.and_then(|name| {
@@ -1761,51 +1723,12 @@ impl Analyzer {
             // Register static methods from statics block (if present)
             if let Some(ref statics_block) = impl_block.statics {
                 // Get entity type id for registering static methods
-                let entity_type_id = match &target_type {
-                    Type::Record(r) => Some(r.type_def_id),
-                    Type::Class(c) => Some(c.type_def_id),
-                    // Handle primitives - look up via name table primitives
-                    Type::I8 => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.i8),
-                    Type::I16 => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.i16),
-                    Type::I32 => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.i32),
-                    Type::I64 => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.i64),
-                    Type::I128 => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.i128),
-                    Type::U8 => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.u8),
-                    Type::U16 => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.u16),
-                    Type::U32 => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.u32),
-                    Type::U64 => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.u64),
-                    Type::F32 => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.f32),
-                    Type::F64 => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.f64),
-                    Type::Bool => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.bool),
-                    Type::String => self
-                        .entity_registry
-                        .type_by_name(self.name_table.primitives.string),
-                    _ => None,
-                };
+                let entity_type_id = target_type.type_def_id().or_else(|| {
+                    self.name_table
+                        .primitives
+                        .name_id_for_type(&target_type)
+                        .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+                });
 
                 if let Some(entity_type_id) = entity_type_id {
                     let type_name_str = match &impl_block.target_type {

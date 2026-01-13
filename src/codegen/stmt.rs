@@ -844,13 +844,19 @@ impl Cg<'_, '_, '_> {
         };
 
         // Get the error tag for this error type
-        let error_tag = fallible_error_tag(fallible_type, raise_stmt.error_name, self.ctx.interner)
-            .ok_or_else(|| {
-                format!(
-                    "Error type {} not found in fallible type",
-                    self.ctx.interner.resolve(raise_stmt.error_name)
-                )
-            })?;
+        let error_tag = fallible_error_tag(
+            fallible_type,
+            raise_stmt.error_name,
+            self.ctx.interner,
+            &self.ctx.analyzed.name_table,
+            &self.ctx.analyzed.entity_registry,
+        )
+        .ok_or_else(|| {
+            format!(
+                "Error type {} not found in fallible type",
+                self.ctx.interner.resolve(raise_stmt.error_name)
+            )
+        })?;
 
         // Calculate the size of the fallible type
         let fallible_size = type_size(return_type, self.ctx.pointer_type);
@@ -869,11 +875,30 @@ impl Cg<'_, '_, '_> {
             .stack_store(tag_val, slot, FALLIBLE_TAG_OFFSET);
 
         // Get the error type info to know field order
+        let raise_error_name = self.ctx.interner.resolve(raise_stmt.error_name);
         let error_type_info = match fallible_type.error_type.as_ref() {
-            Type::ErrorType(info) if info.name == raise_stmt.error_name => Some(info.clone()),
-            Type::Union(variants) => variants.iter().find_map(|v| match v {
-                Type::ErrorType(info) if info.name == raise_stmt.error_name => Some(info.clone()),
-                _ => None,
+            Type::ErrorType(info) => {
+                let name = self
+                    .ctx
+                    .analyzed
+                    .name_table
+                    .last_segment_str(self.ctx.analyzed.entity_registry.name_id(info.type_def_id));
+                if name.as_deref() == Some(raise_error_name) {
+                    Some(info.clone())
+                } else {
+                    None
+                }
+            }
+            Type::Union(variants) => variants.iter().find_map(|v| {
+                if let Type::ErrorType(info) = v {
+                    let name = self.ctx.analyzed.name_table.last_segment_str(
+                        self.ctx.analyzed.entity_registry.name_id(info.type_def_id),
+                    );
+                    if name.as_deref() == Some(raise_error_name) {
+                        return Some(info.clone());
+                    }
+                }
+                None
             }),
             _ => None,
         }

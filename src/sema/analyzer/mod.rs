@@ -123,6 +123,16 @@ pub struct AnalysisOutput {
     pub entity_registry: EntityRegistry,
 }
 
+/// Saved state when entering a function/method check context.
+/// Used by enter_function_context/exit_function_context for uniform save/restore.
+struct FunctionCheckContext {
+    return_type: Option<Type>,
+    error_type: Option<Type>,
+    generator_element_type: Option<Type>,
+    static_method: Option<String>,
+    type_param_scope: Option<TypeParamScope>,
+}
+
 pub struct Analyzer {
     scope: Scope,
     functions: HashMap<Symbol, FunctionType>,
@@ -1360,7 +1370,6 @@ impl Analyzer {
         );
 
         let error_info = ErrorTypeInfo {
-            name: decl.name,
             type_def_id: entity_type_id,
             fields: fields.clone(),
         };
@@ -1599,50 +1608,12 @@ impl Analyzer {
         };
 
         // Get EntityRegistry TypeDefId for the target type
-        let entity_type_id = match target_type {
-            Type::Record(r) => Some(r.type_def_id),
-            Type::Class(c) => Some(c.type_def_id),
-            Type::I8 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.i8),
-            Type::I16 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.i16),
-            Type::I32 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.i32),
-            Type::I64 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.i64),
-            Type::I128 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.i128),
-            Type::U8 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.u8),
-            Type::U16 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.u16),
-            Type::U32 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.u32),
-            Type::U64 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.u64),
-            Type::F32 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.f32),
-            Type::F64 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.f64),
-            Type::Bool => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.bool),
-            Type::String => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.string),
-            _ => None,
-        };
+        let entity_type_id = target_type.type_def_id().or_else(|| {
+            self.name_table
+                .primitives
+                .name_id_for_type(&target_type)
+                .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+        });
 
         // Get interface TypeDefId if implementing an interface
         let interface_type_id = trait_name.and_then(|name| {
@@ -1715,6 +1686,45 @@ impl Analyzer {
         }
     }
 
+    /// Enter a function/method check context, saving current state.
+    /// Automatically sets return/error/generator types from return_type.
+    /// For static methods, caller should set static_method and type_param_scope after calling.
+    fn enter_function_context(
+        &mut self,
+        return_type: &Type,
+        interner: &Interner,
+    ) -> FunctionCheckContext {
+        let saved = FunctionCheckContext {
+            return_type: self.current_function_return.take(),
+            error_type: self.current_function_error_type.take(),
+            generator_element_type: self.current_generator_element_type.take(),
+            static_method: self.current_static_method.take(),
+            type_param_scope: self.current_type_param_scope.clone(),
+        };
+
+        self.current_function_return = Some(return_type.clone());
+
+        // Set error type context if this is a fallible function
+        if let Type::Fallible(ft) = return_type {
+            self.current_function_error_type = Some((*ft.error_type).clone());
+        }
+
+        // Set generator context if return type is Iterator<T>
+        self.current_generator_element_type =
+            self.extract_iterator_element_type(return_type, interner);
+
+        saved
+    }
+
+    /// Exit function/method check context, restoring saved state.
+    fn exit_function_context(&mut self, saved: FunctionCheckContext) {
+        self.current_function_return = saved.return_type;
+        self.current_function_error_type = saved.error_type;
+        self.current_generator_element_type = saved.generator_element_type;
+        self.current_static_method = saved.static_method;
+        self.current_type_param_scope = saved.type_param_scope;
+    }
+
     fn check_function(
         &mut self,
         func: &FuncDecl,
@@ -1732,18 +1742,7 @@ impl Analyzer {
             .cloned()
             .expect("function registered in signature collection pass");
         let return_type = *func_type.return_type.clone();
-        self.current_function_return = Some(return_type.clone());
-
-        // Set error type context if this is a fallible function
-        if let Type::Fallible(ref ft) = return_type {
-            self.current_function_error_type = Some((*ft.error_type).clone());
-        } else {
-            self.current_function_error_type = None;
-        }
-
-        // Set generator context if return type is Iterator<T>
-        self.current_generator_element_type =
-            self.extract_iterator_element_type(&return_type, interner);
+        let saved_ctx = self.enter_function_context(&return_type, interner);
 
         // Create new scope with parameters
         let parent_scope = std::mem::take(&mut self.scope);
@@ -1766,9 +1765,7 @@ impl Analyzer {
         if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
             self.scope = parent;
         }
-        self.current_function_return = None;
-        self.current_function_error_type = None;
-        self.current_generator_element_type = None;
+        self.exit_function_context(saved_ctx);
 
         Ok(())
     }
@@ -1807,18 +1804,7 @@ impl Analyzer {
         let method_def = self.entity_registry.get_method(method_id);
         let method_type = method_def.signature.clone();
         let return_type = *method_type.return_type.clone();
-        self.current_function_return = Some(return_type.clone());
-
-        // Set error type context if this is a fallible method
-        if let Type::Fallible(ref ft) = return_type {
-            self.current_function_error_type = Some((*ft.error_type).clone());
-        } else {
-            self.current_function_error_type = None;
-        }
-
-        // Set generator context if return type is Iterator<T>
-        self.current_generator_element_type =
-            self.extract_iterator_element_type(&return_type, interner);
+        let saved_ctx = self.enter_function_context(&return_type, interner);
 
         // Create scope with 'self' and parameters
         let parent_scope = std::mem::take(&mut self.scope);
@@ -1870,9 +1856,7 @@ impl Analyzer {
         if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
             self.scope = parent;
         }
-        self.current_function_return = None;
-        self.current_function_error_type = None;
-        self.current_generator_element_type = None;
+        self.exit_function_context(saved_ctx);
 
         Ok(())
     }
@@ -1884,84 +1868,12 @@ impl Analyzer {
         type_name: Symbol,
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
-        // Only check methods with bodies
-        let Some(ref body) = method.body else {
-            return Ok(());
-        };
-
-        // Look up static method type via Resolver
+        // Resolve type name and delegate to check_static_method_with_type_def
         let type_def_id = self
             .resolver(interner)
             .resolve_type(type_name, &self.entity_registry)
             .expect("type should be registered in EntityRegistry");
-        let method_name_id = self.method_name_id(method.name, interner);
-        let method_id = self
-            .entity_registry
-            .find_static_method_on_type(type_def_id, method_name_id)
-            .expect("static method should be registered in EntityRegistry");
-        let method_def = self.entity_registry.get_method(method_id);
-        let method_type = method_def.signature.clone();
-        let method_type_params = method_def.method_type_params.clone();
-        let return_type = *method_type.return_type.clone();
-        self.current_function_return = Some(return_type.clone());
-
-        // Set error type context if this is a fallible method
-        if let Type::Fallible(ref ft) = return_type {
-            self.current_function_error_type = Some((*ft.error_type).clone());
-        } else {
-            self.current_function_error_type = None;
-        }
-
-        // Set generator context if return type is Iterator<T>
-        self.current_generator_element_type =
-            self.extract_iterator_element_type(&return_type, interner);
-
-        // Mark that we're in a static method (for self-usage detection)
-        let method_name_str = interner.resolve(method.name).to_string();
-        self.current_static_method = Some(method_name_str);
-
-        // Add method-level type params to the current type param scope (if any)
-        // This allows constraints on method type params to be checked
-        let saved_type_param_scope = self.current_type_param_scope.clone();
-        if !method_type_params.is_empty() {
-            let mut scope = self.current_type_param_scope.take().unwrap_or_default();
-            for tp in &method_type_params {
-                scope.add(tp.clone());
-            }
-            self.current_type_param_scope = Some(scope);
-        }
-
-        // Create scope WITHOUT 'self'
-        let parent_scope = std::mem::take(&mut self.scope);
-        self.scope = Scope::with_parent(parent_scope);
-
-        // Add parameters (no 'self' for static methods)
-        for (param, ty) in method.params.iter().zip(method_type.params.iter()) {
-            self.scope.define(
-                param.name,
-                Variable {
-                    ty: ty.clone(),
-                    mutable: false,
-                },
-            );
-        }
-
-        // Check body
-        self.check_block(body, interner)?;
-
-        // Restore scope and context
-        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-            self.scope = parent;
-        }
-        self.current_function_return = None;
-        self.current_function_error_type = None;
-        self.current_generator_element_type = None;
-        self.current_static_method = None;
-
-        // Restore type param scope (remove method type params)
-        self.current_type_param_scope = saved_type_param_scope;
-
-        Ok(())
+        self.check_static_method_with_type_def(method, type_def_id, interner)
     }
 
     /// Check a static method body with the type already resolved to a TypeDefId.
@@ -1986,26 +1898,12 @@ impl Analyzer {
         let method_type = method_def.signature.clone();
         let method_type_params = method_def.method_type_params.clone();
         let return_type = *method_type.return_type.clone();
-        self.current_function_return = Some(return_type.clone());
-
-        // Set error type context if this is a fallible method
-        if let Type::Fallible(ref ft) = return_type {
-            self.current_function_error_type = Some((*ft.error_type).clone());
-        } else {
-            self.current_function_error_type = None;
-        }
-
-        // Set generator context if return type is Iterator<T>
-        self.current_generator_element_type =
-            self.extract_iterator_element_type(&return_type, interner);
+        let saved_ctx = self.enter_function_context(&return_type, interner);
 
         // Mark that we're in a static method (for self-usage detection)
-        let method_name_str = interner.resolve(method.name).to_string();
-        self.current_static_method = Some(method_name_str);
+        self.current_static_method = Some(interner.resolve(method.name).to_string());
 
         // Add method-level type params to the current type param scope (if any)
-        // This allows constraints on method type params to be checked
-        let saved_type_param_scope = self.current_type_param_scope.clone();
         if !method_type_params.is_empty() {
             let mut scope = self.current_type_param_scope.take().unwrap_or_default();
             for tp in &method_type_params {
@@ -2036,13 +1934,7 @@ impl Analyzer {
         if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
             self.scope = parent;
         }
-        self.current_function_return = None;
-        self.current_function_error_type = None;
-        self.current_generator_element_type = None;
-        self.current_static_method = None;
-
-        // Restore type param scope (remove method type params)
-        self.current_type_param_scope = saved_type_param_scope;
+        self.exit_function_context(saved_ctx);
 
         Ok(())
     }
@@ -2058,7 +1950,7 @@ impl Analyzer {
             self.scope = Scope::with_parent(parent_scope);
 
             // Tests implicitly return void
-            self.current_function_return = Some(Type::Void);
+            let saved_ctx = self.enter_function_context(&Type::Void, interner);
 
             // Type check all statements in the test body
             self.check_block(&test_case.body, interner)?;
@@ -2067,7 +1959,7 @@ impl Analyzer {
             if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
                 self.scope = parent;
             }
-            self.current_function_return = None;
+            self.exit_function_context(saved_ctx);
         }
 
         Ok(())

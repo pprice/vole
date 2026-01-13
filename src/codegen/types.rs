@@ -897,20 +897,20 @@ pub(crate) const FALLIBLE_TAG_SIZE: u32 = 8;
 /// Get the error tag for a specific error type within a fallible type.
 /// Returns the 1-based index (tag 0 is reserved for success).
 ///
-/// Uses string comparison via the Interner to handle cross-interner Symbol lookup.
-/// This is necessary because error types in the fallible type may have Symbols from
-/// the analyzed program's interner, while the error_name may come from a different
-/// interner (e.g., when compiling module code).
+/// Uses string comparison via the NameTable/EntityRegistry to look up error type names
+/// and compares with the resolved error_name Symbol.
 pub(crate) fn fallible_error_tag(
     fallible: &crate::sema::types::FallibleType,
     error_name: Symbol,
     interner: &Interner,
+    name_table: &crate::identity::NameTable,
+    entity_registry: &crate::sema::EntityRegistry,
 ) -> Option<i64> {
     let error_name_str = interner.resolve(error_name);
     match fallible.error_type.as_ref() {
         Type::ErrorType(info) => {
-            let info_name_str = interner.resolve(info.name);
-            if info_name_str == error_name_str {
+            let info_name = name_table.last_segment_str(entity_registry.name_id(info.type_def_id));
+            if info_name.as_deref() == Some(error_name_str) {
                 Some(1) // Single error type always gets tag 1
             } else {
                 None
@@ -920,8 +920,9 @@ pub(crate) fn fallible_error_tag(
             // Find the 1-based index of the error type in the union
             for (idx, variant) in variants.iter().enumerate() {
                 if let Type::ErrorType(info) = variant {
-                    let info_name_str = interner.resolve(info.name);
-                    if info_name_str == error_name_str {
+                    let info_name =
+                        name_table.last_segment_str(entity_registry.name_id(info.type_def_id));
+                    if info_name.as_deref() == Some(error_name_str) {
                         return Some((idx + 1) as i64);
                     }
                 }

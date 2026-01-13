@@ -1,6 +1,6 @@
 // src/sema/types.rs
 
-use crate::frontend::{PrimitiveType, Span, Symbol};
+use crate::frontend::{PrimitiveType, Span};
 use crate::identity::{ModuleId, NameId, TypeDefId};
 
 /// Analysis error - represents a type that couldn't be determined.
@@ -337,7 +337,6 @@ pub struct InterfaceMethodType {
 /// Error type definition (e.g., DivByZero, OutOfRange { value: i32 })
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErrorTypeInfo {
-    pub name: Symbol,
     pub type_def_id: TypeDefId,
     pub fields: Vec<StructField>,
 }

@@ -322,50 +322,12 @@ impl Analyzer {
         // 1. Check implement registry (works for all types)
         let method_name_id = self.method_name_id(method_name, interner);
         // Try EntityRegistry first for method bindings
-        let type_def_id = match object_type {
-            Type::Class(c) => Some(c.type_def_id),
-            Type::Record(r) => Some(r.type_def_id),
-            Type::I8 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.i8),
-            Type::I16 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.i16),
-            Type::I32 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.i32),
-            Type::I64 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.i64),
-            Type::I128 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.i128),
-            Type::U8 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.u8),
-            Type::U16 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.u16),
-            Type::U32 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.u32),
-            Type::U64 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.u64),
-            Type::F32 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.f32),
-            Type::F64 => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.f64),
-            Type::Bool => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.bool),
-            Type::String => self
-                .entity_registry
-                .type_by_name(self.name_table.primitives.string),
-            _ => None,
-        };
+        let type_def_id = object_type.type_def_id().or_else(|| {
+            self.name_table
+                .primitives
+                .name_id_for_type(object_type)
+                .and_then(|name_id| self.entity_registry.type_by_name(name_id))
+        });
         if let Some(type_def_id) = type_def_id
             && let Some((interface_id, binding)) = self
                 .entity_registry

@@ -15,7 +15,6 @@ impl Analyzer {
         type_def_id: TypeDefId,
         type_args: &[Type],
         field_name: &str,
-        interner: &Interner,
     ) -> Option<(String, Type)> {
         let type_def = self.entity_registry.get_type(type_def_id);
 
@@ -56,7 +55,7 @@ impl Analyzer {
     }
 
     /// Get the type name and list of field names for a struct-like type (for error messages)
-    fn get_struct_info(&self, ty: &Type, interner: &Interner) -> Option<(String, Vec<String>)> {
+    fn get_struct_info(&self, ty: &Type) -> Option<(String, Vec<String>)> {
         let (type_def_id, _type_args) = match ty {
             Type::Class(c) => (c.type_def_id, &c.type_args),
             Type::Record(r) => (r.type_def_id, &r.type_args),
@@ -138,14 +137,14 @@ impl Analyzer {
 
         // Try to find the field
         if let Some((_type_name, field_type)) =
-            self.get_field_type(type_def_id, type_args, field_name, interner)
+            self.get_field_type(type_def_id, type_args, field_name)
         {
             return Ok(field_type);
         }
 
         // Field not found - get struct info for error message
         let (type_name, available_fields) = self
-            .get_struct_info(&object_type, interner)
+            .get_struct_info(&object_type)
             .unwrap_or_else(|| ("unknown".to_string(), vec![]));
 
         self.add_error(
@@ -219,7 +218,7 @@ impl Analyzer {
         // Find the field
         let field_name = interner.resolve(opt_chain.field);
         if let Some((_type_name, field_type)) =
-            self.get_field_type(type_def_id, type_args, field_name, interner)
+            self.get_field_type(type_def_id, type_args, field_name)
         {
             // Result is always optional (field_type | nil)
             // But if field type is already optional, don't double-wrap
@@ -230,7 +229,7 @@ impl Analyzer {
             }
         } else {
             let (type_name, _) = self
-                .get_struct_info(&inner_type, interner)
+                .get_struct_info(&inner_type)
                 .unwrap_or_else(|| ("unknown".to_string(), vec![]));
             self.add_error(
                 SemanticError::UnknownField {
