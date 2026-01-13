@@ -11,7 +11,9 @@ use crate::identity::{MethodId, ModuleId, NameId, NameTable, TypeDefId};
 use crate::sema::entity_defs::{Implementation, MethodDef, TypeDef};
 use crate::sema::entity_registry::EntityRegistry;
 use crate::sema::expression_data::ExpressionData;
-use crate::sema::generic::{MonomorphCache, MonomorphInstance, MonomorphKey};
+use crate::sema::generic::{
+    MonomorphCache, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,
+};
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_table::TypeKey;
@@ -92,6 +94,12 @@ impl<'a> ProgramQuery<'a> {
     #[must_use]
     pub fn monomorph_for(&self, node: NodeId) -> Option<&'a MonomorphKey> {
         self.expr_data.get_generic(node)
+    }
+
+    /// Get the monomorphization key for a generic static method call
+    #[must_use]
+    pub fn static_method_generic_at(&self, node: NodeId) -> Option<&'a StaticMethodMonomorphKey> {
+        self.expr_data.get_static_method_generic(node)
     }
 
     /// Get bundled information about a call site

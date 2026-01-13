@@ -1,4 +1,9 @@
 // Test static methods on records and classes
+// Comprehensive tests for non-generic static methods
+
+// =============================================================================
+// Basic Record with Static Methods
+// =============================================================================
 
 record Point {
     x: i64,
@@ -12,8 +17,90 @@ record Point {
         func from_x(x: i64) -> Point {
             return Point { x: x, y: 0 }
         }
+
+        func from_y(y: i64) -> Point {
+            return Point { x: 0, y: y }
+        }
+
+        func create(x: i64, y: i64) -> Point {
+            return Point { x: x, y: y }
+        }
+
+        // Static method calling another static method
+        func unit_x() -> Point {
+            return Point.from_x(1)
+        }
+
+        func unit_y() -> Point {
+            return Point.from_y(1)
+        }
+
+        // Static method with computation
+        func midpoint(p1: Point, p2: Point) -> Point {
+            return Point {
+                x: (p1.x + p2.x) / 2,
+                y: (p1.y + p2.y) / 2,
+            }
+        }
+
+        // Static method returning primitive
+        func distance_squared(p1: Point, p2: Point) -> i64 {
+            let dx = p1.x - p2.x
+            let dy = p1.y - p2.y
+            return dx * dx + dy * dy
+        }
     }
 }
+
+// =============================================================================
+// Record with Multiple Field Types
+// =============================================================================
+
+record Rectangle {
+    x: i64,
+    y: i64,
+    width: i64,
+    height: i64,
+
+    statics {
+        func empty() -> Rectangle {
+            return Rectangle { x: 0, y: 0, width: 0, height: 0 }
+        }
+
+        func at_origin(width: i64, height: i64) -> Rectangle {
+            return Rectangle { x: 0, y: 0, width: width, height: height }
+        }
+
+        func square(size: i64) -> Rectangle {
+            return Rectangle.at_origin(size, size)
+        }
+
+        func from_points(p1: Point, p2: Point) -> Rectangle {
+            let min_x = if p1.x < p2.x { p1.x } else { p2.x }
+            let min_y = if p1.y < p2.y { p1.y } else { p2.y }
+            let max_x = if p1.x > p2.x { p1.x } else { p2.x }
+            let max_y = if p1.y > p2.y { p1.y } else { p2.y }
+            return Rectangle {
+                x: min_x,
+                y: min_y,
+                width: max_x - min_x,
+                height: max_y - min_y,
+            }
+        }
+
+        func area(r: Rectangle) -> i64 {
+            return r.width * r.height
+        }
+
+        func perimeter(r: Rectangle) -> i64 {
+            return 2 * (r.width + r.height)
+        }
+    }
+}
+
+// =============================================================================
+// Basic Class with Static Methods
+// =============================================================================
 
 class Counter {
     value: i64,
@@ -26,25 +113,320 @@ class Counter {
         func starting_at(v: i64) -> Counter {
             return Counter { value: v }
         }
+
+        func from_counter(other: Counter) -> Counter {
+            return Counter { value: other.value }
+        }
     }
 
     func increment() {
         self.value = self.value + 1
     }
+
+    func decrement() {
+        self.value = self.value - 1
+    }
+
+    func add(n: i64) {
+        self.value = self.value + n
+    }
+
+    func get() -> i64 {
+        return self.value
+    }
 }
 
+// =============================================================================
+// Class with Complex State
+// =============================================================================
+
+class BankAccount {
+    balance: i64,
+    transaction_count: i64,
+
+    statics {
+        func empty() -> BankAccount {
+            return BankAccount { balance: 0, transaction_count: 0 }
+        }
+
+        func with_initial_deposit(amount: i64) -> BankAccount {
+            return BankAccount { balance: amount, transaction_count: 1 }
+        }
+
+        // Static utility method
+        func transfer(from: BankAccount, to: BankAccount, amount: i64) -> bool {
+            if from.balance >= amount {
+                from.withdraw(amount)
+                to.deposit(amount)
+                return true
+            }
+            return false
+        }
+    }
+
+    func deposit(amount: i64) {
+        self.balance = self.balance + amount
+        self.transaction_count = self.transaction_count + 1
+    }
+
+    func withdraw(amount: i64) -> bool {
+        if self.balance >= amount {
+            self.balance = self.balance - amount
+            self.transaction_count = self.transaction_count + 1
+            return true
+        }
+        return false
+    }
+
+    func get_balance() -> i64 {
+        return self.balance
+    }
+
+    func get_transaction_count() -> i64 {
+        return self.transaction_count
+    }
+}
+
+// =============================================================================
+// Class with String Fields
+// =============================================================================
+
+class Person {
+    name: string,
+    age: i64,
+
+    statics {
+        func anonymous() -> Person {
+            return Person { name: "Anonymous", age: 0 }
+        }
+
+        func create(name: string, age: i64) -> Person {
+            return Person { name: name, age: age }
+        }
+
+        func child(name: string) -> Person {
+            return Person { name: name, age: 0 }
+        }
+
+        func adult(name: string) -> Person {
+            return Person { name: name, age: 18 }
+        }
+
+        // Static method comparing two instances
+        func older(p1: Person, p2: Person) -> Person {
+            if p1.age >= p2.age {
+                return p1
+            }
+            return p2
+        }
+
+        func age_difference(p1: Person, p2: Person) -> i64 {
+            let diff = p1.age - p2.age
+            if diff < 0 {
+                return -diff
+            }
+            return diff
+        }
+    }
+
+    func get_name() -> string {
+        return self.name
+    }
+
+    func get_age() -> i64 {
+        return self.age
+    }
+
+    func have_birthday() {
+        self.age = self.age + 1
+    }
+}
+
+// =============================================================================
+// Record with Boolean Logic
+// =============================================================================
+
+record Flags {
+    a: bool,
+    b: bool,
+    c: bool,
+
+    statics {
+        func all_false() -> Flags {
+            return Flags { a: false, b: false, c: false }
+        }
+
+        func all_true() -> Flags {
+            return Flags { a: true, b: true, c: true }
+        }
+
+        func from_values(a: bool, b: bool, c: bool) -> Flags {
+            return Flags { a: a, b: b, c: c }
+        }
+
+        func any_set(f: Flags) -> bool {
+            return f.a || f.b || f.c
+        }
+
+        func all_set(f: Flags) -> bool {
+            return f.a && f.b && f.c
+        }
+
+        func none_set(f: Flags) -> bool {
+            return !f.a && !f.b && !f.c
+        }
+
+        func count_set(f: Flags) -> i64 {
+            let mut count = 0
+            if f.a { count = count + 1 }
+            if f.b { count = count + 1 }
+            if f.c { count = count + 1 }
+            return count
+        }
+    }
+}
+
+// =============================================================================
+// Helper Functions for Tests
+// =============================================================================
+
+func square(x: i64) -> i64 {
+    return x * x
+}
+
+func abs(x: i64) -> i64 {
+    if x < 0 {
+        return -x
+    }
+    return x
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
 tests {
+    // -------------------------------------------------------------------------
+    // Point - Basic Static Methods
+    // -------------------------------------------------------------------------
+
     test "record static method - origin" {
         let p = Point.origin()
         assert(p.x == 0)
         assert(p.y == 0)
     }
 
-    test "record static method with params" {
+    test "record static method with params - from_x" {
         let p = Point.from_x(42)
         assert(p.x == 42)
         assert(p.y == 0)
     }
+
+    test "record static method with params - from_y" {
+        let p = Point.from_y(42)
+        assert(p.x == 0)
+        assert(p.y == 42)
+    }
+
+    test "record static method with multiple params" {
+        let p = Point.create(10, 20)
+        assert(p.x == 10)
+        assert(p.y == 20)
+    }
+
+    test "record static method calling another static" {
+        let ux = Point.unit_x()
+        let uy = Point.unit_y()
+        assert(ux.x == 1)
+        assert(ux.y == 0)
+        assert(uy.x == 0)
+        assert(uy.y == 1)
+    }
+
+    test "record static method with record params" {
+        let p1 = Point.create(0, 0)
+        let p2 = Point.create(10, 20)
+        let mid = Point.midpoint(p1, p2)
+        assert(mid.x == 5)
+        assert(mid.y == 10)
+    }
+
+    test "record static method returning primitive" {
+        let p1 = Point.create(0, 0)
+        let p2 = Point.create(3, 4)
+        let dist_sq = Point.distance_squared(p1, p2)
+        assert(dist_sq == 25)  // 3^2 + 4^2
+    }
+
+    test "record static method result in expression" {
+        let sum = Point.origin().x + Point.create(5, 10).y
+        assert(sum == 10)
+    }
+
+    test "record static method chained access" {
+        assert(Point.create(7, 11).x == 7)
+        assert(Point.create(7, 11).y == 11)
+    }
+
+    // -------------------------------------------------------------------------
+    // Rectangle - Static Methods with Complex Logic
+    // -------------------------------------------------------------------------
+
+    test "rectangle empty" {
+        let r = Rectangle.empty()
+        assert(r.x == 0)
+        assert(r.y == 0)
+        assert(r.width == 0)
+        assert(r.height == 0)
+    }
+
+    test "rectangle at_origin" {
+        let r = Rectangle.at_origin(100, 50)
+        assert(r.x == 0)
+        assert(r.y == 0)
+        assert(r.width == 100)
+        assert(r.height == 50)
+    }
+
+    test "rectangle square - static calling static" {
+        let r = Rectangle.square(10)
+        assert(r.width == 10)
+        assert(r.height == 10)
+    }
+
+    test "rectangle from_points" {
+        let p1 = Point.create(5, 5)
+        let p2 = Point.create(15, 25)
+        let r = Rectangle.from_points(p1, p2)
+        assert(r.x == 5)
+        assert(r.y == 5)
+        assert(r.width == 10)
+        assert(r.height == 20)
+    }
+
+    test "rectangle from_points reversed order" {
+        let p1 = Point.create(15, 25)
+        let p2 = Point.create(5, 5)
+        let r = Rectangle.from_points(p1, p2)
+        assert(r.x == 5)
+        assert(r.y == 5)
+        assert(r.width == 10)
+        assert(r.height == 20)
+    }
+
+    test "rectangle static area" {
+        let r = Rectangle.at_origin(10, 5)
+        assert(Rectangle.area(r) == 50)
+    }
+
+    test "rectangle static perimeter" {
+        let r = Rectangle.at_origin(10, 5)
+        assert(Rectangle.perimeter(r) == 30)
+    }
+
+    // -------------------------------------------------------------------------
+    // Counter - Basic Class Static Methods
+    // -------------------------------------------------------------------------
 
     test "class static method - zero" {
         let c = Counter.zero()
@@ -58,7 +440,182 @@ tests {
         assert(c.value == 11)
     }
 
-    // Tests for static interfaces
+    test "class static method with instance param" {
+        let c1 = Counter.starting_at(42)
+        let c2 = Counter.from_counter(c1)
+        assert(c2.value == 42)
+        c1.increment()
+        assert(c1.value == 43)
+        assert(c2.value == 42)  // Independent copy
+    }
+
+    test "class static then instance methods" {
+        let c = Counter.starting_at(5)
+        c.increment()
+        c.increment()
+        c.add(10)
+        c.decrement()
+        assert(c.get() == 16)
+    }
+
+    // -------------------------------------------------------------------------
+    // BankAccount - Complex State Management
+    // -------------------------------------------------------------------------
+
+    test "bank account empty" {
+        let acc = BankAccount.empty()
+        assert(acc.get_balance() == 0)
+        assert(acc.get_transaction_count() == 0)
+    }
+
+    test "bank account with initial deposit" {
+        let acc = BankAccount.with_initial_deposit(1000)
+        assert(acc.get_balance() == 1000)
+        assert(acc.get_transaction_count() == 1)
+    }
+
+    test "bank account deposit and withdraw" {
+        let acc = BankAccount.with_initial_deposit(100)
+        acc.deposit(50)
+        assert(acc.get_balance() == 150)
+        let ok = acc.withdraw(30)
+        assert(ok == true)
+        assert(acc.get_balance() == 120)
+        assert(acc.get_transaction_count() == 3)
+    }
+
+    test "bank account withdraw insufficient funds" {
+        let acc = BankAccount.with_initial_deposit(50)
+        let ok = acc.withdraw(100)
+        assert(ok == false)
+        assert(acc.get_balance() == 50)
+        assert(acc.get_transaction_count() == 1)  // Unchanged
+    }
+
+    test "bank account static transfer success" {
+        let from = BankAccount.with_initial_deposit(100)
+        let to = BankAccount.empty()
+        let ok = BankAccount.transfer(from, to, 30)
+        assert(ok == true)
+        assert(from.get_balance() == 70)
+        assert(to.get_balance() == 30)
+    }
+
+    test "bank account static transfer insufficient funds" {
+        let from = BankAccount.with_initial_deposit(20)
+        let to = BankAccount.empty()
+        let ok = BankAccount.transfer(from, to, 50)
+        assert(ok == false)
+        assert(from.get_balance() == 20)
+        assert(to.get_balance() == 0)
+    }
+
+    // -------------------------------------------------------------------------
+    // Person - String Fields and Comparisons
+    // -------------------------------------------------------------------------
+
+    test "person anonymous" {
+        let p = Person.anonymous()
+        assert(p.get_name() == "Anonymous")
+        assert(p.get_age() == 0)
+    }
+
+    test "person create" {
+        let p = Person.create("Alice", 30)
+        assert(p.get_name() == "Alice")
+        assert(p.get_age() == 30)
+    }
+
+    test "person child and adult factories" {
+        let child = Person.child("Bob")
+        let adult = Person.adult("Carol")
+        assert(child.get_age() == 0)
+        assert(adult.get_age() == 18)
+    }
+
+    test "person have_birthday" {
+        let p = Person.create("Dave", 25)
+        p.have_birthday()
+        p.have_birthday()
+        assert(p.get_age() == 27)
+    }
+
+    test "person static older comparison" {
+        let p1 = Person.create("Elder", 50)
+        let p2 = Person.create("Younger", 20)
+        let older = Person.older(p1, p2)
+        assert(older.get_name() == "Elder")
+    }
+
+    test "person static older same age" {
+        let p1 = Person.create("First", 30)
+        let p2 = Person.create("Second", 30)
+        let older = Person.older(p1, p2)
+        assert(older.get_name() == "First")  // First wins on tie
+    }
+
+    test "person age_difference" {
+        let p1 = Person.create("A", 40)
+        let p2 = Person.create("B", 25)
+        assert(Person.age_difference(p1, p2) == 15)
+        assert(Person.age_difference(p2, p1) == 15)  // Order doesn't matter
+    }
+
+    // -------------------------------------------------------------------------
+    // Flags - Boolean Logic
+    // -------------------------------------------------------------------------
+
+    test "flags all_false" {
+        let f = Flags.all_false()
+        assert(f.a == false)
+        assert(f.b == false)
+        assert(f.c == false)
+    }
+
+    test "flags all_true" {
+        let f = Flags.all_true()
+        assert(f.a == true)
+        assert(f.b == true)
+        assert(f.c == true)
+    }
+
+    test "flags from_values" {
+        let f = Flags.from_values(true, false, true)
+        assert(f.a == true)
+        assert(f.b == false)
+        assert(f.c == true)
+    }
+
+    test "flags any_set" {
+        assert(Flags.any_set(Flags.all_false()) == false)
+        assert(Flags.any_set(Flags.from_values(true, false, false)) == true)
+        assert(Flags.any_set(Flags.from_values(false, true, false)) == true)
+        assert(Flags.any_set(Flags.all_true()) == true)
+    }
+
+    test "flags all_set" {
+        assert(Flags.all_set(Flags.all_false()) == false)
+        assert(Flags.all_set(Flags.from_values(true, true, false)) == false)
+        assert(Flags.all_set(Flags.all_true()) == true)
+    }
+
+    test "flags none_set" {
+        assert(Flags.none_set(Flags.all_false()) == true)
+        assert(Flags.none_set(Flags.from_values(true, false, false)) == false)
+        assert(Flags.none_set(Flags.all_true()) == false)
+    }
+
+    test "flags count_set" {
+        assert(Flags.count_set(Flags.all_false()) == 0)
+        assert(Flags.count_set(Flags.from_values(true, false, false)) == 1)
+        assert(Flags.count_set(Flags.from_values(true, true, false)) == 2)
+        assert(Flags.count_set(Flags.all_true()) == 3)
+    }
+
+    // -------------------------------------------------------------------------
+    // Static Interface Methods (Built-in Types)
+    // -------------------------------------------------------------------------
+
     test "Default interface - i32" {
         let v = i32.default_value()
         assert(v == 0)
@@ -89,10 +646,131 @@ tests {
         assert(i64.max_value() == 9223372036854775807)
     }
 
-    test "Zero and One interfaces" {
+    test "Zero and One interfaces - i32" {
         assert(i32.zero() == 0)
         assert(i32.one() == 1)
+    }
+
+    test "Zero and One interfaces - i64" {
         assert(i64.zero() == 0)
         assert(i64.one() == 1)
+    }
+
+    test "Zero and One interfaces - f64" {
+        assert(f64.zero() == 0.0)
+        assert(f64.one() == 1.0)
+    }
+
+    // -------------------------------------------------------------------------
+    // Cross-Type Static Method Interactions
+    // -------------------------------------------------------------------------
+
+    test "point and rectangle interaction" {
+        let origin = Point.origin()
+        let corner = Point.create(100, 50)
+        let rect = Rectangle.from_points(origin, corner)
+        assert(Rectangle.area(rect) == 5000)
+    }
+
+    test "multiple static calls in expression" {
+        let result = Point.create(3, 4).x + Point.create(5, 6).y
+        assert(result == 9)
+    }
+
+    test "static method result passed to function" {
+        let p = Point.create(5, 0)
+        let squared = square(p.x)
+        assert(squared == 25)
+    }
+
+    test "nested static method calls" {
+        let mid = Point.midpoint(Point.origin(), Point.create(10, 10))
+        assert(mid.x == 5)
+        assert(mid.y == 5)
+    }
+
+    // -------------------------------------------------------------------------
+    // Multiple Instances Same Type
+    // -------------------------------------------------------------------------
+
+    test "multiple counters independent" {
+        let c1 = Counter.starting_at(0)
+        let c2 = Counter.starting_at(100)
+        let c3 = Counter.starting_at(50)
+
+        c1.add(10)
+        c2.decrement()
+        c3.increment()
+
+        assert(c1.get() == 10)
+        assert(c2.get() == 99)
+        assert(c3.get() == 51)
+    }
+
+    test "multiple points in array-like pattern" {
+        let p1 = Point.create(1, 1)
+        let p2 = Point.create(2, 2)
+        let p3 = Point.create(3, 3)
+        let p4 = Point.create(4, 4)
+
+        let sum_x = p1.x + p2.x + p3.x + p4.x
+        let sum_y = p1.y + p2.y + p3.y + p4.y
+
+        assert(sum_x == 10)
+        assert(sum_y == 10)
+    }
+
+    test "multiple bank accounts" {
+        let savings = BankAccount.with_initial_deposit(1000)
+        let checking = BankAccount.with_initial_deposit(500)
+        let investment = BankAccount.empty()
+
+        BankAccount.transfer(savings, investment, 200)
+        BankAccount.transfer(checking, investment, 100)
+
+        assert(savings.get_balance() == 800)
+        assert(checking.get_balance() == 400)
+        assert(investment.get_balance() == 300)
+    }
+
+    // -------------------------------------------------------------------------
+    // Edge Cases
+    // -------------------------------------------------------------------------
+
+    test "point with negative coordinates" {
+        let p = Point.create(-10, -20)
+        assert(p.x == -10)
+        assert(p.y == -20)
+    }
+
+    test "rectangle with zero dimensions" {
+        let r = Rectangle.at_origin(0, 0)
+        assert(Rectangle.area(r) == 0)
+        assert(Rectangle.perimeter(r) == 0)
+    }
+
+    test "distance_squared with same point" {
+        let p = Point.create(5, 5)
+        assert(Point.distance_squared(p, p) == 0)
+    }
+
+    test "counter at max i64" {
+        let c = Counter.starting_at(9223372036854775806)
+        c.increment()
+        assert(c.get() == 9223372036854775807)
+    }
+
+    test "person with empty name" {
+        let p = Person.create("", 25)
+        assert(p.get_name() == "")
+        assert(p.get_age() == 25)
+    }
+
+    test "midpoint rounding" {
+        let p1 = Point.create(0, 0)
+        let p2 = Point.create(5, 5)  // Midpoint is (2.5, 2.5) but integer division
+        let mid = Point.midpoint(p1, p2)
+        assert(mid.x == 2)  // Floor division
+        assert(mid.y == 2)
     }
 }

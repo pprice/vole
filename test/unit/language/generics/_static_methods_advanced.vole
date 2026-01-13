@@ -1,0 +1,304 @@
+// Test: Advanced generic static methods - method-level type parameters
+// WIP: These tests require support for static methods with their own type parameters
+// on generic classes, combined with class type parameters.
+//
+// Tracked by bead: vole-rst0
+
+// =============================================================================
+// Interfaces for constraint testing
+// =============================================================================
+
+interface Eq { func eq(other: Self) -> bool }
+interface Stringable { func str() -> string }
+
+// =============================================================================
+// Test types implementing interfaces
+// =============================================================================
+
+record Id implements Hashable, Eq, Stringable {
+    n: i64,
+}
+
+implement Hashable for Id {
+    func hash() -> i64 { return self.n * 17 }
+}
+
+implement Eq for Id {
+    func eq(other: Id) -> bool { return self.n == other.n }
+}
+
+implement Stringable for Id {
+    func str() -> string { return "Id" }
+}
+
+record Label implements Stringable {
+    text: string,
+}
+
+implement Stringable for Label {
+    func str() -> string { return self.text }
+}
+
+// =============================================================================
+// Static methods with method-level type params on generic classes
+// =============================================================================
+
+// Generic class with static that has its own type param
+class Transformer<T> {
+    value: T,
+
+    statics {
+        // Static with independent type param U (different from class T)
+        func convert<U>(u: U) -> Transformer<U> {
+            return Transformer { value: u }
+        }
+
+        // Static using both class type param T and method type param U
+        func pair<U>(t: T, u: U) -> Pair<T, U> {
+            return Pair { first: t, second: u }
+        }
+
+        // Static with constrained method type param
+        func hashOther<U: Hashable>(u: U) -> i64 {
+            return u.hash()
+        }
+
+        // Factory using class type param only
+        func create(v: T) -> Transformer<T> {
+            return Transformer { value: v }
+        }
+    }
+
+    func get() -> T {
+        return self.value
+    }
+}
+
+// Class with constrained T and static with additional constraint on method param
+class ConstrainedTransformer<T: Hashable> {
+    value: T,
+
+    statics {
+        // Method type param with its own constraint
+        func transformHashable<U: Hashable>(u: U) -> i64 {
+            return u.hash()
+        }
+
+        // Method type param with multiple constraints
+        func transformMulti<U: Hashable + Eq>(u: U, other: U) -> i64 {
+            if u.eq(other) {
+                return u.hash()
+            }
+            return 0
+        }
+
+        // Factory using class type param
+        func create(v: T) -> ConstrainedTransformer<T> {
+            return ConstrainedTransformer { value: v }
+        }
+
+        // Method combining class and method type params
+        func compareHashes<U: Hashable>(t: T, u: U) -> bool {
+            return t.hash() == u.hash()
+        }
+    }
+
+    func get() -> T {
+        return self.value
+    }
+
+    func getHash() -> i64 {
+        return self.value.hash()
+    }
+}
+
+// Generic class Pair for use in tests
+class Pair<K, V> {
+    first: K,
+    second: V,
+
+    statics {
+        func create(k: K, v: V) -> Pair<K, V> {
+            return Pair { first: k, second: v }
+        }
+    }
+
+    func getFirst() -> K {
+        return self.first
+    }
+
+    func getSecond() -> V {
+        return self.second
+    }
+}
+
+// Class with functional-style static methods using method type params
+class Container<T> {
+    item: T,
+
+    statics {
+        func wrap(t: T) -> Container<T> {
+            return Container { item: t }
+        }
+
+        // Apply a function to transform the value type
+        func map<U>(c: Container<T>, f: (T) -> U) -> Container<U> {
+            return Container { item: f(c.item) }
+        }
+
+        // Combine two containers with different types
+        func zip<U>(c1: Container<T>, c2: Container<U>) -> Pair<T, U> {
+            return Pair { first: c1.item, second: c2.item }
+        }
+    }
+
+    func get() -> T {
+        return self.item
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+tests {
+    // -------------------------------------------------------------------------
+    // Static methods with independent method type params
+    // -------------------------------------------------------------------------
+
+    test "static - method type param independent of class" {
+        // Transformer<T>.convert<U>(u) -> Transformer<U>
+        let t = Transformer.convert(42)
+        assert(t.get() == 42)
+    }
+
+    test "static - method type param different types" {
+        let t1 = Transformer.convert("hello")
+        let t2 = Transformer.convert(3.14)
+        assert(t1.get() == "hello")
+        assert(t2.get() == 3.14)
+    }
+
+    test "static - method using both class and method type params" {
+        // pair<U>(t: T, u: U) -> Pair<T, U>
+        let p = Transformer.pair(42, "hello")
+        assert(p.getFirst() == 42)
+        assert(p.getSecond() == "hello")
+    }
+
+    test "static - method with constrained method type param" {
+        let h = Transformer.hashOther(42)
+        assert(h == 42.hash())
+    }
+
+    test "static - class factory and method type param in same class" {
+        let t1 = Transformer.create(100)
+        let t2 = Transformer.convert("string")
+        assert(t1.get() == 100)
+        assert(t2.get() == "string")
+    }
+
+    // -------------------------------------------------------------------------
+    // Constrained class with method type params
+    // -------------------------------------------------------------------------
+
+    test "static - constrained class with method type param" {
+        let h = ConstrainedTransformer.transformHashable(42)
+        assert(h == 42.hash())
+    }
+
+    test "static - constrained class method type param with multiple constraints" {
+        let h = ConstrainedTransformer.transformMulti(Id { n: 5 }, Id { n: 5 })
+        assert(h == 85)  // 5 * 17
+    }
+
+    test "static - constrained class method type param no match" {
+        let h = ConstrainedTransformer.transformMulti(Id { n: 5 }, Id { n: 10 })
+        assert(h == 0)
+    }
+
+    test "static - constrained class factory" {
+        let t = ConstrainedTransformer.create(42)
+        assert(t.get() == 42)
+        assert(t.getHash() == 42.hash())
+    }
+
+    test "static - compare hashes using class and method type params" {
+        let same = ConstrainedTransformer.compareHashes(7, 7)
+        let diff = ConstrainedTransformer.compareHashes(7, 8)
+        assert(same == true)
+        assert(diff == false)
+    }
+
+    // -------------------------------------------------------------------------
+    // Container with functional-style static methods
+    // -------------------------------------------------------------------------
+
+    test "static - container wrap" {
+        let c = Container.wrap(42)
+        assert(c.get() == 42)
+    }
+
+    test "static - container map" {
+        let c = Container.wrap(10)
+        let doubled = Container.map(c, (x: i64) => x * 2)
+        assert(doubled.get() == 20)
+    }
+
+    test "static - container map type change" {
+        let c = Container.wrap(42)
+        let stringified = Container.map(c, (x: i64) -> string => "value")
+        assert(stringified.get() == "value")
+    }
+
+    test "static - container zip" {
+        let c1 = Container.wrap(1)
+        let c2 = Container.wrap("one")
+        let zipped = Container.zip(c1, c2)
+        assert(zipped.getFirst() == 1)
+        assert(zipped.getSecond() == "one")
+    }
+
+    test "static - container zip different types" {
+        let c1 = Container.wrap(true)
+        let c2 = Container.wrap(3.14)
+        let zipped = Container.zip(c1, c2)
+        assert(zipped.getFirst() == true)
+        assert(zipped.getSecond() == 3.14)
+    }
+
+    // -------------------------------------------------------------------------
+    // Complex combinations
+    // -------------------------------------------------------------------------
+
+    test "static - nested transformers" {
+        let inner = Transformer.convert(42)
+        let outer = Transformer.convert(inner)
+        assert(outer.get().get() == 42)
+    }
+
+    test "static - transformer pair with containers" {
+        let c1 = Container.wrap(1)
+        let c2 = Container.wrap(2)
+        let p = Transformer.pair(c1, c2)
+        assert(p.getFirst().get() == 1)
+        assert(p.getSecond().get() == 2)
+    }
+
+    test "static - chained container maps" {
+        let c = Container.wrap(5)
+        let c2 = Container.map(c, (x: i64) => x + 1)
+        let c3 = Container.map(c2, (x: i64) => x * 2)
+        assert(c3.get() == 12)  // (5 + 1) * 2
+    }
+
+    test "static - method type param with Id type" {
+        let h = Transformer.hashOther(Id { n: 3 })
+        assert(h == 51)  // 3 * 17
+    }
+
+    test "static - constrained transformer with Id" {
+        let t = ConstrainedTransformer.create(Id { n: 7 })
+        assert(t.getHash() == 119)  // 7 * 17
+    }
+}

@@ -60,8 +60,16 @@ impl<'src> Parser<'src> {
                 self.consume(TokenType::Identifier, "expected field name after '.'")?;
                 let field = self.interner.intern(&field_token.lexeme);
 
+                // Check for type args: expr.method<T, U>(...) or direct call: expr.method(...)
+                let type_args = if self.check(TokenType::Lt) {
+                    // Try to parse type args with lookahead
+                    self.try_parse_call_type_args()?
+                } else {
+                    Vec::new()
+                };
+
                 if self.check(TokenType::LParen) {
-                    // Method call: expr.method(args)
+                    // Method call: expr.method(args) or expr.method<T>(args)
                     self.advance(); // consume '('
                     let mut args = Vec::new();
                     if !self.check(TokenType::RParen) {
@@ -85,11 +93,22 @@ impl<'src> Parser<'src> {
                         kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
                             object: expr,
                             method: field,
+                            type_args,
                             args,
                             method_span: field_span,
                         })),
                         span,
                     };
+                } else if !type_args.is_empty() {
+                    // Had type args but no parens - syntax error
+                    return Err(ParseError::new(
+                        crate::errors::ParserError::ExpectedToken {
+                            expected: "'(' after type arguments".to_string(),
+                            found: self.current.ty.as_str().to_string(),
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
                 } else {
                     // Field access: expr.field
                     let span = expr.span.merge(field_span);

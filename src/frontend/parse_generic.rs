@@ -9,6 +9,133 @@ use super::ast::{TypeConstraint, TypeExpr, TypeParam};
 use super::parser::{ParseError, Parser};
 
 impl<'src> Parser<'src> {
+    /// Try to parse type arguments at a call site: method<T, U>(...)
+    /// Returns empty Vec if what follows '<' doesn't look like type args.
+    /// Uses lookahead to disambiguate from comparison operators.
+    pub(super) fn try_parse_call_type_args(&mut self) -> Result<Vec<TypeExpr>, ParseError> {
+        if !self.check(TokenType::Lt) {
+            return Ok(Vec::new());
+        }
+
+        // Save position for backtracking
+        let saved_lexer = self.lexer.clone();
+        let saved_current = self.current.clone();
+        let saved_previous = self.previous.clone();
+
+        self.advance(); // consume '<'
+
+        // Try to parse type list
+        let mut types = Vec::new();
+        if !self.check_gt_in_type_context() {
+            loop {
+                // Try to parse a type - if this fails, it's not type args
+                let ty = match self.parse_type() {
+                    Ok(t) => t,
+                    Err(_) => {
+                        // Restore and return empty
+                        self.lexer = saved_lexer;
+                        self.current = saved_current;
+                        self.previous = saved_previous;
+                        return Ok(Vec::new());
+                    }
+                };
+                types.push(ty);
+
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+                // Allow trailing comma
+                if self.check_gt_in_type_context() {
+                    break;
+                }
+            }
+        }
+
+        // Must be followed by '>'
+        if !self.check_gt_in_type_context() {
+            // Restore and return empty
+            self.lexer = saved_lexer;
+            self.current = saved_current;
+            self.previous = saved_previous;
+            return Ok(Vec::new());
+        }
+        self.consume_gt_in_type_context()?;
+
+        // Must be followed by '(' for it to be a call
+        if !self.check(TokenType::LParen) {
+            // Restore and return empty - this was comparison, not type args
+            self.lexer = saved_lexer;
+            self.current = saved_current;
+            self.previous = saved_previous;
+            return Ok(Vec::new());
+        }
+
+        Ok(types)
+    }
+
+    /// Try to parse type arguments for a struct literal: Name<T, U> { ... }
+    /// Returns empty Vec if what follows '<' doesn't look like type args for a struct.
+    pub(super) fn try_parse_struct_type_args(&mut self) -> Result<Vec<TypeExpr>, ParseError> {
+        if !self.check(TokenType::Lt) {
+            return Ok(Vec::new());
+        }
+
+        // Save position for backtracking
+        let saved_lexer = self.lexer.clone();
+        let saved_current = self.current.clone();
+        let saved_previous = self.previous.clone();
+
+        self.advance(); // consume '<'
+
+        // Try to parse type list
+        let mut types = Vec::new();
+        if !self.check_gt_in_type_context() {
+            loop {
+                // Try to parse a type - if this fails, it's not type args
+                let ty = match self.parse_type() {
+                    Ok(t) => t,
+                    Err(_) => {
+                        // Restore and return empty
+                        self.lexer = saved_lexer;
+                        self.current = saved_current;
+                        self.previous = saved_previous;
+                        return Ok(Vec::new());
+                    }
+                };
+                types.push(ty);
+
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+                // Allow trailing comma
+                if self.check_gt_in_type_context() {
+                    break;
+                }
+            }
+        }
+
+        // Must be followed by '>'
+        if !self.check_gt_in_type_context() {
+            // Restore and return empty
+            self.lexer = saved_lexer;
+            self.current = saved_current;
+            self.previous = saved_previous;
+            return Ok(Vec::new());
+        }
+        self.consume_gt_in_type_context()?;
+
+        // Must be followed by '{' for it to be a struct literal
+        if !self.check(TokenType::LBrace) {
+            // Restore and return empty - this was comparison, not type args
+            self.lexer = saved_lexer;
+            self.current = saved_current;
+            self.previous = saved_previous;
+            return Ok(Vec::new());
+        }
+
+        Ok(types)
+    }
+
     /// Parse optional type parameters: <T>, <T: Foo>, <A, B: Bar>
     /// Returns empty Vec if no '<' present.
     pub(super) fn parse_type_params(&mut self) -> Result<Vec<TypeParam>, ParseError> {

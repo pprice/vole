@@ -60,6 +60,25 @@ Dev tools: `just dev-next-error sema`, `just dev-trace-keyword raise`, `just dev
 Format: `tests { test "name" { assert(...) } }`
 Bless: `cargo run --bin vole-snap -- bless path/`
 
+NEVER "simplify" tests, even if you just created them.
+
+### When Tests Reveal Unimplemented Features
+
+If tests fail due to missing language features (not bugs), follow this workflow:
+
+1. **Create a WIP test file** with `_` prefix (e.g., `_feature_name.vole`)
+2. **Move the failing tests** to the WIP file, keeping the original test file working
+3. **Create a bead** to track the feature: `bd create --title="Feature description" --type=feature`
+4. **Reference the bead** in the WIP test file header comment
+5. **Never simplify or remove tests** - they prove correctness once the feature is implemented
+
+Example WIP test file header:
+```vole
+// Test: Feature description
+// WIP: Requires implementation of X
+// Tracked by bead: vole-xxxx
+```
+
 ### Skipped Tests
 
 Files/directories starting with `_` are skipped by default (WIP tests for unimplemented features).
@@ -73,7 +92,7 @@ vole-snap test test/snapshot/ --include-skipped
 cargo run -- test test/unit/language/_raw_strings.vole
 ```
 
-WIP test files live in `test/unit/language/_*.vole`.
+WIP test files live in `test/unit/language/_*.vole` or `test/unit/language/generics/_*.vole`.
 
 ## Verification
 
@@ -83,6 +102,7 @@ Never claim success when:
 - `cargo check` shows errors
 - Tests are failing
 - Subagents must verify `cargo check` exits 0
+- You have "simplified" tests
 
 ## Language Syntax
 

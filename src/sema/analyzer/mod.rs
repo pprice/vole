@@ -15,8 +15,8 @@ use crate::sema::EntityRegistry;
 use crate::sema::ExpressionData;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
-    ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, TypeParamInfo, TypeParamScope,
-    substitute_type,
+    ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,
+    TypeParamInfo, TypeParamScope, substitute_type,
 };
 use crate::sema::implement_registry::{
     ExternalMethodInfo, ImplementRegistry, MethodImpl, PrimitiveTypeId, TypeId,
@@ -31,6 +31,46 @@ use crate::sema::{
 };
 use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
+
+/// Check if a type param's constraint (found) satisfies a required constraint.
+/// Returns true if found has at least as strong constraints as required.
+fn constraint_satisfied(
+    found: &Option<crate::sema::generic::TypeConstraint>,
+    required: &crate::sema::generic::TypeConstraint,
+) -> bool {
+    use crate::sema::generic::TypeConstraint;
+
+    let Some(found) = found else {
+        // Found has no constraint - can only satisfy if required is empty
+        return false;
+    };
+
+    match (found, required) {
+        // Interface constraints: found must have all interfaces that required has
+        (
+            TypeConstraint::Interface(found_interfaces),
+            TypeConstraint::Interface(required_interfaces),
+        ) => {
+            // All required interfaces must be in the found interfaces
+            required_interfaces
+                .iter()
+                .all(|req| found_interfaces.contains(req))
+        }
+        // Union constraints: found must be a subset of or equal to required
+        (TypeConstraint::Union(found_types), TypeConstraint::Union(required_types)) => {
+            // All found types must be in the required types
+            found_types
+                .iter()
+                .all(|f| required_types.iter().any(|r| f == r))
+        }
+        // Structural constraints: more complex matching needed, for now require exact match
+        (TypeConstraint::Structural(found_struct), TypeConstraint::Structural(required_struct)) => {
+            found_struct == required_struct
+        }
+        // Different constraint kinds don't satisfy each other
+        _ => false,
+    }
+}
 
 /// Information about a captured variable during lambda analysis
 #[derive(Debug, Clone)]
@@ -135,6 +175,8 @@ pub struct Analyzer {
     generic_calls: HashMap<NodeId, MonomorphKey>,
     /// Mapping from method call expression NodeId to ClassMethodMonomorphKey (for generic class method calls)
     class_method_calls: HashMap<NodeId, ClassMethodMonomorphKey>,
+    /// Mapping from static method call expression NodeId to StaticMethodMonomorphKey (for generic static method calls)
+    static_method_calls: HashMap<NodeId, StaticMethodMonomorphKey>,
     /// Fully-qualified name interner for printable identities
     name_table: NameTable,
     /// Current module being analyzed (for proper NameId registration)
@@ -178,6 +220,7 @@ impl Analyzer {
             loading_prelude: false,
             generic_calls: HashMap::new(),
             class_method_calls: HashMap::new(),
+            static_method_calls: HashMap::new(),
             name_table,
             current_module: main_module,
             entity_registry: EntityRegistry::new(),
@@ -443,6 +486,7 @@ impl Analyzer {
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
             generic_calls: HashMap::new(),
             class_method_calls: HashMap::new(),
+            static_method_calls: HashMap::new(),
             name_table: NameTable::new(),
             current_module: prelude_module, // Use the prelude module path!
             entity_registry: EntityRegistry::new(),
@@ -649,8 +693,35 @@ impl Analyzer {
             (Type::TypeParam(name_id), actual) => {
                 // Only bind if it's one of our type params
                 if type_params.iter().any(|tp| tp.name_id == *name_id) {
+                    // Special case: if actual is Nil, check if the type param is already in
+                    // scope with the same name_id. If so, bind to the type param instead of Nil.
+                    // This preserves type params in generic contexts (e.g., Box { value: nil }).
+                    let actual_to_bind = if matches!(actual, Type::Nil) {
+                        // Check if this type param is in our current scope - if so, preserve it
+                        if let Some(ref scope) = self.current_type_param_scope
+                            && scope.get_by_name_id(*name_id).is_some()
+                        {
+                            // Preserve the type param
+                            Type::TypeParam(*name_id)
+                        } else {
+                            actual.clone()
+                        }
+                    } else if let Type::TypeParam(actual_name_id) = actual {
+                        // If actual is also a type param, check if it's in our scope
+                        if let Some(ref scope) = self.current_type_param_scope
+                            && scope.get_by_name_id(*actual_name_id).is_some()
+                        {
+                            // Preserve the actual type param
+                            actual.clone()
+                        } else {
+                            actual.clone()
+                        }
+                    } else {
+                        actual.clone()
+                    };
+
                     // Only bind if not already bound (first binding wins)
-                    inferred.entry(*name_id).or_insert_with(|| actual.clone());
+                    inferred.entry(*name_id).or_insert(actual_to_bind);
                 }
             }
             // Array: unify element types
@@ -684,6 +755,18 @@ impl Analyzer {
                 Type::GenericInstance { args: a_args, .. },
             ) => {
                 for (p, a) in p_args.iter().zip(a_args.iter()) {
+                    self.unify_types(p, a, type_params, inferred);
+                }
+            }
+            // Class: unify type args (for generic class parameters)
+            (Type::Class(p_class), Type::Class(a_class)) if p_class.name_id == a_class.name_id => {
+                for (p, a) in p_class.type_args.iter().zip(a_class.type_args.iter()) {
+                    self.unify_types(p, a, type_params, inferred);
+                }
+            }
+            // Record: unify type args (for generic record parameters)
+            (Type::Record(p_rec), Type::Record(a_rec)) if p_rec.name_id == a_rec.name_id => {
+                for (p, a) in p_rec.type_args.iter().zip(a_rec.type_args.iter()) {
                     self.unify_types(p, a, type_params, inferred);
                 }
             }
@@ -722,6 +805,7 @@ impl Analyzer {
             self.method_resolutions.into_inner(),
             self.generic_calls,
             self.class_method_calls,
+            self.static_method_calls,
             self.module_expr_types,
             self.module_method_resolutions,
         );
@@ -1434,6 +1518,17 @@ impl Analyzer {
             let Some(found) = inferred.get(&param.name_id) else {
                 continue;
             };
+
+            // If the inferred type is itself a type param that has a matching or stronger constraint,
+            // the constraint is satisfied. Check if it's a type param in our current scope.
+            if let Type::TypeParam(found_name_id) = found
+                && let Some(ref scope) = self.current_type_param_scope
+                && let Some(found_param) = scope.get_by_name_id(*found_name_id)
+                && constraint_satisfied(&found_param.constraint, constraint)
+            {
+                continue; // Constraint is satisfied
+            }
+
             match constraint {
                 crate::sema::generic::TypeConstraint::Interface(interface_names) => {
                     // Must satisfy all interfaces in the constraint

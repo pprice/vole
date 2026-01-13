@@ -8,8 +8,8 @@ use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{TypeParamScope, substitute_type};
 use crate::sema::types::{
-    FallibleType, FunctionType, InterfaceMethodType, InterfaceType, StructuralFieldType,
-    StructuralMethodType, StructuralType, Type,
+    ClassType, FallibleType, FunctionType, InterfaceMethodType, InterfaceType, RecordType,
+    StructField, StructuralFieldType, StructuralMethodType, StructuralType, Type,
 };
 use std::collections::HashMap;
 
@@ -256,7 +256,84 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
             if let Some(interface) = interface_instance(*name, resolved_args.clone(), ctx) {
                 return interface;
             }
-            // Use string-based interning for consistent NameIds across different interners
+
+            // Check if this is a class or record - use Type::Class/Record with type_args
+            if let Some(type_id) = ctx
+                .resolver()
+                .resolve_type_or_interface(*name, ctx.entity_registry)
+            {
+                let type_def = ctx.entity_registry.get_type(type_id);
+                match type_def.kind {
+                    TypeDefKind::Class => {
+                        // Build ClassType with the resolved type args
+                        // Get fields from the generic info and substitute type params
+                        if let Some(ref generic_info) = type_def.generic_info {
+                            let inferred: HashMap<NameId, Type> = generic_info
+                                .type_params
+                                .iter()
+                                .zip(resolved_args.iter())
+                                .map(|(tp, arg)| (tp.name_id, arg.clone()))
+                                .collect();
+
+                            let fields: Vec<StructField> = generic_info
+                                .field_names
+                                .iter()
+                                .zip(generic_info.field_types.iter())
+                                .enumerate()
+                                .map(|(i, (name, ty))| {
+                                    let field_name = ctx.interner.resolve(*name).to_string();
+                                    StructField {
+                                        name: field_name,
+                                        ty: substitute_type(ty, &inferred),
+                                        slot: i,
+                                    }
+                                })
+                                .collect();
+
+                            return Type::Class(ClassType {
+                                name_id: type_def.name_id,
+                                fields,
+                                type_args: resolved_args,
+                            });
+                        }
+                    }
+                    TypeDefKind::Record => {
+                        // Build RecordType with the resolved type args
+                        if let Some(ref generic_info) = type_def.generic_info {
+                            let inferred: HashMap<NameId, Type> = generic_info
+                                .type_params
+                                .iter()
+                                .zip(resolved_args.iter())
+                                .map(|(tp, arg)| (tp.name_id, arg.clone()))
+                                .collect();
+
+                            let fields: Vec<StructField> = generic_info
+                                .field_names
+                                .iter()
+                                .zip(generic_info.field_types.iter())
+                                .enumerate()
+                                .map(|(i, (name, ty))| {
+                                    let field_name = ctx.interner.resolve(*name).to_string();
+                                    StructField {
+                                        name: field_name,
+                                        ty: substitute_type(ty, &inferred),
+                                        slot: i,
+                                    }
+                                })
+                                .collect();
+
+                            return Type::Record(RecordType {
+                                name_id: type_def.name_id,
+                                fields,
+                                type_args: resolved_args,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Fallback: use GenericInstance for non-class/record types
             let name_str = ctx.interner.resolve(*name);
             let name_id = ctx.name_table.intern_raw(ctx.module_id, &[name_str]);
             Type::GenericInstance {

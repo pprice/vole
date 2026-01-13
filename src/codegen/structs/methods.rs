@@ -53,7 +53,13 @@ impl Cg<'_, '_, '_> {
             .query()
             .method_at_in_module(expr_id, self.ctx.current_module)
         {
-            return self.static_method_call(*type_def_id, *method_id, func_type.clone(), mc);
+            return self.static_method_call(
+                *type_def_id,
+                *method_id,
+                func_type.clone(),
+                mc,
+                expr_id,
+            );
         }
 
         // Handle range.iter() specially since range expressions can't be compiled to values directly
@@ -825,12 +831,55 @@ impl Cg<'_, '_, '_> {
         method_id: MethodId,
         func_type: FunctionType,
         mc: &MethodCallExpr,
+        expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
         // Get the method's name_id for lookup
         let method_def = self.ctx.analyzed.entity_registry.get_method(method_id);
         let method_name_id = method_def.name_id;
 
-        // Look up the static method info
+        // Check for monomorphized static method (for generic classes)
+        if let Some(mono_key) = self.ctx.analyzed.query().static_method_generic_at(expr_id) {
+            // Look up the monomorphized instance
+            if let Some(instance) = self
+                .ctx
+                .analyzed
+                .entity_registry
+                .static_method_monomorph_cache
+                .get(mono_key)
+            {
+                // Compile arguments with substituted param types
+                let mut args = Vec::new();
+                for (arg, param_ty) in mc.args.iter().zip(instance.func_type.params.iter()) {
+                    let compiled = self.expr(arg)?;
+                    // Box interface values if needed
+                    let compiled = if matches!(param_ty, Type::Interface(_)) {
+                        box_interface_value(self.builder, self.ctx, compiled, param_ty)?
+                    } else {
+                        compiled
+                    };
+                    args.push(compiled.value);
+                }
+
+                // Get monomorphized function reference and call
+                let func_key = self.ctx.func_registry.intern_name_id(instance.mangled_name);
+                let func_ref = self.func_ref(func_key)?;
+                let call = self.builder.ins().call(func_ref, &args);
+                let results = self.builder.inst_results(call);
+
+                let return_type = (*instance.func_type.return_type).clone();
+                if results.is_empty() {
+                    return Ok(self.void_value());
+                } else {
+                    return Ok(CompiledValue {
+                        value: results[0],
+                        ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
+                        vole_type: return_type,
+                    });
+                }
+            }
+        }
+
+        // Look up the static method info (for non-generic classes)
         let method_info = self
             .ctx
             .static_method_infos

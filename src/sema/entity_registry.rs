@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
-use crate::sema::generic::{ClassMethodMonomorphCache, MonomorphCache};
+use crate::sema::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_table::{TypeKey, TypeTable};
 use crate::sema::{FunctionType, Type};
@@ -44,6 +44,9 @@ pub struct EntityRegistry {
 
     /// Cache of monomorphized generic class method instances
     pub class_method_monomorph_cache: ClassMethodMonomorphCache,
+
+    /// Cache of monomorphized generic static method instances
+    pub static_method_monomorph_cache: StaticMethodMonomorphCache,
 }
 
 impl EntityRegistry {
@@ -64,6 +67,7 @@ impl EntityRegistry {
             type_table: TypeTable::new(),
             monomorph_cache: MonomorphCache::new(),
             class_method_monomorph_cache: ClassMethodMonomorphCache::new(),
+            static_method_monomorph_cache: StaticMethodMonomorphCache::new(),
         }
     }
 

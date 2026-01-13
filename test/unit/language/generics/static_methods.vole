@@ -1,0 +1,740 @@
+// Test: Generic static methods on classes
+// Design: TypeScript-style - class type params are available in statics
+// but they're implicitly method-level params (shadowing with inherited constraints)
+
+// =============================================================================
+// Interfaces for constraint testing
+// =============================================================================
+
+interface Eq { func eq(other: Self) -> bool }
+interface Stringable { func str() -> string }
+
+// =============================================================================
+// Basic generic class with static factory
+// =============================================================================
+
+class Box<T> {
+    value: T,
+
+    statics {
+        // T here is implicitly a method-level type param, inherits from class
+        func create(v: T) -> Box<T> {
+            return Box { value: v }
+        }
+
+        // Static method with default value
+        func createDefault(v: T, default_val: T) -> Box<T> {
+            return Box { value: v }
+        }
+    }
+
+    func get() -> T {
+        return self.value
+    }
+
+    func set(v: T) {
+        self.value = v
+    }
+}
+
+// =============================================================================
+// Class with constrained type param
+// =============================================================================
+
+class HashBox<T: Hashable> {
+    value: T,
+
+    statics {
+        // T inherits Hashable constraint from class
+        func create(v: T) -> HashBox<T> {
+            let h = v.hash()  // Should work - T: Hashable
+            return HashBox { value: v }
+        }
+
+        // Static that uses the constraint
+        func createAndHash(v: T) -> i64 {
+            return v.hash()
+        }
+    }
+
+    func get() -> T {
+        return self.value
+    }
+
+    func hash_value() -> i64 {
+        return self.value.hash()
+    }
+}
+
+// =============================================================================
+// Class with multiple type parameters
+// =============================================================================
+
+class Pair<K, V> {
+    first: K,
+    second: V,
+
+    statics {
+        func create(k: K, v: V) -> Pair<K, V> {
+            return Pair { first: k, second: v }
+        }
+
+        func createSame(k: K, v: V) -> Pair<K, V> {
+            return Pair.create(k, v)
+        }
+    }
+
+    func getFirst() -> K {
+        return self.first
+    }
+
+    func getSecond() -> V {
+        return self.second
+    }
+}
+
+// =============================================================================
+// Record with static methods
+// =============================================================================
+
+record Point<T> {
+    x: T,
+    y: T,
+
+    statics {
+        func origin(zero: T) -> Point<T> {
+            return Point { x: zero, y: zero }
+        }
+
+        func create(x: T, y: T) -> Point<T> {
+            return Point { x: x, y: y }
+        }
+    }
+}
+
+// =============================================================================
+// Helper functions for tests
+// =============================================================================
+
+func double(x: i64) -> i64 {
+    return x * 2
+}
+
+func concat(a: string, b: string) -> string {
+    return a + b
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+tests {
+    // -------------------------------------------------------------------------
+    // Basic type inference
+    // -------------------------------------------------------------------------
+
+    test "static - type inferred from i64 arg" {
+        let b = Box.create(42)
+        assert(b.get() == 42)
+    }
+
+    test "static - type inferred from string arg" {
+        let b = Box.create("hello")
+        assert(b.get() == "hello")
+    }
+
+    test "static - type inferred from bool arg" {
+        let b = Box.create(true)
+        assert(b.get() == true)
+    }
+
+    test "static - type inferred from f64 arg" {
+        let b = Box.create(3.14)
+        assert(b.get() == 3.14)
+    }
+
+    // -------------------------------------------------------------------------
+    // Explicit type arguments
+    // -------------------------------------------------------------------------
+
+    test "static - explicit type arg string" {
+        let b = Box.create<string>("world")
+        assert(b.get() == "world")
+    }
+
+    test "static - explicit type arg i64" {
+        let b = Box.create<i64>(100)
+        assert(b.get() == 100)
+    }
+
+    // -------------------------------------------------------------------------
+    // Multiple arguments with same type param
+    // -------------------------------------------------------------------------
+
+    test "static - multiple args same type" {
+        let b = Box.createDefault(42, 0)
+        assert(b.get() == 42)
+    }
+
+    test "static - multiple args string" {
+        let b = Box.createDefault("hello", "default")
+        assert(b.get() == "hello")
+    }
+
+    // -------------------------------------------------------------------------
+    // Constrained type parameters
+    // -------------------------------------------------------------------------
+
+    test "static - constrained type param i64" {
+        let b = HashBox.create(42)
+        assert(b.get() == 42)
+    }
+
+    test "static - constrained type param string" {
+        let b = HashBox.create("hashable")
+        assert(b.get() == "hashable")
+    }
+
+    test "static - using constraint in static method" {
+        let h = HashBox.createAndHash(42)
+        assert(h == 42.hash())
+    }
+
+    test "static - hash value through instance" {
+        let b = HashBox.create(100)
+        assert(b.hash_value() == 100.hash())
+    }
+
+    // -------------------------------------------------------------------------
+    // Multiple type parameters
+    // -------------------------------------------------------------------------
+
+    test "static - pair creation i64 string" {
+        let p = Pair.create(1, "one")
+        assert(p.getFirst() == 1)
+        assert(p.getSecond() == "one")
+    }
+
+    test "static - pair creation string bool" {
+        let p = Pair.create("key", true)
+        assert(p.getFirst() == "key")
+        assert(p.getSecond() == true)
+    }
+
+    test "static - pair creation same types" {
+        let p = Pair.create(10, 20)
+        assert(p.getFirst() == 10)
+        assert(p.getSecond() == 20)
+    }
+
+    test "static - calling another static method" {
+        let p = Pair.createSame(5, 10)
+        assert(p.getFirst() == 5)
+        assert(p.getSecond() == 10)
+    }
+
+    // -------------------------------------------------------------------------
+    // Record with statics
+    // -------------------------------------------------------------------------
+
+    test "static - record origin i64" {
+        let p = Point.origin(0)
+        assert(p.x == 0)
+        assert(p.y == 0)
+    }
+
+    test "static - record origin f64" {
+        let p = Point.origin(0.0)
+        assert(p.x == 0.0)
+        assert(p.y == 0.0)
+    }
+
+    test "static - record create i64" {
+        let p = Point.create(3, 4)
+        assert(p.x == 3)
+        assert(p.y == 4)
+    }
+
+    test "static - record create f64" {
+        let p = Point.create(1.5, 2.5)
+        assert(p.x == 1.5)
+        assert(p.y == 2.5)
+    }
+
+    // -------------------------------------------------------------------------
+    // Using static method results in expressions
+    // -------------------------------------------------------------------------
+
+    test "static - result used in expression" {
+        let result = Box.create(10).get() + Box.create(20).get()
+        assert(result == 30)
+    }
+
+    test "static - result passed to function" {
+        let b = Box.create(5)
+        let doubled = double(b.get())
+        assert(doubled == 10)
+    }
+
+    test "static - chained method calls" {
+        let b = Box.create(42)
+        b.set(100)
+        assert(b.get() == 100)
+    }
+
+    test "static - string concatenation via box" {
+        let a = Box.create("hello")
+        let b = Box.create(" world")
+        let result = concat(a.get(), b.get())
+        assert(result == "hello world")
+    }
+
+    // -------------------------------------------------------------------------
+    // Multiple instantiations in same scope
+    // -------------------------------------------------------------------------
+
+    test "static - multiple instantiations" {
+        let intBox = Box.create(42)
+        let strBox = Box.create("hello")
+        let boolBox = Box.create(true)
+
+        assert(intBox.get() == 42)
+        assert(strBox.get() == "hello")
+        assert(boolBox.get() == true)
+    }
+
+    test "static - pairs with different types" {
+        let p1 = Pair.create(1, "a")
+        let p2 = Pair.create("b", 2)
+        let p3 = Pair.create(true, 3.14)
+
+        assert(p1.getFirst() == 1)
+        assert(p2.getFirst() == "b")
+        assert(p3.getSecond() == 3.14)
+    }
+
+    // -------------------------------------------------------------------------
+    // Nested usage
+    // -------------------------------------------------------------------------
+
+    test "static - box containing pair" {
+        let p = Pair.create(1, 2)
+        let b = Box.create(p)
+        assert(b.get().getFirst() == 1)
+        assert(b.get().getSecond() == 2)
+    }
+
+    test "static - pair of boxes" {
+        let b1 = Box.create(10)
+        let b2 = Box.create(20)
+        let p = Pair.create(b1, b2)
+        assert(p.getFirst().get() == 10)
+        assert(p.getSecond().get() == 20)
+    }
+
+    // -------------------------------------------------------------------------
+    // Record static with record result
+    // -------------------------------------------------------------------------
+
+    test "static - record point arithmetic" {
+        let p1 = Point.create(3, 4)
+        let p2 = Point.create(1, 2)
+        assert(p1.x + p2.x == 4)
+        assert(p1.y + p2.y == 6)
+    }
+
+    test "static - record multiple origins" {
+        let intOrigin = Point.origin(0)
+        let floatOrigin = Point.origin(0.0)
+        assert(intOrigin.x == 0)
+        assert(floatOrigin.x == 0.0)
+    }
+}
+
+// =============================================================================
+// Class with multiple constraints - static methods
+// =============================================================================
+
+class ComparableBox<T: Hashable + Eq> {
+    value: T,
+
+    statics {
+        // Static factory using both constraints
+        func create(v: T) -> ComparableBox<T> {
+            return ComparableBox { value: v }
+        }
+
+        // Static method that uses Hashable constraint
+        func computeHash(v: T) -> i64 {
+            return v.hash()
+        }
+
+        // Static method that compares two values
+        func areEqual(a: T, b: T) -> bool {
+            return a.eq(b)
+        }
+
+        // Static method using both constraints
+        func hashIfEqual(a: T, b: T) -> i64 {
+            if a.eq(b) {
+                return a.hash()
+            }
+            return 0
+        }
+    }
+
+    func get() -> T {
+        return self.value
+    }
+
+    func hash_value() -> i64 {
+        return self.value.hash()
+    }
+
+    func equals(other: T) -> bool {
+        return self.value.eq(other)
+    }
+}
+
+// =============================================================================
+// Class with three constraints
+// =============================================================================
+
+class RichBox<T: Hashable + Eq + Stringable> {
+    value: T,
+
+    statics {
+        func create(v: T) -> RichBox<T> {
+            return RichBox { value: v }
+        }
+
+        func describe(v: T) -> string {
+            return v.str()
+        }
+
+        func hashAndDescribe(v: T) -> i64 {
+            let _ = v.str()  // Use Stringable
+            return v.hash()  // Use Hashable
+        }
+    }
+
+    func get() -> T {
+        return self.value
+    }
+}
+
+// =============================================================================
+// Generic record with multiple constraints
+// =============================================================================
+
+record ConstrainedPoint<T: Hashable> {
+    x: T,
+    y: T,
+
+    statics {
+        func origin(zero: T) -> ConstrainedPoint<T> {
+            return ConstrainedPoint { x: zero, y: zero }
+        }
+
+        func create(x: T, y: T) -> ConstrainedPoint<T> {
+            return ConstrainedPoint { x: x, y: y }
+        }
+
+        // Static that uses constraint
+        func hashSum(p: ConstrainedPoint<T>) -> i64 {
+            return p.x.hash() + p.y.hash()
+        }
+    }
+}
+
+// =============================================================================
+// Two type params with different constraints
+// =============================================================================
+
+class KeyValue<K: Hashable, V: Stringable> {
+    key: K,
+    value: V,
+
+    statics {
+        func create(k: K, v: V) -> KeyValue<K, V> {
+            return KeyValue { key: k, value: v }
+        }
+
+        func keyHash(k: K) -> i64 {
+            return k.hash()
+        }
+
+        func valueStr(v: V) -> string {
+            return v.str()
+        }
+
+        func fromParts(k: K, v: V) -> KeyValue<K, V> {
+            let _ = k.hash()  // Use K constraint
+            let _ = v.str()   // Use V constraint
+            return KeyValue { key: k, value: v }
+        }
+    }
+
+    func getKey() -> K {
+        return self.key
+    }
+
+    func getValue() -> V {
+        return self.value
+    }
+}
+
+// =============================================================================
+// Test types implementing interfaces
+// =============================================================================
+
+record Id implements Hashable, Eq, Stringable {
+    n: i64,
+}
+
+implement Hashable for Id {
+    func hash() -> i64 { return self.n * 17 }
+}
+
+implement Eq for Id {
+    func eq(other: Id) -> bool { return self.n == other.n }
+}
+
+implement Stringable for Id {
+    func str() -> string { return "Id" }
+}
+
+record Label implements Stringable {
+    text: string,
+}
+
+implement Stringable for Label {
+    func str() -> string { return self.text }
+}
+
+// =============================================================================
+// Additional Tests for Multiple Constraints
+// =============================================================================
+
+tests {
+    // -------------------------------------------------------------------------
+    // Multiple constraints - basic
+    // -------------------------------------------------------------------------
+
+    test "static - multiple constraints factory" {
+        let b = ComparableBox.create(Id { n: 5 })
+        assert(b.get().n == 5)
+    }
+
+    test "static - multiple constraints hash" {
+        let h = ComparableBox.computeHash(Id { n: 5 })
+        assert(h == 85)  // 5 * 17
+    }
+
+    test "static - multiple constraints equality true" {
+        let eq = ComparableBox.areEqual(Id { n: 5 }, Id { n: 5 })
+        assert(eq == true)
+    }
+
+    test "static - multiple constraints equality false" {
+        let eq = ComparableBox.areEqual(Id { n: 5 }, Id { n: 10 })
+        assert(eq == false)
+    }
+
+    test "static - multiple constraints hash if equal - match" {
+        let h = ComparableBox.hashIfEqual(Id { n: 7 }, Id { n: 7 })
+        assert(h == 119)  // 7 * 17
+    }
+
+    test "static - multiple constraints hash if equal - no match" {
+        let h = ComparableBox.hashIfEqual(Id { n: 7 }, Id { n: 99 })
+        assert(h == 0)
+    }
+
+    test "static - instance method after static factory" {
+        let b = ComparableBox.create(Id { n: 10 })
+        assert(b.hash_value() == 170)  // 10 * 17
+        assert(b.equals(Id { n: 10 }) == true)
+        assert(b.equals(Id { n: 5 }) == false)
+    }
+
+    // -------------------------------------------------------------------------
+    // Three constraints
+    // -------------------------------------------------------------------------
+
+    test "static - three constraints factory" {
+        let b = RichBox.create(Id { n: 3 })
+        assert(b.get().n == 3)
+    }
+
+    test "static - three constraints describe" {
+        let s = RichBox.describe(Id { n: 3 })
+        assert(s == "Id")
+    }
+
+    test "static - three constraints hash and describe" {
+        let h = RichBox.hashAndDescribe(Id { n: 3 })
+        assert(h == 51)  // 3 * 17
+    }
+
+    // -------------------------------------------------------------------------
+    // Constrained generic record statics
+    // -------------------------------------------------------------------------
+
+    test "static - constrained record origin" {
+        let p = ConstrainedPoint.origin(42)
+        assert(p.x == 42)
+        assert(p.y == 42)
+    }
+
+    test "static - constrained record create" {
+        let p = ConstrainedPoint.create(10, 20)
+        assert(p.x == 10)
+        assert(p.y == 20)
+    }
+
+    test "static - constrained record hash sum" {
+        let p = ConstrainedPoint.create(3, 4)
+        let h = ConstrainedPoint.hashSum(p)
+        assert(h == 3.hash() + 4.hash())  // hash(3) + hash(4)
+    }
+
+    // -------------------------------------------------------------------------
+    // Two type params with different constraints
+    // -------------------------------------------------------------------------
+
+    test "static - two params different constraints factory" {
+        let kv = KeyValue.create(Id { n: 1 }, Label { text: "one" })
+        assert(kv.getKey().n == 1)
+        assert(kv.getValue().text == "one")
+    }
+
+    test "static - two params key hash" {
+        let h = KeyValue.keyHash(Id { n: 5 })
+        assert(h == 85)
+    }
+
+    test "static - two params value str" {
+        let s = KeyValue.valueStr(Label { text: "hello" })
+        assert(s == "hello")
+    }
+
+    test "static - two params from parts" {
+        let kv = KeyValue.fromParts(Id { n: 2 }, Label { text: "two" })
+        assert(kv.getKey().n == 2)
+        assert(kv.getValue().text == "two")
+    }
+
+    // -------------------------------------------------------------------------
+    // Mixing constrained and unconstrained in same scope
+    // -------------------------------------------------------------------------
+
+    test "static - mix constrained and unconstrained" {
+        // Unconstrained
+        let b1 = Box.create(42)
+        assert(b1.get() == 42)
+
+        // Single constraint
+        let b2 = HashBox.create(100)
+        assert(b2.get() == 100)
+
+        // Multiple constraints
+        let b3 = ComparableBox.create(Id { n: 7 })
+        assert(b3.get().n == 7)
+    }
+
+    // -------------------------------------------------------------------------
+    // Complex nested scenarios
+    // -------------------------------------------------------------------------
+
+    test "static - box of comparable box" {
+        let inner = ComparableBox.create(Id { n: 5 })
+        let outer = Box.create(inner)
+        assert(outer.get().get().n == 5)
+    }
+
+    test "static - pair of constrained records" {
+        let p1 = ConstrainedPoint.create(1, 2)
+        let p2 = ConstrainedPoint.create(3, 4)
+        let pair = Pair.create(p1, p2)
+        assert(pair.getFirst().x == 1)
+        assert(pair.getSecond().y == 4)
+    }
+
+    test "static - key value with id and pair" {
+        let p = Pair.create(10, 20)
+        let kv = KeyValue.create(Id { n: 1 }, Label { text: "pair" })
+        assert(kv.getKey().n == 1)
+    }
+
+    // -------------------------------------------------------------------------
+    // Multiple instantiations with constraints
+    // -------------------------------------------------------------------------
+
+    test "static - multiple comparable boxes" {
+        let b1 = ComparableBox.create(Id { n: 1 })
+        let b2 = ComparableBox.create(Id { n: 2 })
+        let b3 = ComparableBox.create(Id { n: 3 })
+
+        assert(b1.hash_value() == 17)
+        assert(b2.hash_value() == 34)
+        assert(b3.hash_value() == 51)
+    }
+
+    test "static - multiple key values" {
+        let kv1 = KeyValue.create(Id { n: 1 }, Label { text: "one" })
+        let kv2 = KeyValue.create(Id { n: 2 }, Label { text: "two" })
+
+        assert(kv1.getKey().n == 1)
+        assert(kv2.getKey().n == 2)
+        assert(kv1.getValue().text == "one")
+        assert(kv2.getValue().text == "two")
+    }
+
+    // -------------------------------------------------------------------------
+    // Static methods in expressions
+    // -------------------------------------------------------------------------
+
+    test "static - constrained result in expression" {
+        let h1 = ComparableBox.computeHash(Id { n: 2 })
+        let h2 = ComparableBox.computeHash(Id { n: 3 })
+        assert(h1 + h2 == 85)  // 34 + 51
+    }
+
+    test "static - chained constraint calls" {
+        let b = ComparableBox.create(Id { n: 10 })
+        let h = b.hash_value()
+        assert(h == 170)
+    }
+
+    test "static - conditional on constraint result" {
+        let eq = ComparableBox.areEqual(Id { n: 5 }, Id { n: 5 })
+        let result = if eq { 100 } else { 0 }
+        assert(result == 100)
+    }
+
+    // -------------------------------------------------------------------------
+    // Edge cases
+    // -------------------------------------------------------------------------
+
+    test "static - zero hash value" {
+        let h = ComparableBox.computeHash(Id { n: 0 })
+        assert(h == 0)
+    }
+
+    test "static - negative hash value" {
+        let h = ComparableBox.computeHash(Id { n: -5 })
+        assert(h == -85)
+    }
+
+    test "static - empty string label" {
+        let kv = KeyValue.create(Id { n: 1 }, Label { text: "" })
+        assert(kv.getValue().text == "")
+    }
+
+    test "static - self equality" {
+        let id = Id { n: 42 }
+        let eq = ComparableBox.areEqual(id, id)
+        assert(eq == true)
+    }
+}

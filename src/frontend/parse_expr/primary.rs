@@ -176,12 +176,31 @@ impl<'src> Parser<'src> {
                 self.advance();
                 let sym = self.interner.intern(&token.lexeme);
 
-                // Check for struct literal: Name { field: value }
+                // Check for type args: Name<T, U> followed by { for struct literal
+                let type_args = if self.check(TokenType::Lt) {
+                    self.try_parse_struct_type_args()?
+                } else {
+                    Vec::new()
+                };
+
+                // Check for struct literal: Name { field: value } or Name<T> { field: value }
                 // We need lookahead to distinguish from a block: `size { let x = ... }`
                 // A struct literal looks like `Name { identifier: value }` or `Name { }`
                 // A block starts with statements, keywords, or expressions without `:` after ident
                 if self.check(TokenType::LBrace) && self.looks_like_struct_literal() {
-                    return self.struct_literal(sym, token.span);
+                    return self.struct_literal(sym, type_args, token.span);
+                }
+
+                // If we parsed type args but no struct literal follows, that's an error
+                if !type_args.is_empty() {
+                    return Err(ParseError::new(
+                        ParserError::ExpectedToken {
+                            expected: "'{' after type arguments for struct literal".to_string(),
+                            found: self.current.ty.as_str().to_string(),
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
                 }
 
                 Ok(Expr {
@@ -452,8 +471,13 @@ impl<'src> Parser<'src> {
         })
     }
 
-    /// Parse a struct literal: Name { field: value, ... }
-    fn struct_literal(&mut self, name: Symbol, start_span: Span) -> Result<Expr, ParseError> {
+    /// Parse a struct literal: Name { field: value, ... } or Name<T> { field: value, ... }
+    fn struct_literal(
+        &mut self,
+        name: Symbol,
+        type_args: Vec<TypeExpr>,
+        start_span: Span,
+    ) -> Result<Expr, ParseError> {
         self.consume(TokenType::LBrace, "expected '{'")?;
         self.skip_newlines();
 
@@ -488,7 +512,11 @@ impl<'src> Parser<'src> {
 
         Ok(Expr {
             id: self.next_id(),
-            kind: ExprKind::StructLiteral(Box::new(StructLiteralExpr { name, fields })),
+            kind: ExprKind::StructLiteral(Box::new(StructLiteralExpr {
+                name,
+                type_args,
+                fields,
+            })),
             span: start_span.merge(end_span),
         })
     }

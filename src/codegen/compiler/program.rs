@@ -9,11 +9,15 @@ use crate::codegen::stmt::compile_block;
 use crate::codegen::types::{
     CompileCtx, function_name_id_with_interner, resolve_type_expr_query, type_to_cranelift,
 };
-use crate::frontend::{Decl, FuncDecl, Interner, LetStmt, Program, Symbol, TestCase, TestsDecl};
+use crate::frontend::{
+    Decl, FuncDecl, InterfaceMethod, Interner, LetStmt, Program, Symbol, TestCase, TestsDecl,
+};
 use crate::identity::NameId;
 use crate::sema::Type;
 use crate::sema::entity_defs::TypeDefKind;
-use crate::sema::generic::{ClassMethodMonomorphInstance, MonomorphInstance, substitute_type};
+use crate::sema::generic::{
+    ClassMethodMonomorphInstance, MonomorphInstance, StaticMethodMonomorphInstance, substitute_type,
+};
 use crate::sema::types::{ClassType, RecordType, StructField};
 
 impl Compiler<'_> {
@@ -144,6 +148,7 @@ impl Compiler<'_> {
         // Declare monomorphized function instances before second pass
         self.declare_monomorphized_instances()?;
         self.declare_class_method_monomorphized_instances()?;
+        self.declare_static_method_monomorphized_instances()?;
 
         // Second pass: compile function bodies and tests
         // Note: Decl::Let globals are handled by inlining their initializers
@@ -187,6 +192,7 @@ impl Compiler<'_> {
         // Compile monomorphized instances
         self.compile_monomorphized_instances(program)?;
         self.compile_class_method_monomorphized_instances(program)?;
+        self.compile_static_method_monomorphized_instances(program)?;
 
         Ok(())
     }
@@ -1447,5 +1453,269 @@ impl Compiler<'_> {
             // Final fallback
             Type::I64
         }
+    }
+
+    /// Declare all monomorphized static method instances
+    fn declare_static_method_monomorphized_instances(&mut self) -> Result<(), String> {
+        // Collect instances to avoid borrow issues
+        let instances: Vec<_> = self
+            .analyzed
+            .entity_registry
+            .static_method_monomorph_cache
+            .instances()
+            .map(|(key, instance)| (key.clone(), instance.clone()))
+            .collect();
+
+        tracing::debug!(
+            instance_count = instances.len(),
+            "declaring static method monomorphized instances"
+        );
+
+        for (_key, instance) in instances {
+            let mangled_name = self.query().display_name(instance.mangled_name);
+
+            // Create signature from the concrete function type
+            // Static methods don't have self parameter
+            let mut params = Vec::new();
+            for param_type in &instance.func_type.params {
+                params.push(type_to_cranelift(param_type, self.pointer_type));
+            }
+            let ret = if *instance.func_type.return_type == Type::Void {
+                None
+            } else {
+                Some(type_to_cranelift(
+                    &instance.func_type.return_type,
+                    self.pointer_type,
+                ))
+            };
+            let sig = self.jit.create_signature(&params, ret);
+            let func_id = self.jit.declare_function(&mangled_name, &sig);
+            let func_key = self.func_registry.intern_name_id(instance.mangled_name);
+            self.func_registry.set_func_id(func_key, func_id);
+
+            // Record return type for call expressions
+            self.func_registry
+                .set_return_type(func_key, (*instance.func_type.return_type).clone());
+        }
+
+        Ok(())
+    }
+
+    /// Compile all monomorphized static method instances
+    fn compile_static_method_monomorphized_instances(
+        &mut self,
+        program: &Program,
+    ) -> Result<(), String> {
+        // Build a map of class name -> class decl (for generic classes)
+        let class_asts: HashMap<NameId, &crate::frontend::ClassDecl> = program
+            .declarations
+            .iter()
+            .filter_map(|decl| {
+                if let Decl::Class(class) = decl
+                    && !class.type_params.is_empty()
+                {
+                    let query = self.query();
+                    let name_id = query.try_name_id(query.main_module(), &[class.name])?;
+                    return Some((name_id, class));
+                }
+                None
+            })
+            .collect();
+
+        // Also include record decls (they can be generic too)
+        let record_asts: HashMap<NameId, &crate::frontend::RecordDecl> = program
+            .declarations
+            .iter()
+            .filter_map(|decl| {
+                if let Decl::Record(record) = decl
+                    && !record.type_params.is_empty()
+                {
+                    let query = self.query();
+                    let name_id = query.try_name_id(query.main_module(), &[record.name])?;
+                    return Some((name_id, record));
+                }
+                None
+            })
+            .collect();
+
+        // Collect instances to avoid borrow issues
+        let instances: Vec<_> = self
+            .analyzed
+            .entity_registry
+            .static_method_monomorph_cache
+            .instances()
+            .map(|(key, instance)| (key.clone(), instance.clone()))
+            .collect();
+
+        tracing::debug!(
+            instance_count = instances.len(),
+            "compiling static method monomorphized instances"
+        );
+
+        for (_key, instance) in instances {
+            let class_name_str = self.query().display_name(instance.class_name);
+            tracing::debug!(
+                class_name = %class_name_str,
+                class_name_id = ?instance.class_name,
+                method_name = ?instance.method_name,
+                "looking for static method to compile"
+            );
+
+            // Try to find the static method in a class first
+            if let Some(class) = class_asts.get(&instance.class_name)
+                && let Some(ref statics) = class.statics
+            {
+                let method_name_str = self.query().display_name(instance.method_name);
+                let method = statics
+                    .methods
+                    .iter()
+                    .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
+                if let Some(method) = method {
+                    self.compile_monomorphized_static_method(method, &instance)?;
+                    continue;
+                }
+            }
+
+            // Try records
+            if let Some(record) = record_asts.get(&instance.class_name)
+                && let Some(ref statics) = record.statics
+            {
+                let method_name_str = self.query().display_name(instance.method_name);
+                let method = statics
+                    .methods
+                    .iter()
+                    .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
+                if let Some(method) = method {
+                    self.compile_monomorphized_static_method(method, &instance)?;
+                    continue;
+                }
+            }
+
+            // Method not found - this shouldn't happen if sema was correct
+            let class_name = self.query().display_name(instance.class_name);
+            let method_name = self.query().display_name(instance.method_name);
+            return Err(format!(
+                "Internal error: static method {} not found in class/record {}",
+                method_name, class_name
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Compile a single monomorphized static method instance
+    fn compile_monomorphized_static_method(
+        &mut self,
+        method: &InterfaceMethod,
+        instance: &StaticMethodMonomorphInstance,
+    ) -> Result<(), String> {
+        let mangled_name = self.query().display_name(instance.mangled_name);
+        let func_key = self.func_registry.intern_name_id(instance.mangled_name);
+        let func_id = self
+            .func_registry
+            .func_id(func_key)
+            .ok_or_else(|| format!("Monomorphized static method {} not declared", mangled_name))?;
+
+        // Create signature (no self parameter) with concrete types
+        let mut params = Vec::new();
+        for param_type in &instance.func_type.params {
+            params.push(type_to_cranelift(param_type, self.pointer_type));
+        }
+        let ret = if *instance.func_type.return_type == Type::Void {
+            None
+        } else {
+            Some(type_to_cranelift(
+                &instance.func_type.return_type,
+                self.pointer_type,
+            ))
+        };
+        let sig = self.jit.create_signature(&params, ret);
+        self.jit.ctx.func.signature = sig;
+
+        // Get parameter names and concrete types
+        let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+        let param_types: Vec<types::Type> = instance
+            .func_type
+            .params
+            .iter()
+            .map(|t| type_to_cranelift(t, self.pointer_type))
+            .collect();
+        let param_vole_types: Vec<Type> = instance.func_type.params.clone();
+
+        // Get return type
+        let return_type = Some((*instance.func_type.return_type).clone());
+
+        // Get source file pointer
+        let source_file_ptr = self.source_file_ptr();
+
+        // Create function builder
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+            let entry_block = builder.create_block();
+            builder.append_block_params_for_function_params(entry_block);
+            builder.switch_to_block(entry_block);
+
+            // Build variables map (no self for static methods)
+            let mut variables = HashMap::new();
+
+            // Get entry block params (just user params, no self)
+            let block_params = builder.block_params(entry_block).to_vec();
+
+            // Bind parameters with concrete types
+            for (((name, ty), vole_ty), val) in param_names
+                .iter()
+                .zip(param_types.iter())
+                .zip(param_vole_types.iter())
+                .zip(block_params.iter())
+            {
+                let var = builder.declare_var(*ty);
+                builder.def_var(var, *val);
+                variables.insert(*name, (var, vole_ty.clone()));
+            }
+
+            // Compile method body
+            let body = method.body.as_ref().ok_or_else(|| {
+                format!("Internal error: static method {} has no body", mangled_name)
+            })?;
+
+            let mut cf_ctx = ControlFlowCtx::default();
+            let mut ctx = CompileCtx {
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
+                pointer_type: self.pointer_type,
+                module: &mut self.jit.module,
+                func_registry: &mut self.func_registry,
+                source_file_ptr,
+                globals: &self.globals,
+                lambda_counter: &mut self.lambda_counter,
+                type_metadata: &self.type_metadata,
+                impl_method_infos: &self.impl_method_infos,
+                static_method_infos: &self.static_method_infos,
+                interface_vtables: &self.interface_vtables,
+                current_function_return_type: return_type,
+                native_registry: &self.native_registry,
+                current_module: None,
+                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                type_substitutions: Some(&instance.substitutions),
+            };
+            let terminated =
+                compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
+
+            // Add implicit return if no explicit return
+            if !terminated {
+                builder.ins().return_(&[]);
+            }
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        // Define the function
+        self.jit.define_function(func_id)?;
+        self.jit.clear();
+
+        Ok(())
     }
 }

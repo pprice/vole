@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use crate::frontend::NodeId;
 use crate::sema::Type;
-use crate::sema::generic::{ClassMethodMonomorphKey, MonomorphKey};
+use crate::sema::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::sema::resolution::ResolvedMethod;
 
 /// Encapsulates all NodeId-keyed metadata from semantic analysis.
@@ -23,6 +23,8 @@ pub struct ExpressionData {
     generics: HashMap<NodeId, MonomorphKey>,
     /// Monomorphization key for generic class method calls
     class_method_generics: HashMap<NodeId, ClassMethodMonomorphKey>,
+    /// Monomorphization key for generic static method calls
+    static_method_generics: HashMap<NodeId, StaticMethodMonomorphKey>,
     /// Per-module type mappings (for multi-module compilation)
     module_types: FxHashMap<String, HashMap<NodeId, Type>>,
     /// Per-module method resolutions (for multi-module compilation)
@@ -41,6 +43,7 @@ impl ExpressionData {
         methods: HashMap<NodeId, ResolvedMethod>,
         generics: HashMap<NodeId, MonomorphKey>,
         class_method_generics: HashMap<NodeId, ClassMethodMonomorphKey>,
+        static_method_generics: HashMap<NodeId, StaticMethodMonomorphKey>,
         module_types: FxHashMap<String, HashMap<NodeId, Type>>,
         module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
     ) -> Self {
@@ -49,6 +52,7 @@ impl ExpressionData {
             methods,
             generics,
             class_method_generics,
+            static_method_generics,
             module_types,
             module_methods,
         }
@@ -161,6 +165,26 @@ impl ExpressionData {
     /// Get mutable access to class method monomorphization keys
     pub fn class_method_generics_mut(&mut self) -> &mut HashMap<NodeId, ClassMethodMonomorphKey> {
         &mut self.class_method_generics
+    }
+
+    /// Get the monomorphization key for a generic static method call
+    pub fn get_static_method_generic(&self, node: NodeId) -> Option<&StaticMethodMonomorphKey> {
+        self.static_method_generics.get(&node)
+    }
+
+    /// Set the monomorphization key for a generic static method call
+    pub fn set_static_method_generic(&mut self, node: NodeId, key: StaticMethodMonomorphKey) {
+        self.static_method_generics.insert(node, key);
+    }
+
+    /// Get all static method monomorphization keys
+    pub fn static_method_generics(&self) -> &HashMap<NodeId, StaticMethodMonomorphKey> {
+        &self.static_method_generics
+    }
+
+    /// Get mutable access to static method monomorphization keys
+    pub fn static_method_generics_mut(&mut self) -> &mut HashMap<NodeId, StaticMethodMonomorphKey> {
+        &mut self.static_method_generics
     }
 
     /// Get types for a specific module

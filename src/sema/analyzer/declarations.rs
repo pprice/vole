@@ -1006,6 +1006,66 @@ impl Analyzer {
                     false,
                 );
             }
+
+            // Register static methods for generic records
+            if let Some(ref statics) = record.statics {
+                let record_name_str = interner.resolve(record.name);
+                for method in &statics.methods {
+                    let method_name_str = interner.resolve(method.name);
+                    let method_name_id = self
+                        .name_table
+                        .intern_raw(builtin_module, &[method_name_str]);
+                    let full_method_name_id = self
+                        .name_table
+                        .intern_raw(self.current_module, &[record_name_str, method_name_str]);
+
+                    // Resolve parameter types with type params in scope
+                    let params: Vec<Type> = method
+                        .params
+                        .iter()
+                        .map(|p| {
+                            let mut ctx = TypeResolutionContext::with_type_params(
+                                &self.entity_registry,
+                                interner,
+                                &mut self.name_table,
+                                module_id,
+                                &type_param_scope,
+                            );
+                            resolve_type(&p.ty, &mut ctx)
+                        })
+                        .collect();
+
+                    // Resolve return type with type params in scope
+                    let return_type = method
+                        .return_type
+                        .as_ref()
+                        .map(|t| {
+                            let mut ctx = TypeResolutionContext::with_type_params(
+                                &self.entity_registry,
+                                interner,
+                                &mut self.name_table,
+                                module_id,
+                                &type_param_scope,
+                            );
+                            resolve_type(t, &mut ctx)
+                        })
+                        .unwrap_or(Type::Void);
+
+                    let signature = FunctionType {
+                        params,
+                        return_type: Box::new(return_type),
+                        is_closure: false,
+                    };
+                    let has_default = method.is_default || method.body.is_some();
+                    self.entity_registry.register_static_method(
+                        entity_type_id,
+                        method_name_id,
+                        full_method_name_id,
+                        signature,
+                        has_default,
+                    );
+                }
+            }
         }
     }
 

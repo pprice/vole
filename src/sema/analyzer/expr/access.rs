@@ -1,7 +1,8 @@
 use super::super::*;
 use crate::identity::{NameId, TypeDefId};
 use crate::sema::generic::{
-    ClassMethodMonomorphInstance, ClassMethodMonomorphKey, substitute_type,
+    ClassMethodMonomorphInstance, ClassMethodMonomorphKey, StaticMethodMonomorphInstance,
+    StaticMethodMonomorphKey, TypeParamInfo, substitute_type,
 };
 use crate::sema::implement_registry::ExternalMethodInfo;
 use std::collections::HashMap;
@@ -527,15 +528,53 @@ impl Analyzer {
                 self.add_wrong_arg_count(func_type.params.len(), args.len(), expr.span);
             }
 
-            // Check argument types
-            for (arg, param_ty) in args.iter().zip(func_type.params.iter()) {
-                let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
-                if !self.types_compatible(&arg_ty, param_ty, interner) {
-                    self.add_type_mismatch(param_ty, &arg_ty, arg.span);
-                }
+            // Get type params from the generic class/record definition
+            let type_def = self.entity_registry.get_type(type_def_id);
+            let generic_info = type_def.generic_info.clone();
+
+            // First pass: type-check arguments to get their types
+            let mut arg_types = Vec::new();
+            for arg in args {
+                let arg_ty = self.check_expr(arg, interner)?;
+                arg_types.push(arg_ty);
             }
 
-            let return_type = (*func_type.return_type).clone();
+            // Infer type params from arguments if this is a generic class
+            let (final_params, final_return) = if let Some(ref info) = generic_info {
+                // Infer type params from argument types
+                let inferred =
+                    self.infer_type_params(&info.type_params, &func_type.params, &arg_types);
+
+                // Substitute inferred types into param types and return type
+                let substituted_params: Vec<Type> = func_type
+                    .params
+                    .iter()
+                    .map(|p| crate::sema::generic::substitute_type(p, &inferred))
+                    .collect();
+                let substituted_return =
+                    crate::sema::generic::substitute_type(&func_type.return_type, &inferred);
+
+                // Check type parameter constraints
+                self.check_type_param_constraints(
+                    &info.type_params,
+                    &inferred,
+                    expr.span,
+                    interner,
+                );
+
+                (substituted_params, substituted_return)
+            } else {
+                (func_type.params.clone(), (*func_type.return_type).clone())
+            };
+
+            // Second pass: check argument types against (potentially substituted) param types
+            for (arg, (arg_ty, param_ty)) in
+                args.iter().zip(arg_types.iter().zip(final_params.iter()))
+            {
+                if !self.types_compatible(arg_ty, param_ty, interner) {
+                    self.add_type_mismatch(param_ty, arg_ty, arg.span);
+                }
+            }
 
             // Record resolution for codegen
             self.method_resolutions.insert(
@@ -547,7 +586,20 @@ impl Analyzer {
                 },
             );
 
-            return Ok(return_type);
+            // Record static method monomorphization for generic classes
+            if let Some(ref info) = generic_info {
+                self.record_static_method_monomorph(
+                    expr,
+                    type_def_id,
+                    method_sym,
+                    &func_type,
+                    &info.type_params,
+                    &arg_types,
+                    interner,
+                );
+            }
+
+            return Ok(final_return);
         }
 
         // No static method found - report error
@@ -673,5 +725,106 @@ impl Analyzer {
         // Record the call site → key mapping
         tracing::debug!(expr_id = ?expr.id, key = ?key, "recording call site");
         self.class_method_calls.insert(expr.id, key);
+    }
+
+    /// Record a static method monomorphization for generic class/record static method calls.
+    /// Creates or retrieves a monomorphized instance and records the call site.
+    #[allow(clippy::too_many_arguments)]
+    fn record_static_method_monomorph(
+        &mut self,
+        expr: &Expr,
+        type_def_id: TypeDefId,
+        method_sym: Symbol,
+        func_type: &FunctionType,
+        type_params: &[TypeParamInfo],
+        arg_types: &[Type],
+        interner: &Interner,
+    ) {
+        // Get the type def to extract name and type args
+        let type_def = self.entity_registry.get_type(type_def_id);
+        let class_name_id = type_def.name_id;
+
+        // Infer type arguments from call arguments
+        let inferred = self.infer_type_params(type_params, &func_type.params, arg_types);
+
+        // Skip if no type params were inferred (not actually generic)
+        if inferred.is_empty() {
+            return;
+        }
+
+        // Get the method name_id
+        let method_name_id = self.method_name_id(method_sym, interner);
+
+        // Create type keys for the inferred type arguments (in type param order)
+        let type_keys: Vec<_> = type_params
+            .iter()
+            .filter_map(|tp| inferred.get(&tp.name_id))
+            .map(|t| self.entity_registry.type_table.key_for_type(t))
+            .collect();
+
+        // Create the monomorph key
+        let key = StaticMethodMonomorphKey::new(class_name_id, method_name_id, type_keys);
+
+        // Create/cache the monomorph instance
+        if !self
+            .entity_registry
+            .static_method_monomorph_cache
+            .contains(&key)
+        {
+            // Build substitutions from type params to inferred types
+            let substitutions: HashMap<NameId, Type> = inferred;
+
+            // Generate unique mangled name
+            let instance_id = self
+                .entity_registry
+                .static_method_monomorph_cache
+                .next_unique_id();
+            let class_name = self
+                .name_table
+                .last_segment_str(class_name_id)
+                .unwrap_or_else(|| "class".to_string());
+            let method_name = interner.resolve(method_sym);
+            let mangled_name_str = format!(
+                "{}__static_{}__mono_{}",
+                class_name, method_name, instance_id
+            );
+            let mangled_name = self
+                .name_table
+                .intern_raw(self.current_module, &[&mangled_name_str]);
+
+            // Create the substituted function type
+            let substituted_params: Vec<Type> = func_type
+                .params
+                .iter()
+                .map(|p| substitute_type(p, &substitutions))
+                .collect();
+            let substituted_return = substitute_type(&func_type.return_type, &substitutions);
+            let substituted_func_type = FunctionType {
+                params: substituted_params,
+                return_type: Box::new(substituted_return),
+                is_closure: func_type.is_closure,
+            };
+
+            let instance = StaticMethodMonomorphInstance {
+                class_name: class_name_id,
+                method_name: method_name_id,
+                mangled_name,
+                instance_id,
+                func_type: substituted_func_type,
+                substitutions,
+            };
+
+            tracing::debug!(
+                mangled_name = %mangled_name_str,
+                "inserting static method monomorph instance"
+            );
+            self.entity_registry
+                .static_method_monomorph_cache
+                .insert(key.clone(), instance);
+        }
+
+        // Record the call site → key mapping
+        tracing::debug!(expr_id = ?expr.id, key = ?key, "recording static method call site");
+        self.static_method_calls.insert(expr.id, key);
     }
 }

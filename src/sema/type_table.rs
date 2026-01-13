@@ -369,8 +369,34 @@ impl TypeTable {
             Type::Array(elem) => {
                 format!("[{}]", self.display_type_inner(elem, names))
             }
-            Type::Class(class_type) => names.display(class_type.name_id),
-            Type::Record(record_type) => names.display(record_type.name_id),
+            Type::Class(class_type) => {
+                let base = names.display(class_type.name_id);
+                if class_type.type_args.is_empty() {
+                    base
+                } else {
+                    let arg_list = class_type
+                        .type_args
+                        .iter()
+                        .map(|arg| self.display_type_inner(arg, names))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}<{}>", base, arg_list)
+                }
+            }
+            Type::Record(record_type) => {
+                let base = names.display(record_type.name_id);
+                if record_type.type_args.is_empty() {
+                    base
+                } else {
+                    let arg_list = record_type
+                        .type_args
+                        .iter()
+                        .map(|arg| self.display_type_inner(arg, names))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}<{}>", base, arg_list)
+                }
+            }
             Type::Interface(interface_type) => {
                 let base = names.display(interface_type.name_id);
                 if interface_type.type_args.is_empty() {

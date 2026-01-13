@@ -928,6 +928,7 @@ impl<'a> GeneratorTransformer<'a> {
                 id: self.next_id(),
                 kind: ExprKind::StructLiteral(Box::new(StructLiteralExpr {
                     name: record_name,
+                    type_args: Vec::new(),
                     fields,
                 })),
                 span: dummy_span,

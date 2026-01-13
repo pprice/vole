@@ -674,6 +674,7 @@ pub struct IsExpr {
 #[derive(Debug, Clone)]
 pub struct StructLiteralExpr {
     pub name: Symbol,
+    pub type_args: Vec<TypeExpr>,
     pub fields: Vec<StructFieldInit>,
 }
 
@@ -706,6 +707,7 @@ pub struct OptionalChainExpr {
 pub struct MethodCallExpr {
     pub object: Expr,
     pub method: Symbol,
+    pub type_args: Vec<TypeExpr>,
     pub args: Vec<Expr>,
     pub method_span: Span,
 }

@@ -376,6 +376,7 @@ impl<'src> Parser<'src> {
                         kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
                             object: expr,
                             method: field,
+                            type_args: Vec::new(),
                             args,
                             method_span: field_span,
                         })),
