@@ -35,7 +35,7 @@ pub enum TypeConstraint {
 
 /// Tracks type parameters currently in scope during type checking.
 /// Used when analyzing generic functions, records, classes, etc.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct TypeParamScope {
     /// Type parameters in the current scope
     params: Vec<TypeParamInfo>,
@@ -289,23 +289,32 @@ impl ClassMethodMonomorphCache {
 
 /// Key for looking up monomorphized static method instances on generic classes.
 /// Identifies a specific instantiation of a generic class's static method.
+/// Supports both class-level and method-level type parameters.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StaticMethodMonomorphKey {
     /// The class's NameId
     pub class_name: NameId,
     /// The method's NameId
     pub method_name: NameId,
-    /// Opaque type keys for the class's concrete type arguments
-    pub type_keys: Vec<TypeKey>,
+    /// Opaque type keys for the class's concrete type arguments (e.g., T in Box<T>)
+    pub class_type_keys: Vec<TypeKey>,
+    /// Opaque type keys for the method's concrete type arguments (e.g., U in func convert<U>)
+    pub method_type_keys: Vec<TypeKey>,
 }
 
 impl StaticMethodMonomorphKey {
     /// Create a new key for a static method monomorphization
-    pub fn new(class_name: NameId, method_name: NameId, type_keys: Vec<TypeKey>) -> Self {
+    pub fn new(
+        class_name: NameId,
+        method_name: NameId,
+        class_type_keys: Vec<TypeKey>,
+        method_type_keys: Vec<TypeKey>,
+    ) -> Self {
         Self {
             class_name,
             method_name,
-            type_keys,
+            class_type_keys,
+            method_type_keys,
         }
     }
 }

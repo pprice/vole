@@ -98,6 +98,9 @@ pub struct MethodDef {
     pub is_static: bool,
     /// External binding for this method (if any)
     pub external_binding: Option<ExternalMethodInfo>,
+    /// Method-level type parameters (e.g., `func convert<U>` has U as a method type param)
+    /// Distinct from class type params which are stored on TypeDef
+    pub method_type_params: Vec<TypeParamInfo>,
 }
 
 /// A field definition (always belongs to a type)

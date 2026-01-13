@@ -522,6 +522,7 @@ impl Analyzer {
         {
             let method_def = self.entity_registry.get_method(method_id);
             let func_type = method_def.signature.clone();
+            let method_type_params = method_def.method_type_params.clone();
 
             // Check argument count
             if args.len() != func_type.params.len() {
@@ -539,11 +540,24 @@ impl Analyzer {
                 arg_types.push(arg_ty);
             }
 
-            // Infer type params from arguments if this is a generic class
-            let (final_params, final_return) = if let Some(ref info) = generic_info {
+            // Get class-level type params (if any)
+            let class_type_params: Vec<TypeParamInfo> = generic_info
+                .as_ref()
+                .map(|info| info.type_params.clone())
+                .unwrap_or_default();
+
+            // Combine class and method type params for inference
+            let all_type_params: Vec<TypeParamInfo> = class_type_params
+                .iter()
+                .chain(method_type_params.iter())
+                .cloned()
+                .collect();
+
+            // Infer type params if there are any (class-level or method-level)
+            let (final_params, final_return) = if !all_type_params.is_empty() {
                 // Infer type params from argument types
                 let inferred =
-                    self.infer_type_params(&info.type_params, &func_type.params, &arg_types);
+                    self.infer_type_params(&all_type_params, &func_type.params, &arg_types);
 
                 // Substitute inferred types into param types and return type
                 let substituted_params: Vec<Type> = func_type
@@ -554,13 +568,25 @@ impl Analyzer {
                 let substituted_return =
                     crate::sema::generic::substitute_type(&func_type.return_type, &inferred);
 
-                // Check type parameter constraints
-                self.check_type_param_constraints(
-                    &info.type_params,
-                    &inferred,
-                    expr.span,
-                    interner,
-                );
+                // Check type parameter constraints for class type params
+                if !class_type_params.is_empty() {
+                    self.check_type_param_constraints(
+                        &class_type_params,
+                        &inferred,
+                        expr.span,
+                        interner,
+                    );
+                }
+
+                // Check type parameter constraints for method type params
+                if !method_type_params.is_empty() {
+                    self.check_type_param_constraints(
+                        &method_type_params,
+                        &inferred,
+                        expr.span,
+                        interner,
+                    );
+                }
 
                 (substituted_params, substituted_return)
             } else {
@@ -586,14 +612,15 @@ impl Analyzer {
                 },
             );
 
-            // Record static method monomorphization for generic classes
-            if let Some(ref info) = generic_info {
+            // Record static method monomorphization if there are any type params
+            if !all_type_params.is_empty() {
                 self.record_static_method_monomorph(
                     expr,
                     type_def_id,
                     method_sym,
                     &func_type,
-                    &info.type_params,
+                    &class_type_params,
+                    &method_type_params,
                     &arg_types,
                     interner,
                 );
@@ -736,7 +763,8 @@ impl Analyzer {
         type_def_id: TypeDefId,
         method_sym: Symbol,
         func_type: &FunctionType,
-        type_params: &[TypeParamInfo],
+        class_type_params: &[TypeParamInfo],
+        method_type_params: &[TypeParamInfo],
         arg_types: &[Type],
         interner: &Interner,
     ) {
@@ -744,8 +772,15 @@ impl Analyzer {
         let type_def = self.entity_registry.get_type(type_def_id);
         let class_name_id = type_def.name_id;
 
+        // Combine class and method type params for inference
+        let all_type_params: Vec<TypeParamInfo> = class_type_params
+            .iter()
+            .chain(method_type_params.iter())
+            .cloned()
+            .collect();
+
         // Infer type arguments from call arguments
-        let inferred = self.infer_type_params(type_params, &func_type.params, arg_types);
+        let inferred = self.infer_type_params(&all_type_params, &func_type.params, arg_types);
 
         // Skip if no type params were inferred (not actually generic)
         if inferred.is_empty() {
@@ -755,15 +790,27 @@ impl Analyzer {
         // Get the method name_id
         let method_name_id = self.method_name_id(method_sym, interner);
 
-        // Create type keys for the inferred type arguments (in type param order)
-        let type_keys: Vec<_> = type_params
+        // Create type keys for class type params (in type param order)
+        let class_type_keys: Vec<_> = class_type_params
             .iter()
             .filter_map(|tp| inferred.get(&tp.name_id))
             .map(|t| self.entity_registry.type_table.key_for_type(t))
             .collect();
 
-        // Create the monomorph key
-        let key = StaticMethodMonomorphKey::new(class_name_id, method_name_id, type_keys);
+        // Create type keys for method type params (in type param order)
+        let method_type_keys: Vec<_> = method_type_params
+            .iter()
+            .filter_map(|tp| inferred.get(&tp.name_id))
+            .map(|t| self.entity_registry.type_table.key_for_type(t))
+            .collect();
+
+        // Create the monomorph key with separate class and method type keys
+        let key = StaticMethodMonomorphKey::new(
+            class_name_id,
+            method_name_id,
+            class_type_keys,
+            method_type_keys,
+        );
 
         // Create/cache the monomorph instance
         if !self

@@ -306,6 +306,7 @@ impl Analyzer {
                         full_method_name_id,
                         signature,
                         has_default,
+                        Vec::new(), // Non-generic class, no method type params
                     );
                 }
             }
@@ -550,7 +551,43 @@ impl Analyzer {
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
 
-                    // Resolve parameter types with type params in scope
+                    // Build merged scope: class type params + method type params
+                    let mut merged_scope = type_param_scope.clone();
+                    for tp in &method.type_params {
+                        let tp_name_str = interner.resolve(tp.name);
+                        let tp_name_id = self.name_table.intern_raw(builtin_module, &[tp_name_str]);
+                        merged_scope.add(TypeParamInfo {
+                            name: tp.name,
+                            name_id: tp_name_id,
+                            constraint: None,
+                        });
+                    }
+
+                    // Build method type params with resolved constraints
+                    let method_type_params: Vec<TypeParamInfo> = method
+                        .type_params
+                        .iter()
+                        .map(|tp| {
+                            let tp_name_str = interner.resolve(tp.name);
+                            let tp_name_id =
+                                self.name_table.intern_raw(builtin_module, &[tp_name_str]);
+                            let constraint = tp.constraint.as_ref().and_then(|c| {
+                                self.resolve_type_param_constraint(
+                                    c,
+                                    &merged_scope,
+                                    interner,
+                                    tp.span,
+                                )
+                            });
+                            TypeParamInfo {
+                                name: tp.name,
+                                name_id: tp_name_id,
+                                constraint,
+                            }
+                        })
+                        .collect();
+
+                    // Resolve parameter types with merged type params in scope
                     let params: Vec<Type> = method
                         .params
                         .iter()
@@ -560,13 +597,13 @@ impl Analyzer {
                                 interner,
                                 &mut self.name_table,
                                 module_id,
-                                &type_param_scope,
+                                &merged_scope,
                             );
                             resolve_type(&p.ty, &mut ctx)
                         })
                         .collect();
 
-                    // Resolve return type with type params in scope
+                    // Resolve return type with merged type params in scope
                     let return_type = method
                         .return_type
                         .as_ref()
@@ -576,7 +613,7 @@ impl Analyzer {
                                 interner,
                                 &mut self.name_table,
                                 module_id,
-                                &type_param_scope,
+                                &merged_scope,
                             );
                             resolve_type(t, &mut ctx)
                         })
@@ -594,6 +631,7 @@ impl Analyzer {
                         full_method_name_id,
                         signature,
                         has_default,
+                        method_type_params,
                     );
                 }
             }
@@ -795,6 +833,7 @@ impl Analyzer {
                         full_method_name_id,
                         signature,
                         has_default,
+                        Vec::new(), // Non-generic record, no method type params
                     );
                 }
             }
@@ -1019,7 +1058,43 @@ impl Analyzer {
                         .name_table
                         .intern_raw(self.current_module, &[record_name_str, method_name_str]);
 
-                    // Resolve parameter types with type params in scope
+                    // Build merged scope: record type params + method type params
+                    let mut merged_scope = type_param_scope.clone();
+                    for tp in &method.type_params {
+                        let tp_name_str = interner.resolve(tp.name);
+                        let tp_name_id = self.name_table.intern_raw(builtin_module, &[tp_name_str]);
+                        merged_scope.add(TypeParamInfo {
+                            name: tp.name,
+                            name_id: tp_name_id,
+                            constraint: None,
+                        });
+                    }
+
+                    // Build method type params with resolved constraints
+                    let method_type_params: Vec<TypeParamInfo> = method
+                        .type_params
+                        .iter()
+                        .map(|tp| {
+                            let tp_name_str = interner.resolve(tp.name);
+                            let tp_name_id =
+                                self.name_table.intern_raw(builtin_module, &[tp_name_str]);
+                            let constraint = tp.constraint.as_ref().and_then(|c| {
+                                self.resolve_type_param_constraint(
+                                    c,
+                                    &merged_scope,
+                                    interner,
+                                    tp.span,
+                                )
+                            });
+                            TypeParamInfo {
+                                name: tp.name,
+                                name_id: tp_name_id,
+                                constraint,
+                            }
+                        })
+                        .collect();
+
+                    // Resolve parameter types with merged type params in scope
                     let params: Vec<Type> = method
                         .params
                         .iter()
@@ -1029,13 +1104,13 @@ impl Analyzer {
                                 interner,
                                 &mut self.name_table,
                                 module_id,
-                                &type_param_scope,
+                                &merged_scope,
                             );
                             resolve_type(&p.ty, &mut ctx)
                         })
                         .collect();
 
-                    // Resolve return type with type params in scope
+                    // Resolve return type with merged type params in scope
                     let return_type = method
                         .return_type
                         .as_ref()
@@ -1045,7 +1120,7 @@ impl Analyzer {
                                 interner,
                                 &mut self.name_table,
                                 module_id,
-                                &type_param_scope,
+                                &merged_scope,
                             );
                             resolve_type(t, &mut ctx)
                         })
@@ -1063,6 +1138,7 @@ impl Analyzer {
                         full_method_name_id,
                         signature,
                         has_default,
+                        method_type_params,
                     );
                 }
             }
@@ -1409,6 +1485,7 @@ impl Analyzer {
                     signature,
                     has_default,
                     external_binding,
+                    Vec::new(), // Interface static methods, no method type params
                 );
             }
         }
@@ -1685,6 +1762,7 @@ impl Analyzer {
                             full_method_name_id,
                             signature,
                             false, // implement block methods don't have defaults
+                            Vec::new(), // implement block static methods, no method type params
                         );
                     }
 
@@ -1734,6 +1812,7 @@ impl Analyzer {
                                     native_name,
                                     return_type: Some(Box::new(return_type)),
                                 }),
+                                Vec::new(), // External static methods, no method type params
                             );
                         }
                     }

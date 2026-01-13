@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
-use crate::sema::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
+use crate::sema::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache, TypeParamInfo};
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_table::{TypeKey, TypeTable};
 use crate::sema::{FunctionType, Type};
@@ -228,6 +228,7 @@ impl EntityRegistry {
             has_default,
             is_static: false,
             external_binding,
+            method_type_params: Vec::new(),
         });
         self.method_by_full_name.insert(full_name_id, id);
         self.methods_by_type
@@ -248,6 +249,7 @@ impl EntityRegistry {
         full_name_id: NameId,
         signature: FunctionType,
         has_default: bool,
+        method_type_params: Vec<TypeParamInfo>,
     ) -> MethodId {
         self.register_static_method_with_binding(
             defining_type,
@@ -256,6 +258,7 @@ impl EntityRegistry {
             signature,
             has_default,
             None,
+            method_type_params,
         )
     }
 
@@ -268,6 +271,7 @@ impl EntityRegistry {
         signature: FunctionType,
         has_default: bool,
         external_binding: Option<ExternalMethodInfo>,
+        method_type_params: Vec<TypeParamInfo>,
     ) -> MethodId {
         let id = MethodId::new(self.method_defs.len() as u32);
         self.method_defs.push(MethodDef {
@@ -279,6 +283,7 @@ impl EntityRegistry {
             has_default,
             is_static: true,
             external_binding,
+            method_type_params,
         });
         self.method_by_full_name.insert(full_name_id, id);
         self.static_methods_by_type

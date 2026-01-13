@@ -1899,6 +1899,7 @@ impl Analyzer {
             .expect("static method should be registered in EntityRegistry");
         let method_def = self.entity_registry.get_method(method_id);
         let method_type = method_def.signature.clone();
+        let method_type_params = method_def.method_type_params.clone();
         let return_type = *method_type.return_type.clone();
         self.current_function_return = Some(return_type.clone());
 
@@ -1916,6 +1917,20 @@ impl Analyzer {
         // Mark that we're in a static method (for self-usage detection)
         let method_name_str = interner.resolve(method.name).to_string();
         self.current_static_method = Some(method_name_str);
+
+        // Add method-level type params to the current type param scope (if any)
+        // This allows constraints on method type params to be checked
+        let saved_type_param_scope = self.current_type_param_scope.clone();
+        if !method_type_params.is_empty() {
+            let mut scope = self
+                .current_type_param_scope
+                .take()
+                .unwrap_or_else(TypeParamScope::new);
+            for tp in &method_type_params {
+                scope.add(tp.clone());
+            }
+            self.current_type_param_scope = Some(scope);
+        }
 
         // Create scope WITHOUT 'self'
         let parent_scope = std::mem::take(&mut self.scope);
@@ -1943,6 +1958,9 @@ impl Analyzer {
         self.current_function_error_type = None;
         self.current_generator_element_type = None;
         self.current_static_method = None;
+
+        // Restore type param scope (remove method type params)
+        self.current_type_param_scope = saved_type_param_scope;
 
         Ok(())
     }
@@ -1967,6 +1985,7 @@ impl Analyzer {
             .expect("static method should be registered in EntityRegistry");
         let method_def = self.entity_registry.get_method(method_id);
         let method_type = method_def.signature.clone();
+        let method_type_params = method_def.method_type_params.clone();
         let return_type = *method_type.return_type.clone();
         self.current_function_return = Some(return_type.clone());
 
@@ -1984,6 +2003,20 @@ impl Analyzer {
         // Mark that we're in a static method (for self-usage detection)
         let method_name_str = interner.resolve(method.name).to_string();
         self.current_static_method = Some(method_name_str);
+
+        // Add method-level type params to the current type param scope (if any)
+        // This allows constraints on method type params to be checked
+        let saved_type_param_scope = self.current_type_param_scope.clone();
+        if !method_type_params.is_empty() {
+            let mut scope = self
+                .current_type_param_scope
+                .take()
+                .unwrap_or_else(TypeParamScope::new);
+            for tp in &method_type_params {
+                scope.add(tp.clone());
+            }
+            self.current_type_param_scope = Some(scope);
+        }
 
         // Create scope WITHOUT 'self'
         let parent_scope = std::mem::take(&mut self.scope);
@@ -2011,6 +2044,9 @@ impl Analyzer {
         self.current_function_error_type = None;
         self.current_generator_element_type = None;
         self.current_static_method = None;
+
+        // Restore type param scope (remove method type params)
+        self.current_type_param_scope = saved_type_param_scope;
 
         Ok(())
     }
