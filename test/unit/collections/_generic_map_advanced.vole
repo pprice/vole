@@ -1,0 +1,39 @@
+// Test: Advanced generic Map scenarios
+// Testing current state of generic class support
+
+// Simple value container - infers T from the value field
+class ValueBox<T> {
+    value: T,
+}
+
+// Constrained container - infers T from value field
+class HashBox<T: Hashable> {
+    value: T,
+
+    func get_hash() -> i64 {
+        return self.value.hash()
+    }
+}
+
+tests {
+    test "value box infers type from field - i64" {
+        let box = ValueBox { value: 42 }
+        assert(box.value == 42)
+    }
+
+    test "value box infers type from field - string" {
+        let box = ValueBox { value: "hello" }
+        assert(box.value == "hello")
+    }
+
+    test "hash box infers type and calls constraint method" {
+        let box = HashBox { value: 42 }
+        assert(box.get_hash() == 42.hash())
+    }
+
+    test "hash box with string" {
+        let box = HashBox { value: "test" }
+        let h = box.get_hash()
+        assert(h == "test".hash())
+    }
+}

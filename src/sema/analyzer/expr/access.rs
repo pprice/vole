@@ -245,6 +245,7 @@ impl Analyzer {
                 type_def_id,
                 &type_name_str,
                 method_call.method,
+                &method_call.type_args,
                 &method_call.args,
                 method_call.method_span,
                 interner,
@@ -491,7 +492,7 @@ impl Analyzer {
         }
     }
 
-    /// Check a static method call: TypeName.method(args)
+    /// Check a static method call: TypeName.method(args) or TypeName.method<T, U>(args)
     #[allow(clippy::too_many_arguments)]
     fn check_static_method_call(
         &mut self,
@@ -499,6 +500,7 @@ impl Analyzer {
         type_def_id: TypeDefId,
         type_name_str: &str,
         method_sym: Symbol,
+        explicit_type_args: &[TypeExpr],
         args: &[Expr],
         method_span: Span,
         interner: &Interner,
@@ -546,9 +548,31 @@ impl Analyzer {
 
             // Infer type params if there are any (class-level or method-level)
             let (final_params, final_return) = if !all_type_params.is_empty() {
-                // Infer type params from argument types
-                let inferred =
-                    self.infer_type_params(&all_type_params, &func_type.params, &arg_types);
+                // Build substitution map from explicit type args if provided
+                let inferred = if !explicit_type_args.is_empty() {
+                    // Resolve explicit type args and map to class type params
+                    if explicit_type_args.len() != class_type_params.len() {
+                        self.add_error(
+                            SemanticError::WrongArgumentCount {
+                                expected: class_type_params.len(),
+                                found: explicit_type_args.len(),
+                                span: method_span.into(),
+                            },
+                            method_span,
+                        );
+                    }
+                    let mut explicit_map = std::collections::HashMap::new();
+                    for (param, type_expr) in
+                        class_type_params.iter().zip(explicit_type_args.iter())
+                    {
+                        let resolved = self.resolve_type(type_expr, interner);
+                        explicit_map.insert(param.name_id, resolved);
+                    }
+                    explicit_map
+                } else {
+                    // Infer type params from argument types
+                    self.infer_type_params(&all_type_params, &func_type.params, &arg_types)
+                };
 
                 // Substitute inferred types into param types and return type
                 let substituted_params: Vec<Type> = func_type
