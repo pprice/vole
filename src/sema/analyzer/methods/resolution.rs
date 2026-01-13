@@ -131,17 +131,13 @@ impl Analyzer {
 
     /// Build substitution map for generic interface types
     fn build_interface_substitutions(&self, object_type: &Type) -> HashMap<NameId, Type> {
-        let mut substitutions = HashMap::new();
-
         // Extract type_def_id and type_args from nominal types
         if let Some(info) = object_type.as_nominal() {
-            let type_def = self.entity_registry.get_type(info.type_def_id);
-            for (param_name_id, arg) in type_def.type_params.iter().zip(info.type_args.iter()) {
-                substitutions.insert(*param_name_id, arg.clone());
-            }
+            self.entity_registry
+                .substitution_map(info.type_def_id, &info.type_args)
+        } else {
+            HashMap::new()
         }
-
-        substitutions
     }
 
     /// Apply substitutions to a function type
@@ -370,10 +366,7 @@ impl Analyzer {
             let name_id = interface_def.name_id;
 
             // Build substitution map from type params to type args
-            let mut substitutions: HashMap<NameId, Type> = HashMap::new();
-            for (param_name_id, arg) in interface_def.type_params.iter().zip(type_args.iter()) {
-                substitutions.insert(*param_name_id, arg.clone());
-            }
+            let substitutions = self.entity_registry.substitution_map(type_def_id, type_args);
 
             // Get interface Symbol by looking up from name_id
             let interface_sym = self
@@ -467,14 +460,8 @@ impl Analyzer {
                 let func_type = method_def.signature.clone();
 
                 // For generic records, substitute type args in the method signature
-                // Look up generic info from EntityRegistry
-                let type_def = self.entity_registry.get_type(type_def_id);
-                let generic_info = type_def.generic_info.as_ref();
-                if let (Some(type_args), Some(generic_info)) = (record_type_args, generic_info) {
-                    let mut substitutions = HashMap::new();
-                    for (param, arg) in generic_info.type_params.iter().zip(type_args.iter()) {
-                        substitutions.insert(param.name_id, arg.clone());
-                    }
+                if let Some(type_args) = record_type_args {
+                    let substitutions = self.entity_registry.substitution_map(type_def_id, type_args);
                     let substituted_func_type = FunctionType {
                         params: func_type
                             .params

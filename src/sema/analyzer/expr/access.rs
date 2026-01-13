@@ -17,32 +17,16 @@ impl Analyzer {
         field_name: &str,
     ) -> Option<(String, Type)> {
         let type_def = self.entity_registry.get_type(type_def_id);
-
-        // Get the generic info (field names and types)
         let generic_info = type_def.generic_info.as_ref()?;
 
-        // Build substitution map if there are type arguments
-        let substitutions: HashMap<NameId, Type> = if type_args.is_empty() {
-            HashMap::new()
-        } else {
-            generic_info
-                .type_params
-                .iter()
-                .zip(type_args.iter())
-                .map(|(tp, arg)| (tp.name_id, arg.clone()))
-                .collect()
-        };
-
-        // Find the field by name
+        // Find the field by name and get substituted type
         for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
             let name = self.name_table.last_segment_str(*field_name_id);
             if name.as_deref() == Some(field_name) {
                 let field_type = &generic_info.field_types[i];
-                let substituted = if substitutions.is_empty() {
-                    field_type.clone()
-                } else {
-                    substitute_type(field_type, &substitutions)
-                };
+                let substituted = self
+                    .entity_registry
+                    .substitute_type_with_args(type_def_id, type_args, field_type);
                 let type_name = self
                     .name_table
                     .last_segment_str(type_def.name_id)

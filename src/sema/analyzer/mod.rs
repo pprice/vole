@@ -9,7 +9,7 @@ mod stmt;
 
 use crate::errors::{SemanticError, SemanticWarning};
 use crate::frontend::*;
-use crate::identity::{self, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
+use crate::identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
 use crate::module::ModuleLoader;
 use crate::sema::EntityRegistry;
 use crate::sema::ExpressionData;
@@ -196,6 +196,12 @@ pub struct Analyzer {
     /// Current type parameter scope (set when analyzing methods in generic classes/records)
     /// Used for resolving methods on Type::TypeParam via constraint interfaces
     current_type_param_scope: Option<TypeParamScope>,
+}
+
+/// Result of looking up a method on a type via EntityRegistry
+pub struct MethodLookup {
+    pub method_id: MethodId,
+    pub signature: FunctionType,
 }
 
 impl Analyzer {
@@ -903,10 +909,7 @@ impl Analyzer {
         }
 
         // Build substitution map using type param NameIds
-        let mut substitutions = HashMap::new();
-        for (name_id, arg) in type_def.type_params.iter().zip(type_args.iter()) {
-            substitutions.insert(*name_id, arg.clone());
-        }
+        let substitutions = self.entity_registry.substitution_map(type_def_id, &type_args);
 
         // Build methods with substituted types
         let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
@@ -947,6 +950,24 @@ impl Analyzer {
     /// Look up a method NameId by string name (cross-interner safe)
     fn method_name_id_by_str(&self, name_str: &str, interner: &Interner) -> Option<NameId> {
         identity::method_name_id_by_str(&self.name_table, interner, name_str)
+    }
+
+    /// Look up a method on a type via EntityRegistry
+    fn lookup_method(
+        &mut self,
+        type_def_id: TypeDefId,
+        method_name: Symbol,
+        interner: &Interner,
+    ) -> Option<MethodLookup> {
+        let method_name_id = self.method_name_id(method_name, interner);
+        let method_id = self
+            .entity_registry
+            .find_method_on_type(type_def_id, method_name_id)?;
+        let method_def = self.entity_registry.get_method(method_id);
+        Some(MethodLookup {
+            method_id,
+            signature: method_def.signature.clone(),
+        })
     }
 
     /// Mark the current lambda as having side effects
@@ -1796,14 +1817,10 @@ impl Analyzer {
             .resolver(interner)
             .resolve_type(type_name, &self.entity_registry)
             .expect("type should be registered in EntityRegistry");
-        let method_name_id = self.method_name_id(method.name, interner);
-        let method_id = self
-            .entity_registry
-            .find_method_on_type(type_def_id, method_name_id)
+        let lookup = self
+            .lookup_method(type_def_id, method.name, interner)
             .expect("method should be registered in EntityRegistry");
-        let method_def = self.entity_registry.get_method(method_id);
-        let method_type = method_def.signature.clone();
-        let return_type = *method_type.return_type.clone();
+        let return_type = (*lookup.signature.return_type).clone();
         let saved_ctx = self.enter_function_context(&return_type, interner);
 
         // Create scope with 'self' and parameters
@@ -1839,7 +1856,7 @@ impl Analyzer {
         );
 
         // Add parameters
-        for (param, ty) in method.params.iter().zip(method_type.params.iter()) {
+        for (param, ty) in method.params.iter().zip(lookup.signature.params.iter()) {
             self.scope.define(
                 param.name,
                 Variable {

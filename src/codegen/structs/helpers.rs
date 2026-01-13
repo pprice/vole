@@ -1,7 +1,6 @@
 // src/codegen/structs/helpers.rs
 
 use cranelift::prelude::*;
-use std::collections::HashMap;
 
 use crate::codegen::types::CompileCtx;
 use crate::codegen::types::CompiledValue;
@@ -26,12 +25,10 @@ pub(crate) fn get_field_slot_and_type(
                 .ok_or_else(|| CodegenError::not_found("generic_info", "class").to_string())?;
 
             // Build substitution map if there are type args
-            let substitutions: HashMap<_, _> = generic_info
-                .type_params
-                .iter()
-                .zip(class_type.type_args.iter())
-                .map(|(param, arg)| (param.name_id, arg.clone()))
-                .collect();
+            let substitutions = ctx
+                .analyzed
+                .entity_registry
+                .substitution_map(class_type.type_def_id, &class_type.type_args);
 
             for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
                 let name = ctx.analyzed.name_table.last_segment_str(*field_name_id);
@@ -64,12 +61,10 @@ pub(crate) fn get_field_slot_and_type(
                 .ok_or_else(|| CodegenError::not_found("generic_info", "record").to_string())?;
 
             // Build substitution map if there are type args
-            let substitutions: HashMap<_, _> = generic_info
-                .type_params
-                .iter()
-                .zip(record_type.type_args.iter())
-                .map(|(param, arg)| (param.name_id, arg.clone()))
-                .collect();
+            let substitutions = ctx
+                .analyzed
+                .entity_registry
+                .substitution_map(record_type.type_def_id, &record_type.type_args);
 
             for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
                 let name = ctx.analyzed.name_table.last_segment_str(*field_name_id);
