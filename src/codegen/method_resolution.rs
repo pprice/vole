@@ -119,18 +119,8 @@ pub(crate) fn resolve_method_target(
                 // For interface types, we need vtable dispatch - the external_info is for
                 // the default implementation, but the concrete type may override it
                 if let Type::Interface(interface_type) = input.object_type {
-                    // Look up interface by name_id to get the correct symbol for the current interner
-                    // Look up TypeDefId and method NameId for EntityRegistry-based dispatch
-                    let interface_type_id = input
-                        .analyzed
-                        .entity_registry
-                        .type_by_name(interface_type.name_id)
-                        .ok_or_else(|| {
-                            format!(
-                                "interface {:?} not found in entity_registry",
-                                interface_type.name_id
-                            )
-                        })?;
+                    // Use TypeDefId directly for EntityRegistry-based dispatch
+                    let interface_type_id = interface_type.type_def_id;
                     let method_name_id = method_name_id_by_str(
                         input.analyzed,
                         &input.analyzed.interner,
@@ -212,20 +202,15 @@ pub(crate) fn resolve_method_target(
             } => {
                 // Use object type's interface info for EntityRegistry-based dispatch
                 // Handle both Type::Interface and Type::GenericInstance (for self-referential interface methods)
-                let interface_name_id = match input.object_type {
-                    Type::Interface(interface_type) => Some(interface_type.name_id),
-                    Type::GenericInstance { def, .. } => Some(*def),
+                let interface_type_id = match input.object_type {
+                    Type::Interface(interface_type) => Some(interface_type.type_def_id),
+                    Type::GenericInstance { def, .. } => {
+                        input.analyzed.entity_registry.type_by_name(*def)
+                    }
                     _ => None,
                 };
 
-                if let Some(name_id) = interface_name_id {
-                    let interface_type_id = input
-                        .analyzed
-                        .entity_registry
-                        .type_by_name(name_id)
-                        .ok_or_else(|| {
-                            format!("interface {:?} not found in entity_registry", name_id)
-                        })?;
+                if let Some(interface_type_id) = interface_type_id {
                     let method_name_id = method_name_id_by_str(
                         input.analyzed,
                         &input.analyzed.interner,
@@ -360,17 +345,17 @@ pub(crate) fn resolve_method_target(
     ))
 }
 
-/// Get TypeDefId for a type during codegen (handles primitives, records, classes)
+/// Get TypeDefId for a type during codegen (handles primitives, records, classes, interfaces)
 fn get_type_def_id_for_codegen(ty: &Type, analyzed: &AnalyzedProgram) -> Option<TypeDefId> {
-    // For Class and Record, we already have the TypeDefId
+    // For Class, Record, and Interface, we already have the TypeDefId
     match ty {
         Type::Class(c) => return Some(c.type_def_id),
         Type::Record(r) => return Some(r.type_def_id),
+        Type::Interface(i) => return Some(i.type_def_id),
         _ => {}
     }
 
     let name_id = match ty {
-        Type::Interface(i) => Some(i.name_id),
         Type::GenericInstance { def, .. } => Some(*def),
         // Primitives - look up via well-known NameIds
         Type::I8 => Some(analyzed.name_table.primitives.i8),

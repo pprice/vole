@@ -142,6 +142,11 @@ impl EntityRegistry {
         &mut self.type_defs[id.index() as usize]
     }
 
+    /// Get the NameId for a type definition
+    pub fn name_id(&self, id: TypeDefId) -> NameId {
+        self.get_type(id).name_id
+    }
+
     /// Look up a type by its NameId
     #[must_use]
     pub fn type_by_name(&self, name_id: NameId) -> Option<TypeDefId> {
@@ -729,7 +734,7 @@ impl EntityRegistry {
             Type::Class(c) => Some(self.class_name_id(c)),
             Type::Record(r) => Some(self.record_name_id(r)),
             Type::GenericInstance { def, .. } => Some(*def),
-            Type::Interface(i) => Some(i.name_id),
+            Type::Interface(i) => Some(self.name_id(i.type_def_id)),
             _ => None,
         }
     }

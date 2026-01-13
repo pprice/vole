@@ -98,21 +98,10 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
         return true;
     }
 
-    // Interface is compatible with GenericInstance (and vice versa) when they have same def and args
-    // This handles cases like Iterator<i64> (Interface) matching Iterator<T> instantiated as Iterator<i64> (GenericInstance)
-    match (from, to) {
-        (Type::Interface(iface), Type::GenericInstance { def, args }) => {
-            if iface.name_id == *def && iface.type_args == *args {
-                return true;
-            }
-        }
-        (Type::GenericInstance { def, args }, Type::Interface(iface)) => {
-            if *def == iface.name_id && *args == iface.type_args {
-                return true;
-            }
-        }
-        _ => {}
-    }
+    // Interface<->GenericInstance compatibility is handled by types_compatible() in analyzer/methods/compatibility.rs
+    // which has access to entity_registry for TypeDefId<->NameId conversion.
+    // Direct comparison here would require InterfaceType.type_def_id == GenericInstance.def (NameId),
+    // but these are different ID types. The full compatibility check handles interface subtyping.
 
     // Tuple compatibility: same length and each element is compatible
     if let (Type::Tuple(from_elems), Type::Tuple(to_elems)) = (from, to)

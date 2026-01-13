@@ -288,18 +288,18 @@ pub struct RecordType {
 /// Interface type information
 #[derive(Clone, Eq)]
 pub struct InterfaceType {
-    /// Canonical name ID for cross-interner lookups
-    pub name_id: NameId,
+    /// Reference to the type definition in EntityRegistry
+    pub type_def_id: TypeDefId,
     pub type_args: Vec<Type>,
     pub methods: Vec<InterfaceMethodType>,
-    pub extends: Vec<NameId>, // Parent interface NameIds
+    pub extends: Vec<TypeDefId>, // Parent interface TypeDefIds
 }
 
 // Custom Debug to avoid massive output when tracing - just show identity, not all methods
 impl std::fmt::Debug for InterfaceType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InterfaceType")
-            .field("name_id", &self.name_id)
+            .field("type_def_id", &self.type_def_id)
             .field("type_args", &self.type_args)
             .field("methods", &format_args!("[{} methods]", self.methods.len()))
             .field("extends", &self.extends)
@@ -307,12 +307,12 @@ impl std::fmt::Debug for InterfaceType {
     }
 }
 
-// Custom PartialEq to compare only name_id and type_args
+// Custom PartialEq to compare only type_def_id and type_args
 // This is needed because Symbol is interner-specific and methods can differ
 // when interfaces are loaded from different contexts
 impl PartialEq for InterfaceType {
     fn eq(&self, other: &Self) -> bool {
-        self.name_id == other.name_id && self.type_args == other.type_args
+        self.type_def_id == other.type_def_id && self.type_args == other.type_args
     }
 }
 
@@ -329,7 +329,7 @@ pub struct InterfaceMethodType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErrorTypeInfo {
     pub name: Symbol,
-    pub name_id: NameId,
+    pub type_def_id: TypeDefId,
     pub fields: Vec<StructField>,
 }
 

@@ -1427,11 +1427,11 @@ impl Analyzer {
         self.entity_registry
             .set_type_params(entity_type_id, entity_type_params);
 
-        // Register extends relationships and build extends Vec<NameId>
-        let extends_name_ids: Vec<NameId> = interface_decl
+        // Register extends relationships and build extends Vec<TypeDefId>
+        let extends_type_ids: Vec<TypeDefId> = interface_decl
             .extends
             .iter()
-            .map(|&parent_sym| {
+            .filter_map(|&parent_sym| {
                 let parent_str = interner.resolve(parent_sym);
                 let parent_name_id = self
                     .name_table
@@ -1439,8 +1439,10 @@ impl Analyzer {
                 if let Some(parent_type_id) = self.entity_registry.type_by_name(parent_name_id) {
                     self.entity_registry
                         .add_extends(entity_type_id, parent_type_id);
+                    Some(parent_type_id)
+                } else {
+                    None
                 }
-                parent_name_id
             })
             .collect();
 
@@ -1575,10 +1577,10 @@ impl Analyzer {
         self.register_named_type(
             interface_decl.name,
             Type::Interface(crate::sema::types::InterfaceType {
-                name_id,
+                type_def_id: entity_type_id,
                 type_args: Vec::new(),
                 methods: interface_methods,
-                extends: extends_name_ids,
+                extends: extends_type_ids,
             }),
             interner,
         );

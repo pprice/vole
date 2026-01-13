@@ -3,7 +3,7 @@
 // Type resolution: converts TypeExpr (AST representation) to Type (semantic representation)
 
 use crate::frontend::{Interner, Symbol, TypeExpr};
-use crate::identity::{ModuleId, NameId, NameTable, Resolver};
+use crate::identity::{ModuleId, NameTable, Resolver};
 use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{TypeParamScope, substitute_type};
@@ -75,15 +75,11 @@ fn interface_instance(
         })
         .collect();
 
-    // Build extends from TypeDefIds -> NameIds
-    let extends: Vec<NameId> = type_def
-        .extends
-        .iter()
-        .map(|&parent_id| ctx.entity_registry.get_type(parent_id).name_id)
-        .collect();
+    // Keep extends as TypeDefIds directly
+    let extends = type_def.extends.clone();
 
     Some(Type::Interface(InterfaceType {
-        name_id: type_def.name_id,
+        type_def_id,
         type_args,
         methods,
         extends,

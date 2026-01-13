@@ -111,32 +111,17 @@ impl Primitives {
 /// These are populated after prelude loading for fast type identification.
 #[derive(Debug, Clone, Default)]
 pub struct WellKnownTypes {
-    // NameId fields (for compatibility with existing code)
-    /// std:prelude/traits::Iterator (NameId)
-    pub iterator: Option<NameId>,
-    /// std:prelude/traits::Iterable (NameId)
-    pub iterable: Option<NameId>,
-    /// std:prelude/traits::Equatable (NameId)
-    pub equatable: Option<NameId>,
-    /// std:prelude/traits::Comparable (NameId)
-    pub comparable: Option<NameId>,
-    /// std:prelude/traits::Hashable (NameId)
-    pub hashable: Option<NameId>,
-    /// std:prelude/traits::Stringable (NameId)
-    pub stringable: Option<NameId>,
-
-    // TypeDefId fields (for EntityRegistry integration)
-    /// std:prelude/traits::Iterator (TypeDefId)
+    /// std:prelude/traits::Iterator
     pub iterator_type_def: Option<TypeDefId>,
-    /// std:prelude/traits::Iterable (TypeDefId)
+    /// std:prelude/traits::Iterable
     pub iterable_type_def: Option<TypeDefId>,
-    /// std:prelude/traits::Equatable (TypeDefId)
+    /// std:prelude/traits::Equatable
     pub equatable_type_def: Option<TypeDefId>,
-    /// std:prelude/traits::Comparable (TypeDefId)
+    /// std:prelude/traits::Comparable
     pub comparable_type_def: Option<TypeDefId>,
-    /// std:prelude/traits::Hashable (TypeDefId)
+    /// std:prelude/traits::Hashable
     pub hashable_type_def: Option<TypeDefId>,
-    /// std:prelude/traits::Stringable (TypeDefId)
+    /// std:prelude/traits::Stringable
     pub stringable_type_def: Option<TypeDefId>,
 }
 
@@ -144,16 +129,6 @@ impl WellKnownTypes {
     /// Create an empty WellKnownTypes (before prelude is loaded)
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Check if a NameId is the Iterator interface
-    pub fn is_iterator(&self, name_id: NameId) -> bool {
-        self.iterator == Some(name_id)
-    }
-
-    /// Check if a NameId is the Iterable interface
-    pub fn is_iterable(&self, name_id: NameId) -> bool {
-        self.iterable == Some(name_id)
     }
 
     /// Check if a TypeDefId is the Iterator interface
@@ -241,15 +216,16 @@ impl NameTable {
     }
 
     /// Populate well-known type NameIds after prelude has been loaded.
+    /// This is now a no-op - TypeDefIds are populated directly via populate_type_def_ids.
     pub fn populate_well_known(&mut self) {
-        let traits_module = self.module_id("std:prelude/traits");
+        // TypeDefIds are populated via populate_type_def_ids after EntityRegistry is ready
+    }
 
-        self.well_known.iterator = Some(self.intern_raw(traits_module, &["Iterator"]));
-        self.well_known.iterable = Some(self.intern_raw(traits_module, &["Iterable"]));
-        self.well_known.equatable = Some(self.intern_raw(traits_module, &["Equatable"]));
-        self.well_known.comparable = Some(self.intern_raw(traits_module, &["Comparable"]));
-        self.well_known.hashable = Some(self.intern_raw(traits_module, &["Hashable"]));
-        self.well_known.stringable = Some(self.intern_raw(traits_module, &["Stringable"]));
+    /// Get the NameId for a well-known interface by name.
+    /// Used internally by populate_type_def_ids.
+    pub fn well_known_interface_name_id(&mut self, name: &str) -> NameId {
+        let traits_module = self.module_id("std:prelude/traits");
+        self.intern_raw(traits_module, &[name])
     }
 
     fn register_primitives(&mut self) -> Primitives {

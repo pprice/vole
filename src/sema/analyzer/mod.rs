@@ -730,7 +730,7 @@ impl Analyzer {
             }
             // Interface types: unify type args for the same interface
             (Type::Interface(p_iface), Type::Interface(a_iface))
-                if p_iface.name_id == a_iface.name_id =>
+                if p_iface.type_def_id == a_iface.type_def_id =>
             {
                 for (p_arg, a_arg) in p_iface.type_args.iter().zip(a_iface.type_args.iter()) {
                     self.unify_types(p_arg, a_arg, type_params, inferred);
@@ -930,18 +930,11 @@ impl Analyzer {
             })
             .collect();
 
-        // Build extends from TypeDefIds -> NameIds
-        let extends: Vec<NameId> = type_def
-            .extends
-            .iter()
-            .map(|&parent_id| self.entity_registry.get_type(parent_id).name_id)
-            .collect();
-
         Some(Type::Interface(crate::sema::types::InterfaceType {
-            name_id: type_def.name_id,
+            type_def_id,
             type_args,
             methods,
-            extends,
+            extends: type_def.extends.clone(),
         }))
     }
 
@@ -1009,6 +1002,12 @@ impl Analyzer {
 
         // Pass 1: Collect signatures for all declarations (shells already exist)
         self.collect_signatures(program, interner);
+
+        // Populate well-known TypeDefIds now that interfaces are registered
+        crate::sema::well_known::populate_type_def_ids(
+            &mut self.name_table,
+            &self.entity_registry,
+        );
 
         // Process global let declarations
         self.process_global_lets(program, interner)?;
@@ -1362,20 +1361,20 @@ impl Analyzer {
             .name_table
             .intern(self.current_module, &[decl.name], interner);
 
-        let error_info = ErrorTypeInfo {
-            name: decl.name,
-            name_id,
-            fields: fields.clone(),
-        };
-
-        self.register_named_type(decl.name, Type::ErrorType(error_info.clone()), interner);
-
-        // Register in EntityRegistry (parallel migration)
+        // Register in EntityRegistry first to get TypeDefId
         let entity_type_id = self.entity_registry.register_type(
             name_id,
             TypeDefKind::ErrorType,
             self.current_module,
         );
+
+        let error_info = ErrorTypeInfo {
+            name: decl.name,
+            type_def_id: entity_type_id,
+            fields: fields.clone(),
+        };
+
+        self.register_named_type(decl.name, Type::ErrorType(error_info.clone()), interner);
 
         // Set error info for lookup
         self.entity_registry
@@ -1791,7 +1790,7 @@ impl Analyzer {
         if !self
             .name_table
             .well_known
-            .is_iterator(interface_type.name_id)
+            .is_iterator_type_def(interface_type.type_def_id)
         {
             return None;
         }

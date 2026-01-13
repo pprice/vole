@@ -279,7 +279,8 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
             }
         }
         Type::Interface(interface_type) => {
-            let base = analyzed.name_table.display(interface_type.name_id);
+            let name_id = analyzed.entity_registry.name_id(interface_type.type_def_id);
+            let base = analyzed.name_table.display(name_id);
             if interface_type.type_args.is_empty() {
                 base
             } else {
@@ -292,7 +293,10 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
                 format!("{}<{}>", base, arg_list)
             }
         }
-        Type::ErrorType(error_type) => analyzed.name_table.display(error_type.name_id),
+        Type::ErrorType(error_type) => {
+            let name_id = analyzed.entity_registry.name_id(error_type.type_def_id);
+            analyzed.name_table.display(name_id)
+        }
         Type::Module(module_type) => format!(
             "module(\"{}\")",
             analyzed.name_table.module_path(module_type.module_id)
@@ -344,15 +348,11 @@ fn build_interface_type_from_entity(
         })
         .collect();
 
-    // Build extends from TypeDefIds -> NameIds
-    let extends: Vec<NameId> = type_def
-        .extends
-        .iter()
-        .map(|&parent_id| entity_registry.get_type(parent_id).name_id)
-        .collect();
+    // Keep extends as TypeDefIds directly
+    let extends = type_def.extends.clone();
 
     Type::Interface(crate::sema::types::InterfaceType {
-        name_id: type_def.name_id,
+        type_def_id,
         type_args,
         methods,
         extends,
@@ -642,15 +642,11 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         })
                         .collect();
 
-                    // Build extends
-                    let extends: Vec<NameId> = type_def
-                        .extends
-                        .iter()
-                        .map(|&parent_id| entity_registry.get_type(parent_id).name_id)
-                        .collect();
+                    // Keep extends as TypeDefIds directly
+                    let extends = type_def.extends.clone();
 
                     return Type::Interface(crate::sema::types::InterfaceType {
-                        name_id: type_def.name_id,
+                        type_def_id,
                         type_args: resolved_args,
                         methods,
                         extends,

@@ -561,11 +561,7 @@ pub(crate) fn box_interface_value(
     };
 
     // Look up the interface Symbol name for vtable operations via EntityRegistry
-    let interface_type_id = ctx
-        .analyzed
-        .entity_registry
-        .type_by_name(interface.name_id)
-        .ok_or_else(|| format!("unknown interface with name_id {:?}", interface.name_id))?;
+    let interface_type_id = interface.type_def_id;
     let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_id);
     // Get the interface Symbol by looking up the short name in the interner
     let interface_name_str = ctx
@@ -575,7 +571,7 @@ pub(crate) fn box_interface_value(
         .ok_or_else(|| {
             format!(
                 "cannot get interface name string for {:?}",
-                interface.name_id
+                interface.type_def_id
             )
         })?;
     let interface_name = ctx.interner.lookup(&interface_name_str).ok_or_else(|| {
@@ -597,17 +593,6 @@ pub(crate) fn box_interface_value(
     }
 
     // Check if this is an external-only interface via EntityRegistry
-    let interface_type_id = ctx
-        .analyzed
-        .entity_registry
-        .type_by_name(interface.name_id)
-        .ok_or_else(|| {
-            format!(
-                "interface {:?} not found in entity_registry",
-                interface.name_id
-            )
-        })?;
-
     if ctx
         .analyzed
         .entity_registry

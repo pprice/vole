@@ -520,10 +520,19 @@ impl Cg<'_, '_, '_> {
                 .analyzed
                 .name_table
                 .well_known
-                .is_iterator(iface.name_id),
-            Type::GenericInstance { def, .. } => {
-                self.ctx.analyzed.name_table.well_known.is_iterator(*def)
-            }
+                .is_iterator_type_def(iface.type_def_id),
+            Type::GenericInstance { def, .. } => self
+                .ctx
+                .analyzed
+                .entity_registry
+                .type_by_name(*def)
+                .is_some_and(|id| {
+                    self.ctx
+                        .analyzed
+                        .name_table
+                        .well_known
+                        .is_iterator_type_def(id)
+                }),
             _ => false,
         }
     }

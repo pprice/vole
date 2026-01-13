@@ -148,7 +148,7 @@ pub(crate) fn get_type_name_id(
     match vole_type {
         Type::Class(class_type) => Ok(entity_registry.class_name_id(class_type)),
         Type::Record(record_type) => Ok(entity_registry.record_name_id(record_type)),
-        Type::Interface(interface_type) => Ok(interface_type.name_id),
+        Type::Interface(interface_type) => Ok(entity_registry.name_id(interface_type.type_def_id)),
         Type::GenericInstance { def, .. } => Ok(*def),
         _ => Err(CodegenError::type_mismatch(
             "type name extraction",

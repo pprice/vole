@@ -188,19 +188,13 @@ impl Cg<'_, '_, '_> {
 
         let (method_info, return_type) = match target {
             MethodTarget::FunctionalInterface { func_type } => {
-                // Convert to TypeDefId and NameId for EntityRegistry-based dispatch
-                if let Type::Interface(interface_type) = &obj.vole_type
-                    && let Some(type_def_id) = self
-                        .ctx
-                        .analyzed
-                        .entity_registry
-                        .type_by_name(interface_type.name_id)
-                {
+                // Use TypeDefId directly for EntityRegistry-based dispatch
+                if let Type::Interface(interface_type) = &obj.vole_type {
                     let method_name_id = self.method_name_id(mc.method);
                     return self.interface_dispatch_call_args_by_type_def_id(
                         &obj,
                         &mc.args,
-                        type_def_id,
+                        interface_type.type_def_id,
                         method_name_id,
                         func_type,
                     );
@@ -561,13 +555,7 @@ impl Cg<'_, '_, '_> {
     /// not boxed interface values. This function converts Interface/GenericInstance types
     /// for Iterator to RuntimeIterator so that subsequent method calls use direct dispatch.
     fn convert_iterator_return_type(&self, ty: Type, iterator_type_id: TypeDefId) -> Type {
-        let iterator_name_id = self
-            .ctx
-            .analyzed
-            .entity_registry
-            .get_type(iterator_type_id)
-            .name_id;
-        self.convert_iterator_return_type_by_name_id(ty, iterator_name_id)
+        self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
     }
 
     /// Convert Iterator<T> return types to RuntimeIterator(T), looking up Iterator interface by name
@@ -578,23 +566,19 @@ impl Cg<'_, '_, '_> {
             .resolver()
             .resolve_type_str_or_interface("Iterator", &self.ctx.analyzed.entity_registry);
         if let Some(iterator_type_id) = iterator_type_id {
-            let iterator_name_id = self
-                .ctx
-                .analyzed
-                .entity_registry
-                .get_type(iterator_type_id)
-                .name_id;
-            self.convert_iterator_return_type_by_name_id(ty, iterator_name_id)
+            self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
         } else {
             ty
         }
     }
 
     /// Core implementation of iterator return type conversion
-    fn convert_iterator_return_type_by_name_id(&self, ty: Type, iterator_name_id: NameId) -> Type {
+    fn convert_iterator_return_type_by_type_def_id(&self, ty: Type, iterator_type_id: TypeDefId) -> Type {
+        // Get NameId for GenericInstance comparison
+        let iterator_name_id = self.ctx.analyzed.entity_registry.name_id(iterator_type_id);
         match &ty {
             // Handle Iterator<T> stored as Interface
-            Type::Interface(iface) if iface.name_id == iterator_name_id => {
+            Type::Interface(iface) if iface.type_def_id == iterator_type_id => {
                 if let Some(elem_ty) = iface.type_args.first() {
                     Type::RuntimeIterator(Box::new(elem_ty.clone()))
                 } else {

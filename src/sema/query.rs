@@ -333,13 +333,17 @@ impl<'a> ProgramQuery<'a> {
     /// Check if a NameId refers to the Iterator interface
     #[must_use]
     pub fn is_iterator(&self, name_id: NameId) -> bool {
-        self.name_table.well_known.is_iterator(name_id)
+        self.registry
+            .type_by_name(name_id)
+            .is_some_and(|id| self.name_table.well_known.is_iterator_type_def(id))
     }
 
     /// Check if a NameId refers to the Iterable interface
     #[must_use]
     pub fn is_iterable(&self, name_id: NameId) -> bool {
-        self.name_table.well_known.is_iterable(name_id)
+        self.registry
+            .type_by_name(name_id)
+            .is_some_and(|id| self.name_table.well_known.is_iterable_type_def(id))
     }
 
     // =========================================================================

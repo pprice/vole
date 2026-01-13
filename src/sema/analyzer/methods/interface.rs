@@ -42,7 +42,7 @@ fn substitute_type(ty: &Type, substitutions: &StdHashMap<NameId, Type>) -> Type 
                 .collect(),
         },
         Type::Interface(iface) => Type::Interface(InterfaceType {
-            name_id: iface.name_id,
+            type_def_id: iface.type_def_id,
             type_args: iface
                 .type_args
                 .iter()
@@ -135,21 +135,14 @@ impl Analyzer {
     /// (EntityRegistry-first version with fallback)
     ///
     /// Tries EntityRegistry lookup first for better performance,
-    /// falling back to the traditional approach if EntityRegistry
-    /// doesn't have the interface registered.
+    /// Check if a type satisfies an interface using TypeDefId directly.
     pub fn satisfies_interface_via_entity_registry(
         &self,
         ty: &Type,
-        interface_name_id: NameId,
+        interface_type_def_id: TypeDefId,
         interner: &Interner,
     ) -> bool {
-        // Try EntityRegistry first
-        if let Some(type_def_id) = self.entity_registry.type_by_name(interface_name_id) {
-            return self.satisfies_interface_by_type_def_id(ty, type_def_id, interner);
-        }
-
-        // Fall back to traditional approach
-        self.satisfies_interface_by_name_id(ty, interface_name_id, interner)
+        self.satisfies_interface_by_type_def_id(ty, interface_type_def_id, interner)
     }
 
     /// Check if a type has a field with the given name (string) and compatible type
@@ -287,17 +280,16 @@ impl Analyzer {
 
     /// Check if a type implements Stringable (has to_string() -> string method)
     pub fn satisfies_stringable(&self, ty: &Type, interner: &Interner) -> bool {
-        // Use the well-known Stringable NameId if available
-        if let Some(stringable_id) = self.name_table.well_known.stringable {
-            return self.satisfies_interface_via_entity_registry(ty, stringable_id, interner);
+        // Use the well-known Stringable TypeDefId if available
+        if let Some(stringable_type_def_id) = self.name_table.well_known.stringable_type_def {
+            return self.satisfies_interface_via_entity_registry(ty, stringable_type_def_id, interner);
         }
         // Fallback: try to find "Stringable" via Resolver with interface fallback
         let type_def_id = self
             .resolver(interner)
             .resolve_type_str_or_interface("Stringable", &self.entity_registry);
         if let Some(type_def_id) = type_def_id {
-            let interface = self.entity_registry.get_type(type_def_id);
-            return self.satisfies_interface_via_entity_registry(ty, interface.name_id, interner);
+            return self.satisfies_interface_via_entity_registry(ty, type_def_id, interner);
         }
         false
     }

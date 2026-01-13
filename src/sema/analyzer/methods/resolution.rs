@@ -139,10 +139,7 @@ impl Analyzer {
 
         // Extract type_def_id and type_args from the object type
         let (type_def_id, type_args) = match object_type {
-            Type::Interface(iface) => (
-                self.entity_registry.type_by_name(iface.name_id),
-                iface.type_args.as_slice(),
-            ),
+            Type::Interface(iface) => (Some(iface.type_def_id), iface.type_args.as_slice()),
             Type::GenericInstance { def, args } => {
                 (self.entity_registry.type_by_name(*def), args.as_slice())
             }
@@ -188,7 +185,7 @@ impl Analyzer {
         match ty {
             Type::Class(c) => Some(c.type_def_id),
             Type::Record(r) => Some(r.type_def_id),
-            Type::Interface(i) => self.entity_registry.type_by_name(i.name_id),
+            Type::Interface(i) => Some(i.type_def_id),
             Type::GenericInstance { def, .. } => self.entity_registry.type_by_name(*def),
             _ => None,
         }
@@ -199,7 +196,9 @@ impl Analyzer {
         match ty {
             Type::Class(c) => Some(self.entity_registry.get_type(c.type_def_id).name_id),
             Type::Record(r) => Some(self.entity_registry.get_type(r.type_def_id).name_id),
-            Type::Interface(interface_type) => Some(interface_type.name_id),
+            Type::Interface(interface_type) => {
+                Some(self.entity_registry.name_id(interface_type.type_def_id))
+            }
             Type::GenericInstance { def, .. } => Some(*def),
             _ => None,
         }
@@ -418,18 +417,19 @@ impl Analyzer {
 
         // 2. Interface methods (vtable dispatch)
         // Handle both Type::Interface and Type::GenericInstance (for self-referential interface types)
-        let (interface_name_id, type_args) = match object_type {
-            Type::Interface(iface) => (Some(iface.name_id), iface.type_args.as_slice()),
-            Type::GenericInstance { def, args } => (Some(*def), args.as_slice()),
-            _ => (None, &[] as &[Type]),
+        let (interface_type_def_id, type_args): (Option<TypeDefId>, &[Type]) = match object_type {
+            Type::Interface(iface) => (Some(iface.type_def_id), iface.type_args.as_slice()),
+            Type::GenericInstance { def, args } => {
+                (self.entity_registry.type_by_name(*def), args.as_slice())
+            }
+            _ => (None, &[]),
         };
-        if let Some(name_id) = interface_name_id
-            && let Some(type_def_id) = self.entity_registry.type_by_name(name_id)
-        {
+        if let Some(type_def_id) = interface_type_def_id {
             let interface_def = self.entity_registry.get_type(type_def_id);
+            let name_id = interface_def.name_id;
 
             // Build substitution map from type params to type args
-            let mut substitutions = HashMap::new();
+            let mut substitutions: HashMap<NameId, Type> = HashMap::new();
             for (param_name_id, arg) in interface_def.type_params.iter().zip(type_args.iter()) {
                 substitutions.insert(*param_name_id, arg.clone());
             }
@@ -596,12 +596,11 @@ impl Analyzer {
         None
     }
 
-    /// Get the function type for a functional interface by NameId (cross-interner safe)
-    pub(crate) fn get_functional_interface_type_by_name_id(
+    /// Get the function type for a functional interface by TypeDefId
+    pub(crate) fn get_functional_interface_type_by_type_def_id(
         &self,
-        interface_name_id: NameId,
+        type_def_id: TypeDefId,
     ) -> Option<FunctionType> {
-        let type_def_id = self.entity_registry.type_by_name(interface_name_id)?;
         let method_id = self.entity_registry.is_functional(type_def_id)?;
         let method = self.entity_registry.get_method(method_id);
         Some(FunctionType {

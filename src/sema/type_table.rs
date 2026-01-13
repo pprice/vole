@@ -48,9 +48,10 @@ enum TypeFingerprint {
     Union(Vec<TypeKey>),
     Array(TypeKey),
     Interface {
-        name_id: NameId,
+        type_def_id: TypeDefId,
         args: Vec<TypeKey>,
     },
+    ErrorType(TypeDefId),
     Function {
         params: Vec<TypeKey>,
         return_type: TypeKey,
@@ -230,9 +231,9 @@ impl TypeTable {
             Type::Class(class_type) => self.intern_type_def(ty.clone(), class_type.type_def_id),
             Type::Record(record_type) => self.intern_type_def(ty.clone(), record_type.type_def_id),
             Type::Interface(interface_type) => {
-                let name_id = interface_type.name_id;
+                let type_def_id = interface_type.type_def_id;
                 if interface_type.type_args.is_empty() {
-                    self.intern_named(ty.clone(), name_id)
+                    self.intern_type_def(ty.clone(), type_def_id)
                 } else {
                     let args = interface_type
                         .type_args
@@ -240,15 +241,15 @@ impl TypeTable {
                         .map(|arg| self.key_for_type(arg))
                         .collect();
                     self.intern_fingerprint(
-                        TypeFingerprint::Interface { name_id, args },
+                        TypeFingerprint::Interface { type_def_id, args },
                         ty.clone(),
                     )
                 }
             }
-            Type::ErrorType(error_type) => {
-                let name_id = error_type.name_id;
-                self.intern_named(ty.clone(), name_id)
-            }
+            Type::ErrorType(error_type) => self.intern_fingerprint(
+                TypeFingerprint::ErrorType(error_type.type_def_id),
+                ty.clone(),
+            ),
             Type::Fallible(fallible) => {
                 let success = self.key_for_type(&fallible.success_type);
                 let error = self.key_for_type(&fallible.error_type);
@@ -417,7 +418,8 @@ impl TypeTable {
                 }
             }
             Type::Interface(interface_type) => {
-                let base = names.display(interface_type.name_id);
+                let name_id = entity_registry.name_id(interface_type.type_def_id);
+                let base = names.display(name_id);
                 if interface_type.type_args.is_empty() {
                     base
                 } else {
@@ -430,7 +432,9 @@ impl TypeTable {
                     format!("{}<{}>", base, arg_list)
                 }
             }
-            Type::ErrorType(error_type) => names.display(error_type.name_id),
+            Type::ErrorType(error_type) => {
+                names.display(entity_registry.name_id(error_type.type_def_id))
+            }
             Type::Fallible(ft) => format!(
                 "fallible({}, {})",
                 self.display_type_inner(&ft.success_type, names, entity_registry),
