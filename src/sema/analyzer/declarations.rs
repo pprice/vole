@@ -2,7 +2,7 @@
 //! Declaration signature collection (Pass 1 of semantic analysis).
 
 use super::*;
-use crate::frontend::ast::TypeExpr;
+use crate::frontend::ast::{ExprKind, LetInit, TypeExpr};
 use crate::sema::entity_defs::{GenericFuncInfo, GenericTypeInfo, TypeDefKind};
 
 /// Extract the base interface name from a TypeExpr.
@@ -29,6 +29,52 @@ fn format_type_expr(type_expr: &TypeExpr, interner: &Interner) -> String {
 }
 
 impl Analyzer {
+    /// Register a type shell (name and kind only, no fields/methods yet).
+    /// This enables forward references - types can reference each other regardless of declaration order.
+    fn register_type_shell(
+        &mut self,
+        name: Symbol,
+        kind: TypeDefKind,
+        interner: &Interner,
+    ) -> TypeDefId {
+        let name_id = self
+            .name_table
+            .intern(self.current_module, &[name], interner);
+        self.entity_registry
+            .register_type(name_id, kind, self.current_module)
+    }
+
+    /// Pass 0.5: Register all type shells so forward references work.
+    /// Must be called before collect_signatures.
+    pub(super) fn register_all_type_shells(&mut self, program: &Program, interner: &Interner) {
+        for decl in &program.declarations {
+            match decl {
+                Decl::Class(c) => {
+                    self.register_type_shell(c.name, TypeDefKind::Class, interner);
+                }
+                Decl::Record(r) => {
+                    self.register_type_shell(r.name, TypeDefKind::Record, interner);
+                }
+                Decl::Interface(i) => {
+                    self.register_type_shell(i.name, TypeDefKind::Interface, interner);
+                }
+                Decl::Let(l) => {
+                    // Handle both new syntax (let T = SomeType) and legacy (let T: type = SomeType)
+                    let is_type_alias = match &l.init {
+                        LetInit::TypeAlias(_) => true,
+                        LetInit::Expr(expr) => {
+                            matches!(expr.kind, ExprKind::TypeLiteral(_))
+                        }
+                    };
+                    if is_type_alias {
+                        self.register_type_shell(l.name, TypeDefKind::Alias, interner);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Pass 1: Collect signatures for functions, classes, records, interfaces, and implement blocks
     pub(super) fn collect_signatures(&mut self, program: &Program, interner: &Interner) {
         for decl in &program.declarations {
@@ -187,12 +233,11 @@ impl Analyzer {
 
         // Handle generic classes vs non-generic classes
         if class.type_params.is_empty() {
-            // Non-generic class: Register in EntityRegistry (single source of truth)
-            let entity_type_id = self.entity_registry.register_type(
-                name_id,
-                TypeDefKind::Class,
-                self.current_module,
-            );
+            // Non-generic class: lookup shell registered in pass 0.5
+            let entity_type_id = self
+                .entity_registry
+                .type_by_name(name_id)
+                .expect("class shell registered in register_all_type_shells");
 
             // Register fields in EntityRegistry
             let builtin_module = self.name_table.builtin_module();
@@ -411,13 +456,11 @@ impl Analyzer {
                 .map(|f| resolve_type(&f.ty, &mut ctx))
                 .collect();
 
-            // Register in EntityRegistry with TypeParam placeholders
-            // This allows struct literal checking to find the class definition
-            let entity_type_id = self.entity_registry.register_type(
-                name_id,
-                TypeDefKind::Class,
-                self.current_module,
-            );
+            // Lookup shell registered in pass 0.5
+            let entity_type_id = self
+                .entity_registry
+                .type_by_name(name_id)
+                .expect("class shell registered in register_all_type_shells");
 
             // Set type params on the type definition (needed for method substitutions)
             let type_param_name_ids: Vec<NameId> =
@@ -714,12 +757,11 @@ impl Analyzer {
 
         // Handle generic records vs non-generic records
         if record.type_params.is_empty() {
-            // Non-generic record: Register in EntityRegistry (single source of truth)
-            let entity_type_id = self.entity_registry.register_type(
-                name_id,
-                TypeDefKind::Record,
-                self.current_module,
-            );
+            // Non-generic record: lookup shell registered in pass 0.5
+            let entity_type_id = self
+                .entity_registry
+                .type_by_name(name_id)
+                .expect("record shell registered in register_all_type_shells");
 
             // Register fields in EntityRegistry
             let builtin_module = self.name_table.builtin_module();
@@ -928,17 +970,11 @@ impl Analyzer {
             // Register methods in EntityRegistry (with type params in scope)
             // Note: The signature stored has type params as placeholders
             let builtin_module = self.name_table.builtin_module();
-            // Get or create the type in EntityRegistry - must be done before implements processing
+            // Lookup shell registered in pass 0.5
             let entity_type_id = self
                 .entity_registry
                 .type_by_name(name_id)
-                .unwrap_or_else(|| {
-                    self.entity_registry.register_type(
-                        name_id,
-                        TypeDefKind::Record,
-                        self.current_module,
-                    )
-                });
+                .expect("record shell registered in register_all_type_shells");
 
             // Register and validate implements list (for generic records)
             self.validate_and_register_implements(
@@ -1352,12 +1388,11 @@ impl Analyzer {
             .name_table
             .intern_raw(self.current_module, &[&name_str]);
 
-        // Register in EntityRegistry
-        let entity_type_id = self.entity_registry.register_type(
-            name_id,
-            TypeDefKind::Interface,
-            self.current_module,
-        );
+        // Lookup shell registered in pass 0.5
+        let entity_type_id = self
+            .entity_registry
+            .type_by_name(name_id)
+            .expect("interface shell registered in register_all_type_shells");
 
         // Set type parameters in EntityRegistry (using NameIds only)
         let entity_type_params: Vec<_> = type_params.iter().map(|tp| tp.name_id).collect();
@@ -1761,7 +1796,7 @@ impl Analyzer {
                             method_name_id,
                             full_method_name_id,
                             signature,
-                            false, // implement block methods don't have defaults
+                            false,      // implement block methods don't have defaults
                             Vec::new(), // implement block static methods, no method type params
                         );
                     }

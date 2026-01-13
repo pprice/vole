@@ -72,6 +72,33 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
         return true;
     }
 
+    // Class compatibility: compare by name_id and type_args only (not fields)
+    // This handles forward references where one side has empty fields
+    if let (Type::Class(from_class), Type::Class(to_class)) = (from, to)
+        && from_class.name_id == to_class.name_id
+        && from_class.type_args.len() == to_class.type_args.len()
+        && from_class
+            .type_args
+            .iter()
+            .zip(to_class.type_args.iter())
+            .all(|(f, t)| types_compatible_core(f, t))
+    {
+        return true;
+    }
+
+    // Record compatibility: compare by name_id and type_args only (not fields)
+    if let (Type::Record(from_rec), Type::Record(to_rec)) = (from, to)
+        && from_rec.name_id == to_rec.name_id
+        && from_rec.type_args.len() == to_rec.type_args.len()
+        && from_rec
+            .type_args
+            .iter()
+            .zip(to_rec.type_args.iter())
+            .all(|(f, t)| types_compatible_core(f, t))
+    {
+        return true;
+    }
+
     // Interface is compatible with GenericInstance (and vice versa) when they have same def and args
     // This handles cases like Iterator<i64> (Interface) matching Iterator<T> instantiated as Iterator<i64> (GenericInstance)
     match (from, to) {

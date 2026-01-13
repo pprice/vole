@@ -7,7 +7,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
-use crate::sema::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache, TypeParamInfo};
+use crate::sema::generic::{
+    ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache, TypeParamInfo,
+};
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_table::{TypeKey, TypeTable};
 use crate::sema::{FunctionType, Type};
@@ -263,6 +265,7 @@ impl EntityRegistry {
     }
 
     /// Register a new static method on a type with optional external binding
+    #[allow(clippy::too_many_arguments)]
     pub fn register_static_method_with_binding(
         &mut self,
         defining_type: TypeDefId,
@@ -460,6 +463,13 @@ impl EntityRegistry {
     /// Set error type info for an error type
     pub fn set_error_info(&mut self, type_id: TypeDefId, info: crate::sema::ErrorTypeInfo) {
         self.type_defs[type_id.index() as usize].error_info = Some(info);
+    }
+
+    /// Set the aliased type for a type alias
+    pub fn set_aliased_type(&mut self, type_id: TypeDefId, aliased_type: Type, type_key: TypeKey) {
+        self.type_defs[type_id.index() as usize].aliased_type = Some(aliased_type);
+        // Update the alias index for inverse lookups
+        self.alias_index.entry(type_key).or_default().push(type_id);
     }
 
     /// Add an interface implementation to a type

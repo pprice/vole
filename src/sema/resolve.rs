@@ -295,6 +295,14 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                                 fields,
                                 type_args: resolved_args,
                             });
+                        } else {
+                            // Forward reference: shell exists but generic_info not yet set
+                            // Return ClassType with empty fields - will be resolved at use site
+                            return Type::Class(ClassType {
+                                name_id: type_def.name_id,
+                                fields: Vec::new(),
+                                type_args: resolved_args,
+                            });
                         }
                     }
                     TypeDefKind::Record => {
@@ -325,6 +333,14 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                             return Type::Record(RecordType {
                                 name_id: type_def.name_id,
                                 fields,
+                                type_args: resolved_args,
+                            });
+                        } else {
+                            // Forward reference: shell exists but generic_info not yet set
+                            // Return RecordType with empty fields - will be resolved at use site
+                            return Type::Record(RecordType {
+                                name_id: type_def.name_id,
+                                fields: Vec::new(),
                                 type_args: resolved_args,
                             });
                         }

@@ -996,10 +996,14 @@ impl Analyzer {
         // Populate well-known types after prelude has registered all interfaces
         self.name_table.populate_well_known();
 
-        // Pass 0: Collect type aliases first (so they're available for function signatures)
+        // Pass 0.5: Register type shells for forward reference support
+        // This allows types to reference each other regardless of declaration order
+        self.register_all_type_shells(program, interner);
+
+        // Pass 0: Resolve type aliases (now that shells exist, can reference forward types)
         self.collect_type_aliases(program, interner);
 
-        // Pass 1: Collect signatures for all declarations
+        // Pass 1: Collect signatures for all declarations (shells already exist)
         self.collect_signatures(program, interner);
 
         // Process global let declarations
@@ -1061,17 +1065,17 @@ impl Analyzer {
 
     /// Register a type alias in EntityRegistry
     fn register_type_alias(&mut self, name: Symbol, aliased_type: Type, interner: &Interner) {
-        // Register in EntityRegistry for resolution via TypeDefKind::Alias
+        // Lookup shell registered in register_all_type_shells
         let name_id = self
             .name_table
             .intern(self.current_module, &[name], interner);
+        let type_id = self
+            .entity_registry
+            .type_by_name(name_id)
+            .expect("alias shell registered in register_all_type_shells");
         let type_key = self.entity_registry.type_table.key_for_type(&aliased_type);
-        self.entity_registry.register_alias(
-            name_id,
-            self.current_module,
-            aliased_type.clone(),
-            type_key,
-        );
+        self.entity_registry
+            .set_aliased_type(type_id, aliased_type.clone(), type_key);
         // Also in type_table for display
         self.entity_registry
             .type_table
@@ -1922,10 +1926,7 @@ impl Analyzer {
         // This allows constraints on method type params to be checked
         let saved_type_param_scope = self.current_type_param_scope.clone();
         if !method_type_params.is_empty() {
-            let mut scope = self
-                .current_type_param_scope
-                .take()
-                .unwrap_or_else(TypeParamScope::new);
+            let mut scope = self.current_type_param_scope.take().unwrap_or_default();
             for tp in &method_type_params {
                 scope.add(tp.clone());
             }
@@ -2008,10 +2009,7 @@ impl Analyzer {
         // This allows constraints on method type params to be checked
         let saved_type_param_scope = self.current_type_param_scope.clone();
         if !method_type_params.is_empty() {
-            let mut scope = self
-                .current_type_param_scope
-                .take()
-                .unwrap_or_else(TypeParamScope::new);
+            let mut scope = self.current_type_param_scope.take().unwrap_or_default();
             for tp in &method_type_params {
                 scope.add(tp.clone());
             }
