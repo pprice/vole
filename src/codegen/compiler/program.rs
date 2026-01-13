@@ -11,10 +11,10 @@ use crate::codegen::types::{
 };
 use crate::frontend::{Decl, FuncDecl, Interner, LetStmt, Program, Symbol, TestCase, TestsDecl};
 use crate::identity::NameId;
-use crate::sema::entity_defs::TypeDefKind;
-use crate::sema::types::{ClassType, RecordType, StructField};
 use crate::sema::Type;
+use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{ClassMethodMonomorphInstance, MonomorphInstance, substitute_type};
+use crate::sema::types::{ClassType, RecordType, StructField};
 
 impl Compiler<'_> {
     fn main_function_key_and_name(&mut self, sym: Symbol) -> (FunctionKey, String) {
@@ -1077,9 +1077,17 @@ impl Compiler<'_> {
             .map(|(key, instance)| (key.clone(), instance.clone()))
             .collect();
 
-        tracing::debug!(instance_count = instances.len(), "declaring class method monomorphized instances");
+        tracing::debug!(
+            instance_count = instances.len(),
+            "declaring class method monomorphized instances"
+        );
 
         for (_key, instance) in instances {
+            // External methods are runtime functions - no declaration needed
+            if instance.external_info.is_some() {
+                continue;
+            }
+
             let mangled_name = self.query().display_name(instance.mangled_name);
 
             // Create signature from the concrete function type
@@ -1155,9 +1163,22 @@ impl Compiler<'_> {
             .map(|(key, instance)| (key.clone(), instance.clone()))
             .collect();
 
-        tracing::debug!(instance_count = instances.len(), "compiling class method monomorphized instances");
+        tracing::debug!(
+            instance_count = instances.len(),
+            "compiling class method monomorphized instances"
+        );
 
         for (_key, instance) in instances {
+            // External methods are runtime functions - no compilation needed
+            if instance.external_info.is_some() {
+                tracing::debug!(
+                    class_name = ?instance.class_name,
+                    method_name = ?instance.method_name,
+                    "skipping external method - calls runtime function directly"
+                );
+                continue;
+            }
+
             let class_name_str = self.query().display_name(instance.class_name);
             tracing::debug!(
                 class_name = %class_name_str,
@@ -1169,9 +1190,10 @@ impl Compiler<'_> {
             // Try to find the method in a class first
             if let Some(class) = class_asts.get(&instance.class_name) {
                 let method_name_str = self.query().display_name(instance.method_name);
-                let method = class.methods.iter().find(|m| {
-                    self.query().resolve_symbol(m.name) == method_name_str
-                });
+                let method = class
+                    .methods
+                    .iter()
+                    .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
                 if let Some(method) = method {
                     self.compile_monomorphized_class_method(method, &instance, class.name)?;
                     continue;
@@ -1181,9 +1203,10 @@ impl Compiler<'_> {
             // Try records
             if let Some(record) = record_asts.get(&instance.class_name) {
                 let method_name_str = self.query().display_name(instance.method_name);
-                let method = record.methods.iter().find(|m| {
-                    self.query().resolve_symbol(m.name) == method_name_str
-                });
+                let method = record
+                    .methods
+                    .iter()
+                    .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
                 if let Some(method) = method {
                     self.compile_monomorphized_class_method(method, &instance, record.name)?;
                     continue;

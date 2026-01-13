@@ -45,6 +45,8 @@ pub struct TestResults {
     pub failed: usize,
     pub results: Vec<TestResult>,
     pub total_duration: Duration,
+    /// Number of files that failed to compile (critical errors)
+    pub file_errors: usize,
     /// Number of files skipped due to max_failures cap
     pub skipped_files: usize,
 }
@@ -56,6 +58,7 @@ impl TestResults {
             failed: 0,
             results: Vec::new(),
             total_duration: Duration::ZERO,
+            file_errors: 0,
             skipped_files: 0,
         }
     }
@@ -73,6 +76,7 @@ impl TestResults {
         self.failed += other.failed;
         self.results.extend(other.results);
         self.total_duration += other.total_duration;
+        self.file_errors += other.file_errors;
         self.skipped_files += other.skipped_files;
     }
 }
@@ -169,7 +173,7 @@ pub fn run_tests(
                 if !e.is_empty() {
                     eprintln!("  error: {}", e);
                 }
-                all_results.failed += 1;
+                all_results.file_errors += 1;
             }
         }
     }
@@ -184,7 +188,7 @@ pub fn run_tests(
     // Print summary
     print_summary(&all_results, &colors);
 
-    if all_results.failed > 0 {
+    if all_results.failed > 0 || all_results.file_errors > 0 {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
@@ -223,7 +227,7 @@ fn run_stdin_tests(
             if !e.is_empty() {
                 eprintln!("  error: {}", e);
             }
-            all_results.failed += 1;
+            all_results.file_errors += 1;
         }
     }
 
@@ -236,7 +240,7 @@ fn run_stdin_tests(
 
     print_summary(&all_results, colors);
 
-    if all_results.failed > 0 {
+    if all_results.failed > 0 || all_results.file_errors > 0 {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
@@ -533,16 +537,37 @@ fn print_failures_summary(results: &TestResults, colors: &TermColors) {
 
 /// Print overall test summary
 fn print_summary(results: &TestResults, colors: &TermColors) {
-    let total = results.passed + results.failed;
     let duration = format_duration(results.total_duration);
 
     println!();
-    if results.failed == 0 {
+
+    // Show file errors first - these are critical and should not be ignored
+    if results.file_errors > 0 {
         println!(
-            "{}{} test{} passed{} {}({}){}",
+            "{}Files: {} error{}{} (tests in these files did not run)",
+            colors.red(),
+            results.file_errors,
+            if results.file_errors == 1 { "" } else { "s" },
+            colors.reset()
+        );
+    }
+
+    // Show test results
+    if results.failed == 0 && results.file_errors == 0 {
+        println!(
+            "{}Tests: {} passed{} {}({}){}",
             colors.green(),
-            total,
-            if total == 1 { "" } else { "s" },
+            results.passed,
+            colors.reset(),
+            colors.dim(),
+            duration,
+            colors.reset()
+        );
+    } else if results.failed == 0 {
+        println!(
+            "Tests: {}{} passed{} {}({}){}",
+            colors.green(),
+            results.passed,
             colors.reset(),
             colors.dim(),
             duration,
@@ -550,7 +575,7 @@ fn print_summary(results: &TestResults, colors: &TermColors) {
         );
     } else {
         println!(
-            "{}{} failed{}, {}{} passed{} {}({}){}",
+            "Tests: {}{} failed{}, {}{} passed{} {}({}){}",
             colors.red(),
             results.failed,
             colors.reset(),

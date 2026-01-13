@@ -178,7 +178,8 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                     }
                     TypeDefKind::Interface => {
                         // Use interface_instance for proper method resolution
-                        interface_instance(*sym, Vec::new(), ctx).unwrap_or_else(|| Type::invalid("unwrap_failed"))
+                        interface_instance(*sym, Vec::new(), ctx)
+                            .unwrap_or_else(|| Type::invalid("unwrap_failed"))
                     }
                     TypeDefKind::ErrorType => {
                         // Get error info from EntityRegistry

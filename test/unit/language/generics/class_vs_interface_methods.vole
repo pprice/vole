@@ -1,0 +1,102 @@
+// Regression test: Ensure generic class methods get monomorphized
+// while generic interface methods (with external defaults) do not.
+//
+// Bug fix: record_class_method_monomorph now skips interfaces because
+// interface methods use external default implementations, not inline code.
+
+class Box<T> {
+    value: T,
+
+    func get() -> T {
+        return self.value
+    }
+
+    func set(v: T) {
+        self.value = v
+    }
+
+    func double_if_same(other: T) -> T {
+        if self.value == other {
+            return self.value
+        }
+        return other
+    }
+}
+
+tests "class vs interface generic methods" {
+    // Generic CLASS methods - require monomorphization
+    test "generic class method with i64" {
+        let box = Box { value: 42 }
+        assert(box.get() == 42)
+        box.set(100)
+        assert(box.get() == 100)
+    }
+
+    test "generic class method with string" {
+        let box = Box { value: "hello" }
+        assert(box.get() == "hello")
+        box.set("world")
+        assert(box.get() == "world")
+    }
+
+    test "generic class method with f64" {
+        let box = Box { value: 3.14 }
+        assert(box.get() == 3.14)
+        box.set(2.71)
+        assert(box.get() == 2.71)
+    }
+
+    test "generic class method with bool" {
+        let box = Box { value: true }
+        assert(box.get() == true)
+        box.set(false)
+        assert(box.get() == false)
+    }
+
+    // Generic INTERFACE methods (Iterator<T>) - use external defaults, no monomorphization
+    test "iterator map on i64 array" {
+        let arr = [1, 2, 3]
+        let doubled = arr.iter().map((x) => x * 2).collect()
+        assert(doubled[0] == 2)
+        assert(doubled[1] == 4)
+        assert(doubled[2] == 6)
+    }
+
+    test "iterator filter on i64 array" {
+        let arr = [1, 2, 3, 4, 5]
+        let evens = arr.iter().filter((x) => x % 2 == 0).collect()
+        assert(evens[0] == 2)
+        assert(evens[1] == 4)
+    }
+
+    test "iterator chained operations" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter()
+            .filter((x) => x > 2)
+            .map((x) => x * 10)
+            .take(2)
+            .collect()
+        assert(result[0] == 30)
+        assert(result[1] == 40)
+    }
+
+    test "iterator count" {
+        let arr = [1, 2, 3, 4, 5]
+        let count = arr.iter().filter((x) => x > 2).count()
+        assert(count == 3)
+    }
+
+    test "iterator sum" {
+        let arr = [1, 2, 3, 4, 5]
+        let total = arr.iter().sum()
+        assert(total == 15)
+    }
+
+    // Mix: Using both class methods and iterator methods together
+    test "box holding iterator result" {
+        let arr = [10, 20, 30]
+        let sum = arr.iter().sum()
+        let box = Box { value: sum }
+        assert(box.get() == 60)
+    }
+}

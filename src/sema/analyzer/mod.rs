@@ -1321,7 +1321,10 @@ impl Analyzer {
         tracing::debug!(?constraint, "resolve_type_param_constraint");
         match constraint {
             TypeConstraint::Interface(syms) => {
-                tracing::debug!(num_interfaces = syms.len(), "processing interface constraint");
+                tracing::debug!(
+                    num_interfaces = syms.len(),
+                    "processing interface constraint"
+                );
                 // For single interface, check if it's a type alias first
                 if syms.len() == 1 {
                     let sym = syms[0];

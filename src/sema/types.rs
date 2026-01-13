@@ -55,7 +55,11 @@ impl AnalysisError {
     }
 
     /// Propagate from an existing error, adding context about what we were doing
-    pub fn propagate(source: &AnalysisError, context: impl Into<String>, span: Option<Span>) -> Self {
+    pub fn propagate(
+        source: &AnalysisError,
+        context: impl Into<String>,
+        span: Option<Span>,
+    ) -> Self {
         let ctx = context.into();
         let result = Self {
             kind: "propagate",
@@ -282,13 +286,25 @@ pub struct RecordType {
 }
 
 /// Interface type information
-#[derive(Debug, Clone, Eq)]
+#[derive(Clone, Eq)]
 pub struct InterfaceType {
     /// Canonical name ID for cross-interner lookups
     pub name_id: NameId,
     pub type_args: Vec<Type>,
     pub methods: Vec<InterfaceMethodType>,
     pub extends: Vec<NameId>, // Parent interface NameIds
+}
+
+// Custom Debug to avoid massive output when tracing - just show identity, not all methods
+impl std::fmt::Debug for InterfaceType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InterfaceType")
+            .field("name_id", &self.name_id)
+            .field("type_args", &self.type_args)
+            .field("methods", &format_args!("[{} methods]", self.methods.len()))
+            .field("extends", &self.extends)
+            .finish()
+    }
 }
 
 // Custom PartialEq to compare only name_id and type_args
@@ -546,12 +562,19 @@ impl Type {
     }
 
     /// Propagate an invalid type, chaining to the source error with context
-    pub fn propagate_invalid(source: &Type, context: impl Into<String>, span: Option<Span>) -> Type {
+    pub fn propagate_invalid(
+        source: &Type,
+        context: impl Into<String>,
+        span: Option<Span>,
+    ) -> Type {
         if let Type::Invalid(err) = source {
             Type::Invalid(AnalysisError::propagate(err, context, span))
         } else {
             // Shouldn't call this on non-invalid types
-            Type::Invalid(AnalysisError::new("internal", "propagate_invalid called on valid type"))
+            Type::Invalid(AnalysisError::new(
+                "internal",
+                "propagate_invalid called on valid type",
+            ))
         }
     }
 

@@ -30,6 +30,7 @@ pub enum ResolvedMethod {
         type_name: Symbol,
         method_name: Symbol,
         func_type: FunctionType,
+        external_info: Option<ExternalMethodInfo>,
     },
 
     /// Method called through a non-functional interface value (vtable dispatch)
@@ -69,6 +70,15 @@ impl ResolvedMethod {
                 ..
             }
         )
+    }
+
+    /// Get external info if this is an external method
+    pub fn external_info(&self) -> Option<&ExternalMethodInfo> {
+        match self {
+            ResolvedMethod::Implemented { external_info, .. } => external_info.as_ref(),
+            ResolvedMethod::DefaultMethod { external_info, .. } => external_info.as_ref(),
+            _ => None,
+        }
     }
 }
 

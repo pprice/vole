@@ -311,7 +311,9 @@ impl Analyzer {
                 }
 
                 // Get the non-nil type
-                let unwrapped = value_type.unwrap_optional().unwrap_or_else(|| Type::invalid("unwrap_failed"));
+                let unwrapped = value_type
+                    .unwrap_optional()
+                    .unwrap_or_else(|| Type::invalid("unwrap_failed"));
 
                 // Default must match the unwrapped type
                 let _default_type =

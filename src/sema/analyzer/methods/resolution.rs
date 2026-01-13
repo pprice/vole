@@ -57,27 +57,59 @@ impl Analyzer {
                 // Determine the resolution type based on the defining type's kind
                 match defining_type.kind {
                     TypeDefKind::Interface => {
-                        // This is an interface method - check if it has a default
-                        if method_def.has_default {
-                            // Get the implementing type's symbol for default method resolution
-                            if let Some(type_name_id) = self.get_type_name_id(object_type) {
-                                let type_sym =
-                                    self.get_type_symbol_by_name_id(type_name_id, interner);
-                                let interface_sym = self
-                                    .get_type_symbol_by_name_id(defining_type.name_id, interner);
-                                if let (Some(type_sym), Some(interface_sym)) =
-                                    (type_sym, interface_sym)
-                                {
-                                    return Some(ResolvedMethod::DefaultMethod {
-                                        interface_name: interface_sym,
-                                        type_name: type_sym,
-                                        method_name,
-                                        func_type,
-                                    });
-                                }
+                        // For interface types (Type::Interface, Type::GenericInstance pointing to interface),
+                        // we MUST use vtable dispatch because we don't know the concrete type.
+                        // Generators implement Iterator with their own next() method, so calling
+                        // external functions directly would crash.
+                        let is_interface_type = matches!(
+                            object_type,
+                            Type::Interface(_) | Type::GenericInstance { .. }
+                        );
+
+                        // For external default methods on CONCRETE types (not interface types),
+                        // we can call the external directly
+                        if method_def.has_default
+                            && method_def.external_binding.is_some()
+                            && !is_interface_type
+                            && let Some(type_name_id) = self.get_type_name_id(object_type)
+                        {
+                            let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner);
+                            let interface_sym =
+                                self.get_type_symbol_by_name_id(defining_type.name_id, interner);
+                            if let (Some(type_sym), Some(interface_sym)) = (type_sym, interface_sym)
+                            {
+                                return Some(ResolvedMethod::DefaultMethod {
+                                    interface_name: interface_sym,
+                                    type_name: type_sym,
+                                    method_name,
+                                    func_type,
+                                    external_info: method_def.external_binding.clone(),
+                                });
                             }
                         }
-                        // For non-default interface methods, use vtable dispatch
+
+                        // For non-external default methods on concrete types (Class/Record),
+                        // we can compile and call the default directly
+                        if method_def.has_default
+                            && matches!(object_type, Type::Class(_) | Type::Record(_))
+                            && let Some(type_name_id) = self.get_type_name_id(object_type)
+                        {
+                            let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner);
+                            let interface_sym =
+                                self.get_type_symbol_by_name_id(defining_type.name_id, interner);
+                            if let (Some(type_sym), Some(interface_sym)) = (type_sym, interface_sym)
+                            {
+                                return Some(ResolvedMethod::DefaultMethod {
+                                    interface_name: interface_sym,
+                                    type_name: type_sym,
+                                    method_name,
+                                    func_type,
+                                    external_info: None,
+                                });
+                            }
+                        }
+
+                        // For interface types and non-default methods, use vtable dispatch
                         let interface_sym =
                             self.get_type_symbol_by_name_id(defining_type.name_id, interner);
                         if let Some(interface_sym) = interface_sym {
@@ -166,6 +198,8 @@ impl Analyzer {
         match ty {
             Type::Class(class_type) => Some(class_type.name_id),
             Type::Record(record_type) => Some(record_type.name_id),
+            Type::Interface(interface_type) => Some(interface_type.name_id),
+            Type::GenericInstance { def, .. } => Some(*def),
             _ => None,
         }
     }
@@ -557,6 +591,7 @@ impl Analyzer {
                             type_name: type_sym,
                             method_name,
                             func_type: method.signature.clone(),
+                            external_info: method.external_binding.clone(),
                         });
                     }
                 }

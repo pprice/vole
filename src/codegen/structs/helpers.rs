@@ -92,14 +92,16 @@ pub(crate) fn get_field_slot_and_type(
     }
 }
 
-/// Get the NameId for a class or record type
+/// Get the NameId for a class, record, interface, or generic instance type
 pub(crate) fn get_type_name_id(vole_type: &Type) -> Result<crate::identity::NameId, String> {
     match vole_type {
         Type::Class(class_type) => Ok(class_type.name_id),
         Type::Record(record_type) => Ok(record_type.name_id),
+        Type::Interface(interface_type) => Ok(interface_type.name_id),
+        Type::GenericInstance { def, .. } => Ok(*def),
         _ => Err(CodegenError::type_mismatch(
             "type name extraction",
-            "class or record",
+            "class, record, interface, or generic instance",
             format!("{:?}", vole_type),
         )
         .into()),

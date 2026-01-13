@@ -178,8 +178,19 @@ pub(crate) fn resolve_method_target(
                     func_type: func_type.clone(),
                 })
             }
-            ResolvedMethod::DefaultMethod { func_type, .. } => {
-                // Get the name_id from the object type since DefaultMethod is called on a class/record
+            ResolvedMethod::DefaultMethod {
+                func_type,
+                external_info,
+                ..
+            } => {
+                // If the default method is an external (like Iterator methods), call external
+                if let Some(ext_info) = external_info {
+                    return Ok(MethodTarget::External {
+                        external_info: ext_info.clone(),
+                        return_type: (*func_type.return_type).clone(),
+                    });
+                }
+                // Otherwise, get the name_id from the object type since DefaultMethod is called on a class/record
                 let type_name_id = get_type_name_id(input.object_type)?;
                 let method_info = lookup_direct_method(type_name_id)?;
                 Ok(MethodTarget::Default {

@@ -3,6 +3,7 @@ use crate::identity::{NameId, TypeDefId};
 use crate::sema::generic::{
     ClassMethodMonomorphInstance, ClassMethodMonomorphKey, substitute_type,
 };
+use crate::sema::implement_registry::ExternalMethodInfo;
 use std::collections::HashMap;
 
 impl Analyzer {
@@ -101,7 +102,10 @@ impl Analyzer {
         if object_type.is_invalid() {
             return Ok(Type::propagate_invalid(
                 &object_type,
-                format!("checking field access '.{}'", interner.resolve(field_access.field)),
+                format!(
+                    "checking field access '.{}'",
+                    interner.resolve(field_access.field)
+                ),
                 Some(field_access.field_span),
             ));
         }
@@ -128,9 +132,17 @@ impl Analyzer {
                 format!(
                     "field '{}' not found on {} '{}' (available: {})",
                     field_name,
-                    if matches!(&object_type, Type::Class(_)) { "class" } else { "record" },
+                    if matches!(&object_type, Type::Class(_)) {
+                        "class"
+                    } else {
+                        "record"
+                    },
                     type_name,
-                    if available_fields.is_empty() { "none".to_string() } else { available_fields.join(", ") }
+                    if available_fields.is_empty() {
+                        "none".to_string()
+                    } else {
+                        available_fields.join(", ")
+                    }
                 ),
                 field_access.field_span,
             ));
@@ -413,6 +425,9 @@ impl Analyzer {
                 }
             }
 
+            // Get external_info before moving resolved
+            let external_info = resolved.external_info().cloned();
+
             self.method_resolutions.insert(expr.id, resolved);
 
             // Record class method monomorphization for generic classes/records
@@ -421,6 +436,7 @@ impl Analyzer {
                 &object_type,
                 method_call.method,
                 &func_type,
+                external_info,
                 interner,
             );
 
@@ -560,19 +576,18 @@ impl Analyzer {
         object_type: &Type,
         method_sym: Symbol,
         func_type: &FunctionType,
+        external_info: Option<ExternalMethodInfo>,
         interner: &Interner,
     ) {
         // Extract class/record name_id and type_args
+        // Note: We only record monomorphs for concrete types (Class/Record) that have
+        // method bodies to compile. Interface types use vtable dispatch and don't need monomorphs.
         tracing::debug!(object_type = ?object_type, "record_class_method_monomorph called");
         let (class_name_id, type_args) = match object_type {
             Type::Class(c) if !c.type_args.is_empty() => (c.name_id, &c.type_args),
             Type::Record(r) if !r.type_args.is_empty() => (r.name_id, &r.type_args),
-            Type::GenericInstance { def, args } if !args.is_empty() => {
-                tracing::debug!(def = ?def, args = ?args, "matched GenericInstance");
-                (*def, args)
-            }
             _ => {
-                tracing::debug!("returning early - not a generic type");
+                tracing::debug!("returning early - not a generic class/record");
                 return; // Not a generic class/record, nothing to record
             }
         };
@@ -596,7 +611,11 @@ impl Analyzer {
         let key = ClassMethodMonomorphKey::new(class_name_id, method_name_id, type_keys);
 
         // Create/cache the monomorph instance
-        if !self.entity_registry.class_method_monomorph_cache.contains(&key) {
+        if !self
+            .entity_registry
+            .class_method_monomorph_cache
+            .contains(&key)
+        {
             // Get the generic type definition for substitution info
             let type_def_id = self.entity_registry.type_by_name(class_name_id);
             let substitutions = if let Some(type_def_id) = type_def_id {
@@ -615,13 +634,19 @@ impl Analyzer {
             };
 
             // Generate unique mangled name
-            let instance_id = self.entity_registry.class_method_monomorph_cache.next_unique_id();
+            let instance_id = self
+                .entity_registry
+                .class_method_monomorph_cache
+                .next_unique_id();
             let class_name = self
                 .name_table
                 .last_segment_str(class_name_id)
                 .unwrap_or_else(|| "class".to_string());
             let method_name = interner.resolve(method_sym);
-            let mangled_name_str = format!("{}__method_{}__mono_{}", class_name, method_name, instance_id);
+            let mangled_name_str = format!(
+                "{}__method_{}__mono_{}",
+                class_name, method_name, instance_id
+            );
             let mangled_name = self
                 .name_table
                 .intern_raw(self.current_module, &[&mangled_name_str]);
@@ -633,6 +658,7 @@ impl Analyzer {
                 instance_id,
                 func_type: func_type.clone(),
                 substitutions,
+                external_info,
             };
 
             tracing::debug!(

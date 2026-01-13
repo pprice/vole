@@ -7,6 +7,7 @@
 use crate::frontend::Symbol;
 use crate::identity::NameId;
 use crate::sema::TypeKey;
+use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::types::{FunctionType, StructuralType, Type};
 use std::collections::HashMap;
 
@@ -229,6 +230,8 @@ pub struct ClassMethodMonomorphInstance {
     pub func_type: FunctionType,
     /// Map from type param NameId to concrete type
     pub substitutions: HashMap<NameId, Type>,
+    /// External method info (if this is an external method, call the runtime function)
+    pub external_info: Option<ExternalMethodInfo>,
 }
 
 /// Cache of monomorphized class method instances.
