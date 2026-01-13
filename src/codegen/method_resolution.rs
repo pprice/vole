@@ -201,12 +201,8 @@ pub(crate) fn resolve_method_target(
                 func_type,
             } => {
                 // Use object type's interface info for EntityRegistry-based dispatch
-                // Handle both Type::Interface and Type::GenericInstance (for self-referential interface methods)
                 let interface_type_id = match input.object_type {
                     Type::Interface(interface_type) => Some(interface_type.type_def_id),
-                    Type::GenericInstance { def, .. } => {
-                        input.analyzed.entity_registry.type_by_name(*def)
-                    }
                     _ => None,
                 };
 
@@ -356,7 +352,6 @@ fn get_type_def_id_for_codegen(ty: &Type, analyzed: &AnalyzedProgram) -> Option<
     }
 
     let name_id = match ty {
-        Type::GenericInstance { def, .. } => Some(*def),
         // Primitives - look up via well-known NameIds
         Type::I8 => Some(analyzed.name_table.primitives.i8),
         Type::I16 => Some(analyzed.name_table.primitives.i16),

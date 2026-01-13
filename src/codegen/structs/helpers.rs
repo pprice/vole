@@ -33,9 +33,9 @@ pub(crate) fn get_field_slot_and_type(
                 .map(|(param, arg)| (param.name_id, arg.clone()))
                 .collect();
 
-            for (slot, field_sym) in generic_info.field_names.iter().enumerate() {
-                let name = ctx.interner.resolve(*field_sym);
-                if name == field_name {
+            for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
+                let name = ctx.analyzed.name_table.last_segment_str(*field_name_id);
+                if name.as_deref() == Some(field_name) {
                     let base_type = &generic_info.field_types[slot];
                     // Apply type substitutions from type args, then from monomorphization context
                     let field_type = if !substitutions.is_empty() {
@@ -71,9 +71,9 @@ pub(crate) fn get_field_slot_and_type(
                 .map(|(param, arg)| (param.name_id, arg.clone()))
                 .collect();
 
-            for (slot, field_sym) in generic_info.field_names.iter().enumerate() {
-                let name = ctx.interner.resolve(*field_sym);
-                if name == field_name {
+            for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
+                let name = ctx.analyzed.name_table.last_segment_str(*field_name_id);
+                if name.as_deref() == Some(field_name) {
                     let base_type = &generic_info.field_types[slot];
                     // Apply type substitutions from type args, then from monomorphization context
                     let field_type = if !substitutions.is_empty() {
@@ -90,46 +90,6 @@ pub(crate) fn get_field_slot_and_type(
                 }
             }
             Err(CodegenError::not_found("field", format!("{} in record", field_name)).into())
-        }
-        Type::GenericInstance { def, args } => {
-            // Look up the type definition
-            let type_def_id = ctx
-                .analyzed
-                .entity_registry
-                .type_by_name(*def)
-                .ok_or_else(|| {
-                    CodegenError::not_found("generic type", format!("{:?}", def)).to_string()
-                })?;
-            let type_def = ctx.analyzed.entity_registry.get_type(type_def_id);
-
-            // Get the generic info with field names and types
-            let generic_info = type_def.generic_info.as_ref().ok_or_else(|| {
-                CodegenError::type_mismatch(
-                    "field access",
-                    "generic type with fields",
-                    format!("{:?}", def),
-                )
-                .to_string()
-            })?;
-
-            // Build substitution map: type param NameId -> concrete type
-            let mut substitutions = HashMap::new();
-            for (param, arg) in generic_info.type_params.iter().zip(args.iter()) {
-                substitutions.insert(param.name_id, arg.clone());
-            }
-
-            // Find the field by name
-            for (slot, field_sym) in generic_info.field_names.iter().enumerate() {
-                let name = ctx.interner.resolve(*field_sym);
-                if name == field_name {
-                    // Substitute type arguments in field type
-                    let field_type = &generic_info.field_types[slot];
-                    let substituted = substitute_type(field_type, &substitutions);
-                    return Ok((slot, substituted));
-                }
-            }
-
-            Err(CodegenError::not_found("field", format!("{} in generic", field_name)).into())
         }
         _ => Err(CodegenError::type_mismatch(
             "field access",
@@ -149,7 +109,6 @@ pub(crate) fn get_type_name_id(
         Type::Class(class_type) => Ok(entity_registry.class_name_id(class_type)),
         Type::Record(record_type) => Ok(entity_registry.record_name_id(record_type)),
         Type::Interface(interface_type) => Ok(entity_registry.name_id(interface_type.type_def_id)),
-        Type::GenericInstance { def, .. } => Ok(*def),
         _ => Err(CodegenError::type_mismatch(
             "type name extraction",
             "class, record, interface, or generic instance",

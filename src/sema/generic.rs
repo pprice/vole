@@ -431,13 +431,6 @@ pub fn substitute_type(ty: &Type, substitutions: &HashMap<NameId, Type>) -> Type
             return_type: Box::new(substitute_type(&ft.return_type, substitutions)),
             is_closure: ft.is_closure,
         }),
-        Type::GenericInstance { def, args } => Type::GenericInstance {
-            def: *def,
-            args: args
-                .iter()
-                .map(|t| substitute_type(t, substitutions))
-                .collect(),
-        },
         Type::Tuple(elements) => Type::Tuple(
             elements
                 .iter()

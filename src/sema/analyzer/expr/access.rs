@@ -35,9 +35,9 @@ impl Analyzer {
         };
 
         // Find the field by name
-        for (i, field_sym) in generic_info.field_names.iter().enumerate() {
-            let name = interner.resolve(*field_sym);
-            if name == field_name {
+        for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
+            let name = self.name_table.last_segment_str(*field_name_id);
+            if name.as_deref() == Some(field_name) {
                 let field_type = &generic_info.field_types[i];
                 let substituted = if substitutions.is_empty() {
                     field_type.clone()
@@ -60,16 +60,6 @@ impl Analyzer {
         let (type_def_id, _type_args) = match ty {
             Type::Class(c) => (c.type_def_id, &c.type_args),
             Type::Record(r) => (r.type_def_id, &r.type_args),
-            Type::GenericInstance { def, .. } => {
-                let type_def_id = self.entity_registry.type_by_name(*def)?;
-                return self.get_struct_info(
-                    &Type::Class(ClassType {
-                        type_def_id,
-                        type_args: vec![],
-                    }),
-                    interner,
-                );
-            }
             _ => return None,
         };
 
@@ -85,7 +75,7 @@ impl Analyzer {
             .map(|gi| {
                 gi.field_names
                     .iter()
-                    .map(|s| interner.resolve(*s).to_string())
+                    .filter_map(|name_id| self.name_table.last_segment_str(*name_id))
                     .collect()
             })
             .unwrap_or_default();
@@ -136,26 +126,15 @@ impl Analyzer {
             ));
         }
 
-        // Get fields from object type (Class, Record, or GenericInstance)
+        // Get fields from object type (Class or Record)
         let field_name = interner.resolve(field_access.field);
 
         // Extract type_def_id and type_args from the object type
-        let (type_def_id, type_args) = match &object_type {
-            Type::Class(c) => (c.type_def_id, c.type_args.as_slice()),
-            Type::Record(r) => (r.type_def_id, r.type_args.as_slice()),
-            Type::GenericInstance { def, args } => {
-                if let Some(id) = self.entity_registry.type_by_name(*def) {
-                    (id, args.as_slice())
-                } else {
-                    self.type_error("class or record", &object_type, field_access.object.span);
-                    return Ok(Type::invalid("field_access_non_struct"));
-                }
-            }
-            _ => {
-                self.type_error("class or record", &object_type, field_access.object.span);
-                return Ok(Type::invalid("field_access_non_struct"));
-            }
+        let Some(info) = object_type.as_struct() else {
+            self.type_error("class or record", &object_type, field_access.object.span);
+            return Ok(Type::invalid("field_access_non_struct"));
         };
+        let (type_def_id, type_args) = (info.type_def_id, info.type_args);
 
         // Try to find the field
         if let Some((_type_name, field_type)) =
@@ -227,30 +206,15 @@ impl Analyzer {
         }
 
         // Get type_def_id and type_args from inner type
-        let (type_def_id, type_args) = match &inner_type {
-            Type::Class(c) => (c.type_def_id, c.type_args.as_slice()),
-            Type::Record(r) => (r.type_def_id, r.type_args.as_slice()),
-            Type::GenericInstance { def, args } => {
-                if let Some(id) = self.entity_registry.type_by_name(*def) {
-                    (id, args.as_slice())
-                } else {
-                    self.type_error(
-                        "optional class or record",
-                        &object_type,
-                        opt_chain.object.span,
-                    );
-                    return Ok(Type::invalid("optional_chain_non_struct"));
-                }
-            }
-            _ => {
-                self.type_error(
-                    "optional class or record",
-                    &object_type,
-                    opt_chain.object.span,
-                );
-                return Ok(Type::invalid("optional_chain_non_struct"));
-            }
+        let Some(info) = inner_type.as_struct() else {
+            self.type_error(
+                "optional class or record",
+                &object_type,
+                opt_chain.object.span,
+            );
+            return Ok(Type::invalid("optional_chain_non_struct"));
         };
+        let (type_def_id, type_args) = (info.type_def_id, info.type_args);
 
         // Find the field
         let field_name = interner.resolve(opt_chain.field);

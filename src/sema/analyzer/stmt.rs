@@ -194,24 +194,6 @@ impl Analyzer {
                     Type::String => Type::String,
                     // Runtime iterators have their element type directly
                     Type::RuntimeIterator(elem) => *elem.clone(),
-                    // Accept Iterator<T> directly - extract element type
-                    Type::GenericInstance { def, args } => {
-                        // GenericInstance is used for Iterator<T> from method return types
-                        let is_iterator = self
-                            .entity_registry
-                            .type_by_name(*def)
-                            .is_some_and(|id| self.name_table.well_known.is_iterator_type_def(id));
-                        if is_iterator {
-                            args.first().cloned().unwrap_or_else(Type::unknown)
-                        } else {
-                            self.type_error(
-                                "iterable (range, array, string, or Iterator<T>)",
-                                &iterable_ty,
-                                for_stmt.iterable.span,
-                            );
-                            Type::invalid("propagate")
-                        }
-                    }
                     Type::Interface(_) => {
                         if let Some(elem) =
                             self.extract_iterator_element_type(&iterable_ty, interner)
@@ -636,7 +618,7 @@ impl Analyzer {
                 .field_names
                 .iter()
                 .enumerate()
-                .find(|(_, sym)| interner.resolve(**sym) == field_name_str);
+                .find(|(_, name_id)| self.name_table.last_segment_str(**name_id).as_deref() == Some(field_name_str));
 
             if let Some((slot, _)) = found {
                 let field_type = generic_info.field_types[slot].clone();

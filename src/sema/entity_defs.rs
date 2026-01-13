@@ -3,7 +3,6 @@
 //! These structs hold the full information about types, methods, fields, and functions.
 //! The corresponding ID types (TypeDefId, etc.) are indices into vectors of these.
 
-use crate::frontend::Symbol;
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::generic::TypeParamInfo;
 use crate::sema::implement_registry::ExternalMethodInfo;
@@ -28,8 +27,8 @@ pub enum TypeDefKind {
 pub struct GenericTypeInfo {
     /// The type parameters (e.g., T, K, V) with names and constraints
     pub type_params: Vec<TypeParamInfo>,
-    /// Field names (Symbols from parsing)
-    pub field_names: Vec<Symbol>,
+    /// Field names as stable NameIds (cross-module safe)
+    pub field_names: Vec<NameId>,
     /// Field types with TypeParam placeholders (e.g., [TypeParam(T), i64])
     pub field_types: Vec<Type>,
 }

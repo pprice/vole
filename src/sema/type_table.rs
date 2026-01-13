@@ -62,10 +62,6 @@ enum TypeFingerprint {
     },
     Module(ModuleId),
     TypeParam(NameId),
-    GenericInstance {
-        def: NameId,
-        args: Vec<TypeKey>,
-    },
     RuntimeIterator(TypeKey),
     Tuple(Vec<TypeKey>),
     FixedArray {
@@ -261,16 +257,6 @@ impl TypeTable {
             Type::TypeParam(name_id) => {
                 self.intern_fingerprint(TypeFingerprint::TypeParam(*name_id), ty.clone())
             }
-            Type::GenericInstance { def, args } => {
-                let arg_keys = args.iter().map(|arg| self.key_for_type(arg)).collect();
-                self.intern_fingerprint(
-                    TypeFingerprint::GenericInstance {
-                        def: *def,
-                        args: arg_keys,
-                    },
-                    ty.clone(),
-                )
-            }
             Type::RuntimeIterator(elem) => {
                 let elem_key = self.key_for_type(elem);
                 self.intern_fingerprint(TypeFingerprint::RuntimeIterator(elem_key), ty.clone())
@@ -447,15 +433,6 @@ impl TypeTable {
                 // For TypeParam, display the NameId
                 // In practice, TypeParams should be substituted before display
                 names.display(*name_id)
-            }
-            Type::GenericInstance { def, args } => {
-                let def_name = names.display(*def);
-                let arg_list = args
-                    .iter()
-                    .map(|arg| self.display_type_inner(arg, names, entity_registry))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}<{}>", def_name, arg_list)
             }
             Type::Tuple(elements) => {
                 let elem_list = elements

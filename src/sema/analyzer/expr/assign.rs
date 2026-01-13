@@ -45,7 +45,7 @@ impl Analyzer {
                             if let Some(idx) = generic_info
                                 .field_names
                                 .iter()
-                                .position(|s| interner.resolve(*s) == field_name)
+                                .position(|name_id| self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name))
                             {
                                 let field_type = &generic_info.field_types[idx];
                                 // Substitute type args if any
@@ -304,7 +304,7 @@ impl Analyzer {
                             if let Some(idx) = generic_info
                                 .field_names
                                 .iter()
-                                .position(|s| interner.resolve(*s) == field_name)
+                                .position(|name_id| self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name))
                             {
                                 let field_type = &generic_info.field_types[idx];
                                 // Substitute type args if any

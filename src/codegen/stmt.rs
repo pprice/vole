@@ -521,18 +521,6 @@ impl Cg<'_, '_, '_> {
                 .name_table
                 .well_known
                 .is_iterator_type_def(iface.type_def_id),
-            Type::GenericInstance { def, .. } => self
-                .ctx
-                .analyzed
-                .entity_registry
-                .type_by_name(*def)
-                .is_some_and(|id| {
-                    self.ctx
-                        .analyzed
-                        .name_table
-                        .well_known
-                        .is_iterator_type_def(id)
-                }),
             _ => false,
         }
     }
@@ -541,7 +529,6 @@ impl Cg<'_, '_, '_> {
     fn iterator_element_type(&self, ty: &Type) -> Type {
         match ty {
             Type::Interface(iface) => iface.type_args.first().cloned().unwrap_or(Type::I64),
-            Type::GenericInstance { args, .. } => args.first().cloned().unwrap_or(Type::I64),
             Type::RuntimeIterator(elem) => (**elem).clone(),
             _ => Type::I64,
         }

@@ -43,33 +43,36 @@ impl Analyzer {
         }
 
         // Helper to get fields from TypeDef
-        let get_fields_from_typedef = |type_def: &crate::sema::entity_defs::TypeDef,
-                                       interner: &Interner|
-         -> Vec<StructField> {
-            type_def
-                .generic_info
-                .as_ref()
-                .map(|gi| {
-                    gi.field_names
-                        .iter()
-                        .zip(gi.field_types.iter())
-                        .enumerate()
-                        .map(|(i, (name, ty))| StructField {
-                            name: interner.resolve(*name).to_string(),
-                            ty: ty.clone(),
-                            slot: i,
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
+        let get_fields_from_typedef =
+            |type_def: &crate::sema::entity_defs::TypeDef,
+             name_table: &crate::identity::NameTable|
+             -> Vec<StructField> {
+                type_def
+                    .generic_info
+                    .as_ref()
+                    .map(|gi| {
+                        gi.field_names
+                            .iter()
+                            .zip(gi.field_types.iter())
+                            .enumerate()
+                            .filter_map(|(i, (name_id, ty))| {
+                                Some(StructField {
+                                    name: name_table.last_segment_str(*name_id)?,
+                                    ty: ty.clone(),
+                                    slot: i,
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
 
         let (type_name, fields, result_type) = if let Some(type_id) = type_id_opt {
             let type_def = self.entity_registry.get_type(type_id);
             match type_def.kind {
                 TypeDefKind::Class => {
                     if let Some(class_type) = self.entity_registry.build_class_type(type_id) {
-                        let fields = get_fields_from_typedef(type_def, interner);
+                        let fields = get_fields_from_typedef(type_def, &self.name_table);
                         (
                             interner.resolve(struct_lit.name).to_string(),
                             fields,
@@ -88,7 +91,7 @@ impl Analyzer {
                 }
                 TypeDefKind::Record => {
                     if let Some(record_type) = self.entity_registry.build_record_type(type_id) {
-                        let fields = get_fields_from_typedef(type_def, interner);
+                        let fields = get_fields_from_typedef(type_def, &self.name_table);
                         (
                             interner.resolve(struct_lit.name).to_string(),
                             fields,
@@ -195,11 +198,12 @@ impl Analyzer {
         let mut expected_types = Vec::new();
         let mut actual_types = Vec::new();
 
-        for (i, field_name) in generic_info.field_names.iter().enumerate() {
-            let field_name_str = interner.resolve(*field_name);
-            if let Some(actual_ty) = field_value_types.get(field_name_str) {
-                expected_types.push(generic_info.field_types[i].clone());
-                actual_types.push(actual_ty.clone());
+        for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
+            if let Some(field_name_str) = self.name_table.last_segment_str(*field_name_id) {
+                if let Some(actual_ty) = field_value_types.get(&field_name_str) {
+                    expected_types.push(generic_info.field_types[i].clone());
+                    actual_types.push(actual_ty.clone());
+                }
             }
         }
 
@@ -229,8 +233,8 @@ impl Analyzer {
             .map(|f| interner.resolve(f.name).to_string())
             .collect();
 
-        for field_name in &generic_info.field_names {
-            let field_name_str = interner.resolve(*field_name).to_string();
+        for field_name_id in &generic_info.field_names {
+            let field_name_str = self.name_table.last_segment_str(*field_name_id).unwrap_or_default();
             if !provided_fields.contains(&field_name_str) {
                 self.add_error(
                     SemanticError::MissingField {
@@ -250,7 +254,7 @@ impl Analyzer {
             if let Some(idx) = generic_info
                 .field_names
                 .iter()
-                .position(|n| interner.resolve(*n) == field_init_name_str)
+                .position(|name_id| self.name_table.last_segment_str(*name_id).as_deref() == Some(field_init_name_str))
             {
                 let actual_ty = field_value_types
                     .get(field_init_name_str)
@@ -310,11 +314,12 @@ impl Analyzer {
         let mut expected_types = Vec::new();
         let mut actual_types = Vec::new();
 
-        for (i, field_name) in generic_info.field_names.iter().enumerate() {
-            let field_name_str = interner.resolve(*field_name);
-            if let Some(actual_ty) = field_value_types.get(field_name_str) {
-                expected_types.push(generic_info.field_types[i].clone());
-                actual_types.push(actual_ty.clone());
+        for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
+            if let Some(field_name_str) = self.name_table.last_segment_str(*field_name_id) {
+                if let Some(actual_ty) = field_value_types.get(&field_name_str) {
+                    expected_types.push(generic_info.field_types[i].clone());
+                    actual_types.push(actual_ty.clone());
+                }
             }
         }
 
@@ -344,8 +349,8 @@ impl Analyzer {
             .map(|f| interner.resolve(f.name).to_string())
             .collect();
 
-        for field_name in &generic_info.field_names {
-            let field_name_str = interner.resolve(*field_name).to_string();
+        for field_name_id in &generic_info.field_names {
+            let field_name_str = self.name_table.last_segment_str(*field_name_id).unwrap_or_default();
             if !provided_fields.contains(&field_name_str) {
                 self.add_error(
                     SemanticError::MissingField {
@@ -365,7 +370,7 @@ impl Analyzer {
             if let Some(idx) = generic_info
                 .field_names
                 .iter()
-                .position(|n| interner.resolve(*n) == field_init_name_str)
+                .position(|name_id| self.name_table.last_segment_str(*name_id).as_deref() == Some(field_init_name_str))
             {
                 let actual_ty = field_value_types
                     .get(field_init_name_str)

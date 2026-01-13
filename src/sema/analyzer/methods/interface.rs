@@ -34,13 +34,6 @@ fn substitute_type(ty: &Type, substitutions: &StdHashMap<NameId, Type>) -> Type 
         Type::RuntimeIterator(inner) => {
             Type::RuntimeIterator(Box::new(substitute_type(inner, substitutions)))
         }
-        Type::GenericInstance { def, args } => Type::GenericInstance {
-            def: *def,
-            args: args
-                .iter()
-                .map(|a| substitute_type(a, substitutions))
-                .collect(),
-        },
         Type::Interface(iface) => Type::Interface(InterfaceType {
             type_def_id: iface.type_def_id,
             type_args: iface
@@ -153,13 +146,11 @@ impl Analyzer {
         expected_type: &Type,
         interner: &Interner,
     ) -> bool {
-        let (type_def_id, type_args) = match ty {
-            Type::Record(r) => (r.type_def_id, &r.type_args),
-            Type::Class(c) => (c.type_def_id, &c.type_args),
-            _ => return false,
+        let Some(info) = ty.as_struct() else {
+            return false;
         };
 
-        let type_def = self.entity_registry.get_type(type_def_id);
+        let type_def = self.entity_registry.get_type(info.type_def_id);
         let Some(ref generic_info) = type_def.generic_info else {
             return false;
         };
@@ -168,13 +159,13 @@ impl Analyzer {
         let substitutions: StdHashMap<_, _> = generic_info
             .type_params
             .iter()
-            .zip(type_args.iter())
+            .zip(info.type_args.iter())
             .map(|(tp, arg)| (tp.name_id, arg.clone()))
             .collect();
 
         // Find field and check type compatibility
-        for (i, name) in generic_info.field_names.iter().enumerate() {
-            if interner.resolve(*name) == field_name {
+        for (i, name_id) in generic_info.field_names.iter().enumerate() {
+            if self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name) {
                 let field_ty = crate::sema::generic::substitute_type(
                     &generic_info.field_types[i],
                     &substitutions,
@@ -710,13 +701,11 @@ impl Analyzer {
         expected_type: &Type,
         interner: &Interner,
     ) -> bool {
-        let (type_def_id, type_args) = match ty {
-            Type::Record(r) => (r.type_def_id, &r.type_args),
-            Type::Class(c) => (c.type_def_id, &c.type_args),
-            _ => return false,
+        let Some(info) = ty.as_struct() else {
+            return false;
         };
 
-        let type_def = self.entity_registry.get_type(type_def_id);
+        let type_def = self.entity_registry.get_type(info.type_def_id);
         let Some(ref generic_info) = type_def.generic_info else {
             return false;
         };
@@ -725,13 +714,13 @@ impl Analyzer {
         let substitutions: HashMap<_, _> = generic_info
             .type_params
             .iter()
-            .zip(type_args.iter())
+            .zip(info.type_args.iter())
             .map(|(tp, arg)| (tp.name_id, arg.clone()))
             .collect();
 
         // Find field and check type compatibility
-        for (i, name) in generic_info.field_names.iter().enumerate() {
-            if interner.resolve(*name) == field_name {
+        for (i, name_id) in generic_info.field_names.iter().enumerate() {
+            if self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name) {
                 let field_ty = crate::sema::generic::substitute_type(
                     &generic_info.field_types[i],
                     &substitutions,

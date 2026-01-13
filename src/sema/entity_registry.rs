@@ -12,6 +12,7 @@ use crate::sema::generic::{
 };
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_table::{TypeKey, TypeTable};
+use crate::sema::generic::substitute_type;
 use crate::sema::{FunctionType, Type};
 
 /// Central registry for all language entities
@@ -728,12 +729,11 @@ impl EntityRegistry {
         self.get_type(record_type.type_def_id).name_id
     }
 
-    /// Get the name_id for any struct-like Type (Class, Record, or GenericInstance)
+    /// Get the name_id for any struct-like Type (Class, Record, Interface)
     pub fn type_name_id(&self, ty: &Type) -> Option<NameId> {
         match ty {
             Type::Class(c) => Some(self.class_name_id(c)),
             Type::Record(r) => Some(self.record_name_id(r)),
-            Type::GenericInstance { def, .. } => Some(*def),
             Type::Interface(i) => Some(self.name_id(i.type_def_id)),
             _ => None,
         }
@@ -937,6 +937,75 @@ impl EntityRegistry {
         self.alias_index.entry(type_key).or_default().push(id);
 
         id
+    }
+
+    // ===== Field and Substitution Helpers =====
+
+    /// Get all field NameIds for a type (for iteration and lookups)
+    pub fn field_name_ids(&self, type_def_id: TypeDefId) -> &[NameId] {
+        self.get_type(type_def_id)
+            .generic_info
+            .as_ref()
+            .map(|gi| gi.field_names.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Build substitution map for a generic type instantiation
+    pub fn substitution_map(
+        &self,
+        type_def_id: TypeDefId,
+        type_args: &[Type],
+    ) -> HashMap<NameId, Type> {
+        let type_def = self.get_type(type_def_id);
+        type_def
+            .type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(param, arg)| (*param, arg.clone()))
+            .collect()
+    }
+
+    /// Apply substitution to a type based on type_def's type params
+    pub fn substitute_type_with_args(
+        &self,
+        type_def_id: TypeDefId,
+        type_args: &[Type],
+        ty: &Type,
+    ) -> Type {
+        if type_args.is_empty() {
+            return ty.clone();
+        }
+        let subs = self.substitution_map(type_def_id, type_args);
+        substitute_type(ty, &subs)
+    }
+
+    /// Get field type with type argument substitution applied
+    pub fn field_type(
+        &self,
+        type_def_id: TypeDefId,
+        type_args: &[Type],
+        field_name_id: NameId,
+    ) -> Option<Type> {
+        let type_def = self.get_type(type_def_id);
+        let generic_info = type_def.generic_info.as_ref()?;
+        let idx = generic_info
+            .field_names
+            .iter()
+            .position(|n| *n == field_name_id)?;
+        let field_type = &generic_info.field_types[idx];
+
+        if type_args.is_empty() {
+            Some(field_type.clone())
+        } else {
+            Some(self.substitute_type_with_args(type_def_id, type_args, field_type))
+        }
+    }
+
+    /// Get field index by NameId
+    pub fn field_index(&self, type_def_id: TypeDefId, field_name_id: NameId) -> Option<usize> {
+        let type_def = self.get_type(type_def_id);
+        let generic_info = type_def.generic_info.as_ref()?;
+        generic_info.field_names.iter().position(|n| *n == field_name_id)
     }
 }
 

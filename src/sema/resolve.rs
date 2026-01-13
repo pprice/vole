@@ -247,7 +247,8 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                 return interface;
             }
 
-            // Check if this is a class or record - use Type::Class/Record with type_args
+            // Check if this is a class, record, or other type kind
+            let name_str = ctx.interner.resolve(*name);
             if let Some(type_id) = ctx
                 .resolver()
                 .resolve_type_or_interface(*name, ctx.entity_registry)
@@ -266,17 +267,43 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                             type_args: resolved_args,
                         });
                     }
-                    _ => {}
+                    TypeDefKind::Interface => {
+                        // interface_instance() should have handled this, but as fallback
+                        // return invalid - interfaces need full method info
+                        return Type::invalid_msg(
+                            "resolve_generic_interface",
+                            format!("interface '{}' requires interface_instance resolution", name_str),
+                        );
+                    }
+                    TypeDefKind::Alias => {
+                        // Type aliases don't support type parameters
+                        return Type::invalid_msg(
+                            "resolve_generic_alias",
+                            format!("type alias '{}' cannot have type arguments", name_str),
+                        );
+                    }
+                    TypeDefKind::ErrorType => {
+                        // Error types don't support type parameters
+                        return Type::invalid_msg(
+                            "resolve_generic_error",
+                            format!("error type '{}' cannot have type arguments", name_str),
+                        );
+                    }
+                    TypeDefKind::Primitive => {
+                        // Primitives don't support type parameters
+                        return Type::invalid_msg(
+                            "resolve_generic_primitive",
+                            format!("primitive type '{}' cannot have type arguments", name_str),
+                        );
+                    }
                 }
             }
 
-            // Fallback: use GenericInstance for non-class/record types
-            let name_str = ctx.interner.resolve(*name);
-            let name_id = ctx.name_table.intern_raw(ctx.module_id, &[name_str]);
-            Type::GenericInstance {
-                def: name_id,
-                args: resolved_args,
-            }
+            // Type not found - return invalid
+            Type::invalid_msg(
+                "resolve_unknown_generic",
+                format!("unknown generic type '{}'", name_str),
+            )
         }
         TypeExpr::Tuple(elements) => {
             let resolved_elements: Vec<Type> =

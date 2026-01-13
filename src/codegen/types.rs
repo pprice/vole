@@ -301,15 +301,6 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
             "module(\"{}\")",
             analyzed.name_table.module_path(module_type.module_id)
         ),
-        Type::GenericInstance { def, args } => {
-            let def_name = analyzed.name_table.display(*def);
-            let arg_list = args
-                .iter()
-                .map(|arg| display_type(analyzed, interner, arg))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{}<{}>", def_name, arg_list)
-        }
         Type::Tuple(elements) => {
             let elem_list = elements
                 .iter()
@@ -597,74 +588,90 @@ pub(crate) fn resolve_type_expr_with_metadata(
             // Check entity registry for generic interface via Resolver
             let type_def_id = resolver.resolve_type_or_interface(*name, entity_registry);
 
+            let name_str = interner.resolve(*name);
             if let Some(type_def_id) = type_def_id {
                 let type_def = entity_registry.get_type(type_def_id);
-                if type_def.kind == TypeDefKind::Interface {
-                    if !type_def.type_params.is_empty()
-                        && type_def.type_params.len() != resolved_args.len()
-                    {
-                        panic!(
-                            "INTERNAL ERROR: generic interface type arg count mismatch\n\
-                             expected {} type args, got {}\n\
-                             type_def_id: {:?}, name_id: {:?}",
-                            type_def.type_params.len(),
-                            resolved_args.len(),
+                match type_def.kind {
+                    TypeDefKind::Class => {
+                        return Type::Class(crate::sema::types::ClassType {
                             type_def_id,
-                            type_def.name_id
+                            type_args: resolved_args,
+                        });
+                    }
+                    TypeDefKind::Record => {
+                        return Type::Record(crate::sema::types::RecordType {
+                            type_def_id,
+                            type_args: resolved_args,
+                        });
+                    }
+                    TypeDefKind::Interface => {
+                        if !type_def.type_params.is_empty()
+                            && type_def.type_params.len() != resolved_args.len()
+                        {
+                            panic!(
+                                "INTERNAL ERROR: generic interface type arg count mismatch\n\
+                                 expected {} type args, got {}\n\
+                                 type_def_id: {:?}, name_id: {:?}",
+                                type_def.type_params.len(),
+                                resolved_args.len(),
+                                type_def_id,
+                                type_def.name_id
+                            );
+                        }
+                        // Build substitution map using type param NameIds
+                        let mut substitutions = HashMap::new();
+                        for (name_id, arg) in type_def.type_params.iter().zip(resolved_args.iter())
+                        {
+                            substitutions.insert(*name_id, arg.clone());
+                        }
+
+                        // Build methods with substituted types
+                        let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
+                            .methods
+                            .iter()
+                            .map(|&method_id| {
+                                let method = entity_registry.get_method(method_id);
+                                crate::sema::types::InterfaceMethodType {
+                                    name: method.name_id,
+                                    params: method
+                                        .signature
+                                        .params
+                                        .iter()
+                                        .map(|t| substitute_type(t, &substitutions))
+                                        .collect(),
+                                    return_type: Box::new(substitute_type(
+                                        &method.signature.return_type,
+                                        &substitutions,
+                                    )),
+                                    has_default: method.has_default,
+                                }
+                            })
+                            .collect();
+
+                        // Keep extends as TypeDefIds directly
+                        let extends = type_def.extends.clone();
+
+                        return Type::Interface(crate::sema::types::InterfaceType {
+                            type_def_id,
+                            type_args: resolved_args,
+                            methods,
+                            extends,
+                        });
+                    }
+                    TypeDefKind::Alias | TypeDefKind::ErrorType | TypeDefKind::Primitive => {
+                        panic!(
+                            "INTERNAL ERROR: type '{}' cannot have type arguments\n\
+                             kind: {:?}, type_def_id: {:?}",
+                            name_str, type_def.kind, type_def_id
                         );
                     }
-                    // Build substitution map using type param NameIds
-                    let mut substitutions = HashMap::new();
-                    for (name_id, arg) in type_def.type_params.iter().zip(resolved_args.iter()) {
-                        substitutions.insert(*name_id, arg.clone());
-                    }
-
-                    // Build methods with substituted types
-                    let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
-                        .methods
-                        .iter()
-                        .map(|&method_id| {
-                            let method = entity_registry.get_method(method_id);
-                            crate::sema::types::InterfaceMethodType {
-                                name: method.name_id,
-                                params: method
-                                    .signature
-                                    .params
-                                    .iter()
-                                    .map(|t| substitute_type(t, &substitutions))
-                                    .collect(),
-                                return_type: Box::new(substitute_type(
-                                    &method.signature.return_type,
-                                    &substitutions,
-                                )),
-                                has_default: method.has_default,
-                            }
-                        })
-                        .collect();
-
-                    // Keep extends as TypeDefIds directly
-                    let extends = type_def.extends.clone();
-
-                    return Type::Interface(crate::sema::types::InterfaceType {
-                        type_def_id,
-                        type_args: resolved_args,
-                        methods,
-                        extends,
-                    });
                 }
             }
-            let Some(name_id) = name_table.name_id(module_id, &[*name], interner) else {
-                panic!(
-                    "INTERNAL ERROR: failed to get name_id for generic type\n\
-                     name: {:?}, module_id: {:?}",
-                    interner.resolve(*name),
-                    module_id
-                )
-            };
-            Type::GenericInstance {
-                def: name_id,
-                args: resolved_args,
-            }
+            panic!(
+                "INTERNAL ERROR: unknown generic type '{}'\n\
+                 module_id: {:?}",
+                name_str, module_id
+            )
         }
         TypeExpr::Tuple(elements) => {
             let resolved_elements: Vec<Type> = elements

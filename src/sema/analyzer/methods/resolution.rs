@@ -57,14 +57,10 @@ impl Analyzer {
                 // Determine the resolution type based on the defining type's kind
                 match defining_type.kind {
                     TypeDefKind::Interface => {
-                        // For interface types (Type::Interface, Type::GenericInstance pointing to interface),
-                        // we MUST use vtable dispatch because we don't know the concrete type.
-                        // Generators implement Iterator with their own next() method, so calling
-                        // external functions directly would crash.
-                        let is_interface_type = matches!(
-                            object_type,
-                            Type::Interface(_) | Type::GenericInstance { .. }
-                        );
+                        // For interface types, we MUST use vtable dispatch because we don't know
+                        // the concrete type. Generators implement Iterator with their own next()
+                        // method, so calling external functions directly would crash.
+                        let is_interface_type = matches!(object_type, Type::Interface(_));
 
                         // For external default methods on CONCRETE types (not interface types),
                         // we can call the external directly
@@ -137,21 +133,10 @@ impl Analyzer {
     fn build_interface_substitutions(&self, object_type: &Type) -> HashMap<NameId, Type> {
         let mut substitutions = HashMap::new();
 
-        // Extract type_def_id and type_args from the object type
-        let (type_def_id, type_args) = match object_type {
-            Type::Interface(iface) => (Some(iface.type_def_id), iface.type_args.as_slice()),
-            Type::GenericInstance { def, args } => {
-                (self.entity_registry.type_by_name(*def), args.as_slice())
-            }
-            Type::Record(r) => (Some(r.type_def_id), r.type_args.as_slice()),
-            Type::Class(c) => (Some(c.type_def_id), c.type_args.as_slice()),
-            _ => (None, &[] as &[Type]),
-        };
-
-        // Build substitutions from interface's type params to type args
-        if let Some(type_def_id) = type_def_id {
-            let type_def = self.entity_registry.get_type(type_def_id);
-            for (param_name_id, arg) in type_def.type_params.iter().zip(type_args.iter()) {
+        // Extract type_def_id and type_args from nominal types
+        if let Some(info) = object_type.as_nominal() {
+            let type_def = self.entity_registry.get_type(info.type_def_id);
+            for (param_name_id, arg) in type_def.type_params.iter().zip(info.type_args.iter()) {
                 substitutions.insert(*param_name_id, arg.clone());
             }
         }
@@ -186,7 +171,6 @@ impl Analyzer {
             Type::Class(c) => Some(c.type_def_id),
             Type::Record(r) => Some(r.type_def_id),
             Type::Interface(i) => Some(i.type_def_id),
-            Type::GenericInstance { def, .. } => self.entity_registry.type_by_name(*def),
             _ => None,
         }
     }
@@ -199,7 +183,6 @@ impl Analyzer {
             Type::Interface(interface_type) => {
                 Some(self.entity_registry.name_id(interface_type.type_def_id))
             }
-            Type::GenericInstance { def, .. } => Some(*def),
             _ => None,
         }
     }
@@ -416,12 +399,8 @@ impl Analyzer {
         }
 
         // 2. Interface methods (vtable dispatch)
-        // Handle both Type::Interface and Type::GenericInstance (for self-referential interface types)
         let (interface_type_def_id, type_args): (Option<TypeDefId>, &[Type]) = match object_type {
             Type::Interface(iface) => (Some(iface.type_def_id), iface.type_args.as_slice()),
-            Type::GenericInstance { def, args } => {
-                (self.entity_registry.type_by_name(*def), args.as_slice())
-            }
             _ => (None, &[]),
         };
         if let Some(type_def_id) = interface_type_def_id {

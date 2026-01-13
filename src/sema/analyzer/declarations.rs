@@ -240,7 +240,16 @@ impl Analyzer {
                 .expect("class shell registered in register_all_type_shells");
 
             // Collect field info for generic_info (needed for struct literal checking)
-            let field_names: Vec<Symbol> = class.fields.iter().map(|f| f.name).collect();
+            // Convert Symbol field names to NameId at registration time
+            let builtin_mod = self.name_table.builtin_module();
+            let field_names: Vec<NameId> = class
+                .fields
+                .iter()
+                .map(|f| {
+                    let name_str = interner.resolve(f.name);
+                    self.name_table.intern_raw(builtin_mod, &[name_str])
+                })
+                .collect();
             let field_types: Vec<Type> = class
                 .fields
                 .iter()
@@ -252,25 +261,21 @@ impl Analyzer {
                 entity_type_id,
                 GenericTypeInfo {
                     type_params: vec![],
-                    field_names,
+                    field_names: field_names.clone(),
                     field_types: field_types.clone(),
                 },
             );
 
             // Register fields in EntityRegistry
-            let builtin_module = self.name_table.builtin_module();
             for (i, field) in class.fields.iter().enumerate() {
                 let field_name_str = interner.resolve(field.name);
-                let field_name_id = self
-                    .name_table
-                    .intern_raw(builtin_module, &[field_name_str]);
                 let full_field_name_id = self.name_table.intern_raw(
                     self.current_module,
                     &[interner.resolve(class.name), field_name_str],
                 );
                 self.entity_registry.register_field(
                     entity_type_id,
-                    field_name_id,
+                    field_names[i],
                     full_field_name_id,
                     field_types[i].clone(),
                     i,
@@ -294,12 +299,12 @@ impl Analyzer {
             // Register methods in EntityRegistry (single source of truth)
             // Use class_type as Self for resolving method signatures
             let self_type_for_methods = class_type.map(Type::Class);
-            let builtin_module = self.name_table.builtin_module();
+            let builtin_mod = self.name_table.builtin_module();
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
                 let method_name_id = self
                     .name_table
-                    .intern_raw(builtin_module, &[method_name_str]);
+                    .intern_raw(builtin_mod, &[method_name_str]);
                 let full_method_name_id = self.name_table.intern_raw(
                     self.current_module,
                     &[interner.resolve(class.name), method_name_str],
@@ -334,13 +339,13 @@ impl Analyzer {
 
             // Register static methods in EntityRegistry
             if let Some(ref statics) = class.statics {
-                let builtin_module = self.name_table.builtin_module();
+                let builtin_mod = self.name_table.builtin_module();
                 let class_name_str = interner.resolve(class.name);
                 for method in &statics.methods {
                     let method_name_str = interner.resolve(method.name);
                     let method_name_id = self
                         .name_table
-                        .intern_raw(builtin_module, &[method_name_str]);
+                        .intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
@@ -378,7 +383,7 @@ impl Analyzer {
                     let method_name_str = interner.resolve(func.vole_name);
                     let method_name_id = self
                         .name_table
-                        .intern_raw(builtin_module, &[method_name_str]);
+                        .intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
@@ -454,6 +459,17 @@ impl Analyzer {
                 type_param_scope.add(info.clone());
             }
 
+            // Convert Symbol field names to NameId at registration time
+            // (must be done before creating ctx which borrows name_table)
+            let field_names: Vec<NameId> = class
+                .fields
+                .iter()
+                .map(|f| {
+                    let name_str = interner.resolve(f.name);
+                    self.name_table.intern_raw(builtin_mod, &[name_str])
+                })
+                .collect();
+
             // Resolve field types with type params in scope
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext::with_type_params(
@@ -464,7 +480,6 @@ impl Analyzer {
                 &type_param_scope,
             );
 
-            let field_names: Vec<Symbol> = class.fields.iter().map(|f| f.name).collect();
             let field_types: Vec<Type> = class
                 .fields
                 .iter()
@@ -488,18 +503,14 @@ impl Analyzer {
                 entity_type_id,
                 GenericTypeInfo {
                     type_params,
-                    field_names,
-                    field_types,
+                    field_names: field_names.clone(),
+                    field_types: field_types.clone(),
                 },
             );
 
             // Register fields with placeholder types
-            let builtin_module = self.name_table.builtin_module();
             for (i, field) in class.fields.iter().enumerate() {
                 let field_name_str = interner.resolve(field.name);
-                let field_name_id = self
-                    .name_table
-                    .intern_raw(builtin_module, &[field_name_str]);
                 let full_field_name_id = self.name_table.intern_raw(
                     self.current_module,
                     &[interner.resolve(class.name), field_name_str],
@@ -514,7 +525,7 @@ impl Analyzer {
                 let field_ty = resolve_type(&field.ty, &mut ctx);
                 self.entity_registry.register_field(
                     entity_type_id,
-                    field_name_id,
+                    field_names[i],
                     full_field_name_id,
                     field_ty,
                     i,
@@ -541,7 +552,7 @@ impl Analyzer {
                 let method_name_str = interner.resolve(method.name);
                 let method_name_id = self
                     .name_table
-                    .intern_raw(builtin_module, &[method_name_str]);
+                    .intern_raw(builtin_mod, &[method_name_str]);
                 let full_method_name_id = self.name_table.intern_raw(
                     self.current_module,
                     &[interner.resolve(class.name), method_name_str],
@@ -602,7 +613,7 @@ impl Analyzer {
                     let method_name_str = interner.resolve(method.name);
                     let method_name_id = self
                         .name_table
-                        .intern_raw(builtin_module, &[method_name_str]);
+                        .intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
@@ -611,7 +622,7 @@ impl Analyzer {
                     let mut merged_scope = type_param_scope.clone();
                     for tp in &method.type_params {
                         let tp_name_str = interner.resolve(tp.name);
-                        let tp_name_id = self.name_table.intern_raw(builtin_module, &[tp_name_str]);
+                        let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
                         merged_scope.add(TypeParamInfo {
                             name: tp.name,
                             name_id: tp_name_id,
@@ -626,7 +637,7 @@ impl Analyzer {
                         .map(|tp| {
                             let tp_name_str = interner.resolve(tp.name);
                             let tp_name_id =
-                                self.name_table.intern_raw(builtin_module, &[tp_name_str]);
+                                self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
                             let constraint = tp.constraint.as_ref().and_then(|c| {
                                 self.resolve_type_param_constraint(
                                     c,
@@ -700,7 +711,7 @@ impl Analyzer {
                     let method_name_str = interner.resolve(func.vole_name);
                     let method_name_id = self
                         .name_table
-                        .intern_raw(builtin_module, &[method_name_str]);
+                        .intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
@@ -777,7 +788,16 @@ impl Analyzer {
                 .expect("record shell registered in register_all_type_shells");
 
             // Collect field info for generic_info (needed for struct literal checking)
-            let field_names: Vec<Symbol> = record.fields.iter().map(|f| f.name).collect();
+            // Convert Symbol field names to NameId at registration time
+            let builtin_mod = self.name_table.builtin_module();
+            let field_names: Vec<NameId> = record
+                .fields
+                .iter()
+                .map(|f| {
+                    let name_str = interner.resolve(f.name);
+                    self.name_table.intern_raw(builtin_mod, &[name_str])
+                })
+                .collect();
             let field_types: Vec<Type> = record
                 .fields
                 .iter()
@@ -789,25 +809,21 @@ impl Analyzer {
                 entity_type_id,
                 GenericTypeInfo {
                     type_params: vec![],
-                    field_names,
+                    field_names: field_names.clone(),
                     field_types: field_types.clone(),
                 },
             );
 
             // Register fields in EntityRegistry
-            let builtin_module = self.name_table.builtin_module();
             for (i, field) in record.fields.iter().enumerate() {
                 let field_name_str = interner.resolve(field.name);
-                let field_name_id = self
-                    .name_table
-                    .intern_raw(builtin_module, &[field_name_str]);
                 let full_field_name_id = self.name_table.intern_raw(
                     self.current_module,
                     &[interner.resolve(record.name), field_name_str],
                 );
                 self.entity_registry.register_field(
                     entity_type_id,
-                    field_name_id,
+                    field_names[i],
                     full_field_name_id,
                     field_types[i].clone(),
                     i,
@@ -831,12 +847,12 @@ impl Analyzer {
             // Register methods in EntityRegistry (single source of truth)
             // Use record_type as Self for resolving method signatures
             let self_type_for_methods = record_type.map(Type::Record);
-            let builtin_module = self.name_table.builtin_module();
+            let builtin_mod = self.name_table.builtin_module();
             for method in &record.methods {
                 let method_name_str = interner.resolve(method.name);
                 let method_name_id = self
                     .name_table
-                    .intern_raw(builtin_module, &[method_name_str]);
+                    .intern_raw(builtin_mod, &[method_name_str]);
                 let full_method_name_id = self.name_table.intern_raw(
                     self.current_module,
                     &[interner.resolve(record.name), method_name_str],
@@ -871,13 +887,13 @@ impl Analyzer {
 
             // Register static methods in EntityRegistry
             if let Some(ref statics) = record.statics {
-                let builtin_module = self.name_table.builtin_module();
+                let builtin_mod = self.name_table.builtin_module();
                 let record_name_str = interner.resolve(record.name);
                 for method in &statics.methods {
                     let method_name_str = interner.resolve(method.name);
                     let method_name_id = self
                         .name_table
-                        .intern_raw(builtin_module, &[method_name_str]);
+                        .intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[record_name_str, method_name_str]);
@@ -946,6 +962,17 @@ impl Analyzer {
                 type_param_scope.add(info.clone());
             }
 
+            // Convert Symbol field names to NameId at registration time
+            // (must be done before creating ctx which borrows name_table)
+            let field_names: Vec<NameId> = record
+                .fields
+                .iter()
+                .map(|f| {
+                    let name_str = interner.resolve(f.name);
+                    self.name_table.intern_raw(builtin_mod, &[name_str])
+                })
+                .collect();
+
             // Resolve field types with type params in scope
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext::with_type_params(
@@ -956,7 +983,6 @@ impl Analyzer {
                 &type_param_scope,
             );
 
-            let field_names: Vec<Symbol> = record.fields.iter().map(|f| f.name).collect();
             let field_types: Vec<Type> = record
                 .fields
                 .iter()
@@ -1000,10 +1026,6 @@ impl Analyzer {
             };
             self.register_named_type(record.name, Type::Record(record_type.clone()), interner);
 
-            // Register methods in EntityRegistry (with type params in scope)
-            // Note: The signature stored has type params as placeholders
-            let builtin_module = self.name_table.builtin_module();
-
             // Register and validate implements list (for generic records)
             self.validate_and_register_implements(
                 entity_type_id,
@@ -1015,9 +1037,6 @@ impl Analyzer {
             // Register fields in EntityRegistry (needed for self.field access in methods)
             for (i, field) in record.fields.iter().enumerate() {
                 let field_name_str = interner.resolve(field.name);
-                let field_name_id = self
-                    .name_table
-                    .intern_raw(builtin_module, &[field_name_str]);
                 let full_field_name_id = self.name_table.intern_raw(
                     self.current_module,
                     &[interner.resolve(record.name), field_name_str],
@@ -1034,7 +1053,7 @@ impl Analyzer {
                 };
                 self.entity_registry.register_field(
                     entity_type_id,
-                    field_name_id,
+                    field_names[i],
                     full_field_name_id,
                     field_ty,
                     i,
@@ -1050,7 +1069,7 @@ impl Analyzer {
                 entity_type_id,
                 GenericTypeInfo {
                     type_params,
-                    field_names,
+                    field_names: field_names.clone(),
                     field_types,
                 },
             );
@@ -1091,7 +1110,7 @@ impl Analyzer {
                 let method_name_str = interner.resolve(method.name);
                 let method_name_id = self
                     .name_table
-                    .intern_raw(builtin_module, &[method_name_str]);
+                    .intern_raw(builtin_mod, &[method_name_str]);
                 let full_method_name_id = self.name_table.intern_raw(
                     self.current_module,
                     &[interner.resolve(record.name), method_name_str],
@@ -1117,7 +1136,7 @@ impl Analyzer {
                     let method_name_str = interner.resolve(method.name);
                     let method_name_id = self
                         .name_table
-                        .intern_raw(builtin_module, &[method_name_str]);
+                        .intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[record_name_str, method_name_str]);
@@ -1126,7 +1145,7 @@ impl Analyzer {
                     let mut merged_scope = type_param_scope.clone();
                     for tp in &method.type_params {
                         let tp_name_str = interner.resolve(tp.name);
-                        let tp_name_id = self.name_table.intern_raw(builtin_module, &[tp_name_str]);
+                        let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
                         merged_scope.add(TypeParamInfo {
                             name: tp.name,
                             name_id: tp_name_id,
@@ -1141,7 +1160,7 @@ impl Analyzer {
                         .map(|tp| {
                             let tp_name_str = interner.resolve(tp.name);
                             let tp_name_id =
-                                self.name_table.intern_raw(builtin_module, &[tp_name_str]);
+                                self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
                             let constraint = tp.constraint.as_ref().and_then(|c| {
                                 self.resolve_type_param_constraint(
                                     c,
@@ -1448,10 +1467,10 @@ impl Analyzer {
 
         // Register methods in EntityRegistry (with external bindings)
         for (_, method_name_str, params, return_type, has_default) in &method_data {
-            let builtin_module = self.name_table.builtin_module();
+            let builtin_mod = self.name_table.builtin_module();
             let method_name_id = self
                 .name_table
-                .intern_raw(builtin_module, &[method_name_str]);
+                .intern_raw(builtin_mod, &[method_name_str]);
             let full_method_name_id = self
                 .name_table
                 .intern_raw(self.current_module, &[&name_str, method_name_str]);
@@ -1505,10 +1524,10 @@ impl Analyzer {
             // Register static methods
             for method in &statics_block.methods {
                 let method_name_str = interner.resolve(method.name).to_string();
-                let builtin_module = self.name_table.builtin_module();
+                let builtin_mod = self.name_table.builtin_module();
                 let method_name_id = self
                     .name_table
-                    .intern_raw(builtin_module, &[&method_name_str]);
+                    .intern_raw(builtin_mod, &[&method_name_str]);
                 let full_method_name_id = self
                     .name_table
                     .intern_raw(self.current_module, &[&name_str, &method_name_str]);
@@ -1558,10 +1577,10 @@ impl Analyzer {
         // Register fields in EntityRegistry (for interface field requirements)
         for (i, (field_name, field_ty)) in resolved_fields.iter().enumerate() {
             let field_name_str = interner.resolve(*field_name).to_string();
-            let builtin_module = self.name_table.builtin_module();
+            let builtin_mod = self.name_table.builtin_module();
             let field_name_id = self
                 .name_table
-                .intern_raw(builtin_module, &[&field_name_str]);
+                .intern_raw(builtin_mod, &[&field_name_str]);
             let full_field_name_id = self
                 .name_table
                 .intern_raw(self.current_module, &[&name_str, &field_name_str]);
@@ -1800,10 +1819,10 @@ impl Analyzer {
                     // Register static methods
                     for method in &statics_block.methods {
                         let method_name_str = interner.resolve(method.name).to_string();
-                        let builtin_module = self.name_table.builtin_module();
+                        let builtin_mod = self.name_table.builtin_module();
                         let method_name_id = self
                             .name_table
-                            .intern_raw(builtin_module, &[&method_name_str]);
+                            .intern_raw(builtin_mod, &[&method_name_str]);
                         let full_method_name_id = self
                             .name_table
                             .intern_raw(self.current_module, &[&type_name_str, &method_name_str]);
@@ -1839,10 +1858,10 @@ impl Analyzer {
                     for external in &statics_block.external_blocks {
                         for func in &external.functions {
                             let method_name_str = interner.resolve(func.vole_name).to_string();
-                            let builtin_module = self.name_table.builtin_module();
+                            let builtin_mod = self.name_table.builtin_module();
                             let method_name_id = self
                                 .name_table
-                                .intern_raw(builtin_module, &[&method_name_str]);
+                                .intern_raw(builtin_mod, &[&method_name_str]);
                             let full_method_name_id = self.name_table.intern_raw(
                                 self.current_module,
                                 &[&type_name_str, &method_name_str],

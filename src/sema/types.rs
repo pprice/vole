@@ -206,13 +206,6 @@ pub enum Type {
     /// Type parameter (e.g., T in func identity<T>(x: T) -> T)
     /// Only valid within generic context during type checking
     TypeParam(NameId),
-    /// Generic type instance (e.g., Box<i64>, Result<string, i64>)
-    GenericInstance {
-        /// Name of the generic type definition
-        def: NameId,
-        /// Concrete type arguments
-        args: Vec<Type>,
-    },
     /// Tuple type - heterogeneous fixed-size collection
     /// e.g., [i32, string, bool] - different types per position
     Tuple(Vec<Type>),
@@ -265,6 +258,22 @@ pub struct StructField {
     pub name: String,
     pub ty: Type,
     pub slot: usize, // Compile-time slot index
+}
+
+/// View into nominal type data (Class, Record, Interface, ErrorType)
+/// Provides read-only access to type_def_id and type_args without copying.
+#[derive(Debug, Clone, Copy)]
+pub struct NominalInfo<'a> {
+    pub type_def_id: TypeDefId,
+    pub type_args: &'a [Type],
+}
+
+/// View into struct-like type data (Class, Record - things with fields)
+/// Provides read-only access to type_def_id and type_args without copying.
+#[derive(Debug, Clone, Copy)]
+pub struct StructInfo<'a> {
+    pub type_def_id: TypeDefId,
+    pub type_args: &'a [Type],
 }
 
 /// Class type information
@@ -387,6 +396,69 @@ impl Type {
             PrimitiveType::F64 => Type::F64,
             PrimitiveType::Bool => Type::Bool,
             PrimitiveType::String => Type::String,
+        }
+    }
+
+    /// Get TypeDefId for nominal types (Class, Record, Interface, ErrorType).
+    /// Returns None for primitives, functions, unions, etc.
+    pub fn type_def_id(&self) -> Option<TypeDefId> {
+        match self {
+            Type::Class(c) => Some(c.type_def_id),
+            Type::Record(r) => Some(r.type_def_id),
+            Type::Interface(i) => Some(i.type_def_id),
+            Type::ErrorType(e) => Some(e.type_def_id),
+            _ => None,
+        }
+    }
+
+    /// Get type arguments for generic types.
+    /// Returns empty slice for non-generic or primitive types.
+    pub fn type_args(&self) -> &[Type] {
+        match self {
+            Type::Class(c) => &c.type_args,
+            Type::Record(r) => &r.type_args,
+            Type::Interface(i) => &i.type_args,
+            _ => &[],
+        }
+    }
+
+    /// View as nominal type (Class, Record, Interface, ErrorType).
+    /// Returns None for primitives, functions, unions, etc.
+    pub fn as_nominal(&self) -> Option<NominalInfo<'_>> {
+        match self {
+            Type::Class(c) => Some(NominalInfo {
+                type_def_id: c.type_def_id,
+                type_args: &c.type_args,
+            }),
+            Type::Record(r) => Some(NominalInfo {
+                type_def_id: r.type_def_id,
+                type_args: &r.type_args,
+            }),
+            Type::Interface(i) => Some(NominalInfo {
+                type_def_id: i.type_def_id,
+                type_args: &i.type_args,
+            }),
+            Type::ErrorType(e) => Some(NominalInfo {
+                type_def_id: e.type_def_id,
+                type_args: &[],
+            }),
+            _ => None,
+        }
+    }
+
+    /// View as struct-like type (Class or Record - things with fields).
+    /// Returns None for interfaces, primitives, functions, etc.
+    pub fn as_struct(&self) -> Option<StructInfo<'_>> {
+        match self {
+            Type::Class(c) => Some(StructInfo {
+                type_def_id: c.type_def_id,
+                type_args: &c.type_args,
+            }),
+            Type::Record(r) => Some(StructInfo {
+                type_def_id: r.type_def_id,
+                type_args: &r.type_args,
+            }),
+            _ => None,
         }
     }
 
@@ -513,7 +585,6 @@ impl Type {
             Type::Fallible(_) => "fallible",
             Type::Module(_) => "module",
             Type::TypeParam(_) => "type parameter",
-            Type::GenericInstance { .. } => "generic",
             Type::RuntimeIterator(_) => "iterator",
             Type::Tuple(_) => "tuple",
             Type::FixedArray { .. } => "fixed array",
@@ -711,16 +782,6 @@ impl std::fmt::Display for Type {
             }
             Type::Module(m) => write!(f, "module(id:{})", m.module_id.index()),
             Type::TypeParam(name_id) => write!(f, "{:?}", name_id), // NameId Debug shows the identity
-            Type::GenericInstance { def, args } => {
-                write!(f, "{:?}<", def)?;
-                for (i, arg) in args.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", arg)?;
-                }
-                write!(f, ">")
-            }
             Type::Tuple(elements) => {
                 write!(f, "[")?;
                 for (i, elem) in elements.iter().enumerate() {

@@ -256,10 +256,12 @@ impl Analyzer {
                                             .iter()
                                             .zip(gi.field_types.iter())
                                             .enumerate()
-                                            .map(|(i, (name, ty))| StructField {
-                                                name: interner.resolve(*name).to_string(),
-                                                ty: ty.clone(),
-                                                slot: i,
+                                            .filter_map(|(i, (name_id, ty))| {
+                                                Some(StructField {
+                                                    name: self.name_table.last_segment_str(*name_id)?,
+                                                    ty: ty.clone(),
+                                                    slot: i,
+                                                })
                                             })
                                             .collect()
                                     })
@@ -364,10 +366,12 @@ impl Analyzer {
                                     .iter()
                                     .zip(gi.field_types.iter())
                                     .enumerate()
-                                    .map(|(i, (name, ty))| StructField {
-                                        name: interner.resolve(*name).to_string(),
-                                        ty: ty.clone(),
-                                        slot: i,
+                                    .filter_map(|(i, (name_id, ty))| {
+                                        Some(StructField {
+                                            name: self.name_table.last_segment_str(*name_id)?,
+                                            ty: ty.clone(),
+                                            slot: i,
+                                        })
                                     })
                                     .collect()
                             })
@@ -379,10 +383,12 @@ impl Analyzer {
                                     .iter()
                                     .zip(gi.field_types.iter())
                                     .enumerate()
-                                    .map(|(i, (name, ty))| StructField {
-                                        name: interner.resolve(*name).to_string(),
-                                        ty: ty.clone(),
-                                        slot: i,
+                                    .filter_map(|(i, (name_id, ty))| {
+                                        Some(StructField {
+                                            name: self.name_table.last_segment_str(*name_id)?,
+                                            ty: ty.clone(),
+                                            slot: i,
+                                        })
                                     })
                                     .collect()
                             })

@@ -749,15 +749,6 @@ impl Analyzer {
                 }
                 self.unify_types(&p_ft.return_type, &a_ft.return_type, type_params, inferred);
             }
-            // GenericInstance: unify type args
-            (
-                Type::GenericInstance { args: p_args, .. },
-                Type::GenericInstance { args: a_args, .. },
-            ) => {
-                for (p, a) in p_args.iter().zip(a_args.iter()) {
-                    self.unify_types(p, a, type_params, inferred);
-                }
-            }
             // Class: unify type args (for generic class parameters)
             (Type::Class(p_class), Type::Class(a_class))
                 if p_class.type_def_id == a_class.type_def_id =>
