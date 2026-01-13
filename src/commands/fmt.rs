@@ -6,7 +6,7 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::expand_paths;
+use crate::cli::expand_paths_flat;
 use crate::fmt::{self, CANONICAL};
 
 /// Options for formatting
@@ -29,7 +29,7 @@ pub fn format_files(patterns: &[String], options: FmtOptions) -> ExitCode {
         return format_stdin(options.check);
     }
 
-    let files = match expand_paths(patterns) {
+    let files = match expand_paths_flat(patterns) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("error: {}", e);

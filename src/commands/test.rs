@@ -100,7 +100,7 @@ pub fn run_tests(
     }
 
     // Collect all test files from the given paths
-    let all_files = match expand_paths(paths) {
+    let expanded = match expand_paths(paths) {
         Ok(files) => files,
         Err(e) => {
             eprintln!("error: {}", e);
@@ -108,12 +108,21 @@ pub fn run_tests(
         }
     };
 
-    // Filter out underscore-prefixed files unless include_skipped is set
+    // Filter out underscore-prefixed files from DISCOVERED files only (not explicit paths).
+    // Direct paths like `vole test _wip.vole` should always run.
     let (files, skipped_count): (Vec<_>, usize) = if include_skipped {
-        (all_files, 0)
+        (
+            expanded
+                .explicit
+                .into_iter()
+                .chain(expanded.discovered)
+                .collect(),
+            0,
+        )
     } else {
         let mut skipped = 0;
-        let kept: Vec<_> = all_files
+        let discovered_filtered: Vec<_> = expanded
+            .discovered
             .into_iter()
             .filter(|p| {
                 if should_skip_path(p) {
@@ -124,7 +133,10 @@ pub fn run_tests(
                 }
             })
             .collect();
-        (kept, skipped)
+        // Explicit files are never filtered
+        let mut all = expanded.explicit;
+        all.extend(discovered_filtered);
+        (all, skipped)
     };
 
     if files.is_empty() {

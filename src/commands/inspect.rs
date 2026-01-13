@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use miette::NamedSource;
 
-use crate::cli::{InspectType, expand_paths};
+use crate::cli::{InspectType, expand_paths_flat};
 use crate::codegen::{Compiler, JitContext};
 use crate::commands::common::AnalyzedProgram;
 use crate::errors::render_to_stderr;
@@ -20,7 +20,7 @@ pub fn inspect_files(
     _imports: Option<&str>,
 ) -> ExitCode {
     // Expand patterns and collect unique files
-    let files = match expand_paths(patterns) {
+    let files = match expand_paths_flat(patterns) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("error: {}", e);

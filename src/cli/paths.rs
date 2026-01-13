@@ -34,6 +34,32 @@ impl std::fmt::Display for PathError {
 
 impl std::error::Error for PathError {}
 
+/// Result of path expansion, separating explicit files from discovered files.
+#[derive(Debug, Default)]
+pub struct ExpandedPaths {
+    /// Files explicitly specified by the user (direct file paths)
+    pub explicit: Vec<PathBuf>,
+    /// Files discovered via directory or glob expansion
+    pub discovered: Vec<PathBuf>,
+}
+
+impl ExpandedPaths {
+    /// Get all files combined (explicit first, then discovered)
+    pub fn all(&self) -> impl Iterator<Item = &PathBuf> {
+        self.explicit.iter().chain(self.discovered.iter())
+    }
+
+    /// Total count of all files
+    pub fn len(&self) -> usize {
+        self.explicit.len() + self.discovered.len()
+    }
+
+    /// Check if empty
+    pub fn is_empty(&self) -> bool {
+        self.explicit.is_empty() && self.discovered.is_empty()
+    }
+}
+
 /// Expand a list of path patterns into concrete .vole file paths.
 ///
 /// Each pattern can be:
@@ -46,21 +72,31 @@ impl std::error::Error for PathError {}
 /// - Glob/directory expansions are sorted and appended after explicit files
 /// - Duplicates are removed (glob results matching explicit files are excluded)
 ///
-/// Returns deduplicated paths. Empty result is valid (not an error).
-pub fn expand_paths(patterns: &[String]) -> Result<Vec<PathBuf>, PathError> {
-    let mut explicit_files = Vec::new();
-    let mut glob_files = Vec::new();
+/// Returns `ExpandedPaths` with explicit and discovered files separated.
+/// This allows callers to apply different filtering (e.g., skip underscore
+/// files only for discovered files, not explicit ones).
+pub fn expand_paths(patterns: &[String]) -> Result<ExpandedPaths, PathError> {
+    let mut result = ExpandedPaths::default();
     let mut seen: HashSet<PathBuf> = HashSet::new();
 
     for pattern in patterns {
-        expand_pattern(pattern, &mut explicit_files, &mut glob_files, &mut seen)?;
+        expand_pattern(
+            pattern,
+            &mut result.explicit,
+            &mut result.discovered,
+            &mut seen,
+        )?;
     }
 
-    // Combine: explicit files first (preserving order), then glob files (unsorted)
-    // Duplicates already handled by the `seen` HashSet
-    explicit_files.extend(glob_files);
+    Ok(result)
+}
 
-    Ok(explicit_files)
+/// Legacy helper that returns all files as a single Vec (for backwards compatibility)
+pub fn expand_paths_flat(patterns: &[String]) -> Result<Vec<PathBuf>, PathError> {
+    let expanded = expand_paths(patterns)?;
+    let mut all = expanded.explicit;
+    all.extend(expanded.discovered);
+    Ok(all)
 }
 
 /// Expand a single pattern into file paths
@@ -178,7 +214,7 @@ mod tests {
 
         let files = expand_paths(&[file.to_string_lossy().to_string()]).unwrap();
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0], file);
+        assert_eq!(files.explicit[0], file);
     }
 
     #[test]
@@ -237,7 +273,7 @@ mod tests {
         assert_eq!(files.len(), 3);
 
         // Should be sorted
-        let names: Vec<_> = files.iter().map(|p| p.file_name().unwrap()).collect();
+        let names: Vec<_> = files.all().map(|p| p.file_name().unwrap()).collect();
         assert!(names.windows(2).all(|w| w[0] <= w[1]));
     }
 

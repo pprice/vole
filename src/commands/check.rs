@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use super::common::{parse_and_analyze, read_stdin};
-use crate::cli::expand_paths;
+use crate::cli::expand_paths_flat;
 use crate::runtime::push_context;
 
 /// Check Vole source files (parse + type check, no execution)
@@ -16,7 +16,7 @@ pub fn check_files(patterns: &[String]) -> ExitCode {
         return check_stdin();
     }
 
-    let files = match expand_paths(patterns) {
+    let files = match expand_paths_flat(patterns) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("error: {}", e);

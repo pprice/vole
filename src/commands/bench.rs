@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use comfy_table::{Cell, Color, Table, presets::UTF8_FULL};
 
 use crate::bench::{BenchConfig, BenchmarkRun, Stats, VoleInfo, run_files};
-use crate::cli::expand_paths;
+use crate::cli::expand_paths_flat;
 use crate::util::{format_bytes, format_duration};
 
 /// Run benchmarks on the specified paths
@@ -32,7 +32,7 @@ pub fn run_bench(
     }
 
     // Expand paths
-    let files = match expand_paths(paths) {
+    let files = match expand_paths_flat(paths) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("Error: {}", e);
