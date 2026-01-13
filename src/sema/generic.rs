@@ -445,16 +445,7 @@ pub fn substitute_type(ty: &Type, substitutions: &HashMap<NameId, Type>) -> Type
                 .collect(),
         ),
         Type::Record(record_type) => Type::Record(crate::sema::types::RecordType {
-            name_id: record_type.name_id,
-            fields: record_type
-                .fields
-                .iter()
-                .map(|f| crate::sema::types::StructField {
-                    name: f.name.clone(),
-                    ty: substitute_type(&f.ty, substitutions),
-                    slot: f.slot,
-                })
-                .collect(),
+            type_def_id: record_type.type_def_id,
             type_args: record_type
                 .type_args
                 .iter()
@@ -462,16 +453,7 @@ pub fn substitute_type(ty: &Type, substitutions: &HashMap<NameId, Type>) -> Type
                 .collect(),
         }),
         Type::Class(class_type) => Type::Class(crate::sema::types::ClassType {
-            name_id: class_type.name_id,
-            fields: class_type
-                .fields
-                .iter()
-                .map(|f| crate::sema::types::StructField {
-                    name: f.name.clone(),
-                    ty: substitute_type(&f.ty, substitutions),
-                    slot: f.slot,
-                })
-                .collect(),
+            type_def_id: class_type.type_def_id,
             type_args: class_type
                 .type_args
                 .iter()

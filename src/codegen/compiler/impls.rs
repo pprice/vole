@@ -1174,9 +1174,10 @@ impl Compiler<'_> {
             .values()
             .find(|meta| {
                 if let Type::Class(class_type) = &meta.vole_type {
+                    let name_id = self.analyzed.entity_registry.class_name_id(class_type);
                     self.analyzed
                         .name_table
-                        .last_segment_str(class_type.name_id)
+                        .last_segment_str(name_id)
                         .is_some_and(|name| name == type_name_str)
                 } else {
                     false

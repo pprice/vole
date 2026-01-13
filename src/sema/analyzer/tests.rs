@@ -554,7 +554,7 @@ fn satisfies_interface_with_field() {
         .unwrap();
     let person_type = analyzer
         .entity_registry
-        .build_record_type(type_def_id, &analyzer.name_table)
+        .build_record_type(type_def_id)
         .unwrap();
     let ty = Type::Record(person_type);
 
@@ -589,7 +589,7 @@ fn satisfies_interface_missing_field() {
         .unwrap();
     let point_type = analyzer
         .entity_registry
-        .build_record_type(type_def_id, &analyzer.name_table)
+        .build_record_type(type_def_id)
         .unwrap();
     let ty = Type::Record(point_type);
 
@@ -626,7 +626,7 @@ fn satisfies_interface_with_method() {
         .unwrap();
     let user_type = analyzer
         .entity_registry
-        .build_record_type(type_def_id, &analyzer.name_table)
+        .build_record_type(type_def_id)
         .unwrap();
     let ty = Type::Record(user_type);
 

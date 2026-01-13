@@ -71,14 +71,17 @@ impl InterfaceVtableRegistry {
                 is_closure: func_type.is_closure,
             },
             _ => {
-                let type_id =
-                    TypeId::from_type(concrete_type, &ctx.analyzed.entity_registry.type_table)
-                        .ok_or_else(|| {
-                            format!(
-                                "cannot build vtable for unsupported type {:?}",
-                                concrete_type
-                            )
-                        })?;
+                let type_id = TypeId::from_type(
+                    concrete_type,
+                    &ctx.analyzed.entity_registry.type_table,
+                    &ctx.analyzed.entity_registry,
+                )
+                .ok_or_else(|| {
+                    format!(
+                        "cannot build vtable for unsupported type {:?}",
+                        concrete_type
+                    )
+                })?;
                 InterfaceConcreteType::TypeId(type_id)
             }
         };
@@ -675,13 +678,17 @@ fn resolve_vtable_target(
         });
     }
 
-    let type_id = TypeId::from_type(concrete_type, &ctx.analyzed.entity_registry.type_table)
-        .ok_or_else(|| {
-            format!(
-                "cannot resolve interface method {} on {:?}",
-                method_name_str, concrete_type
-            )
-        })?;
+    let type_id = TypeId::from_type(
+        concrete_type,
+        &ctx.analyzed.entity_registry.type_table,
+        &ctx.analyzed.entity_registry,
+    )
+    .ok_or_else(|| {
+        format!(
+            "cannot resolve interface method {} on {:?}",
+            method_name_str, concrete_type
+        )
+    })?;
     // Use string-based lookup for cross-interner safety (method_def is from stdlib interner)
     // This may return None for default interface methods that aren't explicitly implemented
     let method_name_id = method_name_id_by_str(ctx.analyzed, ctx.interner, &method_name_str);
@@ -713,11 +720,17 @@ fn resolve_vtable_target(
     // Check direct methods on class/record
     if let Some(method_name_id) = method_name_id
         && let Some(type_name_id) = match concrete_type {
-            Type::Class(class_type) => Some(class_type.name_id),
-            Type::Record(record_type) => Some(record_type.name_id),
+            Type::Class(class_type) => Some(ctx.analyzed.entity_registry.class_name_id(class_type)),
+            Type::Record(record_type) => {
+                Some(ctx.analyzed.entity_registry.record_name_id(record_type))
+            }
             _ => None,
         }
-        && let Some(meta) = type_metadata_by_name_id(ctx.type_metadata, type_name_id)
+        && let Some(meta) = type_metadata_by_name_id(
+            ctx.type_metadata,
+            type_name_id,
+            &ctx.analyzed.entity_registry,
+        )
         && let Some(method_info) = meta.method_infos.get(&method_name_id).cloned()
     {
         // Look up method type via EntityRegistry

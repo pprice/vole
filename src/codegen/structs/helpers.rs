@@ -16,29 +16,77 @@ pub(crate) fn get_field_slot_and_type(
 ) -> Result<(usize, Type), String> {
     match vole_type {
         Type::Class(class_type) => {
-            for sf in &class_type.fields {
-                if sf.name == field_name {
-                    // Apply type substitutions if we're in a monomorphized context
-                    let field_type = if let Some(subs) = ctx.type_substitutions {
-                        substitute_type(&sf.ty, subs)
+            let type_def = ctx
+                .analyzed
+                .entity_registry
+                .get_type(class_type.type_def_id);
+            let generic_info = type_def
+                .generic_info
+                .as_ref()
+                .ok_or_else(|| CodegenError::not_found("generic_info", "class").to_string())?;
+
+            // Build substitution map if there are type args
+            let substitutions: HashMap<_, _> = generic_info
+                .type_params
+                .iter()
+                .zip(class_type.type_args.iter())
+                .map(|(param, arg)| (param.name_id, arg.clone()))
+                .collect();
+
+            for (slot, field_sym) in generic_info.field_names.iter().enumerate() {
+                let name = ctx.interner.resolve(*field_sym);
+                if name == field_name {
+                    let base_type = &generic_info.field_types[slot];
+                    // Apply type substitutions from type args, then from monomorphization context
+                    let field_type = if !substitutions.is_empty() {
+                        substitute_type(base_type, &substitutions)
                     } else {
-                        sf.ty.clone()
+                        base_type.clone()
                     };
-                    return Ok((sf.slot, field_type));
+                    let field_type = if let Some(subs) = ctx.type_substitutions {
+                        substitute_type(&field_type, subs)
+                    } else {
+                        field_type
+                    };
+                    return Ok((slot, field_type));
                 }
             }
             Err(CodegenError::not_found("field", format!("{} in class", field_name)).into())
         }
         Type::Record(record_type) => {
-            for sf in &record_type.fields {
-                if sf.name == field_name {
-                    // Apply type substitutions if we're in a monomorphized context
-                    let field_type = if let Some(subs) = ctx.type_substitutions {
-                        substitute_type(&sf.ty, subs)
+            let type_def = ctx
+                .analyzed
+                .entity_registry
+                .get_type(record_type.type_def_id);
+            let generic_info = type_def
+                .generic_info
+                .as_ref()
+                .ok_or_else(|| CodegenError::not_found("generic_info", "record").to_string())?;
+
+            // Build substitution map if there are type args
+            let substitutions: HashMap<_, _> = generic_info
+                .type_params
+                .iter()
+                .zip(record_type.type_args.iter())
+                .map(|(param, arg)| (param.name_id, arg.clone()))
+                .collect();
+
+            for (slot, field_sym) in generic_info.field_names.iter().enumerate() {
+                let name = ctx.interner.resolve(*field_sym);
+                if name == field_name {
+                    let base_type = &generic_info.field_types[slot];
+                    // Apply type substitutions from type args, then from monomorphization context
+                    let field_type = if !substitutions.is_empty() {
+                        substitute_type(base_type, &substitutions)
                     } else {
-                        sf.ty.clone()
+                        base_type.clone()
                     };
-                    return Ok((sf.slot, field_type));
+                    let field_type = if let Some(subs) = ctx.type_substitutions {
+                        substitute_type(&field_type, subs)
+                    } else {
+                        field_type
+                    };
+                    return Ok((slot, field_type));
                 }
             }
             Err(CodegenError::not_found("field", format!("{} in record", field_name)).into())
@@ -93,10 +141,13 @@ pub(crate) fn get_field_slot_and_type(
 }
 
 /// Get the NameId for a class, record, interface, or generic instance type
-pub(crate) fn get_type_name_id(vole_type: &Type) -> Result<crate::identity::NameId, String> {
+pub(crate) fn get_type_name_id(
+    vole_type: &Type,
+    entity_registry: &crate::sema::entity_registry::EntityRegistry,
+) -> Result<crate::identity::NameId, String> {
     match vole_type {
-        Type::Class(class_type) => Ok(class_type.name_id),
-        Type::Record(record_type) => Ok(record_type.name_id),
+        Type::Class(class_type) => Ok(entity_registry.class_name_id(class_type)),
+        Type::Record(record_type) => Ok(entity_registry.record_name_id(record_type)),
         Type::Interface(interface_type) => Ok(interface_type.name_id),
         Type::GenericInstance { def, .. } => Ok(*def),
         _ => Err(CodegenError::type_mismatch(

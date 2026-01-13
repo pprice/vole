@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::identity::{ModuleId, NameId, NameTable};
+use crate::identity::{ModuleId, NameId, NameTable, TypeDefId};
 use crate::sema::Type;
 use crate::sema::implement_registry::PrimitiveTypeId;
 
@@ -81,6 +81,7 @@ enum TypeFingerprint {
 pub struct TypeTable {
     types: Vec<TypeInfo>,
     name_lookup: HashMap<NameId, TypeKey>,
+    type_def_lookup: HashMap<TypeDefId, TypeKey>,
     fingerprint_lookup: HashMap<TypeFingerprint, TypeKey>,
     primitive_names: HashMap<PrimitiveTypeId, NameId>,
     array_name: Option<NameId>,
@@ -91,6 +92,7 @@ impl TypeTable {
         Self {
             types: Vec::new(),
             name_lookup: HashMap::new(),
+            type_def_lookup: HashMap::new(),
             fingerprint_lookup: HashMap::new(),
             primitive_names: HashMap::new(),
             array_name: None,
@@ -165,9 +167,13 @@ impl TypeTable {
         }
     }
 
-    pub fn display_type(&mut self, ty: &Type, names: &mut NameTable) -> String {
-        let _ = self.key_for_type(ty);
-        self.display_type_inner(ty, names)
+    pub fn display_type(
+        &self,
+        ty: &Type,
+        names: &NameTable,
+        entity_registry: &crate::sema::entity_registry::EntityRegistry,
+    ) -> String {
+        self.display_type_inner(ty, names, entity_registry)
     }
 
     pub fn key_for_type(&mut self, ty: &Type) -> TypeKey {
@@ -221,14 +227,8 @@ impl TypeTable {
                     ty.clone(),
                 )
             }
-            Type::Class(class_type) => {
-                let name_id = class_type.name_id;
-                self.intern_named(ty.clone(), name_id)
-            }
-            Type::Record(record_type) => {
-                let name_id = record_type.name_id;
-                self.intern_named(ty.clone(), name_id)
-            }
+            Type::Class(class_type) => self.intern_type_def(ty.clone(), class_type.type_def_id),
+            Type::Record(record_type) => self.intern_type_def(ty.clone(), record_type.type_def_id),
             Type::Interface(interface_type) => {
                 let name_id = interface_type.name_id;
                 if interface_type.type_args.is_empty() {
@@ -324,6 +324,15 @@ impl TypeTable {
         self.insert_named(ty, name_id)
     }
 
+    fn intern_type_def(&mut self, ty: Type, type_def_id: TypeDefId) -> TypeKey {
+        if let Some(key) = self.type_def_lookup.get(&type_def_id) {
+            return *key;
+        }
+        let key = self.insert_anonymous(ty);
+        self.type_def_lookup.insert(type_def_id, key);
+        key
+    }
+
     fn intern_fingerprint(&mut self, fingerprint: TypeFingerprint, ty: Type) -> TypeKey {
         if let Some(key) = self.fingerprint_lookup.get(&fingerprint) {
             return *key;
@@ -346,52 +355,62 @@ impl TypeTable {
         }
     }
 
-    fn display_type_inner(&self, ty: &Type, names: &NameTable) -> String {
+    fn display_type_inner(
+        &self,
+        ty: &Type,
+        names: &NameTable,
+        entity_registry: &crate::sema::entity_registry::EntityRegistry,
+    ) -> String {
         match ty {
             Type::Function(ft) => {
                 let params = ft
                     .params
                     .iter()
-                    .map(|param| self.display_type_inner(param, names))
+                    .map(|param| self.display_type_inner(param, names, entity_registry))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!(
                     "({}) -> {}",
                     params,
-                    self.display_type_inner(&ft.return_type, names)
+                    self.display_type_inner(&ft.return_type, names, entity_registry)
                 )
             }
             Type::Union(variants) => variants
                 .iter()
-                .map(|variant| self.display_type_inner(variant, names))
+                .map(|variant| self.display_type_inner(variant, names, entity_registry))
                 .collect::<Vec<_>>()
                 .join(" | "),
             Type::Array(elem) => {
-                format!("[{}]", self.display_type_inner(elem, names))
+                format!(
+                    "[{}]",
+                    self.display_type_inner(elem, names, entity_registry)
+                )
             }
             Type::Class(class_type) => {
-                let base = names.display(class_type.name_id);
+                let type_def = entity_registry.get_type(class_type.type_def_id);
+                let base = names.display(type_def.name_id);
                 if class_type.type_args.is_empty() {
                     base
                 } else {
                     let arg_list = class_type
                         .type_args
                         .iter()
-                        .map(|arg| self.display_type_inner(arg, names))
+                        .map(|arg| self.display_type_inner(arg, names, entity_registry))
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!("{}<{}>", base, arg_list)
                 }
             }
             Type::Record(record_type) => {
-                let base = names.display(record_type.name_id);
+                let type_def = entity_registry.get_type(record_type.type_def_id);
+                let base = names.display(type_def.name_id);
                 if record_type.type_args.is_empty() {
                     base
                 } else {
                     let arg_list = record_type
                         .type_args
                         .iter()
-                        .map(|arg| self.display_type_inner(arg, names))
+                        .map(|arg| self.display_type_inner(arg, names, entity_registry))
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!("{}<{}>", base, arg_list)
@@ -405,7 +424,7 @@ impl TypeTable {
                     let arg_list = interface_type
                         .type_args
                         .iter()
-                        .map(|arg| self.display_type_inner(arg, names))
+                        .map(|arg| self.display_type_inner(arg, names, entity_registry))
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!("{}<{}>", base, arg_list)
@@ -414,8 +433,8 @@ impl TypeTable {
             Type::ErrorType(error_type) => names.display(error_type.name_id),
             Type::Fallible(ft) => format!(
                 "fallible({}, {})",
-                self.display_type_inner(&ft.success_type, names),
-                self.display_type_inner(&ft.error_type, names)
+                self.display_type_inner(&ft.success_type, names, entity_registry),
+                self.display_type_inner(&ft.error_type, names, entity_registry)
             ),
             Type::Module(module_type) => {
                 format!("module(\"{}\")", names.module_path(module_type.module_id))
@@ -429,7 +448,7 @@ impl TypeTable {
                 let def_name = names.display(*def);
                 let arg_list = args
                     .iter()
-                    .map(|arg| self.display_type_inner(arg, names))
+                    .map(|arg| self.display_type_inner(arg, names, entity_registry))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{}<{}>", def_name, arg_list)
@@ -437,7 +456,7 @@ impl TypeTable {
             Type::Tuple(elements) => {
                 let elem_list = elements
                     .iter()
-                    .map(|elem| self.display_type_inner(elem, names))
+                    .map(|elem| self.display_type_inner(elem, names, entity_registry))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("[{}]", elem_list)
@@ -457,6 +476,8 @@ impl Default for TypeTable {
 mod tests {
     use super::*;
     use crate::frontend::Interner;
+    use crate::sema::entity_defs::TypeDefKind;
+    use crate::sema::entity_registry::EntityRegistry;
 
     #[test]
     fn type_table_uses_name_when_available() {
@@ -464,13 +485,17 @@ mod tests {
         let foo = interner.intern("Foo");
 
         let mut names = NameTable::new();
-        let name_id = names.intern(names.main_module(), &[foo], &interner);
+        let main_module = names.main_module();
+        let name_id = names.intern(main_module, &[foo], &interner);
+
+        // Create EntityRegistry and register a class type to get TypeDefId
+        let mut entity_registry = EntityRegistry::new();
+        let type_def_id = entity_registry.register_type(name_id, TypeDefKind::Class, main_module);
 
         let mut types = TypeTable::new();
         let key = types.insert_named(
             Type::Class(crate::sema::ClassType {
-                name_id,
-                fields: vec![],
+                type_def_id,
                 type_args: vec![],
             }),
             name_id,

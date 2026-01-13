@@ -160,15 +160,36 @@ impl Analyzer {
         expected_type: &Type,
         interner: &Interner,
     ) -> bool {
-        match ty {
-            Type::Record(r) => r.fields.iter().any(|f| {
-                f.name == field_name && self.types_compatible(&f.ty, expected_type, interner)
-            }),
-            Type::Class(c) => c.fields.iter().any(|f| {
-                f.name == field_name && self.types_compatible(&f.ty, expected_type, interner)
-            }),
-            _ => false,
+        let (type_def_id, type_args) = match ty {
+            Type::Record(r) => (r.type_def_id, &r.type_args),
+            Type::Class(c) => (c.type_def_id, &c.type_args),
+            _ => return false,
+        };
+
+        let type_def = self.entity_registry.get_type(type_def_id);
+        let Some(ref generic_info) = type_def.generic_info else {
+            return false;
+        };
+
+        // Build type substitutions
+        let substitutions: StdHashMap<_, _> = generic_info
+            .type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(tp, arg)| (tp.name_id, arg.clone()))
+            .collect();
+
+        // Find field and check type compatibility
+        for (i, name) in generic_info.field_names.iter().enumerate() {
+            if interner.resolve(*name) == field_name {
+                let field_ty = crate::sema::generic::substitute_type(
+                    &generic_info.field_types[i],
+                    &substitutions,
+                );
+                return self.types_compatible(&field_ty, expected_type, interner);
+            }
         }
+        false
     }
 
     /// Check if a type has a method matching the given name and signature
@@ -181,14 +202,15 @@ impl Analyzer {
     ) -> bool {
         // Get type name_id for method lookup
         let type_name_id = match ty {
-            Type::Record(r) => Some(r.name_id),
-            Type::Class(c) => Some(c.name_id),
+            Type::Record(r) => Some(self.entity_registry.record_name_id(r)),
+            Type::Class(c) => Some(self.entity_registry.class_name_id(c)),
             _ => None,
         };
 
         // For primitives/arrays, check implement registry
         if type_name_id.is_none() {
-            if let Some(type_id) = TypeId::from_type(ty, &self.entity_registry.type_table)
+            if let Some(type_id) =
+                TypeId::from_type(ty, &self.entity_registry.type_table, &self.entity_registry)
                 && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             {
                 return self
@@ -215,7 +237,8 @@ impl Analyzer {
         }
 
         // Check implement registry
-        if let Some(type_id) = TypeId::from_type(ty, &self.entity_registry.type_table)
+        if let Some(type_id) =
+            TypeId::from_type(ty, &self.entity_registry.type_table, &self.entity_registry)
             && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             && self
                 .implement_registry
@@ -319,11 +342,11 @@ impl Analyzer {
             match type_def.kind {
                 TypeDefKind::Class => self
                     .entity_registry
-                    .build_class_type(type_id, &self.name_table)
+                    .build_class_type(type_id)
                     .map(Type::Class),
                 TypeDefKind::Record => self
                     .entity_registry
-                    .build_record_type(type_id, &self.name_table)
+                    .build_record_type(type_id)
                     .map(Type::Record),
                 _ => None,
             }
@@ -630,11 +653,11 @@ impl Analyzer {
                 .unwrap_or_default();
 
             if !self.type_has_field_with_type(ty, &field_name_str, &field.ty, interner) {
-                let type_str = self
-                    .entity_registry
-                    .type_table
-                    .clone()
-                    .display_type(&field.ty, &mut self.name_table.clone());
+                let type_str = self.entity_registry.type_table.display_type(
+                    &field.ty,
+                    &self.name_table,
+                    &self.entity_registry,
+                );
                 mismatches.push(format!(
                     "missing field '{}' of type '{}'",
                     field_name_str, type_str
@@ -660,18 +683,19 @@ impl Analyzer {
                     .params
                     .iter()
                     .map(|p| {
-                        self.entity_registry
-                            .type_table
-                            .clone()
-                            .display_type(p, &mut self.name_table.clone())
+                        self.entity_registry.type_table.display_type(
+                            p,
+                            &self.name_table,
+                            &self.entity_registry,
+                        )
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                let ret_str = self
-                    .entity_registry
-                    .type_table
-                    .clone()
-                    .display_type(&method.return_type, &mut self.name_table.clone());
+                let ret_str = self.entity_registry.type_table.display_type(
+                    &method.return_type,
+                    &self.name_table,
+                    &self.entity_registry,
+                );
                 mismatches.push(format!(
                     "missing method '{}({}) -> {}'",
                     method_name_str, params_str, ret_str
@@ -694,15 +718,36 @@ impl Analyzer {
         expected_type: &Type,
         interner: &Interner,
     ) -> bool {
-        match ty {
-            Type::Record(r) => r.fields.iter().any(|f| {
-                f.name == field_name && self.types_compatible(&f.ty, expected_type, interner)
-            }),
-            Type::Class(c) => c.fields.iter().any(|f| {
-                f.name == field_name && self.types_compatible(&f.ty, expected_type, interner)
-            }),
-            _ => false,
+        let (type_def_id, type_args) = match ty {
+            Type::Record(r) => (r.type_def_id, &r.type_args),
+            Type::Class(c) => (c.type_def_id, &c.type_args),
+            _ => return false,
+        };
+
+        let type_def = self.entity_registry.get_type(type_def_id);
+        let Some(ref generic_info) = type_def.generic_info else {
+            return false;
+        };
+
+        // Build type substitutions
+        let substitutions: HashMap<_, _> = generic_info
+            .type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(tp, arg)| (tp.name_id, arg.clone()))
+            .collect();
+
+        // Find field and check type compatibility
+        for (i, name) in generic_info.field_names.iter().enumerate() {
+            if interner.resolve(*name) == field_name {
+                let field_ty = crate::sema::generic::substitute_type(
+                    &generic_info.field_types[i],
+                    &substitutions,
+                );
+                return self.types_compatible(&field_ty, expected_type, interner);
+            }
         }
+        false
     }
 
     /// Check if a type has a method with compatible signature for structural constraints
@@ -717,14 +762,15 @@ impl Analyzer {
     ) -> bool {
         // Get type name_id for method lookup
         let type_name_id = match ty {
-            Type::Record(r) => Some(r.name_id),
-            Type::Class(c) => Some(c.name_id),
+            Type::Record(r) => Some(self.entity_registry.record_name_id(r)),
+            Type::Class(c) => Some(self.entity_registry.class_name_id(c)),
             _ => None,
         };
 
         // For primitives/arrays, check implement registry
         if type_name_id.is_none() {
-            if let Some(type_id) = TypeId::from_type(ty, &self.entity_registry.type_table)
+            if let Some(type_id) =
+                TypeId::from_type(ty, &self.entity_registry.type_table, &self.entity_registry)
                 && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
                 && let Some(method_impl) = self.implement_registry.get_method(&type_id, method_id)
             {
@@ -759,7 +805,8 @@ impl Analyzer {
         }
 
         // Check implement registry
-        if let Some(type_id) = TypeId::from_type(ty, &self.entity_registry.type_table)
+        if let Some(type_id) =
+            TypeId::from_type(ty, &self.entity_registry.type_table, &self.entity_registry)
             && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             && let Some(method_impl) = self.implement_registry.get_method(&type_id, method_id)
         {

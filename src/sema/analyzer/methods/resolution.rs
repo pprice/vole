@@ -137,19 +137,22 @@ impl Analyzer {
     fn build_interface_substitutions(&self, object_type: &Type) -> HashMap<NameId, Type> {
         let mut substitutions = HashMap::new();
 
-        // Extract type_args from the object type
-        let (name_id, type_args) = match object_type {
-            Type::Interface(iface) => (Some(iface.name_id), iface.type_args.as_slice()),
-            Type::GenericInstance { def, args } => (Some(*def), args.as_slice()),
-            Type::Record(r) => (Some(r.name_id), r.type_args.as_slice()),
-            Type::Class(c) => (Some(c.name_id), c.type_args.as_slice()),
+        // Extract type_def_id and type_args from the object type
+        let (type_def_id, type_args) = match object_type {
+            Type::Interface(iface) => (
+                self.entity_registry.type_by_name(iface.name_id),
+                iface.type_args.as_slice(),
+            ),
+            Type::GenericInstance { def, args } => {
+                (self.entity_registry.type_by_name(*def), args.as_slice())
+            }
+            Type::Record(r) => (Some(r.type_def_id), r.type_args.as_slice()),
+            Type::Class(c) => (Some(c.type_def_id), c.type_args.as_slice()),
             _ => (None, &[] as &[Type]),
         };
 
         // Build substitutions from interface's type params to type args
-        if let Some(name_id) = name_id
-            && let Some(type_def_id) = self.entity_registry.type_by_name(name_id)
-        {
+        if let Some(type_def_id) = type_def_id {
             let type_def = self.entity_registry.get_type(type_def_id);
             for (param_name_id, arg) in type_def.type_params.iter().zip(type_args.iter()) {
                 substitutions.insert(*param_name_id, arg.clone());
@@ -182,22 +185,20 @@ impl Analyzer {
 
     /// Get TypeDefId for a Type if it's registered in EntityRegistry
     fn get_type_def_id_for_type(&self, ty: &Type) -> Option<TypeDefId> {
-        let name_id = match ty {
-            Type::Class(c) => Some(c.name_id),
-            Type::Record(r) => Some(r.name_id),
-            Type::Interface(i) => Some(i.name_id),
-            Type::GenericInstance { def, .. } => Some(*def),
+        match ty {
+            Type::Class(c) => Some(c.type_def_id),
+            Type::Record(r) => Some(r.type_def_id),
+            Type::Interface(i) => self.entity_registry.type_by_name(i.name_id),
+            Type::GenericInstance { def, .. } => self.entity_registry.type_by_name(*def),
             _ => None,
-        }?;
-
-        self.entity_registry.type_by_name(name_id)
+        }
     }
 
     /// Get the name_id for a type
     fn get_type_name_id(&self, ty: &Type) -> Option<NameId> {
         match ty {
-            Type::Class(class_type) => Some(class_type.name_id),
-            Type::Record(record_type) => Some(record_type.name_id),
+            Type::Class(c) => Some(self.entity_registry.get_type(c.type_def_id).name_id),
+            Type::Record(r) => Some(self.entity_registry.get_type(r.type_def_id).name_id),
             Type::Interface(interface_type) => Some(interface_type.name_id),
             Type::GenericInstance { def, .. } => Some(*def),
             _ => None,
@@ -340,8 +341,8 @@ impl Analyzer {
         let method_name_id = self.method_name_id(method_name, interner);
         // Try EntityRegistry first for method bindings
         let type_def_id = match object_type {
-            Type::Class(c) => self.entity_registry.type_by_name(c.name_id),
-            Type::Record(r) => self.entity_registry.type_by_name(r.name_id),
+            Type::Class(c) => Some(c.type_def_id),
+            Type::Record(r) => Some(r.type_def_id),
             Type::I8 => self
                 .entity_registry
                 .type_by_name(self.name_table.primitives.i8),
@@ -401,8 +402,11 @@ impl Analyzer {
             });
         }
         // Fall back to old implement_registry for backward compatibility
-        if let Some(type_id) = TypeId::from_type(object_type, &self.entity_registry.type_table)
-            && let Some(impl_) = self.implement_registry.get_method(&type_id, method_name_id)
+        if let Some(type_id) = TypeId::from_type(
+            object_type,
+            &self.entity_registry.type_table,
+            &self.entity_registry,
+        ) && let Some(impl_) = self.implement_registry.get_method(&type_id, method_name_id)
         {
             return Some(ResolvedMethod::Implemented {
                 trait_name: impl_.trait_name,
@@ -499,10 +503,10 @@ impl Analyzer {
         }
 
         // 3. Direct methods on class/record via EntityRegistry
-        let (type_name_id, record_type_args) = match object_type {
-            Type::Class(c) => (Some(c.name_id), None),
+        let (type_def_id_opt, record_type_args) = match object_type {
+            Type::Class(c) => (Some(c.type_def_id), None),
             Type::Record(r) => (
-                Some(r.name_id),
+                Some(r.type_def_id),
                 if r.type_args.is_empty() {
                     None
                 } else {
@@ -511,9 +515,7 @@ impl Analyzer {
             ),
             _ => (None, None),
         };
-        if let Some(type_name_id) = type_name_id
-            && let Some(type_def_id) = self.entity_registry.type_by_name(type_name_id)
-        {
+        if let Some(type_def_id) = type_def_id_opt {
             let method_name_id = self.method_name_id(method_name, interner);
             // Look up method via EntityRegistry
             if let Some(method_id) = self
@@ -554,21 +556,14 @@ impl Analyzer {
 
         // 4. Default methods from implemented interfaces
         // Get type_def_id from the object type (reusing earlier logic or via name_id)
-        let (type_sym, type_name_id) = match object_type {
-            Type::Class(class_type) => (
-                self.get_type_symbol_by_name_id(class_type.name_id, interner),
-                Some(class_type.name_id),
-            ),
-            Type::Record(record_type) => (
-                self.get_type_symbol_by_name_id(record_type.name_id, interner),
-                Some(record_type.name_id),
-            ),
-            _ => (None, None),
+        let type_def_id_opt = match object_type {
+            Type::Class(c) => Some(c.type_def_id),
+            Type::Record(r) => Some(r.type_def_id),
+            _ => None,
         };
-        if let Some(type_sym) = type_sym
-            && let Some(type_name_id) = type_name_id
-            && let Some(type_def_id) = self.entity_registry.type_by_name(type_name_id)
-        {
+        if let Some(type_def_id) = type_def_id_opt {
+            let type_name_id = self.entity_registry.get_type(type_def_id).name_id;
+            let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner);
             let method_name_str = interner.resolve(method_name);
             // Use EntityRegistry's implemented interfaces
             for interface_id in self.entity_registry.get_implemented_interfaces(type_def_id) {
@@ -588,7 +583,7 @@ impl Analyzer {
                             .unwrap_or(Symbol(0));
                         return Some(ResolvedMethod::DefaultMethod {
                             interface_name,
-                            type_name: type_sym,
+                            type_name: type_sym?, // Extract from Option
                             method_name,
                             func_type: method.signature.clone(),
                             external_info: method.external_binding.clone(),

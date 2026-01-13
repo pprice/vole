@@ -18,7 +18,7 @@ use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
     ClassMethodMonomorphInstance, MonomorphInstance, StaticMethodMonomorphInstance, substitute_type,
 };
-use crate::sema::types::{ClassType, RecordType, StructField};
+use crate::sema::types::{ClassType, RecordType};
 
 impl Compiler<'_> {
     fn main_function_key_and_name(&mut self, sym: Symbol) -> (FunctionKey, String) {
@@ -1392,22 +1392,6 @@ impl Compiler<'_> {
                         field_types = ?generic_info.field_types,
                         "using generic_info"
                     );
-                    // Build struct fields from generic_info
-                    let fields: Vec<StructField> = generic_info
-                        .field_names
-                        .iter()
-                        .zip(generic_info.field_types.iter())
-                        .enumerate()
-                        .map(|(slot, (field_sym, field_type))| {
-                            let field_name = self.analyzed.interner.resolve(*field_sym).to_string();
-                            let substituted_type = substitute_type(field_type, substitutions);
-                            StructField {
-                                name: field_name,
-                                ty: substituted_type,
-                                slot,
-                            }
-                        })
-                        .collect();
 
                     // Build type_args from substituted type params
                     let type_args: Vec<Type> = generic_info
@@ -1424,20 +1408,17 @@ impl Compiler<'_> {
                     // Determine if it's a class or record based on TypeDefKind
                     return match &type_def.kind {
                         TypeDefKind::Record => Type::Record(RecordType {
-                            name_id,
-                            fields,
+                            type_def_id,
                             type_args,
                         }),
                         TypeDefKind::Class => Type::Class(ClassType {
-                            name_id,
-                            fields,
+                            type_def_id,
                             type_args,
                         }),
                         _ => {
                             // Fallback for other kinds
                             Type::Record(RecordType {
-                                name_id,
-                                fields,
+                                type_def_id,
                                 type_args,
                             })
                         }

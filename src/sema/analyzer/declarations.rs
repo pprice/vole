@@ -239,6 +239,24 @@ impl Analyzer {
                 .type_by_name(name_id)
                 .expect("class shell registered in register_all_type_shells");
 
+            // Collect field info for generic_info (needed for struct literal checking)
+            let field_names: Vec<Symbol> = class.fields.iter().map(|f| f.name).collect();
+            let field_types: Vec<Type> = class
+                .fields
+                .iter()
+                .map(|f| self.resolve_type(&f.ty, interner))
+                .collect();
+
+            // Set generic_info (with empty type_params for non-generic classes)
+            self.entity_registry.set_generic_info(
+                entity_type_id,
+                GenericTypeInfo {
+                    type_params: vec![],
+                    field_names,
+                    field_types: field_types.clone(),
+                },
+            );
+
             // Register fields in EntityRegistry
             let builtin_module = self.name_table.builtin_module();
             for (i, field) in class.fields.iter().enumerate() {
@@ -250,20 +268,17 @@ impl Analyzer {
                     self.current_module,
                     &[interner.resolve(class.name), field_name_str],
                 );
-                let field_ty = self.resolve_type(&field.ty, interner);
                 self.entity_registry.register_field(
                     entity_type_id,
                     field_name_id,
                     full_field_name_id,
-                    field_ty,
+                    field_types[i].clone(),
                     i,
                 );
             }
 
             // Register in type_table for type resolution
-            let class_type = self
-                .entity_registry
-                .build_class_type(entity_type_id, &self.name_table);
+            let class_type = self.entity_registry.build_class_type(entity_type_id);
             if let Some(ref ct) = class_type {
                 self.register_named_type(class.name, Type::Class(ct.clone()), interner);
             }
@@ -507,9 +522,7 @@ impl Analyzer {
             }
 
             // Build and register class type with TypeParam placeholders
-            let class_type = self
-                .entity_registry
-                .build_class_type(entity_type_id, &self.name_table);
+            let class_type = self.entity_registry.build_class_type(entity_type_id);
             if let Some(ref ct) = class_type {
                 self.register_named_type(class.name, Type::Class(ct.clone()), interner);
             }
@@ -763,6 +776,24 @@ impl Analyzer {
                 .type_by_name(name_id)
                 .expect("record shell registered in register_all_type_shells");
 
+            // Collect field info for generic_info (needed for struct literal checking)
+            let field_names: Vec<Symbol> = record.fields.iter().map(|f| f.name).collect();
+            let field_types: Vec<Type> = record
+                .fields
+                .iter()
+                .map(|f| self.resolve_type(&f.ty, interner))
+                .collect();
+
+            // Set generic_info (with empty type_params for non-generic records)
+            self.entity_registry.set_generic_info(
+                entity_type_id,
+                GenericTypeInfo {
+                    type_params: vec![],
+                    field_names,
+                    field_types: field_types.clone(),
+                },
+            );
+
             // Register fields in EntityRegistry
             let builtin_module = self.name_table.builtin_module();
             for (i, field) in record.fields.iter().enumerate() {
@@ -774,20 +805,17 @@ impl Analyzer {
                     self.current_module,
                     &[interner.resolve(record.name), field_name_str],
                 );
-                let field_ty = self.resolve_type(&field.ty, interner);
                 self.entity_registry.register_field(
                     entity_type_id,
                     field_name_id,
                     full_field_name_id,
-                    field_ty,
+                    field_types[i].clone(),
                     i,
                 );
             }
 
             // Register in type_table for type resolution
-            let record_type = self
-                .entity_registry
-                .build_record_type(entity_type_id, &self.name_table);
+            let record_type = self.entity_registry.build_record_type(entity_type_id);
             if let Some(ref rt) = record_type {
                 self.register_named_type(record.name, Type::Record(rt.clone()), interner);
             }
@@ -941,7 +969,7 @@ impl Analyzer {
 
             // Also register in regular records with TypeParam placeholders
             // This allows struct literal checking to find the record definition
-            let fields: Vec<StructField> = record
+            let _fields: Vec<StructField> = record
                 .fields
                 .iter()
                 .enumerate()
@@ -960,9 +988,14 @@ impl Analyzer {
                     }
                 })
                 .collect();
+            // Lookup shell registered in pass 0.5
+            let entity_type_id = self
+                .entity_registry
+                .type_by_name(name_id)
+                .expect("record shell registered in register_all_type_shells");
+
             let record_type = RecordType {
-                name_id,
-                fields,
+                type_def_id: entity_type_id,
                 type_args: vec![], // Generic record base has no type args yet
             };
             self.register_named_type(record.name, Type::Record(record_type.clone()), interner);
@@ -970,11 +1003,6 @@ impl Analyzer {
             // Register methods in EntityRegistry (with type params in scope)
             // Note: The signature stored has type params as placeholders
             let builtin_module = self.name_table.builtin_module();
-            // Lookup shell registered in pass 0.5
-            let entity_type_id = self
-                .entity_registry
-                .type_by_name(name_id)
-                .expect("record shell registered in register_all_type_shells");
 
             // Register and validate implements list (for generic records)
             self.validate_and_register_implements(
@@ -1599,11 +1627,15 @@ impl Analyzer {
             );
         }
 
-        if let Some(type_id) = TypeId::from_type(&target_type, &self.entity_registry.type_table) {
+        if let Some(type_id) = TypeId::from_type(
+            &target_type,
+            &self.entity_registry.type_table,
+            &self.entity_registry,
+        ) {
             // Get TypeDefId for the target type (for EntityRegistry updates)
             let entity_type_id = match &target_type {
-                Type::Record(r) => self.entity_registry.type_by_name(r.name_id),
-                Type::Class(c) => self.entity_registry.type_by_name(c.name_id),
+                Type::Record(r) => Some(r.type_def_id),
+                Type::Class(c) => Some(c.type_def_id),
                 Type::I8 => self
                     .entity_registry
                     .type_by_name(self.name_table.primitives.i8),
@@ -1709,8 +1741,8 @@ impl Analyzer {
             if let Some(ref statics_block) = impl_block.statics {
                 // Get entity type id for registering static methods
                 let entity_type_id = match &target_type {
-                    Type::Record(r) => self.entity_registry.type_by_name(r.name_id),
-                    Type::Class(c) => self.entity_registry.type_by_name(c.name_id),
+                    Type::Record(r) => Some(r.type_def_id),
+                    Type::Class(c) => Some(c.type_def_id),
                     // Handle primitives - look up via name table primitives
                     Type::I8 => self
                         .entity_registry

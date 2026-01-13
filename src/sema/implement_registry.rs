@@ -57,7 +57,11 @@ impl TypeId {
     }
 
     /// Convert a Type to a TypeId for registry lookup
-    pub fn from_type(ty: &Type, types: &TypeTable) -> Option<Self> {
+    pub fn from_type(
+        ty: &Type,
+        types: &TypeTable,
+        entity_registry: &crate::sema::entity_registry::EntityRegistry,
+    ) -> Option<Self> {
         match ty {
             Type::I8 => types.primitive_name_id(PrimitiveTypeId::I8).map(TypeId),
             Type::I16 => types.primitive_name_id(PrimitiveTypeId::I16).map(TypeId),
@@ -74,8 +78,8 @@ impl TypeId {
             Type::String => types.primitive_name_id(PrimitiveTypeId::String).map(TypeId),
             Type::Range => types.primitive_name_id(PrimitiveTypeId::Range).map(TypeId),
             Type::Array(_) => types.array_name_id().map(TypeId),
-            Type::Class(c) => Some(TypeId(c.name_id)),
-            Type::Record(r) => Some(TypeId(r.name_id)),
+            Type::Class(c) => Some(TypeId(entity_registry.class_name_id(c))),
+            Type::Record(r) => Some(TypeId(entity_registry.record_name_id(r))),
             _ => None,
         }
     }
@@ -239,6 +243,7 @@ mod tests {
     fn type_id_from_type() {
         let mut names = crate::identity::NameTable::new();
         let mut types = TypeTable::new();
+        let entity_registry = crate::sema::entity_registry::EntityRegistry::new();
         // Use pre-registered primitives from NameTable
         let i64_name = names.primitives.i64;
         let builtin = names.builtin_module();
@@ -247,14 +252,17 @@ mod tests {
         types.register_array_name(array_name);
 
         assert_eq!(
-            TypeId::from_type(&Type::I64, &types),
+            TypeId::from_type(&Type::I64, &types, &entity_registry),
             Some(TypeId(i64_name))
         );
         assert_eq!(
-            TypeId::from_type(&Type::Array(Box::new(Type::I32)), &types),
+            TypeId::from_type(&Type::Array(Box::new(Type::I32)), &types, &entity_registry),
             Some(TypeId(array_name))
         );
-        assert_eq!(TypeId::from_type(&Type::Void, &types), None);
+        assert_eq!(
+            TypeId::from_type(&Type::Void, &types, &entity_registry),
+            None
+        );
     }
 
     #[test]

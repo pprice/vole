@@ -603,12 +603,22 @@ impl Analyzer {
         init_span: Span,
         interner: &Interner,
     ) {
-        // Get the record fields from the type
-        let record_fields = match init_type {
-            Type::Record(record_type) => &record_type.fields,
-            Type::Class(class_type) => &class_type.fields,
+        // Get type_def_id from the type
+        let type_def_id = match init_type {
+            Type::Record(record_type) => record_type.type_def_id,
+            Type::Class(class_type) => class_type.type_def_id,
             _ => {
                 self.type_error("record or class", init_type, init_span);
+                return;
+            }
+        };
+
+        // Look up fields from entity_registry - clone to avoid borrow conflicts
+        let type_def = self.entity_registry.get_type(type_def_id);
+        let generic_info = match &type_def.generic_info {
+            Some(gi) => gi.clone(),
+            None => {
+                self.type_error("record or class with fields", init_type, init_span);
                 return;
             }
         };
@@ -617,13 +627,20 @@ impl Analyzer {
         for field_pattern in fields {
             let field_name_str = interner.resolve(field_pattern.field_name);
 
-            // Find the field in the record
-            if let Some(field) = record_fields.iter().find(|f| f.name == field_name_str) {
+            // Find the field by name in generic_info
+            let found = generic_info
+                .field_names
+                .iter()
+                .enumerate()
+                .find(|(_, sym)| interner.resolve(**sym) == field_name_str);
+
+            if let Some((slot, _)) = found {
+                let field_type = generic_info.field_types[slot].clone();
                 // Bind the field to the binding name
                 self.scope.define(
                     field_pattern.binding,
                     Variable {
-                        ty: field.ty.clone(),
+                        ty: field_type,
                         mutable,
                     },
                 );

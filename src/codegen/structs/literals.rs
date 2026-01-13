@@ -63,16 +63,32 @@ impl Cg<'_, '_, '_> {
 
         // Get field types for wrapping optional values
         let field_types: HashMap<String, Type> = match &vole_type {
-            Type::Record(rt) => rt
-                .fields
-                .iter()
-                .map(|f| (f.name.clone(), f.ty.clone()))
-                .collect(),
-            Type::Class(ct) => ct
-                .fields
-                .iter()
-                .map(|f| (f.name.clone(), f.ty.clone()))
-                .collect(),
+            Type::Record(rt) => {
+                let type_def = self.ctx.analyzed.entity_registry.get_type(rt.type_def_id);
+                if let Some(generic_info) = &type_def.generic_info {
+                    generic_info
+                        .field_names
+                        .iter()
+                        .zip(generic_info.field_types.iter())
+                        .map(|(sym, ty)| (self.ctx.interner.resolve(*sym).to_string(), ty.clone()))
+                        .collect()
+                } else {
+                    HashMap::new()
+                }
+            }
+            Type::Class(ct) => {
+                let type_def = self.ctx.analyzed.entity_registry.get_type(ct.type_def_id);
+                if let Some(generic_info) = &type_def.generic_info {
+                    generic_info
+                        .field_names
+                        .iter()
+                        .zip(generic_info.field_types.iter())
+                        .map(|(sym, ty)| (self.ctx.interner.resolve(*sym).to_string(), ty.clone()))
+                        .collect()
+                } else {
+                    HashMap::new()
+                }
+            }
             _ => HashMap::new(),
         };
 

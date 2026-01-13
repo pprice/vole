@@ -1,0 +1,82 @@
+// Test forward references - types referencing other types before full processing
+
+// Forward reference: Parent references Child before Child is fully defined
+class Parent {
+    child: Child,
+
+    func getChildValue() -> i32 {
+        return self.child.value
+    }
+}
+
+class Child {
+    value: i32
+}
+
+// Cross-reference: A and B reference each other
+class NodeA {
+    next: NodeB?,
+    data: i32
+}
+
+class NodeB {
+    prev: NodeA?,
+    data: string
+}
+
+// Generic forward reference
+class Container<T> {
+    item: Wrapper<T>,
+
+    func getWrapped() -> T {
+        return self.item.inner
+    }
+}
+
+class Wrapper<T> {
+    inner: T
+}
+
+// Record forward reference
+record Config {
+    settings: Settings
+}
+
+record Settings {
+    name: string,
+    value: i32
+}
+
+tests {
+    test "forward reference field access" {
+        let child = Child { value: 42 }
+        let parent = Parent { child: child }
+        assert(parent.getChildValue() == 42)
+    }
+
+    test "cross-reference types" {
+        let a = NodeA { next: nil, data: 100 }
+        let b = NodeB { prev: a, data: "hello" }
+        assert(b.prev?.data == 100)
+    }
+
+    test "generic forward reference" {
+        let wrapper = Wrapper<i32> { inner: 123 }
+        let container = Container<i32> { item: wrapper }
+        assert(container.getWrapped() == 123)
+    }
+
+    test "record forward reference" {
+        let settings = Settings { name: "test", value: 99 }
+        let config = Config { settings: settings }
+        assert(config.settings.name == "test")
+        assert(config.settings.value == 99)
+    }
+
+    test "method chaining through forward ref" {
+        let child = Child { value: 7 }
+        let parent = Parent { child: child }
+        // Access through field and then method
+        assert(parent.child.value == 7)
+    }
+}

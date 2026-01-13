@@ -684,73 +684,54 @@ impl EntityRegistry {
     }
 
     /// Build a ClassType from a TypeDefId (for types registered as Class)
-    pub fn build_class_type(
-        &self,
-        type_id: TypeDefId,
-        name_table: &crate::identity::NameTable,
-    ) -> Option<crate::sema::ClassType> {
-        use crate::sema::{ClassType, StructField};
+    pub fn build_class_type(&self, type_id: TypeDefId) -> Option<crate::sema::ClassType> {
+        use crate::sema::ClassType;
 
         let type_def = self.get_type(type_id);
         if type_def.kind != TypeDefKind::Class {
             return None;
         }
 
-        let fields: Vec<StructField> = type_def
-            .fields
-            .iter()
-            .map(|&field_id| {
-                let field = self.get_field(field_id);
-                StructField {
-                    name: name_table
-                        .last_segment_str(field.name_id)
-                        .unwrap_or_else(|| "?".to_string()),
-                    ty: field.ty.clone(),
-                    slot: field.slot,
-                }
-            })
-            .collect();
-
         Some(ClassType {
-            name_id: type_def.name_id,
-            fields,
+            type_def_id: type_id,
             type_args: vec![],
         })
     }
 
     /// Build a RecordType from a TypeDefId (for types registered as Record)
-    pub fn build_record_type(
-        &self,
-        type_id: TypeDefId,
-        name_table: &crate::identity::NameTable,
-    ) -> Option<crate::sema::RecordType> {
-        use crate::sema::{RecordType, StructField};
+    pub fn build_record_type(&self, type_id: TypeDefId) -> Option<crate::sema::RecordType> {
+        use crate::sema::RecordType;
 
         let type_def = self.get_type(type_id);
         if type_def.kind != TypeDefKind::Record {
             return None;
         }
 
-        let fields: Vec<StructField> = type_def
-            .fields
-            .iter()
-            .map(|&field_id| {
-                let field = self.get_field(field_id);
-                StructField {
-                    name: name_table
-                        .last_segment_str(field.name_id)
-                        .unwrap_or_else(|| "?".to_string()),
-                    ty: field.ty.clone(),
-                    slot: field.slot,
-                }
-            })
-            .collect();
-
         Some(RecordType {
-            name_id: type_def.name_id,
-            fields,
-            type_args: Vec::new(), // Non-generic records have empty type_args
+            type_def_id: type_id,
+            type_args: Vec::new(),
         })
+    }
+
+    /// Get the name_id for a ClassType
+    pub fn class_name_id(&self, class_type: &crate::sema::ClassType) -> NameId {
+        self.get_type(class_type.type_def_id).name_id
+    }
+
+    /// Get the name_id for a RecordType
+    pub fn record_name_id(&self, record_type: &crate::sema::RecordType) -> NameId {
+        self.get_type(record_type.type_def_id).name_id
+    }
+
+    /// Get the name_id for any struct-like Type (Class, Record, or GenericInstance)
+    pub fn type_name_id(&self, ty: &Type) -> Option<NameId> {
+        match ty {
+            Type::Class(c) => Some(self.class_name_id(c)),
+            Type::Record(r) => Some(self.record_name_id(r)),
+            Type::GenericInstance { def, .. } => Some(*def),
+            Type::Interface(i) => Some(i.name_id),
+            _ => None,
+        }
     }
 
     /// Merge another registry into this one.

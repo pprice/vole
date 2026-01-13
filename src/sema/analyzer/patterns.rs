@@ -46,9 +46,7 @@ impl Analyzer {
                     let type_def = self.entity_registry.get_type(type_id);
                     match type_def.kind {
                         TypeDefKind::Class => {
-                            if let Some(class_type) = self
-                                .entity_registry
-                                .build_class_type(type_id, &self.name_table)
+                            if let Some(class_type) = self.entity_registry.build_class_type(type_id)
                             {
                                 let pattern_type = Type::Class(class_type);
                                 self.check_type_pattern_compatibility(
@@ -71,9 +69,8 @@ impl Analyzer {
                             }
                         }
                         TypeDefKind::Record => {
-                            if let Some(record_type) = self
-                                .entity_registry
-                                .build_record_type(type_id, &self.name_table)
+                            if let Some(record_type) =
+                                self.entity_registry.build_record_type(type_id)
                             {
                                 let pattern_type = Type::Record(record_type);
                                 self.check_type_pattern_compatibility(
@@ -248,24 +245,42 @@ impl Analyzer {
 
                     if let Some(type_id) = type_id_opt {
                         let type_def = self.entity_registry.get_type(type_id);
+                        // Get fields from generic_info as StructField
+                        let get_fields =
+                            |type_def: &crate::sema::entity_defs::TypeDef| -> Vec<StructField> {
+                                type_def
+                                    .generic_info
+                                    .as_ref()
+                                    .map(|gi| {
+                                        gi.field_names
+                                            .iter()
+                                            .zip(gi.field_types.iter())
+                                            .enumerate()
+                                            .map(|(i, (name, ty))| StructField {
+                                                name: interner.resolve(*name).to_string(),
+                                                ty: ty.clone(),
+                                                slot: i,
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default()
+                            };
                         let (pattern_type, type_fields) = match type_def.kind {
                             TypeDefKind::Record => {
-                                if let Some(record_type) = self
-                                    .entity_registry
-                                    .build_record_type(type_id, &self.name_table)
+                                if let Some(record_type) =
+                                    self.entity_registry.build_record_type(type_id)
                                 {
-                                    let fields_ref = record_type.fields.clone();
+                                    let fields_ref = get_fields(type_def);
                                     (Some(Type::Record(record_type)), fields_ref)
                                 } else {
                                     (None, vec![])
                                 }
                             }
                             TypeDefKind::Class => {
-                                if let Some(class_type) = self
-                                    .entity_registry
-                                    .build_class_type(type_id, &self.name_table)
+                                if let Some(class_type) =
+                                    self.entity_registry.build_class_type(type_id)
                                 {
-                                    let fields_ref = class_type.fields.clone();
+                                    let fields_ref = get_fields(type_def);
                                     (Some(Type::Class(class_type)), fields_ref)
                                 } else {
                                     (None, vec![])
@@ -340,9 +355,38 @@ impl Analyzer {
                     }
                 } else {
                     // Untyped record pattern in match - bind fields from scrutinee type
-                    let type_fields = match scrutinee_type {
-                        Type::Record(record_type) => Some(&record_type.fields),
-                        Type::Class(class_type) => Some(&class_type.fields),
+                    // Get fields from EntityRegistry via type_def_id
+                    let type_fields: Option<Vec<StructField>> = match scrutinee_type {
+                        Type::Record(r) => {
+                            let type_def = self.entity_registry.get_type(r.type_def_id);
+                            type_def.generic_info.as_ref().map(|gi| {
+                                gi.field_names
+                                    .iter()
+                                    .zip(gi.field_types.iter())
+                                    .enumerate()
+                                    .map(|(i, (name, ty))| StructField {
+                                        name: interner.resolve(*name).to_string(),
+                                        ty: ty.clone(),
+                                        slot: i,
+                                    })
+                                    .collect()
+                            })
+                        }
+                        Type::Class(c) => {
+                            let type_def = self.entity_registry.get_type(c.type_def_id);
+                            type_def.generic_info.as_ref().map(|gi| {
+                                gi.field_names
+                                    .iter()
+                                    .zip(gi.field_types.iter())
+                                    .enumerate()
+                                    .map(|(i, (name, ty))| StructField {
+                                        name: interner.resolve(*name).to_string(),
+                                        ty: ty.clone(),
+                                        slot: i,
+                                    })
+                                    .collect()
+                            })
+                        }
                         _ => {
                             self.type_error("record or class", scrutinee_type, *span);
                             None
@@ -351,8 +395,14 @@ impl Analyzer {
 
                     if let Some(type_fields) = type_fields {
                         let type_name_str = match scrutinee_type {
-                            Type::Record(r) => self.name_table.display(r.name_id),
-                            Type::Class(c) => self.name_table.display(c.name_id),
+                            Type::Record(r) => {
+                                let type_def = self.entity_registry.get_type(r.type_def_id);
+                                self.name_table.display(type_def.name_id)
+                            }
+                            Type::Class(c) => {
+                                let type_def = self.entity_registry.get_type(c.type_def_id);
+                                self.name_table.display(type_def.name_id)
+                            }
                             _ => "unknown".to_string(),
                         };
                         for field_pattern in fields {
@@ -458,11 +508,11 @@ impl Analyzer {
                         match type_def.kind {
                             TypeDefKind::Class => self
                                 .entity_registry
-                                .build_class_type(type_id, &self.name_table)
+                                .build_class_type(type_id)
                                 .map(Type::Class),
                             TypeDefKind::Record => self
                                 .entity_registry
-                                .build_record_type(type_id, &self.name_table)
+                                .build_record_type(type_id)
                                 .map(Type::Record),
                             _ => None,
                         }
@@ -480,11 +530,11 @@ impl Analyzer {
                         match type_def.kind {
                             TypeDefKind::Class => self
                                 .entity_registry
-                                .build_class_type(type_id, &self.name_table)
+                                .build_class_type(type_id)
                                 .map(Type::Class),
                             TypeDefKind::Record => self
                                 .entity_registry
-                                .build_record_type(type_id, &self.name_table)
+                                .build_record_type(type_id)
                                 .map(Type::Record),
                             _ => None,
                         }

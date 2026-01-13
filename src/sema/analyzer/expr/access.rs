@@ -8,64 +8,89 @@ use crate::sema::implement_registry::ExternalMethodInfo;
 use std::collections::HashMap;
 
 impl Analyzer {
-    /// Get struct name and fields from a type (for field access operations).
-    /// Returns None for non-struct types.
-    fn get_struct_info<'a>(&self, ty: &'a Type) -> Option<(String, &'a [StructField])> {
-        match ty {
-            Type::Class(class_type) => Some((
-                self.name_table
-                    .last_segment_str(class_type.name_id)
-                    .unwrap_or_else(|| "class".to_string()),
-                &class_type.fields,
-            )),
-            Type::Record(record_type) => Some((
-                self.name_table
-                    .last_segment_str(record_type.name_id)
-                    .unwrap_or_else(|| "record".to_string()),
-                &record_type.fields,
-            )),
-            _ => None,
-        }
-    }
-
-    /// Get field type from a GenericInstance type by looking up the generic definition
-    /// and substituting type arguments.
-    fn get_generic_instance_field(
+    /// Get field type from a struct-like type by looking up the type definition
+    /// and substituting type arguments if needed.
+    fn get_field_type(
         &self,
-        def: &NameId,
-        args: &[Type],
+        type_def_id: TypeDefId,
+        type_args: &[Type],
         field_name: &str,
         interner: &Interner,
     ) -> Option<(String, Type)> {
-        // Look up the type definition
-        let type_def_id = self.entity_registry.type_by_name(*def)?;
         let type_def = self.entity_registry.get_type(type_def_id);
 
-        // Get the generic info (field names and types with type params)
+        // Get the generic info (field names and types)
         let generic_info = type_def.generic_info.as_ref()?;
 
-        // Build substitution map: type param NameId -> concrete type
-        let mut substitutions = HashMap::new();
-        for (param, arg) in generic_info.type_params.iter().zip(args.iter()) {
-            substitutions.insert(param.name_id, arg.clone());
-        }
+        // Build substitution map if there are type arguments
+        let substitutions: HashMap<NameId, Type> = if type_args.is_empty() {
+            HashMap::new()
+        } else {
+            generic_info
+                .type_params
+                .iter()
+                .zip(type_args.iter())
+                .map(|(tp, arg)| (tp.name_id, arg.clone()))
+                .collect()
+        };
 
         // Find the field by name
         for (i, field_sym) in generic_info.field_names.iter().enumerate() {
             let name = interner.resolve(*field_sym);
             if name == field_name {
-                // Substitute type arguments in field type
                 let field_type = &generic_info.field_types[i];
-                let substituted = substitute_type(field_type, &substitutions);
+                let substituted = if substitutions.is_empty() {
+                    field_type.clone()
+                } else {
+                    substitute_type(field_type, &substitutions)
+                };
                 let type_name = self
                     .name_table
-                    .last_segment_str(*def)
-                    .unwrap_or_else(|| "generic".to_string());
+                    .last_segment_str(type_def.name_id)
+                    .unwrap_or_else(|| "struct".to_string());
                 return Some((type_name, substituted));
             }
         }
 
         None
+    }
+
+    /// Get the type name and list of field names for a struct-like type (for error messages)
+    fn get_struct_info(&self, ty: &Type, interner: &Interner) -> Option<(String, Vec<String>)> {
+        let (type_def_id, _type_args) = match ty {
+            Type::Class(c) => (c.type_def_id, &c.type_args),
+            Type::Record(r) => (r.type_def_id, &r.type_args),
+            Type::GenericInstance { def, .. } => {
+                let type_def_id = self.entity_registry.type_by_name(*def)?;
+                return self.get_struct_info(
+                    &Type::Class(ClassType {
+                        type_def_id,
+                        type_args: vec![],
+                    }),
+                    interner,
+                );
+            }
+            _ => return None,
+        };
+
+        let type_def = self.entity_registry.get_type(type_def_id);
+        let type_name = self
+            .name_table
+            .last_segment_str(type_def.name_id)
+            .unwrap_or_else(|| "struct".to_string());
+
+        let field_names: Vec<String> = type_def
+            .generic_info
+            .as_ref()
+            .map(|gi| {
+                gi.field_names
+                    .iter()
+                    .map(|s| interner.resolve(*s).to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Some((type_name, field_names))
     }
 
     pub(super) fn check_field_access_expr(
@@ -111,70 +136,66 @@ impl Analyzer {
             ));
         }
 
-        // Get fields from object type
+        // Get fields from object type (Class, Record, or GenericInstance)
         let field_name = interner.resolve(field_access.field);
-        if let Some((type_name, fields)) = self.get_struct_info(&object_type) {
-            // Try to find the field
-            if let Some(field) = fields.iter().find(|f| f.name == field_name) {
-                return Ok(field.ty.clone());
+
+        // Extract type_def_id and type_args from the object type
+        let (type_def_id, type_args) = match &object_type {
+            Type::Class(c) => (c.type_def_id, c.type_args.as_slice()),
+            Type::Record(r) => (r.type_def_id, r.type_args.as_slice()),
+            Type::GenericInstance { def, args } => {
+                if let Some(id) = self.entity_registry.type_by_name(*def) {
+                    (id, args.as_slice())
+                } else {
+                    self.type_error("class or record", &object_type, field_access.object.span);
+                    return Ok(Type::invalid("field_access_non_struct"));
+                }
             }
-            // Field not found on struct type
-            let available_fields: Vec<_> = fields.iter().map(|f| f.name.as_str()).collect();
-            self.add_error(
-                SemanticError::UnknownField {
-                    ty: type_name.clone(),
-                    field: field_name.to_string(),
-                    span: field_access.field_span.into(),
-                },
-                field_access.field_span,
-            );
-            return Ok(Type::invalid_at(
-                "unknown_field",
-                format!(
-                    "field '{}' not found on {} '{}' (available: {})",
-                    field_name,
-                    if matches!(&object_type, Type::Class(_)) {
-                        "class"
-                    } else {
-                        "record"
-                    },
-                    type_name,
-                    if available_fields.is_empty() {
-                        "none".to_string()
-                    } else {
-                        available_fields.join(", ")
-                    }
-                ),
-                field_access.field_span,
-            ));
+            _ => {
+                self.type_error("class or record", &object_type, field_access.object.span);
+                return Ok(Type::invalid("field_access_non_struct"));
+            }
+        };
+
+        // Try to find the field
+        if let Some((_type_name, field_type)) =
+            self.get_field_type(type_def_id, type_args, field_name, interner)
+        {
+            return Ok(field_type);
         }
 
-        // Handle GenericInstance (e.g., Container<i64>)
-        if let Type::GenericInstance { def, args } = &object_type {
-            if let Some((_type_name, field_type)) =
-                self.get_generic_instance_field(def, args, field_name, interner)
-            {
-                return Ok(field_type);
-            }
-            // GenericInstance but field not found - report error
-            let type_name = self
-                .name_table
-                .last_segment_str(*def)
-                .unwrap_or_else(|| "generic".to_string());
-            self.add_error(
-                SemanticError::UnknownField {
-                    ty: type_name,
-                    field: field_name.to_string(),
-                    span: field_access.field_span.into(),
-                },
-                field_access.field_span,
-            );
-            return Ok(Type::invalid("unknown_generic_field"));
-        }
+        // Field not found - get struct info for error message
+        let (type_name, available_fields) = self
+            .get_struct_info(&object_type, interner)
+            .unwrap_or_else(|| ("unknown".to_string(), vec![]));
 
-        // Not a struct type
-        self.type_error("class or record", &object_type, field_access.object.span);
-        Ok(Type::invalid("field_access_non_struct"))
+        self.add_error(
+            SemanticError::UnknownField {
+                ty: type_name.clone(),
+                field: field_name.to_string(),
+                span: field_access.field_span.into(),
+            },
+            field_access.field_span,
+        );
+        Ok(Type::invalid_at(
+            "unknown_field",
+            format!(
+                "field '{}' not found on {} '{}' (available: {})",
+                field_name,
+                if matches!(&object_type, Type::Class(_)) {
+                    "class"
+                } else {
+                    "record"
+                },
+                type_name,
+                if available_fields.is_empty() {
+                    "none".to_string()
+                } else {
+                    available_fields.join(", ")
+                }
+            ),
+            field_access.field_span,
+        ))
     }
 
     pub(super) fn check_optional_chain_expr(
@@ -205,27 +226,48 @@ impl Analyzer {
             return Ok(Type::invalid("propagate_optional_inner"));
         }
 
-        // Get fields from inner type
-        let Some((type_name, fields)) = self.get_struct_info(&inner_type) else {
-            self.type_error(
-                "optional class or record",
-                &object_type,
-                opt_chain.object.span,
-            );
-            return Ok(Type::invalid("optional_chain_non_struct"));
+        // Get type_def_id and type_args from inner type
+        let (type_def_id, type_args) = match &inner_type {
+            Type::Class(c) => (c.type_def_id, c.type_args.as_slice()),
+            Type::Record(r) => (r.type_def_id, r.type_args.as_slice()),
+            Type::GenericInstance { def, args } => {
+                if let Some(id) = self.entity_registry.type_by_name(*def) {
+                    (id, args.as_slice())
+                } else {
+                    self.type_error(
+                        "optional class or record",
+                        &object_type,
+                        opt_chain.object.span,
+                    );
+                    return Ok(Type::invalid("optional_chain_non_struct"));
+                }
+            }
+            _ => {
+                self.type_error(
+                    "optional class or record",
+                    &object_type,
+                    opt_chain.object.span,
+                );
+                return Ok(Type::invalid("optional_chain_non_struct"));
+            }
         };
 
         // Find the field
         let field_name = interner.resolve(opt_chain.field);
-        if let Some(field) = fields.iter().find(|f| f.name == field_name) {
+        if let Some((_type_name, field_type)) =
+            self.get_field_type(type_def_id, type_args, field_name, interner)
+        {
             // Result is always optional (field_type | nil)
             // But if field type is already optional, don't double-wrap
-            if field.ty.is_optional() {
-                Ok(field.ty.clone())
+            if field_type.is_optional() {
+                Ok(field_type)
             } else {
-                Ok(Type::optional(field.ty.clone()))
+                Ok(Type::optional(field_type))
             }
         } else {
+            let (type_name, _) = self
+                .get_struct_info(&inner_type, interner)
+                .unwrap_or_else(|| ("unknown".to_string(), vec![]));
             self.add_error(
                 SemanticError::UnknownField {
                     ty: type_name,
@@ -658,19 +700,20 @@ impl Analyzer {
         external_info: Option<ExternalMethodInfo>,
         interner: &Interner,
     ) {
-        // Extract class/record name_id and type_args
+        // Extract type_def_id and type_args
         // Note: We only record monomorphs for concrete types (Class/Record) that have
         // method bodies to compile. Interface types use vtable dispatch and don't need monomorphs.
         tracing::debug!(object_type = ?object_type, "record_class_method_monomorph called");
-        let (class_name_id, type_args) = match object_type {
-            Type::Class(c) if !c.type_args.is_empty() => (c.name_id, &c.type_args),
-            Type::Record(r) if !r.type_args.is_empty() => (r.name_id, &r.type_args),
+        let (class_type_def_id, type_args) = match object_type {
+            Type::Class(c) if !c.type_args.is_empty() => (c.type_def_id, &c.type_args),
+            Type::Record(r) if !r.type_args.is_empty() => (r.type_def_id, &r.type_args),
             _ => {
                 tracing::debug!("returning early - not a generic class/record");
                 return; // Not a generic class/record, nothing to record
             }
         };
 
+        let class_name_id = self.entity_registry.get_type(class_type_def_id).name_id;
         tracing::debug!(
             class_name_id = ?class_name_id,
             type_args = ?type_args,
@@ -696,18 +739,13 @@ impl Analyzer {
             .contains(&key)
         {
             // Get the generic type definition for substitution info
-            let type_def_id = self.entity_registry.type_by_name(class_name_id);
-            let substitutions = if let Some(type_def_id) = type_def_id {
-                let type_def = self.entity_registry.get_type(type_def_id);
-                if let Some(generic_info) = &type_def.generic_info {
-                    let mut subs = HashMap::new();
-                    for (param, arg) in generic_info.type_params.iter().zip(type_args.iter()) {
-                        subs.insert(param.name_id, arg.clone());
-                    }
-                    subs
-                } else {
-                    HashMap::new()
+            let type_def = self.entity_registry.get_type(class_type_def_id);
+            let substitutions = if let Some(generic_info) = &type_def.generic_info {
+                let mut subs = HashMap::new();
+                for (param, arg) in generic_info.type_params.iter().zip(type_args.iter()) {
+                    subs.insert(param.name_id, arg.clone());
                 }
+                subs
             } else {
                 HashMap::new()
             };

@@ -13,43 +13,66 @@ impl Analyzer {
             .resolver(interner)
             .resolve_type(struct_lit.name, &self.entity_registry);
 
-        // Check if this is a generic type (record or class with generic_info)
+        // Check if this is a generic type (record or class with type parameters)
+        // Non-generic types have generic_info for field storage but empty type_params
         if let Some(type_id) = type_id_opt {
             let type_def = self.entity_registry.get_type(type_id);
             if let Some(ref generic_info) = type_def.generic_info {
-                let generic_info = generic_info.clone();
-                let name_id = type_def.name_id;
-                return match type_def.kind {
-                    TypeDefKind::Record => self.check_generic_struct_literal(
-                        expr,
-                        struct_lit,
-                        name_id,
-                        &generic_info,
-                        interner,
-                    ),
-                    TypeDefKind::Class => self.check_generic_class_literal(
-                        expr,
-                        struct_lit,
-                        name_id,
-                        &generic_info,
-                        interner,
-                    ),
-                    _ => Ok(Type::invalid("propagate")),
-                };
+                // Only use generic literal checking if there are actual type parameters to infer
+                if !generic_info.type_params.is_empty() {
+                    let generic_info = generic_info.clone();
+                    return match type_def.kind {
+                        TypeDefKind::Record => self.check_generic_struct_literal(
+                            expr,
+                            struct_lit,
+                            type_id,
+                            &generic_info,
+                            interner,
+                        ),
+                        TypeDefKind::Class => self.check_generic_class_literal(
+                            expr,
+                            struct_lit,
+                            type_id,
+                            &generic_info,
+                            interner,
+                        ),
+                        _ => Ok(Type::invalid("propagate")),
+                    };
+                }
             }
         }
+
+        // Helper to get fields from TypeDef
+        let get_fields_from_typedef = |type_def: &crate::sema::entity_defs::TypeDef,
+                                       interner: &Interner|
+         -> Vec<StructField> {
+            type_def
+                .generic_info
+                .as_ref()
+                .map(|gi| {
+                    gi.field_names
+                        .iter()
+                        .zip(gi.field_types.iter())
+                        .enumerate()
+                        .map(|(i, (name, ty))| StructField {
+                            name: interner.resolve(*name).to_string(),
+                            ty: ty.clone(),
+                            slot: i,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
 
         let (type_name, fields, result_type) = if let Some(type_id) = type_id_opt {
             let type_def = self.entity_registry.get_type(type_id);
             match type_def.kind {
                 TypeDefKind::Class => {
-                    if let Some(class_type) = self
-                        .entity_registry
-                        .build_class_type(type_id, &self.name_table)
-                    {
+                    if let Some(class_type) = self.entity_registry.build_class_type(type_id) {
+                        let fields = get_fields_from_typedef(type_def, interner);
                         (
                             interner.resolve(struct_lit.name).to_string(),
-                            class_type.fields.clone(),
+                            fields,
                             Type::Class(class_type),
                         )
                     } else {
@@ -64,13 +87,11 @@ impl Analyzer {
                     }
                 }
                 TypeDefKind::Record => {
-                    if let Some(record_type) = self
-                        .entity_registry
-                        .build_record_type(type_id, &self.name_table)
-                    {
+                    if let Some(record_type) = self.entity_registry.build_record_type(type_id) {
+                        let fields = get_fields_from_typedef(type_def, interner);
                         (
                             interner.resolve(struct_lit.name).to_string(),
-                            record_type.fields.clone(),
+                            fields,
                             Type::Record(record_type),
                         )
                     } else {
@@ -155,17 +176,18 @@ impl Analyzer {
         &mut self,
         expr: &Expr,
         struct_lit: &StructLiteralExpr,
-        name_id: NameId,
+        type_def_id: TypeDefId,
         generic_info: &GenericTypeInfo,
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
         let type_name = interner.resolve(struct_lit.name).to_string();
 
         // First, type-check all field values to get their actual types
-        let mut field_value_types = HashMap::new();
+        // Use string keys since Symbols may be from different interners
+        let mut field_value_types: HashMap<String, Type> = HashMap::new();
         for field_init in &struct_lit.fields {
             let field_ty = self.check_expr(&field_init.value, interner)?;
-            field_value_types.insert(field_init.name, field_ty);
+            field_value_types.insert(interner.resolve(field_init.name).to_string(), field_ty);
         }
 
         // Build parallel arrays of expected types (from generic def) and actual types (from values)
@@ -174,7 +196,8 @@ impl Analyzer {
         let mut actual_types = Vec::new();
 
         for (i, field_name) in generic_info.field_names.iter().enumerate() {
-            if let Some(actual_ty) = field_value_types.get(field_name) {
+            let field_name_str = interner.resolve(*field_name);
+            if let Some(actual_ty) = field_value_types.get(field_name_str) {
                 expected_types.push(generic_info.field_types[i].clone());
                 actual_types.push(actual_ty.clone());
             }
@@ -199,15 +222,20 @@ impl Analyzer {
             .map(|t| substitute_type(t, &inferred))
             .collect();
 
-        // Check that all required fields are present
-        let provided_fields: HashSet<Symbol> = struct_lit.fields.iter().map(|f| f.name).collect();
+        // Check that all required fields are present - compare by string value
+        let provided_fields: HashSet<String> = struct_lit
+            .fields
+            .iter()
+            .map(|f| interner.resolve(f.name).to_string())
+            .collect();
 
         for field_name in &generic_info.field_names {
-            if !provided_fields.contains(field_name) {
+            let field_name_str = interner.resolve(*field_name).to_string();
+            if !provided_fields.contains(&field_name_str) {
                 self.add_error(
                     SemanticError::MissingField {
                         ty: type_name.clone(),
-                        field: interner.resolve(*field_name).to_string(),
+                        field: field_name_str,
                         span: expr.span.into(),
                     },
                     expr.span,
@@ -217,14 +245,15 @@ impl Analyzer {
 
         // Check each provided field against the concrete (substituted) type
         for field_init in &struct_lit.fields {
-            // Find the field index - compare Symbols directly since field_names is Vec<Symbol>
+            let field_init_name_str = interner.resolve(field_init.name);
+            // Find the field index - compare by string value since Symbols may differ
             if let Some(idx) = generic_info
                 .field_names
                 .iter()
-                .position(|n| *n == field_init.name)
+                .position(|n| interner.resolve(*n) == field_init_name_str)
             {
                 let actual_ty = field_value_types
-                    .get(&field_init.name)
+                    .get(field_init_name_str)
                     .expect("field was validated in type check phase");
                 let expected_ty = &concrete_field_types[idx];
 
@@ -235,25 +264,13 @@ impl Analyzer {
                 self.add_error(
                     SemanticError::UnknownField {
                         ty: type_name.clone(),
-                        field: interner.resolve(field_init.name).to_string(),
+                        field: field_init_name_str.to_string(),
                         span: field_init.span.into(),
                     },
                     field_init.span,
                 );
             }
         }
-
-        // Build the concrete record type with substituted field types
-        let concrete_fields: Vec<StructField> = generic_info
-            .field_names
-            .iter()
-            .enumerate()
-            .map(|(i, name)| StructField {
-                name: interner.resolve(*name).to_string(),
-                ty: concrete_field_types[i].clone(),
-                slot: i,
-            })
-            .collect();
 
         // Build type_args from inferred types in order of type params
         let type_args: Vec<Type> = generic_info
@@ -263,8 +280,7 @@ impl Analyzer {
             .collect();
 
         let concrete_record = RecordType {
-            name_id,
-            fields: concrete_fields,
+            type_def_id,
             type_args,
         };
         Ok(Type::Record(concrete_record))
@@ -275,17 +291,18 @@ impl Analyzer {
         &mut self,
         expr: &Expr,
         struct_lit: &StructLiteralExpr,
-        name_id: NameId,
+        type_def_id: TypeDefId,
         generic_info: &GenericTypeInfo,
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
         let type_name = interner.resolve(struct_lit.name).to_string();
 
         // First, type-check all field values to get their actual types
-        let mut field_value_types = HashMap::new();
+        // Use string keys since Symbols may be from different interners
+        let mut field_value_types: HashMap<String, Type> = HashMap::new();
         for field_init in &struct_lit.fields {
             let field_ty = self.check_expr(&field_init.value, interner)?;
-            field_value_types.insert(field_init.name, field_ty);
+            field_value_types.insert(interner.resolve(field_init.name).to_string(), field_ty);
         }
 
         // Build parallel arrays of expected types (from generic def) and actual types (from values)
@@ -294,7 +311,8 @@ impl Analyzer {
         let mut actual_types = Vec::new();
 
         for (i, field_name) in generic_info.field_names.iter().enumerate() {
-            if let Some(actual_ty) = field_value_types.get(field_name) {
+            let field_name_str = interner.resolve(*field_name);
+            if let Some(actual_ty) = field_value_types.get(field_name_str) {
                 expected_types.push(generic_info.field_types[i].clone());
                 actual_types.push(actual_ty.clone());
             }
@@ -319,15 +337,20 @@ impl Analyzer {
             .map(|t| substitute_type(t, &inferred))
             .collect();
 
-        // Check that all required fields are present
-        let provided_fields: HashSet<Symbol> = struct_lit.fields.iter().map(|f| f.name).collect();
+        // Check that all required fields are present - compare by string value
+        let provided_fields: HashSet<String> = struct_lit
+            .fields
+            .iter()
+            .map(|f| interner.resolve(f.name).to_string())
+            .collect();
 
         for field_name in &generic_info.field_names {
-            if !provided_fields.contains(field_name) {
+            let field_name_str = interner.resolve(*field_name).to_string();
+            if !provided_fields.contains(&field_name_str) {
                 self.add_error(
                     SemanticError::MissingField {
                         ty: type_name.clone(),
-                        field: interner.resolve(*field_name).to_string(),
+                        field: field_name_str,
                         span: expr.span.into(),
                     },
                     expr.span,
@@ -337,14 +360,15 @@ impl Analyzer {
 
         // Check each provided field against the concrete (substituted) type
         for field_init in &struct_lit.fields {
-            // Find the field index - compare Symbols directly since field_names is Vec<Symbol>
+            let field_init_name_str = interner.resolve(field_init.name);
+            // Find the field index - compare by string value since Symbols may differ
             if let Some(idx) = generic_info
                 .field_names
                 .iter()
-                .position(|n| *n == field_init.name)
+                .position(|n| interner.resolve(*n) == field_init_name_str)
             {
                 let actual_ty = field_value_types
-                    .get(&field_init.name)
+                    .get(field_init_name_str)
                     .expect("field was validated in type check phase");
                 let expected_ty = &concrete_field_types[idx];
 
@@ -355,25 +379,13 @@ impl Analyzer {
                 self.add_error(
                     SemanticError::UnknownField {
                         ty: type_name.clone(),
-                        field: interner.resolve(field_init.name).to_string(),
+                        field: field_init_name_str.to_string(),
                         span: field_init.span.into(),
                     },
                     field_init.span,
                 );
             }
         }
-
-        // Build the concrete class type with substituted field types
-        let concrete_fields: Vec<StructField> = generic_info
-            .field_names
-            .iter()
-            .enumerate()
-            .map(|(i, name)| StructField {
-                name: interner.resolve(*name).to_string(),
-                ty: concrete_field_types[i].clone(),
-                slot: i,
-            })
-            .collect();
 
         // Convert inferred substitutions to ordered type_args based on type param order
         let type_args: Vec<Type> = generic_info
@@ -388,8 +400,7 @@ impl Analyzer {
             .collect();
 
         let concrete_class = ClassType {
-            name_id,
-            fields: concrete_fields,
+            type_def_id,
             type_args,
         };
         Ok(Type::Class(concrete_class))

@@ -549,10 +549,10 @@ impl Analyzer {
         self.entity_registry.type_table.key_for_type(ty)
     }
 
-    fn type_display(&mut self, ty: &Type) -> String {
+    fn type_display(&self, ty: &Type) -> String {
         self.entity_registry
             .type_table
-            .display_type(ty, &mut self.name_table)
+            .display_type(ty, &self.name_table, &self.entity_registry)
     }
 
     fn type_display_pair(&mut self, left: &Type, right: &Type) -> String {
@@ -759,13 +759,17 @@ impl Analyzer {
                 }
             }
             // Class: unify type args (for generic class parameters)
-            (Type::Class(p_class), Type::Class(a_class)) if p_class.name_id == a_class.name_id => {
+            (Type::Class(p_class), Type::Class(a_class))
+                if p_class.type_def_id == a_class.type_def_id =>
+            {
                 for (p, a) in p_class.type_args.iter().zip(a_class.type_args.iter()) {
                     self.unify_types(p, a, type_params, inferred);
                 }
             }
             // Record: unify type args (for generic record parameters)
-            (Type::Record(p_rec), Type::Record(a_rec)) if p_rec.name_id == a_rec.name_id => {
+            (Type::Record(p_rec), Type::Record(a_rec))
+                if p_rec.type_def_id == a_rec.type_def_id =>
+            {
                 for (p, a) in p_rec.type_args.iter().zip(a_rec.type_args.iter()) {
                     self.unify_types(p, a, type_params, inferred);
                 }
@@ -1595,15 +1599,19 @@ impl Analyzer {
         trait_name: Option<Symbol>,
         interner: &Interner,
     ) {
-        let type_id = match TypeId::from_type(target_type, &self.entity_registry.type_table) {
+        let type_id = match TypeId::from_type(
+            target_type,
+            &self.entity_registry.type_table,
+            &self.entity_registry,
+        ) {
             Some(id) => id,
             None => return, // Skip non-registerable types
         };
 
         // Get EntityRegistry TypeDefId for the target type
         let entity_type_id = match target_type {
-            Type::Record(r) => self.entity_registry.type_by_name(r.name_id),
-            Type::Class(c) => self.entity_registry.type_by_name(c.name_id),
+            Type::Record(r) => Some(r.type_def_id),
+            Type::Class(c) => Some(c.type_def_id),
             Type::I8 => self
                 .entity_registry
                 .type_by_name(self.name_table.primitives.i8),
@@ -1836,12 +1844,12 @@ impl Analyzer {
         let self_type = match type_def.kind {
             TypeDefKind::Class => self
                 .entity_registry
-                .build_class_type(type_def_id, &self.name_table)
+                .build_class_type(type_def_id)
                 .map(Type::Class)
                 .unwrap_or_else(|| Type::invalid("unwrap_failed")),
             TypeDefKind::Record => self
                 .entity_registry
-                .build_record_type(type_def_id, &self.name_table)
+                .build_record_type(type_def_id)
                 .map(Type::Record)
                 .unwrap_or_else(|| Type::invalid("unwrap_failed")),
             _ => Type::invalid("fallback"),

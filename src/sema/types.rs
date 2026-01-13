@@ -1,7 +1,7 @@
 // src/sema/types.rs
 
 use crate::frontend::{PrimitiveType, Span, Symbol};
-use crate::identity::{ModuleId, NameId};
+use crate::identity::{ModuleId, NameId, TypeDefId};
 
 /// Analysis error - represents a type that couldn't be determined.
 /// Designed to be maximally useful for LLM debugging.
@@ -270,8 +270,8 @@ pub struct StructField {
 /// Class type information
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassType {
-    pub name_id: NameId,
-    pub fields: Vec<StructField>,
+    /// Reference to the type definition in EntityRegistry
+    pub type_def_id: TypeDefId,
     /// Type arguments for generic classes (empty for non-generic classes)
     pub type_args: Vec<Type>,
 }
@@ -279,8 +279,8 @@ pub struct ClassType {
 /// Record type information
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordType {
-    pub name_id: NameId,
-    pub fields: Vec<StructField>,
+    /// Reference to the type definition in EntityRegistry
+    pub type_def_id: TypeDefId,
     /// Type arguments for generic records (empty for non-generic records)
     pub type_args: Vec<Type>,
 }
@@ -668,15 +668,6 @@ impl Type {
             flattened.into_iter().next().expect("len checked to be 1")
         } else {
             Type::Union(flattened)
-        }
-    }
-
-    /// Get a field from a class or record type by name
-    pub fn get_field(&self, field: &str) -> Option<&StructField> {
-        match self {
-            Type::Class(c) => c.fields.iter().find(|f| f.name == field),
-            Type::Record(r) => r.fields.iter().find(|f| f.name == field),
-            _ => None,
         }
     }
 

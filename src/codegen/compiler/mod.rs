@@ -131,7 +131,11 @@ impl<'a> Compiler<'a> {
 
     /// Get TypeId from a Type (wraps TypeId::from_type with entity_registry.type_table)
     fn type_id_from_type(&self, ty: &crate::sema::Type) -> Option<TypeId> {
-        TypeId::from_type(ty, &self.analyzed.entity_registry.type_table)
+        TypeId::from_type(
+            ty,
+            &self.analyzed.entity_registry.type_table,
+            &self.analyzed.entity_registry,
+        )
     }
 
     /// Set the source file path for error reporting.

@@ -9,7 +9,7 @@ use crate::frontend::{
     ClassDecl, Decl, InterfaceDecl, Interner, Program, RecordDecl, StaticsBlock, Symbol, TypeExpr,
 };
 use crate::runtime::type_registry::{FieldTypeTag, register_instance_type};
-use crate::sema::{ClassType, RecordType, StructField, Type};
+use crate::sema::{ClassType, RecordType, Type};
 
 /// Convert a Vole Type to a FieldTypeTag for runtime cleanup
 fn type_to_field_tag(ty: &Type) -> FieldTypeTag {
@@ -80,10 +80,16 @@ impl Compiler<'_> {
         let name_id = query.name_id(module_id, &[class.name]);
         let type_key = query.type_key_by_name(name_id);
 
+        // Look up the TypeDefId from EntityRegistry
+        let type_def_id = self
+            .analyzed
+            .entity_registry
+            .type_by_name(name_id)
+            .expect("class should be registered in entity registry");
+
         // Create a placeholder vole_type (will be replaced in finalize_class)
         let placeholder_type = Type::Class(ClassType {
-            name_id,
-            fields: vec![],
+            type_def_id,
             type_args: vec![],
         });
 
@@ -112,29 +118,30 @@ impl Compiler<'_> {
         let query = self.query();
         let module_id = query.main_module();
 
-        // Build field slots map and StructField list
+        // Build field slots map
         let mut field_slots = HashMap::new();
-        let mut struct_fields = Vec::new();
         let mut field_type_tags = Vec::new();
         for (i, field) in class.fields.iter().enumerate() {
             let field_name = query.resolve_symbol(field.name).to_string();
-            field_slots.insert(field_name.clone(), i);
+            field_slots.insert(field_name, i);
             let field_type = self.resolve_type_with_metadata(&field.ty);
             field_type_tags.push(type_to_field_tag(&field_type));
-            struct_fields.push(StructField {
-                name: field_name,
-                ty: field_type,
-                slot: i,
-            });
         }
 
         // Register field types in runtime type registry for cleanup
         register_instance_type(type_id, field_type_tags);
 
+        // Look up the TypeDefId from EntityRegistry
+        let name_id = query.name_id(module_id, &[class.name]);
+        let type_def_id = self
+            .analyzed
+            .entity_registry
+            .type_by_name(name_id)
+            .expect("class should be registered in entity registry");
+
         // Create the Vole type
         let vole_type = Type::Class(ClassType {
-            name_id: query.name_id(module_id, &[class.name]),
-            fields: struct_fields,
+            type_def_id,
             type_args: vec![],
         });
 
@@ -247,10 +254,16 @@ impl Compiler<'_> {
         let name_id = query.name_id(module_id, &[record.name]);
         let type_key = query.type_key_by_name(name_id);
 
+        // Look up the TypeDefId from EntityRegistry
+        let type_def_id = self
+            .analyzed
+            .entity_registry
+            .type_by_name(name_id)
+            .expect("record should be registered in entity registry");
+
         // Create a placeholder vole_type (will be replaced in finalize_record)
         let placeholder_type = Type::Record(RecordType {
-            name_id,
-            fields: vec![],
+            type_def_id,
             type_args: vec![],
         });
 
@@ -279,29 +292,30 @@ impl Compiler<'_> {
         let query = self.query();
         let module_id = query.main_module();
 
-        // Build field slots map and StructField list
+        // Build field slots map
         let mut field_slots = HashMap::new();
-        let mut struct_fields = Vec::new();
         let mut field_type_tags = Vec::new();
         for (i, field) in record.fields.iter().enumerate() {
             let field_name = query.resolve_symbol(field.name).to_string();
-            field_slots.insert(field_name.clone(), i);
+            field_slots.insert(field_name, i);
             let field_type = self.resolve_type_with_metadata(&field.ty);
             field_type_tags.push(type_to_field_tag(&field_type));
-            struct_fields.push(StructField {
-                name: field_name,
-                ty: field_type,
-                slot: i,
-            });
         }
 
         // Register field types in runtime type registry for cleanup
         register_instance_type(type_id, field_type_tags);
 
+        // Look up the TypeDefId from EntityRegistry
+        let name_id = query.name_id(module_id, &[record.name]);
+        let type_def_id = self
+            .analyzed
+            .entity_registry
+            .type_by_name(name_id)
+            .expect("record should be registered in entity registry");
+
         // Create the Vole type
         let vole_type = Type::Record(RecordType {
-            name_id: query.name_id(module_id, &[record.name]),
-            fields: struct_fields,
+            type_def_id,
             type_args: vec![],
         });
 
@@ -475,7 +489,7 @@ impl Compiler<'_> {
             if let Type::Class(class_type) = &meta.vole_type {
                 self.analyzed
                     .name_table
-                    .last_segment_str(class_type.name_id)
+                    .last_segment_str(self.analyzed.entity_registry.class_name_id(class_type))
                     .is_some_and(|name| name == type_name_str)
             } else {
                 false
@@ -493,32 +507,20 @@ impl Compiler<'_> {
 
         // Build field slots map
         let mut field_slots = HashMap::new();
-        let mut struct_fields = Vec::new();
         let mut field_type_tags = Vec::new();
         for (i, field) in class.fields.iter().enumerate() {
             let field_name = module_interner.resolve(field.name).to_string();
-            field_slots.insert(field_name.clone(), i);
+            field_slots.insert(field_name, i);
             let field_type = self.resolve_type_with_interner(&field.ty, module_interner);
             field_type_tags.push(type_to_field_tag(&field_type));
-            struct_fields.push(StructField {
-                name: field_name,
-                ty: field_type,
-                slot: i,
-            });
         }
 
         // Register field types in runtime type registry
         register_instance_type(type_id, field_type_tags);
 
-        // Get the NameId from entity registry
-        let type_def = self.analyzed.entity_registry.get_type(type_def_id);
-        let name_id = type_def.name_id;
-        tracing::debug!(type_name = %type_name_str, ?name_id, "Type NameId from entity registry");
-
         // Create the Vole type
         let vole_type = Type::Class(ClassType {
-            name_id,
-            fields: struct_fields,
+            type_def_id,
             type_args: vec![],
         });
 
@@ -563,7 +565,12 @@ impl Compiler<'_> {
         tracing::debug!(type_name = %type_name_str, registered_count = method_infos.len(), "Finished registering instance methods");
 
         // Get type_key from entity registry
-        let type_key = self.analyzed.entity_registry.type_table.by_name(name_id);
+        let type_def = self.analyzed.entity_registry.get_type(type_def_id);
+        let type_key = self
+            .analyzed
+            .entity_registry
+            .type_table
+            .by_name(type_def.name_id);
 
         // Register type metadata
         // IMPORTANT: Use the main interner's Symbol for the class name, not the module's Symbol.

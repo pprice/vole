@@ -72,10 +72,9 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
         return true;
     }
 
-    // Class compatibility: compare by name_id and type_args only (not fields)
-    // This handles forward references where one side has empty fields
+    // Class compatibility: compare by type_def_id and type_args
     if let (Type::Class(from_class), Type::Class(to_class)) = (from, to)
-        && from_class.name_id == to_class.name_id
+        && from_class.type_def_id == to_class.type_def_id
         && from_class.type_args.len() == to_class.type_args.len()
         && from_class
             .type_args
@@ -86,9 +85,9 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
         return true;
     }
 
-    // Record compatibility: compare by name_id and type_args only (not fields)
+    // Record compatibility: compare by type_def_id and type_args
     if let (Type::Record(from_rec), Type::Record(to_rec)) = (from, to)
-        && from_rec.name_id == to_rec.name_id
+        && from_rec.type_def_id == to_rec.type_def_id
         && from_rec.type_args.len() == to_rec.type_args.len()
         && from_rec
             .type_args

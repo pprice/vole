@@ -58,15 +58,19 @@ pub(crate) fn resolve_method_target(
     input: MethodResolutionInput<'_>,
 ) -> Result<MethodTarget, String> {
     let lookup_direct_method = |type_name_id: NameId| {
-        type_metadata_by_name_id(input.type_metadata, type_name_id)
-            .and_then(|meta| meta.method_infos.get(&input.method_id))
-            .cloned()
-            .ok_or_else(|| {
-                format!(
-                    "Method {} not found on type {:?}",
-                    input.method_name_str, type_name_id
-                )
-            })
+        type_metadata_by_name_id(
+            input.type_metadata,
+            type_name_id,
+            &input.analyzed.entity_registry,
+        )
+        .and_then(|meta| meta.method_infos.get(&input.method_id))
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "Method {} not found on type {:?}",
+                input.method_name_str, type_name_id
+            )
+        })
     };
 
     let lookup_impl_method = |type_id: TypeId| {
@@ -90,7 +94,8 @@ pub(crate) fn resolve_method_target(
     if let Some(resolution) = input.resolution {
         return match resolution {
             ResolvedMethod::Direct { func_type } => {
-                let type_name_id = get_type_name_id(input.object_type)?;
+                let type_name_id =
+                    get_type_name_id(input.object_type, &input.analyzed.entity_registry)?;
                 let method_info = lookup_direct_method(type_name_id)?;
                 Ok(MethodTarget::Direct {
                     method_info,
@@ -151,6 +156,7 @@ pub(crate) fn resolve_method_target(
                 let type_id = TypeId::from_type(
                     input.object_type,
                     &input.analyzed.entity_registry.type_table,
+                    &input.analyzed.entity_registry,
                 )
                 .ok_or_else(|| {
                     CodegenError::not_found(
@@ -191,7 +197,8 @@ pub(crate) fn resolve_method_target(
                     });
                 }
                 // Otherwise, get the name_id from the object type since DefaultMethod is called on a class/record
-                let type_name_id = get_type_name_id(input.object_type)?;
+                let type_name_id =
+                    get_type_name_id(input.object_type, &input.analyzed.entity_registry)?;
                 let method_info = lookup_direct_method(type_name_id)?;
                 Ok(MethodTarget::Default {
                     method_info,
@@ -277,6 +284,7 @@ pub(crate) fn resolve_method_target(
         if let Some(type_id) = TypeId::from_type(
             input.object_type,
             &input.analyzed.entity_registry.type_table,
+            &input.analyzed.entity_registry,
         ) && let Some(method_info) = input
             .impl_method_infos
             .get(&(type_id, input.method_id))
@@ -292,6 +300,7 @@ pub(crate) fn resolve_method_target(
         if let Some(type_id) = TypeId::from_type(
             input.object_type,
             &input.analyzed.entity_registry.type_table,
+            &input.analyzed.entity_registry,
         ) && let Some(method_info) = input
             .impl_method_infos
             .get(&(type_id, method_name_id))
@@ -317,6 +326,7 @@ pub(crate) fn resolve_method_target(
     if let Some(type_id) = TypeId::from_type(
         input.object_type,
         &input.analyzed.entity_registry.type_table,
+        &input.analyzed.entity_registry,
     ) && let Ok(method_info) = lookup_impl_method(type_id)
     {
         let return_type = method_info.return_type.clone();
@@ -328,7 +338,7 @@ pub(crate) fn resolve_method_target(
 
     // Try direct methods (methods defined inside class/record)
     // This only works for classes/records, not primitives.
-    if let Ok(type_name_id) = get_type_name_id(input.object_type)
+    if let Ok(type_name_id) = get_type_name_id(input.object_type, &input.analyzed.entity_registry)
         && let Ok(method_info) = lookup_direct_method(type_name_id)
     {
         let return_type = method_info.return_type.clone();
@@ -352,9 +362,14 @@ pub(crate) fn resolve_method_target(
 
 /// Get TypeDefId for a type during codegen (handles primitives, records, classes)
 fn get_type_def_id_for_codegen(ty: &Type, analyzed: &AnalyzedProgram) -> Option<TypeDefId> {
+    // For Class and Record, we already have the TypeDefId
+    match ty {
+        Type::Class(c) => return Some(c.type_def_id),
+        Type::Record(r) => return Some(r.type_def_id),
+        _ => {}
+    }
+
     let name_id = match ty {
-        Type::Class(c) => Some(c.name_id),
-        Type::Record(r) => Some(r.name_id),
         Type::Interface(i) => Some(i.name_id),
         Type::GenericInstance { def, .. } => Some(*def),
         // Primitives - look up via well-known NameIds

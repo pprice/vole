@@ -67,6 +67,7 @@ impl Cg<'_, '_, '_> {
         let type_id = TypeId::from_type(
             &val.vole_type,
             &self.ctx.analyzed.entity_registry.type_table,
+            &self.ctx.analyzed.entity_registry,
         )
         .ok_or_else(|| format!("Cannot find TypeId for {:?}", val.vole_type))?;
 

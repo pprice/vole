@@ -77,10 +77,11 @@ pub(crate) struct MethodInfo {
 
 /// Look up TypeMetadata by NameId (cross-interner safe)
 /// Returns the TypeMetadata for a class/record with the given name_id
-pub(crate) fn type_metadata_by_name_id(
-    type_metadata: &HashMap<Symbol, TypeMetadata>,
+pub(crate) fn type_metadata_by_name_id<'a>(
+    type_metadata: &'a HashMap<Symbol, TypeMetadata>,
     name_id: NameId,
-) -> Option<&TypeMetadata> {
+    entity_registry: &EntityRegistry,
+) -> Option<&'a TypeMetadata> {
     tracing::trace!(
         ?name_id,
         count = type_metadata.len(),
@@ -88,10 +89,11 @@ pub(crate) fn type_metadata_by_name_id(
     );
     let result = type_metadata.values().find(|meta| match &meta.vole_type {
         Type::Class(c) => {
-            tracing::trace!(target_name_id = ?name_id, class_name_id = ?c.name_id, "comparing class name_id");
-            c.name_id == name_id
+            let class_name_id = entity_registry.class_name_id(c);
+            tracing::trace!(target_name_id = ?name_id, class_name_id = ?class_name_id, "comparing class name_id");
+            class_name_id == name_id
         }
-        Type::Record(r) => r.name_id == name_id,
+        Type::Record(r) => entity_registry.record_name_id(r) == name_id,
         _ => false,
     });
     if result.is_none() {
@@ -100,7 +102,7 @@ pub(crate) fn type_metadata_by_name_id(
             .values()
             .filter_map(|meta| {
                 if let Type::Class(c) = &meta.vole_type {
-                    Some(c.name_id)
+                    Some(entity_registry.class_name_id(c))
                 } else {
                     None
                 }
@@ -246,8 +248,36 @@ pub(crate) fn function_name_id_with_interner(
 #[allow(clippy::only_used_in_recursion)]
 pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: &Type) -> String {
     match ty {
-        Type::Class(class_type) => analyzed.name_table.display(class_type.name_id),
-        Type::Record(record_type) => analyzed.name_table.display(record_type.name_id),
+        Type::Class(class_type) => {
+            let name_id = analyzed.entity_registry.class_name_id(class_type);
+            let base = analyzed.name_table.display(name_id);
+            if class_type.type_args.is_empty() {
+                base
+            } else {
+                let arg_list = class_type
+                    .type_args
+                    .iter()
+                    .map(|arg| display_type(analyzed, interner, arg))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}<{}>", base, arg_list)
+            }
+        }
+        Type::Record(record_type) => {
+            let name_id = analyzed.entity_registry.record_name_id(record_type);
+            let base = analyzed.name_table.display(name_id);
+            if record_type.type_args.is_empty() {
+                base
+            } else {
+                let arg_list = record_type
+                    .type_args
+                    .iter()
+                    .map(|arg| display_type(analyzed, interner, arg))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}<{}>", base, arg_list)
+            }
+        }
         Type::Interface(interface_type) => {
             let base = analyzed.name_table.display(interface_type.name_id);
             if interface_type.type_args.is_empty() {
@@ -389,13 +419,13 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     TypeDefKind::Record | TypeDefKind::Class => {
                         // For Record and Class types, first try direct lookup by Symbol
                         // This works when Symbol is from the main interner
-                        // IMPORTANT: Verify the type matches by name_id to avoid Symbol collisions
+                        // IMPORTANT: Verify the type matches by type_def_id to avoid Symbol collisions
                         // between different interners (module vs main)
                         if let Some(metadata) = type_metadata.get(sym) {
-                            // Verify this is the right type by comparing name_ids
+                            // Verify this is the right type by comparing type_def_ids
                             let matches = match &metadata.vole_type {
-                                Type::Record(r) => r.name_id == type_def.name_id,
-                                Type::Class(c) => c.name_id == type_def.name_id,
+                                Type::Record(r) => r.type_def_id == type_def_id,
+                                Type::Class(c) => c.type_def_id == type_def_id,
                                 _ => false,
                             };
                             if matches {
@@ -407,12 +437,12 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         // Symbols are from module interners
                         if type_def.kind == TypeDefKind::Record {
                             if let Some(record_type) =
-                                entity_registry.build_record_type(type_def_id, name_table)
+                                entity_registry.build_record_type(type_def_id)
                             {
                                 return Type::Record(record_type);
                             }
                         } else if let Some(class_type) =
-                            entity_registry.build_class_type(type_def_id, name_table)
+                            entity_registry.build_class_type(type_def_id)
                         {
                             return Type::Class(class_type);
                         }

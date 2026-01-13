@@ -34,15 +34,48 @@ impl Analyzer {
 
                 match &obj_ty {
                     Type::Class(c) => {
-                        if let Some(field_def) = c.fields.iter().find(|f| f.name == field_name) {
-                            (field_def.ty.clone(), true, true)
+                        // Look up field via EntityRegistry
+                        let type_def = self.entity_registry.get_type(c.type_def_id);
+                        let type_name = self
+                            .name_table
+                            .last_segment_str(type_def.name_id)
+                            .unwrap_or_else(|| "class".to_string());
+
+                        if let Some(ref generic_info) = type_def.generic_info {
+                            if let Some(idx) = generic_info
+                                .field_names
+                                .iter()
+                                .position(|s| interner.resolve(*s) == field_name)
+                            {
+                                let field_type = &generic_info.field_types[idx];
+                                // Substitute type args if any
+                                let resolved_type = if c.type_args.is_empty() {
+                                    field_type.clone()
+                                } else {
+                                    let substitutions: HashMap<_, _> = generic_info
+                                        .type_params
+                                        .iter()
+                                        .zip(c.type_args.iter())
+                                        .map(|(tp, arg)| (tp.name_id, arg.clone()))
+                                        .collect();
+                                    substitute_type(field_type, &substitutions)
+                                };
+                                (resolved_type, true, true)
+                            } else {
+                                self.add_error(
+                                    SemanticError::UnknownField {
+                                        ty: type_name,
+                                        field: field_name.to_string(),
+                                        span: (*field_span).into(),
+                                    },
+                                    *field_span,
+                                );
+                                (Type::invalid("propagate"), false, false)
+                            }
                         } else {
                             self.add_error(
                                 SemanticError::UnknownField {
-                                    ty: self
-                                        .name_table
-                                        .last_segment_str(c.name_id)
-                                        .unwrap_or_else(|| "class".to_string()),
+                                    ty: type_name,
                                     field: field_name.to_string(),
                                     span: (*field_span).into(),
                                 },
@@ -53,11 +86,12 @@ impl Analyzer {
                     }
                     Type::Record(r) => {
                         // Records are immutable - reject field assignment
+                        let type_def = self.entity_registry.get_type(r.type_def_id);
                         self.add_error(
                             SemanticError::RecordFieldMutation {
                                 record: self
                                     .name_table
-                                    .last_segment_str(r.name_id)
+                                    .last_segment_str(type_def.name_id)
                                     .unwrap_or_else(|| "record".to_string()),
                                 field: interner.resolve(*field).to_string(),
                                 span: (*field_span).into(),
@@ -259,15 +293,47 @@ impl Analyzer {
 
                 match &obj_ty {
                     Type::Class(c) => {
-                        if let Some(field_def) = c.fields.iter().find(|f| f.name == field_name) {
-                            field_def.ty.clone()
+                        // Look up field via EntityRegistry
+                        let type_def = self.entity_registry.get_type(c.type_def_id);
+                        let type_name = self
+                            .name_table
+                            .last_segment_str(type_def.name_id)
+                            .unwrap_or_else(|| "class".to_string());
+
+                        if let Some(ref generic_info) = type_def.generic_info {
+                            if let Some(idx) = generic_info
+                                .field_names
+                                .iter()
+                                .position(|s| interner.resolve(*s) == field_name)
+                            {
+                                let field_type = &generic_info.field_types[idx];
+                                // Substitute type args if any
+                                if c.type_args.is_empty() {
+                                    field_type.clone()
+                                } else {
+                                    let substitutions: HashMap<_, _> = generic_info
+                                        .type_params
+                                        .iter()
+                                        .zip(c.type_args.iter())
+                                        .map(|(tp, arg)| (tp.name_id, arg.clone()))
+                                        .collect();
+                                    substitute_type(field_type, &substitutions)
+                                }
+                            } else {
+                                self.add_error(
+                                    SemanticError::UnknownField {
+                                        ty: type_name,
+                                        field: field_name.to_string(),
+                                        span: (*field_span).into(),
+                                    },
+                                    *field_span,
+                                );
+                                Type::invalid("propagate")
+                            }
                         } else {
                             self.add_error(
                                 SemanticError::UnknownField {
-                                    ty: self
-                                        .name_table
-                                        .last_segment_str(c.name_id)
-                                        .unwrap_or_else(|| "class".to_string()),
+                                    ty: type_name,
                                     field: field_name.to_string(),
                                     span: (*field_span).into(),
                                 },
@@ -278,11 +344,12 @@ impl Analyzer {
                     }
                     Type::Record(r) => {
                         // Records are immutable - reject field assignment
+                        let type_def = self.entity_registry.get_type(r.type_def_id);
                         self.add_error(
                             SemanticError::RecordFieldMutation {
                                 record: self
                                     .name_table
-                                    .last_segment_str(r.name_id)
+                                    .last_segment_str(type_def.name_id)
                                     .unwrap_or_else(|| "record".to_string()),
                                 field: field_name.to_string(),
                                 span: (*field_span).into(),
