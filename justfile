@@ -14,13 +14,13 @@ build-release:
 check:
     cargo check --all-targets
 
-# Run tests in debug mode
+# Run tests in debug mode (quiet - only shows failures)
 test:
-    cargo test
+    cargo test --quiet
 
-# Run tests in release mode
+# Run tests in release mode (quiet - only shows failures)
 test-release:
-    cargo test --release
+    cargo test --release --quiet
 
 # Run snapshot tests in debug mode
 snap:
