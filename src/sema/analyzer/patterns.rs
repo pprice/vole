@@ -258,7 +258,9 @@ impl Analyzer {
                                             .enumerate()
                                             .filter_map(|(i, (name_id, ty))| {
                                                 Some(StructField {
-                                                    name: self.name_table.last_segment_str(*name_id)?,
+                                                    name: self
+                                                        .name_table
+                                                        .last_segment_str(*name_id)?,
                                                     ty: ty.clone(),
                                                     slot: i,
                                                 })

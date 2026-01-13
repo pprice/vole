@@ -878,11 +878,10 @@ impl Cg<'_, '_, '_> {
         let raise_error_name = self.ctx.interner.resolve(raise_stmt.error_name);
         let error_type_info = match fallible_type.error_type.as_ref() {
             Type::ErrorType(info) => {
-                let name = self
-                    .ctx
-                    .analyzed
-                    .name_table
-                    .last_segment_str(self.ctx.analyzed.entity_registry.name_id(info.type_def_id));
+                let name =
+                    self.ctx.analyzed.name_table.last_segment_str(
+                        self.ctx.analyzed.entity_registry.name_id(info.type_def_id),
+                    );
                 if name.as_deref() == Some(raise_error_name) {
                     Some(info.clone())
                 } else {

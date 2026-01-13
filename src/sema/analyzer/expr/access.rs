@@ -24,9 +24,11 @@ impl Analyzer {
             let name = self.name_table.last_segment_str(*field_name_id);
             if name.as_deref() == Some(field_name) {
                 let field_type = &generic_info.field_types[i];
-                let substituted = self
-                    .entity_registry
-                    .substitute_type_with_args(type_def_id, type_args, field_type);
+                let substituted = self.entity_registry.substitute_type_with_args(
+                    type_def_id,
+                    type_args,
+                    field_type,
+                );
                 let type_name = self
                     .name_table
                     .last_segment_str(type_def.name_id)

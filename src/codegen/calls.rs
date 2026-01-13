@@ -274,7 +274,11 @@ impl Cg<'_, '_, '_> {
         // Check if it's a functional interface variable
         if let Some((var, vole_type)) = self.vars.get(&callee_sym)
             && let Type::Interface(iface) = vole_type
-            && let Some(method_id) = self.ctx.analyzed.entity_registry.is_functional(iface.type_def_id)
+            && let Some(method_id) = self
+                .ctx
+                .analyzed
+                .entity_registry
+                .is_functional(iface.type_def_id)
         {
             let method = self.ctx.analyzed.entity_registry.get_method(method_id);
             let func_type = FunctionType {
@@ -313,8 +317,11 @@ impl Cg<'_, '_, '_> {
 
                 // If declared as functional interface, call via vtable dispatch
                 if let Type::Interface(iface) = &declared_type
-                    && let Some(method_id) =
-                        self.ctx.analyzed.entity_registry.is_functional(iface.type_def_id)
+                    && let Some(method_id) = self
+                        .ctx
+                        .analyzed
+                        .entity_registry
+                        .is_functional(iface.type_def_id)
                 {
                     let method = self.ctx.analyzed.entity_registry.get_method(method_id);
                     let func_type = FunctionType {
@@ -343,8 +350,11 @@ impl Cg<'_, '_, '_> {
 
             // If it's an interface type (functional interface), call via vtable
             if let Type::Interface(iface) = &lambda_val.vole_type
-                && let Some(method_id) =
-                    self.ctx.analyzed.entity_registry.is_functional(iface.type_def_id)
+                && let Some(method_id) = self
+                    .ctx
+                    .analyzed
+                    .entity_registry
+                    .is_functional(iface.type_def_id)
             {
                 let method = self.ctx.analyzed.entity_registry.get_method(method_id);
                 let func_type = FunctionType {

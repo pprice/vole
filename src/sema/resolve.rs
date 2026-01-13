@@ -272,7 +272,10 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                         // return invalid - interfaces need full method info
                         return Type::invalid_msg(
                             "resolve_generic_interface",
-                            format!("interface '{}' requires interface_instance resolution", name_str),
+                            format!(
+                                "interface '{}' requires interface_instance resolution",
+                                name_str
+                            ),
                         );
                     }
                     TypeDefKind::Alias => {

@@ -573,7 +573,11 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Core implementation of iterator return type conversion
-    fn convert_iterator_return_type_by_type_def_id(&self, ty: Type, iterator_type_id: TypeDefId) -> Type {
+    fn convert_iterator_return_type_by_type_def_id(
+        &self,
+        ty: Type,
+        iterator_type_id: TypeDefId,
+    ) -> Type {
         match &ty {
             // Handle Iterator<T> stored as Interface
             Type::Interface(iface) if iface.type_def_id == iterator_type_id => {

@@ -273,7 +273,11 @@ impl Analyzer {
     pub fn satisfies_stringable(&self, ty: &Type, interner: &Interner) -> bool {
         // Use the well-known Stringable TypeDefId if available
         if let Some(stringable_type_def_id) = self.name_table.well_known.stringable_type_def {
-            return self.satisfies_interface_via_entity_registry(ty, stringable_type_def_id, interner);
+            return self.satisfies_interface_via_entity_registry(
+                ty,
+                stringable_type_def_id,
+                interner,
+            );
         }
         // Fallback: try to find "Stringable" via Resolver with interface fallback
         let type_def_id = self

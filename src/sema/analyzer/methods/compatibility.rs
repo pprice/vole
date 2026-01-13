@@ -26,7 +26,8 @@ impl Analyzer {
         // Function type is compatible with functional interface if signatures match
         if let Type::Function(fn_type) = from
             && let Type::Interface(iface) = to
-            && let Some(iface_fn) = self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
+            && let Some(iface_fn) =
+                self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
             && function_compatible_with_interface(fn_type, &iface_fn)
         {
             return true;

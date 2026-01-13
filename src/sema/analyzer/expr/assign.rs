@@ -42,11 +42,10 @@ impl Analyzer {
                             .unwrap_or_else(|| "class".to_string());
 
                         if let Some(ref generic_info) = type_def.generic_info {
-                            if let Some(idx) = generic_info
-                                .field_names
-                                .iter()
-                                .position(|name_id| self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name))
-                            {
+                            if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
+                                self.name_table.last_segment_str(*name_id).as_deref()
+                                    == Some(field_name)
+                            }) {
                                 let field_type = &generic_info.field_types[idx];
                                 // Substitute type args if any
                                 let resolved_type = if c.type_args.is_empty() {
@@ -301,11 +300,10 @@ impl Analyzer {
                             .unwrap_or_else(|| "class".to_string());
 
                         if let Some(ref generic_info) = type_def.generic_info {
-                            if let Some(idx) = generic_info
-                                .field_names
-                                .iter()
-                                .position(|name_id| self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name))
-                            {
+                            if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
+                                self.name_table.last_segment_str(*name_id).as_deref()
+                                    == Some(field_name)
+                            }) {
                                 let field_type = &generic_info.field_types[idx];
                                 // Substitute type args if any
                                 if c.type_args.is_empty() {

@@ -903,8 +903,8 @@ pub(crate) fn fallible_error_tag(
     fallible: &crate::sema::types::FallibleType,
     error_name: Symbol,
     interner: &Interner,
-    name_table: &crate::identity::NameTable,
-    entity_registry: &crate::sema::EntityRegistry,
+    name_table: &NameTable,
+    entity_registry: &EntityRegistry,
 ) -> Option<i64> {
     let error_name_str = interner.resolve(error_name);
     match fallible.error_type.as_ref() {

@@ -134,7 +134,7 @@ impl Analyzer {
         // Extract type_def_id and type_args from nominal types
         if let Some(info) = object_type.as_nominal() {
             self.entity_registry
-                .substitution_map(info.type_def_id, &info.type_args)
+                .substitution_map(info.type_def_id, info.type_args)
         } else {
             HashMap::new()
         }
@@ -366,7 +366,9 @@ impl Analyzer {
             let name_id = interface_def.name_id;
 
             // Build substitution map from type params to type args
-            let substitutions = self.entity_registry.substitution_map(type_def_id, type_args);
+            let substitutions = self
+                .entity_registry
+                .substitution_map(type_def_id, type_args);
 
             // Get interface Symbol by looking up from name_id
             let interface_sym = self
@@ -461,7 +463,9 @@ impl Analyzer {
 
                 // For generic records, substitute type args in the method signature
                 if let Some(type_args) = record_type_args {
-                    let substitutions = self.entity_registry.substitution_map(type_def_id, type_args);
+                    let substitutions = self
+                        .entity_registry
+                        .substitution_map(type_def_id, type_args);
                     let substituted_func_type = FunctionType {
                         params: func_type
                             .params

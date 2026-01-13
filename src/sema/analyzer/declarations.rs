@@ -302,9 +302,7 @@ impl Analyzer {
             let builtin_mod = self.name_table.builtin_module();
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
-                let method_name_id = self
-                    .name_table
-                    .intern_raw(builtin_mod, &[method_name_str]);
+                let method_name_id = self.name_table.intern_raw(builtin_mod, &[method_name_str]);
                 let full_method_name_id = self.name_table.intern_raw(
                     self.current_module,
                     &[interner.resolve(class.name), method_name_str],
@@ -343,9 +341,8 @@ impl Analyzer {
                 let class_name_str = interner.resolve(class.name);
                 for method in &statics.methods {
                     let method_name_str = interner.resolve(method.name);
-                    let method_name_id = self
-                        .name_table
-                        .intern_raw(builtin_mod, &[method_name_str]);
+                    let method_name_id =
+                        self.name_table.intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
@@ -381,9 +378,8 @@ impl Analyzer {
                 let class_name_str = interner.resolve(class.name);
                 for func in &external.functions {
                     let method_name_str = interner.resolve(func.vole_name);
-                    let method_name_id = self
-                        .name_table
-                        .intern_raw(builtin_mod, &[method_name_str]);
+                    let method_name_id =
+                        self.name_table.intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
@@ -504,7 +500,7 @@ impl Analyzer {
                 GenericTypeInfo {
                     type_params,
                     field_names: field_names.clone(),
-                    field_types: field_types.clone(),
+                    field_types,
                 },
             );
 
@@ -550,9 +546,7 @@ impl Analyzer {
             let self_type_for_methods = class_type.map(Type::Class);
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
-                let method_name_id = self
-                    .name_table
-                    .intern_raw(builtin_mod, &[method_name_str]);
+                let method_name_id = self.name_table.intern_raw(builtin_mod, &[method_name_str]);
                 let full_method_name_id = self.name_table.intern_raw(
                     self.current_module,
                     &[interner.resolve(class.name), method_name_str],
@@ -611,9 +605,8 @@ impl Analyzer {
                 let class_name_str = interner.resolve(class.name);
                 for method in &statics.methods {
                     let method_name_str = interner.resolve(method.name);
-                    let method_name_id = self
-                        .name_table
-                        .intern_raw(builtin_mod, &[method_name_str]);
+                    let method_name_id =
+                        self.name_table.intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
@@ -709,9 +702,8 @@ impl Analyzer {
                 let class_name_str = interner.resolve(class.name);
                 for func in &external.functions {
                     let method_name_str = interner.resolve(func.vole_name);
-                    let method_name_id = self
-                        .name_table
-                        .intern_raw(builtin_mod, &[method_name_str]);
+                    let method_name_id =
+                        self.name_table.intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
@@ -850,9 +842,7 @@ impl Analyzer {
             let builtin_mod = self.name_table.builtin_module();
             for method in &record.methods {
                 let method_name_str = interner.resolve(method.name);
-                let method_name_id = self
-                    .name_table
-                    .intern_raw(builtin_mod, &[method_name_str]);
+                let method_name_id = self.name_table.intern_raw(builtin_mod, &[method_name_str]);
                 let full_method_name_id = self.name_table.intern_raw(
                     self.current_module,
                     &[interner.resolve(record.name), method_name_str],
@@ -891,9 +881,8 @@ impl Analyzer {
                 let record_name_str = interner.resolve(record.name);
                 for method in &statics.methods {
                     let method_name_str = interner.resolve(method.name);
-                    let method_name_id = self
-                        .name_table
-                        .intern_raw(builtin_mod, &[method_name_str]);
+                    let method_name_id =
+                        self.name_table.intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[record_name_str, method_name_str]);
@@ -1069,7 +1058,7 @@ impl Analyzer {
                 entity_type_id,
                 GenericTypeInfo {
                     type_params,
-                    field_names: field_names.clone(),
+                    field_names,
                     field_types,
                 },
             );
@@ -1108,9 +1097,7 @@ impl Analyzer {
                 };
 
                 let method_name_str = interner.resolve(method.name);
-                let method_name_id = self
-                    .name_table
-                    .intern_raw(builtin_mod, &[method_name_str]);
+                let method_name_id = self.name_table.intern_raw(builtin_mod, &[method_name_str]);
                 let full_method_name_id = self.name_table.intern_raw(
                     self.current_module,
                     &[interner.resolve(record.name), method_name_str],
@@ -1134,9 +1121,8 @@ impl Analyzer {
                 let record_name_str = interner.resolve(record.name);
                 for method in &statics.methods {
                     let method_name_str = interner.resolve(method.name);
-                    let method_name_id = self
-                        .name_table
-                        .intern_raw(builtin_mod, &[method_name_str]);
+                    let method_name_id =
+                        self.name_table.intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[record_name_str, method_name_str]);
@@ -1468,9 +1454,7 @@ impl Analyzer {
         // Register methods in EntityRegistry (with external bindings)
         for (_, method_name_str, params, return_type, has_default) in &method_data {
             let builtin_mod = self.name_table.builtin_module();
-            let method_name_id = self
-                .name_table
-                .intern_raw(builtin_mod, &[method_name_str]);
+            let method_name_id = self.name_table.intern_raw(builtin_mod, &[method_name_str]);
             let full_method_name_id = self
                 .name_table
                 .intern_raw(self.current_module, &[&name_str, method_name_str]);
@@ -1525,9 +1509,7 @@ impl Analyzer {
             for method in &statics_block.methods {
                 let method_name_str = interner.resolve(method.name).to_string();
                 let builtin_mod = self.name_table.builtin_module();
-                let method_name_id = self
-                    .name_table
-                    .intern_raw(builtin_mod, &[&method_name_str]);
+                let method_name_id = self.name_table.intern_raw(builtin_mod, &[&method_name_str]);
                 let full_method_name_id = self
                     .name_table
                     .intern_raw(self.current_module, &[&name_str, &method_name_str]);
@@ -1578,9 +1560,7 @@ impl Analyzer {
         for (i, (field_name, field_ty)) in resolved_fields.iter().enumerate() {
             let field_name_str = interner.resolve(*field_name).to_string();
             let builtin_mod = self.name_table.builtin_module();
-            let field_name_id = self
-                .name_table
-                .intern_raw(builtin_mod, &[&field_name_str]);
+            let field_name_id = self.name_table.intern_raw(builtin_mod, &[&field_name_str]);
             let full_field_name_id = self
                 .name_table
                 .intern_raw(self.current_module, &[&name_str, &field_name_str]);
@@ -1743,9 +1723,8 @@ impl Analyzer {
                     for method in &statics_block.methods {
                         let method_name_str = interner.resolve(method.name).to_string();
                         let builtin_mod = self.name_table.builtin_module();
-                        let method_name_id = self
-                            .name_table
-                            .intern_raw(builtin_mod, &[&method_name_str]);
+                        let method_name_id =
+                            self.name_table.intern_raw(builtin_mod, &[&method_name_str]);
                         let full_method_name_id = self
                             .name_table
                             .intern_raw(self.current_module, &[&type_name_str, &method_name_str]);
@@ -1782,9 +1761,8 @@ impl Analyzer {
                         for func in &external.functions {
                             let method_name_str = interner.resolve(func.vole_name).to_string();
                             let builtin_mod = self.name_table.builtin_module();
-                            let method_name_id = self
-                                .name_table
-                                .intern_raw(builtin_mod, &[&method_name_str]);
+                            let method_name_id =
+                                self.name_table.intern_raw(builtin_mod, &[&method_name_str]);
                             let full_method_name_id = self.name_table.intern_raw(
                                 self.current_module,
                                 &[&type_name_str, &method_name_str],

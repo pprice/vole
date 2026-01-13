@@ -632,7 +632,9 @@ impl Analyzer {
                 .field_names
                 .iter()
                 .enumerate()
-                .find(|(_, name_id)| self.name_table.last_segment_str(**name_id).as_deref() == Some(field_name_str));
+                .find(|(_, name_id)| {
+                    self.name_table.last_segment_str(**name_id).as_deref() == Some(field_name_str)
+                });
 
             if let Some((slot, _)) = found {
                 let field_type = generic_info.field_types[slot].clone();

@@ -70,7 +70,16 @@ impl Cg<'_, '_, '_> {
                         .field_names
                         .iter()
                         .zip(generic_info.field_types.iter())
-                        .map(|(name_id, ty)| (self.ctx.analyzed.name_table.last_segment_str(*name_id).unwrap_or_default(), ty.clone()))
+                        .map(|(name_id, ty)| {
+                            (
+                                self.ctx
+                                    .analyzed
+                                    .name_table
+                                    .last_segment_str(*name_id)
+                                    .unwrap_or_default(),
+                                ty.clone(),
+                            )
+                        })
                         .collect()
                 } else {
                     HashMap::new()
@@ -83,7 +92,16 @@ impl Cg<'_, '_, '_> {
                         .field_names
                         .iter()
                         .zip(generic_info.field_types.iter())
-                        .map(|(name_id, ty)| (self.ctx.analyzed.name_table.last_segment_str(*name_id).unwrap_or_default(), ty.clone()))
+                        .map(|(name_id, ty)| {
+                            (
+                                self.ctx
+                                    .analyzed
+                                    .name_table
+                                    .last_segment_str(*name_id)
+                                    .unwrap_or_default(),
+                                ty.clone(),
+                            )
+                        })
                         .collect()
                 } else {
                     HashMap::new()

@@ -7,12 +7,12 @@ use std::collections::{HashMap, HashSet};
 
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
+use crate::sema::generic::substitute_type;
 use crate::sema::generic::{
     ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache, TypeParamInfo,
 };
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_table::{TypeKey, TypeTable};
-use crate::sema::generic::substitute_type;
 use crate::sema::{FunctionType, Type};
 
 /// Central registry for all language entities
@@ -1005,7 +1005,10 @@ impl EntityRegistry {
     pub fn field_index(&self, type_def_id: TypeDefId, field_name_id: NameId) -> Option<usize> {
         let type_def = self.get_type(type_def_id);
         let generic_info = type_def.generic_info.as_ref()?;
-        generic_info.field_names.iter().position(|n| *n == field_name_id)
+        generic_info
+            .field_names
+            .iter()
+            .position(|n| *n == field_name_id)
     }
 }
 

@@ -909,7 +909,9 @@ impl Analyzer {
         }
 
         // Build substitution map using type param NameIds
-        let substitutions = self.entity_registry.substitution_map(type_def_id, &type_args);
+        let substitutions = self
+            .entity_registry
+            .substitution_map(type_def_id, &type_args);
 
         // Build methods with substituted types
         let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
@@ -1026,10 +1028,7 @@ impl Analyzer {
         self.collect_signatures(program, interner);
 
         // Populate well-known TypeDefIds now that interfaces are registered
-        crate::sema::well_known::populate_type_def_ids(
-            &mut self.name_table,
-            &self.entity_registry,
-        );
+        crate::sema::well_known::populate_type_def_ids(&mut self.name_table, &self.entity_registry);
 
         // Process global let declarations
         self.process_global_lets(program, interner)?;
@@ -1632,7 +1631,7 @@ impl Analyzer {
         let entity_type_id = target_type.type_def_id().or_else(|| {
             self.name_table
                 .primitives
-                .name_id_for_type(&target_type)
+                .name_id_for_type(target_type)
                 .and_then(|name_id| self.entity_registry.type_by_name(name_id))
         });
 

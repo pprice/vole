@@ -43,29 +43,28 @@ impl Analyzer {
         }
 
         // Helper to get fields from TypeDef
-        let get_fields_from_typedef =
-            |type_def: &crate::sema::entity_defs::TypeDef,
-             name_table: &crate::identity::NameTable|
-             -> Vec<StructField> {
-                type_def
-                    .generic_info
-                    .as_ref()
-                    .map(|gi| {
-                        gi.field_names
-                            .iter()
-                            .zip(gi.field_types.iter())
-                            .enumerate()
-                            .filter_map(|(i, (name_id, ty))| {
-                                Some(StructField {
-                                    name: name_table.last_segment_str(*name_id)?,
-                                    ty: ty.clone(),
-                                    slot: i,
-                                })
+        let get_fields_from_typedef = |type_def: &crate::sema::entity_defs::TypeDef,
+                                       name_table: &NameTable|
+         -> Vec<StructField> {
+            type_def
+                .generic_info
+                .as_ref()
+                .map(|gi| {
+                    gi.field_names
+                        .iter()
+                        .zip(gi.field_types.iter())
+                        .enumerate()
+                        .filter_map(|(i, (name_id, ty))| {
+                            Some(StructField {
+                                name: name_table.last_segment_str(*name_id)?,
+                                ty: ty.clone(),
+                                slot: i,
                             })
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            };
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
 
         let (type_name, fields, result_type) = if let Some(type_id) = type_id_opt {
             let type_def = self.entity_registry.get_type(type_id);
@@ -199,11 +198,11 @@ impl Analyzer {
         let mut actual_types = Vec::new();
 
         for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
-            if let Some(field_name_str) = self.name_table.last_segment_str(*field_name_id) {
-                if let Some(actual_ty) = field_value_types.get(&field_name_str) {
-                    expected_types.push(generic_info.field_types[i].clone());
-                    actual_types.push(actual_ty.clone());
-                }
+            if let Some(field_name_str) = self.name_table.last_segment_str(*field_name_id)
+                && let Some(actual_ty) = field_value_types.get(&field_name_str)
+            {
+                expected_types.push(generic_info.field_types[i].clone());
+                actual_types.push(actual_ty.clone());
             }
         }
 
@@ -234,7 +233,10 @@ impl Analyzer {
             .collect();
 
         for field_name_id in &generic_info.field_names {
-            let field_name_str = self.name_table.last_segment_str(*field_name_id).unwrap_or_default();
+            let field_name_str = self
+                .name_table
+                .last_segment_str(*field_name_id)
+                .unwrap_or_default();
             if !provided_fields.contains(&field_name_str) {
                 self.add_error(
                     SemanticError::MissingField {
@@ -251,11 +253,9 @@ impl Analyzer {
         for field_init in &struct_lit.fields {
             let field_init_name_str = interner.resolve(field_init.name);
             // Find the field index - compare by string value since Symbols may differ
-            if let Some(idx) = generic_info
-                .field_names
-                .iter()
-                .position(|name_id| self.name_table.last_segment_str(*name_id).as_deref() == Some(field_init_name_str))
-            {
+            if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
+                self.name_table.last_segment_str(*name_id).as_deref() == Some(field_init_name_str)
+            }) {
                 let actual_ty = field_value_types
                     .get(field_init_name_str)
                     .expect("field was validated in type check phase");
@@ -315,11 +315,11 @@ impl Analyzer {
         let mut actual_types = Vec::new();
 
         for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
-            if let Some(field_name_str) = self.name_table.last_segment_str(*field_name_id) {
-                if let Some(actual_ty) = field_value_types.get(&field_name_str) {
-                    expected_types.push(generic_info.field_types[i].clone());
-                    actual_types.push(actual_ty.clone());
-                }
+            if let Some(field_name_str) = self.name_table.last_segment_str(*field_name_id)
+                && let Some(actual_ty) = field_value_types.get(&field_name_str)
+            {
+                expected_types.push(generic_info.field_types[i].clone());
+                actual_types.push(actual_ty.clone());
             }
         }
 
@@ -350,7 +350,10 @@ impl Analyzer {
             .collect();
 
         for field_name_id in &generic_info.field_names {
-            let field_name_str = self.name_table.last_segment_str(*field_name_id).unwrap_or_default();
+            let field_name_str = self
+                .name_table
+                .last_segment_str(*field_name_id)
+                .unwrap_or_default();
             if !provided_fields.contains(&field_name_str) {
                 self.add_error(
                     SemanticError::MissingField {
@@ -367,11 +370,9 @@ impl Analyzer {
         for field_init in &struct_lit.fields {
             let field_init_name_str = interner.resolve(field_init.name);
             // Find the field index - compare by string value since Symbols may differ
-            if let Some(idx) = generic_info
-                .field_names
-                .iter()
-                .position(|name_id| self.name_table.last_segment_str(*name_id).as_deref() == Some(field_init_name_str))
-            {
+            if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
+                self.name_table.last_segment_str(*name_id).as_deref() == Some(field_init_name_str)
+            }) {
                 let actual_ty = field_value_types
                     .get(field_init_name_str)
                     .expect("field was validated in type check phase");
