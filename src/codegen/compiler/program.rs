@@ -147,9 +147,7 @@ impl Compiler<'_> {
         test_count = 0;
 
         // Declare monomorphized function instances before second pass
-        self.declare_monomorphized_instances()?;
-        self.declare_class_method_monomorphized_instances()?;
-        self.declare_static_method_monomorphized_instances()?;
+        self.declare_all_monomorphized_instances()?;
 
         // Second pass: compile function bodies and tests
         // Note: Decl::Let globals are handled by inlining their initializers
@@ -191,9 +189,7 @@ impl Compiler<'_> {
         }
 
         // Compile monomorphized instances
-        self.compile_monomorphized_instances(program)?;
-        self.compile_class_method_monomorphized_instances(program)?;
-        self.compile_static_method_monomorphized_instances(program)?;
+        self.compile_all_monomorphized_instances(program)?;
 
         Ok(())
     }
@@ -381,12 +377,12 @@ impl Compiler<'_> {
             for (((name, ty), vole_ty), val) in param_names
                 .iter()
                 .zip(param_types.iter())
-                .zip(param_vole_types.iter())
+                .zip(param_vole_types)
                 .zip(params.iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty.clone()));
+                variables.insert(*name, (var, vole_ty));
             }
 
             // Compile function body with module's interner
@@ -491,12 +487,12 @@ impl Compiler<'_> {
             for (((name, ty), vole_ty), val) in param_names
                 .iter()
                 .zip(param_types.iter())
-                .zip(param_vole_types.iter())
+                .zip(param_vole_types)
                 .zip(params.iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty.clone()));
+                variables.insert(*name, (var, vole_ty));
             }
 
             // Compile function body
@@ -756,12 +752,12 @@ impl Compiler<'_> {
             for (((name, ty), vole_ty), val) in param_names
                 .iter()
                 .zip(param_types.iter())
-                .zip(param_vole_types.iter())
+                .zip(param_vole_types)
                 .zip(params.iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty.clone()));
+                variables.insert(*name, (var, vole_ty));
             }
 
             // Compile function body
@@ -878,16 +874,16 @@ impl Compiler<'_> {
 
     /// Declare all monomorphized function instances
     fn declare_monomorphized_instances(&mut self) -> Result<(), String> {
-        // Collect instances to avoid borrow issues
+        // Collect instances to avoid borrow issues (key not needed, so don't clone it)
         let instances: Vec<_> = self
             .analyzed
             .entity_registry
             .monomorph_cache
             .instances()
-            .map(|(key, instance)| (key.clone(), instance.clone()))
+            .map(|(_key, instance)| instance.clone())
             .collect();
 
-        for (_key, instance) in instances {
+        for instance in instances {
             // Skip external functions - they don't need JIT compilation
             // They're called directly via native_registry
             let func_name = self.query().display_name(instance.original_name);
@@ -951,16 +947,16 @@ impl Compiler<'_> {
             })
             .collect();
 
-        // Collect instances to avoid borrow issues
+        // Collect instances to avoid borrow issues (key not needed, so don't clone it)
         let instances: Vec<_> = self
             .analyzed
             .entity_registry
             .monomorph_cache
             .instances()
-            .map(|(key, instance)| (key.clone(), instance.clone()))
+            .map(|(_key, instance)| instance.clone())
             .collect();
 
-        for (_key, instance) in instances {
+        for instance in instances {
             // Skip external functions - they don't have AST bodies
             // Generic externals are called directly with type erasure at call sites
             let func_name = self.query().display_name(instance.original_name);
@@ -1057,12 +1053,12 @@ impl Compiler<'_> {
             for (((name, ty), vole_ty), val) in param_names
                 .iter()
                 .zip(param_types.iter())
-                .zip(param_vole_types.iter())
+                .zip(param_vole_types)
                 .zip(params.iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty.clone()));
+                variables.insert(*name, (var, vole_ty));
             }
 
             // Compile function body
@@ -1112,13 +1108,13 @@ impl Compiler<'_> {
 
     /// Declare all monomorphized class method instances
     fn declare_class_method_monomorphized_instances(&mut self) -> Result<(), String> {
-        // Collect instances to avoid borrow issues
+        // Collect instances to avoid borrow issues (key not needed, so don't clone it)
         let instances: Vec<_> = self
             .analyzed
             .entity_registry
             .class_method_monomorph_cache
             .instances()
-            .map(|(key, instance)| (key.clone(), instance.clone()))
+            .map(|(_key, instance)| instance.clone())
             .collect();
 
         tracing::debug!(
@@ -1126,7 +1122,7 @@ impl Compiler<'_> {
             "declaring class method monomorphized instances"
         );
 
-        for (_key, instance) in instances {
+        for instance in instances {
             // External methods are runtime functions - no declaration needed
             if instance.external_info.is_some() {
                 continue;
@@ -1198,13 +1194,13 @@ impl Compiler<'_> {
             })
             .collect();
 
-        // Collect instances to avoid borrow issues
+        // Collect instances to avoid borrow issues (key not needed, so don't clone it)
         let instances: Vec<_> = self
             .analyzed
             .entity_registry
             .class_method_monomorph_cache
             .instances()
-            .map(|(key, instance)| (key.clone(), instance.clone()))
+            .map(|(_key, instance)| instance.clone())
             .collect();
 
         tracing::debug!(
@@ -1212,7 +1208,7 @@ impl Compiler<'_> {
             "compiling class method monomorphized instances"
         );
 
-        for (_key, instance) in instances {
+        for instance in instances {
             // External methods are runtime functions - no compilation needed
             if instance.external_info.is_some() {
                 tracing::debug!(
@@ -1343,12 +1339,12 @@ impl Compiler<'_> {
             for (((name, ty), vole_ty), val) in param_names
                 .iter()
                 .zip(param_types.iter())
-                .zip(param_vole_types.iter())
+                .zip(param_vole_types)
                 .zip(block_params[1..].iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty.clone()));
+                variables.insert(*name, (var, vole_ty));
             }
 
             // Compile method body
@@ -1476,13 +1472,13 @@ impl Compiler<'_> {
 
     /// Declare all monomorphized static method instances
     fn declare_static_method_monomorphized_instances(&mut self) -> Result<(), String> {
-        // Collect instances to avoid borrow issues
+        // Collect instances to avoid borrow issues (key not needed, so don't clone it)
         let instances: Vec<_> = self
             .analyzed
             .entity_registry
             .static_method_monomorph_cache
             .instances()
-            .map(|(key, instance)| (key.clone(), instance.clone()))
+            .map(|(_key, instance)| instance.clone())
             .collect();
 
         tracing::debug!(
@@ -1490,7 +1486,7 @@ impl Compiler<'_> {
             "declaring static method monomorphized instances"
         );
 
-        for (_key, instance) in instances {
+        for instance in instances {
             let mangled_name = self.query().display_name(instance.mangled_name);
 
             // Create signature from the concrete function type
@@ -1557,13 +1553,13 @@ impl Compiler<'_> {
             })
             .collect();
 
-        // Collect instances to avoid borrow issues
+        // Collect instances to avoid borrow issues (key not needed, so don't clone it)
         let instances: Vec<_> = self
             .analyzed
             .entity_registry
             .static_method_monomorph_cache
             .instances()
-            .map(|(key, instance)| (key.clone(), instance.clone()))
+            .map(|(_key, instance)| instance.clone())
             .collect();
 
         tracing::debug!(
@@ -1571,7 +1567,7 @@ impl Compiler<'_> {
             "compiling static method monomorphized instances"
         );
 
-        for (_key, instance) in instances {
+        for instance in instances {
             let class_name_str = self.query().display_name(instance.class_name);
             tracing::debug!(
                 class_name = %class_name_str,
@@ -1686,12 +1682,12 @@ impl Compiler<'_> {
             for (((name, ty), vole_ty), val) in param_names
                 .iter()
                 .zip(param_types.iter())
-                .zip(param_vole_types.iter())
+                .zip(param_vole_types)
                 .zip(block_params.iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty.clone()));
+                variables.insert(*name, (var, vole_ty));
             }
 
             // Compile method body
@@ -1735,6 +1731,26 @@ impl Compiler<'_> {
         self.jit.define_function(func_id)?;
         self.jit.clear();
 
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Unified monomorphization entry points
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Declare all monomorphized instances (functions, class methods, static methods)
+    fn declare_all_monomorphized_instances(&mut self) -> Result<(), String> {
+        self.declare_monomorphized_instances()?;
+        self.declare_class_method_monomorphized_instances()?;
+        self.declare_static_method_monomorphized_instances()?;
+        Ok(())
+    }
+
+    /// Compile all monomorphized instances (functions, class methods, static methods)
+    fn compile_all_monomorphized_instances(&mut self, program: &Program) -> Result<(), String> {
+        self.compile_monomorphized_instances(program)?;
+        self.compile_class_method_monomorphized_instances(program)?;
+        self.compile_static_method_monomorphized_instances(program)?;
         Ok(())
     }
 }

@@ -747,26 +747,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
     }
 }
 
-/// Resolve a type expression using entity registry and type metadata
-/// This is used when CompileCtx is not available (e.g., during Compiler setup)
-pub(crate) fn resolve_type_expr_full(
-    ty: &TypeExpr,
-    entity_registry: &EntityRegistry,
-    type_metadata: &HashMap<Symbol, TypeMetadata>,
-    interner: &Interner,
-    name_table: &NameTable,
-    module_id: ModuleId,
-) -> Type {
-    resolve_type_expr_with_metadata(
-        ty,
-        entity_registry,
-        type_metadata,
-        interner,
-        name_table,
-        module_id,
-    )
-}
-
 /// Resolve a type expression using a ProgramQuery and type metadata.
 /// Cleaner interface for codegen that avoids direct field access.
 pub(crate) fn resolve_type_expr_query(

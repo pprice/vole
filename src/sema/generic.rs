@@ -247,7 +247,9 @@ impl TypeParamRegistry {
 
     /// Look up the NameId for a TypeParamId (for substitution).
     pub fn get_name_id(&self, id: TypeParamId) -> Option<NameId> {
-        self.params.get(id.index() as usize).map(|(name_id, _)| *name_id)
+        self.params
+            .get(id.index() as usize)
+            .map(|(name_id, _)| *name_id)
     }
 
     /// Look up the Symbol for a TypeParamId (for display).
@@ -266,7 +268,10 @@ impl Clone for TypeParamRegistry {
 
 /// Merge two type parameter lists into one.
 /// This is useful for combining class/record type params with method type params.
-pub fn merge_type_params(base: &[TypeParamInfo], additional: &[TypeParamInfo]) -> Vec<TypeParamInfo> {
+pub fn merge_type_params(
+    base: &[TypeParamInfo],
+    additional: &[TypeParamInfo],
+) -> Vec<TypeParamInfo> {
     base.iter().chain(additional.iter()).cloned().collect()
 }
 

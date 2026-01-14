@@ -6,8 +6,8 @@ use cranelift_module::Module;
 use super::{Compiler, ControlFlowCtx};
 use crate::codegen::stmt::compile_block;
 use crate::codegen::types::{
-    CompileCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_full,
-    resolve_type_expr_query, type_to_cranelift,
+    CompileCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_query,
+    resolve_type_expr_with_metadata, type_to_cranelift,
 };
 use crate::frontend::{
     ClassDecl, FuncDecl, ImplementBlock, InterfaceMethod, Interner, RecordDecl, StaticsBlock,
@@ -217,7 +217,7 @@ impl Compiler<'_> {
                         sym
                     )
                 }),
-            _ => resolve_type_expr_full(
+            _ => resolve_type_expr_with_metadata(
                 &impl_block.target_type,
                 &self.analyzed.entity_registry,
                 &self.type_metadata,
@@ -235,7 +235,7 @@ impl Compiler<'_> {
                 .return_type
                 .as_ref()
                 .map(|t| {
-                    resolve_type_expr_full(
+                    resolve_type_expr_with_metadata(
                         t,
                         &self.analyzed.entity_registry,
                         &self.type_metadata,
@@ -302,7 +302,7 @@ impl Compiler<'_> {
                     .return_type
                     .as_ref()
                     .map(|t| {
-                        resolve_type_expr_full(
+                        resolve_type_expr_with_metadata(
                             t,
                             &self.analyzed.entity_registry,
                             &self.type_metadata,
@@ -472,7 +472,7 @@ impl Compiler<'_> {
                 .return_type
                 .as_ref()
                 .map(|t| {
-                    resolve_type_expr_full(
+                    resolve_type_expr_with_metadata(
                         t,
                         &self.analyzed.entity_registry,
                         &self.type_metadata,
@@ -493,7 +493,7 @@ impl Compiler<'_> {
                 .iter()
                 .map(|p| {
                     type_to_cranelift(
-                        &resolve_type_expr_full(
+                        &resolve_type_expr_with_metadata(
                             &p.ty,
                             &self.analyzed.entity_registry,
                             &self.type_metadata,
@@ -509,7 +509,7 @@ impl Compiler<'_> {
                 .params
                 .iter()
                 .map(|p| {
-                    resolve_type_expr_full(
+                    resolve_type_expr_with_metadata(
                         &p.ty,
                         &self.analyzed.entity_registry,
                         &self.type_metadata,
@@ -1214,7 +1214,7 @@ impl Compiler<'_> {
                 .iter()
                 .map(|p| {
                     type_to_cranelift(
-                        &resolve_type_expr_full(
+                        &resolve_type_expr_with_metadata(
                             &p.ty,
                             &self.analyzed.entity_registry,
                             &self.type_metadata,
@@ -1230,7 +1230,7 @@ impl Compiler<'_> {
                 .params
                 .iter()
                 .map(|p| {
-                    resolve_type_expr_full(
+                    resolve_type_expr_with_metadata(
                         &p.ty,
                         &self.analyzed.entity_registry,
                         &self.type_metadata,
@@ -1254,7 +1254,7 @@ impl Compiler<'_> {
                 .return_type
                 .as_ref()
                 .map(|t| {
-                    resolve_type_expr_full(
+                    resolve_type_expr_with_metadata(
                         t,
                         &self.analyzed.entity_registry,
                         &self.type_metadata,
@@ -1363,7 +1363,7 @@ impl Compiler<'_> {
                     .return_type
                     .as_ref()
                     .map(|t| {
-                        resolve_type_expr_full(
+                        resolve_type_expr_with_metadata(
                             t,
                             &self.analyzed.entity_registry,
                             &self.type_metadata,
@@ -1385,7 +1385,7 @@ impl Compiler<'_> {
                     .iter()
                     .map(|p| {
                         type_to_cranelift(
-                            &resolve_type_expr_full(
+                            &resolve_type_expr_with_metadata(
                                 &p.ty,
                                 &self.analyzed.entity_registry,
                                 &self.type_metadata,
@@ -1401,7 +1401,7 @@ impl Compiler<'_> {
                     .params
                     .iter()
                     .map(|p| {
-                        resolve_type_expr_full(
+                        resolve_type_expr_with_metadata(
                             &p.ty,
                             &self.analyzed.entity_registry,
                             &self.type_metadata,
