@@ -164,9 +164,12 @@ impl Cg<'_, '_, '_> {
         union_type: &Type,
     ) -> Result<CompiledValue, String> {
         let Type::Union(variants) = union_type else {
-            return Err(
-                CodegenError::type_mismatch("union construction", "union type", "non-union").into(),
-            );
+            return Err(CodegenError::type_mismatch(
+                "union construction",
+                "union type",
+                "non-union",
+            )
+            .into());
         };
 
         // If the value is already the same union type, just return it

@@ -493,10 +493,10 @@ impl Cg<'_, '_, '_> {
             .unwrap_optional()
             .unwrap_or(Type::Primitive(PrimitiveType::I64));
         let payload_cranelift_type = type_to_cranelift(&inner_type, self.ctx.pointer_type);
-        let payload = self
-            .builder
-            .ins()
-            .load(payload_cranelift_type, MemFlags::new(), optional.value, 8);
+        let payload =
+            self.builder
+                .ins()
+                .load(payload_cranelift_type, MemFlags::new(), optional.value, 8);
 
         // Compare payload with value (extend if necessary to match types)
         let values_equal = if value.ty == types::F64 {
@@ -511,12 +511,17 @@ impl Cg<'_, '_, '_> {
                 (extended, value.value)
             } else if payload_cranelift_type.bytes() > value.ty.bytes() {
                 // Extend value to match payload's type
-                let extended = self.builder.ins().sextend(payload_cranelift_type, value.value);
+                let extended = self
+                    .builder
+                    .ins()
+                    .sextend(payload_cranelift_type, value.value);
                 (payload, extended)
             } else {
                 (payload, value.value)
             };
-            self.builder.ins().icmp(IntCC::Equal, cmp_payload, cmp_value)
+            self.builder
+                .ins()
+                .icmp(IntCC::Equal, cmp_payload, cmp_value)
         };
 
         // Result is: is_not_nil AND values_equal

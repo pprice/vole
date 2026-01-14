@@ -3,7 +3,9 @@
 use super::helpers::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
-use crate::codegen::types::{CompiledValue, box_interface_value, module_name_id, type_to_cranelift};
+use crate::codegen::types::{
+    CompiledValue, box_interface_value, module_name_id, type_to_cranelift,
+};
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
 use crate::sema::PrimitiveType;

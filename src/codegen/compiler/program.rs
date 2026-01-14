@@ -23,6 +23,8 @@ use crate::sema::{PrimitiveType, Type};
 
 /// Compilation phase for monomorphization pipeline.
 /// Allows separating function declaration from body compilation for forward references.
+/// Currently infrastructure for potential future unified API.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MonomorphPhase {
     /// Only declare function signatures (for forward reference support)

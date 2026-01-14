@@ -30,25 +30,11 @@ struct InterfaceVtableKey {
     concrete: InterfaceConcreteType,
 }
 
-/// Compilation phase for vtable generation.
-/// Allows separating metadata collection from wrapper compilation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum VtablePhase {
-    /// Phase 1: Collect vtable metadata and declare data slots
-    Declare,
-    /// Phase 2: Compile wrapper functions
-    CompileWrappers,
-    /// Phase 3: Define vtable data with wrapper function pointers
-    Define,
-}
-
 /// Tracking state for a vtable being built in phases.
 #[derive(Debug, Clone)]
 struct VtableBuildState {
     /// Data ID for this vtable (allocated in Phase 1)
     data_id: DataId,
-    /// Current phase this vtable has completed
-    phase: VtablePhase,
     /// Interface name ID for method resolution
     interface_name_id: NameId,
     /// Concrete type for wrapper compilation
@@ -57,8 +43,6 @@ struct VtableBuildState {
     substitutions: HashMap<NameId, Type>,
     /// Method IDs to compile wrappers for
     method_ids: Vec<MethodId>,
-    /// Wrapper function IDs (populated in Phase 2)
-    wrapper_ids: Vec<cranelift_module::FuncId>,
 }
 
 #[derive(Debug, Default)]
@@ -93,6 +77,9 @@ impl InterfaceVtableRegistry {
         Self::default()
     }
 
+    /// Atomic vtable creation (all phases at once).
+    /// Prefer get_or_declare + ensure_compiled for forward reference support.
+    #[allow(dead_code)]
     #[tracing::instrument(skip(self, ctx, interface_type_args), fields(interface = %ctx.interner.resolve(interface_name)))]
     pub(crate) fn get_or_create(
         &mut self,
@@ -337,12 +324,10 @@ impl InterfaceVtableRegistry {
             key,
             VtableBuildState {
                 data_id,
-                phase: VtablePhase::Declare,
                 interface_name_id,
                 concrete_type: concrete_type.clone(),
                 substitutions,
                 method_ids,
-                wrapper_ids: Vec::new(),
             },
         );
 
@@ -914,12 +899,18 @@ pub(crate) fn box_interface_value(
 
     let heap_alloc_ref = runtime_heap_alloc_ref(ctx, builder)?;
     let data_word = value_to_word(builder, &value, ctx.pointer_type, Some(heap_alloc_ref))?;
-    let vtable_id = ctx.interface_vtables.borrow_mut().get_or_create(
+
+    // Phase 1: Declare vtable, getting DataId for forward reference
+    let vtable_id = ctx.interface_vtables.borrow_mut().get_or_declare(
         ctx,
         interface_name,
         &interface.type_args,
         &value.vole_type,
     )?;
+    // Phase 2+3: Compile wrappers and define vtable data
+    ctx.interface_vtables
+        .borrow_mut()
+        .ensure_compiled(ctx, interface_name, &value.vole_type)?;
     let vtable_gv = ctx.module.declare_data_in_func(vtable_id, builder.func);
     let vtable_ptr = builder.ins().global_value(ctx.pointer_type, vtable_gv);
 

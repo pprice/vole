@@ -6,11 +6,14 @@
 // - `primitive` - PrimitiveType enum (i8-i128, u8-u64, f32, f64, bool, string)
 // - `nominal` - NominalType enum (Class, Record, Interface, Error) with TypeDefIds
 // - `special` - Supporting types for special Type variants (Placeholder, Invalid, etc.)
+// - `intern` - Type interning via Arc for efficient type sharing
 
+pub mod intern;
 pub mod nominal;
 pub mod primitive;
 pub mod special;
 
+pub use intern::{InternableType, InternedType, TypeInterner};
 pub use nominal::{
     ClassType, ErrorTypeInfo, InterfaceMethodType, InterfaceType, NominalType, RecordType,
 };

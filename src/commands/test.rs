@@ -487,7 +487,11 @@ fn execute_tests_with_progress(
                     }
                     // Print captured output on failure
                     if let Some(output) = &captured_output {
-                        println!("    {}--- captured output ---{}", colors.dim(), colors.reset());
+                        println!(
+                            "    {}--- captured output ---{}",
+                            colors.dim(),
+                            colors.reset()
+                        );
                         for line in output.lines() {
                             println!("    {}", line);
                         }
@@ -511,7 +515,11 @@ fn execute_tests_with_progress(
                     eprintln!("    PANIC: {}", msg);
                     // Print captured output on panic
                     if let Some(output) = &captured_output {
-                        println!("    {}--- captured output ---{}", colors.dim(), colors.reset());
+                        println!(
+                            "    {}--- captured output ---{}",
+                            colors.dim(),
+                            colors.reset()
+                        );
                         for line in output.lines() {
                             println!("    {}", line);
                         }
@@ -568,7 +576,11 @@ fn print_test_result(result: &TestResult, colors: &TermColors) {
             }
             // Print captured output on failure
             if let Some(output) = &result.captured_output {
-                println!("    {}--- captured output ---{}", colors.dim(), colors.reset());
+                println!(
+                    "    {}--- captured output ---{}",
+                    colors.dim(),
+                    colors.reset()
+                );
                 for line in output.lines() {
                     println!("    {}", line);
                 }
@@ -587,7 +599,11 @@ fn print_test_result(result: &TestResult, colors: &TermColors) {
             eprintln!("    PANIC: {}", msg);
             // Print captured output on panic
             if let Some(output) = &result.captured_output {
-                println!("    {}--- captured output ---{}", colors.dim(), colors.reset());
+                println!(
+                    "    {}--- captured output ---{}",
+                    colors.dim(),
+                    colors.reset()
+                );
                 for line in output.lines() {
                     println!("    {}", line);
                 }

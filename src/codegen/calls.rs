@@ -421,7 +421,9 @@ impl Cg<'_, '_, '_> {
                         .iter()
                         .map(|p| self.ctx.substitute_type(p))
                         .collect(),
-                    return_type: Box::new(self.ctx.substitute_type(&instance.func_type.return_type)),
+                    return_type: Box::new(
+                        self.ctx.substitute_type(&instance.func_type.return_type),
+                    ),
                     is_closure: instance.func_type.is_closure,
                 };
                 return self.compile_native_call_with_types(native_func, call, &func_type);
