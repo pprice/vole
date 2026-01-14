@@ -12,7 +12,7 @@ use crate::sema::{PrimitiveType, Type};
 
 use super::context::Cg;
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
-use super::types::{CompiledValue, array_element_tag, convert_to_type};
+use super::types::{CompiledValue, array_element_tag, convert_to_type, type_to_cranelift};
 
 impl Cg<'_, '_, '_> {
     /// Compile a binary expression
@@ -486,19 +486,37 @@ impl Cg<'_, '_, '_> {
         let nil_tag_val = self.builder.ins().iconst(types::I8, nil_tag as i64);
         let is_not_nil = self.builder.ins().icmp(IntCC::NotEqual, tag, nil_tag_val);
 
-        // Load the payload (at offset 8)
+        // Load the payload (at offset 8) with the correct type
+        // The payload type matches the inner (non-nil) type of the optional
+        let inner_type = optional
+            .vole_type
+            .unwrap_optional()
+            .unwrap_or(Type::Primitive(PrimitiveType::I64));
+        let payload_cranelift_type = type_to_cranelift(&inner_type, self.ctx.pointer_type);
         let payload = self
             .builder
             .ins()
-            .load(types::I64, MemFlags::new(), optional.value, 8);
+            .load(payload_cranelift_type, MemFlags::new(), optional.value, 8);
 
-        // Compare payload with value
+        // Compare payload with value (extend if necessary to match types)
         let values_equal = if value.ty == types::F64 {
             self.builder
                 .ins()
                 .fcmp(FloatCC::Equal, payload, value.value)
         } else {
-            self.builder.ins().icmp(IntCC::Equal, payload, value.value)
+            // Ensure both values have the same type for comparison
+            let (cmp_payload, cmp_value) = if payload_cranelift_type.bytes() < value.ty.bytes() {
+                // Extend payload to match value's type
+                let extended = self.builder.ins().sextend(value.ty, payload);
+                (extended, value.value)
+            } else if payload_cranelift_type.bytes() > value.ty.bytes() {
+                // Extend value to match payload's type
+                let extended = self.builder.ins().sextend(payload_cranelift_type, value.value);
+                (payload, extended)
+            } else {
+                (payload, value.value)
+            };
+            self.builder.ins().icmp(IntCC::Equal, cmp_payload, cmp_value)
         };
 
         // Result is: is_not_nil AND values_equal

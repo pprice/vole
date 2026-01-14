@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use super::helpers::convert_to_i64_for_storage;
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
-use crate::codegen::types::{CompiledValue, box_interface_value};
+use crate::codegen::types::{CompiledValue, box_interface_value, type_size};
+use crate::errors::CodegenError;
 use crate::frontend::{Expr, StructLiteralExpr};
 use crate::sema::Type;
 use crate::sema::types::NominalType;
@@ -123,11 +124,13 @@ impl Cg<'_, '_, '_> {
             let value = self.expr(&init.value)?;
 
             // If field type is optional (union) and value type is not a union, wrap it
+            // Use heap allocation for unions stored in class/record fields since stack slots
+            // don't persist beyond the current function's stack frame
             let final_value = if let Some(field_type) = field_types.get(init_name) {
                 if matches!(field_type, Type::Union(_))
                     && !matches!(&value.vole_type, Type::Union(_))
                 {
-                    self.construct_union(value, field_type)?
+                    self.construct_union_heap(value, field_type)?
                 } else if matches!(field_type, Type::Nominal(NominalType::Interface(_))) {
                     box_interface_value(self.builder, self.ctx, value, field_type)?
                 } else {
@@ -149,6 +152,74 @@ impl Cg<'_, '_, '_> {
             value: instance_ptr,
             ty: self.ctx.pointer_type,
             vole_type,
+        })
+    }
+
+    /// Construct a union value on the heap (for storing in class/record fields).
+    /// Unlike the stack-based construct_union, this allocates on the heap so the
+    /// union persists beyond the current function's stack frame.
+    fn construct_union_heap(
+        &mut self,
+        value: CompiledValue,
+        union_type: &Type,
+    ) -> Result<CompiledValue, String> {
+        let Type::Union(variants) = union_type else {
+            return Err(
+                CodegenError::type_mismatch("union construction", "union type", "non-union").into(),
+            );
+        };
+
+        // If the value is already the same union type, just return it
+        if &value.vole_type == union_type {
+            return Ok(value);
+        }
+
+        // Find the tag for the value type
+        let tag = variants
+            .iter()
+            .position(|v| v == &value.vole_type)
+            .ok_or_else(|| {
+                CodegenError::type_mismatch(
+                    "union variant",
+                    format!("one of {:?}", variants),
+                    format!("{:?}", value.vole_type),
+                )
+            })?;
+
+        // Get heap_alloc function ref
+        let heap_alloc_key = self
+            .ctx
+            .func_registry
+            .runtime_key(RuntimeFn::HeapAlloc)
+            .ok_or_else(|| "heap allocator not registered".to_string())?;
+        let heap_alloc_ref = self.func_ref(heap_alloc_key)?;
+
+        // Allocate union storage on the heap
+        let union_size = type_size(union_type, self.ctx.pointer_type);
+        let size_val = self
+            .builder
+            .ins()
+            .iconst(self.ctx.pointer_type, union_size as i64);
+        let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
+        let heap_ptr = self.builder.inst_results(alloc_call)[0];
+
+        // Store tag at offset 0
+        let tag_val = self.builder.ins().iconst(types::I8, tag as i64);
+        self.builder
+            .ins()
+            .store(MemFlags::new(), tag_val, heap_ptr, 0);
+
+        // Store payload at offset 8 (if not nil)
+        if value.vole_type != Type::Nil {
+            self.builder
+                .ins()
+                .store(MemFlags::new(), value.value, heap_ptr, 8);
+        }
+
+        Ok(CompiledValue {
+            value: heap_ptr,
+            ty: self.ctx.pointer_type,
+            vole_type: union_type.clone(),
         })
     }
 }
