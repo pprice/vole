@@ -15,5 +15,5 @@ mod types;
 
 pub use compiler::{Compiler, ControlFlowCtx, TestInfo};
 pub use function_registry::{FunctionKey, FunctionRegistry, RuntimeFn};
-pub use jit::JitContext;
+pub use jit::{CompiledModules, JitContext};
 pub use types::CompiledValue;

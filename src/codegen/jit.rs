@@ -5,11 +5,63 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use std::collections::HashMap;
 
+/// Cache of compiled module functions that can be shared across JitContexts.
+/// The JitContext that compiled these functions must be kept alive.
+pub struct CompiledModules {
+    /// The JIT context holding the compiled module code (must stay alive)
+    #[allow(dead_code)]
+    jit: JitContext,
+    /// Function name -> function pointer for all compiled module functions
+    pub functions: HashMap<String, *const u8>,
+}
+
+// Safety: Function pointers are valid for the lifetime of the CompiledModules
+// and can be safely shared across threads (they point to immutable code)
+unsafe impl Send for CompiledModules {}
+unsafe impl Sync for CompiledModules {}
+
+impl CompiledModules {
+    /// Create a new CompiledModules from a finalized JitContext.
+    /// Extracts function pointers for all declared functions.
+    pub fn new(mut jit: JitContext) -> Self {
+        // Finalize to get function pointers
+        let _ = jit.finalize();
+
+        // Extract all function pointers
+        let functions: HashMap<String, *const u8> = jit
+            .func_ids
+            .iter()
+            .map(|(name, &func_id)| {
+                let ptr = jit.module.get_finalized_function(func_id);
+                (name.clone(), ptr)
+            })
+            .collect();
+
+        Self { jit, functions }
+    }
+
+    /// Check if a function by name is present in the compiled modules
+    pub fn has_function(&self, name: &str) -> bool {
+        self.functions.contains_key(name)
+    }
+
+    /// Check if all functions with a given prefix are present
+    /// Used to check if a module (e.g., "std:math") has been compiled
+    pub fn has_module(&self, module_prefix: &str) -> bool {
+        // If no functions with this prefix exist, we assume the module wasn't compiled
+        // This is a heuristic - a module might have no pure Vole functions
+        self.functions.keys().any(|name| name.starts_with(module_prefix))
+    }
+}
+
 /// JIT compiler context
 pub struct JitContext {
     pub module: JITModule,
     pub ctx: codegen::Context,
+    /// Functions declared with Export linkage (will be compiled)
     pub func_ids: HashMap<String, FuncId>,
+    /// Functions declared with Import linkage (runtime/external functions)
+    pub imported_func_ids: HashMap<String, FuncId>,
     /// Source file path stored here so it lives as long as the JIT code.
     /// Used by assert failure messages.
     source_file: Option<Box<str>>,
@@ -17,6 +69,16 @@ pub struct JitContext {
 
 impl JitContext {
     pub fn new() -> Self {
+        Self::new_with_modules(None)
+    }
+
+    /// Create a new JitContext with pre-compiled module functions available as external symbols.
+    /// This allows reusing compiled module code across multiple JitContexts.
+    pub fn with_modules(modules: &CompiledModules) -> Self {
+        Self::new_with_modules(Some(&modules.functions))
+    }
+
+    fn new_with_modules(precompiled: Option<&HashMap<String, *const u8>>) -> Self {
         // Build JIT module with native ISA
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
@@ -35,6 +97,13 @@ impl JitContext {
         // Register runtime functions
         Self::register_runtime_symbols(&mut builder);
 
+        // Register pre-compiled module functions as external symbols
+        if let Some(functions) = precompiled {
+            for (name, &ptr) in functions {
+                builder.symbol(name, ptr);
+            }
+        }
+
         let module = JITModule::new(builder);
         let ctx = module.make_context();
 
@@ -42,6 +111,7 @@ impl JitContext {
             module,
             ctx,
             func_ids: HashMap::new(),
+            imported_func_ids: HashMap::new(),
             source_file: None,
         };
 
@@ -830,12 +900,14 @@ impl JitContext {
     }
 
     /// Import an external function
+    /// These are stored in imported_func_ids (not func_ids) since they don't have
+    /// compiled code that can be retrieved via get_finalized_function.
     pub fn import_function(&mut self, name: &str, sig: &Signature) -> FuncId {
         let func_id = self
             .module
             .declare_function(name, Linkage::Import, sig)
             .unwrap();
-        self.func_ids.insert(name.to_string(), func_id);
+        self.imported_func_ids.insert(name.to_string(), func_id);
         func_id
     }
 

@@ -64,7 +64,8 @@ impl<'a> Compiler<'a> {
 
         let mut func_registry = FunctionRegistry::new(analyzed.name_table.clone());
         for runtime in RuntimeFn::ALL {
-            if let Some(func_id) = jit.func_ids.get(runtime.name()) {
+            // Runtime functions are in imported_func_ids (Import linkage)
+            if let Some(func_id) = jit.imported_func_ids.get(runtime.name()) {
                 let key = func_registry.intern_runtime(*runtime);
                 func_registry.set_func_id(key, *func_id);
             }

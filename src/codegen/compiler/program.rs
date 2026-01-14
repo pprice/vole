@@ -80,7 +80,29 @@ impl Compiler<'_> {
     pub fn compile_program(&mut self, program: &Program) -> Result<(), String> {
         // Compile module functions first (before main program)
         self.compile_module_functions()?;
+        self.compile_program_body(program)
+    }
 
+    /// Compile only module functions (prelude, imports).
+    /// Call this once before compile_program_only for batched compilation.
+    pub fn compile_modules_only(&mut self) -> Result<(), String> {
+        self.compile_module_functions()
+    }
+
+    /// Import pre-compiled module functions without compiling them.
+    /// Use this when modules were already compiled in a shared CompiledModules cache.
+    pub fn import_modules(&mut self) -> Result<(), String> {
+        self.import_module_functions()
+    }
+
+    /// Compile a program without recompiling module functions.
+    /// Use with compile_modules_only for batched compilation.
+    pub fn compile_program_only(&mut self, program: &Program) -> Result<(), String> {
+        self.compile_program_body(program)
+    }
+
+    /// Compile the main program body (functions, tests, classes, etc.)
+    fn compile_program_body(&mut self, program: &Program) -> Result<(), String> {
         // Count total tests to assign unique IDs
         let mut test_count = 0usize;
 
@@ -285,10 +307,17 @@ impl Compiler<'_> {
                 }
             }
 
-            // Register implement blocks (including static methods)
+            // Register static methods from implement blocks (first pass - declarations only)
+            // Instance methods are skipped - they're handled through the main program path.
+            // External methods are resolved via the native registry.
             for decl in &program.declarations {
                 if let Decl::Implement(impl_block) = decl {
-                    self.register_implement_block_with_interner(impl_block, module_interner);
+                    if impl_block.statics.is_some() {
+                        self.register_implement_statics_only_with_interner(
+                            impl_block,
+                            module_interner,
+                        );
+                    }
                 }
             }
 
@@ -320,29 +349,118 @@ impl Compiler<'_> {
                 }
             }
 
-            // Compile ONLY static methods from implement blocks in module programs
-            // Regular implement methods are handled via external FFI or were already compiled
+            // Compile implement block static methods from module programs
+            // Note: Instance methods for primitives (like to_string, index_of) are compiled
+            // through the main program path, not here. This avoids cross-interner issues.
             for decl in &program.declarations {
-                if let Decl::Implement(impl_block) = decl
-                    && impl_block.statics.is_some()
-                {
-                    self.compile_implement_statics_only(
-                        impl_block,
-                        Some(module_path),
-                        module_interner,
-                    )?;
+                if let Decl::Implement(impl_block) = decl {
+                    // Compile static methods only
+                    if impl_block.statics.is_some() {
+                        self.compile_implement_statics_only(
+                            impl_block,
+                            Some(module_path),
+                            module_interner,
+                        )?;
+                    }
                 }
             }
 
             // Compile module class methods (both instance and static)
             for decl in &program.declarations {
                 if let Decl::Class(class) = decl {
+                    tracing::debug!(class_name = %module_interner.resolve(class.name), "Compiling module class methods");
                     self.compile_module_class_methods(class, module_interner, module_path)?;
                 }
             }
         }
 
+        tracing::debug!("compile_module_functions complete");
         Ok(())
+    }
+
+    /// Import pre-compiled module functions as external symbols.
+    /// This declares the functions so they can be called, but doesn't compile them.
+    /// Used when modules are already compiled in a shared CompiledModules cache.
+    fn import_module_functions(&mut self) -> Result<(), String> {
+        let module_paths: Vec<_> = self.query().module_paths().map(String::from).collect();
+
+        for module_path in &module_paths {
+            let (program, module_interner) = &self.analyzed.module_programs[module_path];
+
+            // Import pure Vole functions (they're already compiled, just need declarations)
+            for decl in &program.declarations {
+                if let Decl::Function(func) = decl {
+                    let module_id = self.query().module_id_or_main(module_path);
+                    let name_id = function_name_id_with_interner(
+                        self.analyzed,
+                        module_interner,
+                        module_id,
+                        func.name,
+                    )
+                    .expect("module function name_id should be registered");
+                    let display_name = self.query().display_name(name_id);
+
+                    // Create signature and IMPORT (not declare) the function
+                    let sig = self.build_signature(
+                        &func.params,
+                        func.return_type.as_ref(),
+                        SelfParam::None,
+                        TypeResolver::Query,
+                    );
+                    let func_id = self.jit.import_function(&display_name, &sig);
+                    let func_key = self.func_registry.intern_name_id(name_id);
+                    self.func_registry.set_func_id(func_key, func_id);
+
+                    // Record return type
+                    let query = self.query();
+                    let return_type = func
+                        .return_type
+                        .as_ref()
+                        .map(|t| {
+                            resolve_type_expr_with_metadata(
+                                t,
+                                query.registry(),
+                                &self.type_metadata,
+                                query.interner(),
+                                query.name_table(),
+                                module_id,
+                            )
+                        })
+                        .unwrap_or(Type::Void);
+                    self.func_registry.set_return_type(func_key, return_type);
+                }
+            }
+
+            // Import implement block statics (using Linkage::Import for pre-compiled modules)
+            // Note: Instance methods are handled through external dispatch, only statics need importing
+            for decl in &program.declarations {
+                if let Decl::Implement(impl_block) = decl {
+                    if impl_block.statics.is_some() {
+                        self.import_implement_statics_only_with_interner(impl_block, module_interner);
+                    }
+                }
+            }
+
+            // Finalize module classes (register type metadata, import methods)
+            for decl in &program.declarations {
+                if let Decl::Class(class) = decl {
+                    self.import_module_class(class, module_interner);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Import a module class - register metadata and import methods.
+    /// Used when modules are already compiled in a shared cache.
+    fn import_module_class(&mut self, class: &crate::frontend::ClassDecl, module_interner: &Interner) {
+        // First finalize to get type metadata registered
+        self.finalize_module_class(class, module_interner);
+
+        // The methods are already compiled - they'll be linked via external symbols
+        // No additional work needed here since method calls go through func_registry
+        // which will find the imported function IDs
     }
 
     /// Compile a single module function with its own interner

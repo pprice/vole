@@ -17,7 +17,7 @@ use crate::cli::{ColorMode, ReportMode, expand_paths, should_skip_path};
 use crate::sema::ModuleCache;
 use std::cell::RefCell;
 use std::rc::Rc;
-use crate::codegen::{Compiler, JitContext, TestInfo};
+use crate::codegen::{CompiledModules, Compiler, JitContext, TestInfo};
 use crate::runtime::{
     AssertFailure, JmpBuf, call_setjmp, clear_current_test, clear_test_jmp_buf, set_current_file,
     set_current_test, set_stdout_capture, set_test_jmp_buf, take_assert_failure,
@@ -191,8 +191,11 @@ pub fn run_tests(
         max_failures as usize
     };
 
-    // Create shared module cache for all test files
+    // Create shared module cache for all test files (sema caching)
     let cache = Rc::new(RefCell::new(ModuleCache::new()));
+
+    // Compiled modules cache (codegen caching) - populated on first file
+    let mut compiled_modules: Option<CompiledModules> = None;
 
     for (idx, file) in files.iter().enumerate() {
         // Check if we've hit the failure cap
@@ -211,7 +214,7 @@ pub fn run_tests(
         // Set current file for signal handler
         set_current_file(&file.display().to_string());
 
-        match run_file_tests_with_progress(file, filter, &colors, &report, cache.clone()) {
+        match run_file_tests_with_modules(file, filter, &colors, &report, cache.clone(), &mut compiled_modules) {
             Ok(results) => {
                 all_results.merge(results);
             }
@@ -298,6 +301,8 @@ fn run_stdin_tests(
 }
 
 /// Parse, type check, compile, and run tests with incremental progress output
+/// Note: Kept for future use; currently we use run_file_tests_with_modules for module caching
+#[allow(dead_code)]
 fn run_file_tests_with_progress(
     path: &Path,
     filter: Option<&str>,
@@ -310,6 +315,197 @@ fn run_file_tests_with_progress(
     run_source_tests_with_progress(&source, &file_path, path, filter, colors, report, cache)
 }
 
+/// Parse, type check, compile, and run tests with shared compiled modules
+fn run_file_tests_with_modules(
+    path: &Path,
+    filter: Option<&str>,
+    colors: &TermColors,
+    report: &ReportMode,
+    cache: Rc<RefCell<ModuleCache>>,
+    compiled_modules: &mut Option<CompiledModules>,
+) -> Result<TestResults, String> {
+    let source = fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
+    let file_path = path.to_string_lossy();
+    run_source_tests_with_modules(&source, &file_path, path, filter, colors, report, cache, compiled_modules)
+}
+
+/// Parse, type check, compile, and run tests with shared compiled modules
+fn run_source_tests_with_modules(
+    source: &str,
+    file_path: &str,
+    path: &Path,
+    filter: Option<&str>,
+    colors: &TermColors,
+    report: &ReportMode,
+    cache: Rc<RefCell<ModuleCache>>,
+    compiled_modules: &mut Option<CompiledModules>,
+) -> Result<TestResults, String> {
+    let sema_start = Instant::now();
+
+    // Parse and type check with shared cache
+    let analyzed = parse_and_analyze_with_cache(source, file_path, cache).map_err(|()| String::new())?;
+    let sema_time = sema_start.elapsed();
+
+    // Compile - either with pre-compiled modules or compiling them fresh
+    let codegen_start = Instant::now();
+
+    // Check if cached modules contain all modules needed by this file
+    let can_use_cache = compiled_modules.as_ref().map_or(false, |modules| {
+        // Check if all module paths in the current file are present in the cache
+        analyzed.module_programs.keys().all(|module_path| {
+            // Module path like "std:math" becomes prefix "std:math::"
+            let prefix = format!("{}::", module_path);
+            modules.has_module(&prefix) || modules.has_module(module_path)
+        })
+    });
+
+    let (jit, compile_result, tests, modules_time, program_time) = if can_use_cache {
+        let modules = compiled_modules.as_ref().unwrap();
+        // Subsequent files: use pre-compiled modules
+        let mut jit = JitContext::with_modules(modules);
+        let mut compiler = Compiler::new(&mut jit, &analyzed);
+        compiler.set_source_file(file_path);
+
+        // Import module functions (fast - just declarations, no codegen)
+        let modules_start = Instant::now();
+        let _ = compiler.import_modules();
+        let modules_time = modules_start.elapsed();
+
+        // Compile just the main program
+        let program_start = Instant::now();
+        let result = compiler.compile_program_only(&analyzed.program);
+        let program_time = program_start.elapsed();
+
+        let tests = compiler.take_tests();
+        (jit, result, tests, modules_time, program_time)
+    } else {
+        // First file: compile normally and cache modules for future files
+        let mut jit = JitContext::new();
+        let mut compiler = Compiler::new(&mut jit, &analyzed);
+        compiler.set_source_file(file_path);
+
+        // Compile modules (this is the expensive part)
+        let modules_start = Instant::now();
+        let modules_result = compiler.compile_modules_only();
+        let modules_time = modules_start.elapsed();
+
+        // Compile main program
+        let program_start = Instant::now();
+        let result = if modules_result.is_ok() {
+            compiler.compile_program_only(&analyzed.program)
+        } else {
+            modules_result
+        };
+        let program_time = program_start.elapsed();
+
+        let tests = compiler.take_tests();
+
+        // If successful, create a separate modules JIT for caching
+        if result.is_ok() && !analyzed.module_programs.is_empty() {
+            let mut modules_jit = JitContext::new();
+            let compile_result = {
+                let mut modules_compiler = Compiler::new(&mut modules_jit, &analyzed);
+                modules_compiler.compile_modules_only()
+            };
+            match compile_result {
+                Ok(()) => {
+                    *compiled_modules = Some(CompiledModules::new(modules_jit));
+                }
+                Err(e) => {
+                    tracing::warn!("Modules compilation failed: {}", e);
+                    std::mem::forget(modules_jit);
+                }
+            }
+        }
+
+        (jit, result, tests, modules_time, program_time)
+    };
+
+    let codegen_time = codegen_start.elapsed();
+
+    // Print compile time in 'all' mode
+    if matches!(report, ReportMode::All) {
+        println!(
+            "  {}sema: {}, codegen: {} (modules: {}, program: {}){}",
+            colors.dim(),
+            format_duration(sema_time),
+            format_duration(codegen_time),
+            format_duration(modules_time),
+            format_duration(program_time),
+            colors.reset()
+        );
+    }
+
+    // Check compilation result
+    if let Err(e) = compile_result {
+        std::mem::forget(jit);
+        return Err(format!("compilation error: {}", e));
+    }
+
+    // Finalize only on successful compilation
+    let mut jit = jit;
+    let _ = jit.finalize();
+
+    // Filter tests if a filter is provided
+    let tests = if let Some(pattern) = filter {
+        tests
+            .into_iter()
+            .filter(|t| t.name.contains(pattern))
+            .collect()
+    } else {
+        tests
+    };
+
+    // Execute tests with progress output
+    let results = execute_tests_with_progress(tests, &jit, path, colors, report);
+
+    Ok(results)
+}
+
+/// Helper to run tests from an already-finalized JIT
+/// Note: Kept for potential future use
+#[allow(dead_code)]
+fn run_tests_from_jit(
+    jit: JitContext,
+    tests: Vec<TestInfo>,
+    filter: Option<&str>,
+    path: &Path,
+    colors: &TermColors,
+    report: &ReportMode,
+    sema_time: Duration,
+    codegen_time: Duration,
+    modules_time: Duration,
+    program_time: Duration,
+) -> Result<TestResults, String> {
+    // Print compile time in 'all' mode
+    if matches!(report, ReportMode::All) {
+        println!(
+            "  {}sema: {}, codegen: {} (modules: {}, program: {}){}",
+            colors.dim(),
+            format_duration(sema_time),
+            format_duration(codegen_time),
+            format_duration(modules_time),
+            format_duration(program_time),
+            colors.reset()
+        );
+    }
+
+    // Filter tests if a filter is provided
+    let tests = if let Some(pattern) = filter {
+        tests
+            .into_iter()
+            .filter(|t| t.name.contains(pattern))
+            .collect()
+    } else {
+        tests
+    };
+
+    // Execute tests with progress output
+    let results = execute_tests_with_progress(tests, &jit, path, colors, report);
+
+    Ok(results)
+}
+
 /// Parse, type check, compile, and run tests with incremental progress output
 fn run_source_tests_with_progress(
     source: &str,
@@ -320,29 +516,47 @@ fn run_source_tests_with_progress(
     report: &ReportMode,
     cache: Rc<RefCell<ModuleCache>>,
 ) -> Result<TestResults, String> {
-    let compile_start = Instant::now();
+    let sema_start = Instant::now();
 
     // Parse and type check with shared cache
     let analyzed = parse_and_analyze_with_cache(source, file_path, cache).map_err(|()| String::new())?;
+    let sema_time = sema_start.elapsed();
 
     // Compile
+    let codegen_start = Instant::now();
     let mut jit = JitContext::new();
-    let (compile_result, tests) = {
+    let (compile_result, tests, modules_time, program_time) = {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.set_source_file(file_path);
-        let result = compiler.compile_program(&analyzed.program);
-        let tests = compiler.take_tests();
-        (result, tests)
-    };
 
-    let compile_time = compile_start.elapsed();
+        // Compile modules first (prelude functions)
+        let modules_start = Instant::now();
+        let modules_result = compiler.compile_modules_only();
+        let modules_time = modules_start.elapsed();
+
+        // Then compile just the main program
+        let program_start = Instant::now();
+        let result = if modules_result.is_ok() {
+            compiler.compile_program_only(&analyzed.program)
+        } else {
+            modules_result
+        };
+        let program_time = program_start.elapsed();
+
+        let tests = compiler.take_tests();
+        (result, tests, modules_time, program_time)
+    };
+    let codegen_time = codegen_start.elapsed();
 
     // Print compile time in 'all' mode
     if matches!(report, ReportMode::All) {
         println!(
-            "  {}compiled in {}{}",
+            "  {}sema: {}, codegen: {} (modules: {}, program: {}){}",
             colors.dim(),
-            format_duration(compile_time),
+            format_duration(sema_time),
+            format_duration(codegen_time),
+            format_duration(modules_time),
+            format_duration(program_time),
             colors.reset()
         );
     }
