@@ -3,7 +3,7 @@
 use super::helpers::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
-use crate::codegen::types::{CompiledValue, module_name_id, type_to_cranelift};
+use crate::codegen::types::{CompiledValue, box_interface_value, module_name_id, type_to_cranelift};
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
 use crate::sema::PrimitiveType;
@@ -225,12 +225,7 @@ impl Cg<'_, '_, '_> {
         let field_name = self.ctx.interner.resolve(field);
         let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field_name, self.ctx)?;
         let value = if matches!(field_type, Type::Nominal(NominalType::Interface(_))) {
-            crate::codegen::interface_vtable::box_interface_value(
-                self.builder,
-                self.ctx,
-                value,
-                &field_type,
-            )?
+            box_interface_value(self.builder, self.ctx, value, &field_type)?
         } else {
             value
         };

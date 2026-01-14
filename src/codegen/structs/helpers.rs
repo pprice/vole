@@ -42,11 +42,7 @@ pub(crate) fn get_field_slot_and_type(
                     } else {
                         base_type.clone()
                     };
-                    let field_type = if let Some(subs) = ctx.type_substitutions {
-                        substitute_type(&field_type, subs)
-                    } else {
-                        field_type
-                    };
+                    let field_type = ctx.substitute_type(&field_type);
                     return Ok((slot, field_type));
                 }
             }
@@ -78,11 +74,7 @@ pub(crate) fn get_field_slot_and_type(
                     } else {
                         base_type.clone()
                     };
-                    let field_type = if let Some(subs) = ctx.type_substitutions {
-                        substitute_type(&field_type, subs)
-                    } else {
-                        field_type
-                    };
+                    let field_type = ctx.substitute_type(&field_type);
                     return Ok((slot, field_type));
                 }
             }

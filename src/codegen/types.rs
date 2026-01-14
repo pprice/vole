@@ -20,6 +20,9 @@ use crate::sema::generic::{MonomorphCache, substitute_type};
 use crate::sema::types::NominalType;
 use crate::sema::{EntityRegistry, FunctionType, PrimitiveType, Type, TypeId, TypeKey};
 
+// Re-export box_interface_value for centralized access to all boxing helpers
+pub(crate) use super::interface_vtable::box_interface_value;
+
 /// Compiled value with its type
 #[derive(Clone)]
 pub struct CompiledValue {
@@ -157,6 +160,16 @@ pub(crate) struct CompileCtx<'a> {
 }
 
 impl<'a> CompileCtx<'a> {
+    /// Substitute type parameters with concrete types using current context.
+    /// If no type_substitutions are set, returns the original type unchanged.
+    pub fn substitute_type(&self, ty: &Type) -> Type {
+        if let Some(substitutions) = self.type_substitutions {
+            ty.substitute(substitutions)
+        } else {
+            ty.clone()
+        }
+    }
+
     /// Get a Resolver for name lookups in codegen
     pub fn resolver(&self) -> Resolver<'_> {
         let module_id = self

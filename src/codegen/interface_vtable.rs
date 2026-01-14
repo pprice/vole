@@ -30,28 +30,62 @@ struct InterfaceVtableKey {
     concrete: InterfaceConcreteType,
 }
 
+/// Compilation phase for vtable generation.
+/// Allows separating metadata collection from wrapper compilation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VtablePhase {
+    /// Phase 1: Collect vtable metadata and declare data slots
+    Declare,
+    /// Phase 2: Compile wrapper functions
+    CompileWrappers,
+    /// Phase 3: Define vtable data with wrapper function pointers
+    Define,
+}
+
+/// Tracking state for a vtable being built in phases.
+#[derive(Debug, Clone)]
+struct VtableBuildState {
+    /// Data ID for this vtable (allocated in Phase 1)
+    data_id: DataId,
+    /// Current phase this vtable has completed
+    phase: VtablePhase,
+    /// Interface name ID for method resolution
+    interface_name_id: NameId,
+    /// Concrete type for wrapper compilation
+    concrete_type: Type,
+    /// Type substitutions for generic interfaces
+    substitutions: HashMap<NameId, Type>,
+    /// Method IDs to compile wrappers for
+    method_ids: Vec<MethodId>,
+    /// Wrapper function IDs (populated in Phase 2)
+    wrapper_ids: Vec<cranelift_module::FuncId>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct InterfaceVtableRegistry {
+    /// Completed vtables (after Phase 3)
     vtables: HashMap<InterfaceVtableKey, DataId>,
+    /// In-progress vtables (during phased compilation)
+    pending: HashMap<InterfaceVtableKey, VtableBuildState>,
     wrapper_counter: u32,
 }
 
+/// Wrapper struct containing the resolved method target and its function type.
+/// The func_type is always needed regardless of target kind, so it's extracted here.
+struct VtableMethod {
+    func_type: FunctionType,
+    target: VtableMethodTarget,
+}
+
+/// Target-specific data for vtable method resolution.
+/// Direct and Implemented are combined since they have identical structure.
 enum VtableMethodTarget {
-    Direct {
-        method_info: MethodInfo,
-        func_type: FunctionType,
-    },
-    Implemented {
-        method_info: MethodInfo,
-        func_type: FunctionType,
-    },
-    External {
-        external_info: ExternalMethodInfo,
-        func_type: FunctionType,
-    },
-    Function {
-        func_type: FunctionType,
-    },
+    /// Direct method call on class/record (includes both direct methods and explicit implementations)
+    Method(MethodInfo),
+    /// External/native function binding
+    External(ExternalMethodInfo),
+    /// Closure or function pointer (no additional data needed)
+    Function,
 }
 
 impl InterfaceVtableRegistry {
@@ -175,11 +209,10 @@ impl InterfaceVtableRegistry {
             )?;
             let func_ref = ctx.module.declare_func_in_data(wrapper_id, &mut data);
             data.write_function_addr((index * word_bytes) as u32, func_ref);
-            let target_type = match &target {
-                VtableMethodTarget::Direct { .. } => "Direct",
-                VtableMethodTarget::Implemented { .. } => "Implemented",
-                VtableMethodTarget::External { .. } => "External",
-                VtableMethodTarget::Function { .. } => "Function",
+            let target_type = match &target.target {
+                VtableMethodTarget::Method(_) => "Method",
+                VtableMethodTarget::External(_) => "External",
+                VtableMethodTarget::Function => "Function",
             };
             tracing::debug!(
                 slot = index,
@@ -197,21 +230,234 @@ impl InterfaceVtableRegistry {
         Ok(data_id)
     }
 
+    /// Phase 1: Get or declare a vtable, returning DataId for forward references.
+    /// Does not compile wrappers yet - call ensure_compiled() later.
+    #[tracing::instrument(skip(self, ctx, interface_type_args), fields(interface = %ctx.interner.resolve(interface_name)))]
+    pub(crate) fn get_or_declare(
+        &mut self,
+        ctx: &mut CompileCtx,
+        interface_name: Symbol,
+        interface_type_args: &[Type],
+        concrete_type: &Type,
+    ) -> Result<DataId, String> {
+        // Build key for lookup
+        let concrete_key = match concrete_type {
+            Type::Function(func_type) => InterfaceConcreteType::Function {
+                is_closure: func_type.is_closure,
+            },
+            _ => {
+                let type_id = TypeId::from_type(
+                    concrete_type,
+                    &ctx.analyzed.entity_registry.type_table,
+                    &ctx.analyzed.entity_registry,
+                )
+                .ok_or_else(|| {
+                    format!(
+                        "cannot build vtable for unsupported type {:?}",
+                        concrete_type
+                    )
+                })?;
+                InterfaceConcreteType::TypeId(type_id)
+            }
+        };
+        let key = InterfaceVtableKey {
+            interface_name,
+            concrete: concrete_key,
+        };
+
+        // Return if already completed
+        if let Some(data_id) = self.vtables.get(&key) {
+            return Ok(*data_id);
+        }
+
+        // Return if already pending (Phase 1 done)
+        if let Some(state) = self.pending.get(&key) {
+            return Ok(state.data_id);
+        }
+
+        // Resolve interface metadata
+        let interface_name_str = ctx.interner.resolve(interface_name);
+        let interface_type_id = ctx
+            .resolver()
+            .resolve_type_str_or_interface(interface_name_str, &ctx.analyzed.entity_registry)
+            .ok_or_else(|| format!("unknown interface {:?}", interface_name_str))?;
+        let interface_name_id = ctx
+            .analyzed
+            .entity_registry
+            .get_type(interface_type_id)
+            .name_id;
+
+        // Build substitution map
+        let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_id);
+        let substitutions: HashMap<NameId, Type> = interface_def
+            .type_params
+            .iter()
+            .zip(interface_type_args.iter())
+            .map(|(param_name_id, arg)| (*param_name_id, arg.clone()))
+            .collect();
+
+        // Collect method IDs
+        let method_ids = collect_interface_methods_via_entity_registry(
+            interface_type_id,
+            &ctx.analyzed.entity_registry,
+        )?;
+
+        // Build vtable name and declare data
+        let type_name = match concrete_key {
+            InterfaceConcreteType::TypeId(type_id) => {
+                ctx.analyzed.name_table.display(type_id.name_id())
+            }
+            InterfaceConcreteType::Function { is_closure } => {
+                if is_closure {
+                    "closure".to_string()
+                } else {
+                    "function".to_string()
+                }
+            }
+        };
+        let vtable_name = format!(
+            "__vole_iface_vtable_{}_{}",
+            ctx.interner.resolve(interface_name),
+            type_name
+        );
+        let data_id = ctx
+            .module
+            .declare_data(&vtable_name, Linkage::Local, false, false)
+            .map_err(|e| e.to_string())?;
+
+        tracing::debug!(
+            interface = %ctx.interner.resolve(interface_name),
+            concrete_type = ?concrete_type,
+            method_count = method_ids.len(),
+            "declared vtable (phase 1)"
+        );
+
+        // Store pending state
+        self.pending.insert(
+            key,
+            VtableBuildState {
+                data_id,
+                phase: VtablePhase::Declare,
+                interface_name_id,
+                concrete_type: concrete_type.clone(),
+                substitutions,
+                method_ids,
+                wrapper_ids: Vec::new(),
+            },
+        );
+
+        Ok(data_id)
+    }
+
+    /// Phase 2+3: Ensure a vtable is fully compiled.
+    /// Must be called after get_or_declare() for the same key.
+    #[tracing::instrument(skip(self, ctx), fields(interface = %ctx.interner.resolve(interface_name)))]
+    pub(crate) fn ensure_compiled(
+        &mut self,
+        ctx: &mut CompileCtx,
+        interface_name: Symbol,
+        concrete_type: &Type,
+    ) -> Result<DataId, String> {
+        // Build key for lookup
+        let concrete_key = match concrete_type {
+            Type::Function(func_type) => InterfaceConcreteType::Function {
+                is_closure: func_type.is_closure,
+            },
+            _ => {
+                let type_id = TypeId::from_type(
+                    concrete_type,
+                    &ctx.analyzed.entity_registry.type_table,
+                    &ctx.analyzed.entity_registry,
+                )
+                .ok_or_else(|| {
+                    format!(
+                        "cannot build vtable for unsupported type {:?}",
+                        concrete_type
+                    )
+                })?;
+                InterfaceConcreteType::TypeId(type_id)
+            }
+        };
+        let key = InterfaceVtableKey {
+            interface_name,
+            concrete: concrete_key,
+        };
+
+        // Return if already completed
+        if let Some(data_id) = self.vtables.get(&key) {
+            return Ok(*data_id);
+        }
+
+        // Get pending state
+        let state = self
+            .pending
+            .remove(&key)
+            .ok_or_else(|| "vtable not declared - call get_or_declare first".to_string())?;
+
+        let word_bytes = ctx.pointer_type.bytes() as usize;
+        let interface_name_str = ctx.interner.resolve(interface_name);
+
+        // Phase 2: Compile wrappers
+        let mut data = DataDescription::new();
+        data.define_zeroinit(word_bytes * state.method_ids.len());
+        data.set_align(word_bytes as u64);
+
+        for (index, &method_id) in state.method_ids.iter().enumerate() {
+            let method = ctx.analyzed.entity_registry.get_method(method_id);
+            let method_name_str = ctx.analyzed.name_table.display(method.name_id);
+            let target = resolve_vtable_target(
+                ctx,
+                state.interface_name_id,
+                &state.concrete_type,
+                method_id,
+                &state.substitutions,
+            )?;
+            let wrapper_id = self.compile_wrapper(
+                ctx,
+                interface_name_str,
+                &method_name_str,
+                &state.concrete_type,
+                &target,
+            )?;
+            let func_ref = ctx.module.declare_func_in_data(wrapper_id, &mut data);
+            data.write_function_addr((index * word_bytes) as u32, func_ref);
+            let target_type = match &target.target {
+                VtableMethodTarget::Method(_) => "Method",
+                VtableMethodTarget::External(_) => "External",
+                VtableMethodTarget::Function => "Function",
+            };
+            tracing::debug!(
+                slot = index,
+                method = %method_name_str,
+                target = target_type,
+                wrapper = ?wrapper_id,
+                "vtable slot (phase 2)"
+            );
+        }
+
+        // Phase 3: Define data
+        ctx.module
+            .define_data(state.data_id, &data)
+            .map_err(|e| e.to_string())?;
+
+        tracing::debug!(
+            interface = %interface_name_str,
+            "completed vtable (phase 3)"
+        );
+
+        self.vtables.insert(key, state.data_id);
+        Ok(state.data_id)
+    }
+
     fn compile_wrapper(
         &mut self,
         ctx: &mut CompileCtx,
         interface_name: &str,
         method_name: &str,
         concrete_type: &Type,
-        target: &VtableMethodTarget,
+        method: &VtableMethod,
     ) -> Result<cranelift_module::FuncId, String> {
-        let func_type = match target {
-            VtableMethodTarget::Direct { func_type, .. }
-            | VtableMethodTarget::Implemented { func_type, .. }
-            | VtableMethodTarget::External { func_type, .. }
-            | VtableMethodTarget::Function { func_type } => func_type,
-        };
-
+        let func_type = &method.func_type;
         let word_type = ctx.pointer_type;
         let mut sig = ctx.module.make_signature();
         sig.params.push(AbiParam::new(word_type));
@@ -250,8 +496,8 @@ impl InterfaceVtableRegistry {
             let data_word = builder.ins().load(word_type, MemFlags::new(), box_ptr, 0);
 
             // Dispatch to target-specific wrapper compilation
-            let results = match target {
-                VtableMethodTarget::Function { func_type } => compile_function_wrapper(
+            let results = match &method.target {
+                VtableMethodTarget::Function => compile_function_wrapper(
                     &mut builder,
                     ctx,
                     func_type,
@@ -259,8 +505,7 @@ impl InterfaceVtableRegistry {
                     data_word,
                     &params,
                 )?,
-                VtableMethodTarget::Direct { method_info, .. }
-                | VtableMethodTarget::Implemented { method_info, .. } => compile_method_wrapper(
+                VtableMethodTarget::Method(method_info) => compile_method_wrapper(
                     &mut builder,
                     ctx,
                     func_type,
@@ -269,10 +514,7 @@ impl InterfaceVtableRegistry {
                     &params,
                     method_info,
                 )?,
-                VtableMethodTarget::External {
-                    external_info,
-                    func_type,
-                } => compile_external_wrapper(
+                VtableMethodTarget::External(external_info) => compile_external_wrapper(
                     &mut builder,
                     ctx,
                     func_type,
@@ -706,7 +948,7 @@ fn resolve_vtable_target(
     concrete_type: &Type,
     interface_method_id: MethodId,
     substitutions: &HashMap<NameId, Type>,
-) -> Result<VtableMethodTarget, String> {
+) -> Result<VtableMethod, String> {
     // Get method info from EntityRegistry
     let interface_method = ctx.analyzed.entity_registry.get_method(interface_method_id);
     let method_name_str = ctx.analyzed.name_table.display(interface_method.name_id);
@@ -722,8 +964,9 @@ fn resolve_vtable_target(
         substitute_type(&interface_method.signature.return_type, substitutions);
 
     if let Type::Function(func_type) = concrete_type {
-        return Ok(VtableMethodTarget::Function {
+        return Ok(VtableMethod {
             func_type: func_type.clone(),
+            target: VtableMethodTarget::Function,
         });
     }
 
@@ -750,9 +993,9 @@ fn resolve_vtable_target(
             .get_method(&type_id, method_name_id)
     {
         if let Some(external_info) = impl_.external_info.clone() {
-            return Ok(VtableMethodTarget::External {
-                external_info,
+            return Ok(VtableMethod {
                 func_type: impl_.func_type.clone(),
+                target: VtableMethodTarget::External(external_info),
             });
         }
         let method_info = ctx
@@ -760,9 +1003,9 @@ fn resolve_vtable_target(
             .get(&(type_id, method_name_id))
             .cloned()
             .ok_or_else(|| "implement method info not found".to_string())?;
-        return Ok(VtableMethodTarget::Implemented {
-            method_info,
+        return Ok(VtableMethod {
             func_type: impl_.func_type.clone(),
+            target: VtableMethodTarget::Method(method_info),
         });
     }
 
@@ -806,9 +1049,9 @@ fn resolve_vtable_target(
                 return_type: Box::new(substituted_return_type.clone()),
                 is_closure: false,
             });
-        return Ok(VtableMethodTarget::Direct {
-            method_info,
+        return Ok(VtableMethod {
             func_type,
+            target: VtableMethodTarget::Method(method_info),
         });
     }
 
@@ -827,13 +1070,13 @@ fn resolve_vtable_target(
                 .entity_registry
                 .get_external_binding(found_method_id)
         {
-            return Ok(VtableMethodTarget::External {
-                external_info: external_info.clone(),
+            return Ok(VtableMethod {
                 func_type: FunctionType {
                     params: substituted_params,
                     return_type: Box::new(substituted_return_type),
                     is_closure: false,
                 },
+                target: VtableMethodTarget::External(external_info.clone()),
             });
         }
         // TODO: Handle Vole body defaults when interface method bodies are supported

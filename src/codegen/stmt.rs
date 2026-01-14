@@ -14,11 +14,11 @@ use crate::sema::{PrimitiveType, Type};
 
 use super::compiler::ControlFlowCtx;
 use super::context::{Cg, ControlFlow};
-use super::interface_vtable::box_interface_value;
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
 use super::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    fallible_error_tag, resolve_type_expr, tuple_layout, type_size, type_to_cranelift,
+    box_interface_value, fallible_error_tag, resolve_type_expr, tuple_layout, type_size,
+    type_to_cranelift,
 };
 
 /// Compile a block of statements (wrapper for compatibility)

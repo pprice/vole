@@ -19,11 +19,11 @@ use crate::sema::types::NominalType;
 use crate::sema::{PrimitiveType, Type};
 
 use super::context::Cg;
-use super::interface_vtable::box_interface_value;
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    array_element_tag, fallible_error_tag, resolve_type_expr, tuple_layout, type_to_cranelift,
+    array_element_tag, box_interface_value, fallible_error_tag, resolve_type_expr, tuple_layout,
+    type_to_cranelift,
 };
 
 impl Cg<'_, '_, '_> {

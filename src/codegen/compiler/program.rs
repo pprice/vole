@@ -15,10 +15,23 @@ use crate::frontend::{
 use crate::identity::NameId;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
-    ClassMethodMonomorphInstance, MonomorphInstance, StaticMethodMonomorphInstance, substitute_type,
+    ClassMethodMonomorphInstance, MonomorphInstance, MonomorphInstanceTrait,
+    StaticMethodMonomorphInstance, substitute_type,
 };
 use crate::sema::types::{ClassType, NominalType, RecordType};
 use crate::sema::{PrimitiveType, Type};
+
+/// Compilation phase for monomorphization pipeline.
+/// Allows separating function declaration from body compilation for forward references.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonomorphPhase {
+    /// Only declare function signatures (for forward reference support)
+    Declare,
+    /// Only compile function bodies (assumes already declared)
+    Compile,
+    /// Both declare and compile (original behavior)
+    All,
+}
 
 impl Compiler<'_> {
     fn main_function_key_and_name(&mut self, sym: Symbol) -> (FunctionKey, String) {
@@ -986,6 +999,40 @@ impl Compiler<'_> {
         Ok(())
     }
 
+    /// Declare a single monomorphized instance using the common trait interface.
+    /// `has_self_param` indicates if a self pointer should be prepended to parameters.
+    fn declare_monomorph_instance<T: MonomorphInstanceTrait>(
+        &mut self,
+        instance: &T,
+        has_self_param: bool,
+    ) {
+        let mangled_name = self.query().display_name(instance.mangled_name());
+        let func_type = instance.func_type();
+
+        // Create signature from the concrete function type
+        let mut params = Vec::new();
+        if has_self_param {
+            params.push(self.pointer_type);
+        }
+        for param_type in &func_type.params {
+            params.push(type_to_cranelift(param_type, self.pointer_type));
+        }
+        let ret = if *func_type.return_type == Type::Void {
+            None
+        } else {
+            Some(type_to_cranelift(&func_type.return_type, self.pointer_type))
+        };
+
+        let sig = self.jit.create_signature(&params, ret);
+        let func_id = self.jit.declare_function(&mangled_name, &sig);
+        let func_key = self.func_registry.intern_name_id(instance.mangled_name());
+        self.func_registry.set_func_id(func_key, func_id);
+
+        // Record return type for call expressions
+        self.func_registry
+            .set_return_type(func_key, (*func_type.return_type).clone());
+    }
+
     /// Declare all monomorphized function instances
     fn declare_monomorphized_instances(&mut self) -> Result<(), String> {
         // Collect instances to avoid borrow issues
@@ -1013,29 +1060,7 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let mangled_name = self.query().display_name(instance.mangled_name);
-
-            // Create signature from the concrete function type
-            let mut params = Vec::new();
-            for param_type in &instance.func_type.params {
-                params.push(type_to_cranelift(param_type, self.pointer_type));
-            }
-            let ret = if *instance.func_type.return_type == Type::Void {
-                None
-            } else {
-                Some(type_to_cranelift(
-                    &instance.func_type.return_type,
-                    self.pointer_type,
-                ))
-            };
-            let sig = self.jit.create_signature(&params, ret);
-            let func_id = self.jit.declare_function(&mangled_name, &sig);
-            let func_key = self.func_registry.intern_name_id(instance.mangled_name);
-            self.func_registry.set_func_id(func_key, func_id);
-
-            // Record return type for call expressions
-            self.func_registry
-                .set_return_type(func_key, (*instance.func_type.return_type).clone());
+            self.declare_monomorph_instance(&instance, false);
         }
 
         Ok(())
@@ -1236,30 +1261,8 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let mangled_name = self.query().display_name(instance.mangled_name);
-
-            // Create signature from the concrete function type
-            // Method signature: self (pointer) + params
-            let mut params = vec![self.pointer_type]; // self parameter
-            for param_type in &instance.func_type.params {
-                params.push(type_to_cranelift(param_type, self.pointer_type));
-            }
-            let ret = if *instance.func_type.return_type == Type::Void {
-                None
-            } else {
-                Some(type_to_cranelift(
-                    &instance.func_type.return_type,
-                    self.pointer_type,
-                ))
-            };
-            let sig = self.jit.create_signature(&params, ret);
-            let func_id = self.jit.declare_function(&mangled_name, &sig);
-            let func_key = self.func_registry.intern_name_id(instance.mangled_name);
-            self.func_registry.set_func_id(func_key, func_id);
-
-            // Record return type for call expressions
-            self.func_registry
-                .set_return_type(func_key, (*instance.func_type.return_type).clone());
+            // Class methods have self parameter
+            self.declare_monomorph_instance(&instance, true);
         }
 
         Ok(())
@@ -1591,30 +1594,8 @@ impl Compiler<'_> {
         );
 
         for instance in instances {
-            let mangled_name = self.query().display_name(instance.mangled_name);
-
-            // Create signature from the concrete function type
             // Static methods don't have self parameter
-            let mut params = Vec::new();
-            for param_type in &instance.func_type.params {
-                params.push(type_to_cranelift(param_type, self.pointer_type));
-            }
-            let ret = if *instance.func_type.return_type == Type::Void {
-                None
-            } else {
-                Some(type_to_cranelift(
-                    &instance.func_type.return_type,
-                    self.pointer_type,
-                ))
-            };
-            let sig = self.jit.create_signature(&params, ret);
-            let func_id = self.jit.declare_function(&mangled_name, &sig);
-            let func_key = self.func_registry.intern_name_id(instance.mangled_name);
-            self.func_registry.set_func_id(func_key, func_id);
-
-            // Record return type for call expressions
-            self.func_registry
-                .set_return_type(func_key, (*instance.func_type.return_type).clone());
+            self.declare_monomorph_instance(&instance, false);
         }
 
         Ok(())

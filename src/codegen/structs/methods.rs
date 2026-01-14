@@ -9,12 +9,12 @@ use crate::codegen::RuntimeFn;
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
 use crate::codegen::context::Cg;
-use crate::codegen::interface_vtable::box_interface_value;
 use crate::codegen::method_resolution::{
     MethodResolutionInput, MethodTarget, resolve_method_target,
 };
 use crate::codegen::types::{
-    CompiledValue, module_name_id, type_size, type_to_cranelift, value_to_word, word_to_value,
+    CompiledValue, box_interface_value, module_name_id, type_size, type_to_cranelift,
+    value_to_word, word_to_value,
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};

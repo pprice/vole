@@ -548,6 +548,19 @@ impl MonomorphKey {
     }
 }
 
+/// Common interface for all monomorphized instance types.
+/// Provides access to shared fields needed during codegen.
+pub trait MonomorphInstanceTrait {
+    /// Get the mangled name for this instance
+    fn mangled_name(&self) -> NameId;
+    /// Get the unique instance ID
+    fn instance_id(&self) -> u32;
+    /// Get the concrete function type after substitution
+    fn func_type(&self) -> &FunctionType;
+    /// Get the type parameter substitutions
+    fn substitutions(&self) -> &HashMap<NameId, Type>;
+}
+
 /// A monomorphized function instance
 #[derive(Debug, Clone)]
 pub struct MonomorphInstance {
@@ -561,6 +574,21 @@ pub struct MonomorphInstance {
     pub func_type: FunctionType,
     /// Map from type param NameId to concrete type
     pub substitutions: HashMap<NameId, Type>,
+}
+
+impl MonomorphInstanceTrait for MonomorphInstance {
+    fn mangled_name(&self) -> NameId {
+        self.mangled_name
+    }
+    fn instance_id(&self) -> u32 {
+        self.instance_id
+    }
+    fn func_type(&self) -> &FunctionType {
+        &self.func_type
+    }
+    fn substitutions(&self) -> &HashMap<NameId, Type> {
+        &self.substitutions
+    }
 }
 
 /// Cache of monomorphized function instances.
@@ -607,6 +635,21 @@ pub struct ClassMethodMonomorphInstance {
     pub substitutions: HashMap<NameId, Type>,
     /// External method info (if this is an external method, call the runtime function)
     pub external_info: Option<ExternalMethodInfo>,
+}
+
+impl MonomorphInstanceTrait for ClassMethodMonomorphInstance {
+    fn mangled_name(&self) -> NameId {
+        self.mangled_name
+    }
+    fn instance_id(&self) -> u32 {
+        self.instance_id
+    }
+    fn func_type(&self) -> &FunctionType {
+        &self.func_type
+    }
+    fn substitutions(&self) -> &HashMap<NameId, Type> {
+        &self.substitutions
+    }
 }
 
 /// Cache of monomorphized class method instances.
@@ -660,6 +703,21 @@ pub struct StaticMethodMonomorphInstance {
     pub func_type: FunctionType,
     /// Map from type param NameId to concrete type
     pub substitutions: HashMap<NameId, Type>,
+}
+
+impl MonomorphInstanceTrait for StaticMethodMonomorphInstance {
+    fn mangled_name(&self) -> NameId {
+        self.mangled_name
+    }
+    fn instance_id(&self) -> u32 {
+        self.instance_id
+    }
+    fn func_type(&self) -> &FunctionType {
+        &self.func_type
+    }
+    fn substitutions(&self) -> &HashMap<NameId, Type> {
+        &self.substitutions
+    }
 }
 
 /// Cache of monomorphized static method instances.

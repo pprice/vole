@@ -17,8 +17,10 @@ use crate::sema::types::NominalType;
 use crate::sema::{FunctionType, PrimitiveType, Type};
 
 use super::context::Cg;
-use super::interface_vtable::box_interface_value;
-use super::types::{CompiledValue, native_type_to_cranelift, resolve_type_expr, type_to_cranelift};
+use super::types::{
+    CompiledValue, box_interface_value, native_type_to_cranelift, resolve_type_expr,
+    type_to_cranelift,
+};
 use super::{FunctionKey, FunctionRegistry, RuntimeFn};
 
 /// Compile a string literal by calling vole_string_new
@@ -412,22 +414,15 @@ impl Cg<'_, '_, '_> {
                 // The func_type from the monomorph instance may have TypeParams that weren't
                 // inferred from arguments (like return type params). Apply class type
                 // substitutions to fully resolve the type.
-                let func_type = if let Some(subs) = self.ctx.type_substitutions {
-                    FunctionType {
-                        params: instance
-                            .func_type
-                            .params
-                            .iter()
-                            .map(|p| crate::sema::generic::substitute_type(p, subs))
-                            .collect(),
-                        return_type: Box::new(crate::sema::generic::substitute_type(
-                            &instance.func_type.return_type,
-                            subs,
-                        )),
-                        is_closure: instance.func_type.is_closure,
-                    }
-                } else {
-                    instance.func_type.clone()
+                let func_type = FunctionType {
+                    params: instance
+                        .func_type
+                        .params
+                        .iter()
+                        .map(|p| self.ctx.substitute_type(p))
+                        .collect(),
+                    return_type: Box::new(self.ctx.substitute_type(&instance.func_type.return_type)),
+                    is_closure: instance.func_type.is_closure,
                 };
                 return self.compile_native_call_with_types(native_func, call, &func_type);
             }
@@ -949,11 +944,7 @@ impl Cg<'_, '_, '_> {
         } else {
             // Use the concrete return type from the monomorphized function type
             // Apply class type substitutions if available (for calls inside monomorphized methods)
-            let return_type = if let Some(subs) = self.ctx.type_substitutions {
-                crate::sema::generic::substitute_type(&func_type.return_type, subs)
-            } else {
-                (*func_type.return_type).clone()
-            };
+            let return_type = self.ctx.substitute_type(&func_type.return_type);
             let return_type = self.maybe_convert_iterator_return_type(return_type);
             Ok(CompiledValue {
                 value: results[0],
