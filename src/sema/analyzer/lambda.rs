@@ -1,7 +1,7 @@
 // src/sema/analyzer/lambda.rs
 
 use super::*;
-use crate::sema::generic::TypeParamInfo;
+use crate::sema::generic::{TypeParamInfo, TypeParamVariance};
 
 impl Analyzer {
     /// Analyze a lambda expression, optionally with an expected function type for inference
@@ -29,6 +29,7 @@ impl Analyzer {
                     name_id: tp_name_id,
                     constraint: None, // Lambdas don't support constraints yet
                     type_param_id: None,
+                    variance: TypeParamVariance::default(),
                 }
             })
             .collect();

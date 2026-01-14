@@ -155,6 +155,58 @@ impl<K: Hash + Eq, V> MonomorphCacheBase<K, V> {
 // Type Parameter Handling
 // ============================================================================
 
+/// Variance of a type parameter.
+///
+/// Variance describes how a type parameter relates to subtyping:
+/// - Covariant: if T is a subtype of U, then F<T> is a subtype of F<U>
+/// - Contravariant: if T is a subtype of U, then F<U> is a subtype of F<T>
+/// - Invariant: F<T> and F<U> are unrelated unless T = U
+/// - Bivariant: F<T> is both a subtype and supertype of F<U> (rare, usually error)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TypeParamVariance {
+    /// Type can vary in the same direction as its container.
+    /// Used for return types, read-only fields, iterators.
+    #[default]
+    Covariant,
+    /// Type varies in the opposite direction of its container.
+    /// Used for function parameter types.
+    Contravariant,
+    /// Type cannot vary at all.
+    /// Used when type appears in both input and output positions.
+    Invariant,
+    /// Type can vary in any direction.
+    /// Rarely useful, indicates the type param is unused.
+    Bivariant,
+}
+
+impl TypeParamVariance {
+    /// Combine two variance positions.
+    /// Used when a type param appears in multiple positions.
+    pub fn combine(self, other: TypeParamVariance) -> TypeParamVariance {
+        use TypeParamVariance::*;
+        match (self, other) {
+            // Same variance is preserved
+            (Covariant, Covariant) => Covariant,
+            (Contravariant, Contravariant) => Contravariant,
+            (Invariant, _) | (_, Invariant) => Invariant,
+            (Bivariant, v) | (v, Bivariant) => v,
+            // Different non-bi variances become invariant
+            (Covariant, Contravariant) | (Contravariant, Covariant) => Invariant,
+        }
+    }
+
+    /// Flip variance (used when entering contravariant position like function params).
+    pub fn flip(self) -> TypeParamVariance {
+        use TypeParamVariance::*;
+        match self {
+            Covariant => Contravariant,
+            Contravariant => Covariant,
+            Invariant => Invariant,
+            Bivariant => Bivariant,
+        }
+    }
+}
+
 /// Information about a type parameter in scope
 #[derive(Debug, Clone)]
 pub struct TypeParamInfo {
@@ -168,6 +220,9 @@ pub struct TypeParamInfo {
     /// This provides a stable identity that can be used to distinguish
     /// between different type parameters that might have the same NameId.
     pub type_param_id: Option<TypeParamId>,
+    /// Variance of this type parameter (computed from usage positions).
+    /// Defaults to Covariant for simple cases.
+    pub variance: TypeParamVariance,
 }
 
 /// Merge two type parameter lists into one.
@@ -572,6 +627,7 @@ mod tests {
             name_id: t_name_id,
             constraint: None,
             type_param_id: None,
+            variance: TypeParamVariance::default(),
         });
 
         assert!(scope.is_type_param(t));

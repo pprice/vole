@@ -20,7 +20,7 @@ use crate::sema::ExpressionData;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
     ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,
-    TypeParamInfo, TypeParamScope, TypeParamScopeStack, substitute_type,
+    TypeParamInfo, TypeParamScope, TypeParamScopeStack, TypeParamVariance, substitute_type,
 };
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry, MethodImpl, TypeId};
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};

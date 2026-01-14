@@ -156,6 +156,7 @@ impl Analyzer {
                     name_id: tp_name_id,
                     constraint: None,
                     type_param_id: None,
+                    variance: TypeParamVariance::default(),
                 });
             }
 
@@ -173,6 +174,7 @@ impl Analyzer {
                         name_id: tp_name_id,
                         constraint,
                         type_param_id: None,
+                        variance: TypeParamVariance::default(),
                     }
                 })
                 .collect();
@@ -437,6 +439,7 @@ impl Analyzer {
                     name_id: tp_name_id,
                     constraint: None,
                     type_param_id: None,
+                    variance: TypeParamVariance::default(),
                 });
             }
 
@@ -455,6 +458,7 @@ impl Analyzer {
                         name_id: tp_name_id,
                         constraint,
                         type_param_id: None,
+                        variance: TypeParamVariance::default(),
                     }
                 })
                 .collect();
@@ -634,6 +638,7 @@ impl Analyzer {
                             name_id: tp_name_id,
                             constraint: None,
                             type_param_id: None,
+                            variance: TypeParamVariance::default(),
                         });
                     }
 
@@ -658,6 +663,7 @@ impl Analyzer {
                                 name_id: tp_name_id,
                                 constraint,
                                 type_param_id: None,
+                                variance: TypeParamVariance::default(),
                             }
                         })
                         .collect();
@@ -945,6 +951,7 @@ impl Analyzer {
                     name_id: tp_name_id,
                     constraint: None,
                     type_param_id: None,
+                    variance: TypeParamVariance::default(),
                 });
             }
 
@@ -963,6 +970,7 @@ impl Analyzer {
                         name_id: tp_name_id,
                         constraint,
                         type_param_id: None,
+                        variance: TypeParamVariance::default(),
                     }
                 })
                 .collect();
@@ -1162,6 +1170,7 @@ impl Analyzer {
                             name_id: tp_name_id,
                             constraint: None,
                             type_param_id: None,
+                            variance: TypeParamVariance::default(),
                         });
                     }
 
@@ -1186,6 +1195,7 @@ impl Analyzer {
                                 name_id: tp_name_id,
                                 constraint,
                                 type_param_id: None,
+                                variance: TypeParamVariance::default(),
                             }
                         })
                         .collect();
@@ -1318,6 +1328,7 @@ impl Analyzer {
                 name_id: tp_name_id,
                 constraint: None,
                 type_param_id: None,
+                variance: TypeParamVariance::default(),
             });
         }
 
@@ -1335,6 +1346,7 @@ impl Analyzer {
                     name_id: tp_name_id,
                     constraint,
                     type_param_id: None,
+                    variance: TypeParamVariance::default(),
                 }
             })
             .collect();
@@ -1879,6 +1891,7 @@ impl Analyzer {
                             name_id: tp_name_id,
                             constraint: None, // External functions don't have constraints for now
                             type_param_id: None,
+                            variance: TypeParamVariance::default(),
                         }
                     })
                     .collect();
