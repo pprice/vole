@@ -19,7 +19,7 @@ Vole is a compiled language with JIT via Cranelift.
 
 Key directories:
 - `frontend/` - lexer.rs, token.rs, parser/, ast.rs, intern.rs
-- `sema/` - analyzer/ (expr.rs, stmt.rs, patterns.rs), types.rs, scope.rs
+- `sema/` - analyzer/, types/, entity_registry/, generic.rs, resolve.rs
 - `codegen/` - compiler/ (patterns.rs, calls.rs, ops.rs, methods.rs), jit.rs
 - `errors/` - sema.rs (E2xxx), parser.rs (E1xxx), lexer.rs (E0xxx)
 
@@ -45,6 +45,7 @@ Dev tools: `just dev-next-error sema`, `just dev-trace-keyword raise`, `just dev
 | New statement | `frontend/parser/parse_stmt.rs`, `frontend/ast.rs` |
 | New operator | lexer → parser → `sema/analyzer/expr.rs` → `codegen/compiler/ops.rs` |
 | Type checking | `sema/analyzer/expr.rs`, `stmt.rs`, `patterns.rs` |
+| Generics/type params | `sema/generic.rs`, `sema/analyzer/inference.rs` |
 | New error code | `errors/sema.rs` or `errors/parser.rs` |
 | Codegen | `codegen/compiler/patterns.rs`, `calls.rs`, `methods.rs` |
 | Builtins | `runtime/builtins.rs`, register in `codegen/compiler/calls.rs` |
