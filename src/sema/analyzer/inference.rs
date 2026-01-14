@@ -45,7 +45,7 @@ impl Analyzer {
                     // This preserves type params in generic contexts (e.g., Box { value: nil }).
                     let actual_to_bind = if matches!(actual, Type::Nil) {
                         // Check if this type param is in our current scope - if so, preserve it
-                        if let Some(ref scope) = self.current_type_param_scope
+                        if let Some(scope) = self.type_param_stack.current()
                             && scope.get_by_name_id(*name_id).is_some()
                         {
                             // Preserve the type param
@@ -55,7 +55,7 @@ impl Analyzer {
                         }
                     } else if let Type::TypeParam(actual_name_id) = actual {
                         // If actual is also a type param, check if it's in our scope
-                        if let Some(ref scope) = self.current_type_param_scope
+                        if let Some(scope) = self.type_param_stack.current()
                             && scope.get_by_name_id(*actual_name_id).is_some()
                         {
                             // Preserve the actual type param

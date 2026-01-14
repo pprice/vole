@@ -20,7 +20,7 @@ use crate::sema::ExpressionData;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
     ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,
-    TypeParamInfo, TypeParamScope, substitute_type,
+    TypeParamInfo, TypeParamScope, TypeParamScopeStack, substitute_type,
 };
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry, MethodImpl, TypeId};
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
@@ -132,7 +132,8 @@ struct FunctionCheckContext {
     error_type: Option<Type>,
     generator_element_type: Option<Type>,
     static_method: Option<String>,
-    type_param_scope: Option<TypeParamScope>,
+    /// How many scopes were on the stack when we entered this context
+    type_param_stack_depth: usize,
 }
 
 pub struct Analyzer {
@@ -195,9 +196,9 @@ pub struct Analyzer {
     current_module: ModuleId,
     /// Entity registry for first-class type/method/field/function identity (includes type_table)
     pub entity_registry: EntityRegistry,
-    /// Current type parameter scope (set when analyzing methods in generic classes/records)
-    /// Used for resolving methods on Type::TypeParam via constraint interfaces
-    current_type_param_scope: Option<TypeParamScope>,
+    /// Stack of type parameter scopes for nested generic contexts.
+    /// Used for resolving methods on Type::TypeParam via constraint interfaces.
+    type_param_stack: TypeParamScopeStack,
 }
 
 /// Result of looking up a method on a type via EntityRegistry
@@ -242,7 +243,7 @@ impl Analyzer {
             name_table,
             current_module: main_module,
             entity_registry: EntityRegistry::new(),
-            current_type_param_scope: None,
+            type_param_stack: TypeParamScopeStack::new(),
         };
 
         // Register primitives in EntityRegistry so they can have static methods
@@ -539,7 +540,7 @@ impl Analyzer {
             name_table: &mut self.name_table,
             module_id,
             // Propagate type param scope to nested contexts (lambdas, etc.)
-            type_params: self.current_type_param_scope.as_ref(),
+            type_params: self.type_param_stack.current(),
             self_type,
         };
         resolve_type(ty, &mut ctx)
@@ -690,7 +691,7 @@ impl Analyzer {
                         for tp in &generic_info.type_params {
                             scope.add(tp.clone());
                         }
-                        self.current_type_param_scope = Some(scope);
+                        self.type_param_stack.push_scope(scope);
                     }
 
                     for method in &class.methods {
@@ -703,8 +704,10 @@ impl Analyzer {
                         }
                     }
 
-                    // Clear type param scope after checking methods
-                    self.current_type_param_scope = None;
+                    // Pop type param scope after checking methods
+                    if !class.type_params.is_empty() {
+                        self.type_param_stack.pop();
+                    }
                     // Validate interface satisfaction via EntityRegistry
                     if let Some(class_name_id) =
                         self.name_table
@@ -746,7 +749,7 @@ impl Analyzer {
                         for tp in &generic_info.type_params {
                             scope.add(tp.clone());
                         }
-                        self.current_type_param_scope = Some(scope);
+                        self.type_param_stack.push_scope(scope);
                     }
 
                     for method in &record.methods {
@@ -759,8 +762,10 @@ impl Analyzer {
                         }
                     }
 
-                    // Clear type param scope after checking methods
-                    self.current_type_param_scope = None;
+                    // Pop type param scope after checking methods
+                    if !record.type_params.is_empty() {
+                        self.type_param_stack.pop();
+                    }
 
                     // Validate interface satisfaction via EntityRegistry
                     if let Some(record_name_id) =
@@ -1032,8 +1037,7 @@ impl Analyzer {
             // If the inferred type is itself a type param that has a matching or stronger constraint,
             // the constraint is satisfied. Check if it's a type param in our current scope.
             if let Type::TypeParam(found_name_id) = found
-                && let Some(ref scope) = self.current_type_param_scope
-                && let Some(found_param) = scope.get_by_name_id(*found_name_id)
+                && let Some(found_param) = self.type_param_stack.get_by_name_id(*found_name_id)
                 && constraint_satisfied(&found_param.constraint, constraint)
             {
                 continue; // Constraint is satisfied
@@ -1191,7 +1195,7 @@ impl Analyzer {
 
     /// Enter a function/method check context, saving current state.
     /// Automatically sets return/error/generator types from return_type.
-    /// For static methods, caller should set static_method and type_param_scope after calling.
+    /// For static methods, caller should set static_method and push type params after calling.
     fn enter_function_context(
         &mut self,
         return_type: &Type,
@@ -1202,7 +1206,7 @@ impl Analyzer {
             error_type: self.current_function_error_type.take(),
             generator_element_type: self.current_generator_element_type.take(),
             static_method: self.current_static_method.take(),
-            type_param_scope: self.current_type_param_scope.clone(),
+            type_param_stack_depth: self.type_param_stack.depth(),
         };
 
         self.current_function_return = Some(return_type.clone());
@@ -1225,7 +1229,10 @@ impl Analyzer {
         self.current_function_error_type = saved.error_type;
         self.current_generator_element_type = saved.generator_element_type;
         self.current_static_method = saved.static_method;
-        self.current_type_param_scope = saved.type_param_scope;
+        // Pop any scopes that were pushed during this context
+        while self.type_param_stack.depth() > saved.type_param_stack_depth {
+            self.type_param_stack.pop();
+        }
     }
 
     fn check_function(
@@ -1402,13 +1409,9 @@ impl Analyzer {
         // Mark that we're in a static method (for self-usage detection)
         self.current_static_method = Some(interner.resolve(method.name).to_string());
 
-        // Add method-level type params to the current type param scope (if any)
+        // Push method-level type params onto the stack (merged with any class/record type params)
         if !method_type_params.is_empty() {
-            let mut scope = self.current_type_param_scope.take().unwrap_or_default();
-            for tp in &method_type_params {
-                scope.add(tp.clone());
-            }
-            self.current_type_param_scope = Some(scope);
+            self.type_param_stack.push_merged(method_type_params.clone());
         }
 
         // Create scope WITHOUT 'self'

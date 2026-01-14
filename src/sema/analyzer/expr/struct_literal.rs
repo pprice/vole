@@ -406,7 +406,7 @@ impl Analyzer {
                 }
                 // Fall back to current type param scope - this handles cases like
                 // GenericContainer { _ptr: ... } inside GenericContainer<K,V>.new()
-                if let Some(ref scope) = self.current_type_param_scope {
+                if let Some(scope) = self.type_param_stack.current() {
                     // Look up by matching the type param name in the current scope
                     let param_name = self.name_table.last_segment_str(param.name_id);
                     if let Some(param_name) = param_name {

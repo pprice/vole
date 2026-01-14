@@ -220,6 +220,126 @@ impl TypeParamScope {
     pub fn clear(&mut self) {
         self.params.clear();
     }
+
+    /// Check if the scope is empty
+    pub fn is_empty(&self) -> bool {
+        self.params.is_empty()
+    }
+
+    /// Get the number of type parameters in scope
+    pub fn len(&self) -> usize {
+        self.params.len()
+    }
+}
+
+/// Stack of type parameter scopes for nested generic contexts.
+/// Provides push/pop semantics for entering/exiting generic functions,
+/// methods, classes, records, and lambdas.
+#[derive(Debug, Default, Clone)]
+pub struct TypeParamScopeStack {
+    /// Stack of scopes, with the innermost (current) scope at the end
+    scopes: Vec<TypeParamScope>,
+}
+
+impl TypeParamScopeStack {
+    /// Create a new empty stack
+    pub fn new() -> Self {
+        Self { scopes: Vec::new() }
+    }
+
+    /// Push a new scope onto the stack with the given type parameters
+    pub fn push(&mut self, params: Vec<TypeParamInfo>) {
+        let mut scope = TypeParamScope::new();
+        for param in params {
+            scope.add(param);
+        }
+        self.scopes.push(scope);
+    }
+
+    /// Push an existing scope onto the stack
+    pub fn push_scope(&mut self, scope: TypeParamScope) {
+        self.scopes.push(scope);
+    }
+
+    /// Pop the current scope from the stack
+    pub fn pop(&mut self) -> Option<TypeParamScope> {
+        self.scopes.pop()
+    }
+
+    /// Get the current (innermost) scope, if any
+    pub fn current(&self) -> Option<&TypeParamScope> {
+        self.scopes.last()
+    }
+
+    /// Get the current (innermost) scope mutably, if any
+    pub fn current_mut(&mut self) -> Option<&mut TypeParamScope> {
+        self.scopes.last_mut()
+    }
+
+    /// Look up a type parameter by Symbol in any scope (innermost first)
+    pub fn get(&self, name: Symbol) -> Option<&TypeParamInfo> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(info) = scope.get(name) {
+                return Some(info);
+            }
+        }
+        None
+    }
+
+    /// Look up a type parameter by NameId in any scope (innermost first)
+    pub fn get_by_name_id(&self, name_id: NameId) -> Option<&TypeParamInfo> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(info) = scope.get_by_name_id(name_id) {
+                return Some(info);
+            }
+        }
+        None
+    }
+
+    /// Check if a symbol refers to a type parameter in any scope
+    pub fn is_type_param(&self, name: Symbol) -> bool {
+        self.get(name).is_some()
+    }
+
+    /// Check if there are any scopes on the stack
+    pub fn is_empty(&self) -> bool {
+        self.scopes.is_empty()
+    }
+
+    /// Get the depth of the stack (number of nested scopes)
+    pub fn depth(&self) -> usize {
+        self.scopes.len()
+    }
+
+    /// Get all type parameters from all scopes (for merging contexts)
+    pub fn all_params(&self) -> Vec<TypeParamInfo> {
+        self.scopes
+            .iter()
+            .flat_map(|s| s.params().iter().cloned())
+            .collect()
+    }
+
+    /// Create a merged scope containing all type parameters from all scopes
+    pub fn merged_scope(&self) -> TypeParamScope {
+        let mut merged = TypeParamScope::new();
+        for scope in &self.scopes {
+            for param in scope.params() {
+                merged.add(param.clone());
+            }
+        }
+        merged
+    }
+
+    /// Push a merged scope that combines the current scope with additional params.
+    /// This is useful for methods in generic classes where we need both
+    /// the class's type params and the method's type params.
+    pub fn push_merged(&mut self, additional_params: Vec<TypeParamInfo>) {
+        let mut merged = self.merged_scope();
+        for param in additional_params {
+            merged.add(param);
+        }
+        self.scopes.push(merged);
+    }
 }
 
 /// Information about a generic function definition

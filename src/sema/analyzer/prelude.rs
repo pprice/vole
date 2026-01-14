@@ -4,6 +4,7 @@ use super::Analyzer;
 use crate::frontend::{Interner, Parser};
 use crate::identity::NameTable;
 use crate::sema::EntityRegistry;
+use crate::sema::generic::TypeParamScopeStack;
 use crate::sema::implement_registry::ImplementRegistry;
 use crate::sema::resolution::MethodResolutions;
 use crate::sema::scope::Scope;
@@ -101,7 +102,7 @@ impl Analyzer {
             name_table: NameTable::new(),
             current_module: prelude_module, // Use the prelude module path!
             entity_registry: EntityRegistry::new(),
-            current_type_param_scope: None,
+            type_param_stack: TypeParamScopeStack::new(),
         };
 
         // Copy existing registries so prelude files can reference earlier definitions

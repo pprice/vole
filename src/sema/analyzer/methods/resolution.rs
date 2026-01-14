@@ -219,8 +219,8 @@ impl Analyzer {
             "resolve_method_on_type_param: starting"
         );
 
-        // Look up the type parameter in current_type_param_scope
-        let type_param_scope = self.current_type_param_scope.as_ref()?;
+        // Look up the type parameter in type_param_stack
+        let type_param_scope = self.type_param_stack.current()?;
 
         // Find the type parameter by name_id
         let type_param = type_param_scope
