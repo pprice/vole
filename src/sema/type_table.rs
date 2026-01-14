@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::identity::{ModuleId, NameId, NameTable, TypeDefId};
+use crate::identity::{NameId, NameTable, TypeDefId};
 use crate::sema::Type;
 use crate::sema::implement_registry::PrimitiveTypeId;
 use crate::sema::types::{NominalType, PrimitiveType};
@@ -24,63 +24,12 @@ pub struct TypeInfo {
     pub name_id: Option<NameId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum TypeFingerprint {
-    I8,
-    I16,
-    I32,
-    I64,
-    I128,
-    U8,
-    U16,
-    U32,
-    U64,
-    F32,
-    F64,
-    Bool,
-    String,
-    Void,
-    Nil,
-    Done,
-    Range,
-    Unknown,
-    Error,
-    Type,
-    Union(Vec<TypeKey>),
-    Array(TypeKey),
-    Interface {
-        type_def_id: TypeDefId,
-        args: Vec<TypeKey>,
-    },
-    ErrorType(TypeDefId),
-    Function {
-        params: Vec<TypeKey>,
-        return_type: TypeKey,
-    },
-    Fallible {
-        success: TypeKey,
-        error: TypeKey,
-    },
-    Module(ModuleId),
-    TypeParam(NameId),
-    RuntimeIterator(TypeKey),
-    Tuple(Vec<TypeKey>),
-    FixedArray {
-        element: TypeKey,
-        size: usize,
-    },
-    Structural {
-        fields: Vec<(NameId, TypeKey)>,
-        methods: Vec<(NameId, Vec<TypeKey>, TypeKey)>,
-    },
-}
-
 #[derive(Debug, Clone)]
 pub struct TypeTable {
     types: Vec<TypeInfo>,
     name_lookup: HashMap<NameId, TypeKey>,
     type_def_lookup: HashMap<TypeDefId, TypeKey>,
-    fingerprint_lookup: HashMap<TypeFingerprint, TypeKey>,
+    type_lookup: HashMap<Type, TypeKey>,
     primitive_names: HashMap<PrimitiveTypeId, NameId>,
     array_name: Option<NameId>,
 }
@@ -91,7 +40,7 @@ impl TypeTable {
             types: Vec::new(),
             name_lookup: HashMap::new(),
             type_def_lookup: HashMap::new(),
-            fingerprint_lookup: HashMap::new(),
+            type_lookup: HashMap::new(),
             primitive_names: HashMap::new(),
             array_name: None,
         }
@@ -176,81 +125,26 @@ impl TypeTable {
 
     pub fn key_for_type(&mut self, ty: &Type) -> TypeKey {
         match ty {
-            Type::Primitive(prim) => match prim {
-                PrimitiveType::I8 => {
-                    self.intern_primitive(PrimitiveTypeId::I8, TypeFingerprint::I8, ty)
-                }
-                PrimitiveType::I16 => {
-                    self.intern_primitive(PrimitiveTypeId::I16, TypeFingerprint::I16, ty)
-                }
-                PrimitiveType::I32 => {
-                    self.intern_primitive(PrimitiveTypeId::I32, TypeFingerprint::I32, ty)
-                }
-                PrimitiveType::I64 => {
-                    self.intern_primitive(PrimitiveTypeId::I64, TypeFingerprint::I64, ty)
-                }
-                PrimitiveType::I128 => {
-                    self.intern_primitive(PrimitiveTypeId::I128, TypeFingerprint::I128, ty)
-                }
-                PrimitiveType::U8 => {
-                    self.intern_primitive(PrimitiveTypeId::U8, TypeFingerprint::U8, ty)
-                }
-                PrimitiveType::U16 => {
-                    self.intern_primitive(PrimitiveTypeId::U16, TypeFingerprint::U16, ty)
-                }
-                PrimitiveType::U32 => {
-                    self.intern_primitive(PrimitiveTypeId::U32, TypeFingerprint::U32, ty)
-                }
-                PrimitiveType::U64 => {
-                    self.intern_primitive(PrimitiveTypeId::U64, TypeFingerprint::U64, ty)
-                }
-                PrimitiveType::F32 => {
-                    self.intern_primitive(PrimitiveTypeId::F32, TypeFingerprint::F32, ty)
-                }
-                PrimitiveType::F64 => {
-                    self.intern_primitive(PrimitiveTypeId::F64, TypeFingerprint::F64, ty)
-                }
-                PrimitiveType::Bool => {
-                    self.intern_primitive(PrimitiveTypeId::Bool, TypeFingerprint::Bool, ty)
-                }
-                PrimitiveType::String => {
-                    self.intern_primitive(PrimitiveTypeId::String, TypeFingerprint::String, ty)
-                }
-            },
-            Type::Void => self.intern_fingerprint(TypeFingerprint::Void, ty.clone()),
-            Type::Nil => self.intern_fingerprint(TypeFingerprint::Nil, ty.clone()),
-            Type::Done => self.intern_fingerprint(TypeFingerprint::Done, ty.clone()),
-            Type::Range => self.intern_fingerprint(TypeFingerprint::Range, ty.clone()),
-            Type::Placeholder(_) => self.intern_fingerprint(TypeFingerprint::Unknown, ty.clone()),
-            Type::Invalid(_) => self.intern_fingerprint(TypeFingerprint::Error, ty.clone()),
-            Type::Type => self.intern_fingerprint(TypeFingerprint::Type, ty.clone()),
-            Type::Union(variants) => {
-                let mut keys: Vec<TypeKey> = variants
-                    .iter()
-                    .map(|variant| self.key_for_type(variant))
-                    .collect();
-                keys.sort_by_key(|key| key.index());
-                self.intern_fingerprint(TypeFingerprint::Union(keys), ty.clone())
+            // Primitives: use registered name if available, otherwise intern by type
+            Type::Primitive(prim) => {
+                let prim_id = match prim {
+                    PrimitiveType::I8 => PrimitiveTypeId::I8,
+                    PrimitiveType::I16 => PrimitiveTypeId::I16,
+                    PrimitiveType::I32 => PrimitiveTypeId::I32,
+                    PrimitiveType::I64 => PrimitiveTypeId::I64,
+                    PrimitiveType::I128 => PrimitiveTypeId::I128,
+                    PrimitiveType::U8 => PrimitiveTypeId::U8,
+                    PrimitiveType::U16 => PrimitiveTypeId::U16,
+                    PrimitiveType::U32 => PrimitiveTypeId::U32,
+                    PrimitiveType::U64 => PrimitiveTypeId::U64,
+                    PrimitiveType::F32 => PrimitiveTypeId::F32,
+                    PrimitiveType::F64 => PrimitiveTypeId::F64,
+                    PrimitiveType::Bool => PrimitiveTypeId::Bool,
+                    PrimitiveType::String => PrimitiveTypeId::String,
+                };
+                self.intern_primitive(prim_id, ty)
             }
-            Type::Array(elem) => {
-                let elem_key = self.key_for_type(elem);
-                self.intern_fingerprint(TypeFingerprint::Array(elem_key), ty.clone())
-            }
-            Type::Function(func) => {
-                let params = func
-                    .params
-                    .iter()
-                    .map(|param| self.key_for_type(param))
-                    .collect();
-                let return_type = self.key_for_type(&func.return_type);
-                self.intern_fingerprint(
-                    TypeFingerprint::Function {
-                        params,
-                        return_type,
-                    },
-                    ty.clone(),
-                )
-            }
+            // Nominal types with TypeDefId: use type_def_lookup for deduplication
             Type::Nominal(NominalType::Class(class_type)) => {
                 self.intern_type_def(ty.clone(), class_type.type_def_id)
             }
@@ -258,74 +152,15 @@ impl TypeTable {
                 self.intern_type_def(ty.clone(), record_type.type_def_id)
             }
             Type::Nominal(NominalType::Interface(interface_type)) => {
-                let type_def_id = interface_type.type_def_id;
+                // Non-generic interfaces use type_def_lookup, generic use type_lookup
                 if interface_type.type_args.is_empty() {
-                    self.intern_type_def(ty.clone(), type_def_id)
+                    self.intern_type_def(ty.clone(), interface_type.type_def_id)
                 } else {
-                    let args = interface_type
-                        .type_args
-                        .iter()
-                        .map(|arg| self.key_for_type(arg))
-                        .collect();
-                    self.intern_fingerprint(
-                        TypeFingerprint::Interface { type_def_id, args },
-                        ty.clone(),
-                    )
+                    self.intern_type(ty.clone())
                 }
             }
-            Type::Nominal(NominalType::Error(error_type)) => self.intern_fingerprint(
-                TypeFingerprint::ErrorType(error_type.type_def_id),
-                ty.clone(),
-            ),
-            Type::Fallible(fallible) => {
-                let success = self.key_for_type(&fallible.success_type);
-                let error = self.key_for_type(&fallible.error_type);
-                self.intern_fingerprint(TypeFingerprint::Fallible { success, error }, ty.clone())
-            }
-            Type::Module(module_type) => {
-                self.intern_fingerprint(TypeFingerprint::Module(module_type.module_id), ty.clone())
-            }
-            Type::TypeParam(name_id) => {
-                self.intern_fingerprint(TypeFingerprint::TypeParam(*name_id), ty.clone())
-            }
-            Type::RuntimeIterator(elem) => {
-                let elem_key = self.key_for_type(elem);
-                self.intern_fingerprint(TypeFingerprint::RuntimeIterator(elem_key), ty.clone())
-            }
-            Type::Tuple(elements) => {
-                let elem_keys = elements
-                    .iter()
-                    .map(|elem| self.key_for_type(elem))
-                    .collect();
-                self.intern_fingerprint(TypeFingerprint::Tuple(elem_keys), ty.clone())
-            }
-            Type::FixedArray { element, size } => {
-                let elem_key = self.key_for_type(element);
-                self.intern_fingerprint(
-                    TypeFingerprint::FixedArray {
-                        element: elem_key,
-                        size: *size,
-                    },
-                    ty.clone(),
-                )
-            }
-            Type::Structural(structural) => {
-                let fields: Vec<_> = structural
-                    .fields
-                    .iter()
-                    .map(|f| (f.name, self.key_for_type(&f.ty)))
-                    .collect();
-                let methods: Vec<_> = structural
-                    .methods
-                    .iter()
-                    .map(|m| {
-                        let params: Vec<_> =
-                            m.params.iter().map(|p| self.key_for_type(p)).collect();
-                        (m.name, params, self.key_for_type(&m.return_type))
-                    })
-                    .collect();
-                self.intern_fingerprint(TypeFingerprint::Structural { fields, methods }, ty.clone())
-            }
+            // All other types: use direct Type hashing
+            _ => self.intern_type(ty.clone()),
         }
     }
 
@@ -351,25 +186,20 @@ impl TypeTable {
         key
     }
 
-    fn intern_fingerprint(&mut self, fingerprint: TypeFingerprint, ty: Type) -> TypeKey {
-        if let Some(key) = self.fingerprint_lookup.get(&fingerprint) {
+    fn intern_type(&mut self, ty: Type) -> TypeKey {
+        if let Some(key) = self.type_lookup.get(&ty) {
             return *key;
         }
-        let key = self.insert_anonymous(ty);
-        self.fingerprint_lookup.insert(fingerprint, key);
+        let key = self.insert_anonymous(ty.clone());
+        self.type_lookup.insert(ty, key);
         key
     }
 
-    fn intern_primitive(
-        &mut self,
-        prim: PrimitiveTypeId,
-        fingerprint: TypeFingerprint,
-        ty: &Type,
-    ) -> TypeKey {
+    fn intern_primitive(&mut self, prim: PrimitiveTypeId, ty: &Type) -> TypeKey {
         if let Some(name_id) = self.primitive_names.get(&prim) {
             self.intern_named(ty.clone(), *name_id)
         } else {
-            self.intern_fingerprint(fingerprint, ty.clone())
+            self.intern_type(ty.clone())
         }
     }
 
