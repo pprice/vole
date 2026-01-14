@@ -465,6 +465,151 @@ impl Type {
             _ => left.clone(),
         }
     }
+
+    /// Substitute type parameters with concrete types.
+    ///
+    /// This is the core operation for generic type instantiation. Given a map
+    /// from type parameter NameIds to concrete types, returns a new type with
+    /// all type parameters replaced.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // For a function `fn identity<T>(x: T) -> T` called with i64:
+    /// let substitutions = HashMap::from([(t_name_id, Type::Primitive(PrimitiveType::I64))]);
+    /// let param_type = Type::TypeParam(t_name_id);
+    /// assert_eq!(param_type.substitute(&substitutions), Type::Primitive(PrimitiveType::I64));
+    /// ```
+    pub fn substitute(&self, substitutions: &std::collections::HashMap<NameId, Type>) -> Type {
+        match self {
+            // Direct substitution for type parameters
+            Type::TypeParam(name_id) => substitutions
+                .get(name_id)
+                .cloned()
+                .unwrap_or_else(|| self.clone()),
+
+            // Recursive substitution for compound types
+            Type::Array(elem) => Type::Array(Box::new(elem.substitute(substitutions))),
+
+            Type::Union(types) => {
+                Type::Union(types.iter().map(|t| t.substitute(substitutions)).collect())
+            }
+
+            Type::Function(ft) => Type::Function(FunctionType {
+                params: ft
+                    .params
+                    .iter()
+                    .map(|t| t.substitute(substitutions))
+                    .collect(),
+                return_type: Box::new(ft.return_type.substitute(substitutions)),
+                is_closure: ft.is_closure,
+            }),
+
+            Type::Tuple(elements) => Type::Tuple(
+                elements
+                    .iter()
+                    .map(|t| t.substitute(substitutions))
+                    .collect(),
+            ),
+
+            Type::Nominal(NominalType::Interface(interface_type)) => {
+                Type::Nominal(NominalType::Interface(InterfaceType {
+                    type_def_id: interface_type.type_def_id,
+                    type_args: interface_type
+                        .type_args
+                        .iter()
+                        .map(|t| t.substitute(substitutions))
+                        .collect(),
+                    methods: interface_type
+                        .methods
+                        .iter()
+                        .map(|method| InterfaceMethodType {
+                            name: method.name,
+                            params: method
+                                .params
+                                .iter()
+                                .map(|t| t.substitute(substitutions))
+                                .collect(),
+                            return_type: Box::new(method.return_type.substitute(substitutions)),
+                            has_default: method.has_default,
+                        })
+                        .collect(),
+                    extends: interface_type.extends.clone(),
+                }))
+            }
+
+            Type::Nominal(NominalType::Record(record_type)) => {
+                Type::Nominal(NominalType::Record(RecordType {
+                    type_def_id: record_type.type_def_id,
+                    type_args: record_type
+                        .type_args
+                        .iter()
+                        .map(|t| t.substitute(substitutions))
+                        .collect(),
+                }))
+            }
+
+            Type::Nominal(NominalType::Class(class_type)) => {
+                Type::Nominal(NominalType::Class(ClassType {
+                    type_def_id: class_type.type_def_id,
+                    type_args: class_type
+                        .type_args
+                        .iter()
+                        .map(|t| t.substitute(substitutions))
+                        .collect(),
+                }))
+            }
+
+            Type::RuntimeIterator(elem) => {
+                Type::RuntimeIterator(Box::new(elem.substitute(substitutions)))
+            }
+
+            Type::FixedArray { element, size } => Type::FixedArray {
+                element: Box::new(element.substitute(substitutions)),
+                size: *size,
+            },
+
+            Type::Fallible(ft) => Type::Fallible(FallibleType {
+                success_type: Box::new(ft.success_type.substitute(substitutions)),
+                error_type: Box::new(ft.error_type.substitute(substitutions)),
+            }),
+
+            Type::Structural(st) => Type::Structural(StructuralType {
+                fields: st
+                    .fields
+                    .iter()
+                    .map(|f| StructuralFieldType {
+                        name: f.name,
+                        ty: f.ty.substitute(substitutions),
+                    })
+                    .collect(),
+                methods: st
+                    .methods
+                    .iter()
+                    .map(|m| StructuralMethodType {
+                        name: m.name,
+                        params: m
+                            .params
+                            .iter()
+                            .map(|p| p.substitute(substitutions))
+                            .collect(),
+                        return_type: m.return_type.substitute(substitutions),
+                    })
+                    .collect(),
+            }),
+
+            // Types without nested type parameters - return unchanged
+            Type::Primitive(_)
+            | Type::Void
+            | Type::Nil
+            | Type::Done
+            | Type::Range
+            | Type::Type
+            | Type::Placeholder(_)
+            | Type::Invalid(_)
+            | Type::Module(_)
+            | Type::Nominal(NominalType::Error(_)) => self.clone(),
+        }
+    }
 }
 
 impl std::fmt::Display for Type {
