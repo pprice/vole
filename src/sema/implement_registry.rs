@@ -216,7 +216,7 @@ mod tests {
             MethodImpl {
                 trait_name: Some(sym(2)), // "Sized"
                 func_type: FunctionType {
-                    params: vec![],
+                    params: vec![].into(),
                     return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 },
@@ -302,7 +302,7 @@ mod tests {
             MethodImpl {
                 trait_name: None,
                 func_type: FunctionType {
-                    params: vec![],
+                    params: vec![].into(),
                     return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 },
@@ -317,7 +317,7 @@ mod tests {
             MethodImpl {
                 trait_name: None,
                 func_type: FunctionType {
-                    params: vec![],
+                    params: vec![].into(),
                     return_type: Box::new(Type::Primitive(PrimitiveType::String)),
                     is_closure: false,
                 },
@@ -357,7 +357,7 @@ mod tests {
             MethodImpl {
                 trait_name: Some(sym(20)), // "Equatable"
                 func_type: FunctionType {
-                    params: vec![Type::Primitive(PrimitiveType::I64)],
+                    params: vec![Type::Primitive(PrimitiveType::I64)].into(),
                     return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
                     is_closure: false,
                 },
@@ -373,7 +373,7 @@ mod tests {
             MethodImpl {
                 trait_name: None,
                 func_type: FunctionType {
-                    params: vec![],
+                    params: vec![].into(),
                     return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 },

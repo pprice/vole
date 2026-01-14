@@ -342,7 +342,7 @@ mod tests {
         let key = types.insert_named(
             Type::Nominal(NominalType::Class(crate::sema::ClassType {
                 type_def_id,
-                type_args: vec![],
+                type_args: vec![].into(),
             })),
             name_id,
         );

@@ -469,6 +469,11 @@ impl Type {
     /// assert_eq!(param_type.substitute(&substitutions), Type::Primitive(PrimitiveType::I64));
     /// ```
     pub fn substitute(&self, substitutions: &std::collections::HashMap<NameId, Type>) -> Type {
+        // Early exit if no substitutions - just clone (cheap for Arc-based types)
+        if substitutions.is_empty() {
+            return self.clone();
+        }
+
         match self {
             // Direct substitution for type parameters
             Type::TypeParam(name_id) => substitutions
@@ -479,115 +484,173 @@ impl Type {
             // TypeParamRef doesn't substitute based on NameId - it's an opaque reference
             Type::TypeParamRef(_) => self.clone(),
 
-            // Recursive substitution for compound types
-            Type::Array(elem) => Type::Array(Box::new(elem.substitute(substitutions))),
-
-            Type::Union(types) => {
-                Type::Union(types.iter().map(|t| t.substitute(substitutions)).collect())
+            // Recursive substitution for compound types - reuse Arc if unchanged
+            Type::Array(elem) => {
+                let new_elem = elem.substitute(substitutions);
+                if &new_elem == elem.as_ref() {
+                    self.clone()
+                } else {
+                    Type::Array(Box::new(new_elem))
+                }
             }
 
-            Type::Function(ft) => Type::Function(FunctionType {
-                params: ft
-                    .params
-                    .iter()
-                    .map(|t| t.substitute(substitutions))
-                    .collect(),
-                return_type: Box::new(ft.return_type.substitute(substitutions)),
-                is_closure: ft.is_closure,
-            }),
+            Type::Union(types) => {
+                let new_types = substitute_slice(types, substitutions);
+                if let Some(reused) = new_types {
+                    Type::Union(reused)
+                } else {
+                    self.clone()
+                }
+            }
 
-            Type::Tuple(elements) => Type::Tuple(
-                elements
-                    .iter()
-                    .map(|t| t.substitute(substitutions))
-                    .collect(),
-            ),
+            Type::Function(ft) => {
+                let new_params = substitute_slice(&ft.params, substitutions);
+                let new_return = ft.return_type.substitute(substitutions);
+                let return_changed = &new_return != ft.return_type.as_ref();
+
+                if new_params.is_none() && !return_changed {
+                    self.clone()
+                } else {
+                    Type::Function(FunctionType {
+                        params: new_params.unwrap_or_else(|| ft.params.clone()),
+                        return_type: Box::new(new_return),
+                        is_closure: ft.is_closure,
+                    })
+                }
+            }
+
+            Type::Tuple(elements) => {
+                let new_elements = substitute_slice(elements, substitutions);
+                if let Some(reused) = new_elements {
+                    Type::Tuple(reused)
+                } else {
+                    self.clone()
+                }
+            }
 
             Type::Nominal(NominalType::Interface(interface_type)) => {
-                Type::Nominal(NominalType::Interface(InterfaceType {
-                    type_def_id: interface_type.type_def_id,
-                    type_args: interface_type
-                        .type_args
-                        .iter()
-                        .map(|t| t.substitute(substitutions))
-                        .collect(),
-                    methods: interface_type
-                        .methods
-                        .iter()
-                        .map(|method| InterfaceMethodType {
-                            name: method.name,
-                            params: method
-                                .params
-                                .iter()
-                                .map(|t| t.substitute(substitutions))
-                                .collect(),
-                            return_type: Box::new(method.return_type.substitute(substitutions)),
-                            has_default: method.has_default,
-                        })
-                        .collect(),
-                    extends: interface_type.extends.clone(),
-                }))
+                let new_type_args = substitute_slice(&interface_type.type_args, substitutions);
+                let new_methods = substitute_interface_methods(&interface_type.methods, substitutions);
+
+                if new_type_args.is_none() && new_methods.is_none() {
+                    self.clone()
+                } else {
+                    Type::Nominal(NominalType::Interface(InterfaceType {
+                        type_def_id: interface_type.type_def_id,
+                        type_args: new_type_args.unwrap_or_else(|| interface_type.type_args.clone()),
+                        methods: new_methods.unwrap_or_else(|| interface_type.methods.clone()),
+                        extends: interface_type.extends.clone(),
+                    }))
+                }
             }
 
             Type::Nominal(NominalType::Record(record_type)) => {
-                Type::Nominal(NominalType::Record(RecordType {
-                    type_def_id: record_type.type_def_id,
-                    type_args: record_type
-                        .type_args
-                        .iter()
-                        .map(|t| t.substitute(substitutions))
-                        .collect(),
-                }))
+                let new_type_args = substitute_slice(&record_type.type_args, substitutions);
+                if let Some(args) = new_type_args {
+                    Type::Nominal(NominalType::Record(RecordType {
+                        type_def_id: record_type.type_def_id,
+                        type_args: args,
+                    }))
+                } else {
+                    self.clone()
+                }
             }
 
             Type::Nominal(NominalType::Class(class_type)) => {
-                Type::Nominal(NominalType::Class(ClassType {
-                    type_def_id: class_type.type_def_id,
-                    type_args: class_type
-                        .type_args
-                        .iter()
-                        .map(|t| t.substitute(substitutions))
-                        .collect(),
-                }))
+                let new_type_args = substitute_slice(&class_type.type_args, substitutions);
+                if let Some(args) = new_type_args {
+                    Type::Nominal(NominalType::Class(ClassType {
+                        type_def_id: class_type.type_def_id,
+                        type_args: args,
+                    }))
+                } else {
+                    self.clone()
+                }
             }
 
             Type::RuntimeIterator(elem) => {
-                Type::RuntimeIterator(Box::new(elem.substitute(substitutions)))
+                let new_elem = elem.substitute(substitutions);
+                if &new_elem == elem.as_ref() {
+                    self.clone()
+                } else {
+                    Type::RuntimeIterator(Box::new(new_elem))
+                }
             }
 
-            Type::FixedArray { element, size } => Type::FixedArray {
-                element: Box::new(element.substitute(substitutions)),
-                size: *size,
-            },
+            Type::FixedArray { element, size } => {
+                let new_elem = element.substitute(substitutions);
+                if &new_elem == element.as_ref() {
+                    self.clone()
+                } else {
+                    Type::FixedArray {
+                        element: Box::new(new_elem),
+                        size: *size,
+                    }
+                }
+            }
 
-            Type::Fallible(ft) => Type::Fallible(FallibleType {
-                success_type: Box::new(ft.success_type.substitute(substitutions)),
-                error_type: Box::new(ft.error_type.substitute(substitutions)),
-            }),
+            Type::Fallible(ft) => {
+                let new_success = ft.success_type.substitute(substitutions);
+                let new_error = ft.error_type.substitute(substitutions);
+                let success_changed = &new_success != ft.success_type.as_ref();
+                let error_changed = &new_error != ft.error_type.as_ref();
 
-            Type::Structural(st) => Type::Structural(StructuralType {
-                fields: st
+                if !success_changed && !error_changed {
+                    self.clone()
+                } else {
+                    Type::Fallible(FallibleType {
+                        success_type: Box::new(new_success),
+                        error_type: Box::new(new_error),
+                    })
+                }
+            }
+
+            Type::Structural(st) => {
+                let mut fields_changed = false;
+                let new_fields: Vec<_> = st
                     .fields
                     .iter()
-                    .map(|f| StructuralFieldType {
-                        name: f.name,
-                        ty: f.ty.substitute(substitutions),
+                    .map(|f| {
+                        let new_ty = f.ty.substitute(substitutions);
+                        if new_ty != f.ty {
+                            fields_changed = true;
+                        }
+                        StructuralFieldType {
+                            name: f.name,
+                            ty: new_ty,
+                        }
                     })
-                    .collect(),
-                methods: st
+                    .collect();
+
+                let mut methods_changed = false;
+                let new_methods: Vec<_> = st
                     .methods
                     .iter()
-                    .map(|m| StructuralMethodType {
-                        name: m.name,
-                        params: m
-                            .params
-                            .iter()
-                            .map(|p| p.substitute(substitutions))
-                            .collect(),
-                        return_type: m.return_type.substitute(substitutions),
+                    .map(|m| {
+                        let new_params: Vec<_> = m.params.iter().map(|p| p.substitute(substitutions)).collect();
+                        let new_return = m.return_type.substitute(substitutions);
+                        if new_params.iter().zip(m.params.iter()).any(|(a, b)| a != b)
+                            || new_return != m.return_type
+                        {
+                            methods_changed = true;
+                        }
+                        StructuralMethodType {
+                            name: m.name,
+                            params: new_params,
+                            return_type: new_return,
+                        }
                     })
-                    .collect(),
-            }),
+                    .collect();
+
+                if !fields_changed && !methods_changed {
+                    self.clone()
+                } else {
+                    Type::Structural(StructuralType {
+                        fields: new_fields,
+                        methods: new_methods,
+                    })
+                }
+            }
 
             // Types without nested type parameters - return unchanged
             Type::Primitive(_)
@@ -601,6 +664,64 @@ impl Type {
             | Type::Module(_)
             | Type::Nominal(NominalType::Error(_)) => self.clone(),
         }
+    }
+}
+
+/// Helper: substitute types in a slice, returning Some(new_arc) only if any changed
+fn substitute_slice(
+    types: &Arc<[Type]>,
+    substitutions: &std::collections::HashMap<NameId, Type>,
+) -> Option<Arc<[Type]>> {
+    let mut changed = false;
+    let new_types: Vec<_> = types
+        .iter()
+        .map(|t| {
+            let new_t = t.substitute(substitutions);
+            if &new_t != t {
+                changed = true;
+            }
+            new_t
+        })
+        .collect();
+
+    if changed {
+        Some(new_types.into())
+    } else {
+        None
+    }
+}
+
+/// Helper: substitute types in interface methods, returning Some only if any changed
+fn substitute_interface_methods(
+    methods: &Arc<[InterfaceMethodType]>,
+    substitutions: &std::collections::HashMap<NameId, Type>,
+) -> Option<Arc<[InterfaceMethodType]>> {
+    let mut changed = false;
+    let new_methods: Vec<_> = methods
+        .iter()
+        .map(|method| {
+            let new_params = substitute_slice(&method.params, substitutions);
+            let new_return = method.return_type.substitute(substitutions);
+            let return_changed = &new_return != method.return_type.as_ref();
+
+            if new_params.is_some() || return_changed {
+                changed = true;
+                InterfaceMethodType {
+                    name: method.name,
+                    params: new_params.unwrap_or_else(|| method.params.clone()),
+                    return_type: Box::new(new_return),
+                    has_default: method.has_default,
+                }
+            } else {
+                method.clone()
+            }
+        })
+        .collect();
+
+    if changed {
+        Some(new_methods.into())
+    } else {
+        None
     }
 }
 

@@ -793,7 +793,7 @@ mod tests {
                 mangled_name: names.intern_raw(names.main_module(), &["foo__mono_0"]),
                 instance_id: 0,
                 func_type: FunctionType {
-                    params: vec![Type::Primitive(PrimitiveType::I64)],
+                    params: vec![Type::Primitive(PrimitiveType::I64)].into(),
                     return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 },

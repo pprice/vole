@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn resolved_method_func_type() {
         let ft = FunctionType {
-            params: vec![Type::Primitive(PrimitiveType::I32)],
+            params: vec![Type::Primitive(PrimitiveType::I32)].into(),
             return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
             is_closure: false,
         };
@@ -145,7 +145,7 @@ mod tests {
             node_id,
             ResolvedMethod::Direct {
                 func_type: FunctionType {
-                    params: vec![],
+                    params: vec![].into(),
                     return_type: Box::new(Type::Void),
                     is_closure: false,
                 },
