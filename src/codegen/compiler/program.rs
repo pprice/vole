@@ -3,11 +3,11 @@ use std::io::Write;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
 
-use super::{Compiler, ControlFlowCtx, TestInfo};
+use super::{Compiler, ControlFlowCtx, SelfParam, TestInfo, TypeResolver};
 use crate::codegen::FunctionKey;
 use crate::codegen::stmt::compile_block;
 use crate::codegen::types::{
-    CompileCtx, function_name_id_with_interner, resolve_type_expr_query, type_to_cranelift,
+    CompileCtx, function_name_id_with_interner, resolve_type_expr_with_metadata, type_to_cranelift,
 };
 use crate::frontend::{
     Decl, FuncDecl, InterfaceMethod, Interner, LetStmt, Program, Symbol, TestCase, TestsDecl,
@@ -91,7 +91,12 @@ impl Compiler<'_> {
                     if !func.type_params.is_empty() {
                         continue;
                     }
-                    let sig = self.create_function_signature(func);
+                    let sig = self.build_signature(
+                        &func.params,
+                        func.return_type.as_ref(),
+                        SelfParam::None,
+                        TypeResolver::Query,
+                    );
                     let (func_key, display_name) = self.main_function_key_and_name(func.name);
                     let func_id = self.jit.declare_function(&display_name, &sig);
                     self.func_registry.set_func_id(func_key, func_id);
@@ -235,7 +240,12 @@ impl Compiler<'_> {
                     let display_name = self.query().display_name(name_id);
 
                     // Create signature and declare function
-                    let sig = self.create_function_signature(func);
+                    let sig = self.build_signature(
+                        &func.params,
+                        func.return_type.as_ref(),
+                        SelfParam::None,
+                        TypeResolver::Query,
+                    );
                     let func_id = self.jit.declare_function(&display_name, &sig);
                     let func_key = self.func_registry.intern_name_id(name_id);
                     self.func_registry.set_func_id(func_key, func_id);
@@ -245,7 +255,16 @@ impl Compiler<'_> {
                     let return_type = func
                         .return_type
                         .as_ref()
-                        .map(|t| resolve_type_expr_query(t, &query, &self.type_metadata, module_id))
+                        .map(|t| {
+                            resolve_type_expr_with_metadata(
+                                t,
+                                query.registry(),
+                                &self.type_metadata,
+                                query.interner(),
+                                query.name_table(),
+                                module_id,
+                            )
+                        })
                         .unwrap_or(Type::Void);
                     self.func_registry.set_return_type(func_key, return_type);
                 }
@@ -329,7 +348,12 @@ impl Compiler<'_> {
         let module_id = self.query().module_id_or_main(module_path);
 
         // Create function signature
-        let sig = self.create_function_signature(func);
+        let sig = self.build_signature(
+            &func.params,
+            func.return_type.as_ref(),
+            SelfParam::None,
+            TypeResolver::Query,
+        );
         self.jit.ctx.func.signature = sig;
 
         // Collect param types
@@ -339,7 +363,14 @@ impl Compiler<'_> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id),
+                    &resolve_type_expr_with_metadata(
+                        &p.ty,
+                        query.registry(),
+                        &self.type_metadata,
+                        query.interner(),
+                        query.name_table(),
+                        module_id,
+                    ),
                     self.pointer_type,
                 )
             })
@@ -347,15 +378,30 @@ impl Compiler<'_> {
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id))
+            .map(|p| {
+                resolve_type_expr_with_metadata(
+                    &p.ty,
+                    query.registry(),
+                    &self.type_metadata,
+                    query.interner(),
+                    query.name_table(),
+                    module_id,
+                )
+            })
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type
-        let return_type = func
-            .return_type
-            .as_ref()
-            .map(|t| resolve_type_expr_query(t, &query, &self.type_metadata, module_id));
+        let return_type = func.return_type.as_ref().map(|t| {
+            resolve_type_expr_with_metadata(
+                t,
+                query.registry(),
+                &self.type_metadata,
+                query.interner(),
+                query.name_table(),
+                module_id,
+            )
+        });
 
         // Get source file pointer
         let source_file_ptr = self.source_file_ptr();
@@ -439,7 +485,12 @@ impl Compiler<'_> {
             .ok_or_else(|| format!("Function {} not declared", display_name))?;
 
         // Create function signature
-        let sig = self.create_function_signature(func);
+        let sig = self.build_signature(
+            &func.params,
+            func.return_type.as_ref(),
+            SelfParam::None,
+            TypeResolver::Query,
+        );
         self.jit.ctx.func.signature = sig;
 
         // Collect param types before borrowing ctx.func
@@ -449,7 +500,14 @@ impl Compiler<'_> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id),
+                    &resolve_type_expr_with_metadata(
+                        &p.ty,
+                        query.registry(),
+                        &self.type_metadata,
+                        query.interner(),
+                        query.name_table(),
+                        module_id,
+                    ),
                     self.pointer_type,
                 )
             })
@@ -457,15 +515,30 @@ impl Compiler<'_> {
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id))
+            .map(|p| {
+                resolve_type_expr_with_metadata(
+                    &p.ty,
+                    query.registry(),
+                    &self.type_metadata,
+                    query.interner(),
+                    query.name_table(),
+                    module_id,
+                )
+            })
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type (needed for raise statements in fallible functions)
-        let return_type = func
-            .return_type
-            .as_ref()
-            .map(|t| resolve_type_expr_query(t, &query, &self.type_metadata, module_id));
+        let return_type = func.return_type.as_ref().map(|t| {
+            resolve_type_expr_with_metadata(
+                t,
+                query.registry(),
+                &self.type_metadata,
+                query.interner(),
+                query.name_table(),
+                module_id,
+            )
+        });
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -645,7 +718,12 @@ impl Compiler<'_> {
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
-                    let sig = self.create_function_signature(func);
+                    let sig = self.build_signature(
+                        &func.params,
+                        func.return_type.as_ref(),
+                        SelfParam::None,
+                        TypeResolver::Query,
+                    );
                     let (func_key, display_name) = self.main_function_key_and_name(func.name);
                     let func_id = self.jit.declare_function(&display_name, &sig);
                     self.func_registry.set_func_id(func_key, func_id);
@@ -654,7 +732,16 @@ impl Compiler<'_> {
                     let return_type = func
                         .return_type
                         .as_ref()
-                        .map(|t| resolve_type_expr_query(t, &query, &self.type_metadata, module_id))
+                        .map(|t| {
+                            resolve_type_expr_with_metadata(
+                                t,
+                                query.registry(),
+                                &self.type_metadata,
+                                query.interner(),
+                                query.name_table(),
+                                module_id,
+                            )
+                        })
                         .unwrap_or(Type::Void);
                     self.func_registry.set_return_type(func_key, return_type);
                 }
@@ -704,7 +791,12 @@ impl Compiler<'_> {
     fn build_function_ir(&mut self, func: &FuncDecl) -> Result<(), String> {
         let module_id = self.query().main_module();
         // Create function signature
-        let sig = self.create_function_signature(func);
+        let sig = self.build_signature(
+            &func.params,
+            func.return_type.as_ref(),
+            SelfParam::None,
+            TypeResolver::Query,
+        );
         self.jit.ctx.func.signature = sig;
 
         // Collect param types before borrowing ctx.func
@@ -714,7 +806,14 @@ impl Compiler<'_> {
             .iter()
             .map(|p| {
                 type_to_cranelift(
-                    &resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id),
+                    &resolve_type_expr_with_metadata(
+                        &p.ty,
+                        query.registry(),
+                        &self.type_metadata,
+                        query.interner(),
+                        query.name_table(),
+                        module_id,
+                    ),
                     self.pointer_type,
                 )
             })
@@ -722,15 +821,30 @@ impl Compiler<'_> {
         let param_vole_types: Vec<Type> = func
             .params
             .iter()
-            .map(|p| resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id))
+            .map(|p| {
+                resolve_type_expr_with_metadata(
+                    &p.ty,
+                    query.registry(),
+                    &self.type_metadata,
+                    query.interner(),
+                    query.name_table(),
+                    module_id,
+                )
+            })
             .collect();
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type (needed for raise statements in fallible functions)
-        let return_type = func
-            .return_type
-            .as_ref()
-            .map(|t| resolve_type_expr_query(t, &query, &self.type_metadata, module_id));
+        let return_type = func.return_type.as_ref().map(|t| {
+            resolve_type_expr_with_metadata(
+                t,
+                query.registry(),
+                &self.type_metadata,
+                query.interner(),
+                query.name_table(),
+                module_id,
+            )
+        });
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -874,14 +988,12 @@ impl Compiler<'_> {
 
     /// Declare all monomorphized function instances
     fn declare_monomorphized_instances(&mut self) -> Result<(), String> {
-        // Collect instances to avoid borrow issues (key not needed, so don't clone it)
-        let instances: Vec<_> = self
+        // Collect instances to avoid borrow issues
+        let instances = self
             .analyzed
             .entity_registry
             .monomorph_cache
-            .instances()
-            .map(|(_key, instance)| instance.clone())
-            .collect();
+            .collect_instances();
 
         for instance in instances {
             // Skip external functions - they don't need JIT compilation
@@ -947,14 +1059,12 @@ impl Compiler<'_> {
             })
             .collect();
 
-        // Collect instances to avoid borrow issues (key not needed, so don't clone it)
-        let instances: Vec<_> = self
+        // Collect instances to avoid borrow issues
+        let instances = self
             .analyzed
             .entity_registry
             .monomorph_cache
-            .instances()
-            .map(|(_key, instance)| instance.clone())
-            .collect();
+            .collect_instances();
 
         for instance in instances {
             // Skip external functions - they don't have AST bodies
@@ -1108,14 +1218,12 @@ impl Compiler<'_> {
 
     /// Declare all monomorphized class method instances
     fn declare_class_method_monomorphized_instances(&mut self) -> Result<(), String> {
-        // Collect instances to avoid borrow issues (key not needed, so don't clone it)
-        let instances: Vec<_> = self
+        // Collect instances to avoid borrow issues
+        let instances = self
             .analyzed
             .entity_registry
             .class_method_monomorph_cache
-            .instances()
-            .map(|(_key, instance)| instance.clone())
-            .collect();
+            .collect_instances();
 
         tracing::debug!(
             instance_count = instances.len(),
@@ -1194,14 +1302,12 @@ impl Compiler<'_> {
             })
             .collect();
 
-        // Collect instances to avoid borrow issues (key not needed, so don't clone it)
-        let instances: Vec<_> = self
+        // Collect instances to avoid borrow issues
+        let instances = self
             .analyzed
             .entity_registry
             .class_method_monomorph_cache
-            .instances()
-            .map(|(_key, instance)| instance.clone())
-            .collect();
+            .collect_instances();
 
         tracing::debug!(
             instance_count = instances.len(),
@@ -1472,14 +1578,12 @@ impl Compiler<'_> {
 
     /// Declare all monomorphized static method instances
     fn declare_static_method_monomorphized_instances(&mut self) -> Result<(), String> {
-        // Collect instances to avoid borrow issues (key not needed, so don't clone it)
-        let instances: Vec<_> = self
+        // Collect instances to avoid borrow issues
+        let instances = self
             .analyzed
             .entity_registry
             .static_method_monomorph_cache
-            .instances()
-            .map(|(_key, instance)| instance.clone())
-            .collect();
+            .collect_instances();
 
         tracing::debug!(
             instance_count = instances.len(),
@@ -1553,14 +1657,12 @@ impl Compiler<'_> {
             })
             .collect();
 
-        // Collect instances to avoid borrow issues (key not needed, so don't clone it)
-        let instances: Vec<_> = self
+        // Collect instances to avoid borrow issues
+        let instances = self
             .analyzed
             .entity_registry
             .static_method_monomorph_cache
-            .instances()
-            .map(|(_key, instance)| instance.clone())
-            .collect();
+            .collect_instances();
 
         tracing::debug!(
             instance_count = instances.len(),

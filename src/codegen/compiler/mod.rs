@@ -5,6 +5,8 @@ mod signatures;
 mod state;
 mod type_registry;
 
+pub use signatures::{SelfParam, TypeResolver};
+
 use std::collections::HashMap;
 
 use cranelift::prelude::types as clif_types;

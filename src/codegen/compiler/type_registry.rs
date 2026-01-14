@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
-use super::Compiler;
+use super::{Compiler, SelfParam, TypeResolver};
 use crate::codegen::types::{
-    MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_query,
-    resolve_type_expr_with_metadata,
+    MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_with_metadata,
 };
 use crate::frontend::{
     ClassDecl, Decl, InterfaceDecl, Interner, Program, RecordDecl, StaticsBlock, Symbol, TypeExpr,
@@ -56,7 +55,15 @@ impl Compiler<'_> {
     /// This allows resolving types like `Person?` where Person is another record/class
     pub(super) fn resolve_type_with_metadata(&self, ty: &TypeExpr) -> Type {
         let query = self.query();
-        resolve_type_expr_query(ty, &query, &self.type_metadata, query.main_module())
+        let module_id = query.main_module();
+        resolve_type_expr_with_metadata(
+            ty,
+            query.registry(),
+            &self.type_metadata,
+            query.interner(),
+            query.name_table(),
+            module_id,
+        )
     }
 
     /// Resolve a type expression using a specific interner (for module types)
@@ -157,7 +164,12 @@ impl Compiler<'_> {
                 .as_ref()
                 .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(Type::Void);
-            let sig = self.create_method_signature(method);
+            let sig = self.build_signature(
+                &method.params,
+                method.return_type.as_ref(),
+                SelfParam::Pointer,
+                TypeResolver::Query,
+            );
             let func_key = self.intern_func(func_module_id, &[class.name, method.name]);
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
@@ -208,7 +220,12 @@ impl Compiler<'_> {
                             .as_ref()
                             .map(|t| self.resolve_type_with_metadata(t))
                             .unwrap_or(Type::Void);
-                        let sig = self.create_interface_method_signature(method);
+                        let sig = self.build_signature(
+                            &method.params,
+                            method.return_type.as_ref(),
+                            SelfParam::Pointer,
+                            TypeResolver::Query,
+                        );
                         let func_key = self.intern_func(func_module_id, &[class.name, method.name]);
                         let display_name = self.func_registry.display(func_key);
                         let func_id = self.jit.declare_function(&display_name, &sig);
@@ -331,7 +348,12 @@ impl Compiler<'_> {
                 .as_ref()
                 .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(Type::Void);
-            let sig = self.create_method_signature(method);
+            let sig = self.build_signature(
+                &method.params,
+                method.return_type.as_ref(),
+                SelfParam::Pointer,
+                TypeResolver::Query,
+            );
             let func_key = self.intern_func(func_module_id, &[record.name, method.name]);
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
@@ -382,7 +404,12 @@ impl Compiler<'_> {
                             .as_ref()
                             .map(|t| self.resolve_type_with_metadata(t))
                             .unwrap_or(Type::Void);
-                        let sig = self.create_interface_method_signature(method);
+                        let sig = self.build_signature(
+                            &method.params,
+                            method.return_type.as_ref(),
+                            SelfParam::Pointer,
+                            TypeResolver::Query,
+                        );
                         let func_key =
                             self.intern_func(func_module_id, &[record.name, method.name]);
                         let display_name = self.func_registry.display(func_key);
@@ -444,7 +471,12 @@ impl Compiler<'_> {
                 .unwrap_or(Type::Void);
 
             // Create signature without self parameter
-            let sig = self.create_static_method_signature(method);
+            let sig = self.build_signature(
+                &method.params,
+                method.return_type.as_ref(),
+                SelfParam::None,
+                TypeResolver::Query,
+            );
 
             // Function key: TypeName::methodName
             let func_key = self.intern_func(func_module_id, &[type_name, method.name]);
@@ -542,7 +574,12 @@ impl Compiler<'_> {
                 .map(|t| self.resolve_type_with_interner(t, module_interner))
                 .unwrap_or(Type::Void);
 
-            let sig = self.create_method_signature_with_interner(method, module_interner);
+            let sig = self.build_signature(
+                &method.params,
+                method.return_type.as_ref(),
+                SelfParam::Pointer,
+                TypeResolver::Interner(module_interner),
+            );
             let func_key = self
                 .func_registry
                 .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
@@ -610,8 +647,12 @@ impl Compiler<'_> {
                     .map(|t| self.resolve_type_with_interner(t, module_interner))
                     .unwrap_or(Type::Void);
 
-                let sig =
-                    self.create_static_method_signature_with_interner(method, module_interner);
+                let sig = self.build_signature(
+                    &method.params,
+                    method.return_type.as_ref(),
+                    SelfParam::None,
+                    TypeResolver::Interner(module_interner),
+                );
                 let method_name_str = module_interner.resolve(method.name);
                 let func_key = self
                     .func_registry

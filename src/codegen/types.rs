@@ -18,9 +18,7 @@ use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, substitute_type};
 use crate::sema::types::NominalType;
-use crate::sema::{
-    EntityRegistry, FunctionType, PrimitiveType, ProgramQuery, Type, TypeId, TypeKey,
-};
+use crate::sema::{EntityRegistry, FunctionType, PrimitiveType, Type, TypeId, TypeKey};
 
 /// Compiled value with its type
 #[derive(Clone)]
@@ -745,24 +743,6 @@ pub(crate) fn resolve_type_expr_with_metadata(
             Type::Void
         }
     }
-}
-
-/// Resolve a type expression using a ProgramQuery and type metadata.
-/// Cleaner interface for codegen that avoids direct field access.
-pub(crate) fn resolve_type_expr_query(
-    ty: &TypeExpr,
-    query: &ProgramQuery,
-    type_metadata: &HashMap<Symbol, TypeMetadata>,
-    module_id: ModuleId,
-) -> Type {
-    resolve_type_expr_with_metadata(
-        ty,
-        query.registry(),
-        type_metadata,
-        query.interner(),
-        query.name_table(),
-        module_id,
-    )
 }
 
 /// Convert a Vole type to a Cranelift type

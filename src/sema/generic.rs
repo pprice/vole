@@ -100,6 +100,15 @@ impl<K: Hash + Eq, V> MonomorphCacheBase<K, V> {
         self.instances.iter()
     }
 
+    /// Collect all instances as owned values (for codegen iteration)
+    /// This avoids cloning keys when only values are needed.
+    pub fn collect_instances(&self) -> Vec<V>
+    where
+        V: Clone,
+    {
+        self.instances.values().cloned().collect()
+    }
+
     // ========================================================================
     // Cache Metrics
     // ========================================================================

@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
 use cranelift_module::Module;
 
-use super::{Compiler, ControlFlowCtx};
+use super::{Compiler, ControlFlowCtx, SelfParam, TypeResolver};
 use crate::codegen::stmt::compile_block;
 use crate::codegen::types::{
-    CompileCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_query,
+    CompileCtx, MethodInfo, TypeMetadata, method_name_id_with_interner,
     resolve_type_expr_with_metadata, type_to_cranelift,
 };
 use crate::frontend::{
@@ -245,7 +245,12 @@ impl Compiler<'_> {
                     )
                 })
                 .unwrap_or(Type::Void);
-            let sig = self.create_implement_method_signature(method, &self_vole_type);
+            let sig = self.build_signature(
+                &method.params,
+                method.return_type.as_ref(),
+                SelfParam::Typed(&self_vole_type),
+                TypeResolver::Query,
+            );
             let func_key = if let Some(type_sym) = type_sym {
                 self.func_registry
                     .intern_qualified(func_module, &[type_sym, method.name], interner)
@@ -314,7 +319,12 @@ impl Compiler<'_> {
                     .unwrap_or(Type::Void);
 
                 // Create signature without self parameter
-                let sig = self.create_static_method_signature(method);
+                let sig = self.build_signature(
+                    &method.params,
+                    method.return_type.as_ref(),
+                    SelfParam::None,
+                    TypeResolver::Query,
+                );
 
                 // Function key: TypeName::methodName
                 let func_key = self.func_registry.intern_raw_qualified(
@@ -370,10 +380,12 @@ impl Compiler<'_> {
                 }),
             _ => {
                 let query = self.query();
-                resolve_type_expr_query(
+                resolve_type_expr_with_metadata(
                     &impl_block.target_type,
-                    &query,
+                    query.registry(),
                     &self.type_metadata,
+                    query.interner(),
+                    query.name_table(),
                     module_id,
                 )
             }
@@ -484,7 +496,12 @@ impl Compiler<'_> {
                 .unwrap_or(Type::Void);
 
             // Create signature (no self parameter)
-            let sig = self.create_static_method_signature(method);
+            let sig = self.build_signature(
+                &method.params,
+                method.return_type.as_ref(),
+                SelfParam::None,
+                TypeResolver::Query,
+            );
             self.jit.ctx.func.signature = sig;
 
             // Collect param types
@@ -620,7 +637,12 @@ impl Compiler<'_> {
         })?;
 
         // Create method signature with correct self type (primitives use their type, not pointer)
-        let sig = self.create_implement_method_signature(method, self_vole_type);
+        let sig = self.build_signature(
+            &method.params,
+            method.return_type.as_ref(),
+            SelfParam::Typed(self_vole_type),
+            TypeResolver::Query,
+        );
         self.jit.ctx.func.signature = sig;
 
         // Get the Cranelift type for self
@@ -631,11 +653,21 @@ impl Compiler<'_> {
 
         // Helper to resolve param type, substituting Self with the concrete type
         let query = self.query();
+        let registry = query.registry();
+        let interner = query.interner();
+        let name_table = query.name_table();
         let resolve_param_type = |ty: &TypeExpr| -> Type {
             if matches!(ty, TypeExpr::SelfType) {
                 self_type.clone()
             } else {
-                resolve_type_expr_query(ty, &query, &self.type_metadata, module_id)
+                resolve_type_expr_with_metadata(
+                    ty,
+                    registry,
+                    &self.type_metadata,
+                    interner,
+                    name_table,
+                    module_id,
+                )
             }
         };
 
@@ -658,10 +690,16 @@ impl Compiler<'_> {
 
         // Compute the method's return type for proper union wrapping
         let query = self.query();
-        let method_return_type = method
-            .return_type
-            .as_ref()
-            .map(|t| resolve_type_expr_query(t, &query, &self.type_metadata, module_id));
+        let method_return_type = method.return_type.as_ref().map(|t| {
+            resolve_type_expr_with_metadata(
+                t,
+                query.registry(),
+                &self.type_metadata,
+                query.interner(),
+                query.name_table(),
+                module_id,
+            )
+        });
 
         // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -770,7 +808,12 @@ impl Compiler<'_> {
         })?;
 
         // Create method signature (self + params)
-        let sig = self.create_method_signature(method);
+        let sig = self.build_signature(
+            &method.params,
+            method.return_type.as_ref(),
+            SelfParam::Pointer,
+            TypeResolver::Query,
+        );
         self.jit.ctx.func.signature = sig;
 
         // Clone metadata for the closure (needs to be before resolve_param_type closure)
@@ -778,11 +821,21 @@ impl Compiler<'_> {
 
         // Helper to resolve param type, substituting Self with the concrete type
         let query = self.query();
+        let registry = query.registry();
+        let interner = query.interner();
+        let name_table = query.name_table();
         let resolve_param_type = |ty: &TypeExpr| -> Type {
             if matches!(ty, TypeExpr::SelfType) {
                 self_vole_type.clone()
             } else {
-                resolve_type_expr_query(ty, &query, &self.type_metadata, module_id)
+                resolve_type_expr_with_metadata(
+                    ty,
+                    registry,
+                    &self.type_metadata,
+                    interner,
+                    name_table,
+                    module_id,
+                )
             }
         };
 
@@ -804,7 +857,14 @@ impl Compiler<'_> {
             if matches!(t, TypeExpr::SelfType) {
                 metadata.vole_type.clone()
             } else {
-                resolve_type_expr_query(t, &query, &self.type_metadata, module_id)
+                resolve_type_expr_with_metadata(
+                    t,
+                    registry,
+                    &self.type_metadata,
+                    interner,
+                    name_table,
+                    module_id,
+                )
             }
         });
 
@@ -916,7 +976,12 @@ impl Compiler<'_> {
         })?;
 
         // Create method signature (self + params)
-        let sig = self.create_interface_method_signature(method);
+        let sig = self.build_signature(
+            &method.params,
+            method.return_type.as_ref(),
+            SelfParam::Pointer,
+            TypeResolver::Query,
+        );
         self.jit.ctx.func.signature = sig;
 
         // Clone metadata for the closure - self has the concrete type!
@@ -924,11 +989,21 @@ impl Compiler<'_> {
 
         // Helper to resolve param type, substituting Self with the concrete type
         let query = self.query();
+        let registry = query.registry();
+        let interner = query.interner();
+        let name_table = query.name_table();
         let resolve_param_type = |ty: &TypeExpr| -> Type {
             if matches!(ty, TypeExpr::SelfType) {
                 self_vole_type.clone()
             } else {
-                resolve_type_expr_query(ty, &query, &self.type_metadata, module_id)
+                resolve_type_expr_with_metadata(
+                    ty,
+                    registry,
+                    &self.type_metadata,
+                    interner,
+                    name_table,
+                    module_id,
+                )
             }
         };
 
@@ -950,7 +1025,14 @@ impl Compiler<'_> {
             if matches!(t, TypeExpr::SelfType) {
                 metadata.vole_type.clone()
             } else {
-                resolve_type_expr_query(t, &query, &self.type_metadata, module_id)
+                resolve_type_expr_with_metadata(
+                    t,
+                    registry,
+                    &self.type_metadata,
+                    interner,
+                    name_table,
+                    module_id,
+                )
             }
         });
 
@@ -1065,7 +1147,12 @@ impl Compiler<'_> {
             })?;
 
             // Create signature (no self parameter)
-            let sig = self.create_static_method_signature(method);
+            let sig = self.build_signature(
+                &method.params,
+                method.return_type.as_ref(),
+                SelfParam::None,
+                TypeResolver::Query,
+            );
             self.jit.ctx.func.signature = sig;
 
             // Collect param types
@@ -1075,7 +1162,14 @@ impl Compiler<'_> {
                 .iter()
                 .map(|p| {
                     type_to_cranelift(
-                        &resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id),
+                        &resolve_type_expr_with_metadata(
+                            &p.ty,
+                            query.registry(),
+                            &self.type_metadata,
+                            query.interner(),
+                            query.name_table(),
+                            module_id,
+                        ),
                         self.pointer_type,
                     )
                 })
@@ -1083,7 +1177,16 @@ impl Compiler<'_> {
             let param_vole_types: Vec<Type> = method
                 .params
                 .iter()
-                .map(|p| resolve_type_expr_query(&p.ty, &query, &self.type_metadata, module_id))
+                .map(|p| {
+                    resolve_type_expr_with_metadata(
+                        &p.ty,
+                        query.registry(),
+                        &self.type_metadata,
+                        query.interner(),
+                        query.name_table(),
+                        module_id,
+                    )
+                })
                 .collect();
             let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
@@ -1205,7 +1308,12 @@ impl Compiler<'_> {
             })?;
 
             // Create method signature with self parameter (use module interner)
-            let sig = self.create_method_signature_with_interner(method, module_interner);
+            let sig = self.build_signature(
+                &method.params,
+                method.return_type.as_ref(),
+                SelfParam::Pointer,
+                TypeResolver::Interner(module_interner),
+            );
             self.jit.ctx.func.signature = sig;
 
             // Resolve param types
@@ -1375,8 +1483,12 @@ impl Compiler<'_> {
                     .unwrap_or(Type::Void);
 
                 // Create signature (no self parameter) - use module interner
-                let sig =
-                    self.create_static_method_signature_with_interner(method, module_interner);
+                let sig = self.build_signature(
+                    &method.params,
+                    method.return_type.as_ref(),
+                    SelfParam::None,
+                    TypeResolver::Interner(module_interner),
+                );
                 self.jit.ctx.func.signature = sig;
 
                 // Resolve param types
