@@ -1,154 +1,28 @@
 // src/sema/types/mod.rs
+//
+// Core type system module for Vole.
+//
+// This module is organized into submodules by type category:
+// - `primitive` - PrimitiveType enum (i8-i128, u8-u64, f32, f64, bool, string)
+// - `nominal` - NominalType enum (Class, Record, Interface, Error) with TypeDefIds
+// - `special` - Supporting types for special Type variants (Placeholder, Invalid, etc.)
 
 pub mod nominal;
 pub mod primitive;
+pub mod special;
 
 pub use nominal::{
     ClassType, ErrorTypeInfo, InterfaceMethodType, InterfaceType, NominalType, RecordType,
 };
 pub use primitive::PrimitiveType;
+pub use special::{AnalysisError, ConstantValue, FallibleType, ModuleType, PlaceholderKind};
 
 use crate::frontend::PrimitiveType as AstPrimitiveType;
 use crate::frontend::Span;
-use crate::identity::{ModuleId, NameId, TypeDefId};
+use crate::identity::{NameId, TypeDefId};
 
-/// Analysis error - represents a type that couldn't be determined.
-/// Designed to be maximally useful for LLM debugging.
-/// Chains to source error for full traceability.
-#[derive(Debug, Clone)]
-pub struct AnalysisError {
-    /// Category for filtering/grouping (e.g., "unknown_field", "type_mismatch")
-    pub kind: &'static str,
-    /// Full human-readable description with all relevant context
-    /// e.g., "field 'foo' not found on Record 'Bar' (has fields: x, y, z)"
-    pub message: String,
-    /// Where it happened in source
-    pub span: Option<Span>,
-    /// The upstream error we're propagating from (if any)
-    pub source: Option<Box<AnalysisError>>,
-}
-
-impl AnalysisError {
-    /// Create a fresh error with full context (preferred for new code)
-    pub fn new(kind: &'static str, message: impl Into<String>) -> Self {
-        let msg = message.into();
-        tracing::trace!(kind, %msg, "AnalysisError::new");
-        Self {
-            kind,
-            message: msg,
-            span: None,
-            source: None,
-        }
-    }
-
-    /// Create a fresh error with location
-    pub fn at(kind: &'static str, message: impl Into<String>, span: Span) -> Self {
-        let msg = message.into();
-        tracing::trace!(kind, %msg, ?span, "AnalysisError::at");
-        Self {
-            kind,
-            message: msg,
-            span: Some(span),
-            source: None,
-        }
-    }
-
-    /// Create a simple error (for migration from old API - prefer new() with message)
-    pub fn simple(kind: &'static str) -> Self {
-        Self {
-            kind,
-            message: kind.to_string(),
-            span: None,
-            source: None,
-        }
-    }
-
-    /// Propagate from an existing error, adding context about what we were doing
-    pub fn propagate(
-        source: &AnalysisError,
-        context: impl Into<String>,
-        span: Option<Span>,
-    ) -> Self {
-        let ctx = context.into();
-        let result = Self {
-            kind: "propagate",
-            message: ctx.clone(),
-            span,
-            source: Some(Box::new(source.clone())),
-        };
-        tracing::trace!(
-            context = %ctx,
-            root_cause = %source.root_cause().message,
-            "AnalysisError::propagate"
-        );
-        result
-    }
-
-    /// Get the root cause of this error chain
-    pub fn root_cause(&self) -> &AnalysisError {
-        match &self.source {
-            Some(src) => src.root_cause(),
-            None => self,
-        }
-    }
-
-    /// Format the full error chain for debugging (multi-line)
-    pub fn full_chain(&self) -> String {
-        let mut parts = vec![self.format_single()];
-        let mut current = &self.source;
-        while let Some(src) = current {
-            parts.push(src.format_single());
-            current = &src.source;
-        }
-        parts.join("\n  <- ")
-    }
-
-    fn format_single(&self) -> String {
-        let mut s = format!("[{}] {}", self.kind, self.message);
-        if let Some(span) = &self.span {
-            s.push_str(&format!(" (line {}:{})", span.line, span.column));
-        }
-        s
-    }
-}
-
-impl PartialEq for AnalysisError {
-    fn eq(&self, _other: &Self) -> bool {
-        // For type comparison, all Invalid types are equal
-        // (we don't want type mismatches based on error details)
-        true
-    }
-}
-
-impl Eq for AnalysisError {}
-
-impl std::fmt::Display for AnalysisError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.full_chain())
-    }
-}
-
-/// What kind of type is being deferred as a placeholder.
-/// This provides clarity about why a type is not yet resolved.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlaceholderKind {
-    /// Generic type inference placeholder (e.g., empty array element type)
-    Inference,
-    /// Type parameter (e.g., T in Box<T>) - carries the parameter name for debugging
-    TypeParam(String),
-    /// Self type in interface signatures - resolved when interface is implemented
-    SelfType,
-}
-
-impl std::fmt::Display for PlaceholderKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PlaceholderKind::Inference => write!(f, "?"),
-            PlaceholderKind::TypeParam(name) => write!(f, "{}", name),
-            PlaceholderKind::SelfType => write!(f, "Self"),
-        }
-    }
-}
+// AnalysisError, PlaceholderKind, FallibleType, ModuleType, ConstantValue
+// are now defined in special.rs and re-exported above
 
 /// Resolved types in the type system
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -263,36 +137,9 @@ pub struct StructInfo<'a> {
 
 // ClassType, RecordType, InterfaceType, InterfaceMethodType, ErrorTypeInfo
 // are now defined in nominal.rs and re-exported above
-
-/// Fallible type: fallible(T, E)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FallibleType {
-    pub success_type: Box<Type>,
-    pub error_type: Box<Type>, // ErrorType or Union of ErrorTypes
-}
-
-/// A constant value that can be stored in a module
-#[derive(Debug, Clone, PartialEq)]
-pub enum ConstantValue {
-    I64(i64),
-    F64(f64),
-    Bool(bool),
-    String(String),
-}
-
-impl Eq for ConstantValue {}
-
-/// Module type: represents an imported module with its exports
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModuleType {
-    pub module_id: ModuleId,
-    /// Exports keyed by fully-qualified name id
-    pub exports: std::collections::HashMap<NameId, Type>,
-    /// Constant values from the module (let PI = 3.14...)
-    pub constants: std::collections::HashMap<NameId, ConstantValue>,
-    /// Names of functions that are external (FFI) - others are pure Vole
-    pub external_funcs: std::collections::HashSet<NameId>,
-}
+//
+// FallibleType, ConstantValue, ModuleType, AnalysisError, PlaceholderKind
+// are now defined in special.rs and re-exported above
 
 impl PartialEq for FunctionType {
     fn eq(&self, other: &Self) -> bool {
