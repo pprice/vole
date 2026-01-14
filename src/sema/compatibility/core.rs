@@ -227,7 +227,7 @@ mod tests {
         let union_ty = Type::Union(vec![
             Type::Primitive(PrimitiveType::I8),
             Type::Primitive(PrimitiveType::I32),
-        ]);
+        ].into());
         assert!(literal_fits(100, &union_ty)); // Fits in i8
         assert!(literal_fits(1000, &union_ty)); // Fits in i32
         assert!(!literal_fits(i64::MAX, &union_ty)); // Doesn't fit in either
@@ -270,7 +270,7 @@ mod tests {
         let union_ty = Type::Union(vec![
             Type::Primitive(PrimitiveType::I32),
             Type::Primitive(PrimitiveType::String),
-        ]);
+        ].into());
         assert!(types_compatible_core(
             &Type::Primitive(PrimitiveType::I32),
             &union_ty
@@ -311,13 +311,13 @@ mod tests {
     #[test]
     fn test_function_compatible_with_interface() {
         let fn_type = FunctionType {
-            params: vec![Type::Primitive(PrimitiveType::I32)],
+            params: vec![Type::Primitive(PrimitiveType::I32)].into(),
             return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
             is_closure: false,
         };
 
         let iface_fn = FunctionType {
-            params: vec![Type::Primitive(PrimitiveType::I32)],
+            params: vec![Type::Primitive(PrimitiveType::I32)].into(),
             return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
             is_closure: true,
         };
@@ -326,7 +326,7 @@ mod tests {
 
         // Incompatible return type
         let iface_fn_bad = FunctionType {
-            params: vec![Type::Primitive(PrimitiveType::I32)],
+            params: vec![Type::Primitive(PrimitiveType::I32)].into(),
             return_type: Box::new(Type::Primitive(PrimitiveType::String)),
             is_closure: true,
         };
@@ -337,7 +337,7 @@ mod tests {
             params: vec![
                 Type::Primitive(PrimitiveType::I32),
                 Type::Primitive(PrimitiveType::I32),
-            ],
+            ].into(),
             return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
             is_closure: true,
         };
@@ -352,16 +352,16 @@ mod tests {
         let tuple1 = Type::Tuple(vec![
             Type::Primitive(PrimitiveType::I32),
             Type::Primitive(PrimitiveType::String),
-        ]);
+        ].into());
         let tuple2 = Type::Tuple(vec![
             Type::Primitive(PrimitiveType::I32),
             Type::Primitive(PrimitiveType::String),
-        ]);
+        ].into());
         let tuple3 = Type::Tuple(vec![
             Type::Primitive(PrimitiveType::I32),
             Type::Primitive(PrimitiveType::Bool),
-        ]); // Different element type
-        let tuple4 = Type::Tuple(vec![Type::Primitive(PrimitiveType::I32)]); // Different length
+        ].into()); // Different element type
+        let tuple4 = Type::Tuple(vec![Type::Primitive(PrimitiveType::I32)].into()); // Different length
 
         assert!(types_compatible_core(&tuple1, &tuple2));
         assert!(!types_compatible_core(&tuple1, &tuple3));
@@ -374,11 +374,11 @@ mod tests {
         let narrow = Type::Tuple(vec![
             Type::Primitive(PrimitiveType::I32),
             Type::Primitive(PrimitiveType::F32),
-        ]);
+        ].into());
         let wide = Type::Tuple(vec![
             Type::Primitive(PrimitiveType::I64),
             Type::Primitive(PrimitiveType::F64),
-        ]);
+        ].into());
         assert!(types_compatible_core(&narrow, &wide));
     }
 

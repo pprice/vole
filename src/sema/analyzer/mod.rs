@@ -1202,14 +1202,15 @@ impl Analyzer {
                 },
             );
 
-            // Also register in EntityRegistry if we have both type and interface
-            if let (Some(entity_type_id), Some(interface_type_id)) =
-                (entity_type_id, interface_type_id)
-            {
+            // Register in EntityRegistry for method resolution
+            if let Some(entity_type_id) = entity_type_id {
                 use crate::sema::entity_defs::MethodBinding;
+                // For trait implementations, use the interface type id
+                // For type extensions, use the type's own id as both
+                let binding_type_id = interface_type_id.unwrap_or(entity_type_id);
                 self.entity_registry.add_method_binding(
                     entity_type_id,
-                    interface_type_id,
+                    binding_type_id,
                     MethodBinding {
                         method_name: method_id,
                         func_type,

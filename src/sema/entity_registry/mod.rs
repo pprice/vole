@@ -546,7 +546,7 @@ mod tests {
         let type_id = registry.register_type(type_name, TypeDefKind::Interface, main_mod);
 
         let signature = FunctionType {
-            params: vec![],
+            params: vec![].into(),
             return_type: Box::new(Type::Primitive(PrimitiveType::I32)),
             is_closure: false,
         };
@@ -606,7 +606,7 @@ mod tests {
         let mut registry = EntityRegistry::new();
 
         let signature = FunctionType {
-            params: vec![Type::Primitive(PrimitiveType::F64)],
+            params: vec![Type::Primitive(PrimitiveType::F64)].into(),
             return_type: Box::new(Type::Primitive(PrimitiveType::F64)),
             is_closure: false,
         };
@@ -654,7 +654,7 @@ mod tests {
         let derived_id = registry.register_type(derived_name, TypeDefKind::Interface, main_mod);
 
         let signature = FunctionType {
-            params: vec![],
+            params: vec![].into(),
             return_type: Box::new(Type::Void),
             is_closure: false,
         };
