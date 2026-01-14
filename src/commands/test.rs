@@ -320,6 +320,8 @@ fn run_source_tests_with_progress(
     report: &ReportMode,
     cache: Rc<RefCell<ModuleCache>>,
 ) -> Result<TestResults, String> {
+    let compile_start = Instant::now();
+
     // Parse and type check with shared cache
     let analyzed = parse_and_analyze_with_cache(source, file_path, cache).map_err(|()| String::new())?;
 
@@ -332,6 +334,18 @@ fn run_source_tests_with_progress(
         let tests = compiler.take_tests();
         (result, tests)
     };
+
+    let compile_time = compile_start.elapsed();
+
+    // Print compile time in 'all' mode
+    if matches!(report, ReportMode::All) {
+        println!(
+            "  {}compiled in {}{}",
+            colors.dim(),
+            format_duration(compile_time),
+            colors.reset()
+        );
+    }
 
     // Check compilation result
     if let Err(e) = compile_result {
