@@ -128,17 +128,9 @@ impl Analyzer {
                 } else {
                     actual.clone()
                 }
-            } else if let Type::TypeParamRef(type_param_id) = actual {
+            } else if matches!(actual, Type::TypeParamRef(_)) {
                 // If actual is a type param ref, preserve it
-                if self
-                    .type_param_stack
-                    .get_by_type_param_id(*type_param_id)
-                    .is_some()
-                {
-                    actual.clone()
-                } else {
-                    actual.clone()
-                }
+                actual.clone()
             } else {
                 actual.clone()
             };

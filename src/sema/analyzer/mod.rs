@@ -1418,8 +1418,9 @@ impl Analyzer {
         self.current_static_method = Some(interner.resolve(method.name).to_string());
 
         // Push method-level type params onto the stack (merged with any class/record type params)
-        if !method_type_params.is_empty() {
-            self.type_param_stack.push_merged(method_type_params.clone());
+        let has_method_type_params = !method_type_params.is_empty();
+        if has_method_type_params {
+            self.type_param_stack.push_merged(method_type_params);
         }
 
         // Create scope WITHOUT 'self'
