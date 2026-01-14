@@ -92,8 +92,7 @@ impl Cg<'_, '_, '_> {
         let field_name = self.ctx.interner.resolve(fa.field);
         let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field_name, self.ctx)?;
 
-        let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-        let result_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[obj.value, slot_val])?;
+        let result_raw = self.get_field_cached(obj.value, slot as u32)?;
 
         let (result_val, cranelift_ty) = convert_field_value(self.builder, result_raw, &field_type);
 
@@ -239,6 +238,7 @@ impl Cg<'_, '_, '_> {
             RuntimeFn::InstanceSetField,
             &[obj.value, slot_val, store_value],
         )?;
+        self.field_cache.clear(); // Invalidate cached field reads
 
         Ok(value)
     }

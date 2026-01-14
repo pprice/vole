@@ -649,12 +649,12 @@ impl Cg<'_, '_, '_> {
                 })
             }
             Type::Array(elem) => {
-                // Dynamic array indexing (existing behavior)
+                // Dynamic array indexing with CSE caching
                 let idx = self.expr(index)?;
                 let elem_type = elem.as_ref().clone();
 
                 let raw_value =
-                    self.call_runtime(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
+                    self.call_runtime_cached(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
                 let (result_value, result_ty) =
                     convert_field_value(self.builder, raw_value, &elem_type);
 

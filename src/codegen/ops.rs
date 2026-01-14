@@ -667,6 +667,7 @@ impl Cg<'_, '_, '_> {
             RuntimeFn::InstanceSetField,
             &[obj.value, slot_val, store_value],
         )?;
+        self.field_cache.clear(); // Invalidate cached field reads
 
         Ok(result)
     }

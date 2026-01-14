@@ -9,6 +9,7 @@ use cranelift::prelude::{AbiParam, FunctionBuilder, InstBuilder, Value, Variable
 use cranelift_module::{FuncId, Module};
 
 use crate::codegen::{FunctionKey, RuntimeFn};
+use smallvec::SmallVec;
 use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::runtime::native_registry::NativeType;
@@ -79,12 +80,19 @@ pub(crate) struct Captures<'a> {
 /// - calls.rs: call(), println(), assert()
 /// - ops.rs: binary(), compound_assign()
 /// - structs.rs: struct_literal(), field_access(), method_call()
+/// Key for caching pure runtime function calls
+pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
+
 pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub builder: &'a mut FunctionBuilder<'b>,
     pub vars: &'a mut HashMap<Symbol, (Variable, Type)>,
     pub ctx: &'a mut CompileCtx<'ctx>,
     pub cf: &'a mut ControlFlow,
     pub captures: Option<Captures<'a>>,
+    /// Cache for pure runtime function calls: (func, args) -> result
+    pub call_cache: HashMap<CallCacheKey, Value>,
+    /// Cache for field access: (instance_ptr, slot) -> field_value
+    pub field_cache: HashMap<(Value, u32), Value>,
 }
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
@@ -101,6 +109,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ctx,
             cf,
             captures: None,
+            call_cache: HashMap::new(),
+            field_cache: HashMap::new(),
         }
     }
 
@@ -118,6 +128,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ctx,
             cf,
             captures: Some(captures),
+            call_cache: HashMap::new(),
+            field_cache: HashMap::new(),
         }
     }
 
@@ -175,6 +187,35 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             Ok(results[0])
         }
+    }
+
+    /// Call a pure runtime function with caching (CSE)
+    pub fn call_runtime_cached(&mut self, func: RuntimeFn, args: &[Value]) -> Result<Value, String> {
+        let key = (func, SmallVec::from_slice(args));
+        if let Some(&cached) = self.call_cache.get(&key) {
+            return Ok(cached);
+        }
+        let result = self.call_runtime(func, args)?;
+        self.call_cache.insert(key, result);
+        Ok(result)
+    }
+
+    /// Invalidate call cache (call before mutations)
+    #[allow(dead_code)]
+    pub fn invalidate_call_cache(&mut self) {
+        self.call_cache.clear();
+    }
+
+    /// Get cached field value or call runtime and cache result
+    pub fn get_field_cached(&mut self, instance: Value, slot: u32) -> Result<Value, String> {
+        let key = (instance, slot);
+        if let Some(&cached) = self.field_cache.get(&key) {
+            return Ok(cached);
+        }
+        let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+        let result = self.call_runtime(RuntimeFn::InstanceGetField, &[instance, slot_val])?;
+        self.field_cache.insert(key, result);
+        Ok(result)
     }
 
     /// Call a runtime function that returns void
