@@ -54,6 +54,15 @@ pub enum SemanticError {
         span: SourceSpan,
     },
 
+    #[error("expected {expected} type arguments, found {found}")]
+    #[diagnostic(code(E2013))]
+    WrongTypeArgCount {
+        expected: usize,
+        found: usize,
+        #[label("wrong number of type arguments")]
+        span: SourceSpan,
+    },
+
     #[error("condition must be boolean, found {found}")]
     #[diagnostic(code(E2027))]
     ConditionNotBool {

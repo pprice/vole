@@ -1251,13 +1251,29 @@ impl Analyzer {
             };
 
             // Extract and resolve type arguments for generic interfaces
-            let type_args = match iface_type {
+            let type_args: Vec<Type> = match iface_type {
                 TypeExpr::Generic { args, .. } => args
                     .iter()
                     .map(|arg| self.resolve_type(arg, interner))
                     .collect(),
                 _ => Vec::new(),
             };
+
+            // Validate that type args match interface's type params
+            let interface_def = self.entity_registry.get_type(interface_type_id);
+            let expected_count = interface_def.type_params.len();
+            let found_count = type_args.len();
+            if expected_count != found_count {
+                self.add_error(
+                    SemanticError::WrongTypeArgCount {
+                        expected: expected_count,
+                        found: found_count,
+                        span: span.into(),
+                    },
+                    span,
+                );
+                continue;
+            }
 
             self.entity_registry
                 .add_implementation(entity_type_id, interface_type_id, type_args);
