@@ -886,6 +886,23 @@ impl Compiler<'_> {
             .collect();
 
         for (_key, instance) in instances {
+            // Skip external functions - they don't need JIT compilation
+            // They're called directly via native_registry
+            let func_name = self.query().display_name(instance.original_name);
+            let short_name = self
+                .analyzed
+                .name_table
+                .last_segment_str(instance.original_name)
+                .unwrap_or_else(|| func_name.clone());
+            if self
+                .analyzed
+                .implement_registry
+                .get_external_func(&short_name)
+                .is_some()
+            {
+                continue;
+            }
+
             let mangled_name = self.query().display_name(instance.mangled_name);
 
             // Create signature from the concrete function type
@@ -942,12 +959,31 @@ impl Compiler<'_> {
             .collect();
 
         for (_key, instance) in instances {
+            // Skip external functions - they don't have AST bodies
+            // Generic externals are called directly with type erasure at call sites
+            let func_name = self.query().display_name(instance.original_name);
+            // External functions are registered by their short name (e.g. "_generic_map_get")
+            // not the fully qualified name (e.g. "main::_generic_map_get")
+            let short_name = self
+                .analyzed
+                .name_table
+                .last_segment_str(instance.original_name)
+                .unwrap_or_else(|| func_name.clone());
+            if self
+                .analyzed
+                .implement_registry
+                .get_external_func(&short_name)
+                .is_some()
+            {
+                continue;
+            }
+
             let func = generic_func_asts
                 .get(&instance.original_name)
                 .ok_or_else(|| {
                     format!(
                         "Internal error: generic function AST not found for {}",
-                        self.query().display_name(instance.original_name)
+                        func_name
                     )
                 })?;
 

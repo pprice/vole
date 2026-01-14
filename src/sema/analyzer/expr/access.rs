@@ -547,7 +547,7 @@ impl Analyzer {
                 .collect();
 
             // Infer type params if there are any (class-level or method-level)
-            let (final_params, final_return) = if !all_type_params.is_empty() {
+            let (final_params, final_return, maybe_inferred) = if !all_type_params.is_empty() {
                 // Build substitution map from explicit type args if provided
                 let inferred = if !explicit_type_args.is_empty() {
                     // Resolve explicit type args and map to class type params
@@ -603,9 +603,13 @@ impl Analyzer {
                     );
                 }
 
-                (substituted_params, substituted_return)
+                (substituted_params, substituted_return, Some(inferred))
             } else {
-                (func_type.params.clone(), (*func_type.return_type).clone())
+                (
+                    func_type.params.clone(),
+                    (*func_type.return_type).clone(),
+                    None,
+                )
             };
 
             // Second pass: check argument types against (potentially substituted) param types
@@ -628,7 +632,9 @@ impl Analyzer {
             );
 
             // Record static method monomorphization if there are any type params
-            if !all_type_params.is_empty() {
+            if let Some(ref inferred) = maybe_inferred
+                && !inferred.is_empty()
+            {
                 self.record_static_method_monomorph(
                     expr,
                     type_def_id,
@@ -636,7 +642,7 @@ impl Analyzer {
                     &func_type,
                     &class_type_params,
                     &method_type_params,
-                    &arg_types,
+                    inferred,
                     interner,
                 );
             }
@@ -776,27 +782,12 @@ impl Analyzer {
         func_type: &FunctionType,
         class_type_params: &[TypeParamInfo],
         method_type_params: &[TypeParamInfo],
-        arg_types: &[Type],
+        inferred: &std::collections::HashMap<NameId, Type>,
         interner: &Interner,
     ) {
         // Get the type def to extract name and type args
         let type_def = self.entity_registry.get_type(type_def_id);
         let class_name_id = type_def.name_id;
-
-        // Combine class and method type params for inference
-        let all_type_params: Vec<TypeParamInfo> = class_type_params
-            .iter()
-            .chain(method_type_params.iter())
-            .cloned()
-            .collect();
-
-        // Infer type arguments from call arguments
-        let inferred = self.infer_type_params(&all_type_params, &func_type.params, arg_types);
-
-        // Skip if no type params were inferred (not actually generic)
-        if inferred.is_empty() {
-            return;
-        }
 
         // Get the method name_id
         let method_name_id = self.method_name_id(method_sym, interner);
@@ -830,7 +821,7 @@ impl Analyzer {
             .contains(&key)
         {
             // Build substitutions from type params to inferred types
-            let substitutions: HashMap<NameId, Type> = inferred;
+            let substitutions: HashMap<NameId, Type> = inferred.clone();
 
             // Generate unique mangled name
             let instance_id = self

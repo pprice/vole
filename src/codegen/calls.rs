@@ -12,7 +12,7 @@ use crate::errors::CodegenError;
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
 use crate::frontend::{CallExpr, ExprKind, LetInit, NodeId, StringPart};
-use crate::runtime::native_registry::NativeType;
+use crate::runtime::native_registry::{NativeFunction, NativeType};
 use crate::sema::{FunctionType, Type};
 
 use super::context::Cg;
@@ -374,12 +374,61 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if this is a call to a generic function (via monomorphization)
-        if let Some(monomorph_key) = self.ctx.analyzed.query().monomorph_for(call_expr_id)
+        let monomorph_key = self.ctx.analyzed.query().monomorph_for(call_expr_id);
+        tracing::trace!(
+            call_expr_id = ?call_expr_id,
+            callee = callee_name,
+            has_monomorph = monomorph_key.is_some(),
+            "checking for generic function call"
+        );
+        if let Some(monomorph_key) = monomorph_key
             && let Some(instance) = self.ctx.monomorph_cache.get(monomorph_key)
         {
+            tracing::trace!(
+                instance_name = ?instance.original_name,
+                mangled_name = ?instance.mangled_name,
+                "found monomorph instance"
+            );
             let func_key = self.ctx.func_registry.intern_name_id(instance.mangled_name);
             if let Some(func_id) = self.ctx.func_registry.func_id(func_key) {
+                tracing::trace!("found func_id, using regular path");
                 return self.call_func_id(func_key, func_id, call);
+            }
+            tracing::trace!("no func_id, checking for external function");
+
+            // For generic external functions, call them directly with type erasure
+            // They don't have compiled func_id, but we can look them up in native_registry
+            if let Some(ext_info) = self
+                .ctx
+                .analyzed
+                .implement_registry
+                .get_external_func(callee_name)
+                && let Some(native_func) = self
+                    .ctx
+                    .native_registry
+                    .lookup(&ext_info.module_path, &ext_info.native_name)
+            {
+                // The func_type from the monomorph instance may have TypeParams that weren't
+                // inferred from arguments (like return type params). Apply class type
+                // substitutions to fully resolve the type.
+                let func_type = if let Some(subs) = self.ctx.type_substitutions {
+                    FunctionType {
+                        params: instance
+                            .func_type
+                            .params
+                            .iter()
+                            .map(|p| crate::sema::generic::substitute_type(p, subs))
+                            .collect(),
+                        return_type: Box::new(crate::sema::generic::substitute_type(
+                            &instance.func_type.return_type,
+                            subs,
+                        )),
+                        is_closure: instance.func_type.is_closure,
+                    }
+                } else {
+                    instance.func_type.clone()
+                };
+                return self.compile_native_call_with_types(native_func, call, &func_type);
             }
         }
 
@@ -846,6 +895,72 @@ impl Cg<'_, '_, '_> {
             Ok(self.void_value())
         } else {
             Ok(self.typed_value(results[0], func_type.return_type.as_ref().clone()))
+        }
+    }
+
+    /// Compile a native function call with known Vole types (for generic external functions)
+    /// This uses the concrete types from the monomorphized FunctionType rather than
+    /// inferring types from the native signature.
+    fn compile_native_call_with_types(
+        &mut self,
+        native_func: &NativeFunction,
+        call: &CallExpr,
+        func_type: &FunctionType,
+    ) -> Result<CompiledValue, String> {
+        // Compile arguments
+        let mut args = Vec::new();
+        for arg in &call.args {
+            let compiled = self.expr(arg)?;
+            args.push(compiled.value);
+        }
+
+        // Build the Cranelift signature from NativeSignature
+        let mut sig = self.ctx.module.make_signature();
+        for param_type in &native_func.signature.params {
+            sig.params.push(AbiParam::new(native_type_to_cranelift(
+                param_type,
+                self.ctx.pointer_type,
+            )));
+        }
+        if native_func.signature.return_type != NativeType::Nil {
+            sig.returns.push(AbiParam::new(native_type_to_cranelift(
+                &native_func.signature.return_type,
+                self.ctx.pointer_type,
+            )));
+        }
+
+        // Import the signature and emit an indirect call
+        let sig_ref = self.builder.import_signature(sig);
+        let func_ptr_val = self
+            .builder
+            .ins()
+            .iconst(self.ctx.pointer_type, native_func.ptr as i64);
+
+        let call_inst = self
+            .builder
+            .ins()
+            .call_indirect(sig_ref, func_ptr_val, &args);
+        let results = self.builder.inst_results(call_inst);
+
+        if results.is_empty() {
+            Ok(self.void_value())
+        } else {
+            // Use the concrete return type from the monomorphized function type
+            // Apply class type substitutions if available (for calls inside monomorphized methods)
+            let return_type = if let Some(subs) = self.ctx.type_substitutions {
+                crate::sema::generic::substitute_type(&func_type.return_type, subs)
+            } else {
+                (*func_type.return_type).clone()
+            };
+            let return_type = self.maybe_convert_iterator_return_type(return_type);
+            Ok(CompiledValue {
+                value: results[0],
+                ty: native_type_to_cranelift(
+                    &native_func.signature.return_type,
+                    self.ctx.pointer_type,
+                ),
+                vole_type: return_type,
+            })
         }
     }
 }
