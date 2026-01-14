@@ -10,6 +10,73 @@ use crate::sema::TypeKey;
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::types::{FunctionType, StructuralType, Type};
 use std::collections::HashMap;
+use std::hash::Hash;
+
+// ============================================================================
+// Generic Monomorphization Cache
+// ============================================================================
+
+/// Generic cache for monomorphized instances.
+///
+/// This provides the common caching infrastructure used by:
+/// - `MonomorphCache` (free functions)
+/// - `ClassMethodMonomorphCache` (class instance methods)
+/// - `StaticMethodMonomorphCache` (class static methods)
+///
+/// All caches share the same structure: a HashMap from keys to instances,
+/// plus a counter for generating unique mangled names.
+#[derive(Debug, Clone)]
+pub struct MonomorphCacheBase<K, V> {
+    instances: HashMap<K, V>,
+    next_id: u32,
+}
+
+impl<K: Hash + Eq, V> Default for MonomorphCacheBase<K, V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K: Hash + Eq, V> MonomorphCacheBase<K, V> {
+    /// Create a new empty cache
+    pub fn new() -> Self {
+        Self {
+            instances: HashMap::new(),
+            next_id: 0,
+        }
+    }
+
+    /// Look up an existing monomorphized instance
+    pub fn get(&self, key: &K) -> Option<&V> {
+        self.instances.get(key)
+    }
+
+    /// Insert a new monomorphized instance
+    pub fn insert(&mut self, key: K, instance: V) {
+        self.instances.insert(key, instance);
+    }
+
+    /// Check if an instance exists
+    pub fn contains(&self, key: &K) -> bool {
+        self.instances.contains_key(key)
+    }
+
+    /// Generate the next unique ID for mangled names
+    pub fn next_unique_id(&mut self) -> u32 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    /// Get all cached instances (for codegen)
+    pub fn instances(&self) -> impl Iterator<Item = (&K, &V)> {
+        self.instances.iter()
+    }
+}
+
+// ============================================================================
+// Type Parameter Handling
+// ============================================================================
 
 /// Information about a type parameter in scope
 #[derive(Debug, Clone)]
@@ -135,16 +202,6 @@ impl MonomorphKey {
     }
 }
 
-/// Cache of monomorphized function instances.
-/// Maps (func_name, concrete_types) -> monomorphized function info.
-#[derive(Debug, Default, Clone)]
-pub struct MonomorphCache {
-    /// Cached monomorphized instances
-    instances: HashMap<MonomorphKey, MonomorphInstance>,
-    /// Counter for generating unique names
-    next_id: u32,
-}
-
 /// A monomorphized function instance
 #[derive(Debug, Clone)]
 pub struct MonomorphInstance {
@@ -160,42 +217,9 @@ pub struct MonomorphInstance {
     pub substitutions: HashMap<NameId, Type>,
 }
 
-impl MonomorphCache {
-    /// Create a new empty cache
-    pub fn new() -> Self {
-        Self {
-            instances: HashMap::new(),
-            next_id: 0,
-        }
-    }
-
-    /// Look up an existing monomorphized instance
-    pub fn get(&self, key: &MonomorphKey) -> Option<&MonomorphInstance> {
-        self.instances.get(key)
-    }
-
-    /// Insert a new monomorphized instance
-    pub fn insert(&mut self, key: MonomorphKey, instance: MonomorphInstance) {
-        self.instances.insert(key, instance);
-    }
-
-    /// Check if an instance exists
-    pub fn contains(&self, key: &MonomorphKey) -> bool {
-        self.instances.contains_key(key)
-    }
-
-    /// Generate the next unique ID for mangled names
-    pub fn next_unique_id(&mut self) -> u32 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-
-    /// Get all cached instances (for codegen)
-    pub fn instances(&self) -> impl Iterator<Item = (&MonomorphKey, &MonomorphInstance)> {
-        self.instances.iter()
-    }
-}
+/// Cache of monomorphized function instances.
+/// Maps (func_name, concrete_types) -> monomorphized function info.
+pub type MonomorphCache = MonomorphCacheBase<MonomorphKey, MonomorphInstance>;
 
 /// Key for looking up monomorphized class method instances.
 /// Identifies a specific instantiation of a generic class method.
@@ -240,52 +264,8 @@ pub struct ClassMethodMonomorphInstance {
 }
 
 /// Cache of monomorphized class method instances.
-#[derive(Debug, Default, Clone)]
-pub struct ClassMethodMonomorphCache {
-    /// Cached monomorphized method instances
-    instances: HashMap<ClassMethodMonomorphKey, ClassMethodMonomorphInstance>,
-    /// Counter for generating unique names
-    next_id: u32,
-}
-
-impl ClassMethodMonomorphCache {
-    /// Create a new empty cache
-    pub fn new() -> Self {
-        Self {
-            instances: HashMap::new(),
-            next_id: 0,
-        }
-    }
-
-    /// Look up an existing monomorphized instance
-    pub fn get(&self, key: &ClassMethodMonomorphKey) -> Option<&ClassMethodMonomorphInstance> {
-        self.instances.get(key)
-    }
-
-    /// Insert a new monomorphized instance
-    pub fn insert(&mut self, key: ClassMethodMonomorphKey, instance: ClassMethodMonomorphInstance) {
-        self.instances.insert(key, instance);
-    }
-
-    /// Check if an instance exists
-    pub fn contains(&self, key: &ClassMethodMonomorphKey) -> bool {
-        self.instances.contains_key(key)
-    }
-
-    /// Generate the next unique ID for mangled names
-    pub fn next_unique_id(&mut self) -> u32 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-
-    /// Get all cached instances (for codegen)
-    pub fn instances(
-        &self,
-    ) -> impl Iterator<Item = (&ClassMethodMonomorphKey, &ClassMethodMonomorphInstance)> {
-        self.instances.iter()
-    }
-}
+pub type ClassMethodMonomorphCache =
+    MonomorphCacheBase<ClassMethodMonomorphKey, ClassMethodMonomorphInstance>;
 
 /// Key for looking up monomorphized static method instances on generic classes.
 /// Identifies a specific instantiation of a generic class's static method.
@@ -337,56 +317,8 @@ pub struct StaticMethodMonomorphInstance {
 }
 
 /// Cache of monomorphized static method instances.
-#[derive(Debug, Default, Clone)]
-pub struct StaticMethodMonomorphCache {
-    /// Cached monomorphized static method instances
-    instances: HashMap<StaticMethodMonomorphKey, StaticMethodMonomorphInstance>,
-    /// Counter for generating unique names
-    next_id: u32,
-}
-
-impl StaticMethodMonomorphCache {
-    /// Create a new empty cache
-    pub fn new() -> Self {
-        Self {
-            instances: HashMap::new(),
-            next_id: 0,
-        }
-    }
-
-    /// Look up an existing monomorphized instance
-    pub fn get(&self, key: &StaticMethodMonomorphKey) -> Option<&StaticMethodMonomorphInstance> {
-        self.instances.get(key)
-    }
-
-    /// Insert a new monomorphized instance
-    pub fn insert(
-        &mut self,
-        key: StaticMethodMonomorphKey,
-        instance: StaticMethodMonomorphInstance,
-    ) {
-        self.instances.insert(key, instance);
-    }
-
-    /// Check if an instance exists
-    pub fn contains(&self, key: &StaticMethodMonomorphKey) -> bool {
-        self.instances.contains_key(key)
-    }
-
-    /// Generate the next unique ID for mangled names
-    pub fn next_unique_id(&mut self) -> u32 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
-    }
-
-    /// Get all cached instances (for codegen)
-    pub fn instances(
-        &self,
-    ) -> impl Iterator<Item = (&StaticMethodMonomorphKey, &StaticMethodMonomorphInstance)> {
-        self.instances.iter()
-    }
-}
+pub type StaticMethodMonomorphCache =
+    MonomorphCacheBase<StaticMethodMonomorphKey, StaticMethodMonomorphInstance>;
 
 /// Substitute concrete types for type parameters in a type.
 ///
