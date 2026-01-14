@@ -263,7 +263,7 @@ impl EntityRegistry {
 
         Some(ClassType {
             type_def_id: type_id,
-            type_args: vec![],
+            type_args: vec![].into(),
         })
     }
 
@@ -278,7 +278,7 @@ impl EntityRegistry {
 
         Some(RecordType {
             type_def_id: type_id,
-            type_args: Vec::new(),
+            type_args: Vec::new().into(),
         })
     }
 

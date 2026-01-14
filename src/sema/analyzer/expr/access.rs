@@ -615,7 +615,7 @@ impl Analyzer {
                 (substituted_params, substituted_return, Some(inferred))
             } else {
                 (
-                    func_type.params.clone(),
+                    func_type.params.to_vec(),
                     (*func_type.return_type).clone(),
                     None,
                 )
@@ -862,7 +862,7 @@ impl Analyzer {
                 .collect();
             let substituted_return = substitute_type(&func_type.return_type, &substitutions);
             let substituted_func_type = FunctionType {
-                params: substituted_params,
+                params: substituted_params.into(),
                 return_type: Box::new(substituted_return),
                 is_closure: func_type.is_closure,
             };

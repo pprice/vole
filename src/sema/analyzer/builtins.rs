@@ -63,7 +63,7 @@ impl Analyzer {
                 type_id,
                 method_len,
                 FunctionType {
-                    params: vec![],
+                    params: vec![].into(),
                     return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 }
@@ -72,7 +72,7 @@ impl Analyzer {
                 type_id,
                 method_iter,
                 FunctionType {
-                    params: vec![],
+                    params: vec![].into(),
                     return_type: Box::new(Type::unknown()),
                     is_closure: false,
                 },
@@ -89,7 +89,7 @@ impl Analyzer {
                 type_id,
                 method_len,
                 FunctionType {
-                    params: vec![],
+                    params: vec![].into(),
                     return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 }
@@ -98,7 +98,7 @@ impl Analyzer {
                 type_id,
                 method_iter,
                 FunctionType {
-                    params: vec![],
+                    params: vec![].into(),
                     return_type: Box::new(Type::unknown()), // Will be refined by check_builtin_method
                     is_closure: false,
                 },
@@ -121,7 +121,7 @@ impl Analyzer {
                 type_id,
                 method_iter,
                 FunctionType {
-                    params: vec![],
+                    params: vec![].into(),
                     return_type: Box::new(Type::unknown()), // Will be refined by check_builtin_method
                     is_closure: false,
                 },

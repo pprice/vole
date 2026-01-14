@@ -856,7 +856,7 @@ impl Cg<'_, '_, '_> {
         // Build signature (closure ptr + params)
         let mut sig = self.ctx.module.make_signature();
         sig.params.push(AbiParam::new(self.ctx.pointer_type)); // closure ptr
-        for param_type in &func_type.params {
+        for param_type in func_type.params.iter() {
             sig.params.push(AbiParam::new(type_to_cranelift(
                 param_type,
                 self.ctx.pointer_type,
@@ -978,7 +978,7 @@ fn native_type_to_vole_type(nt: &NativeType) -> Type {
         NativeType::String => Type::Primitive(PrimitiveType::String),
         NativeType::Nil => Type::Nil,
         NativeType::Optional(inner) => {
-            Type::Union(vec![native_type_to_vole_type(inner), Type::Nil])
+            Type::Union(vec![native_type_to_vole_type(inner), Type::Nil].into())
         }
         NativeType::Array(inner) => Type::Array(Box::new(native_type_to_vole_type(inner))),
     }

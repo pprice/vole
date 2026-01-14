@@ -174,7 +174,7 @@ impl Analyzer {
                             self.type_overrides.insert(*sym, remaining[0].clone());
                         } else if remaining.len() > 1 {
                             // Multiple types remaining - narrow to smaller union
-                            self.type_overrides.insert(*sym, Type::Union(remaining));
+                            self.type_overrides.insert(*sym, Type::Union(remaining.into()));
                         }
                     }
 

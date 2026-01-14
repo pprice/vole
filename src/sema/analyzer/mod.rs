@@ -416,9 +416,9 @@ impl Analyzer {
         Some(Type::Nominal(NominalType::Interface(
             crate::sema::types::InterfaceType {
                 type_def_id,
-                type_args,
-                methods,
-                extends: type_def.extends.clone(),
+                type_args: type_args.into(),
+                methods: methods.into(),
+                extends: type_def.extends.clone().into(),
             },
         )))
     }
@@ -937,7 +937,7 @@ impl Analyzer {
                         {
                             // Convert the aliased type to a union constraint
                             let types = match aliased_type {
-                                Type::Union(types) => types.clone(),
+                                Type::Union(types) => types.to_vec(),
                                 other => vec![other.clone()],
                             };
                             return Some(crate::sema::generic::TypeConstraint::Union(types));
@@ -1152,7 +1152,7 @@ impl Analyzer {
             };
 
             let func_type = FunctionType {
-                params: param_types,
+                params: param_types.into(),
                 return_type: Box::new(return_type),
                 is_closure: false,
             };
@@ -1566,7 +1566,7 @@ impl Analyzer {
                     };
 
                     let func_type = Type::Function(FunctionType {
-                        params,
+                        params: params.into(),
                         return_type: Box::new(return_type),
                         is_closure: false,
                     });
@@ -1637,7 +1637,7 @@ impl Analyzer {
                         };
 
                         let func_type = Type::Function(FunctionType {
-                            params,
+                            params: params.into(),
                             return_type: Box::new(return_type),
                             is_closure: false,
                         });

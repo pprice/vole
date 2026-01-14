@@ -22,7 +22,7 @@ fn type_to_field_tag(ty: &Type) -> FieldTypeTag {
         // Optional types containing reference types also need cleanup
         Type::Union(variants) => {
             // If any variant is a reference type, mark as needing cleanup
-            for variant in variants {
+            for variant in variants.iter() {
                 let tag = type_to_field_tag(variant);
                 if tag.needs_cleanup() {
                     return tag;
@@ -100,7 +100,7 @@ impl Compiler<'_> {
         // Create a placeholder vole_type (will be replaced in finalize_class)
         let placeholder_type = Type::Nominal(NominalType::Class(ClassType {
             type_def_id,
-            type_args: vec![],
+            type_args: vec![].into(),
         }));
 
         self.type_metadata.insert(
@@ -152,7 +152,7 @@ impl Compiler<'_> {
         // Create the Vole type
         let vole_type = Type::Nominal(NominalType::Class(ClassType {
             type_def_id,
-            type_args: vec![],
+            type_args: vec![].into(),
         }));
 
         // Collect method return types
@@ -284,7 +284,7 @@ impl Compiler<'_> {
         // Create a placeholder vole_type (will be replaced in finalize_record)
         let placeholder_type = Type::Nominal(NominalType::Record(RecordType {
             type_def_id,
-            type_args: vec![],
+            type_args: vec![].into(),
         }));
 
         self.type_metadata.insert(
@@ -336,7 +336,7 @@ impl Compiler<'_> {
         // Create the Vole type
         let vole_type = Type::Nominal(NominalType::Record(RecordType {
             type_def_id,
-            type_args: vec![],
+            type_args: vec![].into(),
         }));
 
         // Collect method return types
@@ -556,7 +556,7 @@ impl Compiler<'_> {
         // Create the Vole type
         let vole_type = Type::Nominal(NominalType::Class(ClassType {
             type_def_id,
-            type_args: vec![],
+            type_args: vec![].into(),
         }));
 
         // Collect method info and declare methods

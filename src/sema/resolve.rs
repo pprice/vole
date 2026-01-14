@@ -65,7 +65,8 @@ fn interface_instance(
                     .params
                     .iter()
                     .map(|t| substitute_type(t, &substitutions))
-                    .collect(),
+                    .collect::<Vec<_>>()
+                    .into(),
                 return_type: Box::new(substitute_type(
                     &method.signature.return_type,
                     &substitutions,
@@ -76,13 +77,13 @@ fn interface_instance(
         .collect();
 
     // Keep extends as TypeDefIds directly
-    let extends = type_def.extends.clone();
+    let extends: Vec<_> = type_def.extends.iter().copied().collect();
 
     Some(Type::Nominal(NominalType::Interface(InterfaceType {
         type_def_id,
-        type_args,
-        methods,
-        extends,
+        type_args: type_args.into(),
+        methods: methods.into(),
+        extends: extends.into(),
     })))
 }
 
@@ -215,7 +216,7 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
             let param_types: Vec<Type> = params.iter().map(|p| resolve_type(p, ctx)).collect();
             let ret = resolve_type(return_type, ctx);
             Type::Function(FunctionType {
-                params: param_types,
+                params: param_types.into(),
                 return_type: Box::new(ret),
                 is_closure: false, // Type annotations don't know if it's a closure
             })
@@ -258,13 +259,13 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                     TypeDefKind::Class => {
                         return Type::Nominal(NominalType::Class(ClassType {
                             type_def_id: type_id,
-                            type_args: resolved_args,
+                            type_args: resolved_args.into(),
                         }));
                     }
                     TypeDefKind::Record => {
                         return Type::Nominal(NominalType::Record(RecordType {
                             type_def_id: type_id,
-                            type_args: resolved_args,
+                            type_args: resolved_args.into(),
                         }));
                     }
                     TypeDefKind::Interface => {
@@ -311,7 +312,7 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
         TypeExpr::Tuple(elements) => {
             let resolved_elements: Vec<Type> =
                 elements.iter().map(|e| resolve_type(e, ctx)).collect();
-            Type::Tuple(resolved_elements)
+            Type::Tuple(resolved_elements.into())
         }
         TypeExpr::FixedArray { element, size } => {
             let elem_ty = resolve_type(element, ctx);

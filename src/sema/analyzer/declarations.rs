@@ -130,7 +130,7 @@ impl Analyzer {
                 .unwrap_or(Type::Void);
 
             let signature = FunctionType {
-                params,
+                params: params.into(),
                 return_type: Box::new(return_type),
                 is_closure: false,
             };
@@ -206,7 +206,7 @@ impl Analyzer {
 
             // Create a FunctionType with TypeParam placeholders for the signature
             let signature = FunctionType {
-                params: param_types.clone(),
+                params: param_types.clone().into(),
                 return_type: Box::new(return_type.clone()),
                 is_closure: false,
             };
@@ -331,7 +331,7 @@ impl Analyzer {
                     })
                     .unwrap_or(Type::Void);
                 let signature = FunctionType {
-                    params,
+                    params: params.into(),
                     return_type: Box::new(return_type),
                     is_closure: false,
                 };
@@ -366,7 +366,7 @@ impl Analyzer {
                         .map(|t| self.resolve_type(t, interner))
                         .unwrap_or(Type::Void);
                     let signature = FunctionType {
-                        params,
+                        params: params.into(),
                         return_type: Box::new(return_type),
                         is_closure: false,
                     };
@@ -403,7 +403,7 @@ impl Analyzer {
                         .map(|t| self.resolve_type(t, interner))
                         .unwrap_or(Type::Void);
                     let signature = FunctionType {
-                        params,
+                        params: params.into(),
                         return_type: Box::new(return_type.clone()),
                         is_closure: false,
                     };
@@ -604,7 +604,7 @@ impl Analyzer {
                     .unwrap_or(Type::Void);
 
                 let signature = FunctionType {
-                    params,
+                    params: params.into(),
                     return_type: Box::new(return_type),
                     is_closure: false,
                 };
@@ -701,7 +701,7 @@ impl Analyzer {
                         .unwrap_or(Type::Void);
 
                     let signature = FunctionType {
-                        params,
+                        params: params.into(),
                         return_type: Box::new(return_type),
                         is_closure: false,
                     };
@@ -762,7 +762,7 @@ impl Analyzer {
                         .unwrap_or(Type::Void);
 
                     let signature = FunctionType {
-                        params,
+                        params: params.into(),
                         return_type: Box::new(return_type.clone()),
                         is_closure: false,
                     };
@@ -887,7 +887,7 @@ impl Analyzer {
                     })
                     .unwrap_or(Type::Void);
                 let signature = FunctionType {
-                    params,
+                    params: params.into(),
                     return_type: Box::new(return_type),
                     is_closure: false,
                 };
@@ -922,7 +922,7 @@ impl Analyzer {
                         .map(|t| self.resolve_type(t, interner))
                         .unwrap_or(Type::Void);
                     let signature = FunctionType {
-                        params,
+                        params: params.into(),
                         return_type: Box::new(return_type),
                         is_closure: false,
                     };
@@ -1040,7 +1040,7 @@ impl Analyzer {
 
             let record_type = RecordType {
                 type_def_id: entity_type_id,
-                type_args: vec![], // Generic record base has no type args yet
+                type_args: vec![].into(), // Generic record base has no type args yet
             };
             self.register_named_type(
                 record.name,
@@ -1136,7 +1136,7 @@ impl Analyzer {
                     &[interner.resolve(record.name), method_name_str],
                 );
                 let signature = FunctionType {
-                    params,
+                    params: params.into(),
                     return_type: Box::new(return_type),
                     is_closure: false,
                 };
@@ -1233,7 +1233,7 @@ impl Analyzer {
                         .unwrap_or(Type::Void);
 
                     let signature = FunctionType {
-                        params,
+                        params: params.into(),
                         return_type: Box::new(return_type),
                         is_closure: false,
                     };
@@ -1419,7 +1419,7 @@ impl Analyzer {
             .map(|(name, _, params, return_type, has_default)| {
                 crate::sema::types::InterfaceMethodType {
                     name: self.method_name_id(*name, interner),
-                    params: params.clone(),
+                    params: params.clone().into(),
                     return_type: Box::new(return_type.clone()),
                     has_default: *has_default,
                 }
@@ -1516,7 +1516,7 @@ impl Analyzer {
                 .name_table
                 .intern_raw(self.current_module, &[&name_str, method_name_str]);
             let signature = FunctionType {
-                params: params.clone(),
+                params: params.clone().into(),
                 return_type: Box::new(return_type.clone()),
                 is_closure: false,
             };
@@ -1595,7 +1595,7 @@ impl Analyzer {
                     || default_static_external_methods.contains(&method.name);
 
                 let signature = FunctionType {
-                    params,
+                    params: params.into(),
                     return_type: Box::new(return_type),
                     is_closure: false,
                 };
@@ -1634,9 +1634,9 @@ impl Analyzer {
             interface_decl.name,
             Type::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
                 type_def_id: entity_type_id,
-                type_args: Vec::new(),
-                methods: interface_methods,
-                extends: extends_type_ids,
+                type_args: vec![].into(),
+                methods: interface_methods.into(),
+                extends: extends_type_ids.into(),
             })),
             interner,
         );
@@ -1798,7 +1798,7 @@ impl Analyzer {
                             .unwrap_or(Type::Void);
 
                         let signature = FunctionType {
-                            params,
+                            params: params.into(),
                             return_type: Box::new(return_type),
                             is_closure: false,
                         };
@@ -1837,7 +1837,7 @@ impl Analyzer {
                                 .unwrap_or(Type::Void);
 
                             let signature = FunctionType {
-                                params,
+                                params: params.into(),
                                 return_type: Box::new(return_type.clone()),
                                 is_closure: false,
                             };
@@ -1923,7 +1923,7 @@ impl Analyzer {
 
                 // Create signature with TypeParam placeholders
                 let signature = FunctionType {
-                    params: param_types.clone(),
+                    params: param_types.clone().into(),
                     return_type: Box::new(return_type.clone()),
                     is_closure: false,
                 };
@@ -1975,7 +1975,7 @@ impl Analyzer {
                     .unwrap_or(Type::Void);
 
                 let func_type = FunctionType {
-                    params,
+                    params: params.into(),
                     return_type: Box::new(return_type.clone()),
                     is_closure: false,
                 };

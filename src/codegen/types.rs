@@ -380,9 +380,9 @@ fn build_interface_type_from_entity(
 
     Type::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
         type_def_id,
-        type_args,
-        methods,
-        extends,
+        type_args: type_args.into(),
+        methods: methods.into(),
+        extends: extends.into(),
     }))
 }
 
@@ -528,7 +528,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 name_table,
                 module_id,
             );
-            Type::Union(vec![inner_ty, Type::Nil])
+            Type::Union(vec![inner_ty, Type::Nil].into())
         }
         TypeExpr::Union(variants) => {
             let variant_types: Vec<Type> = variants
@@ -574,7 +574,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 module_id,
             );
             Type::Function(FunctionType {
-                params: param_types,
+                params: param_types.into(),
                 return_type: Box::new(ret_type),
                 is_closure: false, // Type expressions don't know if closure
             })
@@ -635,14 +635,14 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     TypeDefKind::Class => {
                         return Type::Nominal(NominalType::Class(crate::sema::types::ClassType {
                             type_def_id,
-                            type_args: resolved_args,
+                            type_args: resolved_args.into(),
                         }));
                     }
                     TypeDefKind::Record => {
                         return Type::Nominal(NominalType::Record(
                             crate::sema::types::RecordType {
                                 type_def_id,
-                                type_args: resolved_args,
+                                type_args: resolved_args.into(),
                             },
                         ));
                     }
@@ -680,7 +680,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                                         .params
                                         .iter()
                                         .map(|t| substitute_type(t, &substitutions))
-                                        .collect(),
+                                        .collect::<Vec<_>>()
+                                        .into(),
                                     return_type: Box::new(substitute_type(
                                         &method.signature.return_type,
                                         &substitutions,
@@ -696,9 +697,9 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         return Type::Nominal(NominalType::Interface(
                             crate::sema::types::InterfaceType {
                                 type_def_id,
-                                type_args: resolved_args,
-                                methods,
-                                extends,
+                                type_args: resolved_args.into(),
+                                methods: methods.into(),
+                                extends: extends.into(),
                             },
                         ));
                     }
@@ -731,7 +732,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     )
                 })
                 .collect();
-            Type::Tuple(resolved_elements)
+            Type::Tuple(resolved_elements.into())
         }
         TypeExpr::FixedArray { element, size } => {
             let elem_ty = resolve_type_expr_with_metadata(

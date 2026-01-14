@@ -379,7 +379,7 @@ impl Analyzer {
         // 2. Interface methods (vtable dispatch)
         let (interface_type_def_id, type_args): (Option<TypeDefId>, &[Type]) = match object_type {
             Type::Nominal(NominalType::Interface(iface)) => {
-                (Some(iface.type_def_id), iface.type_args.as_slice())
+                (Some(iface.type_def_id), &iface.type_args)
             }
             _ => (None, &[]),
         };
@@ -468,7 +468,7 @@ impl Analyzer {
                 if r.type_args.is_empty() {
                     None
                 } else {
-                    Some(r.type_args.as_slice())
+                    Some(&*r.type_args)
                 },
             ),
             _ => (None, None),

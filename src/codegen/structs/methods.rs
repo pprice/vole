@@ -627,7 +627,7 @@ impl Cg<'_, '_, '_> {
             // First param is the closure pointer, then the user params
             let mut sig = self.ctx.module.make_signature();
             sig.params.push(AbiParam::new(self.ctx.pointer_type)); // Closure pointer
-            for param_type in &func_type.params {
+            for param_type in func_type.params.iter() {
                 sig.params.push(AbiParam::new(type_to_cranelift(
                     param_type,
                     self.ctx.pointer_type,
@@ -665,7 +665,7 @@ impl Cg<'_, '_, '_> {
         } else {
             // It's a pure function - call directly
             let mut sig = self.ctx.module.make_signature();
-            for param_type in &func_type.params {
+            for param_type in func_type.params.iter() {
                 sig.params.push(AbiParam::new(type_to_cranelift(
                     param_type,
                     self.ctx.pointer_type,
@@ -752,7 +752,7 @@ impl Cg<'_, '_, '_> {
 
         let mut sig = self.ctx.module.make_signature();
         sig.params.push(AbiParam::new(word_type));
-        for _ in &func_type.params {
+        for _ in func_type.params.iter() {
             sig.params.push(AbiParam::new(word_type));
         }
         if func_type.return_type.as_ref() != &Type::Void {

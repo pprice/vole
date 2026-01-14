@@ -155,7 +155,7 @@ impl Analyzer {
         let return_type = declared_return.or(expected_return).unwrap_or(body_type);
 
         Type::Function(FunctionType {
-            params: param_types,
+            params: param_types.into(),
             return_type: Box::new(return_type),
             is_closure: has_captures,
         })

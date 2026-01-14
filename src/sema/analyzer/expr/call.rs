@@ -168,7 +168,7 @@ impl Analyzer {
                             mangled_name,
                             instance_id: id,
                             func_type: FunctionType {
-                                params: concrete_params,
+                                params: concrete_params.into(),
                                 return_type: Box::new(concrete_return.clone()),
                                 is_closure: false,
                             },

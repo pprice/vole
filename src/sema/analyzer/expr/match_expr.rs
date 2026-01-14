@@ -94,7 +94,7 @@ impl Analyzer {
                     if remaining.len() == 1 {
                         Some(remaining[0].clone())
                     } else if remaining.len() > 1 {
-                        Some(Type::Union(remaining))
+                        Some(Type::Union(remaining.into()))
                     } else {
                         narrowed_type
                     }

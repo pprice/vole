@@ -4,6 +4,8 @@
 // These are types that have a type definition identity (TypeDefId) and optional
 // type arguments for generic instantiation.
 
+use std::sync::Arc;
+
 use crate::identity::{NameId, TypeDefId};
 
 use super::{StructField, Type};
@@ -118,7 +120,7 @@ pub struct ClassType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
     /// Type arguments for generic classes (empty for non-generic classes)
-    pub type_args: Vec<Type>,
+    pub type_args: Arc<[Type]>,
 }
 
 /// Record type information
@@ -127,7 +129,7 @@ pub struct RecordType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
     /// Type arguments for generic records (empty for non-generic records)
-    pub type_args: Vec<Type>,
+    pub type_args: Arc<[Type]>,
 }
 
 /// Interface type information
@@ -135,9 +137,9 @@ pub struct RecordType {
 pub struct InterfaceType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
-    pub type_args: Vec<Type>,
-    pub methods: Vec<InterfaceMethodType>,
-    pub extends: Vec<TypeDefId>, // Parent interface TypeDefIds
+    pub type_args: Arc<[Type]>,
+    pub methods: Arc<[InterfaceMethodType]>,
+    pub extends: Arc<[TypeDefId]>, // Parent interface TypeDefIds
 }
 
 // Custom Debug to avoid massive output when tracing - just show identity, not all methods
@@ -173,7 +175,7 @@ impl std::hash::Hash for InterfaceType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InterfaceMethodType {
     pub name: NameId,
-    pub params: Vec<Type>,
+    pub params: Arc<[Type]>,
     pub return_type: Box<Type>,
     pub has_default: bool, // True if interface provides default implementation
 }
@@ -198,23 +200,23 @@ mod tests {
     fn make_class(id: u32) -> NominalType {
         NominalType::Class(ClassType {
             type_def_id: TypeDefId::new(id),
-            type_args: vec![],
+            type_args: vec![].into(),
         })
     }
 
     fn make_record(id: u32) -> NominalType {
         NominalType::Record(RecordType {
             type_def_id: TypeDefId::new(id),
-            type_args: vec![],
+            type_args: vec![].into(),
         })
     }
 
     fn make_interface(id: u32) -> NominalType {
         NominalType::Interface(InterfaceType {
             type_def_id: TypeDefId::new(id),
-            type_args: vec![],
-            methods: vec![],
-            extends: vec![],
+            type_args: vec![].into(),
+            methods: vec![].into(),
+            extends: vec![].into(),
         })
     }
 

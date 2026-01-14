@@ -58,7 +58,7 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
             return true;
         }
         // Also check if from can widen into a union variant
-        for variant in variants {
+        for variant in variants.iter() {
             if from.can_widen_to(variant) {
                 return true;
             }

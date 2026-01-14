@@ -235,7 +235,7 @@ impl Analyzer {
                         Ok(Type::Array(Box::new(first_ty.clone())))
                     } else {
                         // Different types → tuple
-                        Ok(Type::Tuple(elem_types))
+                        Ok(Type::Tuple(elem_types.into()))
                     }
                 }
             }

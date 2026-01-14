@@ -465,7 +465,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: ptr,
             ty: self.ctx.pointer_type,
-            vole_type: Type::Tuple(elem_types.to_vec()),
+            vole_type: Type::Tuple(elem_types.to_vec().into()),
         })
     }
 

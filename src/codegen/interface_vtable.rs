@@ -446,7 +446,7 @@ impl InterfaceVtableRegistry {
         let word_type = ctx.pointer_type;
         let mut sig = ctx.module.make_signature();
         sig.params.push(AbiParam::new(word_type));
-        for _ in &func_type.params {
+        for _ in func_type.params.iter() {
             sig.params.push(AbiParam::new(word_type));
         }
         if func_type.return_type.as_ref() != &Type::Void {
@@ -587,7 +587,7 @@ fn compile_function_wrapper(
             concrete_type,
             ctx.pointer_type,
         )));
-        for param_type in &func_type.params {
+        for param_type in func_type.params.iter() {
             sig.params.push(AbiParam::new(type_to_cranelift(
                 param_type,
                 ctx.pointer_type,
@@ -606,7 +606,7 @@ fn compile_function_wrapper(
         (func_ptr, call_args, sig)
     } else {
         let mut sig = ctx.module.make_signature();
-        for param_type in &func_type.params {
+        for param_type in func_type.params.iter() {
             sig.params.push(AbiParam::new(type_to_cranelift(
                 param_type,
                 ctx.pointer_type,
@@ -723,7 +723,7 @@ fn compile_external_wrapper(
         type_to_cranelift(concrete_type, ctx.pointer_type)
     };
     native_sig.params.push(AbiParam::new(self_param_type));
-    for param_type in &func_type.params {
+    for param_type in func_type.params.iter() {
         native_sig.params.push(AbiParam::new(type_to_cranelift(
             param_type,
             ctx.pointer_type,
@@ -1036,7 +1036,7 @@ fn resolve_vtable_target(
                     .clone()
             })
             .unwrap_or_else(|| FunctionType {
-                params: substituted_params.clone(),
+                params: substituted_params.clone().into(),
                 return_type: Box::new(substituted_return_type.clone()),
                 is_closure: false,
             });
@@ -1063,7 +1063,7 @@ fn resolve_vtable_target(
         {
             return Ok(VtableMethod {
                 func_type: FunctionType {
-                    params: substituted_params,
+                    params: substituted_params.into(),
                     return_type: Box::new(substituted_return_type),
                     is_closure: false,
                 },

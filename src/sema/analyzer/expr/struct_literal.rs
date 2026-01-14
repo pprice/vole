@@ -286,7 +286,7 @@ impl Analyzer {
 
         let concrete_record = RecordType {
             type_def_id,
-            type_args,
+            type_args: type_args.into(),
         };
         Ok(Type::Nominal(NominalType::Record(concrete_record)))
     }
@@ -425,7 +425,7 @@ impl Analyzer {
 
         let concrete_class = ClassType {
             type_def_id,
-            type_args,
+            type_args: type_args.into(),
         };
         Ok(Type::Nominal(NominalType::Class(concrete_class)))
     }

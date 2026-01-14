@@ -16,6 +16,8 @@ pub use nominal::{
 pub use primitive::PrimitiveType;
 pub use special::{AnalysisError, ConstantValue, FallibleType, ModuleType, PlaceholderKind};
 
+use std::sync::Arc;
+
 use crate::frontend::PrimitiveType as AstPrimitiveType;
 use crate::frontend::Span;
 use crate::identity::{NameId, TypeDefId, TypeParamId};
@@ -39,7 +41,7 @@ pub enum Type {
     /// Union type - value can be any of the variant types
     /// Represented at runtime as tagged union (discriminant + payload)
     /// TODO: Consider nullable pointer optimization for pointer types (String, Array)
-    Union(Vec<Type>),
+    Union(Arc<[Type]>),
     /// Range type (e.g., 0..10)
     Range,
     /// Array type (e.g., [i32], [string])
@@ -75,7 +77,7 @@ pub enum Type {
     TypeParamRef(TypeParamId),
     /// Tuple type - heterogeneous fixed-size collection
     /// e.g., [i32, string, bool] - different types per position
-    Tuple(Vec<Type>),
+    Tuple(Arc<[Type]>),
     /// Fixed-size array - homogeneous fixed-size array
     /// e.g., [i32; 10] - single element type, compile-time known size
     FixedArray { element: Box<Type>, size: usize },
@@ -108,7 +110,7 @@ pub struct StructuralMethodType {
 
 #[derive(Debug, Clone, Eq)]
 pub struct FunctionType {
-    pub params: Vec<Type>,
+    pub params: Arc<[Type]>,
     pub return_type: Box<Type>,
     /// If true, this function is a closure (has captures) and needs
     /// to be called with the closure pointer as the first argument.
@@ -302,7 +304,7 @@ impl Type {
                 match non_nil.len() {
                     0 => None,
                     1 => Some(non_nil.into_iter().next().expect("len checked to be 1")),
-                    _ => Some(Type::Union(non_nil)),
+                    _ => Some(Type::Union(non_nil.into())),
                 }
             }
             _ => None,
@@ -311,7 +313,7 @@ impl Type {
 
     /// Create an optional type (T | nil)
     pub fn optional(inner: Type) -> Type {
-        Type::Union(vec![inner, Type::Nil])
+        Type::Union(vec![inner, Type::Nil].into())
     }
 
     /// Create an invalid type with just a kind (for migration - prefer invalid_msg)
@@ -420,7 +422,7 @@ impl Type {
         let mut flattened = Vec::new();
         for ty in types.drain(..) {
             match ty {
-                Type::Union(inner) => flattened.extend(inner),
+                Type::Union(inner) => flattened.extend(inner.iter().cloned()),
                 other => flattened.push(other),
             }
         }
@@ -435,7 +437,7 @@ impl Type {
         if flattened.len() == 1 {
             flattened.into_iter().next().expect("len checked to be 1")
         } else {
-            Type::Union(flattened)
+            Type::Union(flattened.into())
         }
     }
 
@@ -755,7 +757,7 @@ mod tests {
         // Nested unions flatten
         let normalized = Type::normalize_union(vec![
             p(PrimitiveType::I32),
-            Type::Union(vec![p(PrimitiveType::String), Type::Nil]),
+            Type::Union(vec![p(PrimitiveType::String), Type::Nil].into()),
         ]);
         assert!(matches!(normalized, Type::Union(v) if v.len() == 3));
 

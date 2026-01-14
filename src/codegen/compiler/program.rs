@@ -1016,7 +1016,7 @@ impl Compiler<'_> {
         if has_self_param {
             params.push(self.pointer_type);
         }
-        for param_type in &func_type.params {
+        for param_type in func_type.params.iter() {
             params.push(type_to_cranelift(param_type, self.pointer_type));
         }
         let ret = if *func_type.return_type == Type::Void {
@@ -1143,7 +1143,7 @@ impl Compiler<'_> {
 
         // Create function signature from concrete types
         let mut params = Vec::new();
-        for param_type in &instance.func_type.params {
+        for param_type in instance.func_type.params.iter() {
             params.push(type_to_cranelift(param_type, self.pointer_type));
         }
         let ret = if *instance.func_type.return_type == Type::Void {
@@ -1165,7 +1165,7 @@ impl Compiler<'_> {
             .iter()
             .map(|t| type_to_cranelift(t, self.pointer_type))
             .collect();
-        let param_vole_types: Vec<Type> = instance.func_type.params.clone();
+        let param_vole_types: Vec<Type> = instance.func_type.params.to_vec();
 
         // Get return type
         let return_type = Some((*instance.func_type.return_type).clone());
@@ -1392,7 +1392,7 @@ impl Compiler<'_> {
 
         // Create method signature (self + params) with concrete types
         let mut params = vec![self.pointer_type]; // self
-        for param_type in &instance.func_type.params {
+        for param_type in instance.func_type.params.iter() {
             params.push(type_to_cranelift(param_type, self.pointer_type));
         }
         let ret = if *instance.func_type.return_type == Type::Void {
@@ -1414,7 +1414,7 @@ impl Compiler<'_> {
             .iter()
             .map(|t| type_to_cranelift(t, self.pointer_type))
             .collect();
-        let param_vole_types: Vec<Type> = instance.func_type.params.clone();
+        let param_vole_types: Vec<Type> = instance.func_type.params.to_vec();
 
         // Get return type
         let return_type = Some((*instance.func_type.return_type).clone());
@@ -1554,17 +1554,17 @@ impl Compiler<'_> {
                     return match &type_def.kind {
                         TypeDefKind::Record => Type::Nominal(NominalType::Record(RecordType {
                             type_def_id,
-                            type_args,
+                            type_args: type_args.into(),
                         })),
                         TypeDefKind::Class => Type::Nominal(NominalType::Class(ClassType {
                             type_def_id,
-                            type_args,
+                            type_args: type_args.into(),
                         })),
                         _ => {
                             // Fallback for other kinds
                             Type::Nominal(NominalType::Record(RecordType {
                                 type_def_id,
-                                type_args,
+                                type_args: type_args.into(),
                             }))
                         }
                     };
@@ -1718,7 +1718,7 @@ impl Compiler<'_> {
 
         // Create signature (no self parameter) with concrete types
         let mut params = Vec::new();
-        for param_type in &instance.func_type.params {
+        for param_type in instance.func_type.params.iter() {
             params.push(type_to_cranelift(param_type, self.pointer_type));
         }
         let ret = if *instance.func_type.return_type == Type::Void {
@@ -1740,7 +1740,7 @@ impl Compiler<'_> {
             .iter()
             .map(|t| type_to_cranelift(t, self.pointer_type))
             .collect();
-        let param_vole_types: Vec<Type> = instance.func_type.params.clone();
+        let param_vole_types: Vec<Type> = instance.func_type.params.to_vec();
 
         // Get return type
         let return_type = Some((*instance.func_type.return_type).clone());

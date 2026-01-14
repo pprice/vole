@@ -309,7 +309,7 @@ impl Analyzer {
                             self.check_expr_expecting(elem, Some(expected_elem), interner)
                         })
                         .collect::<Result<Vec<_>, _>>()?;
-                    return Ok(Type::Tuple(elem_types));
+                    return Ok(Type::Tuple(elem_types.into()));
                 }
 
                 // Check if expecting an array type
@@ -342,7 +342,7 @@ impl Analyzer {
                 if is_homogeneous {
                     Ok(Type::Array(Box::new(first_ty.clone())))
                 } else {
-                    Ok(Type::Tuple(elem_types))
+                    Ok(Type::Tuple(elem_types.into()))
                 }
             }
             ExprKind::Index(_) => {

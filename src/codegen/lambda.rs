@@ -158,7 +158,7 @@ pub(crate) fn infer_expr_type(
                 .map(|t| resolve_type_expr(t, ctx))
                 .unwrap_or(Type::Primitive(PrimitiveType::I64));
             Type::Function(FunctionType {
-                params: lambda_params,
+                params: lambda_params.into(),
                 return_type: Box::new(return_ty),
                 is_closure: !lambda.captures.borrow().is_empty(),
             })
@@ -320,7 +320,7 @@ fn compile_pure_lambda(
         value: closure_ptr,
         ty: ctx.pointer_type,
         vole_type: Type::Function(FunctionType {
-            params: param_vole_types,
+            params: param_vole_types.into(),
             return_type: Box::new(return_vole_type),
             is_closure: true, // Now always a closure struct
         }),
@@ -501,7 +501,7 @@ fn compile_lambda_with_captures(
         value: closure_ptr,
         ty: ctx.pointer_type,
         vole_type: Type::Function(FunctionType {
-            params: param_vole_types,
+            params: param_vole_types.into(),
             return_type: Box::new(return_vole_type),
             is_closure: true,
         }),

@@ -12,7 +12,7 @@ impl Analyzer {
         interner: &Interner,
     ) -> Option<FunctionType> {
         let method_type = |params: Vec<Type>, return_type: Type| FunctionType {
-            params,
+            params: params.into(),
             return_type: Box::new(return_type),
             is_closure: false,
         };
