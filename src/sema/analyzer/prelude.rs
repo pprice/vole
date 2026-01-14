@@ -3,7 +3,9 @@
 use super::Analyzer;
 use crate::frontend::{Interner, Parser};
 use crate::identity::NameTable;
+use crate::module::ModuleLoader;
 use crate::sema::EntityRegistry;
+use crate::sema::analysis_cache::CachedModule;
 use crate::sema::generic::TypeParamScopeStack;
 use crate::sema::implement_registry::ImplementRegistry;
 use crate::sema::resolution::MethodResolutions;
@@ -49,7 +51,25 @@ impl Analyzer {
 
     /// Load a single prelude file and merge its registries
     pub(super) fn load_prelude_file(&mut self, import_path: &str, _interner: &Interner) {
-        use crate::module::ModuleLoader;
+        // Check cache first
+        if let Some(ref cache) = self.module_cache {
+            if let Some(cached) = cache.borrow().get(import_path) {
+                // Use cached analysis results
+                self.name_table = cached.name_table.clone();
+                self.entity_registry.merge(&cached.entity_registry);
+                self.implement_registry.merge(&cached.implement_registry);
+                for (name, func_type) in &cached.functions_by_name {
+                    self.functions_by_name.insert(name.clone(), func_type.clone());
+                }
+                self.module_programs
+                    .insert(import_path.to_string(), (cached.program.clone(), cached.interner.clone()));
+                self.module_expr_types
+                    .insert(import_path.to_string(), cached.expr_types.clone());
+                self.module_method_resolutions
+                    .insert(import_path.to_string(), cached.method_resolutions.clone());
+                return;
+            }
+        }
 
         // Load source via module_loader
         let module_info = match self.module_loader.load(import_path) {
@@ -103,6 +123,7 @@ impl Analyzer {
             current_module: prelude_module, // Use the prelude module path!
             entity_registry: EntityRegistry::new(),
             type_param_stack: TypeParamScopeStack::new(),
+            module_cache: None, // Sub-analyzers don't need the cache
         };
 
         // Copy existing registries so prelude files can reference earlier definitions
@@ -116,6 +137,24 @@ impl Analyzer {
             tracing::warn!(import_path, ?errors, "prelude analysis errors");
         }
         if analyze_result.is_ok() {
+            // Cache the analysis results before merging
+            if let Some(ref cache) = self.module_cache {
+                cache.borrow_mut().insert(
+                    import_path.to_string(),
+                    CachedModule {
+                        program: program.clone(),
+                        interner: prelude_interner.clone(),
+                        module_type: None,
+                        expr_types: sub_analyzer.expr_types.clone(),
+                        method_resolutions: sub_analyzer.method_resolutions.clone_inner(),
+                        entity_registry: sub_analyzer.entity_registry.clone(),
+                        implement_registry: sub_analyzer.implement_registry.clone(),
+                        functions_by_name: sub_analyzer.functions_by_name.clone(),
+                        name_table: sub_analyzer.name_table.clone(),
+                    },
+                );
+            }
+
             // Merge the entity registry (types, methods, fields)
             self.entity_registry.merge(&sub_analyzer.entity_registry);
             // Merge the implement registry

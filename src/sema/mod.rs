@@ -1,4 +1,5 @@
 // src/sema/mod.rs
+pub mod analysis_cache;
 pub mod analyzer;
 pub mod compatibility;
 pub mod entity_defs;
@@ -14,6 +15,7 @@ pub mod type_table;
 pub mod types;
 pub mod well_known;
 
+pub use analysis_cache::{CachedModule, ModuleCache};
 pub use analyzer::{AnalysisOutput, Analyzer, TypeError, TypeWarning};
 pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 pub use entity_registry::EntityRegistry;

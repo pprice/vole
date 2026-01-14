@@ -15,8 +15,11 @@ use crate::errors::{SemanticError, SemanticWarning};
 use crate::frontend::*;
 use crate::identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
 use crate::module::ModuleLoader;
+use crate::sema::analysis_cache::ModuleCache;
 use crate::sema::EntityRegistry;
 use crate::sema::ExpressionData;
+use std::cell::RefCell;
+use std::rc::Rc;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
     ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,
@@ -199,6 +202,9 @@ pub struct Analyzer {
     /// Stack of type parameter scopes for nested generic contexts.
     /// Used for resolving methods on Type::TypeParam via constraint interfaces.
     type_param_stack: TypeParamScopeStack,
+    /// Optional shared cache for module analysis results.
+    /// When set, modules are cached after analysis and reused across Analyzer instances.
+    module_cache: Option<Rc<RefCell<ModuleCache>>>,
 }
 
 /// Result of looking up a method on a type via EntityRegistry
@@ -244,6 +250,7 @@ impl Analyzer {
             current_module: main_module,
             entity_registry: EntityRegistry::new(),
             type_param_stack: TypeParamScopeStack::new(),
+            module_cache: None,
         };
 
         // Register primitives in EntityRegistry so they can have static methods
@@ -255,6 +262,19 @@ impl Analyzer {
         // NOTE: This is temporary - will eventually come from stdlib/traits.void
         analyzer.register_builtins();
 
+        analyzer
+    }
+
+    /// Create an analyzer with a shared module cache.
+    /// The cache is shared across multiple Analyzer instances to avoid
+    /// re-analyzing the same modules (prelude, stdlib, user imports).
+    pub fn with_cache(
+        _file: &str,
+        _source: &str,
+        cache: Rc<RefCell<ModuleCache>>,
+    ) -> Self {
+        let mut analyzer = Self::new(_file, _source);
+        analyzer.module_cache = Some(cache);
         analyzer
     }
 

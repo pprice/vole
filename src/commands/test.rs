@@ -12,8 +12,11 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::common::{TermColors, parse_and_analyze, read_stdin};
+use super::common::{TermColors, parse_and_analyze_with_cache, read_stdin};
 use crate::cli::{ColorMode, ReportMode, expand_paths, should_skip_path};
+use crate::sema::ModuleCache;
+use std::cell::RefCell;
+use std::rc::Rc;
 use crate::codegen::{Compiler, JitContext, TestInfo};
 use crate::runtime::{
     AssertFailure, JmpBuf, call_setjmp, clear_current_test, clear_test_jmp_buf, set_current_file,
@@ -188,6 +191,9 @@ pub fn run_tests(
         max_failures as usize
     };
 
+    // Create shared module cache for all test files
+    let cache = Rc::new(RefCell::new(ModuleCache::new()));
+
     for (idx, file) in files.iter().enumerate() {
         // Check if we've hit the failure cap
         if all_results.failed >= failure_cap {
@@ -205,7 +211,7 @@ pub fn run_tests(
         // Set current file for signal handler
         set_current_file(&file.display().to_string());
 
-        match run_file_tests_with_progress(file, filter, &colors, &report) {
+        match run_file_tests_with_progress(file, filter, &colors, &report, cache.clone()) {
             Ok(results) => {
                 all_results.merge(results);
             }
@@ -254,13 +260,16 @@ fn run_stdin_tests(
     let stdin_path = PathBuf::from("<stdin>");
     let mut all_results = TestResults::new();
 
+    // Create cache for stdin test (single file, but still useful for prelude)
+    let cache = Rc::new(RefCell::new(ModuleCache::new()));
+
     // Print file path only in 'all' mode
     if matches!(report, ReportMode::All) {
         println!("\n{}", stdin_path.display());
         let _ = io::stdout().flush();
     }
 
-    match run_source_tests_with_progress(&source, "<stdin>", &stdin_path, filter, colors, report) {
+    match run_source_tests_with_progress(&source, "<stdin>", &stdin_path, filter, colors, report, cache) {
         Ok(results) => {
             all_results.merge(results);
         }
@@ -294,10 +303,11 @@ fn run_file_tests_with_progress(
     filter: Option<&str>,
     colors: &TermColors,
     report: &ReportMode,
+    cache: Rc<RefCell<ModuleCache>>,
 ) -> Result<TestResults, String> {
     let source = fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
     let file_path = path.to_string_lossy();
-    run_source_tests_with_progress(&source, &file_path, path, filter, colors, report)
+    run_source_tests_with_progress(&source, &file_path, path, filter, colors, report, cache)
 }
 
 /// Parse, type check, compile, and run tests with incremental progress output
@@ -308,9 +318,10 @@ fn run_source_tests_with_progress(
     filter: Option<&str>,
     colors: &TermColors,
     report: &ReportMode,
+    cache: Rc<RefCell<ModuleCache>>,
 ) -> Result<TestResults, String> {
-    // Parse and type check
-    let analyzed = parse_and_analyze(source, file_path).map_err(|()| String::new())?;
+    // Parse and type check with shared cache
+    let analyzed = parse_and_analyze_with_cache(source, file_path, cache).map_err(|()| String::new())?;
 
     // Compile
     let mut jit = JitContext::new();

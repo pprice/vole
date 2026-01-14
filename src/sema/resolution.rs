@@ -107,6 +107,11 @@ impl MethodResolutions {
     pub fn into_inner(self) -> HashMap<NodeId, ResolvedMethod> {
         self.resolutions
     }
+
+    /// Clone the inner HashMap without consuming self
+    pub fn clone_inner(&self) -> HashMap<NodeId, ResolvedMethod> {
+        self.resolutions.clone()
+    }
 }
 
 #[cfg(test)]

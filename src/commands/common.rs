@@ -14,10 +14,12 @@ use crate::frontend::{AstPrinter, Interner, ParseError, Parser, ast::Program};
 use crate::identity::NameTable;
 use crate::runtime::set_stdout_capture;
 use crate::sema::{
-    AnalysisOutput, Analyzer, EntityRegistry, ExpressionData, ImplementRegistry, ProgramQuery,
-    TypeError, TypeWarning,
+    AnalysisOutput, Analyzer, EntityRegistry, ExpressionData, ImplementRegistry, ModuleCache,
+    ProgramQuery, TypeError, TypeWarning,
 };
 use crate::transforms;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
@@ -189,6 +191,81 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
     };
 
     // Render any warnings (non-fatal diagnostics)
+    for warn in &analyzer.take_warnings() {
+        render_sema_warning(warn, file_path, source);
+    }
+
+    let output = analyzer.into_analysis_results();
+    Ok(AnalyzedProgram::from_analysis(program, interner, output))
+}
+
+/// Parse and analyze a source file with a shared module cache.
+/// The cache is used to avoid re-analyzing modules that have already been analyzed.
+#[allow(clippy::result_unit_err)]
+pub fn parse_and_analyze_with_cache(
+    source: &str,
+    file_path: &str,
+    cache: Rc<RefCell<ModuleCache>>,
+) -> Result<AnalyzedProgram, ()> {
+    // Parse phase
+    let (mut program, mut interner) = {
+        let _span = tracing::info_span!("parse", file = %file_path).entered();
+        let mut parser = Parser::with_file(source, file_path);
+        let program = match parser.parse_program() {
+            Ok(prog) => prog,
+            Err(e) => {
+                let lexer_errors = parser.take_lexer_errors();
+                if !lexer_errors.is_empty() {
+                    for err in &lexer_errors {
+                        render_lexer_error(err, file_path, source);
+                    }
+                } else {
+                    render_parser_error(&e, file_path, source);
+                }
+                return Err(());
+            }
+        };
+
+        let lexer_errors = parser.take_lexer_errors();
+        if !lexer_errors.is_empty() {
+            for err in &lexer_errors {
+                render_lexer_error(err, file_path, source);
+            }
+            return Err(());
+        }
+
+        let mut interner = parser.into_interner();
+        interner.seed_builtin_symbols();
+        tracing::debug!(declarations = program.declarations.len(), "parsed");
+        (program, interner)
+    };
+
+    // Transform phase
+    {
+        let _span = tracing::info_span!("transform").entered();
+        let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
+        if !transform_errors.is_empty() {
+            for err in &transform_errors {
+                render_sema_error(err, file_path, source);
+            }
+            return Err(());
+        }
+    }
+
+    // Sema phase with cache
+    let mut analyzer = {
+        let _span = tracing::info_span!("sema").entered();
+        let mut analyzer = Analyzer::with_cache(file_path, source, cache);
+        if let Err(errors) = analyzer.analyze(&program, &interner) {
+            for err in &errors {
+                render_sema_error(err, file_path, source);
+            }
+            return Err(());
+        }
+        tracing::debug!("type checking complete");
+        analyzer
+    };
+
     for warn in &analyzer.take_warnings() {
         render_sema_warning(warn, file_path, source);
     }
