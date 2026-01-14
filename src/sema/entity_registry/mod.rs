@@ -2,19 +2,26 @@
 //!
 //! EntityRegistry stores type definitions, methods, fields, and functions,
 //! providing type-safe lookups by ID and name.
+//!
+//! This module is split into submodules by functionality:
+//! - `types` - Type registration and lookup
+//! - `methods` - Method registration, lookup, and inheritance
+//! - `fields` - Field registration, lookup, and substitution helpers
+//! - `functions` - Free function registration and lookup
+
+mod fields;
+mod functions;
+mod methods;
+mod types;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
+use crate::identity::{FieldId, FunctionId, MethodId, NameId, TypeDefId};
+use crate::sema::Type;
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
-use crate::sema::generic::substitute_type;
-use crate::sema::generic::{
-    ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache, TypeParamInfo,
-};
-use crate::sema::implement_registry::ExternalMethodInfo;
+use crate::sema::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
 use crate::sema::type_table::{TypeKey, TypeTable};
 use crate::sema::types::NominalType;
-use crate::sema::{FunctionType, Type};
 
 /// Central registry for all language entities
 #[derive(Debug, Clone)]
@@ -75,368 +82,7 @@ impl EntityRegistry {
         }
     }
 
-    /// Count total static methods registered (for debugging)
-    pub fn static_method_count(&self) -> usize {
-        self.method_defs.iter().filter(|m| m.is_static).count()
-    }
-
-    /// Register a new type definition
-    pub fn register_type(
-        &mut self,
-        name_id: NameId,
-        kind: TypeDefKind,
-        module: ModuleId,
-    ) -> TypeDefId {
-        let id = TypeDefId::new(self.type_defs.len() as u32);
-        self.type_defs.push(TypeDef {
-            id,
-            name_id,
-            kind,
-            module,
-            methods: Vec::new(),
-            fields: Vec::new(),
-            extends: Vec::new(),
-            type_params: Vec::new(),
-            static_methods: Vec::new(),
-            aliased_type: None,
-            generic_info: None,
-            error_info: None,
-            implements: Vec::new(),
-        });
-        self.type_by_name.insert(name_id, id);
-        self.methods_by_type.insert(id, HashMap::new());
-        self.fields_by_type.insert(id, HashMap::new());
-        self.static_methods_by_type.insert(id, HashMap::new());
-        id
-    }
-
-    /// Register all primitive types from the NameTable
-    pub fn register_primitives(&mut self, name_table: &crate::identity::NameTable) {
-        let primitives = &name_table.primitives;
-        let Some(builtin_module) = name_table.builtin_module_id() else {
-            return; // No builtin module yet - primitives can't be registered
-        };
-
-        // Register each primitive type
-        self.register_type(primitives.i8, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.i16, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.i32, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.i64, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.i128, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.u8, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.u16, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.u32, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.u64, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.f32, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.f64, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.bool, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.string, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.nil, TypeDefKind::Primitive, builtin_module);
-    }
-
-    /// Get a type definition by ID
-    pub fn get_type(&self, id: TypeDefId) -> &TypeDef {
-        &self.type_defs[id.index() as usize]
-    }
-
-    /// Get a mutable type definition by ID
-    pub fn get_type_mut(&mut self, id: TypeDefId) -> &mut TypeDef {
-        &mut self.type_defs[id.index() as usize]
-    }
-
-    /// Get the NameId for a type definition
-    pub fn name_id(&self, id: TypeDefId) -> NameId {
-        self.get_type(id).name_id
-    }
-
-    /// Look up a type by its NameId
-    #[must_use]
-    pub fn type_by_name(&self, name_id: NameId) -> Option<TypeDefId> {
-        self.type_by_name.get(&name_id).copied()
-    }
-
-    /// Look up an interface by its short name (string-based, cross-module)
-    /// This searches through all registered types to find one matching the short name
-    /// and of kind Interface
-    pub fn interface_by_short_name(
-        &self,
-        short_name: &str,
-        name_table: &crate::identity::NameTable,
-    ) -> Option<TypeDefId> {
-        for type_def in &self.type_defs {
-            if type_def.kind == TypeDefKind::Interface
-                && name_table
-                    .last_segment_str(type_def.name_id)
-                    .is_some_and(|last_segment| last_segment == short_name)
-            {
-                return Some(type_def.id);
-            }
-        }
-        None
-    }
-
-    /// Look up a class by its short name (string-based, cross-module)
-    /// This searches through all registered types to find one matching the short name
-    /// and of kind Class. Used for prelude classes like Map and Set.
-    pub fn class_by_short_name(
-        &self,
-        short_name: &str,
-        name_table: &crate::identity::NameTable,
-    ) -> Option<TypeDefId> {
-        tracing::trace!(short_name, "class_by_short_name searching");
-        for type_def in &self.type_defs {
-            if type_def.kind == TypeDefKind::Class {
-                let last_seg = name_table.last_segment_str(type_def.name_id);
-                tracing::trace!(?type_def.name_id, ?last_seg, "checking class");
-                if last_seg.is_some_and(|last_segment| last_segment == short_name) {
-                    tracing::trace!(?type_def.id, "found class by short name");
-                    return Some(type_def.id);
-                }
-            }
-        }
-        tracing::trace!("class not found by short name");
-        None
-    }
-
-    /// Register a new method on a type
-    pub fn register_method(
-        &mut self,
-        defining_type: TypeDefId,
-        name_id: NameId,
-        full_name_id: NameId,
-        signature: FunctionType,
-        has_default: bool,
-    ) -> MethodId {
-        self.register_method_with_binding(
-            defining_type,
-            name_id,
-            full_name_id,
-            signature,
-            has_default,
-            None,
-        )
-    }
-
-    /// Register a new method on a type with optional external binding
-    pub fn register_method_with_binding(
-        &mut self,
-        defining_type: TypeDefId,
-        name_id: NameId,
-        full_name_id: NameId,
-        signature: FunctionType,
-        has_default: bool,
-        external_binding: Option<ExternalMethodInfo>,
-    ) -> MethodId {
-        let id = MethodId::new(self.method_defs.len() as u32);
-        self.method_defs.push(MethodDef {
-            id,
-            name_id,
-            full_name_id,
-            defining_type,
-            signature,
-            has_default,
-            is_static: false,
-            external_binding,
-            method_type_params: Vec::new(),
-        });
-        self.method_by_full_name.insert(full_name_id, id);
-        self.methods_by_type
-            .get_mut(&defining_type)
-            .expect("type must be registered before adding methods")
-            .insert(name_id, id);
-        self.type_defs[defining_type.index() as usize]
-            .methods
-            .push(id);
-        id
-    }
-
-    /// Register a new static method on a type
-    pub fn register_static_method(
-        &mut self,
-        defining_type: TypeDefId,
-        name_id: NameId,
-        full_name_id: NameId,
-        signature: FunctionType,
-        has_default: bool,
-        method_type_params: Vec<TypeParamInfo>,
-    ) -> MethodId {
-        self.register_static_method_with_binding(
-            defining_type,
-            name_id,
-            full_name_id,
-            signature,
-            has_default,
-            None,
-            method_type_params,
-        )
-    }
-
-    /// Register a new static method on a type with optional external binding
-    #[allow(clippy::too_many_arguments)]
-    pub fn register_static_method_with_binding(
-        &mut self,
-        defining_type: TypeDefId,
-        name_id: NameId,
-        full_name_id: NameId,
-        signature: FunctionType,
-        has_default: bool,
-        external_binding: Option<ExternalMethodInfo>,
-        method_type_params: Vec<TypeParamInfo>,
-    ) -> MethodId {
-        let id = MethodId::new(self.method_defs.len() as u32);
-        self.method_defs.push(MethodDef {
-            id,
-            name_id,
-            full_name_id,
-            defining_type,
-            signature,
-            has_default,
-            is_static: true,
-            external_binding,
-            method_type_params,
-        });
-        self.method_by_full_name.insert(full_name_id, id);
-        self.static_methods_by_type
-            .get_mut(&defining_type)
-            .expect("type must be registered before adding static methods")
-            .insert(name_id, id);
-        self.type_defs[defining_type.index() as usize]
-            .static_methods
-            .push(id);
-        id
-    }
-
-    /// Get all static methods defined directly on a type
-    pub fn static_methods_on_type(
-        &self,
-        type_id: TypeDefId,
-    ) -> impl Iterator<Item = MethodId> + '_ {
-        self.type_defs[type_id.index() as usize]
-            .static_methods
-            .iter()
-            .copied()
-    }
-
-    /// Find a static method on a type by its short name
-    pub fn find_static_method_on_type(
-        &self,
-        type_id: TypeDefId,
-        name_id: NameId,
-    ) -> Option<MethodId> {
-        self.static_methods_by_type
-            .get(&type_id)
-            .and_then(|methods| methods.get(&name_id).copied())
-    }
-
-    /// Get a method definition by ID
-    pub fn get_method(&self, id: MethodId) -> &MethodDef {
-        &self.method_defs[id.index() as usize]
-    }
-
-    /// Get all methods defined directly on a type (not inherited)
-    pub fn methods_on_type(&self, type_id: TypeDefId) -> impl Iterator<Item = MethodId> + '_ {
-        self.type_defs[type_id.index() as usize]
-            .methods
-            .iter()
-            .copied()
-    }
-
-    /// Find a method on a type by its short name (not inherited)
-    #[must_use]
-    pub fn find_method_on_type(&self, type_id: TypeDefId, name_id: NameId) -> Option<MethodId> {
-        self.methods_by_type
-            .get(&type_id)
-            .and_then(|methods| methods.get(&name_id).copied())
-    }
-
-    /// Register a new field on a type
-    pub fn register_field(
-        &mut self,
-        defining_type: TypeDefId,
-        name_id: NameId,
-        full_name_id: NameId,
-        ty: Type,
-        slot: usize,
-    ) -> FieldId {
-        let id = FieldId::new(self.field_defs.len() as u32);
-        self.field_defs.push(FieldDef {
-            id,
-            name_id,
-            full_name_id,
-            defining_type,
-            ty,
-            slot,
-        });
-        self.field_by_full_name.insert(full_name_id, id);
-        self.fields_by_type
-            .get_mut(&defining_type)
-            .expect("type must be registered before adding fields")
-            .insert(name_id, id);
-        self.type_defs[defining_type.index() as usize]
-            .fields
-            .push(id);
-        id
-    }
-
-    /// Get a field definition by ID
-    pub fn get_field(&self, id: FieldId) -> &FieldDef {
-        &self.field_defs[id.index() as usize]
-    }
-
-    /// Get all fields defined directly on a type
-    pub fn fields_on_type(&self, type_id: TypeDefId) -> impl Iterator<Item = FieldId> + '_ {
-        self.type_defs[type_id.index() as usize]
-            .fields
-            .iter()
-            .copied()
-    }
-
-    /// Find a field on a type by its short name
-    pub fn find_field_on_type(&self, type_id: TypeDefId, name_id: NameId) -> Option<FieldId> {
-        self.fields_by_type
-            .get(&type_id)
-            .and_then(|fields| fields.get(&name_id).copied())
-    }
-
-    /// Register a new free function
-    pub fn register_function(
-        &mut self,
-        name_id: NameId,
-        full_name_id: NameId,
-        module: ModuleId,
-        signature: FunctionType,
-    ) -> FunctionId {
-        let id = FunctionId::new(self.function_defs.len() as u32);
-        self.function_defs.push(FunctionDef {
-            id,
-            name_id,
-            full_name_id,
-            module,
-            signature,
-            generic_info: None,
-        });
-        self.function_by_name.insert(full_name_id, id);
-        id
-    }
-
-    /// Get a function definition by ID
-    pub fn get_function(&self, id: FunctionId) -> &FunctionDef {
-        &self.function_defs[id.index() as usize]
-    }
-
-    /// Look up a function by its full NameId
-    pub fn function_by_name(&self, full_name_id: NameId) -> Option<FunctionId> {
-        self.function_by_name.get(&full_name_id).copied()
-    }
-
-    /// Set generic function info (type params, param/return types) for a generic function
-    pub fn set_function_generic_info(
-        &mut self,
-        func_id: FunctionId,
-        info: crate::sema::entity_defs::GenericFuncInfo,
-    ) {
-        self.function_defs[func_id.index() as usize].generic_info = Some(info);
-    }
+    // ===== Type Relationships =====
 
     /// Add an extends relationship (derived extends base)
     pub fn add_extends(&mut self, derived: TypeDefId, base: TypeDefId) {
@@ -478,6 +124,29 @@ impl EntityRegistry {
         // Update the alias index for inverse lookups
         self.alias_index.entry(type_key).or_default().push(type_id);
     }
+
+    /// Check if derived extends base (transitive)
+    pub fn type_extends(&self, derived: TypeDefId, base: TypeDefId) -> bool {
+        if derived == base {
+            return true;
+        }
+        let mut stack = vec![derived];
+        let mut seen = HashSet::new();
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current) {
+                continue;
+            }
+            for parent in &self.type_defs[current.index() as usize].extends {
+                if *parent == base {
+                    return true;
+                }
+                stack.push(*parent);
+            }
+        }
+        false
+    }
+
+    // ===== Interface Implementations =====
 
     /// Add an interface implementation to a type
     pub fn add_implementation(
@@ -581,114 +250,7 @@ impl EntityRegistry {
         None
     }
 
-    /// Check if derived extends base (transitive)
-    pub fn type_extends(&self, derived: TypeDefId, base: TypeDefId) -> bool {
-        if derived == base {
-            return true;
-        }
-        let mut stack = vec![derived];
-        let mut seen = HashSet::new();
-        while let Some(current) = stack.pop() {
-            if !seen.insert(current) {
-                continue;
-            }
-            for parent in &self.type_defs[current.index() as usize].extends {
-                if *parent == base {
-                    return true;
-                }
-                stack.push(*parent);
-            }
-        }
-        false
-    }
-
-    /// Resolve a method on a type, checking inherited methods too
-    #[must_use]
-    pub fn resolve_method(&self, type_id: TypeDefId, method_name: NameId) -> Option<MethodId> {
-        // Check direct methods first
-        if let Some(method_id) = self.find_method_on_type(type_id, method_name) {
-            return Some(method_id);
-        }
-        // Check parent types
-        for parent in &self.type_defs[type_id.index() as usize].extends.clone() {
-            if let Some(method_id) = self.resolve_method(*parent, method_name) {
-                return Some(method_id);
-            }
-        }
-        None
-    }
-
-    /// Get all methods on a type including inherited
-    pub fn all_methods(&self, type_id: TypeDefId) -> Vec<MethodId> {
-        let mut result = Vec::new();
-        let mut seen_names = HashSet::new();
-        self.collect_all_methods(type_id, &mut result, &mut seen_names);
-        result
-    }
-
-    fn collect_all_methods(
-        &self,
-        type_id: TypeDefId,
-        result: &mut Vec<MethodId>,
-        seen_names: &mut HashSet<NameId>,
-    ) {
-        // Add direct methods first (they override inherited)
-        for method_id in &self.type_defs[type_id.index() as usize].methods {
-            let method = self.get_method(*method_id);
-            if seen_names.insert(method.name_id) {
-                result.push(*method_id);
-            }
-        }
-        // Then check parents
-        for parent in self.type_defs[type_id.index() as usize].extends.clone() {
-            self.collect_all_methods(parent, result, seen_names);
-        }
-    }
-
-    /// Check if a type is a functional interface (single abstract method, no fields).
-    /// Returns the single abstract method's ID if it's a functional interface.
-    #[must_use]
-    pub fn is_functional(&self, type_id: TypeDefId) -> Option<MethodId> {
-        let type_def = self.get_type(type_id);
-
-        // Must have no fields
-        if !type_def.fields.is_empty() {
-            return None;
-        }
-
-        // Count abstract methods (no default)
-        let abstract_methods: Vec<MethodId> = type_def
-            .methods
-            .iter()
-            .copied()
-            .filter(|&method_id| !self.get_method(method_id).has_default)
-            .collect();
-
-        // Exactly one abstract method = functional interface
-        if abstract_methods.len() == 1 {
-            Some(abstract_methods[0])
-        } else {
-            None
-        }
-    }
-
-    /// Get the external binding for a method (if any)
-    #[must_use]
-    pub fn get_external_binding(&self, method_id: MethodId) -> Option<&ExternalMethodInfo> {
-        self.get_method(method_id).external_binding.as_ref()
-    }
-
-    /// Check if all methods on a type have external bindings
-    pub fn is_external_only(&self, type_id: TypeDefId) -> bool {
-        let type_def = self.get_type(type_id);
-        if type_def.methods.is_empty() {
-            return false;
-        }
-        type_def.methods.iter().all(|&method_id| {
-            let method = self.get_method(method_id);
-            method.external_binding.is_some() && !method.has_default
-        })
-    }
+    // ===== Type Builders =====
 
     /// Build a ClassType from a TypeDefId (for types registered as Class)
     pub fn build_class_type(&self, type_id: TypeDefId) -> Option<crate::sema::ClassType> {
@@ -739,6 +301,55 @@ impl EntityRegistry {
             _ => None,
         }
     }
+
+    // ===== Alias Management =====
+
+    /// Get all type aliases that resolve to a given type.
+    /// Returns an empty slice if no aliases point to this type.
+    pub fn aliases_for(&self, type_key: TypeKey) -> &[TypeDefId] {
+        self.alias_index
+            .get(&type_key)
+            .map_or(&[], |v| v.as_slice())
+    }
+
+    /// Register a type alias and update the alias index.
+    /// The type_key should be obtained from TypeTable::key_for_type for the aliased type.
+    pub fn register_alias(
+        &mut self,
+        name_id: NameId,
+        module: crate::identity::ModuleId,
+        aliased_type: Type,
+        type_key: TypeKey,
+    ) -> TypeDefId {
+        // Register the type with kind Alias
+        let id = TypeDefId::new(self.type_defs.len() as u32);
+        self.type_defs.push(TypeDef {
+            id,
+            name_id,
+            kind: TypeDefKind::Alias,
+            module,
+            methods: Vec::new(),
+            fields: Vec::new(),
+            extends: Vec::new(),
+            type_params: Vec::new(),
+            static_methods: Vec::new(),
+            aliased_type: Some(aliased_type),
+            generic_info: None,
+            error_info: None,
+            implements: Vec::new(),
+        });
+        self.type_by_name.insert(name_id, id);
+        self.methods_by_type.insert(id, HashMap::new());
+        self.fields_by_type.insert(id, HashMap::new());
+        self.static_methods_by_type.insert(id, HashMap::new());
+
+        // Update the alias index for inverse lookups
+        self.alias_index.entry(type_key).or_default().push(id);
+
+        id
+    }
+
+    // ===== Registry Merge =====
 
     /// Merge another registry into this one.
     /// This is used when merging prelude definitions into the main analyzer.
@@ -894,123 +505,6 @@ impl EntityRegistry {
         // Monomorph cache: take other's (it was cloned from ours, so it has all our instances plus new ones)
         self.monomorph_cache = other.monomorph_cache.clone();
     }
-
-    /// Get all type aliases that resolve to a given type.
-    /// Returns an empty slice if no aliases point to this type.
-    pub fn aliases_for(&self, type_key: TypeKey) -> &[TypeDefId] {
-        self.alias_index
-            .get(&type_key)
-            .map_or(&[], |v| v.as_slice())
-    }
-
-    /// Register a type alias and update the alias index.
-    /// The type_key should be obtained from TypeTable::key_for_type for the aliased type.
-    pub fn register_alias(
-        &mut self,
-        name_id: NameId,
-        module: ModuleId,
-        aliased_type: Type,
-        type_key: TypeKey,
-    ) -> TypeDefId {
-        // Register the type with kind Alias
-        let id = TypeDefId::new(self.type_defs.len() as u32);
-        self.type_defs.push(TypeDef {
-            id,
-            name_id,
-            kind: TypeDefKind::Alias,
-            module,
-            methods: Vec::new(),
-            fields: Vec::new(),
-            extends: Vec::new(),
-            type_params: Vec::new(),
-            static_methods: Vec::new(),
-            aliased_type: Some(aliased_type),
-            generic_info: None,
-            error_info: None,
-            implements: Vec::new(),
-        });
-        self.type_by_name.insert(name_id, id);
-        self.methods_by_type.insert(id, HashMap::new());
-        self.fields_by_type.insert(id, HashMap::new());
-        self.static_methods_by_type.insert(id, HashMap::new());
-
-        // Update the alias index for inverse lookups
-        self.alias_index.entry(type_key).or_default().push(id);
-
-        id
-    }
-
-    // ===== Field and Substitution Helpers =====
-
-    /// Get all field NameIds for a type (for iteration and lookups)
-    pub fn field_name_ids(&self, type_def_id: TypeDefId) -> &[NameId] {
-        self.get_type(type_def_id)
-            .generic_info
-            .as_ref()
-            .map(|gi| gi.field_names.as_slice())
-            .unwrap_or(&[])
-    }
-
-    /// Build substitution map for a generic type instantiation
-    pub fn substitution_map(
-        &self,
-        type_def_id: TypeDefId,
-        type_args: &[Type],
-    ) -> HashMap<NameId, Type> {
-        let type_def = self.get_type(type_def_id);
-        type_def
-            .type_params
-            .iter()
-            .zip(type_args.iter())
-            .map(|(param, arg)| (*param, arg.clone()))
-            .collect()
-    }
-
-    /// Apply substitution to a type based on type_def's type params
-    pub fn substitute_type_with_args(
-        &self,
-        type_def_id: TypeDefId,
-        type_args: &[Type],
-        ty: &Type,
-    ) -> Type {
-        if type_args.is_empty() {
-            return ty.clone();
-        }
-        let subs = self.substitution_map(type_def_id, type_args);
-        substitute_type(ty, &subs)
-    }
-
-    /// Get field type with type argument substitution applied
-    pub fn field_type(
-        &self,
-        type_def_id: TypeDefId,
-        type_args: &[Type],
-        field_name_id: NameId,
-    ) -> Option<Type> {
-        let type_def = self.get_type(type_def_id);
-        let generic_info = type_def.generic_info.as_ref()?;
-        let idx = generic_info
-            .field_names
-            .iter()
-            .position(|n| *n == field_name_id)?;
-        let field_type = &generic_info.field_types[idx];
-
-        if type_args.is_empty() {
-            Some(field_type.clone())
-        } else {
-            Some(self.substitute_type_with_args(type_def_id, type_args, field_type))
-        }
-    }
-
-    /// Get field index by NameId
-    pub fn field_index(&self, type_def_id: TypeDefId, field_name_id: NameId) -> Option<usize> {
-        let type_def = self.get_type(type_def_id);
-        let generic_info = type_def.generic_info.as_ref()?;
-        generic_info
-            .field_names
-            .iter()
-            .position(|n| *n == field_name_id)
-    }
 }
 
 impl Default for EntityRegistry {
@@ -1023,7 +517,7 @@ impl Default for EntityRegistry {
 mod tests {
     use super::*;
     use crate::identity::NameTable;
-    use crate::sema::Type;
+    use crate::sema::FunctionType;
     use crate::sema::types::PrimitiveType;
 
     #[test]
