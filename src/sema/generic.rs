@@ -170,6 +170,12 @@ pub struct TypeParamInfo {
     pub type_param_id: Option<TypeParamId>,
 }
 
+/// Merge two type parameter lists into one.
+/// This is useful for combining class/record type params with method type params.
+pub fn merge_type_params(base: &[TypeParamInfo], additional: &[TypeParamInfo]) -> Vec<TypeParamInfo> {
+    base.iter().chain(additional.iter()).cloned().collect()
+}
+
 /// Resolved constraint for type parameter checking
 #[derive(Debug, Clone)]
 pub enum TypeConstraint {
@@ -233,6 +239,25 @@ impl TypeParamScope {
     /// Get the number of type parameters in scope
     pub fn len(&self) -> usize {
         self.params.len()
+    }
+
+    /// Create a new scope that combines this scope's params with additional params.
+    /// This is useful for method type checking where class/record type params need
+    /// to be merged with method-specific type params.
+    pub fn merge_with(&self, additional: &[TypeParamInfo]) -> TypeParamScope {
+        let mut merged = self.clone();
+        merged.extend(additional);
+        merged
+    }
+
+    /// Extend this scope with additional type parameters.
+    pub fn extend(&mut self, params: &[TypeParamInfo]) {
+        self.params.extend(params.iter().cloned());
+    }
+
+    /// Create a scope from a slice of TypeParamInfo.
+    pub fn from_params(params: Vec<TypeParamInfo>) -> Self {
+        Self { params }
     }
 }
 

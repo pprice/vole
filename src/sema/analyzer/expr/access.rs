@@ -2,7 +2,7 @@ use super::super::*;
 use crate::identity::{NameId, TypeDefId};
 use crate::sema::generic::{
     ClassMethodMonomorphInstance, ClassMethodMonomorphKey, StaticMethodMonomorphInstance,
-    StaticMethodMonomorphKey, TypeParamInfo, substitute_type,
+    StaticMethodMonomorphKey, TypeParamInfo, merge_type_params, substitute_type,
 };
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::types::NominalType;
@@ -553,11 +553,7 @@ impl Analyzer {
                 .unwrap_or_default();
 
             // Combine class and method type params for inference
-            let all_type_params: Vec<TypeParamInfo> = class_type_params
-                .iter()
-                .chain(method_type_params.iter())
-                .cloned()
-                .collect();
+            let all_type_params = merge_type_params(&class_type_params, &method_type_params);
 
             // Infer type params if there are any (class-level or method-level)
             let (final_params, final_return, maybe_inferred) = if !all_type_params.is_empty() {
