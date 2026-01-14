@@ -14,8 +14,8 @@ use crate::frontend::{
     AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, LetInit, MatchExpr, Pattern, RangeExpr,
     RecordFieldPattern, Symbol, UnaryOp,
 };
-use crate::sema::Type;
 use crate::sema::entity_defs::TypeDefKind;
+use crate::sema::{PrimitiveType, Type};
 
 use super::context::Cg;
 use super::interface_vtable::box_interface_value;
@@ -44,7 +44,7 @@ impl Cg<'_, '_, '_> {
                     .ctx
                     .get_expr_type(&expr.id)
                     .cloned()
-                    .unwrap_or(Type::I64);
+                    .unwrap_or(Type::Primitive(PrimitiveType::I64));
                 Ok(self.int_const(*n, vole_type))
             }
             ExprKind::FloatLiteral(n) => {
@@ -53,7 +53,7 @@ impl Cg<'_, '_, '_> {
                     .ctx
                     .get_expr_type(&expr.id)
                     .cloned()
-                    .unwrap_or(Type::F64);
+                    .unwrap_or(Type::Primitive(PrimitiveType::F64));
                 Ok(self.float_const(*n, vole_type))
             }
             ExprKind::BoolLiteral(b) => Ok(self.bool_const(*b)),
@@ -820,14 +820,16 @@ impl Cg<'_, '_, '_> {
         right: Value,
     ) -> Result<Value, String> {
         Ok(match ty {
-            Type::String => {
+            Type::Primitive(PrimitiveType::String) => {
                 if self.ctx.func_registry.has_runtime(RuntimeFn::StringEq) {
                     self.call_runtime(RuntimeFn::StringEq, &[left, right])?
                 } else {
                     self.builder.ins().icmp(IntCC::Equal, left, right)
                 }
             }
-            Type::F64 => self.builder.ins().fcmp(FloatCC::Equal, left, right),
+            Type::Primitive(PrimitiveType::F64) => {
+                self.builder.ins().fcmp(FloatCC::Equal, left, right)
+            }
             _ => self.builder.ins().icmp(IntCC::Equal, left, right),
         })
     }

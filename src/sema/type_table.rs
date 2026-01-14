@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use crate::identity::{ModuleId, NameId, NameTable, TypeDefId};
 use crate::sema::Type;
 use crate::sema::implement_registry::PrimitiveTypeId;
+use crate::sema::types::PrimitiveType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeKey(u32);
@@ -102,19 +103,19 @@ impl TypeTable {
         }
         self.primitive_names.insert(prim, name_id);
         let ty = match prim {
-            PrimitiveTypeId::I8 => Type::I8,
-            PrimitiveTypeId::I16 => Type::I16,
-            PrimitiveTypeId::I32 => Type::I32,
-            PrimitiveTypeId::I64 => Type::I64,
-            PrimitiveTypeId::I128 => Type::I128,
-            PrimitiveTypeId::U8 => Type::U8,
-            PrimitiveTypeId::U16 => Type::U16,
-            PrimitiveTypeId::U32 => Type::U32,
-            PrimitiveTypeId::U64 => Type::U64,
-            PrimitiveTypeId::F32 => Type::F32,
-            PrimitiveTypeId::F64 => Type::F64,
-            PrimitiveTypeId::Bool => Type::Bool,
-            PrimitiveTypeId::String => Type::String,
+            PrimitiveTypeId::I8 => Type::Primitive(PrimitiveType::I8),
+            PrimitiveTypeId::I16 => Type::Primitive(PrimitiveType::I16),
+            PrimitiveTypeId::I32 => Type::Primitive(PrimitiveType::I32),
+            PrimitiveTypeId::I64 => Type::Primitive(PrimitiveType::I64),
+            PrimitiveTypeId::I128 => Type::Primitive(PrimitiveType::I128),
+            PrimitiveTypeId::U8 => Type::Primitive(PrimitiveType::U8),
+            PrimitiveTypeId::U16 => Type::Primitive(PrimitiveType::U16),
+            PrimitiveTypeId::U32 => Type::Primitive(PrimitiveType::U32),
+            PrimitiveTypeId::U64 => Type::Primitive(PrimitiveType::U64),
+            PrimitiveTypeId::F32 => Type::Primitive(PrimitiveType::F32),
+            PrimitiveTypeId::F64 => Type::Primitive(PrimitiveType::F64),
+            PrimitiveTypeId::Bool => Type::Primitive(PrimitiveType::Bool),
+            PrimitiveTypeId::String => Type::Primitive(PrimitiveType::String),
             PrimitiveTypeId::Range => Type::Range,
         };
         let _ = self.insert_named(ty, name_id);
@@ -175,21 +176,47 @@ impl TypeTable {
 
     pub fn key_for_type(&mut self, ty: &Type) -> TypeKey {
         match ty {
-            Type::I8 => self.intern_primitive(PrimitiveTypeId::I8, TypeFingerprint::I8, ty),
-            Type::I16 => self.intern_primitive(PrimitiveTypeId::I16, TypeFingerprint::I16, ty),
-            Type::I32 => self.intern_primitive(PrimitiveTypeId::I32, TypeFingerprint::I32, ty),
-            Type::I64 => self.intern_primitive(PrimitiveTypeId::I64, TypeFingerprint::I64, ty),
-            Type::I128 => self.intern_primitive(PrimitiveTypeId::I128, TypeFingerprint::I128, ty),
-            Type::U8 => self.intern_primitive(PrimitiveTypeId::U8, TypeFingerprint::U8, ty),
-            Type::U16 => self.intern_primitive(PrimitiveTypeId::U16, TypeFingerprint::U16, ty),
-            Type::U32 => self.intern_primitive(PrimitiveTypeId::U32, TypeFingerprint::U32, ty),
-            Type::U64 => self.intern_primitive(PrimitiveTypeId::U64, TypeFingerprint::U64, ty),
-            Type::F32 => self.intern_primitive(PrimitiveTypeId::F32, TypeFingerprint::F32, ty),
-            Type::F64 => self.intern_primitive(PrimitiveTypeId::F64, TypeFingerprint::F64, ty),
-            Type::Bool => self.intern_primitive(PrimitiveTypeId::Bool, TypeFingerprint::Bool, ty),
-            Type::String => {
-                self.intern_primitive(PrimitiveTypeId::String, TypeFingerprint::String, ty)
-            }
+            Type::Primitive(prim) => match prim {
+                PrimitiveType::I8 => {
+                    self.intern_primitive(PrimitiveTypeId::I8, TypeFingerprint::I8, ty)
+                }
+                PrimitiveType::I16 => {
+                    self.intern_primitive(PrimitiveTypeId::I16, TypeFingerprint::I16, ty)
+                }
+                PrimitiveType::I32 => {
+                    self.intern_primitive(PrimitiveTypeId::I32, TypeFingerprint::I32, ty)
+                }
+                PrimitiveType::I64 => {
+                    self.intern_primitive(PrimitiveTypeId::I64, TypeFingerprint::I64, ty)
+                }
+                PrimitiveType::I128 => {
+                    self.intern_primitive(PrimitiveTypeId::I128, TypeFingerprint::I128, ty)
+                }
+                PrimitiveType::U8 => {
+                    self.intern_primitive(PrimitiveTypeId::U8, TypeFingerprint::U8, ty)
+                }
+                PrimitiveType::U16 => {
+                    self.intern_primitive(PrimitiveTypeId::U16, TypeFingerprint::U16, ty)
+                }
+                PrimitiveType::U32 => {
+                    self.intern_primitive(PrimitiveTypeId::U32, TypeFingerprint::U32, ty)
+                }
+                PrimitiveType::U64 => {
+                    self.intern_primitive(PrimitiveTypeId::U64, TypeFingerprint::U64, ty)
+                }
+                PrimitiveType::F32 => {
+                    self.intern_primitive(PrimitiveTypeId::F32, TypeFingerprint::F32, ty)
+                }
+                PrimitiveType::F64 => {
+                    self.intern_primitive(PrimitiveTypeId::F64, TypeFingerprint::F64, ty)
+                }
+                PrimitiveType::Bool => {
+                    self.intern_primitive(PrimitiveTypeId::Bool, TypeFingerprint::Bool, ty)
+                }
+                PrimitiveType::String => {
+                    self.intern_primitive(PrimitiveTypeId::String, TypeFingerprint::String, ty)
+                }
+            },
             Type::Void => self.intern_fingerprint(TypeFingerprint::Void, ty.clone()),
             Type::Nil => self.intern_fingerprint(TypeFingerprint::Nil, ty.clone()),
             Type::Done => self.intern_fingerprint(TypeFingerprint::Done, ty.clone()),

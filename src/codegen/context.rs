@@ -12,8 +12,8 @@ use crate::codegen::{FunctionKey, RuntimeFn};
 use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::runtime::native_registry::NativeType;
-use crate::sema::Type;
 use crate::sema::implement_registry::ExternalMethodInfo;
+use crate::sema::{PrimitiveType, Type};
 
 use super::lambda::CaptureBinding;
 use super::types::{CompileCtx, CompiledValue, native_type_to_cranelift, type_to_cranelift};
@@ -201,7 +201,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I8,
-            vole_type: Type::Bool,
+            vole_type: Type::Primitive(PrimitiveType::Bool),
         }
     }
 
@@ -216,7 +216,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I64,
-            vole_type: Type::I64,
+            vole_type: Type::Primitive(PrimitiveType::I64),
         }
     }
 
@@ -241,7 +241,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a float constant with explicit type (for bidirectional inference)
     pub fn float_const(&mut self, n: f64, vole_type: Type) -> CompiledValue {
         let (ty, value) = match vole_type {
-            Type::F32 => {
+            Type::Primitive(PrimitiveType::F32) => {
                 let v = self.builder.ins().f32const(n as f32);
                 (types::F32, v)
             }
@@ -283,7 +283,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: self.ctx.pointer_type,
-            vole_type: Type::String,
+            vole_type: Type::Primitive(PrimitiveType::String),
         }
     }
 

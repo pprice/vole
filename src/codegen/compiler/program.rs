@@ -13,12 +13,12 @@ use crate::frontend::{
     Decl, FuncDecl, InterfaceMethod, Interner, LetStmt, Program, Symbol, TestCase, TestsDecl,
 };
 use crate::identity::NameId;
-use crate::sema::Type;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
     ClassMethodMonomorphInstance, MonomorphInstance, StaticMethodMonomorphInstance, substitute_type,
 };
 use crate::sema::types::{ClassType, RecordType};
+use crate::sema::{PrimitiveType, Type};
 
 impl Compiler<'_> {
     fn main_function_key_and_name(&mut self, sym: Symbol) -> (FunctionKey, String) {
@@ -112,7 +112,8 @@ impl Compiler<'_> {
                         let func_name = self.test_display_name(name_id);
                         let sig = self.jit.create_signature(&[], Some(types::I64));
                         let func_id = self.jit.declare_function(&func_name, &sig);
-                        self.func_registry.set_return_type(func_key, Type::I64);
+                        self.func_registry
+                            .set_return_type(func_key, Type::Primitive(PrimitiveType::I64));
                         self.func_registry.set_func_id(func_key, func_id);
                         test_count += 1;
                     }
@@ -667,7 +668,8 @@ impl Compiler<'_> {
                         let func_name = self.test_display_name(name_id);
                         let sig = self.jit.create_signature(&[], Some(types::I64));
                         let func_id = self.jit.declare_function(&func_name, &sig);
-                        self.func_registry.set_return_type(func_key, Type::I64);
+                        self.func_registry
+                            .set_return_type(func_key, Type::Primitive(PrimitiveType::I64));
                         self.func_registry.set_func_id(func_key, func_id);
                         test_count += 1;
                     }
@@ -1468,7 +1470,7 @@ impl Compiler<'_> {
             substitute_type(&metadata.vole_type, substitutions)
         } else {
             // Final fallback
-            Type::I64
+            Type::Primitive(PrimitiveType::I64)
         }
     }
 

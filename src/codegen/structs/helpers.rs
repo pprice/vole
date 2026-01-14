@@ -5,6 +5,7 @@ use cranelift::prelude::*;
 use crate::codegen::types::CompileCtx;
 use crate::codegen::types::CompiledValue;
 use crate::errors::CodegenError;
+use crate::sema::PrimitiveType;
 use crate::sema::Type;
 use crate::sema::generic::substitute_type;
 
@@ -119,35 +120,38 @@ pub(crate) fn convert_field_value(
     field_type: &Type,
 ) -> (Value, types::Type) {
     match field_type {
-        Type::F64 => {
+        Type::Primitive(PrimitiveType::F64) => {
             let fval = builder
                 .ins()
                 .bitcast(types::F64, MemFlags::new(), raw_value);
             (fval, types::F64)
         }
-        Type::F32 => {
+        Type::Primitive(PrimitiveType::F32) => {
             // Truncate to i32 first, then bitcast
             let i32_val = builder.ins().ireduce(types::I32, raw_value);
             let fval = builder.ins().bitcast(types::F32, MemFlags::new(), i32_val);
             (fval, types::F32)
         }
-        Type::Bool => {
+        Type::Primitive(PrimitiveType::Bool) => {
             let bval = builder.ins().ireduce(types::I8, raw_value);
             (bval, types::I8)
         }
-        Type::I8 | Type::U8 => {
+        Type::Primitive(PrimitiveType::I8) | Type::Primitive(PrimitiveType::U8) => {
             let val = builder.ins().ireduce(types::I8, raw_value);
             (val, types::I8)
         }
-        Type::I16 | Type::U16 => {
+        Type::Primitive(PrimitiveType::I16) | Type::Primitive(PrimitiveType::U16) => {
             let val = builder.ins().ireduce(types::I16, raw_value);
             (val, types::I16)
         }
-        Type::I32 | Type::U32 => {
+        Type::Primitive(PrimitiveType::I32) | Type::Primitive(PrimitiveType::U32) => {
             let val = builder.ins().ireduce(types::I32, raw_value);
             (val, types::I32)
         }
-        Type::String | Type::Array(_) | Type::Class(_) | Type::Record(_) => {
+        Type::Primitive(PrimitiveType::String)
+        | Type::Array(_)
+        | Type::Class(_)
+        | Type::Record(_) => {
             // Pointers stay as i64
             (raw_value, types::I64)
         }

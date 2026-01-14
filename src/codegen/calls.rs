@@ -13,7 +13,7 @@ use crate::errors::CodegenError;
 type ArgVec = SmallVec<[Value; 8]>;
 use crate::frontend::{CallExpr, ExprKind, LetInit, NodeId, StringPart};
 use crate::runtime::native_registry::{NativeFunction, NativeType};
-use crate::sema::{FunctionType, Type};
+use crate::sema::{FunctionType, PrimitiveType, Type};
 
 use super::context::Cg;
 use super::interface_vtable::box_interface_value;
@@ -52,7 +52,7 @@ pub(crate) fn compile_string_literal(
     Ok(CompiledValue {
         value: result,
         ty: pointer_type,
-        vole_type: Type::String,
+        vole_type: Type::Primitive(PrimitiveType::String),
     })
 }
 
@@ -66,7 +66,7 @@ pub(crate) fn value_to_string(
     func_registry: &FunctionRegistry,
 ) -> Result<Value, String> {
     // If already a string, return as-is
-    if matches!(val.vole_type, Type::String) {
+    if matches!(val.vole_type, Type::Primitive(PrimitiveType::String)) {
         return Ok(val.value);
     }
 
@@ -145,7 +145,7 @@ impl Cg<'_, '_, '_> {
 
     /// Convert a value to a string
     fn value_to_string(&mut self, val: CompiledValue) -> Result<Value, String> {
-        if matches!(val.vole_type, Type::String) {
+        if matches!(val.vole_type, Type::Primitive(PrimitiveType::String)) {
             return Ok(val.value);
         }
 
@@ -703,7 +703,8 @@ impl Cg<'_, '_, '_> {
         let arg = self.expr(&call.args[0])?;
 
         // Dispatch based on argument type
-        let (runtime, call_arg) = if matches!(arg.vole_type, Type::String) {
+        let (runtime, call_arg) = if matches!(arg.vole_type, Type::Primitive(PrimitiveType::String))
+        {
             (
                 if newline {
                     RuntimeFn::PrintlnString
@@ -968,19 +969,19 @@ impl Cg<'_, '_, '_> {
 /// Convert NativeType to Vole Type
 fn native_type_to_vole_type(nt: &NativeType) -> Type {
     match nt {
-        NativeType::I8 => Type::I8,
-        NativeType::I16 => Type::I16,
-        NativeType::I32 => Type::I32,
-        NativeType::I64 => Type::I64,
-        NativeType::I128 => Type::I128,
-        NativeType::U8 => Type::U8,
-        NativeType::U16 => Type::U16,
-        NativeType::U32 => Type::U32,
-        NativeType::U64 => Type::U64,
-        NativeType::F32 => Type::F32,
-        NativeType::F64 => Type::F64,
-        NativeType::Bool => Type::Bool,
-        NativeType::String => Type::String,
+        NativeType::I8 => Type::Primitive(PrimitiveType::I8),
+        NativeType::I16 => Type::Primitive(PrimitiveType::I16),
+        NativeType::I32 => Type::Primitive(PrimitiveType::I32),
+        NativeType::I64 => Type::Primitive(PrimitiveType::I64),
+        NativeType::I128 => Type::Primitive(PrimitiveType::I128),
+        NativeType::U8 => Type::Primitive(PrimitiveType::U8),
+        NativeType::U16 => Type::Primitive(PrimitiveType::U16),
+        NativeType::U32 => Type::Primitive(PrimitiveType::U32),
+        NativeType::U64 => Type::Primitive(PrimitiveType::U64),
+        NativeType::F32 => Type::Primitive(PrimitiveType::F32),
+        NativeType::F64 => Type::Primitive(PrimitiveType::F64),
+        NativeType::Bool => Type::Primitive(PrimitiveType::Bool),
+        NativeType::String => Type::Primitive(PrimitiveType::String),
         NativeType::Nil => Type::Nil,
         NativeType::Optional(inner) => {
             Type::Union(vec![native_type_to_vole_type(inner), Type::Nil])

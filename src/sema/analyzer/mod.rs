@@ -24,7 +24,7 @@ use crate::sema::implement_registry::{
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::types::{ConstantValue, ModuleType, StructuralType};
 use crate::sema::{
-    ClassType, ErrorTypeInfo, FunctionType, RecordType, StructField, Type, TypeKey,
+    ClassType, ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField, Type, TypeKey,
     compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
@@ -312,7 +312,7 @@ impl Analyzer {
                 method_len,
                 FunctionType {
                     params: vec![],
-                    return_type: Box::new(Type::I64),
+                    return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 }
             );
@@ -338,7 +338,7 @@ impl Analyzer {
                 method_len,
                 FunctionType {
                     params: vec![],
-                    return_type: Box::new(Type::I64),
+                    return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 }
             );
@@ -2094,12 +2094,22 @@ impl Analyzer {
                         .name_table
                         .intern(module_id, &[l.name], &module_interner);
                     let (ty, const_val) = match &init_expr.kind {
-                        ExprKind::FloatLiteral(v) => (Type::F64, Some(ConstantValue::F64(*v))),
-                        ExprKind::IntLiteral(v) => (Type::I64, Some(ConstantValue::I64(*v))),
-                        ExprKind::BoolLiteral(v) => (Type::Bool, Some(ConstantValue::Bool(*v))),
-                        ExprKind::StringLiteral(v) => {
-                            (Type::String, Some(ConstantValue::String(v.clone())))
-                        }
+                        ExprKind::FloatLiteral(v) => (
+                            Type::Primitive(PrimitiveType::F64),
+                            Some(ConstantValue::F64(*v)),
+                        ),
+                        ExprKind::IntLiteral(v) => (
+                            Type::Primitive(PrimitiveType::I64),
+                            Some(ConstantValue::I64(*v)),
+                        ),
+                        ExprKind::BoolLiteral(v) => (
+                            Type::Primitive(PrimitiveType::Bool),
+                            Some(ConstantValue::Bool(*v)),
+                        ),
+                        ExprKind::StringLiteral(v) => (
+                            Type::Primitive(PrimitiveType::String),
+                            Some(ConstantValue::String(v.clone())),
+                        ),
                         _ => (Type::unknown(), None), // Complex expressions need full analysis
                     };
                     exports.insert(name_id, ty);

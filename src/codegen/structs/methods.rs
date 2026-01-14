@@ -22,7 +22,7 @@ use crate::identity::NamerLookup;
 use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::generic::substitute_type;
 use crate::sema::resolution::ResolvedMethod;
-use crate::sema::{FunctionType, Type};
+use crate::sema::{FunctionType, PrimitiveType, Type};
 
 impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
@@ -427,7 +427,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: result,
             ty: self.ctx.pointer_type,
-            vole_type: Type::RuntimeIterator(Box::new(Type::I64)),
+            vole_type: Type::RuntimeIterator(Box::new(Type::Primitive(PrimitiveType::I64))),
         })
     }
 
@@ -451,16 +451,18 @@ impl Cg<'_, '_, '_> {
                     vole_type: Type::RuntimeIterator(elem_ty.clone()),
                 }))
             }
-            (Type::String, "length") => {
+            (Type::Primitive(PrimitiveType::String), "length") => {
                 let result = self.call_runtime(RuntimeFn::StringLen, &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
             }
-            (Type::String, "iter") => {
+            (Type::Primitive(PrimitiveType::String), "iter") => {
                 let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
-                    vole_type: Type::RuntimeIterator(Box::new(Type::String)),
+                    vole_type: Type::RuntimeIterator(Box::new(Type::Primitive(
+                        PrimitiveType::String,
+                    ))),
                 }))
             }
             (Type::Range, "iter") => {
@@ -477,7 +479,7 @@ impl Cg<'_, '_, '_> {
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
-                    vole_type: Type::RuntimeIterator(Box::new(Type::I64)),
+                    vole_type: Type::RuntimeIterator(Box::new(Type::Primitive(PrimitiveType::I64))),
                 }))
             }
             _ => Ok(None),

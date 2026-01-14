@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::sema::PrimitiveType;
 
 impl Analyzer {
     /// Check if a pattern is a type pattern (matches a class/record/primitive type name)
@@ -116,7 +117,7 @@ impl Analyzer {
             // Check guard if present (must be bool)
             if let Some(guard) = &arm.guard {
                 let guard_type = self.check_expr(guard, interner)?;
-                if guard_type != Type::Bool && !guard_type.is_numeric() {
+                if guard_type != Type::Primitive(PrimitiveType::Bool) && !guard_type.is_numeric() {
                     let found = self.type_display(&guard_type);
                     self.add_error(
                         SemanticError::MatchGuardNotBool {

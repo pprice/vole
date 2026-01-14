@@ -8,7 +8,7 @@ use crate::frontend::Symbol;
 use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::resolution::ResolvedMethod;
-use crate::sema::{FunctionType, Type};
+use crate::sema::{FunctionType, PrimitiveType, Type};
 
 #[derive(Debug)]
 pub(crate) enum MethodTarget {
@@ -354,19 +354,19 @@ fn get_type_def_id_for_codegen(ty: &Type, analyzed: &AnalyzedProgram) -> Option<
 
     let name_id = match ty {
         // Primitives - look up via well-known NameIds
-        Type::I8 => Some(analyzed.name_table.primitives.i8),
-        Type::I16 => Some(analyzed.name_table.primitives.i16),
-        Type::I32 => Some(analyzed.name_table.primitives.i32),
-        Type::I64 => Some(analyzed.name_table.primitives.i64),
-        Type::I128 => Some(analyzed.name_table.primitives.i128),
-        Type::U8 => Some(analyzed.name_table.primitives.u8),
-        Type::U16 => Some(analyzed.name_table.primitives.u16),
-        Type::U32 => Some(analyzed.name_table.primitives.u32),
-        Type::U64 => Some(analyzed.name_table.primitives.u64),
-        Type::F32 => Some(analyzed.name_table.primitives.f32),
-        Type::F64 => Some(analyzed.name_table.primitives.f64),
-        Type::Bool => Some(analyzed.name_table.primitives.bool),
-        Type::String => Some(analyzed.name_table.primitives.string),
+        Type::Primitive(PrimitiveType::I8) => Some(analyzed.name_table.primitives.i8),
+        Type::Primitive(PrimitiveType::I16) => Some(analyzed.name_table.primitives.i16),
+        Type::Primitive(PrimitiveType::I32) => Some(analyzed.name_table.primitives.i32),
+        Type::Primitive(PrimitiveType::I64) => Some(analyzed.name_table.primitives.i64),
+        Type::Primitive(PrimitiveType::I128) => Some(analyzed.name_table.primitives.i128),
+        Type::Primitive(PrimitiveType::U8) => Some(analyzed.name_table.primitives.u8),
+        Type::Primitive(PrimitiveType::U16) => Some(analyzed.name_table.primitives.u16),
+        Type::Primitive(PrimitiveType::U32) => Some(analyzed.name_table.primitives.u32),
+        Type::Primitive(PrimitiveType::U64) => Some(analyzed.name_table.primitives.u64),
+        Type::Primitive(PrimitiveType::F32) => Some(analyzed.name_table.primitives.f32),
+        Type::Primitive(PrimitiveType::F64) => Some(analyzed.name_table.primitives.f64),
+        Type::Primitive(PrimitiveType::Bool) => Some(analyzed.name_table.primitives.bool),
+        Type::Primitive(PrimitiveType::String) => Some(analyzed.name_table.primitives.string),
         _ => None,
     }?;
 

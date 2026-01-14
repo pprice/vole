@@ -362,8 +362,9 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::PrimitiveType;
+    use crate::frontend::PrimitiveType as FrontendPrimitiveType;
     use crate::identity::NameTable;
+    use crate::sema::types::PrimitiveType;
 
     fn with_empty_context<F, R>(interner: &Interner, f: F) -> R
     where
@@ -390,16 +391,16 @@ mod tests {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
             assert_eq!(
-                resolve_type(&TypeExpr::Primitive(PrimitiveType::I32), ctx),
-                Type::I32
+                resolve_type(&TypeExpr::Primitive(FrontendPrimitiveType::I32), ctx),
+                Type::Primitive(PrimitiveType::I32)
             );
             assert_eq!(
-                resolve_type(&TypeExpr::Primitive(PrimitiveType::Bool), ctx),
-                Type::Bool
+                resolve_type(&TypeExpr::Primitive(FrontendPrimitiveType::Bool), ctx),
+                Type::Primitive(PrimitiveType::Bool)
             );
             assert_eq!(
-                resolve_type(&TypeExpr::Primitive(PrimitiveType::String), ctx),
-                Type::String
+                resolve_type(&TypeExpr::Primitive(FrontendPrimitiveType::String), ctx),
+                Type::Primitive(PrimitiveType::String)
             );
         });
     }
@@ -416,9 +417,13 @@ mod tests {
     fn resolve_array_type() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
-            let array_expr = TypeExpr::Array(Box::new(TypeExpr::Primitive(PrimitiveType::I64)));
+            let array_expr =
+                TypeExpr::Array(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::I64)));
             let resolved = resolve_type(&array_expr, ctx);
-            assert_eq!(resolved, Type::Array(Box::new(Type::I64)));
+            assert_eq!(
+                resolved,
+                Type::Array(Box::new(Type::Primitive(PrimitiveType::I64)))
+            );
         });
     }
 
@@ -426,7 +431,8 @@ mod tests {
     fn resolve_optional_type() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
-            let opt_expr = TypeExpr::Optional(Box::new(TypeExpr::Primitive(PrimitiveType::I32)));
+            let opt_expr =
+                TypeExpr::Optional(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::I32)));
             let resolved = resolve_type(&opt_expr, ctx);
             assert!(resolved.is_optional());
         });
@@ -438,17 +444,17 @@ mod tests {
         with_empty_context(&interner, |ctx| {
             let func_expr = TypeExpr::Function {
                 params: vec![
-                    TypeExpr::Primitive(PrimitiveType::I32),
-                    TypeExpr::Primitive(PrimitiveType::I32),
+                    TypeExpr::Primitive(FrontendPrimitiveType::I32),
+                    TypeExpr::Primitive(FrontendPrimitiveType::I32),
                 ],
-                return_type: Box::new(TypeExpr::Primitive(PrimitiveType::Bool)),
+                return_type: Box::new(TypeExpr::Primitive(FrontendPrimitiveType::Bool)),
             };
             let resolved = resolve_type(&func_expr, ctx);
             if let Type::Function(ft) = resolved {
                 assert_eq!(ft.params.len(), 2);
-                assert_eq!(ft.params[0], Type::I32);
-                assert_eq!(ft.params[1], Type::I32);
-                assert_eq!(*ft.return_type, Type::Bool);
+                assert_eq!(ft.params[0], Type::Primitive(PrimitiveType::I32));
+                assert_eq!(ft.params[1], Type::Primitive(PrimitiveType::I32));
+                assert_eq!(*ft.return_type, Type::Primitive(PrimitiveType::Bool));
                 assert!(!ft.is_closure);
             } else {
                 panic!("Expected function type");

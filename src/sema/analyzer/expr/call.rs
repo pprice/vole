@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::identity::Namer;
+use crate::sema::PrimitiveType;
 
 impl Analyzer {
     pub(super) fn check_call_expr(
@@ -28,7 +29,7 @@ impl Analyzer {
             }
 
             let arg_ty = self.check_expr(&call.args[0], interner)?;
-            if arg_ty != Type::Bool && !arg_ty.is_invalid() {
+            if arg_ty != Type::Primitive(PrimitiveType::Bool) && !arg_ty.is_invalid() {
                 let found = self.type_display(&arg_ty);
                 self.add_error(
                     SemanticError::TypeMismatch {

@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use crate::frontend::{BinaryOp, Expr, ExprKind, LambdaBody, LambdaExpr, Symbol};
-use crate::sema::{FunctionType, Type};
+use crate::sema::{FunctionType, PrimitiveType, Type};
 
 use super::RuntimeFn;
 use super::context::{Captures, Cg, ControlFlow};
@@ -39,7 +39,7 @@ pub(crate) fn build_capture_bindings(
         let vole_type = variables
             .get(&capture.name)
             .map(|(_, ty)| ty.clone())
-            .unwrap_or(Type::I64);
+            .unwrap_or(Type::Primitive(PrimitiveType::I64));
         bindings.insert(capture.name, CaptureBinding::new(i, vole_type));
     }
     bindings
@@ -53,7 +53,7 @@ pub(crate) fn infer_lambda_return_type(
 ) -> Type {
     match body {
         LambdaBody::Expr(expr) => infer_expr_type(expr, param_types, ctx),
-        LambdaBody::Block(_) => Type::I64,
+        LambdaBody::Block(_) => Type::Primitive(PrimitiveType::I64),
     }
 }
 
@@ -64,11 +64,11 @@ pub(crate) fn infer_expr_type(
     ctx: &CompileCtx,
 ) -> Type {
     match &expr.kind {
-        ExprKind::IntLiteral(_) => Type::I64,
-        ExprKind::FloatLiteral(_) => Type::F64,
-        ExprKind::BoolLiteral(_) => Type::Bool,
-        ExprKind::StringLiteral(_) => Type::String,
-        ExprKind::InterpolatedString(_) => Type::String,
+        ExprKind::IntLiteral(_) => Type::Primitive(PrimitiveType::I64),
+        ExprKind::FloatLiteral(_) => Type::Primitive(PrimitiveType::F64),
+        ExprKind::BoolLiteral(_) => Type::Primitive(PrimitiveType::Bool),
+        ExprKind::StringLiteral(_) => Type::Primitive(PrimitiveType::String),
+        ExprKind::InterpolatedString(_) => Type::Primitive(PrimitiveType::String),
         ExprKind::Nil => Type::Nil,
         ExprKind::Done => Type::Done,
 
@@ -85,7 +85,7 @@ pub(crate) fn infer_expr_type(
                     return resolve_type_expr(type_expr, ctx);
                 }
             }
-            Type::I64
+            Type::Primitive(PrimitiveType::I64)
         }
 
         ExprKind::Binary(bin) => {
@@ -100,16 +100,25 @@ pub(crate) fn infer_expr_type(
                 | BinaryOp::Gt
                 | BinaryOp::Ge
                 | BinaryOp::And
-                | BinaryOp::Or => Type::Bool,
+                | BinaryOp::Or => Type::Primitive(PrimitiveType::Bool),
 
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                     if left_ty == right_ty {
                         left_ty
                     } else {
                         match (&left_ty, &right_ty) {
-                            (Type::I64, _) | (_, Type::I64) => Type::I64,
-                            (Type::F64, _) | (_, Type::F64) => Type::F64,
-                            (Type::I32, _) | (_, Type::I32) => Type::I32,
+                            (Type::Primitive(PrimitiveType::I64), _)
+                            | (_, Type::Primitive(PrimitiveType::I64)) => {
+                                Type::Primitive(PrimitiveType::I64)
+                            }
+                            (Type::Primitive(PrimitiveType::F64), _)
+                            | (_, Type::Primitive(PrimitiveType::F64)) => {
+                                Type::Primitive(PrimitiveType::F64)
+                            }
+                            (Type::Primitive(PrimitiveType::I32), _)
+                            | (_, Type::Primitive(PrimitiveType::I32)) => {
+                                Type::Primitive(PrimitiveType::I32)
+                            }
                             _ => left_ty,
                         }
                     }
@@ -129,7 +138,7 @@ pub(crate) fn infer_expr_type(
             let callee_ty = infer_expr_type(&call.callee, param_types, ctx);
             match callee_ty {
                 Type::Function(ft) => *ft.return_type,
-                _ => Type::I64,
+                _ => Type::Primitive(PrimitiveType::I64),
             }
         }
 
@@ -140,14 +149,14 @@ pub(crate) fn infer_expr_type(
                 .map(|p| {
                     p.ty.as_ref()
                         .map(|t| resolve_type_expr(t, ctx))
-                        .unwrap_or(Type::I64)
+                        .unwrap_or(Type::Primitive(PrimitiveType::I64))
                 })
                 .collect();
             let return_ty = lambda
                 .return_type
                 .as_ref()
                 .map(|t| resolve_type_expr(t, ctx))
-                .unwrap_or(Type::I64);
+                .unwrap_or(Type::Primitive(PrimitiveType::I64));
             Type::Function(FunctionType {
                 params: lambda_params,
                 return_type: Box::new(return_ty),
@@ -155,7 +164,7 @@ pub(crate) fn infer_expr_type(
             })
         }
 
-        _ => Type::I64,
+        _ => Type::Primitive(PrimitiveType::I64),
     }
 }
 
@@ -207,7 +216,7 @@ fn compile_pure_lambda(
         .map(|p| {
             p.ty.as_ref()
                 .map(|t| resolve_type_expr(t, ctx))
-                .unwrap_or(Type::I64)
+                .unwrap_or(Type::Primitive(PrimitiveType::I64))
         })
         .collect();
 
@@ -346,7 +355,7 @@ fn compile_lambda_with_captures(
         .map(|p| {
             p.ty.as_ref()
                 .map(|t| resolve_type_expr(t, ctx))
-                .unwrap_or(Type::I64)
+                .unwrap_or(Type::Primitive(PrimitiveType::I64))
         })
         .collect();
 
@@ -543,7 +552,7 @@ fn compile_lambda_body(
                 Ok(Some(CompiledValue {
                     value: zero,
                     ty: types::I64,
-                    vole_type: Type::I64,
+                    vole_type: Type::Primitive(PrimitiveType::I64),
                 }))
             }
         }

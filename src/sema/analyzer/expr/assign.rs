@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::sema::PrimitiveType;
 
 impl Analyzer {
     pub(super) fn check_assign_expr(
@@ -123,7 +124,12 @@ impl Analyzer {
                 // Check index is integer
                 if !matches!(
                     idx_type,
-                    Type::I32 | Type::I64 | Type::U8 | Type::U16 | Type::U32 | Type::U64
+                    Type::Primitive(PrimitiveType::I32)
+                        | Type::Primitive(PrimitiveType::I64)
+                        | Type::Primitive(PrimitiveType::U8)
+                        | Type::Primitive(PrimitiveType::U16)
+                        | Type::Primitive(PrimitiveType::U32)
+                        | Type::Primitive(PrimitiveType::U64)
                 ) {
                     let found = self.type_display(&idx_type);
                     self.add_error(
@@ -249,7 +255,12 @@ impl Analyzer {
                 // Check index is integer
                 if !matches!(
                     idx_type,
-                    Type::I32 | Type::I64 | Type::U8 | Type::U16 | Type::U32 | Type::U64
+                    Type::Primitive(PrimitiveType::I32)
+                        | Type::Primitive(PrimitiveType::I64)
+                        | Type::Primitive(PrimitiveType::U8)
+                        | Type::Primitive(PrimitiveType::U16)
+                        | Type::Primitive(PrimitiveType::U32)
+                        | Type::Primitive(PrimitiveType::U64)
                 ) {
                     let found = self.type_display(&idx_type);
                     self.add_error(

@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::sema::PrimitiveType;
 
 impl Analyzer {
     /// Check if a method call is a built-in method on a primitive type
@@ -22,7 +23,7 @@ impl Analyzer {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                Some(method_type(vec![], Type::I64))
+                Some(method_type(vec![], Type::Primitive(PrimitiveType::I64)))
             }
             // Array.iter() -> Iterator<T>
             (Type::Array(elem_ty), "iter") => {
@@ -38,22 +39,30 @@ impl Analyzer {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                let iter_type = self.interface_type("Iterator", vec![Type::I64], interner)?;
+                let iter_type = self.interface_type(
+                    "Iterator",
+                    vec![Type::Primitive(PrimitiveType::I64)],
+                    interner,
+                )?;
                 Some(method_type(vec![], iter_type))
             }
             // String.length() -> i64
-            (Type::String, "length") => {
+            (Type::Primitive(PrimitiveType::String), "length") => {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                Some(method_type(vec![], Type::I64))
+                Some(method_type(vec![], Type::Primitive(PrimitiveType::I64)))
             }
             // String.iter() -> Iterator<string>
-            (Type::String, "iter") => {
+            (Type::Primitive(PrimitiveType::String), "iter") => {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                let iter_type = self.interface_type("Iterator", vec![Type::String], interner)?;
+                let iter_type = self.interface_type(
+                    "Iterator",
+                    vec![Type::Primitive(PrimitiveType::String)],
+                    interner,
+                )?;
                 Some(method_type(vec![], iter_type))
             }
             _ => None,

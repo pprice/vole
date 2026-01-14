@@ -9,12 +9,12 @@ use crate::frontend::{
     ClassDecl, Decl, InterfaceDecl, Interner, Program, RecordDecl, StaticsBlock, Symbol, TypeExpr,
 };
 use crate::runtime::type_registry::{FieldTypeTag, register_instance_type};
-use crate::sema::{ClassType, RecordType, Type};
+use crate::sema::{ClassType, PrimitiveType, RecordType, Type};
 
 /// Convert a Vole Type to a FieldTypeTag for runtime cleanup
 fn type_to_field_tag(ty: &Type) -> FieldTypeTag {
     match ty {
-        Type::String => FieldTypeTag::String,
+        Type::Primitive(PrimitiveType::String) => FieldTypeTag::String,
         Type::Array(_) => FieldTypeTag::Array,
         Type::Class(_) | Type::Record(_) => FieldTypeTag::Instance,
         // Optional types containing reference types also need cleanup

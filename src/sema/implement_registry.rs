@@ -3,7 +3,7 @@
 use crate::frontend::Symbol;
 use crate::identity::NameId;
 use crate::sema::type_table::TypeTable;
-use crate::sema::types::{FunctionType, Type};
+use crate::sema::types::{FunctionType, PrimitiveType, Type};
 use std::collections::HashMap;
 
 /// Identifier for primitive types
@@ -63,19 +63,24 @@ impl TypeId {
         entity_registry: &crate::sema::entity_registry::EntityRegistry,
     ) -> Option<Self> {
         match ty {
-            Type::I8 => types.primitive_name_id(PrimitiveTypeId::I8).map(TypeId),
-            Type::I16 => types.primitive_name_id(PrimitiveTypeId::I16).map(TypeId),
-            Type::I32 => types.primitive_name_id(PrimitiveTypeId::I32).map(TypeId),
-            Type::I64 => types.primitive_name_id(PrimitiveTypeId::I64).map(TypeId),
-            Type::I128 => types.primitive_name_id(PrimitiveTypeId::I128).map(TypeId),
-            Type::U8 => types.primitive_name_id(PrimitiveTypeId::U8).map(TypeId),
-            Type::U16 => types.primitive_name_id(PrimitiveTypeId::U16).map(TypeId),
-            Type::U32 => types.primitive_name_id(PrimitiveTypeId::U32).map(TypeId),
-            Type::U64 => types.primitive_name_id(PrimitiveTypeId::U64).map(TypeId),
-            Type::F32 => types.primitive_name_id(PrimitiveTypeId::F32).map(TypeId),
-            Type::F64 => types.primitive_name_id(PrimitiveTypeId::F64).map(TypeId),
-            Type::Bool => types.primitive_name_id(PrimitiveTypeId::Bool).map(TypeId),
-            Type::String => types.primitive_name_id(PrimitiveTypeId::String).map(TypeId),
+            Type::Primitive(prim) => {
+                let prim_id = match prim {
+                    PrimitiveType::I8 => PrimitiveTypeId::I8,
+                    PrimitiveType::I16 => PrimitiveTypeId::I16,
+                    PrimitiveType::I32 => PrimitiveTypeId::I32,
+                    PrimitiveType::I64 => PrimitiveTypeId::I64,
+                    PrimitiveType::I128 => PrimitiveTypeId::I128,
+                    PrimitiveType::U8 => PrimitiveTypeId::U8,
+                    PrimitiveType::U16 => PrimitiveTypeId::U16,
+                    PrimitiveType::U32 => PrimitiveTypeId::U32,
+                    PrimitiveType::U64 => PrimitiveTypeId::U64,
+                    PrimitiveType::F32 => PrimitiveTypeId::F32,
+                    PrimitiveType::F64 => PrimitiveTypeId::F64,
+                    PrimitiveType::Bool => PrimitiveTypeId::Bool,
+                    PrimitiveType::String => PrimitiveTypeId::String,
+                };
+                types.primitive_name_id(prim_id).map(TypeId)
+            }
             Type::Range => types.primitive_name_id(PrimitiveTypeId::Range).map(TypeId),
             Type::Array(_) => types.array_name_id().map(TypeId),
             Type::Class(c) => Some(TypeId(entity_registry.class_name_id(c))),
@@ -210,7 +215,7 @@ mod tests {
                 trait_name: Some(sym(2)), // "Sized"
                 func_type: FunctionType {
                     params: vec![],
-                    return_type: Box::new(Type::I64),
+                    return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 },
                 is_builtin: true,
@@ -252,11 +257,19 @@ mod tests {
         types.register_array_name(array_name);
 
         assert_eq!(
-            TypeId::from_type(&Type::I64, &types, &entity_registry),
+            TypeId::from_type(
+                &Type::Primitive(PrimitiveType::I64),
+                &types,
+                &entity_registry
+            ),
             Some(TypeId(i64_name))
         );
         assert_eq!(
-            TypeId::from_type(&Type::Array(Box::new(Type::I32)), &types, &entity_registry),
+            TypeId::from_type(
+                &Type::Array(Box::new(Type::Primitive(PrimitiveType::I32))),
+                &types,
+                &entity_registry
+            ),
             Some(TypeId(array_name))
         );
         assert_eq!(
@@ -288,7 +301,7 @@ mod tests {
                 trait_name: None,
                 func_type: FunctionType {
                     params: vec![],
-                    return_type: Box::new(Type::I64),
+                    return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 },
                 is_builtin: true,
@@ -303,7 +316,7 @@ mod tests {
                 trait_name: None,
                 func_type: FunctionType {
                     params: vec![],
-                    return_type: Box::new(Type::String),
+                    return_type: Box::new(Type::Primitive(PrimitiveType::String)),
                     is_closure: false,
                 },
                 is_builtin: true,
@@ -342,8 +355,8 @@ mod tests {
             MethodImpl {
                 trait_name: Some(sym(20)), // "Equatable"
                 func_type: FunctionType {
-                    params: vec![Type::I64],
-                    return_type: Box::new(Type::Bool),
+                    params: vec![Type::Primitive(PrimitiveType::I64)],
+                    return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
                     is_closure: false,
                 },
                 is_builtin: false,
@@ -359,7 +372,7 @@ mod tests {
                 trait_name: None,
                 func_type: FunctionType {
                     params: vec![],
-                    return_type: Box::new(Type::I64),
+                    return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 },
                 is_builtin: false,

@@ -9,7 +9,7 @@ use cranelift::prelude::*;
 use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
 use crate::frontend::{self, ExprKind, LetInit, Pattern, RaiseStmt, Stmt, Symbol};
-use crate::sema::Type;
+use crate::sema::{PrimitiveType, Type};
 
 use super::compiler::ControlFlowCtx;
 use super::context::{Cg, ControlFlow};
@@ -153,10 +153,14 @@ impl Cg<'_, '_, '_> {
                         } else {
                             (init.value, declared_type)
                         }
-                    } else if declared_type == Type::F32 && init.vole_type == Type::F64 {
+                    } else if declared_type == Type::Primitive(PrimitiveType::F32)
+                        && init.vole_type == Type::Primitive(PrimitiveType::F64)
+                    {
                         let narrowed = self.builder.ins().fdemote(types::F32, init.value);
                         (narrowed, declared_type)
-                    } else if declared_type == Type::F64 && init.vole_type == Type::F32 {
+                    } else if declared_type == Type::Primitive(PrimitiveType::F64)
+                        && init.vole_type == Type::Primitive(PrimitiveType::F32)
+                    {
                         let widened = self.builder.ins().fpromote(types::F64, init.value);
                         (widened, declared_type)
                     } else if let Type::Interface(_) = &declared_type {
@@ -354,7 +358,8 @@ impl Cg<'_, '_, '_> {
                     // Check if iterable is an Iterator type or string type
                     let iterable_type = self.ctx.get_expr_type(&for_stmt.iterable.id);
                     let is_iterator = iterable_type.is_some_and(|ty| self.is_iterator_type(ty));
-                    let is_string = iterable_type.is_some_and(|ty| matches!(ty, Type::String));
+                    let is_string = iterable_type
+                        .is_some_and(|ty| matches!(ty, Type::Primitive(PrimitiveType::String)));
                     if is_iterator {
                         self.for_iterator(for_stmt)
                     } else if is_string {
@@ -397,7 +402,10 @@ impl Cg<'_, '_, '_> {
 
         let var = self.builder.declare_var(types::I64);
         self.builder.def_var(var, start_val.value);
-        self.vars.insert(for_stmt.var_name, (var, Type::I64));
+        self.vars.insert(
+            for_stmt.var_name,
+            (var, Type::Primitive(PrimitiveType::I64)),
+        );
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
@@ -458,7 +466,7 @@ impl Cg<'_, '_, '_> {
 
         let elem_type = match &arr.vole_type {
             Type::Array(elem) => elem.as_ref().clone(),
-            _ => Type::I64,
+            _ => Type::Primitive(PrimitiveType::I64),
         };
 
         let elem_var = self.builder.declare_var(types::I64);
@@ -528,9 +536,13 @@ impl Cg<'_, '_, '_> {
     /// Extract element type from Iterator<T>
     fn iterator_element_type(&self, ty: &Type) -> Type {
         match ty {
-            Type::Interface(iface) => iface.type_args.first().cloned().unwrap_or(Type::I64),
+            Type::Interface(iface) => iface
+                .type_args
+                .first()
+                .cloned()
+                .unwrap_or(Type::Primitive(PrimitiveType::I64)),
             Type::RuntimeIterator(elem) => (**elem).clone(),
-            _ => Type::I64,
+            _ => Type::Primitive(PrimitiveType::I64),
         }
     }
 
@@ -624,8 +636,10 @@ impl Cg<'_, '_, '_> {
         let elem_var = self.builder.declare_var(types::I64);
         let zero = self.builder.ins().iconst(types::I64, 0);
         self.builder.def_var(elem_var, zero);
-        self.vars
-            .insert(for_stmt.var_name, (elem_var, Type::String));
+        self.vars.insert(
+            for_stmt.var_name,
+            (elem_var, Type::Primitive(PrimitiveType::String)),
+        );
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();

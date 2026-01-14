@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::sema::PrimitiveType;
 
 impl Analyzer {
     /// Check expression against an expected type (bidirectional type checking)
@@ -39,7 +40,7 @@ impl Analyzer {
                             },
                             expr.span,
                         );
-                        Ok(Type::I64) // Return a sensible default
+                        Ok(Type::Primitive(PrimitiveType::I64)) // Return a sensible default
                     }
                 }
                 Some(ty) if literal_fits(*value, ty) => Ok(ty.clone()),
@@ -55,7 +56,7 @@ impl Analyzer {
                     );
                     Ok(ty.clone())
                 }
-                None => Ok(Type::I64),
+                None => Ok(Type::Primitive(PrimitiveType::I64)),
             },
             ExprKind::TypeLiteral(_) => match expected {
                 Some(Type::Type) | None => Ok(Type::Type),
@@ -73,10 +74,16 @@ impl Analyzer {
                 }
             },
             ExprKind::FloatLiteral(_) => match expected {
-                Some(ty) if ty == &Type::F64 => Ok(Type::F64),
+                Some(ty) if ty == &Type::Primitive(PrimitiveType::F64) => {
+                    Ok(Type::Primitive(PrimitiveType::F64))
+                }
                 Some(ty) if ty.is_numeric() => Ok(ty.clone()),
                 // Float literals can be assigned to unions containing f64
-                Some(Type::Union(variants)) if variants.contains(&Type::F64) => Ok(Type::F64),
+                Some(Type::Union(variants))
+                    if variants.contains(&Type::Primitive(PrimitiveType::F64)) =>
+                {
+                    Ok(Type::Primitive(PrimitiveType::F64))
+                }
                 Some(ty) => {
                     let expected = self.type_display(ty);
                     self.add_error(
@@ -87,9 +94,9 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    Ok(Type::F64)
+                    Ok(Type::Primitive(PrimitiveType::F64))
                 }
-                None => Ok(Type::F64),
+                None => Ok(Type::Primitive(PrimitiveType::F64)),
             },
             ExprKind::Binary(bin) => match bin.op {
                 // Add handles both numeric addition and string concatenation
@@ -98,13 +105,13 @@ impl Analyzer {
                     let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
 
                     // Handle string concatenation: string + Stringable
-                    if matches!(left_ty, Type::String) {
-                        if matches!(right_ty, Type::String) {
+                    if matches!(left_ty, Type::Primitive(PrimitiveType::String)) {
+                        if matches!(right_ty, Type::Primitive(PrimitiveType::String)) {
                             // string + string is always valid
-                            Ok(Type::String)
+                            Ok(Type::Primitive(PrimitiveType::String))
                         } else if self.satisfies_stringable(&right_ty, interner) {
                             // Right implements Stringable
-                            Ok(Type::String)
+                            Ok(Type::Primitive(PrimitiveType::String))
                         } else {
                             self.type_error("Stringable", &right_ty, bin.right.span);
                             Ok(Type::invalid("propagate"))
@@ -117,12 +124,16 @@ impl Analyzer {
                         {
                             return Ok(exp.clone());
                         }
-                        if left_ty == Type::F64 || right_ty == Type::F64 {
-                            Ok(Type::F64)
-                        } else if left_ty == Type::I64 || right_ty == Type::I64 {
-                            Ok(Type::I64)
+                        if left_ty == Type::Primitive(PrimitiveType::F64)
+                            || right_ty == Type::Primitive(PrimitiveType::F64)
+                        {
+                            Ok(Type::Primitive(PrimitiveType::F64))
+                        } else if left_ty == Type::Primitive(PrimitiveType::I64)
+                            || right_ty == Type::Primitive(PrimitiveType::I64)
+                        {
+                            Ok(Type::Primitive(PrimitiveType::I64))
                         } else {
-                            Ok(Type::I32)
+                            Ok(Type::Primitive(PrimitiveType::I32))
                         }
                     } else {
                         self.type_error_pair("numeric or string", &left_ty, &right_ty, expr.span);
@@ -143,12 +154,16 @@ impl Analyzer {
                             return Ok(exp.clone());
                         }
                         // Otherwise return wider type
-                        if left_ty == Type::F64 || right_ty == Type::F64 {
-                            Ok(Type::F64)
-                        } else if left_ty == Type::I64 || right_ty == Type::I64 {
-                            Ok(Type::I64)
+                        if left_ty == Type::Primitive(PrimitiveType::F64)
+                            || right_ty == Type::Primitive(PrimitiveType::F64)
+                        {
+                            Ok(Type::Primitive(PrimitiveType::F64))
+                        } else if left_ty == Type::Primitive(PrimitiveType::I64)
+                            || right_ty == Type::Primitive(PrimitiveType::I64)
+                        {
+                            Ok(Type::Primitive(PrimitiveType::I64))
                         } else {
-                            Ok(Type::I32)
+                            Ok(Type::Primitive(PrimitiveType::I32))
                         }
                     } else {
                         self.type_error_pair("numeric", &left_ty, &right_ty, expr.span);
@@ -164,16 +179,24 @@ impl Analyzer {
                 | BinaryOp::Ge => {
                     let left_ty = self.check_expr_expecting(&bin.left, None, interner)?;
                     self.check_expr_expecting(&bin.right, Some(&left_ty), interner)?;
-                    Ok(Type::Bool)
+                    Ok(Type::Primitive(PrimitiveType::Bool))
                 }
                 // Logical ops: both sides must be bool
                 BinaryOp::And | BinaryOp::Or => {
-                    let left_ty =
-                        self.check_expr_expecting(&bin.left, Some(&Type::Bool), interner)?;
-                    let right_ty =
-                        self.check_expr_expecting(&bin.right, Some(&Type::Bool), interner)?;
-                    if left_ty == Type::Bool && right_ty == Type::Bool {
-                        Ok(Type::Bool)
+                    let left_ty = self.check_expr_expecting(
+                        &bin.left,
+                        Some(&Type::Primitive(PrimitiveType::Bool)),
+                        interner,
+                    )?;
+                    let right_ty = self.check_expr_expecting(
+                        &bin.right,
+                        Some(&Type::Primitive(PrimitiveType::Bool)),
+                        interner,
+                    )?;
+                    if left_ty == Type::Primitive(PrimitiveType::Bool)
+                        && right_ty == Type::Primitive(PrimitiveType::Bool)
+                    {
+                        Ok(Type::Primitive(PrimitiveType::Bool))
                     } else {
                         self.type_error_pair("bool", &left_ty, &right_ty, expr.span);
                         Ok(Type::invalid("propagate"))
@@ -195,10 +218,12 @@ impl Analyzer {
                         {
                             return Ok(exp.clone());
                         }
-                        if left_ty == Type::I64 || right_ty == Type::I64 {
-                            Ok(Type::I64)
+                        if left_ty == Type::Primitive(PrimitiveType::I64)
+                            || right_ty == Type::Primitive(PrimitiveType::I64)
+                        {
+                            Ok(Type::Primitive(PrimitiveType::I64))
                         } else {
-                            Ok(Type::I32)
+                            Ok(Type::Primitive(PrimitiveType::I32))
                         }
                     } else {
                         self.type_error_pair("integer", &left_ty, &right_ty, expr.span);
@@ -219,7 +244,9 @@ impl Analyzer {
                             return Ok(self.record_expr_type(&un.operand, target.clone()));
                         }
                         // Fall back to i64 if no expected type or doesn't fit
-                        return Ok(self.record_expr_type(&un.operand, Type::I64));
+                        return Ok(
+                            self.record_expr_type(&un.operand, Type::Primitive(PrimitiveType::I64))
+                        );
                     }
 
                     // Propagate expected type through negation
@@ -233,10 +260,13 @@ impl Analyzer {
                 }
                 UnaryOp::Not => {
                     // Not always expects and returns bool
-                    let operand_ty =
-                        self.check_expr_expecting(&un.operand, Some(&Type::Bool), interner)?;
-                    if operand_ty == Type::Bool {
-                        Ok(Type::Bool)
+                    let operand_ty = self.check_expr_expecting(
+                        &un.operand,
+                        Some(&Type::Primitive(PrimitiveType::Bool)),
+                        interner,
+                    )?;
+                    if operand_ty == Type::Primitive(PrimitiveType::Bool) {
+                        Ok(Type::Primitive(PrimitiveType::Bool))
                     } else {
                         self.type_error("bool", &operand_ty, expr.span);
                         Ok(Type::invalid("propagate"))

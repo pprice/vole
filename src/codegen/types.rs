@@ -17,7 +17,9 @@ use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, substitute_type};
-use crate::sema::{EntityRegistry, FunctionType, ProgramQuery, Type, TypeId, TypeKey};
+use crate::sema::{
+    EntityRegistry, FunctionType, PrimitiveType, ProgramQuery, Type, TypeId, TypeKey,
+};
 
 /// Compiled value with its type
 #[derive(Clone)]
@@ -777,15 +779,15 @@ pub(crate) fn resolve_type_expr_query(
 /// Convert a Vole type to a Cranelift type
 pub(crate) fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::Type {
     match ty {
-        Type::I8 | Type::U8 => types::I8,
-        Type::I16 | Type::U16 => types::I16,
-        Type::I32 | Type::U32 => types::I32,
-        Type::I64 | Type::U64 => types::I64,
-        Type::I128 => types::I128,
-        Type::F32 => types::F32,
-        Type::F64 => types::F64,
-        Type::Bool => types::I8,
-        Type::String => pointer_type,
+        Type::Primitive(PrimitiveType::I8) | Type::Primitive(PrimitiveType::U8) => types::I8,
+        Type::Primitive(PrimitiveType::I16) | Type::Primitive(PrimitiveType::U16) => types::I16,
+        Type::Primitive(PrimitiveType::I32) | Type::Primitive(PrimitiveType::U32) => types::I32,
+        Type::Primitive(PrimitiveType::I64) | Type::Primitive(PrimitiveType::U64) => types::I64,
+        Type::Primitive(PrimitiveType::I128) => types::I128,
+        Type::Primitive(PrimitiveType::F32) => types::F32,
+        Type::Primitive(PrimitiveType::F64) => types::F64,
+        Type::Primitive(PrimitiveType::Bool) => types::I8,
+        Type::Primitive(PrimitiveType::String) => pointer_type,
         Type::Interface(_) => pointer_type,
         Type::Nil => types::I8,            // Nil uses minimal representation
         Type::Done => types::I8,           // Done uses minimal representation (like Nil)
@@ -802,12 +804,18 @@ pub(crate) fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::
 /// Get the size in bytes for a Vole type (used for union layout)
 pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
     match ty {
-        Type::I8 | Type::U8 | Type::Bool => 1,
-        Type::I16 | Type::U16 => 2,
-        Type::I32 | Type::U32 | Type::F32 => 4,
-        Type::I64 | Type::U64 | Type::F64 => 8,
-        Type::I128 => 16,
-        Type::String | Type::Array(_) => pointer_type.bytes(), // pointer size
+        Type::Primitive(PrimitiveType::I8)
+        | Type::Primitive(PrimitiveType::U8)
+        | Type::Primitive(PrimitiveType::Bool) => 1,
+        Type::Primitive(PrimitiveType::I16) | Type::Primitive(PrimitiveType::U16) => 2,
+        Type::Primitive(PrimitiveType::I32)
+        | Type::Primitive(PrimitiveType::U32)
+        | Type::Primitive(PrimitiveType::F32) => 4,
+        Type::Primitive(PrimitiveType::I64)
+        | Type::Primitive(PrimitiveType::U64)
+        | Type::Primitive(PrimitiveType::F64) => 8,
+        Type::Primitive(PrimitiveType::I128) => 16,
+        Type::Primitive(PrimitiveType::String) | Type::Array(_) => pointer_type.bytes(), // pointer size
         Type::Interface(_) => pointer_type.bytes(),
         Type::Nil | Type::Done | Type::Void => 0,
         Type::Range => 16, // start (i64) + end (i64)
@@ -959,13 +967,13 @@ pub(crate) fn fallible_error_tag(
 #[allow(dead_code)] // Used by compiler.rs during migration
 pub(crate) fn cranelift_to_vole_type(ty: types::Type) -> Type {
     match ty {
-        types::I8 => Type::I8,
-        types::I16 => Type::I16,
-        types::I32 => Type::I32,
-        types::I64 => Type::I64,
-        types::I128 => Type::I128,
-        types::F32 => Type::F32,
-        types::F64 => Type::F64,
+        types::I8 => Type::Primitive(PrimitiveType::I8),
+        types::I16 => Type::Primitive(PrimitiveType::I16),
+        types::I32 => Type::Primitive(PrimitiveType::I32),
+        types::I64 => Type::Primitive(PrimitiveType::I64),
+        types::I128 => Type::Primitive(PrimitiveType::I128),
+        types::F32 => Type::Primitive(PrimitiveType::F32),
+        types::F64 => Type::Primitive(PrimitiveType::F64),
         _ => Type::unknown(), // Pointer types, etc. use inference placeholder for now
     }
 }
@@ -1051,21 +1059,29 @@ pub(crate) fn value_to_word(
     }
 
     let word = match value.vole_type {
-        Type::F64 => builder
-            .ins()
-            .bitcast(types::I64, MemFlags::new(), value.value),
-        Type::F32 => {
+        Type::Primitive(PrimitiveType::F64) => {
+            builder
+                .ins()
+                .bitcast(types::I64, MemFlags::new(), value.value)
+        }
+        Type::Primitive(PrimitiveType::F32) => {
             let i32_val = builder
                 .ins()
                 .bitcast(types::I32, MemFlags::new(), value.value);
             builder.ins().uextend(word_type, i32_val)
         }
-        Type::Bool => builder.ins().uextend(word_type, value.value),
-        Type::I8 | Type::U8 => builder.ins().uextend(word_type, value.value),
-        Type::I16 | Type::U16 => builder.ins().uextend(word_type, value.value),
-        Type::I32 | Type::U32 => builder.ins().uextend(word_type, value.value),
-        Type::I64 | Type::U64 => value.value,
-        Type::I128 => {
+        Type::Primitive(PrimitiveType::Bool) => builder.ins().uextend(word_type, value.value),
+        Type::Primitive(PrimitiveType::I8) | Type::Primitive(PrimitiveType::U8) => {
+            builder.ins().uextend(word_type, value.value)
+        }
+        Type::Primitive(PrimitiveType::I16) | Type::Primitive(PrimitiveType::U16) => {
+            builder.ins().uextend(word_type, value.value)
+        }
+        Type::Primitive(PrimitiveType::I32) | Type::Primitive(PrimitiveType::U32) => {
+            builder.ins().uextend(word_type, value.value)
+        }
+        Type::Primitive(PrimitiveType::I64) | Type::Primitive(PrimitiveType::U64) => value.value,
+        Type::Primitive(PrimitiveType::I128) => {
             let low = builder.ins().ireduce(types::I64, value.value);
             if word_type == types::I64 {
                 low
@@ -1101,17 +1117,25 @@ pub(crate) fn word_to_value(
     }
 
     match vole_type {
-        Type::F64 => builder.ins().bitcast(types::F64, MemFlags::new(), word),
-        Type::F32 => {
+        Type::Primitive(PrimitiveType::F64) => {
+            builder.ins().bitcast(types::F64, MemFlags::new(), word)
+        }
+        Type::Primitive(PrimitiveType::F32) => {
             let i32_val = builder.ins().ireduce(types::I32, word);
             builder.ins().bitcast(types::F32, MemFlags::new(), i32_val)
         }
-        Type::Bool => builder.ins().ireduce(types::I8, word),
-        Type::I8 | Type::U8 => builder.ins().ireduce(types::I8, word),
-        Type::I16 | Type::U16 => builder.ins().ireduce(types::I16, word),
-        Type::I32 | Type::U32 => builder.ins().ireduce(types::I32, word),
-        Type::I64 | Type::U64 => word,
-        Type::I128 => {
+        Type::Primitive(PrimitiveType::Bool) => builder.ins().ireduce(types::I8, word),
+        Type::Primitive(PrimitiveType::I8) | Type::Primitive(PrimitiveType::U8) => {
+            builder.ins().ireduce(types::I8, word)
+        }
+        Type::Primitive(PrimitiveType::I16) | Type::Primitive(PrimitiveType::U16) => {
+            builder.ins().ireduce(types::I16, word)
+        }
+        Type::Primitive(PrimitiveType::I32) | Type::Primitive(PrimitiveType::U32) => {
+            builder.ins().ireduce(types::I32, word)
+        }
+        Type::Primitive(PrimitiveType::I64) | Type::Primitive(PrimitiveType::U64) => word,
+        Type::Primitive(PrimitiveType::I128) => {
             let low = if word_type == types::I64 {
                 word
             } else {
@@ -1127,10 +1151,13 @@ pub(crate) fn word_to_value(
 /// These tags are used by the runtime to distinguish element types.
 pub(crate) fn array_element_tag(ty: &Type) -> i64 {
     match ty {
-        Type::String => 1,
-        Type::I64 | Type::I32 | Type::I16 | Type::I8 => 2,
-        Type::F64 | Type::F32 => 3,
-        Type::Bool => 4,
+        Type::Primitive(PrimitiveType::String) => 1,
+        Type::Primitive(PrimitiveType::I64)
+        | Type::Primitive(PrimitiveType::I32)
+        | Type::Primitive(PrimitiveType::I16)
+        | Type::Primitive(PrimitiveType::I8) => 2,
+        Type::Primitive(PrimitiveType::F64) | Type::Primitive(PrimitiveType::F32) => 3,
+        Type::Primitive(PrimitiveType::Bool) => 4,
         Type::Array(_) => 5,
         _ => 2, // default to integer
     }

@@ -1,6 +1,7 @@
 // src/sema/analyzer/stmt.rs
 
 use super::*;
+use crate::sema::PrimitiveType;
 
 impl Analyzer {
     pub(crate) fn check_block(
@@ -92,7 +93,7 @@ impl Analyzer {
             }
             Stmt::While(while_stmt) => {
                 let cond_type = self.check_expr(&while_stmt.condition, interner)?;
-                if cond_type != Type::Bool && !cond_type.is_numeric() {
+                if cond_type != Type::Primitive(PrimitiveType::Bool) && !cond_type.is_numeric() {
                     let found = self.type_display(&cond_type);
                     self.add_error(
                         SemanticError::ConditionNotBool {
@@ -112,7 +113,7 @@ impl Analyzer {
             }
             Stmt::If(if_stmt) => {
                 let cond_type = self.check_expr(&if_stmt.condition, interner)?;
-                if cond_type != Type::Bool && !cond_type.is_numeric() {
+                if cond_type != Type::Primitive(PrimitiveType::Bool) && !cond_type.is_numeric() {
                     let found = self.type_display(&cond_type);
                     self.add_error(
                         SemanticError::ConditionNotBool {
@@ -188,10 +189,12 @@ impl Analyzer {
                 let iterable_ty = self.check_expr(&for_stmt.iterable, interner)?;
 
                 let elem_ty = match &iterable_ty {
-                    Type::Range => Type::I64,
+                    Type::Range => Type::Primitive(PrimitiveType::I64),
                     Type::Array(elem) => *elem.clone(),
                     // String is iterable - yields string (individual characters)
-                    Type::String => Type::String,
+                    Type::Primitive(PrimitiveType::String) => {
+                        Type::Primitive(PrimitiveType::String)
+                    }
                     // Runtime iterators have their element type directly
                     Type::RuntimeIterator(elem) => *elem.clone(),
                     Type::Interface(_) => {

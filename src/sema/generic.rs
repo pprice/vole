@@ -461,6 +461,7 @@ pub fn substitute_type(ty: &Type, substitutions: &HashMap<NameId, Type>) -> Type
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sema::types::PrimitiveType;
 
     #[test]
     fn test_type_param_scope() {
@@ -494,9 +495,18 @@ mod tests {
         let func_name = names.intern(names.main_module(), &[func_sym], &interner);
         let mut table = crate::sema::TypeTable::new();
 
-        let key1 = MonomorphKey::new(func_name, vec![table.key_for_type(&Type::I64)]);
-        let key2 = MonomorphKey::new(func_name, vec![table.key_for_type(&Type::String)]);
-        let key1_dup = MonomorphKey::new(func_name, vec![table.key_for_type(&Type::I64)]);
+        let key1 = MonomorphKey::new(
+            func_name,
+            vec![table.key_for_type(&Type::Primitive(PrimitiveType::I64))],
+        );
+        let key2 = MonomorphKey::new(
+            func_name,
+            vec![table.key_for_type(&Type::Primitive(PrimitiveType::String))],
+        );
+        let key1_dup = MonomorphKey::new(
+            func_name,
+            vec![table.key_for_type(&Type::Primitive(PrimitiveType::I64))],
+        );
 
         assert!(!cache.contains(&key1));
 
@@ -507,8 +517,8 @@ mod tests {
                 mangled_name: names.intern_raw(names.main_module(), &["foo__mono_0"]),
                 instance_id: 0,
                 func_type: FunctionType {
-                    params: vec![Type::I64],
-                    return_type: Box::new(Type::I64),
+                    params: vec![Type::Primitive(PrimitiveType::I64)],
+                    return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 },
                 substitutions: HashMap::new(),
@@ -525,19 +535,22 @@ mod tests {
         let mut names = crate::identity::NameTable::new();
         let t_name_id = names.intern_raw(names.main_module(), &["T"]);
         let mut subs = HashMap::new();
-        subs.insert(t_name_id, Type::I64);
+        subs.insert(t_name_id, Type::Primitive(PrimitiveType::I64));
 
         // Simple substitution
         let result = substitute_type(&Type::TypeParam(t_name_id), &subs);
-        assert_eq!(result, Type::I64);
+        assert_eq!(result, Type::Primitive(PrimitiveType::I64));
 
         // Array of type param
         let arr = Type::Array(Box::new(Type::TypeParam(t_name_id)));
         let result = substitute_type(&arr, &subs);
-        assert_eq!(result, Type::Array(Box::new(Type::I64)));
+        assert_eq!(
+            result,
+            Type::Array(Box::new(Type::Primitive(PrimitiveType::I64)))
+        );
 
         // Non-param types unchanged
-        let result = substitute_type(&Type::Bool, &subs);
-        assert_eq!(result, Type::Bool);
+        let result = substitute_type(&Type::Primitive(PrimitiveType::Bool), &subs);
+        assert_eq!(result, Type::Primitive(PrimitiveType::Bool));
     }
 }

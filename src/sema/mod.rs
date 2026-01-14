@@ -23,6 +23,7 @@ pub use query::{CallInfo, ProgramQuery};
 pub use resolution::{MethodResolutions, ResolvedMethod};
 pub use type_table::{TypeInfo, TypeKey, TypeTable};
 pub use types::{
-    ClassType, ErrorTypeInfo, FunctionType, ModuleType, RecordType, StructField, Type,
+    ClassType, ErrorTypeInfo, FunctionType, ModuleType, PrimitiveType, RecordType, StructField,
+    Type,
 };
 pub use well_known::{WellKnownMethods, WellKnownTypes};

@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::sema::PrimitiveType;
 
 impl Analyzer {
     pub(crate) fn check_expr(
@@ -21,11 +22,11 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
         match &expr.kind {
-            ExprKind::IntLiteral(_) => Ok(Type::I64), // Default to i64 for now
-            ExprKind::FloatLiteral(_) => Ok(Type::F64),
-            ExprKind::BoolLiteral(_) => Ok(Type::Bool),
-            ExprKind::StringLiteral(_) => Ok(Type::String),
-            ExprKind::InterpolatedString(_) => Ok(Type::String),
+            ExprKind::IntLiteral(_) => Ok(Type::Primitive(PrimitiveType::I64)), // Default to i64 for now
+            ExprKind::FloatLiteral(_) => Ok(Type::Primitive(PrimitiveType::F64)),
+            ExprKind::BoolLiteral(_) => Ok(Type::Primitive(PrimitiveType::Bool)),
+            ExprKind::StringLiteral(_) => Ok(Type::Primitive(PrimitiveType::String)),
+            ExprKind::InterpolatedString(_) => Ok(Type::Primitive(PrimitiveType::String)),
             ExprKind::TypeLiteral(_) => Ok(Type::Type), // Type values have metatype `type`
 
             ExprKind::Identifier(sym) => {
@@ -77,14 +78,14 @@ impl Analyzer {
                 match bin.op {
                     BinaryOp::Add => {
                         // Handle string concatenation: string + Stringable
-                        if matches!(left_ty, Type::String) {
+                        if matches!(left_ty, Type::Primitive(PrimitiveType::String)) {
                             // Left is string - check if right implements Stringable
-                            if matches!(right_ty, Type::String) {
+                            if matches!(right_ty, Type::Primitive(PrimitiveType::String)) {
                                 // string + string is always valid
-                                Ok(Type::String)
+                                Ok(Type::Primitive(PrimitiveType::String))
                             } else if self.satisfies_stringable(&right_ty, interner) {
                                 // Right implements Stringable, so string + X is valid
-                                Ok(Type::String)
+                                Ok(Type::Primitive(PrimitiveType::String))
                             } else {
                                 // Right doesn't implement Stringable
                                 self.type_error("Stringable", &right_ty, bin.right.span);
@@ -92,12 +93,16 @@ impl Analyzer {
                             }
                         } else if left_ty.is_numeric() && right_ty.is_numeric() {
                             // Numeric addition
-                            if left_ty == Type::F64 || right_ty == Type::F64 {
-                                Ok(Type::F64)
-                            } else if left_ty == Type::I64 || right_ty == Type::I64 {
-                                Ok(Type::I64)
+                            if left_ty == Type::Primitive(PrimitiveType::F64)
+                                || right_ty == Type::Primitive(PrimitiveType::F64)
+                            {
+                                Ok(Type::Primitive(PrimitiveType::F64))
+                            } else if left_ty == Type::Primitive(PrimitiveType::I64)
+                                || right_ty == Type::Primitive(PrimitiveType::I64)
+                            {
+                                Ok(Type::Primitive(PrimitiveType::I64))
                             } else {
-                                Ok(Type::I32)
+                                Ok(Type::Primitive(PrimitiveType::I32))
                             }
                         } else {
                             self.type_error_pair(
@@ -112,12 +117,16 @@ impl Analyzer {
                     BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                         if left_ty.is_numeric() && right_ty.is_numeric() {
                             // Return wider type
-                            if left_ty == Type::F64 || right_ty == Type::F64 {
-                                Ok(Type::F64)
-                            } else if left_ty == Type::I64 || right_ty == Type::I64 {
-                                Ok(Type::I64)
+                            if left_ty == Type::Primitive(PrimitiveType::F64)
+                                || right_ty == Type::Primitive(PrimitiveType::F64)
+                            {
+                                Ok(Type::Primitive(PrimitiveType::F64))
+                            } else if left_ty == Type::Primitive(PrimitiveType::I64)
+                                || right_ty == Type::Primitive(PrimitiveType::I64)
+                            {
+                                Ok(Type::Primitive(PrimitiveType::I64))
                             } else {
-                                Ok(Type::I32)
+                                Ok(Type::Primitive(PrimitiveType::I32))
                             }
                         } else {
                             self.type_error_pair("numeric", &left_ty, &right_ty, expr.span);
@@ -129,10 +138,12 @@ impl Analyzer {
                     | BinaryOp::Lt
                     | BinaryOp::Gt
                     | BinaryOp::Le
-                    | BinaryOp::Ge => Ok(Type::Bool),
+                    | BinaryOp::Ge => Ok(Type::Primitive(PrimitiveType::Bool)),
                     BinaryOp::And | BinaryOp::Or => {
-                        if left_ty == Type::Bool && right_ty == Type::Bool {
-                            Ok(Type::Bool)
+                        if left_ty == Type::Primitive(PrimitiveType::Bool)
+                            && right_ty == Type::Primitive(PrimitiveType::Bool)
+                        {
+                            Ok(Type::Primitive(PrimitiveType::Bool))
                         } else {
                             self.type_error_pair("bool", &left_ty, &right_ty, expr.span);
                             Ok(Type::invalid("propagate"))
@@ -144,10 +155,12 @@ impl Analyzer {
                     | BinaryOp::Shl
                     | BinaryOp::Shr => {
                         if left_ty.is_integer() && right_ty.is_integer() {
-                            if left_ty == Type::I64 || right_ty == Type::I64 {
-                                Ok(Type::I64)
+                            if left_ty == Type::Primitive(PrimitiveType::I64)
+                                || right_ty == Type::Primitive(PrimitiveType::I64)
+                            {
+                                Ok(Type::Primitive(PrimitiveType::I64))
                             } else {
-                                Ok(Type::I32)
+                                Ok(Type::Primitive(PrimitiveType::I32))
                             }
                         } else {
                             self.type_error_pair("integer", &left_ty, &right_ty, expr.span);
@@ -169,8 +182,8 @@ impl Analyzer {
                         }
                     }
                     UnaryOp::Not => {
-                        if operand_ty == Type::Bool {
-                            Ok(Type::Bool)
+                        if operand_ty == Type::Primitive(PrimitiveType::Bool) {
+                            Ok(Type::Primitive(PrimitiveType::Bool))
                         } else {
                             self.type_error("bool", &operand_ty, expr.span);
                             Ok(Type::invalid("propagate"))
@@ -354,7 +367,7 @@ impl Analyzer {
                 }
 
                 // Result is always bool
-                Ok(Type::Bool)
+                Ok(Type::Primitive(PrimitiveType::Bool))
             }
 
             ExprKind::Lambda(lambda) => {
@@ -455,7 +468,7 @@ impl Analyzer {
             ExprKind::If(if_expr) => {
                 // Type check the condition (must be bool)
                 let cond_ty = self.check_expr(&if_expr.condition, interner)?;
-                if cond_ty != Type::Bool {
+                if cond_ty != Type::Primitive(PrimitiveType::Bool) {
                     self.type_error("bool", &cond_ty, if_expr.condition.span);
                 }
 
@@ -503,19 +516,22 @@ impl Analyzer {
                 if literal_fits(*value, hint) {
                     hint.clone()
                 } else {
-                    Type::I64 // Default
+                    Type::Primitive(PrimitiveType::I64) // Default
                 }
             }
             ExprKind::FloatLiteral(_) => {
-                if matches!(hint, Type::F32 | Type::F64) {
+                if matches!(
+                    hint,
+                    Type::Primitive(PrimitiveType::F32) | Type::Primitive(PrimitiveType::F64)
+                ) {
                     hint.clone()
                 } else {
-                    Type::F64 // Default
+                    Type::Primitive(PrimitiveType::F64) // Default
                 }
             }
             // Bool, String, and Nil have only one possible type
-            ExprKind::BoolLiteral(_) => Type::Bool,
-            ExprKind::StringLiteral(_) => Type::String,
+            ExprKind::BoolLiteral(_) => Type::Primitive(PrimitiveType::Bool),
+            ExprKind::StringLiteral(_) => Type::Primitive(PrimitiveType::String),
             ExprKind::Nil => Type::Nil,
             // Not a literal - this shouldn't happen if is_literal() was checked
             _ => Type::invalid("fallback"),

@@ -7,8 +7,8 @@ use cranelift::prelude::*;
 
 use crate::codegen::RuntimeFn;
 use crate::frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr};
-use crate::sema::Type;
 use crate::sema::implement_registry::TypeId;
+use crate::sema::{PrimitiveType, Type};
 
 use super::context::Cg;
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
@@ -27,7 +27,9 @@ impl Cg<'_, '_, '_> {
         let left = self.expr(&bin.left)?;
 
         // Handle string concatenation: string + Stringable
-        if bin.op == BinaryOp::Add && matches!(left.vole_type, Type::String) {
+        if bin.op == BinaryOp::Add
+            && matches!(left.vole_type, Type::Primitive(PrimitiveType::String))
+        {
             let right = self.expr(&bin.right)?;
             return self.string_concat(left, right);
         }
@@ -45,7 +47,7 @@ impl Cg<'_, '_, '_> {
         right: CompiledValue,
     ) -> Result<CompiledValue, String> {
         // Get the right operand as a string
-        let right_string = if matches!(right.vole_type, Type::String) {
+        let right_string = if matches!(right.vole_type, Type::Primitive(PrimitiveType::String)) {
             // Right is already a string, use it directly
             right.value
         } else {
@@ -89,7 +91,11 @@ impl Cg<'_, '_, '_> {
         // Check if it's an external (native) method
         if let Some(ref external_info) = method_impl.external_info {
             // Call the external function directly
-            let result = self.call_external(external_info, &[val.value], &Type::String)?;
+            let result = self.call_external(
+                external_info,
+                &[val.value],
+                &Type::Primitive(PrimitiveType::String),
+            )?;
             return Ok(result.value);
         }
 
@@ -277,7 +283,7 @@ impl Cg<'_, '_, '_> {
                 }
             }
             BinaryOp::Eq => {
-                if matches!(left_vole_type, Type::String) {
+                if matches!(left_vole_type, Type::Primitive(PrimitiveType::String)) {
                     self.string_eq(left_val, right_val)?
                 } else if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fcmp(FloatCC::Equal, left_val, right_val)
@@ -286,7 +292,7 @@ impl Cg<'_, '_, '_> {
                 }
             }
             BinaryOp::Ne => {
-                if matches!(left_vole_type, Type::String) {
+                if matches!(left_vole_type, Type::Primitive(PrimitiveType::String)) {
                     let eq = self.string_eq(left_val, right_val)?;
                     let one = self.builder.ins().iconst(types::I8, 1);
                     self.builder.ins().isub(one, eq)
@@ -391,7 +397,7 @@ impl Cg<'_, '_, '_> {
             | BinaryOp::Lt
             | BinaryOp::Gt
             | BinaryOp::Le
-            | BinaryOp::Ge => Type::Bool,
+            | BinaryOp::Ge => Type::Primitive(PrimitiveType::Bool),
             BinaryOp::And | BinaryOp::Or => unreachable!(),
             _ => left_vole_type,
         };
@@ -565,7 +571,7 @@ impl Cg<'_, '_, '_> {
 
         let elem_type = match &arr.vole_type {
             Type::Array(elem) => elem.as_ref().clone(),
-            _ => Type::I64,
+            _ => Type::Primitive(PrimitiveType::I64),
         };
 
         // Load current element

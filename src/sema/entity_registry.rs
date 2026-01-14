@@ -1023,6 +1023,7 @@ mod tests {
     use super::*;
     use crate::identity::NameTable;
     use crate::sema::Type;
+    use crate::sema::types::PrimitiveType;
 
     #[test]
     fn register_and_lookup_type() {
@@ -1051,7 +1052,7 @@ mod tests {
 
         let signature = FunctionType {
             params: vec![],
-            return_type: Box::new(Type::I32),
+            return_type: Box::new(Type::Primitive(PrimitiveType::I32)),
             is_closure: false,
         };
 
@@ -1081,7 +1082,13 @@ mod tests {
         let mut registry = EntityRegistry::new();
         let type_id = registry.register_type(type_name, TypeDefKind::Record, main_mod);
 
-        let field_id = registry.register_field(type_id, field_name, full_field_name, Type::I32, 0);
+        let field_id = registry.register_field(
+            type_id,
+            field_name,
+            full_field_name,
+            Type::Primitive(PrimitiveType::I32),
+            0,
+        );
 
         assert_eq!(
             registry.find_field_on_type(type_id, field_name),
@@ -1104,8 +1111,8 @@ mod tests {
         let mut registry = EntityRegistry::new();
 
         let signature = FunctionType {
-            params: vec![Type::F64],
-            return_type: Box::new(Type::F64),
+            params: vec![Type::Primitive(PrimitiveType::F64)],
+            return_type: Box::new(Type::Primitive(PrimitiveType::F64)),
             is_closure: false,
         };
 

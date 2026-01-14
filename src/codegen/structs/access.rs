@@ -6,6 +6,7 @@ use crate::codegen::context::Cg;
 use crate::codegen::types::{CompiledValue, module_name_id, type_to_cranelift};
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
+use crate::sema::PrimitiveType;
 use crate::sema::Type;
 use crate::sema::types::ConstantValue;
 use cranelift::prelude::*;
@@ -36,7 +37,7 @@ impl Cg<'_, '_, '_> {
                         Ok(CompiledValue {
                             value: val,
                             ty: types::F64,
-                            vole_type: Type::F64,
+                            vole_type: Type::Primitive(PrimitiveType::F64),
                         })
                     }
                     ConstantValue::I64(v) => {
@@ -44,7 +45,7 @@ impl Cg<'_, '_, '_> {
                         Ok(CompiledValue {
                             value: val,
                             ty: types::I64,
-                            vole_type: Type::I64,
+                            vole_type: Type::Primitive(PrimitiveType::I64),
                         })
                     }
                     ConstantValue::Bool(v) => {
@@ -52,7 +53,7 @@ impl Cg<'_, '_, '_> {
                         Ok(CompiledValue {
                             value: val,
                             ty: types::I8,
-                            vole_type: Type::Bool,
+                            vole_type: Type::Primitive(PrimitiveType::Bool),
                         })
                     }
                     ConstantValue::String(s) => self.string_literal(s),

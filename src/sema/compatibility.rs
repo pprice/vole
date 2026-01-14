@@ -3,21 +3,24 @@
 // Type compatibility checking functions.
 // These are pure functions that determine if types are compatible for assignment.
 
-use super::types::{FunctionType, Type};
+use super::types::{FunctionType, PrimitiveType, Type};
 
 /// Check if an integer literal value fits within a type's range
 pub fn literal_fits(value: i64, target: &Type) -> bool {
     match target {
-        Type::I8 => value >= i8::MIN as i64 && value <= i8::MAX as i64,
-        Type::I16 => value >= i16::MIN as i64 && value <= i16::MAX as i64,
-        Type::I32 => value >= i32::MIN as i64 && value <= i32::MAX as i64,
-        Type::I64 => true,
-        Type::I128 => true, // i64 always fits in i128
-        Type::U8 => value >= 0 && value <= u8::MAX as i64,
-        Type::U16 => value >= 0 && value <= u16::MAX as i64,
-        Type::U32 => value >= 0 && value <= u32::MAX as i64,
-        Type::U64 => value >= 0,       // i64 positive values fit
-        Type::F32 | Type::F64 => true, // Integers can become floats
+        Type::Primitive(prim) => match prim {
+            PrimitiveType::I8 => value >= i8::MIN as i64 && value <= i8::MAX as i64,
+            PrimitiveType::I16 => value >= i16::MIN as i64 && value <= i16::MAX as i64,
+            PrimitiveType::I32 => value >= i32::MIN as i64 && value <= i32::MAX as i64,
+            PrimitiveType::I64 => true,
+            PrimitiveType::I128 => true, // i64 always fits in i128
+            PrimitiveType::U8 => value >= 0 && value <= u8::MAX as i64,
+            PrimitiveType::U16 => value >= 0 && value <= u16::MAX as i64,
+            PrimitiveType::U32 => value >= 0 && value <= u32::MAX as i64,
+            PrimitiveType::U64 => value >= 0, // i64 positive values fit
+            PrimitiveType::F32 | PrimitiveType::F64 => true, // Integers can become floats
+            PrimitiveType::Bool | PrimitiveType::String => false,
+        },
         // For unions, check if literal fits any numeric variant
         Type::Union(variants) => variants.iter().any(|v| literal_fits(value, v)),
         _ => false,
@@ -41,10 +44,10 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
     }
 
     // Allow numeric coercion (kept for backwards compatibility)
-    if from.is_integer() && to == &Type::I64 {
+    if from.is_integer() && *to == Type::Primitive(PrimitiveType::I64) {
         return true;
     }
-    if from.is_numeric() && to == &Type::F64 {
+    if from.is_numeric() && *to == Type::Primitive(PrimitiveType::F64) {
         return true;
     }
 
@@ -163,56 +166,71 @@ mod tests {
     #[test]
     fn test_literal_fits_signed() {
         // i8 range: -128 to 127
-        assert!(literal_fits(0, &Type::I8));
-        assert!(literal_fits(127, &Type::I8));
-        assert!(literal_fits(-128, &Type::I8));
-        assert!(!literal_fits(128, &Type::I8));
-        assert!(!literal_fits(-129, &Type::I8));
+        assert!(literal_fits(0, &Type::Primitive(PrimitiveType::I8)));
+        assert!(literal_fits(127, &Type::Primitive(PrimitiveType::I8)));
+        assert!(literal_fits(-128, &Type::Primitive(PrimitiveType::I8)));
+        assert!(!literal_fits(128, &Type::Primitive(PrimitiveType::I8)));
+        assert!(!literal_fits(-129, &Type::Primitive(PrimitiveType::I8)));
 
         // i16 range
-        assert!(literal_fits(32767, &Type::I16));
-        assert!(!literal_fits(32768, &Type::I16));
+        assert!(literal_fits(32767, &Type::Primitive(PrimitiveType::I16)));
+        assert!(!literal_fits(32768, &Type::Primitive(PrimitiveType::I16)));
 
         // i32 range
-        assert!(literal_fits(2147483647, &Type::I32));
-        assert!(!literal_fits(2147483648, &Type::I32));
+        assert!(literal_fits(
+            2147483647,
+            &Type::Primitive(PrimitiveType::I32)
+        ));
+        assert!(!literal_fits(
+            2147483648,
+            &Type::Primitive(PrimitiveType::I32)
+        ));
 
         // i64 always fits
-        assert!(literal_fits(i64::MAX, &Type::I64));
-        assert!(literal_fits(i64::MIN, &Type::I64));
+        assert!(literal_fits(i64::MAX, &Type::Primitive(PrimitiveType::I64)));
+        assert!(literal_fits(i64::MIN, &Type::Primitive(PrimitiveType::I64)));
     }
 
     #[test]
     fn test_literal_fits_unsigned() {
         // u8 range: 0 to 255
-        assert!(literal_fits(0, &Type::U8));
-        assert!(literal_fits(255, &Type::U8));
-        assert!(!literal_fits(256, &Type::U8));
-        assert!(!literal_fits(-1, &Type::U8));
+        assert!(literal_fits(0, &Type::Primitive(PrimitiveType::U8)));
+        assert!(literal_fits(255, &Type::Primitive(PrimitiveType::U8)));
+        assert!(!literal_fits(256, &Type::Primitive(PrimitiveType::U8)));
+        assert!(!literal_fits(-1, &Type::Primitive(PrimitiveType::U8)));
 
         // u16 range
-        assert!(literal_fits(65535, &Type::U16));
-        assert!(!literal_fits(65536, &Type::U16));
+        assert!(literal_fits(65535, &Type::Primitive(PrimitiveType::U16)));
+        assert!(!literal_fits(65536, &Type::Primitive(PrimitiveType::U16)));
 
         // u32 range
-        assert!(literal_fits(4294967295, &Type::U32));
-        assert!(!literal_fits(4294967296, &Type::U32));
+        assert!(literal_fits(
+            4294967295,
+            &Type::Primitive(PrimitiveType::U32)
+        ));
+        assert!(!literal_fits(
+            4294967296,
+            &Type::Primitive(PrimitiveType::U32)
+        ));
 
         // u64 accepts all positive i64 values
-        assert!(literal_fits(0, &Type::U64));
-        assert!(literal_fits(i64::MAX, &Type::U64));
-        assert!(!literal_fits(-1, &Type::U64));
+        assert!(literal_fits(0, &Type::Primitive(PrimitiveType::U64)));
+        assert!(literal_fits(i64::MAX, &Type::Primitive(PrimitiveType::U64)));
+        assert!(!literal_fits(-1, &Type::Primitive(PrimitiveType::U64)));
     }
 
     #[test]
     fn test_literal_fits_float() {
-        assert!(literal_fits(0, &Type::F32));
-        assert!(literal_fits(i64::MAX, &Type::F64));
+        assert!(literal_fits(0, &Type::Primitive(PrimitiveType::F32)));
+        assert!(literal_fits(i64::MAX, &Type::Primitive(PrimitiveType::F64)));
     }
 
     #[test]
     fn test_literal_fits_union() {
-        let union_ty = Type::Union(vec![Type::I8, Type::I32]);
+        let union_ty = Type::Union(vec![
+            Type::Primitive(PrimitiveType::I8),
+            Type::Primitive(PrimitiveType::I32),
+        ]);
         assert!(literal_fits(100, &union_ty)); // Fits in i8
         assert!(literal_fits(1000, &union_ty)); // Fits in i32
         assert!(!literal_fits(i64::MAX, &union_ty)); // Doesn't fit in either
@@ -220,51 +238,90 @@ mod tests {
 
     #[test]
     fn test_types_compatible_same() {
-        assert!(types_compatible_core(&Type::I32, &Type::I32));
-        assert!(types_compatible_core(&Type::String, &Type::String));
-        assert!(types_compatible_core(&Type::Bool, &Type::Bool));
+        assert!(types_compatible_core(
+            &Type::Primitive(PrimitiveType::I32),
+            &Type::Primitive(PrimitiveType::I32)
+        ));
+        assert!(types_compatible_core(
+            &Type::Primitive(PrimitiveType::String),
+            &Type::Primitive(PrimitiveType::String)
+        ));
+        assert!(types_compatible_core(
+            &Type::Primitive(PrimitiveType::Bool),
+            &Type::Primitive(PrimitiveType::Bool)
+        ));
     }
 
     #[test]
     fn test_types_compatible_widening() {
-        assert!(types_compatible_core(&Type::I32, &Type::I64));
-        assert!(types_compatible_core(&Type::F32, &Type::F64));
-        assert!(types_compatible_core(&Type::U8, &Type::I16));
+        assert!(types_compatible_core(
+            &Type::Primitive(PrimitiveType::I32),
+            &Type::Primitive(PrimitiveType::I64)
+        ));
+        assert!(types_compatible_core(
+            &Type::Primitive(PrimitiveType::F32),
+            &Type::Primitive(PrimitiveType::F64)
+        ));
+        assert!(types_compatible_core(
+            &Type::Primitive(PrimitiveType::U8),
+            &Type::Primitive(PrimitiveType::I16)
+        ));
     }
 
     #[test]
     fn test_types_compatible_union() {
-        let union_ty = Type::Union(vec![Type::I32, Type::String]);
-        assert!(types_compatible_core(&Type::I32, &union_ty));
-        assert!(types_compatible_core(&Type::String, &union_ty));
-        assert!(!types_compatible_core(&Type::Bool, &union_ty));
+        let union_ty = Type::Union(vec![
+            Type::Primitive(PrimitiveType::I32),
+            Type::Primitive(PrimitiveType::String),
+        ]);
+        assert!(types_compatible_core(
+            &Type::Primitive(PrimitiveType::I32),
+            &union_ty
+        ));
+        assert!(types_compatible_core(
+            &Type::Primitive(PrimitiveType::String),
+            &union_ty
+        ));
+        assert!(!types_compatible_core(
+            &Type::Primitive(PrimitiveType::Bool),
+            &union_ty
+        ));
     }
 
     #[test]
     fn test_types_compatible_optional() {
-        let optional = Type::optional(Type::I32);
+        let optional = Type::optional(Type::Primitive(PrimitiveType::I32));
         assert!(types_compatible_core(&Type::Nil, &optional));
-        assert!(types_compatible_core(&Type::I32, &optional));
+        assert!(types_compatible_core(
+            &Type::Primitive(PrimitiveType::I32),
+            &optional
+        ));
     }
 
     #[test]
     fn test_types_compatible_error() {
         let err = Type::invalid("test");
-        assert!(types_compatible_core(&err, &Type::I32));
-        assert!(types_compatible_core(&Type::I32, &err));
+        assert!(types_compatible_core(
+            &err,
+            &Type::Primitive(PrimitiveType::I32)
+        ));
+        assert!(types_compatible_core(
+            &Type::Primitive(PrimitiveType::I32),
+            &err
+        ));
     }
 
     #[test]
     fn test_function_compatible_with_interface() {
         let fn_type = FunctionType {
-            params: vec![Type::I32],
-            return_type: Box::new(Type::Bool),
+            params: vec![Type::Primitive(PrimitiveType::I32)],
+            return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
             is_closure: false,
         };
 
         let iface_fn = FunctionType {
-            params: vec![Type::I32],
-            return_type: Box::new(Type::Bool),
+            params: vec![Type::Primitive(PrimitiveType::I32)],
+            return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
             is_closure: true,
         };
 
@@ -272,16 +329,19 @@ mod tests {
 
         // Incompatible return type
         let iface_fn_bad = FunctionType {
-            params: vec![Type::I32],
-            return_type: Box::new(Type::String),
+            params: vec![Type::Primitive(PrimitiveType::I32)],
+            return_type: Box::new(Type::Primitive(PrimitiveType::String)),
             is_closure: true,
         };
         assert!(!function_compatible_with_interface(&fn_type, &iface_fn_bad));
 
         // Different param count
         let iface_fn_wrong_params = FunctionType {
-            params: vec![Type::I32, Type::I32],
-            return_type: Box::new(Type::Bool),
+            params: vec![
+                Type::Primitive(PrimitiveType::I32),
+                Type::Primitive(PrimitiveType::I32),
+            ],
+            return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
             is_closure: true,
         };
         assert!(!function_compatible_with_interface(
@@ -292,10 +352,19 @@ mod tests {
 
     #[test]
     fn test_types_compatible_tuple() {
-        let tuple1 = Type::Tuple(vec![Type::I32, Type::String]);
-        let tuple2 = Type::Tuple(vec![Type::I32, Type::String]);
-        let tuple3 = Type::Tuple(vec![Type::I32, Type::Bool]); // Different element type
-        let tuple4 = Type::Tuple(vec![Type::I32]); // Different length
+        let tuple1 = Type::Tuple(vec![
+            Type::Primitive(PrimitiveType::I32),
+            Type::Primitive(PrimitiveType::String),
+        ]);
+        let tuple2 = Type::Tuple(vec![
+            Type::Primitive(PrimitiveType::I32),
+            Type::Primitive(PrimitiveType::String),
+        ]);
+        let tuple3 = Type::Tuple(vec![
+            Type::Primitive(PrimitiveType::I32),
+            Type::Primitive(PrimitiveType::Bool),
+        ]); // Different element type
+        let tuple4 = Type::Tuple(vec![Type::Primitive(PrimitiveType::I32)]); // Different length
 
         assert!(types_compatible_core(&tuple1, &tuple2));
         assert!(!types_compatible_core(&tuple1, &tuple3));
@@ -305,27 +374,33 @@ mod tests {
     #[test]
     fn test_types_compatible_tuple_widening() {
         // Tuple with widening: [i32, f32] compatible with [i64, f64]
-        let narrow = Type::Tuple(vec![Type::I32, Type::F32]);
-        let wide = Type::Tuple(vec![Type::I64, Type::F64]);
+        let narrow = Type::Tuple(vec![
+            Type::Primitive(PrimitiveType::I32),
+            Type::Primitive(PrimitiveType::F32),
+        ]);
+        let wide = Type::Tuple(vec![
+            Type::Primitive(PrimitiveType::I64),
+            Type::Primitive(PrimitiveType::F64),
+        ]);
         assert!(types_compatible_core(&narrow, &wide));
     }
 
     #[test]
     fn test_types_compatible_fixed_array() {
         let arr1 = Type::FixedArray {
-            element: Box::new(Type::I32),
+            element: Box::new(Type::Primitive(PrimitiveType::I32)),
             size: 10,
         };
         let arr2 = Type::FixedArray {
-            element: Box::new(Type::I32),
+            element: Box::new(Type::Primitive(PrimitiveType::I32)),
             size: 10,
         };
         let arr3 = Type::FixedArray {
-            element: Box::new(Type::I32),
+            element: Box::new(Type::Primitive(PrimitiveType::I32)),
             size: 5,
         }; // Different size
         let arr4 = Type::FixedArray {
-            element: Box::new(Type::String),
+            element: Box::new(Type::Primitive(PrimitiveType::String)),
             size: 10,
         }; // Different element type
 
@@ -338,11 +413,11 @@ mod tests {
     fn test_types_compatible_fixed_array_widening() {
         // Fixed array with widening: [i32; 5] compatible with [i64; 5]
         let narrow = Type::FixedArray {
-            element: Box::new(Type::I32),
+            element: Box::new(Type::Primitive(PrimitiveType::I32)),
             size: 5,
         };
         let wide = Type::FixedArray {
-            element: Box::new(Type::I64),
+            element: Box::new(Type::Primitive(PrimitiveType::I64)),
             size: 5,
         };
         assert!(types_compatible_core(&narrow, &wide));
