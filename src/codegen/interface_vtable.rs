@@ -248,180 +248,44 @@ impl InterfaceVtableRegistry {
             // We need to extract data_ptr for most targets
             let box_ptr = params[0];
             let data_word = builder.ins().load(word_type, MemFlags::new(), box_ptr, 0);
+
+            // Dispatch to target-specific wrapper compilation
             let results = match target {
-                VtableMethodTarget::Function { func_type } => {
-                    let self_val =
-                        word_to_value(&mut builder, data_word, concrete_type, ctx.pointer_type);
-                    let mut args = Vec::with_capacity(func_type.params.len() + 1);
-                    for (param_word, param_ty) in params[1..].iter().zip(func_type.params.iter()) {
-                        args.push(word_to_value(
-                            &mut builder,
-                            *param_word,
-                            param_ty,
-                            ctx.pointer_type,
-                        ));
-                    }
-
-                    let (func_ptr, call_args, sig) = if func_type.is_closure {
-                        let closure_get_key = ctx
-                            .func_registry
-                            .runtime_key(RuntimeFn::ClosureGetFunc)
-                            .ok_or_else(|| "closure get func not registered".to_string())?;
-                        let closure_get_id = ctx
-                            .func_registry
-                            .func_id(closure_get_key)
-                            .ok_or_else(|| "closure get func id missing".to_string())?;
-                        let closure_get_ref = ctx
-                            .module
-                            .declare_func_in_func(closure_get_id, builder.func);
-                        let closure_call = builder.ins().call(closure_get_ref, &[self_val]);
-                        let func_ptr = builder.inst_results(closure_call)[0];
-
-                        let mut sig = ctx.module.make_signature();
-                        sig.params.push(AbiParam::new(type_to_cranelift(
-                            concrete_type,
-                            ctx.pointer_type,
-                        )));
-                        for param_type in &func_type.params {
-                            sig.params.push(AbiParam::new(type_to_cranelift(
-                                param_type,
-                                ctx.pointer_type,
-                            )));
-                        }
-                        if func_type.return_type.as_ref() != &Type::Void {
-                            sig.returns.push(AbiParam::new(type_to_cranelift(
-                                &func_type.return_type,
-                                ctx.pointer_type,
-                            )));
-                        }
-
-                        let mut call_args = Vec::with_capacity(args.len() + 1);
-                        call_args.push(self_val);
-                        call_args.extend(args);
-                        (func_ptr, call_args, sig)
-                    } else {
-                        let mut sig = ctx.module.make_signature();
-                        for param_type in &func_type.params {
-                            sig.params.push(AbiParam::new(type_to_cranelift(
-                                param_type,
-                                ctx.pointer_type,
-                            )));
-                        }
-                        if func_type.return_type.as_ref() != &Type::Void {
-                            sig.returns.push(AbiParam::new(type_to_cranelift(
-                                &func_type.return_type,
-                                ctx.pointer_type,
-                            )));
-                        }
-                        (self_val, args, sig)
-                    };
-
-                    let sig_ref = builder.import_signature(sig);
-                    let call = builder.ins().call_indirect(sig_ref, func_ptr, &call_args);
-                    builder.inst_results(call).to_vec()
-                }
+                VtableMethodTarget::Function { func_type } => compile_function_wrapper(
+                    &mut builder,
+                    ctx,
+                    func_type,
+                    concrete_type,
+                    data_word,
+                    &params,
+                )?,
                 VtableMethodTarget::Direct { method_info, .. }
-                | VtableMethodTarget::Implemented { method_info, .. } => {
-                    let self_val =
-                        word_to_value(&mut builder, data_word, concrete_type, ctx.pointer_type);
-                    let mut call_args = Vec::with_capacity(1 + func_type.params.len());
-                    call_args.push(self_val);
-                    for (param_word, param_ty) in params[1..].iter().zip(func_type.params.iter()) {
-                        call_args.push(word_to_value(
-                            &mut builder,
-                            *param_word,
-                            param_ty,
-                            ctx.pointer_type,
-                        ));
-                    }
-                    let func_id = ctx
-                        .func_registry
-                        .func_id(method_info.func_key)
-                        .ok_or_else(|| "method function id not found".to_string())?;
-                    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
-                    let call = builder.ins().call(func_ref, &call_args);
-                    builder.inst_results(call).to_vec()
-                }
+                | VtableMethodTarget::Implemented { method_info, .. } => compile_method_wrapper(
+                    &mut builder,
+                    ctx,
+                    func_type,
+                    concrete_type,
+                    data_word,
+                    &params,
+                    method_info,
+                )?,
                 VtableMethodTarget::External {
                     external_info,
                     func_type,
-                } => {
-                    // For Iterator interface, wrap the boxed interface in a UnifiedIterator
-                    // so external functions like vole_iter_collect can iterate via vtable.
-                    let self_val = if interface_name == "Iterator" {
-                        // Call vole_interface_iter(box_ptr) to create UnifiedIterator adapter
-                        let interface_iter_fn = ctx
-                            .native_registry
-                            .lookup("std:intrinsics", "interface_iter")
-                            .ok_or_else(|| {
-                                "native function std:intrinsics::interface_iter not found"
-                                    .to_string()
-                            })?;
-                        let mut iter_sig = ctx.module.make_signature();
-                        iter_sig.params.push(AbiParam::new(ctx.pointer_type));
-                        iter_sig.returns.push(AbiParam::new(ctx.pointer_type));
-                        let iter_sig_ref = builder.import_signature(iter_sig);
-                        let iter_fn_ptr = builder
-                            .ins()
-                            .iconst(ctx.pointer_type, interface_iter_fn.ptr as i64);
-                        let iter_call =
-                            builder
-                                .ins()
-                                .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr]);
-                        builder.inst_results(iter_call)[0]
-                    } else {
-                        word_to_value(&mut builder, data_word, concrete_type, ctx.pointer_type)
-                    };
-                    let mut call_args = Vec::with_capacity(1 + func_type.params.len());
-                    call_args.push(self_val);
-                    for (param_word, param_ty) in params[1..].iter().zip(func_type.params.iter()) {
-                        call_args.push(word_to_value(
-                            &mut builder,
-                            *param_word,
-                            param_ty,
-                            ctx.pointer_type,
-                        ));
-                    }
-                    let native_func = ctx
-                        .native_registry
-                        .lookup(&external_info.module_path, &external_info.native_name)
-                        .ok_or_else(|| {
-                            format!(
-                                "native function {}::{} not found",
-                                external_info.module_path, external_info.native_name
-                            )
-                        })?;
-                    let mut native_sig = ctx.module.make_signature();
-                    // For Iterator, the self param is now *mut UnifiedIterator (pointer)
-                    let self_param_type = if interface_name == "Iterator" {
-                        ctx.pointer_type
-                    } else {
-                        type_to_cranelift(concrete_type, ctx.pointer_type)
-                    };
-                    native_sig.params.push(AbiParam::new(self_param_type));
-                    for param_type in &func_type.params {
-                        native_sig.params.push(AbiParam::new(type_to_cranelift(
-                            param_type,
-                            ctx.pointer_type,
-                        )));
-                    }
-                    if func_type.return_type.as_ref() != &Type::Void {
-                        native_sig.returns.push(AbiParam::new(type_to_cranelift(
-                            &func_type.return_type,
-                            ctx.pointer_type,
-                        )));
-                    }
-                    let sig_ref = builder.import_signature(native_sig);
-                    let func_ptr_val = builder
-                        .ins()
-                        .iconst(ctx.pointer_type, native_func.ptr as i64);
-                    let call = builder
-                        .ins()
-                        .call_indirect(sig_ref, func_ptr_val, &call_args);
-                    builder.inst_results(call).to_vec()
-                }
+                } => compile_external_wrapper(
+                    &mut builder,
+                    ctx,
+                    func_type,
+                    concrete_type,
+                    data_word,
+                    box_ptr,
+                    &params,
+                    external_info,
+                    interface_name,
+                )?,
             };
 
+            // Handle return value
             if func_type.return_type.as_ref() == &Type::Void {
                 builder.ins().return_(&[]);
             } else {
@@ -454,6 +318,205 @@ impl InterfaceVtableRegistry {
 
         Ok(func_id)
     }
+}
+
+/// Compile wrapper body for Function target (closure/function pointer calls)
+fn compile_function_wrapper(
+    builder: &mut FunctionBuilder,
+    ctx: &mut CompileCtx,
+    func_type: &FunctionType,
+    concrete_type: &Type,
+    data_word: Value,
+    params: &[Value],
+) -> Result<Vec<Value>, String> {
+    let self_val = word_to_value(builder, data_word, concrete_type, ctx.pointer_type);
+    let mut args = Vec::with_capacity(func_type.params.len() + 1);
+    for (param_word, param_ty) in params[1..].iter().zip(func_type.params.iter()) {
+        args.push(word_to_value(
+            builder,
+            *param_word,
+            param_ty,
+            ctx.pointer_type,
+        ));
+    }
+
+    let (func_ptr, call_args, sig) = if func_type.is_closure {
+        let closure_get_key = ctx
+            .func_registry
+            .runtime_key(RuntimeFn::ClosureGetFunc)
+            .ok_or_else(|| "closure get func not registered".to_string())?;
+        let closure_get_id = ctx
+            .func_registry
+            .func_id(closure_get_key)
+            .ok_or_else(|| "closure get func id missing".to_string())?;
+        let closure_get_ref = ctx
+            .module
+            .declare_func_in_func(closure_get_id, builder.func);
+        let closure_call = builder.ins().call(closure_get_ref, &[self_val]);
+        let func_ptr = builder.inst_results(closure_call)[0];
+
+        let mut sig = ctx.module.make_signature();
+        sig.params.push(AbiParam::new(type_to_cranelift(
+            concrete_type,
+            ctx.pointer_type,
+        )));
+        for param_type in &func_type.params {
+            sig.params.push(AbiParam::new(type_to_cranelift(
+                param_type,
+                ctx.pointer_type,
+            )));
+        }
+        if func_type.return_type.as_ref() != &Type::Void {
+            sig.returns.push(AbiParam::new(type_to_cranelift(
+                &func_type.return_type,
+                ctx.pointer_type,
+            )));
+        }
+
+        let mut call_args = Vec::with_capacity(args.len() + 1);
+        call_args.push(self_val);
+        call_args.extend(args);
+        (func_ptr, call_args, sig)
+    } else {
+        let mut sig = ctx.module.make_signature();
+        for param_type in &func_type.params {
+            sig.params.push(AbiParam::new(type_to_cranelift(
+                param_type,
+                ctx.pointer_type,
+            )));
+        }
+        if func_type.return_type.as_ref() != &Type::Void {
+            sig.returns.push(AbiParam::new(type_to_cranelift(
+                &func_type.return_type,
+                ctx.pointer_type,
+            )));
+        }
+        (self_val, args, sig)
+    };
+
+    let sig_ref = builder.import_signature(sig);
+    let call = builder.ins().call_indirect(sig_ref, func_ptr, &call_args);
+    Ok(builder.inst_results(call).to_vec())
+}
+
+/// Compile wrapper body for Direct/Implemented targets (direct method calls)
+fn compile_method_wrapper(
+    builder: &mut FunctionBuilder,
+    ctx: &mut CompileCtx,
+    func_type: &FunctionType,
+    concrete_type: &Type,
+    data_word: Value,
+    params: &[Value],
+    method_info: &MethodInfo,
+) -> Result<Vec<Value>, String> {
+    let self_val = word_to_value(builder, data_word, concrete_type, ctx.pointer_type);
+    let mut call_args = Vec::with_capacity(1 + func_type.params.len());
+    call_args.push(self_val);
+    for (param_word, param_ty) in params[1..].iter().zip(func_type.params.iter()) {
+        call_args.push(word_to_value(
+            builder,
+            *param_word,
+            param_ty,
+            ctx.pointer_type,
+        ));
+    }
+    let func_id = ctx
+        .func_registry
+        .func_id(method_info.func_key)
+        .ok_or_else(|| "method function id not found".to_string())?;
+    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
+    let call = builder.ins().call(func_ref, &call_args);
+    Ok(builder.inst_results(call).to_vec())
+}
+
+/// Compile wrapper body for External target (native/external function calls)
+#[allow(clippy::too_many_arguments)]
+fn compile_external_wrapper(
+    builder: &mut FunctionBuilder,
+    ctx: &mut CompileCtx,
+    func_type: &FunctionType,
+    concrete_type: &Type,
+    data_word: Value,
+    box_ptr: Value,
+    params: &[Value],
+    external_info: &ExternalMethodInfo,
+    interface_name: &str,
+) -> Result<Vec<Value>, String> {
+    // For Iterator interface, wrap the boxed interface in a UnifiedIterator
+    // so external functions like vole_iter_collect can iterate via vtable.
+    let self_val = if interface_name == "Iterator" {
+        // Call vole_interface_iter(box_ptr) to create UnifiedIterator adapter
+        let interface_iter_fn = ctx
+            .native_registry
+            .lookup("std:intrinsics", "interface_iter")
+            .ok_or_else(|| {
+                "native function std:intrinsics::interface_iter not found".to_string()
+            })?;
+        let mut iter_sig = ctx.module.make_signature();
+        iter_sig.params.push(AbiParam::new(ctx.pointer_type));
+        iter_sig.returns.push(AbiParam::new(ctx.pointer_type));
+        let iter_sig_ref = builder.import_signature(iter_sig);
+        let iter_fn_ptr = builder
+            .ins()
+            .iconst(ctx.pointer_type, interface_iter_fn.ptr as i64);
+        let iter_call = builder
+            .ins()
+            .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr]);
+        builder.inst_results(iter_call)[0]
+    } else {
+        word_to_value(builder, data_word, concrete_type, ctx.pointer_type)
+    };
+
+    let mut call_args = Vec::with_capacity(1 + func_type.params.len());
+    call_args.push(self_val);
+    for (param_word, param_ty) in params[1..].iter().zip(func_type.params.iter()) {
+        call_args.push(word_to_value(
+            builder,
+            *param_word,
+            param_ty,
+            ctx.pointer_type,
+        ));
+    }
+
+    let native_func = ctx
+        .native_registry
+        .lookup(&external_info.module_path, &external_info.native_name)
+        .ok_or_else(|| {
+            format!(
+                "native function {}::{} not found",
+                external_info.module_path, external_info.native_name
+            )
+        })?;
+
+    let mut native_sig = ctx.module.make_signature();
+    // For Iterator, the self param is now *mut UnifiedIterator (pointer)
+    let self_param_type = if interface_name == "Iterator" {
+        ctx.pointer_type
+    } else {
+        type_to_cranelift(concrete_type, ctx.pointer_type)
+    };
+    native_sig.params.push(AbiParam::new(self_param_type));
+    for param_type in &func_type.params {
+        native_sig.params.push(AbiParam::new(type_to_cranelift(
+            param_type,
+            ctx.pointer_type,
+        )));
+    }
+    if func_type.return_type.as_ref() != &Type::Void {
+        native_sig.returns.push(AbiParam::new(type_to_cranelift(
+            &func_type.return_type,
+            ctx.pointer_type,
+        )));
+    }
+
+    let sig_ref = builder.import_signature(native_sig);
+    let func_ptr_val = builder
+        .ins()
+        .iconst(ctx.pointer_type, native_func.ptr as i64);
+    let call = builder
+        .ins()
+        .call_indirect(sig_ref, func_ptr_val, &call_args);
+    Ok(builder.inst_results(call).to_vec())
 }
 
 /// Look up an interface method slot using EntityRegistry (TypeDefId-based)
