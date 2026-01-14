@@ -9,6 +9,7 @@ use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
 use crate::sema::PrimitiveType;
 use crate::sema::Type;
 use crate::sema::types::ConstantValue;
+use crate::sema::types::NominalType;
 use cranelift::prelude::*;
 
 impl Cg<'_, '_, '_> {
@@ -223,7 +224,7 @@ impl Cg<'_, '_, '_> {
 
         let field_name = self.ctx.interner.resolve(field);
         let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field_name, self.ctx)?;
-        let value = if matches!(field_type, Type::Interface(_)) {
+        let value = if matches!(field_type, Type::Nominal(NominalType::Interface(_))) {
             crate::codegen::interface_vtable::box_interface_value(
                 self.builder,
                 self.ctx,

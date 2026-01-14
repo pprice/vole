@@ -17,6 +17,7 @@ use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, substitute_type};
+use crate::sema::types::NominalType;
 use crate::sema::{
     EntityRegistry, FunctionType, PrimitiveType, ProgramQuery, Type, TypeId, TypeKey,
 };
@@ -90,12 +91,12 @@ pub(crate) fn type_metadata_by_name_id<'a>(
         "type_metadata_by_name_id lookup"
     );
     let result = type_metadata.values().find(|meta| match &meta.vole_type {
-        Type::Class(c) => {
+        Type::Nominal(NominalType::Class(c)) => {
             let class_name_id = entity_registry.class_name_id(c);
             tracing::trace!(target_name_id = ?name_id, class_name_id = ?class_name_id, "comparing class name_id");
             class_name_id == name_id
         }
-        Type::Record(r) => entity_registry.record_name_id(r) == name_id,
+        Type::Nominal(NominalType::Record(r)) => entity_registry.record_name_id(r) == name_id,
         _ => false,
     });
     if result.is_none() {
@@ -103,7 +104,7 @@ pub(crate) fn type_metadata_by_name_id<'a>(
         let class_name_ids: Vec<_> = type_metadata
             .values()
             .filter_map(|meta| {
-                if let Type::Class(c) = &meta.vole_type {
+                if let Type::Nominal(NominalType::Class(c)) = &meta.vole_type {
                     Some(entity_registry.class_name_id(c))
                 } else {
                     None
@@ -272,7 +273,7 @@ pub(crate) fn function_name_id_with_interner(
 #[allow(clippy::only_used_in_recursion)]
 pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: &Type) -> String {
     match ty {
-        Type::Class(class_type) => {
+        Type::Nominal(NominalType::Class(class_type)) => {
             let name_id = analyzed.entity_registry.class_name_id(class_type);
             let base = analyzed.name_table.display(name_id);
             if class_type.type_args.is_empty() {
@@ -287,7 +288,7 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
                 format!("{}<{}>", base, arg_list)
             }
         }
-        Type::Record(record_type) => {
+        Type::Nominal(NominalType::Record(record_type)) => {
             let name_id = analyzed.entity_registry.record_name_id(record_type);
             let base = analyzed.name_table.display(name_id);
             if record_type.type_args.is_empty() {
@@ -302,7 +303,7 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
                 format!("{}<{}>", base, arg_list)
             }
         }
-        Type::Interface(interface_type) => {
+        Type::Nominal(NominalType::Interface(interface_type)) => {
             let name_id = analyzed.entity_registry.name_id(interface_type.type_def_id);
             let base = analyzed.name_table.display(name_id);
             if interface_type.type_args.is_empty() {
@@ -317,7 +318,7 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
                 format!("{}<{}>", base, arg_list)
             }
         }
-        Type::ErrorType(error_type) => {
+        Type::Nominal(NominalType::Error(error_type)) => {
             let name_id = analyzed.entity_registry.name_id(error_type.type_def_id);
             analyzed.name_table.display(name_id)
         }
@@ -366,12 +367,12 @@ fn build_interface_type_from_entity(
     // Keep extends as TypeDefIds directly
     let extends = type_def.extends.clone();
 
-    Type::Interface(crate::sema::types::InterfaceType {
+    Type::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
         type_def_id,
         type_args,
         methods,
         extends,
-    })
+    }))
 }
 
 /// Resolve a type expression using entity registry, error types, and type metadata
@@ -422,7 +423,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     TypeDefKind::ErrorType => {
                         // Error type - get info from EntityRegistry
                         if let Some(error_info) = type_def.error_info.clone() {
-                            Type::ErrorType(error_info)
+                            Type::Nominal(NominalType::Error(error_info))
                         } else {
                             panic!(
                                 "INTERNAL ERROR: error type has no error_info\n\
@@ -439,8 +440,12 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         if let Some(metadata) = type_metadata.get(sym) {
                             // Verify this is the right type by comparing type_def_ids
                             let matches = match &metadata.vole_type {
-                                Type::Record(r) => r.type_def_id == type_def_id,
-                                Type::Class(c) => c.type_def_id == type_def_id,
+                                Type::Nominal(NominalType::Record(r)) => {
+                                    r.type_def_id == type_def_id
+                                }
+                                Type::Nominal(NominalType::Class(c)) => {
+                                    c.type_def_id == type_def_id
+                                }
                                 _ => false,
                             };
                             if matches {
@@ -454,12 +459,12 @@ pub(crate) fn resolve_type_expr_with_metadata(
                             if let Some(record_type) =
                                 entity_registry.build_record_type(type_def_id)
                             {
-                                return Type::Record(record_type);
+                                return Type::Nominal(NominalType::Record(record_type));
                             }
                         } else if let Some(class_type) =
                             entity_registry.build_class_type(type_def_id)
                         {
-                            return Type::Class(class_type);
+                            return Type::Nominal(NominalType::Class(class_type));
                         }
                         panic!(
                             "INTERNAL ERROR: failed to build record/class type\n\
@@ -617,16 +622,18 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 let type_def = entity_registry.get_type(type_def_id);
                 match type_def.kind {
                     TypeDefKind::Class => {
-                        return Type::Class(crate::sema::types::ClassType {
+                        return Type::Nominal(NominalType::Class(crate::sema::types::ClassType {
                             type_def_id,
                             type_args: resolved_args,
-                        });
+                        }));
                     }
                     TypeDefKind::Record => {
-                        return Type::Record(crate::sema::types::RecordType {
-                            type_def_id,
-                            type_args: resolved_args,
-                        });
+                        return Type::Nominal(NominalType::Record(
+                            crate::sema::types::RecordType {
+                                type_def_id,
+                                type_args: resolved_args,
+                            },
+                        ));
                     }
                     TypeDefKind::Interface => {
                         if !type_def.type_params.is_empty()
@@ -675,12 +682,14 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         // Keep extends as TypeDefIds directly
                         let extends = type_def.extends.clone();
 
-                        return Type::Interface(crate::sema::types::InterfaceType {
-                            type_def_id,
-                            type_args: resolved_args,
-                            methods,
-                            extends,
-                        });
+                        return Type::Nominal(NominalType::Interface(
+                            crate::sema::types::InterfaceType {
+                                type_def_id,
+                                type_args: resolved_args,
+                                methods,
+                                extends,
+                            },
+                        ));
                     }
                     TypeDefKind::Alias | TypeDefKind::ErrorType | TypeDefKind::Primitive => {
                         panic!(
@@ -788,7 +797,7 @@ pub(crate) fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::
         Type::Primitive(PrimitiveType::F64) => types::F64,
         Type::Primitive(PrimitiveType::Bool) => types::I8,
         Type::Primitive(PrimitiveType::String) => pointer_type,
-        Type::Interface(_) => pointer_type,
+        Type::Nominal(NominalType::Interface(_)) => pointer_type,
         Type::Nil => types::I8,            // Nil uses minimal representation
         Type::Done => types::I8,           // Done uses minimal representation (like Nil)
         Type::Union(_) => pointer_type,    // Unions are passed by pointer
@@ -816,7 +825,7 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
         | Type::Primitive(PrimitiveType::F64) => 8,
         Type::Primitive(PrimitiveType::I128) => 16,
         Type::Primitive(PrimitiveType::String) | Type::Array(_) => pointer_type.bytes(), // pointer size
-        Type::Interface(_) => pointer_type.bytes(),
+        Type::Nominal(NominalType::Interface(_)) => pointer_type.bytes(),
         Type::Nil | Type::Done | Type::Void => 0,
         Type::Range => 16, // start (i64) + end (i64)
         Type::Union(variants) => {
@@ -829,7 +838,7 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
             // Layout: [tag:1][padding:7][payload:max_payload] aligned to 8
             8 + max_payload.div_ceil(8) * 8
         }
-        Type::ErrorType(info) => {
+        Type::Nominal(NominalType::Error(info)) => {
             // Error types are struct-like: sum of all field sizes, aligned to 8
             let fields_size: u32 = info
                 .fields
@@ -845,7 +854,7 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
 
             // Compute max error payload size
             let error_size = match ft.error_type.as_ref() {
-                Type::ErrorType(info) => {
+                Type::Nominal(NominalType::Error(info)) => {
                     // Single error type
                     info.fields
                         .iter()
@@ -857,7 +866,7 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
                     variants
                         .iter()
                         .filter_map(|v| match v {
-                            Type::ErrorType(info) => Some(
+                            Type::Nominal(NominalType::Error(info)) => Some(
                                 info.fields
                                     .iter()
                                     .map(|f| type_size(&f.ty, pointer_type))
@@ -938,7 +947,7 @@ pub(crate) fn fallible_error_tag(
 ) -> Option<i64> {
     let error_name_str = interner.resolve(error_name);
     match fallible.error_type.as_ref() {
-        Type::ErrorType(info) => {
+        Type::Nominal(NominalType::Error(info)) => {
             let info_name = name_table.last_segment_str(entity_registry.name_id(info.type_def_id));
             if info_name.as_deref() == Some(error_name_str) {
                 Some(1) // Single error type always gets tag 1
@@ -949,7 +958,7 @@ pub(crate) fn fallible_error_tag(
         Type::Union(variants) => {
             // Find the 1-based index of the error type in the union
             for (idx, variant) in variants.iter().enumerate() {
-                if let Type::ErrorType(info) = variant {
+                if let Type::Nominal(NominalType::Error(info)) = variant {
                     let info_name =
                         name_table.last_segment_str(entity_registry.name_id(info.type_def_id));
                     if info_name.as_deref() == Some(error_name_str) {

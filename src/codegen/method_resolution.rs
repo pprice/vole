@@ -8,6 +8,7 @@ use crate::frontend::Symbol;
 use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::resolution::ResolvedMethod;
+use crate::sema::types::NominalType;
 use crate::sema::{FunctionType, PrimitiveType, Type};
 
 #[derive(Debug)]
@@ -96,7 +97,7 @@ pub(crate) fn resolve_method_target(
     // but at codegen time the type is concrete (e.g., i64).
     let effective_resolution = input.resolution.filter(|resolution| {
         !matches!(resolution, ResolvedMethod::InterfaceMethod { .. })
-            || matches!(input.object_type, Type::Interface(_))
+            || matches!(input.object_type, Type::Nominal(NominalType::Interface(_)))
     });
 
     if let Some(resolution) = effective_resolution {
@@ -126,7 +127,7 @@ pub(crate) fn resolve_method_target(
 
                 // For interface types, we need vtable dispatch - the external_info is for
                 // the default implementation, but the concrete type may override it
-                if let Type::Interface(interface_type) = input.object_type {
+                if let Type::Nominal(NominalType::Interface(interface_type)) = input.object_type {
                     // Use TypeDefId directly for EntityRegistry-based dispatch
                     let interface_type_id = interface_type.type_def_id;
                     let method_name_id = method_name_id_by_str(
@@ -211,7 +212,7 @@ pub(crate) fn resolve_method_target(
                 // This branch is only taken when object_type is an interface
                 // (non-interface types are filtered out before the match)
                 let interface_type = match input.object_type {
-                    Type::Interface(it) => it,
+                    Type::Nominal(NominalType::Interface(it)) => it,
                     _ => unreachable!("InterfaceMethod filtered out for non-interface types"),
                 };
                 let method_name_id = method_name_id_by_str(
@@ -346,9 +347,9 @@ pub(crate) fn resolve_method_target(
 fn get_type_def_id_for_codegen(ty: &Type, analyzed: &AnalyzedProgram) -> Option<TypeDefId> {
     // For Class, Record, and Interface, we already have the TypeDefId
     match ty {
-        Type::Class(c) => return Some(c.type_def_id),
-        Type::Record(r) => return Some(r.type_def_id),
-        Type::Interface(i) => return Some(i.type_def_id),
+        Type::Nominal(NominalType::Class(c)) => return Some(c.type_def_id),
+        Type::Nominal(NominalType::Record(r)) => return Some(r.type_def_id),
+        Type::Nominal(NominalType::Interface(i)) => return Some(i.type_def_id),
         _ => {}
     }
 

@@ -5,6 +5,7 @@ use crate::sema::generic::{
     StaticMethodMonomorphKey, TypeParamInfo, substitute_type,
 };
 use crate::sema::implement_registry::ExternalMethodInfo;
+use crate::sema::types::NominalType;
 use std::collections::HashMap;
 
 impl Analyzer {
@@ -43,8 +44,8 @@ impl Analyzer {
     /// Get the type name and list of field names for a struct-like type (for error messages)
     fn get_struct_info(&self, ty: &Type) -> Option<(String, Vec<String>)> {
         let (type_def_id, _type_args) = match ty {
-            Type::Class(c) => (c.type_def_id, &c.type_args),
-            Type::Record(r) => (r.type_def_id, &r.type_args),
+            Type::Nominal(NominalType::Class(c)) => (c.type_def_id, &c.type_args),
+            Type::Nominal(NominalType::Record(r)) => (r.type_def_id, &r.type_args),
             _ => return None,
         };
 
@@ -146,7 +147,7 @@ impl Analyzer {
             format!(
                 "field '{}' not found on {} '{}' (available: {})",
                 field_name,
-                if matches!(&object_type, Type::Class(_)) {
+                if matches!(&object_type, Type::Nominal(NominalType::Class(_))) {
                     "class"
                 } else {
                     "record"
@@ -684,8 +685,12 @@ impl Analyzer {
         // method bodies to compile. Interface types use vtable dispatch and don't need monomorphs.
         tracing::debug!(object_type = ?object_type, "record_class_method_monomorph called");
         let (class_type_def_id, type_args) = match object_type {
-            Type::Class(c) if !c.type_args.is_empty() => (c.type_def_id, &c.type_args),
-            Type::Record(r) if !r.type_args.is_empty() => (r.type_def_id, &r.type_args),
+            Type::Nominal(NominalType::Class(c)) if !c.type_args.is_empty() => {
+                (c.type_def_id, &c.type_args)
+            }
+            Type::Nominal(NominalType::Record(r)) if !r.type_args.is_empty() => {
+                (r.type_def_id, &r.type_args)
+            }
             _ => {
                 tracing::debug!("returning early - not a generic class/record");
                 return; // Not a generic class/record, nothing to record

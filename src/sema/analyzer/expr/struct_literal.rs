@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::sema::entity_defs::GenericTypeInfo;
+use crate::sema::types::NominalType;
 
 impl Analyzer {
     pub(super) fn check_struct_literal_expr(
@@ -75,7 +76,7 @@ impl Analyzer {
                         (
                             interner.resolve(struct_lit.name).to_string(),
                             fields,
-                            Type::Class(class_type),
+                            Type::Nominal(NominalType::Class(class_type)),
                         )
                     } else {
                         self.add_error(
@@ -94,7 +95,7 @@ impl Analyzer {
                         (
                             interner.resolve(struct_lit.name).to_string(),
                             fields,
-                            Type::Record(record_type),
+                            Type::Nominal(NominalType::Record(record_type)),
                         )
                     } else {
                         self.add_error(
@@ -287,7 +288,7 @@ impl Analyzer {
             type_def_id,
             type_args,
         };
-        Ok(Type::Record(concrete_record))
+        Ok(Type::Nominal(NominalType::Record(concrete_record)))
     }
 
     /// Check a struct literal for a generic class, inferring type parameters from field values
@@ -426,6 +427,6 @@ impl Analyzer {
             type_def_id,
             type_args,
         };
-        Ok(Type::Class(concrete_class))
+        Ok(Type::Nominal(NominalType::Class(concrete_class)))
     }
 }

@@ -9,6 +9,7 @@ use cranelift::prelude::*;
 use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
 use crate::frontend::{self, ExprKind, LetInit, Pattern, RaiseStmt, Stmt, Symbol};
+use crate::sema::types::NominalType;
 use crate::sema::{PrimitiveType, Type};
 
 use super::compiler::ControlFlowCtx;
@@ -163,7 +164,7 @@ impl Cg<'_, '_, '_> {
                     {
                         let widened = self.builder.ins().fpromote(types::F64, init.value);
                         (widened, declared_type)
-                    } else if let Type::Interface(_) = &declared_type {
+                    } else if let Type::Nominal(NominalType::Interface(_)) = &declared_type {
                         // For functional interfaces, keep the actual function type from the lambda
                         // This preserves the is_closure flag for proper calling convention
                         (init.value, init.vole_type)
@@ -175,8 +176,8 @@ impl Cg<'_, '_, '_> {
                 };
 
                 if let Some(declared_type) = declared_type_opt
-                    && matches!(declared_type, Type::Interface(_))
-                    && !matches!(final_type, Type::Interface(_))
+                    && matches!(declared_type, Type::Nominal(NominalType::Interface(_)))
+                    && !matches!(final_type, Type::Nominal(NominalType::Interface(_)))
                 {
                     let boxed = box_interface_value(
                         self.builder,
@@ -220,8 +221,8 @@ impl Cg<'_, '_, '_> {
 
                     // Box concrete types to interface representation if needed
                     // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
-                    if let Some(Type::Interface(_)) = &return_type
-                        && !matches!(compiled.vole_type, Type::Interface(_))
+                    if let Some(Type::Nominal(NominalType::Interface(_))) = &return_type
+                        && !matches!(compiled.vole_type, Type::Nominal(NominalType::Interface(_)))
                         && !matches!(compiled.vole_type, Type::RuntimeIterator(_))
                     {
                         let return_type =
@@ -523,7 +524,7 @@ impl Cg<'_, '_, '_> {
     /// Check if a type is an Iterator<T> type
     fn is_iterator_type(&self, ty: &Type) -> bool {
         match ty {
-            Type::Interface(iface) => self
+            Type::Nominal(NominalType::Interface(iface)) => self
                 .ctx
                 .analyzed
                 .name_table
@@ -536,7 +537,7 @@ impl Cg<'_, '_, '_> {
     /// Extract element type from Iterator<T>
     fn iterator_element_type(&self, ty: &Type) -> Type {
         match ty {
-            Type::Interface(iface) => iface
+            Type::Nominal(NominalType::Interface(iface)) => iface
                 .type_args
                 .first()
                 .cloned()
@@ -891,7 +892,7 @@ impl Cg<'_, '_, '_> {
         // Get the error type info to know field order
         let raise_error_name = self.ctx.interner.resolve(raise_stmt.error_name);
         let error_type_info = match fallible_type.error_type.as_ref() {
-            Type::ErrorType(info) => {
+            Type::Nominal(NominalType::Error(info)) => {
                 let name =
                     self.ctx.analyzed.name_table.last_segment_str(
                         self.ctx.analyzed.entity_registry.name_id(info.type_def_id),
@@ -903,7 +904,7 @@ impl Cg<'_, '_, '_> {
                 }
             }
             Type::Union(variants) => variants.iter().find_map(|v| {
-                if let Type::ErrorType(info) = v {
+                if let Type::Nominal(NominalType::Error(info)) = v {
                     let name = self.ctx.analyzed.name_table.last_segment_str(
                         self.ctx.analyzed.entity_registry.name_id(info.type_def_id),
                     );

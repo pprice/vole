@@ -3,7 +3,7 @@
 // Type compatibility checking functions.
 // These are pure functions that determine if types are compatible for assignment.
 
-use super::types::{FunctionType, PrimitiveType, Type};
+use super::types::{FunctionType, NominalType, PrimitiveType, Type};
 
 /// Check if an integer literal value fits within a type's range
 pub fn literal_fits(value: i64, target: &Type) -> bool {
@@ -76,7 +76,10 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
     }
 
     // Class compatibility: compare by type_def_id and type_args
-    if let (Type::Class(from_class), Type::Class(to_class)) = (from, to)
+    if let (
+        Type::Nominal(NominalType::Class(from_class)),
+        Type::Nominal(NominalType::Class(to_class)),
+    ) = (from, to)
         && from_class.type_def_id == to_class.type_def_id
         && from_class.type_args.len() == to_class.type_args.len()
         && from_class
@@ -89,7 +92,10 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
     }
 
     // Record compatibility: compare by type_def_id and type_args
-    if let (Type::Record(from_rec), Type::Record(to_rec)) = (from, to)
+    if let (
+        Type::Nominal(NominalType::Record(from_rec)),
+        Type::Nominal(NominalType::Record(to_rec)),
+    ) = (from, to)
         && from_rec.type_def_id == to_rec.type_def_id
         && from_rec.type_args.len() == to_rec.type_args.len()
         && from_rec

@@ -8,7 +8,7 @@ use crate::frontend::Symbol;
 use crate::identity::NameId;
 use crate::sema::TypeKey;
 use crate::sema::implement_registry::ExternalMethodInfo;
-use crate::sema::types::{FunctionType, StructuralType, Type};
+use crate::sema::types::{FunctionType, NominalType, StructuralType, Type};
 use std::collections::HashMap;
 
 /// Information about a type parameter in scope
@@ -393,29 +393,31 @@ pub fn substitute_type(ty: &Type, substitutions: &HashMap<NameId, Type>) -> Type
     match ty {
         Type::TypeParam(name_id) => substitutions.get(name_id).cloned().unwrap_or(ty.clone()),
         Type::Array(elem) => Type::Array(Box::new(substitute_type(elem, substitutions))),
-        Type::Interface(interface_type) => Type::Interface(crate::sema::types::InterfaceType {
-            type_def_id: interface_type.type_def_id,
-            type_args: interface_type
-                .type_args
-                .iter()
-                .map(|t| substitute_type(t, substitutions))
-                .collect(),
-            methods: interface_type
-                .methods
-                .iter()
-                .map(|method| crate::sema::types::InterfaceMethodType {
-                    name: method.name,
-                    params: method
-                        .params
-                        .iter()
-                        .map(|t| substitute_type(t, substitutions))
-                        .collect(),
-                    return_type: Box::new(substitute_type(&method.return_type, substitutions)),
-                    has_default: method.has_default,
-                })
-                .collect(),
-            extends: interface_type.extends.clone(),
-        }),
+        Type::Nominal(NominalType::Interface(interface_type)) => {
+            Type::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
+                type_def_id: interface_type.type_def_id,
+                type_args: interface_type
+                    .type_args
+                    .iter()
+                    .map(|t| substitute_type(t, substitutions))
+                    .collect(),
+                methods: interface_type
+                    .methods
+                    .iter()
+                    .map(|method| crate::sema::types::InterfaceMethodType {
+                        name: method.name,
+                        params: method
+                            .params
+                            .iter()
+                            .map(|t| substitute_type(t, substitutions))
+                            .collect(),
+                        return_type: Box::new(substitute_type(&method.return_type, substitutions)),
+                        has_default: method.has_default,
+                    })
+                    .collect(),
+                extends: interface_type.extends.clone(),
+            }))
+        }
         Type::Union(types) => Type::Union(
             types
                 .iter()
@@ -437,22 +439,26 @@ pub fn substitute_type(ty: &Type, substitutions: &HashMap<NameId, Type>) -> Type
                 .map(|t| substitute_type(t, substitutions))
                 .collect(),
         ),
-        Type::Record(record_type) => Type::Record(crate::sema::types::RecordType {
-            type_def_id: record_type.type_def_id,
-            type_args: record_type
-                .type_args
-                .iter()
-                .map(|t| substitute_type(t, substitutions))
-                .collect(),
-        }),
-        Type::Class(class_type) => Type::Class(crate::sema::types::ClassType {
-            type_def_id: class_type.type_def_id,
-            type_args: class_type
-                .type_args
-                .iter()
-                .map(|t| substitute_type(t, substitutions))
-                .collect(),
-        }),
+        Type::Nominal(NominalType::Record(record_type)) => {
+            Type::Nominal(NominalType::Record(crate::sema::types::RecordType {
+                type_def_id: record_type.type_def_id,
+                type_args: record_type
+                    .type_args
+                    .iter()
+                    .map(|t| substitute_type(t, substitutions))
+                    .collect(),
+            }))
+        }
+        Type::Nominal(NominalType::Class(class_type)) => {
+            Type::Nominal(NominalType::Class(crate::sema::types::ClassType {
+                type_def_id: class_type.type_def_id,
+                type_args: class_type
+                    .type_args
+                    .iter()
+                    .map(|t| substitute_type(t, substitutions))
+                    .collect(),
+            }))
+        }
         // All other types don't contain type parameters
         _ => ty.clone(),
     }

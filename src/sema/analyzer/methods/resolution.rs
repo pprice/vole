@@ -2,6 +2,7 @@ use super::super::*;
 use crate::identity::{MethodId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
+use crate::sema::types::NominalType;
 use std::collections::{HashMap, HashSet};
 
 impl Analyzer {
@@ -60,7 +61,8 @@ impl Analyzer {
                         // For interface types, we MUST use vtable dispatch because we don't know
                         // the concrete type. Generators implement Iterator with their own next()
                         // method, so calling external functions directly would crash.
-                        let is_interface_type = matches!(object_type, Type::Interface(_));
+                        let is_interface_type =
+                            matches!(object_type, Type::Nominal(NominalType::Interface(_)));
 
                         // For external default methods on CONCRETE types (not interface types),
                         // we can call the external directly
@@ -87,7 +89,11 @@ impl Analyzer {
                         // For non-external default methods on concrete types (Class/Record),
                         // we can compile and call the default directly
                         if method_def.has_default
-                            && matches!(object_type, Type::Class(_) | Type::Record(_))
+                            && matches!(
+                                object_type,
+                                Type::Nominal(NominalType::Class(_))
+                                    | Type::Nominal(NominalType::Record(_))
+                            )
                             && let Some(type_name_id) = self.get_type_name_id(object_type)
                         {
                             let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner);
@@ -164,9 +170,9 @@ impl Analyzer {
     /// Get TypeDefId for a Type if it's registered in EntityRegistry
     fn get_type_def_id_for_type(&self, ty: &Type) -> Option<TypeDefId> {
         match ty {
-            Type::Class(c) => Some(c.type_def_id),
-            Type::Record(r) => Some(r.type_def_id),
-            Type::Interface(i) => Some(i.type_def_id),
+            Type::Nominal(NominalType::Class(c)) => Some(c.type_def_id),
+            Type::Nominal(NominalType::Record(r)) => Some(r.type_def_id),
+            Type::Nominal(NominalType::Interface(i)) => Some(i.type_def_id),
             _ => None,
         }
     }
@@ -174,9 +180,13 @@ impl Analyzer {
     /// Get the name_id for a type
     fn get_type_name_id(&self, ty: &Type) -> Option<NameId> {
         match ty {
-            Type::Class(c) => Some(self.entity_registry.get_type(c.type_def_id).name_id),
-            Type::Record(r) => Some(self.entity_registry.get_type(r.type_def_id).name_id),
-            Type::Interface(interface_type) => {
+            Type::Nominal(NominalType::Class(c)) => {
+                Some(self.entity_registry.get_type(c.type_def_id).name_id)
+            }
+            Type::Nominal(NominalType::Record(r)) => {
+                Some(self.entity_registry.get_type(r.type_def_id).name_id)
+            }
+            Type::Nominal(NominalType::Interface(interface_type)) => {
                 Some(self.entity_registry.name_id(interface_type.type_def_id))
             }
             _ => None,
@@ -358,7 +368,9 @@ impl Analyzer {
 
         // 2. Interface methods (vtable dispatch)
         let (interface_type_def_id, type_args): (Option<TypeDefId>, &[Type]) = match object_type {
-            Type::Interface(iface) => (Some(iface.type_def_id), iface.type_args.as_slice()),
+            Type::Nominal(NominalType::Interface(iface)) => {
+                (Some(iface.type_def_id), iface.type_args.as_slice())
+            }
             _ => (None, &[]),
         };
         if let Some(type_def_id) = interface_type_def_id {
@@ -440,8 +452,8 @@ impl Analyzer {
 
         // 3. Direct methods on class/record via EntityRegistry
         let (type_def_id_opt, record_type_args) = match object_type {
-            Type::Class(c) => (Some(c.type_def_id), None),
-            Type::Record(r) => (
+            Type::Nominal(NominalType::Class(c)) => (Some(c.type_def_id), None),
+            Type::Nominal(NominalType::Record(r)) => (
                 Some(r.type_def_id),
                 if r.type_args.is_empty() {
                     None
@@ -489,8 +501,8 @@ impl Analyzer {
         // 4. Default methods from implemented interfaces
         // Get type_def_id from the object type (reusing earlier logic or via name_id)
         let type_def_id_opt = match object_type {
-            Type::Class(c) => Some(c.type_def_id),
-            Type::Record(r) => Some(r.type_def_id),
+            Type::Nominal(NominalType::Class(c)) => Some(c.type_def_id),
+            Type::Nominal(NominalType::Record(r)) => Some(r.type_def_id),
             _ => None,
         };
         if let Some(type_def_id) = type_def_id_opt {

@@ -15,6 +15,7 @@ use crate::frontend::{
     RecordFieldPattern, Symbol, UnaryOp,
 };
 use crate::sema::entity_defs::TypeDefKind;
+use crate::sema::types::NominalType;
 use crate::sema::{PrimitiveType, Type};
 
 use super::context::Cg;
@@ -150,8 +151,8 @@ impl Cg<'_, '_, '_> {
             // If the global has a declared interface type, box the value
             if let Some(ref ty_expr) = global.ty {
                 let declared_type = resolve_type_expr(ty_expr, self.ctx);
-                if matches!(&declared_type, Type::Interface(_))
-                    && !matches!(&value.vole_type, Type::Interface(_))
+                if matches!(&declared_type, Type::Nominal(NominalType::Interface(_)))
+                    && !matches!(&value.vole_type, Type::Nominal(NominalType::Interface(_)))
                 {
                     value = box_interface_value(self.builder, self.ctx, value, &declared_type)?;
                 }
@@ -352,8 +353,8 @@ impl Cg<'_, '_, '_> {
                 let var = *var;
                 let var_type = var_type.clone();
 
-                if matches!(&var_type, Type::Interface(_))
-                    && !matches!(value.vole_type, Type::Interface(_))
+                if matches!(&var_type, Type::Nominal(NominalType::Interface(_)))
+                    && !matches!(value.vole_type, Type::Nominal(NominalType::Interface(_)))
                 {
                     value = box_interface_value(self.builder, self.ctx, value, &var_type)?;
                 }

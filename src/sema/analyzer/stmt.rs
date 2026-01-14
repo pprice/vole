@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::sema::PrimitiveType;
+use crate::sema::types::NominalType;
 
 impl Analyzer {
     pub(crate) fn check_block(
@@ -197,7 +198,7 @@ impl Analyzer {
                     }
                     // Runtime iterators have their element type directly
                     Type::RuntimeIterator(elem) => *elem.clone(),
-                    Type::Interface(_) => {
+                    Type::Nominal(NominalType::Interface(_)) => {
                         if let Some(elem) =
                             self.extract_iterator_element_type(&iterable_ty, interner)
                         {
@@ -477,7 +478,7 @@ impl Analyzer {
         // Verify that raised error type is compatible with declared error type
         let stmt_error_name = interner.resolve(stmt.error_name);
         let is_compatible = match &error_type {
-            Type::ErrorType(declared_info) => {
+            Type::Nominal(NominalType::Error(declared_info)) => {
                 // Single error type - must match exactly
                 let name = self
                     .name_table
@@ -487,7 +488,7 @@ impl Analyzer {
             Type::Union(variants) => {
                 // Union of error types - raised error must be one of the variants
                 variants.iter().any(|variant| {
-                    if let Type::ErrorType(info) = variant {
+                    if let Type::Nominal(NominalType::Error(info)) = variant {
                         let name = self
                             .name_table
                             .last_segment_str(self.entity_registry.name_id(info.type_def_id));
@@ -502,7 +503,7 @@ impl Analyzer {
 
         if !is_compatible {
             let declared_str = self.type_display(&error_type);
-            let raised_str = self.type_display(&Type::ErrorType(error_info));
+            let raised_str = self.type_display(&Type::Nominal(NominalType::Error(error_info)));
 
             self.add_error(
                 SemanticError::IncompatibleRaiseError {
@@ -608,8 +609,8 @@ impl Analyzer {
     ) {
         // Get type_def_id from the type
         let type_def_id = match init_type {
-            Type::Record(record_type) => record_type.type_def_id,
-            Type::Class(class_type) => class_type.type_def_id,
+            Type::Nominal(NominalType::Record(record_type)) => record_type.type_def_id,
+            Type::Nominal(NominalType::Class(class_type)) => class_type.type_def_id,
             _ => {
                 self.type_error("record or class", init_type, init_span);
                 return;

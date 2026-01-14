@@ -9,6 +9,7 @@ use crate::codegen::interface_vtable::box_interface_value;
 use crate::codegen::types::CompiledValue;
 use crate::frontend::{Expr, StructLiteralExpr};
 use crate::sema::Type;
+use crate::sema::types::NominalType;
 use cranelift::prelude::*;
 
 impl Cg<'_, '_, '_> {
@@ -63,7 +64,7 @@ impl Cg<'_, '_, '_> {
 
         // Get field types for wrapping optional values
         let field_types: HashMap<String, Type> = match &vole_type {
-            Type::Record(rt) => {
+            Type::Nominal(NominalType::Record(rt)) => {
                 let type_def = self.ctx.analyzed.entity_registry.get_type(rt.type_def_id);
                 if let Some(generic_info) = &type_def.generic_info {
                     generic_info
@@ -85,7 +86,7 @@ impl Cg<'_, '_, '_> {
                     HashMap::new()
                 }
             }
-            Type::Class(ct) => {
+            Type::Nominal(NominalType::Class(ct)) => {
                 let type_def = self.ctx.analyzed.entity_registry.get_type(ct.type_def_id);
                 if let Some(generic_info) = &type_def.generic_info {
                     generic_info
@@ -128,7 +129,7 @@ impl Cg<'_, '_, '_> {
                     && !matches!(&value.vole_type, Type::Union(_))
                 {
                     self.construct_union(value, field_type)?
-                } else if matches!(field_type, Type::Interface(_)) {
+                } else if matches!(field_type, Type::Nominal(NominalType::Interface(_))) {
                     box_interface_value(self.builder, self.ctx, value, field_type)?
                 } else {
                     value

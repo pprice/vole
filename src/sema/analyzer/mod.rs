@@ -22,7 +22,7 @@ use crate::sema::implement_registry::{
     ExternalMethodInfo, ImplementRegistry, MethodImpl, PrimitiveTypeId, TypeId,
 };
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
-use crate::sema::types::{ConstantValue, ModuleType, StructuralType};
+use crate::sema::types::{ConstantValue, ModuleType, NominalType, StructuralType};
 use crate::sema::{
     ClassType, ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField, Type, TypeKey,
     compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
@@ -745,9 +745,10 @@ impl Analyzer {
                 self.unify_types(p_elem, a_elem, type_params, inferred);
             }
             // Interface types: unify type args for the same interface
-            (Type::Interface(p_iface), Type::Interface(a_iface))
-                if p_iface.type_def_id == a_iface.type_def_id =>
-            {
+            (
+                Type::Nominal(NominalType::Interface(p_iface)),
+                Type::Nominal(NominalType::Interface(a_iface)),
+            ) if p_iface.type_def_id == a_iface.type_def_id => {
                 for (p_arg, a_arg) in p_iface.type_args.iter().zip(a_iface.type_args.iter()) {
                     self.unify_types(p_arg, a_arg, type_params, inferred);
                 }
@@ -766,17 +767,19 @@ impl Analyzer {
                 self.unify_types(&p_ft.return_type, &a_ft.return_type, type_params, inferred);
             }
             // Class: unify type args (for generic class parameters)
-            (Type::Class(p_class), Type::Class(a_class))
-                if p_class.type_def_id == a_class.type_def_id =>
-            {
+            (
+                Type::Nominal(NominalType::Class(p_class)),
+                Type::Nominal(NominalType::Class(a_class)),
+            ) if p_class.type_def_id == a_class.type_def_id => {
                 for (p, a) in p_class.type_args.iter().zip(a_class.type_args.iter()) {
                     self.unify_types(p, a, type_params, inferred);
                 }
             }
             // Record: unify type args (for generic record parameters)
-            (Type::Record(p_rec), Type::Record(a_rec))
-                if p_rec.type_def_id == a_rec.type_def_id =>
-            {
+            (
+                Type::Nominal(NominalType::Record(p_rec)),
+                Type::Nominal(NominalType::Record(a_rec)),
+            ) if p_rec.type_def_id == a_rec.type_def_id => {
                 for (p, a) in p_rec.type_args.iter().zip(a_rec.type_args.iter()) {
                     self.unify_types(p, a, type_params, inferred);
                 }
@@ -936,12 +939,14 @@ impl Analyzer {
             })
             .collect();
 
-        Some(Type::Interface(crate::sema::types::InterfaceType {
-            type_def_id,
-            type_args,
-            methods,
-            extends: type_def.extends.clone(),
-        }))
+        Some(Type::Nominal(NominalType::Interface(
+            crate::sema::types::InterfaceType {
+                type_def_id,
+                type_args,
+                methods,
+                extends: type_def.extends.clone(),
+            },
+        )))
     }
 
     fn method_name_id(&mut self, name: Symbol, interner: &Interner) -> NameId {
@@ -1395,7 +1400,11 @@ impl Analyzer {
             fields: fields.clone(),
         };
 
-        self.register_named_type(decl.name, Type::ErrorType(error_info.clone()), interner);
+        self.register_named_type(
+            decl.name,
+            Type::Nominal(NominalType::Error(error_info.clone())),
+            interner,
+        );
 
         // Set error info for lookup
         self.entity_registry
@@ -1793,7 +1802,7 @@ impl Analyzer {
 
     /// Extract the element type from an Iterator<T> type, or None if not an iterator type
     fn extract_iterator_element_type(&self, ty: &Type, _interner: &Interner) -> Option<Type> {
-        let Type::Interface(interface_type) = ty else {
+        let Type::Nominal(NominalType::Interface(interface_type)) = ty else {
             return None;
         };
         if !self
@@ -1838,12 +1847,12 @@ impl Analyzer {
             TypeDefKind::Class => self
                 .entity_registry
                 .build_class_type(type_def_id)
-                .map(Type::Class)
+                .map(|c| Type::Nominal(NominalType::Class(c)))
                 .unwrap_or_else(|| Type::invalid("unwrap_failed")),
             TypeDefKind::Record => self
                 .entity_registry
                 .build_record_type(type_def_id)
-                .map(Type::Record)
+                .map(|r| Type::Nominal(NominalType::Record(r)))
                 .unwrap_or_else(|| Type::invalid("unwrap_failed")),
             _ => Type::invalid("fallback"),
         };

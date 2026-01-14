@@ -1,6 +1,7 @@
 use super::super::*;
 use crate::identity::Namer;
 use crate::sema::PrimitiveType;
+use crate::sema::types::NominalType;
 
 impl Analyzer {
     pub(super) fn check_call_expr(
@@ -198,7 +199,7 @@ impl Analyzer {
             }
 
             // Check if it's a variable with a functional interface type
-            if let Some(Type::Interface(iface)) = self.get_variable_type(*sym)
+            if let Some(Type::Nominal(NominalType::Interface(iface))) = self.get_variable_type(*sym)
                 && let Some(func_type) =
                     self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
             {

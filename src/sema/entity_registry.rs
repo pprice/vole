@@ -13,6 +13,7 @@ use crate::sema::generic::{
 };
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_table::{TypeKey, TypeTable};
+use crate::sema::types::NominalType;
 use crate::sema::{FunctionType, Type};
 
 /// Central registry for all language entities
@@ -732,9 +733,9 @@ impl EntityRegistry {
     /// Get the name_id for any struct-like Type (Class, Record, Interface)
     pub fn type_name_id(&self, ty: &Type) -> Option<NameId> {
         match ty {
-            Type::Class(c) => Some(self.class_name_id(c)),
-            Type::Record(r) => Some(self.record_name_id(r)),
-            Type::Interface(i) => Some(self.name_id(i.type_def_id)),
+            Type::Nominal(NominalType::Class(c)) => Some(self.class_name_id(c)),
+            Type::Nominal(NominalType::Record(r)) => Some(self.record_name_id(r)),
+            Type::Nominal(NominalType::Interface(i)) => Some(self.name_id(i.type_def_id)),
             _ => None,
         }
     }

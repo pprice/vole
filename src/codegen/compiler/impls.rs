@@ -15,6 +15,7 @@ use crate::frontend::{
 };
 use crate::identity::ModuleId;
 use crate::sema::Type;
+use crate::sema::types::NominalType;
 
 impl Compiler<'_> {
     /// Compile methods for a class
@@ -1173,7 +1174,7 @@ impl Compiler<'_> {
             .type_metadata
             .values()
             .find(|meta| {
-                if let Type::Class(class_type) = &meta.vole_type {
+                if let Type::Nominal(NominalType::Class(class_type)) = &meta.vole_type {
                     let name_id = self.analyzed.entity_registry.class_name_id(class_type);
                     self.analyzed
                         .name_table

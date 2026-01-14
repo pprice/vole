@@ -8,6 +8,7 @@ use crate::errors::CodegenError;
 use crate::sema::PrimitiveType;
 use crate::sema::Type;
 use crate::sema::generic::substitute_type;
+use crate::sema::types::NominalType;
 
 pub(crate) fn get_field_slot_and_type(
     vole_type: &Type,
@@ -15,7 +16,7 @@ pub(crate) fn get_field_slot_and_type(
     ctx: &CompileCtx,
 ) -> Result<(usize, Type), String> {
     match vole_type {
-        Type::Class(class_type) => {
+        Type::Nominal(NominalType::Class(class_type)) => {
             let type_def = ctx
                 .analyzed
                 .entity_registry
@@ -51,7 +52,7 @@ pub(crate) fn get_field_slot_and_type(
             }
             Err(CodegenError::not_found("field", format!("{} in class", field_name)).into())
         }
-        Type::Record(record_type) => {
+        Type::Nominal(NominalType::Record(record_type)) => {
             let type_def = ctx
                 .analyzed
                 .entity_registry
@@ -102,9 +103,15 @@ pub(crate) fn get_type_name_id(
     entity_registry: &crate::sema::entity_registry::EntityRegistry,
 ) -> Result<crate::identity::NameId, String> {
     match vole_type {
-        Type::Class(class_type) => Ok(entity_registry.class_name_id(class_type)),
-        Type::Record(record_type) => Ok(entity_registry.record_name_id(record_type)),
-        Type::Interface(interface_type) => Ok(entity_registry.name_id(interface_type.type_def_id)),
+        Type::Nominal(NominalType::Class(class_type)) => {
+            Ok(entity_registry.class_name_id(class_type))
+        }
+        Type::Nominal(NominalType::Record(record_type)) => {
+            Ok(entity_registry.record_name_id(record_type))
+        }
+        Type::Nominal(NominalType::Interface(interface_type)) => {
+            Ok(entity_registry.name_id(interface_type.type_def_id))
+        }
         _ => Err(CodegenError::type_mismatch(
             "type name extraction",
             "class, record, interface, or generic instance",
@@ -150,8 +157,8 @@ pub(crate) fn convert_field_value(
         }
         Type::Primitive(PrimitiveType::String)
         | Type::Array(_)
-        | Type::Class(_)
-        | Type::Record(_) => {
+        | Type::Nominal(NominalType::Class(_))
+        | Type::Nominal(NominalType::Record(_)) => {
             // Pointers stay as i64
             (raw_value, types::I64)
         }

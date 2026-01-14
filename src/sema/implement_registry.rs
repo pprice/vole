@@ -3,7 +3,7 @@
 use crate::frontend::Symbol;
 use crate::identity::NameId;
 use crate::sema::type_table::TypeTable;
-use crate::sema::types::{FunctionType, PrimitiveType, Type};
+use crate::sema::types::{FunctionType, NominalType, PrimitiveType, Type};
 use std::collections::HashMap;
 
 /// Identifier for primitive types
@@ -83,8 +83,10 @@ impl TypeId {
             }
             Type::Range => types.primitive_name_id(PrimitiveTypeId::Range).map(TypeId),
             Type::Array(_) => types.array_name_id().map(TypeId),
-            Type::Class(c) => Some(TypeId(entity_registry.class_name_id(c))),
-            Type::Record(r) => Some(TypeId(entity_registry.record_name_id(r))),
+            Type::Nominal(NominalType::Class(c)) => Some(TypeId(entity_registry.class_name_id(c))),
+            Type::Nominal(NominalType::Record(r)) => {
+                Some(TypeId(entity_registry.record_name_id(r)))
+            }
             _ => None,
         }
     }

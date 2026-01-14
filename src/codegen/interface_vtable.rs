@@ -15,6 +15,7 @@ use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
+use crate::sema::types::NominalType;
 use crate::sema::{EntityRegistry, FunctionType, Type};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -556,7 +557,7 @@ pub(crate) fn box_interface_value(
     value: CompiledValue,
     interface_type: &Type,
 ) -> Result<CompiledValue, String> {
-    let Type::Interface(interface) = interface_type else {
+    let Type::Nominal(NominalType::Interface(interface)) = interface_type else {
         return Ok(value);
     };
 
@@ -587,7 +588,7 @@ pub(crate) fn box_interface_value(
         "boxing value as interface"
     );
 
-    if matches!(value.vole_type, Type::Interface(_)) {
+    if matches!(value.vole_type, Type::Nominal(NominalType::Interface(_))) {
         tracing::debug!("already interface, skip boxing");
         return Ok(value);
     }
@@ -705,8 +706,10 @@ fn resolve_vtable_target(
     // Check direct methods on class/record
     if let Some(method_name_id) = method_name_id
         && let Some(type_name_id) = match concrete_type {
-            Type::Class(class_type) => Some(ctx.analyzed.entity_registry.class_name_id(class_type)),
-            Type::Record(record_type) => {
+            Type::Nominal(NominalType::Class(class_type)) => {
+                Some(ctx.analyzed.entity_registry.class_name_id(class_type))
+            }
+            Type::Nominal(NominalType::Record(record_type)) => {
                 Some(ctx.analyzed.entity_registry.record_name_id(record_type))
             }
             _ => None,

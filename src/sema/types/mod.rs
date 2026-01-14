@@ -1,7 +1,11 @@
 // src/sema/types/mod.rs
 
+pub mod nominal;
 pub mod primitive;
 
+pub use nominal::{
+    ClassType, ErrorTypeInfo, InterfaceMethodType, InterfaceType, NominalType, RecordType,
+};
 pub use primitive::PrimitiveType;
 
 use crate::frontend::PrimitiveType as AstPrimitiveType;
@@ -177,14 +181,8 @@ pub enum Type {
     /// The metatype - the type of types themselves
     /// e.g., `i32` has type `Type`, `let MyInt = i32` assigns a type value
     Type,
-    /// Class instance type
-    Class(ClassType),
-    /// Record instance type
-    Record(RecordType),
-    /// Interface type
-    Interface(InterfaceType),
-    /// Error type (e.g., DivByZero)
-    ErrorType(ErrorTypeInfo),
+    /// Nominal types (Class, Record, Interface, Error) - types with a TypeDefId
+    Nominal(NominalType),
     /// Fallible return type: fallible(T, E)
     Fallible(FallibleType),
     /// Module type (from import expression)
@@ -263,70 +261,8 @@ pub struct StructInfo<'a> {
     pub type_args: &'a [Type],
 }
 
-/// Class type information
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClassType {
-    /// Reference to the type definition in EntityRegistry
-    pub type_def_id: TypeDefId,
-    /// Type arguments for generic classes (empty for non-generic classes)
-    pub type_args: Vec<Type>,
-}
-
-/// Record type information
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecordType {
-    /// Reference to the type definition in EntityRegistry
-    pub type_def_id: TypeDefId,
-    /// Type arguments for generic records (empty for non-generic records)
-    pub type_args: Vec<Type>,
-}
-
-/// Interface type information
-#[derive(Clone, Eq)]
-pub struct InterfaceType {
-    /// Reference to the type definition in EntityRegistry
-    pub type_def_id: TypeDefId,
-    pub type_args: Vec<Type>,
-    pub methods: Vec<InterfaceMethodType>,
-    pub extends: Vec<TypeDefId>, // Parent interface TypeDefIds
-}
-
-// Custom Debug to avoid massive output when tracing - just show identity, not all methods
-impl std::fmt::Debug for InterfaceType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InterfaceType")
-            .field("type_def_id", &self.type_def_id)
-            .field("type_args", &self.type_args)
-            .field("methods", &format_args!("[{} methods]", self.methods.len()))
-            .field("extends", &self.extends)
-            .finish()
-    }
-}
-
-// Custom PartialEq to compare only type_def_id and type_args
-// This is needed because Symbol is interner-specific and methods can differ
-// when interfaces are loaded from different contexts
-impl PartialEq for InterfaceType {
-    fn eq(&self, other: &Self) -> bool {
-        self.type_def_id == other.type_def_id && self.type_args == other.type_args
-    }
-}
-
-/// Method signature in an interface
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InterfaceMethodType {
-    pub name: NameId,
-    pub params: Vec<Type>,
-    pub return_type: Box<Type>,
-    pub has_default: bool, // True if interface provides default implementation
-}
-
-/// Error type definition (e.g., DivByZero, OutOfRange { value: i32 })
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ErrorTypeInfo {
-    pub type_def_id: TypeDefId,
-    pub fields: Vec<StructField>,
-}
+// ClassType, RecordType, InterfaceType, InterfaceMethodType, ErrorTypeInfo
+// are now defined in nominal.rs and re-exported above
 
 /// Fallible type: fallible(T, E)
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -384,10 +320,7 @@ impl Type {
     /// Returns None for primitives, functions, unions, etc.
     pub fn type_def_id(&self) -> Option<TypeDefId> {
         match self {
-            Type::Class(c) => Some(c.type_def_id),
-            Type::Record(r) => Some(r.type_def_id),
-            Type::Interface(i) => Some(i.type_def_id),
-            Type::ErrorType(e) => Some(e.type_def_id),
+            Type::Nominal(n) => Some(n.type_def_id()),
             _ => None,
         }
     }
@@ -396,9 +329,7 @@ impl Type {
     /// Returns empty slice for non-generic or primitive types.
     pub fn type_args(&self) -> &[Type] {
         match self {
-            Type::Class(c) => &c.type_args,
-            Type::Record(r) => &r.type_args,
-            Type::Interface(i) => &i.type_args,
+            Type::Nominal(n) => n.type_args(),
             _ => &[],
         }
     }
@@ -407,21 +338,9 @@ impl Type {
     /// Returns None for primitives, functions, unions, etc.
     pub fn as_nominal(&self) -> Option<NominalInfo<'_>> {
         match self {
-            Type::Class(c) => Some(NominalInfo {
-                type_def_id: c.type_def_id,
-                type_args: &c.type_args,
-            }),
-            Type::Record(r) => Some(NominalInfo {
-                type_def_id: r.type_def_id,
-                type_args: &r.type_args,
-            }),
-            Type::Interface(i) => Some(NominalInfo {
-                type_def_id: i.type_def_id,
-                type_args: &i.type_args,
-            }),
-            Type::ErrorType(e) => Some(NominalInfo {
-                type_def_id: e.type_def_id,
-                type_args: &[],
+            Type::Nominal(n) => Some(NominalInfo {
+                type_def_id: n.type_def_id(),
+                type_args: n.type_args(),
             }),
             _ => None,
         }
@@ -431,11 +350,11 @@ impl Type {
     /// Returns None for interfaces, primitives, functions, etc.
     pub fn as_struct(&self) -> Option<StructInfo<'_>> {
         match self {
-            Type::Class(c) => Some(StructInfo {
+            Type::Nominal(NominalType::Class(c)) => Some(StructInfo {
                 type_def_id: c.type_def_id,
                 type_args: &c.type_args,
             }),
-            Type::Record(r) => Some(StructInfo {
+            Type::Nominal(NominalType::Record(r)) => Some(StructInfo {
                 type_def_id: r.type_def_id,
                 type_args: &r.type_args,
             }),
@@ -516,10 +435,7 @@ impl Type {
             Type::Placeholder(_) => "placeholder",
             Type::Invalid(_) => "<invalid>",
             Type::Type => "type",
-            Type::Class(_) => "class",
-            Type::Record(_) => "record",
-            Type::Interface(_) => "interface",
-            Type::ErrorType(_) => "error",
+            Type::Nominal(n) => n.name(),
             Type::Fallible(_) => "fallible",
             Type::Module(_) => "module",
             Type::TypeParam(_) => "type parameter",
@@ -714,11 +630,7 @@ impl std::fmt::Display for Type {
                 write!(f, "{}", parts.join(" | "))
             }
             Type::Array(elem) => write!(f, "[{}]", elem),
-            Type::Class(_) => write!(f, "class"),
-            Type::Record(_) => write!(f, "record"),
-            Type::ErrorType(_) => {
-                write!(f, "error")
-            }
+            Type::Nominal(n) => write!(f, "{}", n),
             Type::Fallible(ft) => {
                 write!(f, "fallible({}, {})", ft.success_type, ft.error_type)
             }

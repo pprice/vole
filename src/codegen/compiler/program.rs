@@ -17,7 +17,7 @@ use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
     ClassMethodMonomorphInstance, MonomorphInstance, StaticMethodMonomorphInstance, substitute_type,
 };
-use crate::sema::types::{ClassType, RecordType};
+use crate::sema::types::{ClassType, NominalType, RecordType};
 use crate::sema::{PrimitiveType, Type};
 
 impl Compiler<'_> {
@@ -1445,20 +1445,20 @@ impl Compiler<'_> {
 
                     // Determine if it's a class or record based on TypeDefKind
                     return match &type_def.kind {
-                        TypeDefKind::Record => Type::Record(RecordType {
+                        TypeDefKind::Record => Type::Nominal(NominalType::Record(RecordType {
                             type_def_id,
                             type_args,
-                        }),
-                        TypeDefKind::Class => Type::Class(ClassType {
+                        })),
+                        TypeDefKind::Class => Type::Nominal(NominalType::Class(ClassType {
                             type_def_id,
                             type_args,
-                        }),
+                        })),
                         _ => {
                             // Fallback for other kinds
-                            Type::Record(RecordType {
+                            Type::Nominal(NominalType::Record(RecordType {
                                 type_def_id,
                                 type_args,
-                            })
+                            }))
                         }
                     };
                 }

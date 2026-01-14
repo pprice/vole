@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::identity::TypeDefId;
+use crate::sema::types::NominalType;
 use std::collections::HashSet;
 
 #[allow(dead_code)]
@@ -11,8 +12,8 @@ impl Analyzer {
         }
 
         // Non-functional interface compatibility
-        if let Type::Interface(iface) = to {
-            if let Type::Interface(from_iface) = from
+        if let Type::Nominal(NominalType::Interface(iface)) = to {
+            if let Type::Nominal(NominalType::Interface(from_iface)) = from
                 && self.interface_extends_by_type_def_id(from_iface.type_def_id, iface.type_def_id)
             {
                 return true;
@@ -25,7 +26,7 @@ impl Analyzer {
 
         // Function type is compatible with functional interface if signatures match
         if let Type::Function(fn_type) = from
-            && let Type::Interface(iface) = to
+            && let Type::Nominal(NominalType::Interface(iface)) = to
             && let Some(iface_fn) =
                 self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
             && function_compatible_with_interface(fn_type, &iface_fn)

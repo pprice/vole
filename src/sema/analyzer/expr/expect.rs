@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::sema::PrimitiveType;
+use crate::sema::types::NominalType;
 
 impl Analyzer {
     /// Check expression against an expected type (bidirectional type checking)
@@ -353,7 +354,7 @@ impl Analyzer {
                 let expected_fn = expected.and_then(|t| {
                     if let Type::Function(ft) = t {
                         Some(ft.clone())
-                    } else if let Type::Interface(iface) = t {
+                    } else if let Type::Nominal(NominalType::Interface(iface)) = t {
                         // Check if it's a functional interface (single abstract method, no fields)
                         self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
                     } else {

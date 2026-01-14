@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::sema::PrimitiveType;
+use crate::sema::types::NominalType;
 
 impl Analyzer {
     pub(super) fn check_assign_expr(
@@ -34,7 +35,7 @@ impl Analyzer {
                 let field_name = interner.resolve(*field);
 
                 match &obj_ty {
-                    Type::Class(c) => {
+                    Type::Nominal(NominalType::Class(c)) => {
                         // Look up field via EntityRegistry
                         let type_def = self.entity_registry.get_type(c.type_def_id);
                         let type_name = self
@@ -84,7 +85,7 @@ impl Analyzer {
                             (Type::invalid("propagate"), false, false)
                         }
                     }
-                    Type::Record(r) => {
+                    Type::Nominal(NominalType::Record(r)) => {
                         // Records are immutable - reject field assignment
                         let type_def = self.entity_registry.get_type(r.type_def_id);
                         self.add_error(
@@ -302,7 +303,7 @@ impl Analyzer {
                 let field_name = interner.resolve(*field);
 
                 match &obj_ty {
-                    Type::Class(c) => {
+                    Type::Nominal(NominalType::Class(c)) => {
                         // Look up field via EntityRegistry
                         let type_def = self.entity_registry.get_type(c.type_def_id);
                         let type_name = self
@@ -351,7 +352,7 @@ impl Analyzer {
                             Type::invalid("propagate")
                         }
                     }
-                    Type::Record(r) => {
+                    Type::Nominal(NominalType::Record(r)) => {
                         // Records are immutable - reject field assignment
                         let type_def = self.entity_registry.get_type(r.type_def_id);
                         self.add_error(

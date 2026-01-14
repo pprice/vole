@@ -1,6 +1,7 @@
 // src/sema/analyzer/patterns.rs
 
 use super::*;
+use crate::sema::types::NominalType;
 
 impl Analyzer {
     /// Check a pattern against the scrutinee type.
@@ -48,7 +49,7 @@ impl Analyzer {
                         TypeDefKind::Class => {
                             if let Some(class_type) = self.entity_registry.build_class_type(type_id)
                             {
-                                let pattern_type = Type::Class(class_type);
+                                let pattern_type = Type::Nominal(NominalType::Class(class_type));
                                 self.check_type_pattern_compatibility(
                                     &pattern_type,
                                     scrutinee_type,
@@ -72,7 +73,7 @@ impl Analyzer {
                             if let Some(record_type) =
                                 self.entity_registry.build_record_type(type_id)
                             {
-                                let pattern_type = Type::Record(record_type);
+                                let pattern_type = Type::Nominal(NominalType::Record(record_type));
                                 self.check_type_pattern_compatibility(
                                     &pattern_type,
                                     scrutinee_type,
@@ -275,7 +276,10 @@ impl Analyzer {
                                     self.entity_registry.build_record_type(type_id)
                                 {
                                     let fields_ref = get_fields(type_def);
-                                    (Some(Type::Record(record_type)), fields_ref)
+                                    (
+                                        Some(Type::Nominal(NominalType::Record(record_type))),
+                                        fields_ref,
+                                    )
                                 } else {
                                     (None, vec![])
                                 }
@@ -285,7 +289,10 @@ impl Analyzer {
                                     self.entity_registry.build_class_type(type_id)
                                 {
                                     let fields_ref = get_fields(type_def);
-                                    (Some(Type::Class(class_type)), fields_ref)
+                                    (
+                                        Some(Type::Nominal(NominalType::Class(class_type))),
+                                        fields_ref,
+                                    )
                                 } else {
                                     (None, vec![])
                                 }
@@ -294,7 +301,10 @@ impl Analyzer {
                                 // Error type destructuring: error Overflow { value, max }
                                 if let Some(error_info) = type_def.error_info.clone() {
                                     let fields_ref = error_info.fields.clone();
-                                    (Some(Type::ErrorType(error_info)), fields_ref)
+                                    (
+                                        Some(Type::Nominal(NominalType::Error(error_info))),
+                                        fields_ref,
+                                    )
                                 } else {
                                     (None, vec![])
                                 }
@@ -361,7 +371,7 @@ impl Analyzer {
                     // Untyped record pattern in match - bind fields from scrutinee type
                     // Get fields from EntityRegistry via type_def_id
                     let type_fields: Option<Vec<StructField>> = match scrutinee_type {
-                        Type::Record(r) => {
+                        Type::Nominal(NominalType::Record(r)) => {
                             let type_def = self.entity_registry.get_type(r.type_def_id);
                             type_def.generic_info.as_ref().map(|gi| {
                                 gi.field_names
@@ -378,7 +388,7 @@ impl Analyzer {
                                     .collect()
                             })
                         }
-                        Type::Class(c) => {
+                        Type::Nominal(NominalType::Class(c)) => {
                             let type_def = self.entity_registry.get_type(c.type_def_id);
                             type_def.generic_info.as_ref().map(|gi| {
                                 gi.field_names
@@ -403,11 +413,11 @@ impl Analyzer {
 
                     if let Some(type_fields) = type_fields {
                         let type_name_str = match scrutinee_type {
-                            Type::Record(r) => {
+                            Type::Nominal(NominalType::Record(r)) => {
                                 let type_def = self.entity_registry.get_type(r.type_def_id);
                                 self.name_table.display(type_def.name_id)
                             }
-                            Type::Class(c) => {
+                            Type::Nominal(NominalType::Class(c)) => {
                                 let type_def = self.entity_registry.get_type(c.type_def_id);
                                 self.name_table.display(type_def.name_id)
                             }
@@ -517,11 +527,11 @@ impl Analyzer {
                             TypeDefKind::Class => self
                                 .entity_registry
                                 .build_class_type(type_id)
-                                .map(Type::Class),
+                                .map(|c| Type::Nominal(NominalType::Class(c))),
                             TypeDefKind::Record => self
                                 .entity_registry
                                 .build_record_type(type_id)
-                                .map(Type::Record),
+                                .map(|r| Type::Nominal(NominalType::Record(r))),
                             _ => None,
                         }
                     })
@@ -539,11 +549,11 @@ impl Analyzer {
                             TypeDefKind::Class => self
                                 .entity_registry
                                 .build_class_type(type_id)
-                                .map(Type::Class),
+                                .map(|c| Type::Nominal(NominalType::Class(c))),
                             TypeDefKind::Record => self
                                 .entity_registry
                                 .build_record_type(type_id)
-                                .map(Type::Record),
+                                .map(|r| Type::Nominal(NominalType::Record(r))),
                             _ => None,
                         }
                     })

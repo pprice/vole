@@ -3,7 +3,7 @@ use std::collections::HashMap as StdHashMap;
 use crate::identity::{NameId, TypeDefId};
 use crate::sema::Type;
 use crate::sema::entity_defs::TypeDefKind;
-use crate::sema::types::{InterfaceMethodType, InterfaceType, StructuralType};
+use crate::sema::types::{InterfaceMethodType, InterfaceType, NominalType, StructuralType};
 
 use super::super::*;
 
@@ -34,29 +34,31 @@ fn substitute_type(ty: &Type, substitutions: &StdHashMap<NameId, Type>) -> Type 
         Type::RuntimeIterator(inner) => {
             Type::RuntimeIterator(Box::new(substitute_type(inner, substitutions)))
         }
-        Type::Interface(iface) => Type::Interface(InterfaceType {
-            type_def_id: iface.type_def_id,
-            type_args: iface
-                .type_args
-                .iter()
-                .map(|a| substitute_type(a, substitutions))
-                .collect(),
-            methods: iface
-                .methods
-                .iter()
-                .map(|m| InterfaceMethodType {
-                    name: m.name,
-                    params: m
-                        .params
-                        .iter()
-                        .map(|p| substitute_type(p, substitutions))
-                        .collect(),
-                    return_type: Box::new(substitute_type(&m.return_type, substitutions)),
-                    has_default: m.has_default,
-                })
-                .collect(),
-            extends: iface.extends.clone(),
-        }),
+        Type::Nominal(NominalType::Interface(iface)) => {
+            Type::Nominal(NominalType::Interface(InterfaceType {
+                type_def_id: iface.type_def_id,
+                type_args: iface
+                    .type_args
+                    .iter()
+                    .map(|a| substitute_type(a, substitutions))
+                    .collect(),
+                methods: iface
+                    .methods
+                    .iter()
+                    .map(|m| InterfaceMethodType {
+                        name: m.name,
+                        params: m
+                            .params
+                            .iter()
+                            .map(|p| substitute_type(p, substitutions))
+                            .collect(),
+                        return_type: Box::new(substitute_type(&m.return_type, substitutions)),
+                        has_default: m.has_default,
+                    })
+                    .collect(),
+                extends: iface.extends.clone(),
+            }))
+        }
         Type::Tuple(elements) => Type::Tuple(
             elements
                 .iter()
@@ -186,8 +188,8 @@ impl Analyzer {
     ) -> bool {
         // Get type name_id for method lookup
         let type_name_id = match ty {
-            Type::Record(r) => Some(self.entity_registry.record_name_id(r)),
-            Type::Class(c) => Some(self.entity_registry.class_name_id(c)),
+            Type::Nominal(NominalType::Record(r)) => Some(self.entity_registry.record_name_id(r)),
+            Type::Nominal(NominalType::Class(c)) => Some(self.entity_registry.class_name_id(c)),
             _ => None,
         };
 
@@ -330,11 +332,11 @@ impl Analyzer {
                 TypeDefKind::Class => self
                     .entity_registry
                     .build_class_type(type_id)
-                    .map(Type::Class),
+                    .map(|c| Type::Nominal(NominalType::Class(c))),
                 TypeDefKind::Record => self
                     .entity_registry
                     .build_record_type(type_id)
-                    .map(Type::Record),
+                    .map(|r| Type::Nominal(NominalType::Record(r))),
                 _ => None,
             }
         } else {
@@ -747,8 +749,8 @@ impl Analyzer {
     ) -> bool {
         // Get type name_id for method lookup
         let type_name_id = match ty {
-            Type::Record(r) => Some(self.entity_registry.record_name_id(r)),
-            Type::Class(c) => Some(self.entity_registry.class_name_id(c)),
+            Type::Nominal(NominalType::Record(r)) => Some(self.entity_registry.record_name_id(r)),
+            Type::Nominal(NominalType::Class(c)) => Some(self.entity_registry.class_name_id(c)),
             _ => None,
         };
 

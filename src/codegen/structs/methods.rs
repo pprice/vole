@@ -22,6 +22,7 @@ use crate::identity::NamerLookup;
 use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::generic::substitute_type;
 use crate::sema::resolution::ResolvedMethod;
+use crate::sema::types::NominalType;
 use crate::sema::{FunctionType, PrimitiveType, Type};
 
 impl Cg<'_, '_, '_> {
@@ -189,7 +190,7 @@ impl Cg<'_, '_, '_> {
         let (method_info, return_type) = match target {
             MethodTarget::FunctionalInterface { func_type } => {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
-                if let Type::Interface(interface_type) = &obj.vole_type {
+                if let Type::Nominal(NominalType::Interface(interface_type)) = &obj.vole_type {
                     let method_name_id = self.method_name_id(mc.method);
                     return self.interface_dispatch_call_args_by_type_def_id(
                         &obj,
@@ -222,11 +223,12 @@ impl Cg<'_, '_, '_> {
                 if let Some(param_types) = &param_types {
                     for (arg, param_type) in mc.args.iter().zip(param_types.iter()) {
                         let compiled = self.expr(arg)?;
-                        let compiled = if matches!(param_type, Type::Interface(_)) {
-                            box_interface_value(self.builder, self.ctx, compiled, param_type)?
-                        } else {
-                            compiled
-                        };
+                        let compiled =
+                            if matches!(param_type, Type::Nominal(NominalType::Interface(_))) {
+                                box_interface_value(self.builder, self.ctx, compiled, param_type)?
+                            } else {
+                                compiled
+                            };
                         args.push(compiled.value);
                     }
                 } else {
@@ -296,8 +298,7 @@ impl Cg<'_, '_, '_> {
             }
         } else {
             // Not a monomorphized class method, use regular dispatch
-            let is_generic_class =
-                matches!(&obj.vole_type, Type::Class(c) if !c.type_args.is_empty());
+            let is_generic_class = matches!(&obj.vole_type, Type::Nominal(NominalType::Class(c)) if !c.type_args.is_empty());
             (self.func_ref(method_info.func_key)?, is_generic_class)
         };
 
@@ -306,7 +307,7 @@ impl Cg<'_, '_, '_> {
         if let Some(param_types) = &param_types {
             for (arg, param_type) in mc.args.iter().zip(param_types.iter()) {
                 let compiled = self.expr(arg)?;
-                let compiled = if matches!(param_type, Type::Interface(_)) {
+                let compiled = if matches!(param_type, Type::Nominal(NominalType::Interface(_))) {
                     box_interface_value(self.builder, self.ctx, compiled, param_type)?
                 } else {
                     compiled
@@ -582,7 +583,9 @@ impl Cg<'_, '_, '_> {
     ) -> Type {
         match &ty {
             // Handle Iterator<T> stored as Interface
-            Type::Interface(iface) if iface.type_def_id == iterator_type_id => {
+            Type::Nominal(NominalType::Interface(iface))
+                if iface.type_def_id == iterator_type_id =>
+            {
                 if let Some(elem_ty) = iface.type_args.first() {
                     Type::RuntimeIterator(Box::new(elem_ty.clone()))
                 } else {
@@ -832,7 +835,7 @@ impl Cg<'_, '_, '_> {
                 for (arg, param_ty) in mc.args.iter().zip(instance.func_type.params.iter()) {
                     let compiled = self.expr(arg)?;
                     // Box interface values if needed
-                    let compiled = if matches!(param_ty, Type::Interface(_)) {
+                    let compiled = if matches!(param_ty, Type::Nominal(NominalType::Interface(_))) {
                         box_interface_value(self.builder, self.ctx, compiled, param_ty)?
                     } else {
                         compiled
@@ -891,7 +894,7 @@ impl Cg<'_, '_, '_> {
         for (arg, param_ty) in mc.args.iter().zip(func_type.params.iter()) {
             let compiled = self.expr(arg)?;
             // Box interface values if needed
-            let compiled = if matches!(param_ty, Type::Interface(_)) {
+            let compiled = if matches!(param_ty, Type::Nominal(NominalType::Interface(_))) {
                 box_interface_value(self.builder, self.ctx, compiled, param_ty)?
             } else {
                 compiled

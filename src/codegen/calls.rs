@@ -13,6 +13,7 @@ use crate::errors::CodegenError;
 type ArgVec = SmallVec<[Value; 8]>;
 use crate::frontend::{CallExpr, ExprKind, LetInit, NodeId, StringPart};
 use crate::runtime::native_registry::{NativeFunction, NativeType};
+use crate::sema::types::NominalType;
 use crate::sema::{FunctionType, PrimitiveType, Type};
 
 use super::context::Cg;
@@ -273,7 +274,7 @@ impl Cg<'_, '_, '_> {
 
         // Check if it's a functional interface variable
         if let Some((var, vole_type)) = self.vars.get(&callee_sym)
-            && let Type::Interface(iface) = vole_type
+            && let Type::Nominal(NominalType::Interface(iface)) = vole_type
             && let Some(method_id) = self
                 .ctx
                 .analyzed
@@ -316,7 +317,7 @@ impl Cg<'_, '_, '_> {
                 let declared_type = resolve_type_expr(ty_expr, self.ctx);
 
                 // If declared as functional interface, call via vtable dispatch
-                if let Type::Interface(iface) = &declared_type
+                if let Type::Nominal(NominalType::Interface(iface)) = &declared_type
                     && let Some(method_id) = self
                         .ctx
                         .analyzed
@@ -349,7 +350,7 @@ impl Cg<'_, '_, '_> {
             }
 
             // If it's an interface type (functional interface), call via vtable
-            if let Type::Interface(iface) = &lambda_val.vole_type
+            if let Type::Nominal(NominalType::Interface(iface)) = &lambda_val.vole_type
                 && let Some(method_id) = self
                     .ctx
                     .analyzed
@@ -876,7 +877,7 @@ impl Cg<'_, '_, '_> {
         let mut args: ArgVec = smallvec![closure_ptr];
         for (arg, param_type) in call.args.iter().zip(func_type.params.iter()) {
             let compiled = self.expr(arg)?;
-            let compiled = if matches!(param_type, Type::Interface(_)) {
+            let compiled = if matches!(param_type, Type::Nominal(NominalType::Interface(_))) {
                 box_interface_value(self.builder, self.ctx, compiled, param_type)?
             } else if matches!(param_type, Type::Union(_))
                 && !matches!(&compiled.vole_type, Type::Union(_))

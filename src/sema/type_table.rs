@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use crate::identity::{ModuleId, NameId, NameTable, TypeDefId};
 use crate::sema::Type;
 use crate::sema::implement_registry::PrimitiveTypeId;
-use crate::sema::types::PrimitiveType;
+use crate::sema::types::{NominalType, PrimitiveType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeKey(u32);
@@ -251,9 +251,13 @@ impl TypeTable {
                     ty.clone(),
                 )
             }
-            Type::Class(class_type) => self.intern_type_def(ty.clone(), class_type.type_def_id),
-            Type::Record(record_type) => self.intern_type_def(ty.clone(), record_type.type_def_id),
-            Type::Interface(interface_type) => {
+            Type::Nominal(NominalType::Class(class_type)) => {
+                self.intern_type_def(ty.clone(), class_type.type_def_id)
+            }
+            Type::Nominal(NominalType::Record(record_type)) => {
+                self.intern_type_def(ty.clone(), record_type.type_def_id)
+            }
+            Type::Nominal(NominalType::Interface(interface_type)) => {
                 let type_def_id = interface_type.type_def_id;
                 if interface_type.type_args.is_empty() {
                     self.intern_type_def(ty.clone(), type_def_id)
@@ -269,7 +273,7 @@ impl TypeTable {
                     )
                 }
             }
-            Type::ErrorType(error_type) => self.intern_fingerprint(
+            Type::Nominal(NominalType::Error(error_type)) => self.intern_fingerprint(
                 TypeFingerprint::ErrorType(error_type.type_def_id),
                 ty.clone(),
             ),
@@ -400,7 +404,7 @@ impl TypeTable {
                     self.display_type_inner(elem, names, entity_registry)
                 )
             }
-            Type::Class(class_type) => {
+            Type::Nominal(NominalType::Class(class_type)) => {
                 let type_def = entity_registry.get_type(class_type.type_def_id);
                 let base = names.display(type_def.name_id);
                 if class_type.type_args.is_empty() {
@@ -415,7 +419,7 @@ impl TypeTable {
                     format!("{}<{}>", base, arg_list)
                 }
             }
-            Type::Record(record_type) => {
+            Type::Nominal(NominalType::Record(record_type)) => {
                 let type_def = entity_registry.get_type(record_type.type_def_id);
                 let base = names.display(type_def.name_id);
                 if record_type.type_args.is_empty() {
@@ -430,7 +434,7 @@ impl TypeTable {
                     format!("{}<{}>", base, arg_list)
                 }
             }
-            Type::Interface(interface_type) => {
+            Type::Nominal(NominalType::Interface(interface_type)) => {
                 let name_id = entity_registry.name_id(interface_type.type_def_id);
                 let base = names.display(name_id);
                 if interface_type.type_args.is_empty() {
@@ -445,7 +449,7 @@ impl TypeTable {
                     format!("{}<{}>", base, arg_list)
                 }
             }
-            Type::ErrorType(error_type) => {
+            Type::Nominal(NominalType::Error(error_type)) => {
                 names.display(entity_registry.name_id(error_type.type_def_id))
             }
             Type::Fallible(ft) => format!(
@@ -502,10 +506,10 @@ mod tests {
 
         let mut types = TypeTable::new();
         let key = types.insert_named(
-            Type::Class(crate::sema::ClassType {
+            Type::Nominal(NominalType::Class(crate::sema::ClassType {
                 type_def_id,
                 type_args: vec![],
-            }),
+            })),
             name_id,
         );
 

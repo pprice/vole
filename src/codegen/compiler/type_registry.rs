@@ -9,6 +9,7 @@ use crate::frontend::{
     ClassDecl, Decl, InterfaceDecl, Interner, Program, RecordDecl, StaticsBlock, Symbol, TypeExpr,
 };
 use crate::runtime::type_registry::{FieldTypeTag, register_instance_type};
+use crate::sema::types::NominalType;
 use crate::sema::{ClassType, PrimitiveType, RecordType, Type};
 
 /// Convert a Vole Type to a FieldTypeTag for runtime cleanup
@@ -16,7 +17,9 @@ fn type_to_field_tag(ty: &Type) -> FieldTypeTag {
     match ty {
         Type::Primitive(PrimitiveType::String) => FieldTypeTag::String,
         Type::Array(_) => FieldTypeTag::Array,
-        Type::Class(_) | Type::Record(_) => FieldTypeTag::Instance,
+        Type::Nominal(NominalType::Class(_)) | Type::Nominal(NominalType::Record(_)) => {
+            FieldTypeTag::Instance
+        }
         // Optional types containing reference types also need cleanup
         Type::Union(variants) => {
             // If any variant is a reference type, mark as needing cleanup
@@ -88,10 +91,10 @@ impl Compiler<'_> {
             .expect("class should be registered in entity registry");
 
         // Create a placeholder vole_type (will be replaced in finalize_class)
-        let placeholder_type = Type::Class(ClassType {
+        let placeholder_type = Type::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![],
-        });
+        }));
 
         self.type_metadata.insert(
             class.name,
@@ -140,10 +143,10 @@ impl Compiler<'_> {
             .expect("class should be registered in entity registry");
 
         // Create the Vole type
-        let vole_type = Type::Class(ClassType {
+        let vole_type = Type::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![],
-        });
+        }));
 
         // Collect method return types
         let func_module_id = self.func_registry.main_module();
@@ -262,10 +265,10 @@ impl Compiler<'_> {
             .expect("record should be registered in entity registry");
 
         // Create a placeholder vole_type (will be replaced in finalize_record)
-        let placeholder_type = Type::Record(RecordType {
+        let placeholder_type = Type::Nominal(NominalType::Record(RecordType {
             type_def_id,
             type_args: vec![],
-        });
+        }));
 
         self.type_metadata.insert(
             record.name,
@@ -314,10 +317,10 @@ impl Compiler<'_> {
             .expect("record should be registered in entity registry");
 
         // Create the Vole type
-        let vole_type = Type::Record(RecordType {
+        let vole_type = Type::Nominal(NominalType::Record(RecordType {
             type_def_id,
             type_args: vec![],
-        });
+        }));
 
         // Collect method return types
         let func_module_id = self.func_registry.main_module();
@@ -486,7 +489,7 @@ impl Compiler<'_> {
 
         // Skip if already registered - check by type name string to avoid Symbol collisions across interners
         let already_registered = self.type_metadata.values().any(|meta| {
-            if let Type::Class(class_type) = &meta.vole_type {
+            if let Type::Nominal(NominalType::Class(class_type)) = &meta.vole_type {
                 self.analyzed
                     .name_table
                     .last_segment_str(self.analyzed.entity_registry.class_name_id(class_type))
@@ -519,10 +522,10 @@ impl Compiler<'_> {
         register_instance_type(type_id, field_type_tags);
 
         // Create the Vole type
-        let vole_type = Type::Class(ClassType {
+        let vole_type = Type::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![],
-        });
+        }));
 
         // Collect method info and declare methods
         let func_module_id = self.func_registry.main_module();

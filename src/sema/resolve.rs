@@ -8,8 +8,8 @@ use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{TypeParamScope, substitute_type};
 use crate::sema::types::{
-    ClassType, FallibleType, FunctionType, InterfaceMethodType, InterfaceType, RecordType,
-    StructuralFieldType, StructuralMethodType, StructuralType, Type,
+    ClassType, FallibleType, FunctionType, InterfaceMethodType, InterfaceType, NominalType,
+    RecordType, StructuralFieldType, StructuralMethodType, StructuralType, Type,
 };
 use std::collections::HashMap;
 
@@ -78,12 +78,12 @@ fn interface_instance(
     // Keep extends as TypeDefIds directly
     let extends = type_def.extends.clone();
 
-    Some(Type::Interface(InterfaceType {
+    Some(Type::Nominal(NominalType::Interface(InterfaceType {
         type_def_id,
         type_args,
         methods,
         extends,
-    }))
+    })))
 }
 
 impl<'a> TypeResolutionContext<'a> {
@@ -154,14 +154,14 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                 match type_def.kind {
                     TypeDefKind::Record => {
                         if let Some(record) = ctx.entity_registry.build_record_type(type_id) {
-                            Type::Record(record)
+                            Type::Nominal(NominalType::Record(record))
                         } else {
                             Type::invalid("resolve_failed")
                         }
                     }
                     TypeDefKind::Class => {
                         if let Some(class) = ctx.entity_registry.build_class_type(type_id) {
-                            Type::Class(class)
+                            Type::Nominal(NominalType::Class(class))
                         } else {
                             Type::invalid("resolve_failed")
                         }
@@ -174,7 +174,7 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                     TypeDefKind::ErrorType => {
                         // Get error info from EntityRegistry
                         if let Some(error_info) = type_def.error_info.clone() {
-                            Type::ErrorType(error_info)
+                            Type::Nominal(NominalType::Error(error_info))
                         } else {
                             Type::invalid("resolve_failed")
                         }
@@ -256,16 +256,16 @@ pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type 
                 let type_def = ctx.entity_registry.get_type(type_id);
                 match type_def.kind {
                     TypeDefKind::Class => {
-                        return Type::Class(ClassType {
+                        return Type::Nominal(NominalType::Class(ClassType {
                             type_def_id: type_id,
                             type_args: resolved_args,
-                        });
+                        }));
                     }
                     TypeDefKind::Record => {
-                        return Type::Record(RecordType {
+                        return Type::Nominal(NominalType::Record(RecordType {
                             type_def_id: type_id,
                             type_args: resolved_args,
-                        });
+                        }));
                     }
                     TypeDefKind::Interface => {
                         // interface_instance() should have handled this, but as fallback
