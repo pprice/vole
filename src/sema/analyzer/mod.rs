@@ -25,7 +25,7 @@ use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::types::{ConstantValue, ModuleType, NominalType, StructuralType};
 use crate::sema::{
     ClassType, ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField, Type, TypeKey,
-    compatibility::{function_compatible_with_interface, literal_fits, types_compatible_core},
+    compatibility::TypeCompatibility,
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
 };
@@ -1586,7 +1586,7 @@ impl Analyzer {
                 }
                 crate::sema::generic::TypeConstraint::Union(variants) => {
                     let expected = Type::normalize_union(variants.clone());
-                    if !types_compatible_core(found, &expected) {
+                    if !found.is_compatible(&expected) {
                         let expected_display = self.type_display(&expected);
                         let found_display = self.type_display(found);
                         self.add_error(

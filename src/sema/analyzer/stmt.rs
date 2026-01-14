@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::sema::PrimitiveType;
+use crate::sema::compatibility::TypeCompatibility;
 use crate::sema::types::NominalType;
 
 impl Analyzer {
@@ -459,7 +460,7 @@ impl Analyzer {
             let field_init_name = interner.resolve(field_init.name);
             if let Some(field) = error_info.fields.iter().find(|f| f.name == field_init_name) {
                 // Known field - check type compatibility
-                if !types_compatible_core(&value_type, &field.ty) {
+                if !value_type.is_compatible(&field.ty) {
                     self.add_type_mismatch(&field.ty, &value_type, field_init.span);
                 }
             } else {

@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::sema::PrimitiveType;
+use crate::sema::compatibility::TypeCompatibility;
 
 impl Analyzer {
     pub(crate) fn check_expr(
@@ -513,7 +514,7 @@ impl Analyzer {
     ) -> Type {
         match &expr.kind {
             ExprKind::IntLiteral(value) => {
-                if literal_fits(*value, hint) {
+                if hint.fits_literal(*value) {
                     hint.clone()
                 } else {
                     Type::Primitive(PrimitiveType::I64) // Default

@@ -146,23 +146,14 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
 /// This is used by the analyzer to extend type compatibility checking to include
 /// function-to-interface compatibility. The `interface_fn` parameter should be
 /// the function signature extracted from the interface definition.
+///
+/// Note: This delegates to `FunctionType::is_compatible_with_interface`.
+/// Consider using that method directly on FunctionType instances.
 pub fn function_compatible_with_interface(
     fn_type: &FunctionType,
     interface_fn: &FunctionType,
 ) -> bool {
-    if fn_type.params.len() != interface_fn.params.len() {
-        return false;
-    }
-
-    let params_match = fn_type
-        .params
-        .iter()
-        .zip(interface_fn.params.iter())
-        .all(|(fp, ip)| types_compatible_core(fp, ip));
-
-    let return_matches = types_compatible_core(&fn_type.return_type, &interface_fn.return_type);
-
-    params_match && return_matches
+    fn_type.is_compatible_with_interface(interface_fn)
 }
 
 #[cfg(test)]

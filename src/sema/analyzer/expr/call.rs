@@ -1,6 +1,7 @@
 use super::super::*;
 use crate::identity::Namer;
 use crate::sema::PrimitiveType;
+use crate::sema::compatibility::TypeCompatibility;
 use crate::sema::types::NominalType;
 
 impl Analyzer {
@@ -125,7 +126,7 @@ impl Analyzer {
                 for (i, (arg, expected)) in call.args.iter().zip(concrete_params.iter()).enumerate()
                 {
                     let arg_ty = &arg_types[i];
-                    if !types_compatible_core(arg_ty, expected) {
+                    if !arg_ty.is_compatible(expected) {
                         self.add_type_mismatch(expected, arg_ty, arg.span);
                     }
                 }

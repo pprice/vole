@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::sema::PrimitiveType;
+use crate::sema::compatibility::TypeCompatibility;
 use crate::sema::types::NominalType;
 
 impl Analyzer {
@@ -28,7 +29,7 @@ impl Analyzer {
                 Some(Type::Union(variants)) => {
                     if let Some(int_variant) = variants
                         .iter()
-                        .find(|v| v.is_integer() && literal_fits(*value, v))
+                        .find(|v| v.is_integer() && v.fits_literal(*value))
                     {
                         Ok(int_variant.clone())
                     } else {
@@ -44,7 +45,7 @@ impl Analyzer {
                         Ok(Type::Primitive(PrimitiveType::I64)) // Return a sensible default
                     }
                 }
-                Some(ty) if literal_fits(*value, ty) => Ok(ty.clone()),
+                Some(ty) if ty.fits_literal(*value) => Ok(ty.clone()),
                 Some(ty) => {
                     let expected = self.type_display(ty);
                     self.add_error(
@@ -240,7 +241,7 @@ impl Analyzer {
                     if let ExprKind::IntLiteral(value) = &un.operand.kind {
                         let negated = value.wrapping_neg();
                         if let Some(target) = expected
-                            && literal_fits(negated, target)
+                            && target.fits_literal(negated)
                         {
                             return Ok(self.record_expr_type(&un.operand, target.clone()));
                         }

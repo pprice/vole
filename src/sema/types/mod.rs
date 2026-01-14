@@ -142,6 +142,32 @@ impl std::hash::Hash for FunctionType {
     }
 }
 
+impl FunctionType {
+    /// Check if this function type is compatible with a functional interface signature.
+    ///
+    /// This is used when checking if a function/closure can be assigned to a functional
+    /// interface type. Parameters must be compatible (with widening) and return types
+    /// must be compatible.
+    pub fn is_compatible_with_interface(&self, interface_fn: &FunctionType) -> bool {
+        if self.params.len() != interface_fn.params.len() {
+            return false;
+        }
+
+        // Import here to avoid circular dependency issues at module level
+        use crate::sema::compatibility::TypeCompatibility;
+
+        let params_match = self
+            .params
+            .iter()
+            .zip(interface_fn.params.iter())
+            .all(|(fp, ip)| fp.is_compatible(ip));
+
+        let return_matches = self.return_type.is_compatible(&interface_fn.return_type);
+
+        params_match && return_matches
+    }
+}
+
 impl Type {
     /// Convert from AST PrimitiveType to Type
     pub fn from_primitive(p: AstPrimitiveType) -> Self {

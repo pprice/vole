@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::identity::TypeDefId;
+use crate::sema::compatibility::TypeCompatibility;
 use crate::sema::types::NominalType;
 use std::collections::HashSet;
 
@@ -7,7 +8,7 @@ use std::collections::HashSet;
 impl Analyzer {
     pub(crate) fn types_compatible(&self, from: &Type, to: &Type, interner: &Interner) -> bool {
         // Use the core compatibility check for most cases
-        if types_compatible_core(from, to) {
+        if from.is_compatible(to) {
             return true;
         }
 
@@ -29,7 +30,7 @@ impl Analyzer {
             && let Type::Nominal(NominalType::Interface(iface)) = to
             && let Some(iface_fn) =
                 self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
-            && function_compatible_with_interface(fn_type, &iface_fn)
+            && fn_type.is_compatible_with_interface(&iface_fn)
         {
             return true;
         }
