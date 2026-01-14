@@ -11,6 +11,7 @@ use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::types::{FunctionType, StructuralType, Type};
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 // ============================================================================
 // Generic Monomorphization Cache
@@ -25,10 +26,27 @@ use std::hash::Hash;
 ///
 /// All caches share the same structure: a HashMap from keys to instances,
 /// plus a counter for generating unique mangled names.
-#[derive(Debug, Clone)]
+///
+/// Also tracks cache hit/miss statistics for debugging monomorphization performance.
+#[derive(Debug)]
 pub struct MonomorphCacheBase<K, V> {
     instances: HashMap<K, V>,
     next_id: u32,
+    /// Number of cache hits (successful lookups). Uses AtomicU32 for thread-safe interior mutability.
+    hits: AtomicU32,
+    /// Number of cache misses (failed lookups). Uses AtomicU32 for thread-safe interior mutability.
+    misses: AtomicU32,
+}
+
+impl<K: Clone, V: Clone> Clone for MonomorphCacheBase<K, V> {
+    fn clone(&self) -> Self {
+        Self {
+            instances: self.instances.clone(),
+            next_id: self.next_id,
+            hits: AtomicU32::new(self.hits.load(Ordering::Relaxed)),
+            misses: AtomicU32::new(self.misses.load(Ordering::Relaxed)),
+        }
+    }
 }
 
 impl<K: Hash + Eq, V> Default for MonomorphCacheBase<K, V> {
@@ -43,12 +61,21 @@ impl<K: Hash + Eq, V> MonomorphCacheBase<K, V> {
         Self {
             instances: HashMap::new(),
             next_id: 0,
+            hits: AtomicU32::new(0),
+            misses: AtomicU32::new(0),
         }
     }
 
-    /// Look up an existing monomorphized instance
+    /// Look up an existing monomorphized instance.
+    /// Tracks hit/miss statistics for performance debugging.
     pub fn get(&self, key: &K) -> Option<&V> {
-        self.instances.get(key)
+        let result = self.instances.get(key);
+        if result.is_some() {
+            self.hits.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.misses.fetch_add(1, Ordering::Relaxed);
+        }
+        result
     }
 
     /// Insert a new monomorphized instance
@@ -71,6 +98,56 @@ impl<K: Hash + Eq, V> MonomorphCacheBase<K, V> {
     /// Get all cached instances (for codegen)
     pub fn instances(&self) -> impl Iterator<Item = (&K, &V)> {
         self.instances.iter()
+    }
+
+    // ========================================================================
+    // Cache Metrics
+    // ========================================================================
+
+    /// Get the number of cache hits
+    pub fn hit_count(&self) -> u32 {
+        self.hits.load(Ordering::Relaxed)
+    }
+
+    /// Get the number of cache misses
+    pub fn miss_count(&self) -> u32 {
+        self.misses.load(Ordering::Relaxed)
+    }
+
+    /// Get the cache hit rate as a percentage (0.0 - 100.0).
+    /// Returns 0.0 if no lookups have been performed.
+    pub fn hit_rate(&self) -> f64 {
+        let hits = self.hits.load(Ordering::Relaxed);
+        let misses = self.misses.load(Ordering::Relaxed);
+        let total = hits + misses;
+        if total == 0 {
+            0.0
+        } else {
+            (hits as f64 / total as f64) * 100.0
+        }
+    }
+
+    /// Reset cache metrics to zero
+    pub fn clear_metrics(&self) {
+        self.hits.store(0, Ordering::Relaxed);
+        self.misses.store(0, Ordering::Relaxed);
+    }
+
+    /// Print cache statistics for debugging
+    pub fn print_stats(&self, cache_name: &str) {
+        let hits = self.hits.load(Ordering::Relaxed);
+        let misses = self.misses.load(Ordering::Relaxed);
+        let total = hits + misses;
+        let entries = self.instances.len();
+        eprintln!(
+            "[{}] entries: {}, lookups: {} (hits: {}, misses: {}, hit_rate: {:.1}%)",
+            cache_name,
+            entries,
+            total,
+            hits,
+            misses,
+            self.hit_rate()
+        );
     }
 }
 
