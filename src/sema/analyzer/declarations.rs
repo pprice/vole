@@ -1830,16 +1830,54 @@ impl Analyzer {
     /// This is called for standalone external blocks (not inside implement blocks)
     fn collect_external_block(&mut self, ext_block: &ExternalBlock, interner: &Interner) {
         for func in &ext_block.functions {
-            let params: Vec<Type> = func
-                .params
-                .iter()
-                .map(|p| self.resolve_type(&p.ty, interner))
-                .collect();
-            let return_type = func
-                .return_type
-                .as_ref()
-                .map(|t| self.resolve_type(t, interner))
-                .unwrap_or(Type::Void);
+            // For generic external functions, set up type param scope
+            let (params, return_type) = if !func.type_params.is_empty() {
+                let builtin_mod = self.name_table.builtin_module();
+                let mut type_param_scope = TypeParamScope::new();
+                for tp in &func.type_params {
+                    let tp_name_str = interner.resolve(tp.name);
+                    let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
+                    type_param_scope.add(TypeParamInfo {
+                        name: tp.name,
+                        name_id: tp_name_id,
+                        constraint: None,
+                    });
+                }
+
+                // Resolve with type params in scope
+                let module_id = self.current_module;
+                let mut ctx = TypeResolutionContext::with_type_params(
+                    &self.entity_registry,
+                    interner,
+                    &mut self.name_table,
+                    module_id,
+                    &type_param_scope,
+                );
+                let params: Vec<Type> = func
+                    .params
+                    .iter()
+                    .map(|p| resolve_type(&p.ty, &mut ctx))
+                    .collect();
+                let return_type = func
+                    .return_type
+                    .as_ref()
+                    .map(|t| resolve_type(t, &mut ctx))
+                    .unwrap_or(Type::Void);
+                (params, return_type)
+            } else {
+                // Non-generic external function
+                let params: Vec<Type> = func
+                    .params
+                    .iter()
+                    .map(|p| self.resolve_type(&p.ty, interner))
+                    .collect();
+                let return_type = func
+                    .return_type
+                    .as_ref()
+                    .map(|t| self.resolve_type(t, interner))
+                    .unwrap_or(Type::Void);
+                (params, return_type)
+            };
 
             let func_type = FunctionType {
                 params,

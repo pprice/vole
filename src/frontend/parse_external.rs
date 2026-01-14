@@ -94,6 +94,10 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::Identifier, "expected function name")?;
         let vole_name = self.interner.intern(&name_token.lexeme);
 
+        // Parse optional type parameters: func name<T, K, V>(...)
+        // parse_type_params handles checking for and consuming '<'
+        let type_params = self.parse_type_params()?;
+
         // Parse parameter list
         self.consume(TokenType::LParen, "expected '(' after function name")?;
         let mut params = Vec::new();
@@ -119,6 +123,7 @@ impl<'src> Parser<'src> {
         Ok(ExternalFunc {
             native_name,
             vole_name,
+            type_params,
             params,
             return_type,
             span,

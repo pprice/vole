@@ -192,6 +192,7 @@ pub struct StaticsBlock {
 pub struct ExternalFunc {
     pub native_name: Option<String>, // "string_length" or None
     pub vole_name: Symbol,
+    pub type_params: Vec<TypeParam>, // Generic type params for type-erased external functions
     pub params: Vec<Param>,
     pub return_type: Option<TypeExpr>,
     pub span: Span,
@@ -865,6 +866,7 @@ mod tests {
         let ef = ExternalFunc {
             native_name: Some("string_length".to_string()),
             vole_name: Symbol(1),
+            type_params: vec![],
             params: vec![],
             return_type: None,
             span: Span::default(),
@@ -877,6 +879,7 @@ mod tests {
         let ef = ExternalFunc {
             native_name: None,
             vole_name: Symbol(1),
+            type_params: vec![],
             params: vec![],
             return_type: None,
             span: Span::default(),
