@@ -138,9 +138,9 @@ impl Analyzer {
     /// Build substitution map for generic interface types
     fn build_interface_substitutions(&self, object_type: &Type) -> HashMap<NameId, Type> {
         // Extract type_def_id and type_args from nominal types
-        if let Some(info) = object_type.as_nominal() {
+        if let Type::Nominal(n) = object_type {
             self.entity_registry
-                .substitution_map(info.type_def_id, info.type_args)
+                .substitution_map(n.type_def_id(), n.type_args())
         } else {
             HashMap::new()
         }

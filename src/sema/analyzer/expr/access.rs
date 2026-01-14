@@ -116,11 +116,15 @@ impl Analyzer {
         let field_name = interner.resolve(field_access.field);
 
         // Extract type_def_id and type_args from the object type
-        let Some(info) = object_type.as_struct() else {
+        let Type::Nominal(n) = &object_type else {
             self.type_error("class or record", &object_type, field_access.object.span);
             return Ok(Type::invalid("field_access_non_struct"));
         };
-        let (type_def_id, type_args) = (info.type_def_id, info.type_args);
+        if !n.is_struct_like() {
+            self.type_error("class or record", &object_type, field_access.object.span);
+            return Ok(Type::invalid("field_access_non_struct"));
+        }
+        let (type_def_id, type_args) = (n.type_def_id(), n.type_args());
 
         // Try to find the field
         if let Some((_type_name, field_type)) =
@@ -192,7 +196,7 @@ impl Analyzer {
         }
 
         // Get type_def_id and type_args from inner type
-        let Some(info) = inner_type.as_struct() else {
+        let Type::Nominal(n) = &inner_type else {
             self.type_error(
                 "optional class or record",
                 &object_type,
@@ -200,7 +204,15 @@ impl Analyzer {
             );
             return Ok(Type::invalid("optional_chain_non_struct"));
         };
-        let (type_def_id, type_args) = (info.type_def_id, info.type_args);
+        if !n.is_struct_like() {
+            self.type_error(
+                "optional class or record",
+                &object_type,
+                opt_chain.object.span,
+            );
+            return Ok(Type::invalid("optional_chain_non_struct"));
+        }
+        let (type_def_id, type_args) = (n.type_def_id(), n.type_args());
 
         // Find the field
         let field_name = interner.resolve(opt_chain.field);

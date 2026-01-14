@@ -119,22 +119,6 @@ pub struct StructField {
     pub slot: usize, // Compile-time slot index
 }
 
-/// View into nominal type data (Class, Record, Interface, ErrorType)
-/// Provides read-only access to type_def_id and type_args without copying.
-#[derive(Debug, Clone, Copy)]
-pub struct NominalInfo<'a> {
-    pub type_def_id: TypeDefId,
-    pub type_args: &'a [Type],
-}
-
-/// View into struct-like type data (Class, Record - things with fields)
-/// Provides read-only access to type_def_id and type_args without copying.
-#[derive(Debug, Clone, Copy)]
-pub struct StructInfo<'a> {
-    pub type_def_id: TypeDefId,
-    pub type_args: &'a [Type],
-}
-
 // ClassType, RecordType, InterfaceType, InterfaceMethodType, ErrorTypeInfo
 // are now defined in nominal.rs and re-exported above
 //
@@ -187,34 +171,6 @@ impl Type {
         match self {
             Type::Nominal(n) => n.type_args(),
             _ => &[],
-        }
-    }
-
-    /// View as nominal type (Class, Record, Interface, ErrorType).
-    /// Returns None for primitives, functions, unions, etc.
-    pub fn as_nominal(&self) -> Option<NominalInfo<'_>> {
-        match self {
-            Type::Nominal(n) => Some(NominalInfo {
-                type_def_id: n.type_def_id(),
-                type_args: n.type_args(),
-            }),
-            _ => None,
-        }
-    }
-
-    /// View as struct-like type (Class or Record - things with fields).
-    /// Returns None for interfaces, primitives, functions, etc.
-    pub fn as_struct(&self) -> Option<StructInfo<'_>> {
-        match self {
-            Type::Nominal(NominalType::Class(c)) => Some(StructInfo {
-                type_def_id: c.type_def_id,
-                type_args: &c.type_args,
-            }),
-            Type::Nominal(NominalType::Record(r)) => Some(StructInfo {
-                type_def_id: r.type_def_id,
-                type_args: &r.type_args,
-            }),
-            _ => None,
         }
     }
 

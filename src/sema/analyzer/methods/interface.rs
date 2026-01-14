@@ -148,11 +148,14 @@ impl Analyzer {
         expected_type: &Type,
         interner: &Interner,
     ) -> bool {
-        let Some(info) = ty.as_struct() else {
+        let Type::Nominal(n) = ty else {
             return false;
         };
+        if !n.is_struct_like() {
+            return false;
+        }
 
-        let type_def = self.entity_registry.get_type(info.type_def_id);
+        let type_def = self.entity_registry.get_type(n.type_def_id());
         let Some(ref generic_info) = type_def.generic_info else {
             return false;
         };
@@ -161,7 +164,7 @@ impl Analyzer {
         let substitutions: StdHashMap<_, _> = generic_info
             .type_params
             .iter()
-            .zip(info.type_args.iter())
+            .zip(n.type_args().iter())
             .map(|(tp, arg)| (tp.name_id, arg.clone()))
             .collect();
 
@@ -707,11 +710,14 @@ impl Analyzer {
         expected_type: &Type,
         interner: &Interner,
     ) -> bool {
-        let Some(info) = ty.as_struct() else {
+        let Type::Nominal(n) = ty else {
             return false;
         };
+        if !n.is_struct_like() {
+            return false;
+        }
 
-        let type_def = self.entity_registry.get_type(info.type_def_id);
+        let type_def = self.entity_registry.get_type(n.type_def_id());
         let Some(ref generic_info) = type_def.generic_info else {
             return false;
         };
@@ -720,7 +726,7 @@ impl Analyzer {
         let substitutions: HashMap<_, _> = generic_info
             .type_params
             .iter()
-            .zip(info.type_args.iter())
+            .zip(n.type_args().iter())
             .map(|(tp, arg)| (tp.name_id, arg.clone()))
             .collect();
 
