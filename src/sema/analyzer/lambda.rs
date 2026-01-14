@@ -1,6 +1,7 @@
 // src/sema/analyzer/lambda.rs
 
 use super::*;
+use crate::sema::generic::TypeParamInfo;
 
 impl Analyzer {
     /// Analyze a lambda expression, optionally with an expected function type for inference
@@ -14,6 +15,28 @@ impl Analyzer {
         self.lambda_captures.push(HashMap::new());
         self.lambda_locals.push(HashSet::new());
         self.lambda_side_effects.push(false);
+
+        // Build type param scope for generic lambdas
+        let builtin_mod = self.name_table.builtin_module();
+        let type_params: Vec<TypeParamInfo> = lambda
+            .type_params
+            .iter()
+            .map(|tp| {
+                let tp_name_str = interner.resolve(tp.name);
+                let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
+                TypeParamInfo {
+                    name: tp.name,
+                    name_id: tp_name_id,
+                    constraint: None, // Lambdas don't support constraints yet
+                    type_param_id: None,
+                }
+            })
+            .collect();
+
+        // Push type params to stack if any
+        if !type_params.is_empty() {
+            self.type_param_stack.push(type_params.clone());
+        }
 
         // Resolve parameter types
         let mut param_types = Vec::new();
@@ -99,6 +122,11 @@ impl Analyzer {
         // Restore outer scope
         if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
             self.scope = parent;
+        }
+
+        // Pop type params if we pushed any
+        if !type_params.is_empty() {
+            self.type_param_stack.pop();
         }
 
         // Pop capture stacks, side effects flag, and store results in the lambda
