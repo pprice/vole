@@ -19,7 +19,7 @@ pub use special::{AnalysisError, ConstantValue, FallibleType, ModuleType, Placeh
 
 use crate::frontend::PrimitiveType as AstPrimitiveType;
 use crate::frontend::Span;
-use crate::identity::{NameId, TypeDefId};
+use crate::identity::{NameId, TypeDefId, TypeParamId};
 
 // AnalysisError, PlaceholderKind, FallibleType, ModuleType, ConstantValue
 // are now defined in special.rs and re-exported above
@@ -65,9 +65,15 @@ pub enum Type {
     /// These are raw pointers to UnifiedIterator and should call external functions directly
     /// without interface boxing. The inner type is the element type.
     RuntimeIterator(Box<Type>),
-    /// Type parameter (e.g., T in func identity<T>(x: T) -> T)
-    /// Only valid within generic context during type checking
+    /// Type parameter placeholder (e.g., T during inference)
+    /// Only valid within generic context during type checking.
+    /// Note: This is for inference placeholders. For resolved type parameter
+    /// references, use TypeParamRef(TypeParamId) instead.
     TypeParam(NameId),
+    /// Type parameter reference - a reference to a specific type parameter.
+    /// Unlike TypeParam which is for inference, TypeParamRef identifies a
+    /// concrete type parameter definition with a unique TypeParamId.
+    TypeParamRef(TypeParamId),
     /// Tuple type - heterogeneous fixed-size collection
     /// e.g., [i32, string, bool] - different types per position
     Tuple(Vec<Type>),
@@ -277,6 +283,7 @@ impl Type {
             Type::Fallible(_) => "fallible",
             Type::Module(_) => "module",
             Type::TypeParam(_) => "type parameter",
+            Type::TypeParamRef(_) => "type parameter",
             Type::RuntimeIterator(_) => "iterator",
             Type::Tuple(_) => "tuple",
             Type::FixedArray { .. } => "fixed array",
@@ -578,6 +585,11 @@ impl Type {
                     })
                     .collect(),
             }),
+
+            // TypeParamRef uses TypeParamId, not NameId, so it doesn't participate
+            // in NameId-based substitution. In the future, we may need a separate
+            // substitution map for TypeParamId.
+            Type::TypeParamRef(_) => self.clone(),
 
             // Types without nested type parameters - return unchanged
             Type::Primitive(_)

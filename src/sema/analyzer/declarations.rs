@@ -155,6 +155,7 @@ impl Analyzer {
                     name: tp.name,
                     name_id: tp_name_id,
                     constraint: None,
+                    type_param_id: None,
                 });
             }
 
@@ -171,6 +172,7 @@ impl Analyzer {
                         name: tp.name,
                         name_id: tp_name_id,
                         constraint,
+                        type_param_id: None,
                     }
                 })
                 .collect();
@@ -434,6 +436,7 @@ impl Analyzer {
                     name: tp.name,
                     name_id: tp_name_id,
                     constraint: None,
+                    type_param_id: None,
                 });
             }
 
@@ -451,6 +454,7 @@ impl Analyzer {
                         name: tp.name,
                         name_id: tp_name_id,
                         constraint,
+                        type_param_id: None,
                     }
                 })
                 .collect();
@@ -629,6 +633,7 @@ impl Analyzer {
                             name: tp.name,
                             name_id: tp_name_id,
                             constraint: None,
+                            type_param_id: None,
                         });
                     }
 
@@ -652,6 +657,7 @@ impl Analyzer {
                                 name: tp.name,
                                 name_id: tp_name_id,
                                 constraint,
+                                type_param_id: None,
                             }
                         })
                         .collect();
@@ -938,6 +944,7 @@ impl Analyzer {
                     name: tp.name,
                     name_id: tp_name_id,
                     constraint: None,
+                    type_param_id: None,
                 });
             }
 
@@ -955,6 +962,7 @@ impl Analyzer {
                         name: tp.name,
                         name_id: tp_name_id,
                         constraint,
+                        type_param_id: None,
                     }
                 })
                 .collect();
@@ -1153,6 +1161,7 @@ impl Analyzer {
                             name: tp.name,
                             name_id: tp_name_id,
                             constraint: None,
+                            type_param_id: None,
                         });
                     }
 
@@ -1176,6 +1185,7 @@ impl Analyzer {
                                 name: tp.name,
                                 name_id: tp_name_id,
                                 constraint,
+                                type_param_id: None,
                             }
                         })
                         .collect();
@@ -1307,6 +1317,7 @@ impl Analyzer {
                 name: tp.name,
                 name_id: tp_name_id,
                 constraint: None,
+                type_param_id: None,
             });
         }
 
@@ -1323,6 +1334,7 @@ impl Analyzer {
                     name: tp.name,
                     name_id: tp_name_id,
                     constraint,
+                    type_param_id: None,
                 }
             })
             .collect();
@@ -1866,6 +1878,7 @@ impl Analyzer {
                             name: tp.name,
                             name_id: tp_name_id,
                             constraint: None, // External functions don't have constraints for now
+                            type_param_id: None,
                         }
                     })
                     .collect();

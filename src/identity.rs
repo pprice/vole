@@ -11,7 +11,7 @@ use crate::sema::types::Type;
 mod entities;
 mod namer;
 mod resolver;
-pub use entities::{FieldId, FunctionId, MethodId, TypeDefId};
+pub use entities::{FieldId, FunctionId, MethodId, TypeDefId, TypeParamId};
 pub use namer::{Namer, NamerLookup, method_name_id_by_str};
 pub use resolver::Resolver;
 

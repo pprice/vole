@@ -5,7 +5,7 @@
 // and supports monomorphization of generic functions.
 
 use crate::frontend::Symbol;
-use crate::identity::NameId;
+use crate::identity::{NameId, TypeParamId};
 use crate::sema::TypeKey;
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::types::{FunctionType, StructuralType, Type};
@@ -164,6 +164,10 @@ pub struct TypeParamInfo {
     pub name_id: NameId,
     /// Optional constraint on the type parameter
     pub constraint: Option<TypeConstraint>,
+    /// Unique identifier for this type parameter.
+    /// This provides a stable identity that can be used to distinguish
+    /// between different type parameters that might have the same NameId.
+    pub type_param_id: Option<TypeParamId>,
 }
 
 /// Resolved constraint for type parameter checking
@@ -542,6 +546,7 @@ mod tests {
             name: t,
             name_id: t_name_id,
             constraint: None,
+            type_param_id: None,
         });
 
         assert!(scope.is_type_param(t));

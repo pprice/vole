@@ -58,3 +58,18 @@ impl FunctionId {
         self.0
     }
 }
+
+/// Identity for a type parameter (e.g., T in `func identity<T>(x: T) -> T`)
+/// Distinct from NameId to avoid confusion with inference variables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeParamId(u32);
+
+impl TypeParamId {
+    pub(crate) fn new(index: u32) -> Self {
+        Self(index)
+    }
+
+    pub fn index(self) -> u32 {
+        self.0
+    }
+}
