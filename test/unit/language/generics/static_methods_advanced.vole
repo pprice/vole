@@ -1,8 +1,6 @@
 // Test: Advanced generic static methods - method-level type parameters
-// WIP: These tests require support for static methods with their own type parameters
-// on generic classes, combined with class type parameters.
-//
-// Tracked by bead: vole-rst0
+// Tests static methods with their own type parameters on generic classes,
+// combined with class type parameters.
 
 // =============================================================================
 // Interfaces for constraint testing
