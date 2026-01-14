@@ -105,6 +105,25 @@ Never claim success when:
 - Subagents must verify `cargo check` exits 0
 - You have "simplified" tests
 
+## Partial Fixes Policy
+
+**Never leave partial fixes without tracking.**
+
+If you cannot fully complete a fix:
+1. DO NOT claim the task is done
+2. Create a follow-up bead with `bd create` describing remaining work
+3. Link it as blocking if appropriate
+4. Mention the follow-up bead in your response
+
+Examples of partial fixes that need follow-up beads:
+- Fixed 3 of 5 occurrences of a pattern
+- Added feature but didn't add tests
+- Fixed the bug but didn't handle edge case
+- Refactored one file but similar changes needed elsewhere
+
+Bad: "Fixed most of the issues, some edge cases remain"
+Good: "Fixed X, created vole-abc for remaining Y"
+
 ## Language Syntax
 
 Types: `i32`, `i64`, `f64`, `bool`, `string`, `nil`, `T?` (optional)
