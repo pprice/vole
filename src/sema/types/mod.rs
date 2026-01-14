@@ -25,7 +25,7 @@ use crate::identity::{NameId, TypeDefId};
 // are now defined in special.rs and re-exported above
 
 /// Resolved types in the type system
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     /// Primitive types (integers, floats, bool, string)
     Primitive(PrimitiveType),
@@ -80,21 +80,21 @@ pub enum Type {
 }
 
 /// Structural type - defines shape constraints for duck typing
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructuralType {
     pub fields: Vec<StructuralFieldType>,
     pub methods: Vec<StructuralMethodType>,
 }
 
 /// A field in a structural type
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructuralFieldType {
     pub name: NameId,
     pub ty: Type,
 }
 
 /// A method in a structural type
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructuralMethodType {
     pub name: NameId,
     pub params: Vec<Type>,
@@ -112,7 +112,7 @@ pub struct FunctionType {
 }
 
 /// Field information for a class/record
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructField {
     pub name: String,
     pub ty: Type,
@@ -146,6 +146,15 @@ impl PartialEq for FunctionType {
         // is_closure is not part of type equality - a closure () -> i64 is
         // compatible with a function type () -> i64 for type checking purposes
         self.params == other.params && self.return_type == other.return_type
+    }
+}
+
+// Manual Hash to match PartialEq semantics - ignore is_closure
+impl std::hash::Hash for FunctionType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.params.hash(state);
+        self.return_type.hash(state);
+        // is_closure deliberately not hashed to match PartialEq
     }
 }
 

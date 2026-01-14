@@ -10,7 +10,7 @@ use super::{StructField, Type};
 
 /// Nominal types - types with a definition identity in the EntityRegistry.
 /// All nominal types have a TypeDefId for looking up their definition.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NominalType {
     /// Class instance type
     Class(ClassType),
@@ -113,7 +113,7 @@ impl NominalType {
 }
 
 /// Class type information
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ClassType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
@@ -122,7 +122,7 @@ pub struct ClassType {
 }
 
 /// Record type information
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RecordType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
@@ -161,8 +161,16 @@ impl PartialEq for InterfaceType {
     }
 }
 
+// Custom Hash to match PartialEq semantics - only hash type_def_id and type_args
+impl std::hash::Hash for InterfaceType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.type_def_id.hash(state);
+        self.type_args.hash(state);
+    }
+}
+
 /// Method signature in an interface
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InterfaceMethodType {
     pub name: NameId,
     pub params: Vec<Type>,
@@ -171,7 +179,7 @@ pub struct InterfaceMethodType {
 }
 
 /// Error type definition (e.g., DivByZero, OutOfRange { value: i32 })
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ErrorTypeInfo {
     pub type_def_id: TypeDefId,
     pub fields: Vec<StructField>,

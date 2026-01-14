@@ -159,6 +159,14 @@ impl PartialEq for AnalysisError {
 
 impl Eq for AnalysisError {}
 
+// Custom Hash to match PartialEq semantics - all errors hash the same
+impl std::hash::Hash for AnalysisError {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // All AnalysisErrors are equal, so they must have the same hash
+        0u8.hash(state);
+    }
+}
+
 impl std::fmt::Display for AnalysisError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.full_chain())
@@ -174,7 +182,7 @@ impl std::fmt::Display for AnalysisError {
 /// - `SelfType` - `Self` in interface method signatures
 ///
 /// Placeholders are resolved during type checking or monomorphization.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PlaceholderKind {
     /// Generic type inference placeholder (e.g., empty array element type)
     Inference,
@@ -203,7 +211,7 @@ impl std::fmt::Display for PlaceholderKind {
 ///
 /// At runtime, represented as a tagged union where success returns `T`
 /// and failure returns the error type `E`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FallibleType {
     /// The success type (returned on success)
     pub success_type: Box<Type>,
@@ -229,6 +237,19 @@ pub enum ConstantValue {
 
 impl Eq for ConstantValue {}
 
+// Manual Hash implementation because f64 doesn't implement Hash
+impl std::hash::Hash for ConstantValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            ConstantValue::I64(v) => v.hash(state),
+            ConstantValue::F64(v) => v.to_bits().hash(state),
+            ConstantValue::Bool(v) => v.hash(state),
+            ConstantValue::String(v) => v.hash(state),
+        }
+    }
+}
+
 /// Module type: represents an imported module with its exports.
 ///
 /// Created when a module is imported:
@@ -251,6 +272,14 @@ pub struct ModuleType {
     pub constants: std::collections::HashMap<NameId, ConstantValue>,
     /// Names of functions that are external (FFI) - others are pure Vole
     pub external_funcs: std::collections::HashSet<NameId>,
+}
+
+// Manual Hash implementation because HashMap doesn't implement Hash.
+// Two ModuleTypes with the same module_id refer to the same module.
+impl std::hash::Hash for ModuleType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.module_id.hash(state);
+    }
 }
 
 #[cfg(test)]
