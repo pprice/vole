@@ -9,6 +9,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::common::{TermColors, parse_and_analyze, read_stdin};
@@ -16,9 +17,35 @@ use crate::cli::{ColorMode, ReportMode, expand_paths, should_skip_path};
 use crate::codegen::{Compiler, JitContext, TestInfo};
 use crate::runtime::{
     AssertFailure, JmpBuf, call_setjmp, clear_current_test, clear_test_jmp_buf, set_current_file,
-    set_current_test, set_test_jmp_buf, take_assert_failure,
+    set_current_test, set_stdout_capture, set_test_jmp_buf, take_assert_failure,
 };
 use crate::util::format_duration;
+
+/// A thread-safe buffer for capturing stdout during test execution
+#[derive(Clone)]
+struct CaptureBuffer(Arc<Mutex<Vec<u8>>>);
+
+impl CaptureBuffer {
+    fn new() -> Self {
+        CaptureBuffer(Arc::new(Mutex::new(Vec::new())))
+    }
+
+    fn take_string(&self) -> String {
+        let bytes = std::mem::take(&mut *self.0.lock().unwrap());
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+}
+
+impl Write for CaptureBuffer {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 /// Status of an individual test
 #[derive(Debug, Clone)]
@@ -36,6 +63,8 @@ pub struct TestResult {
     pub duration: Duration,
     /// File path where this test is defined
     pub file: PathBuf,
+    /// Captured stdout from print/println during test execution
+    pub captured_output: Option<String>,
 }
 
 /// Aggregated results from running all tests
@@ -356,6 +385,7 @@ fn execute_tests_with_progress(
                     status: TestStatus::Failed(None),
                     duration: Duration::ZERO,
                     file: file_path.clone(),
+                    captured_output: None,
                 });
                 continue;
             }
@@ -368,6 +398,10 @@ fn execute_tests_with_progress(
         set_current_test(&test.name);
 
         let test_start = Instant::now();
+
+        // Set up stdout capture for this test
+        let capture_buffer = CaptureBuffer::new();
+        set_stdout_capture(Some(Box::new(capture_buffer.clone())));
 
         // Set up jump buffer for assertion failure recovery
         let mut jmp_buf: JmpBuf = JmpBuf::zeroed();
@@ -387,6 +421,15 @@ fn execute_tests_with_progress(
 
         clear_test_jmp_buf();
         clear_current_test();
+
+        // Stop capturing and get the output
+        set_stdout_capture(None);
+        let captured_output = capture_buffer.take_string();
+        let captured_output = if captured_output.is_empty() {
+            None
+        } else {
+            Some(captured_output)
+        };
 
         let status = match panic_result {
             Ok(status) => status,
@@ -442,6 +485,13 @@ fn execute_tests_with_progress(
                     } else {
                         println!();
                     }
+                    // Print captured output on failure
+                    if let Some(output) = &captured_output {
+                        println!("    {}--- captured output ---{}", colors.dim(), colors.reset());
+                        for line in output.lines() {
+                            println!("    {}", line);
+                        }
+                    }
                     let _ = io::stdout().flush();
                 }
                 TestStatus::Panicked(msg) => {
@@ -459,6 +509,13 @@ fn execute_tests_with_progress(
                         colors.reset()
                     );
                     eprintln!("    PANIC: {}", msg);
+                    // Print captured output on panic
+                    if let Some(output) = &captured_output {
+                        println!("    {}--- captured output ---{}", colors.dim(), colors.reset());
+                        for line in output.lines() {
+                            println!("    {}", line);
+                        }
+                    }
                     let _ = io::stdout().flush();
                     let _ = io::stderr().flush();
                 }
@@ -470,6 +527,7 @@ fn execute_tests_with_progress(
             status,
             duration,
             file: file_path.clone(),
+            captured_output,
         });
     }
 
@@ -508,6 +566,13 @@ fn print_test_result(result: &TestResult, colors: &TermColors) {
             } else {
                 println!();
             }
+            // Print captured output on failure
+            if let Some(output) = &result.captured_output {
+                println!("    {}--- captured output ---{}", colors.dim(), colors.reset());
+                for line in output.lines() {
+                    println!("    {}", line);
+                }
+            }
         }
         TestStatus::Panicked(msg) => {
             println!(
@@ -520,6 +585,13 @@ fn print_test_result(result: &TestResult, colors: &TermColors) {
                 colors.reset()
             );
             eprintln!("    PANIC: {}", msg);
+            // Print captured output on panic
+            if let Some(output) = &result.captured_output {
+                println!("    {}--- captured output ---{}", colors.dim(), colors.reset());
+                for line in output.lines() {
+                    println!("    {}", line);
+                }
+            }
         }
     }
 }
