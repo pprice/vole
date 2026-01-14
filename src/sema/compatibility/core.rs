@@ -3,7 +3,7 @@
 // Type compatibility checking functions.
 // These are pure functions that determine if types are compatible for assignment.
 
-use super::types::{FunctionType, NominalType, PrimitiveType, Type};
+use crate::sema::types::{FunctionType, NominalType, PrimitiveType, Type};
 
 /// Check if an integer literal value fits within a type's range
 pub fn literal_fits(value: i64, target: &Type) -> bool {
