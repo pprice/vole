@@ -6,9 +6,14 @@
 
 use std::sync::Arc;
 
+use smallvec::SmallVec;
+
 use crate::identity::{NameId, TypeDefId};
 
 use super::{StructField, Type};
+
+/// SmallVec for interface extends list - most interfaces extend 0-2 parents
+pub type ExtendsVec = SmallVec<[TypeDefId; 2]>;
 
 /// Nominal types - types with a definition identity in the EntityRegistry.
 /// All nominal types have a TypeDefId for looking up their definition.
@@ -139,7 +144,7 @@ pub struct InterfaceType {
     pub type_def_id: TypeDefId,
     pub type_args: Arc<[Type]>,
     pub methods: Arc<[InterfaceMethodType]>,
-    pub extends: Arc<[TypeDefId]>, // Parent interface TypeDefIds
+    pub extends: ExtendsVec, // Parent interface TypeDefIds (inline for 0-2)
 }
 
 // Custom Debug to avoid massive output when tracing - just show identity, not all methods

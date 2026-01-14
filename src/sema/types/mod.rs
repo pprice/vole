@@ -11,7 +11,8 @@ pub mod nominal;
 pub mod primitive;
 pub mod special;
 pub use nominal::{
-    ClassType, ErrorTypeInfo, InterfaceMethodType, InterfaceType, NominalType, RecordType,
+    ClassType, ErrorTypeInfo, ExtendsVec, InterfaceMethodType, InterfaceType, NominalType,
+    RecordType,
 };
 pub use primitive::PrimitiveType;
 pub use special::{AnalysisError, ConstantValue, FallibleType, ModuleType, PlaceholderKind};
