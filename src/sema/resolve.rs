@@ -7,6 +7,7 @@ use crate::identity::{ModuleId, NameTable, Resolver};
 use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{TypeParamScope, substitute_type};
+use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use crate::sema::types::{
     ClassType, FallibleType, FunctionType, InterfaceMethodType, InterfaceType, NominalType,
     RecordType, StructuralFieldType, StructuralMethodType, StructuralType, Type,
@@ -135,6 +136,86 @@ impl<'a> TypeResolutionContext<'a> {
 /// It handles primitives, named types (aliases, classes, records, interfaces), arrays,
 /// optionals, unions, and function types.
 pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type {
+    resolve_type_impl(ty, ctx)
+}
+
+/// Resolve a TypeExpr to a TypeId using the arena.
+///
+/// This is the arena-based version of resolve_type. It returns an interned TypeId
+/// for O(1) equality and reduced allocations.
+///
+/// Use this when you have access to a TypeArena; otherwise use resolve_type.
+pub fn resolve_type_with_arena(
+    ty: &TypeExpr,
+    ctx: &mut TypeResolutionContext<'_>,
+    arena: &mut TypeArena,
+) -> TypeId {
+    match ty {
+        TypeExpr::Primitive(p) => {
+            let prim_type = crate::sema::types::PrimitiveType::from_ast(*p);
+            arena.primitive(prim_type)
+        }
+        TypeExpr::Named(sym) => {
+            // Check if it's a type parameter in scope first
+            if let Some(type_params) = ctx.type_params
+                && let Some(tp_info) = type_params.get(*sym)
+            {
+                return arena.type_param(tp_info.name_id);
+            }
+            // For other named types, fall back to Type-based resolution and convert
+            let ty = resolve_type_impl(&TypeExpr::Named(*sym), ctx);
+            arena.from_type(&ty)
+        }
+        TypeExpr::Array(elem) => {
+            let elem_id = resolve_type_with_arena(elem, ctx, arena);
+            arena.array(elem_id)
+        }
+        TypeExpr::Nil => arena.nil(),
+        TypeExpr::Done => arena.done(),
+        TypeExpr::Optional(inner) => {
+            let inner_id = resolve_type_with_arena(inner, ctx, arena);
+            arena.optional(inner_id)
+        }
+        TypeExpr::Union(variants) => {
+            let variant_ids: TypeIdVec = variants
+                .iter()
+                .map(|t| resolve_type_with_arena(t, ctx, arena))
+                .collect();
+            arena.union(variant_ids)
+        }
+        TypeExpr::Function {
+            params,
+            return_type,
+        } => {
+            let param_ids: TypeIdVec = params
+                .iter()
+                .map(|p| resolve_type_with_arena(p, ctx, arena))
+                .collect();
+            let ret_id = resolve_type_with_arena(return_type, ctx, arena);
+            arena.function(param_ids, ret_id, false)
+        }
+        TypeExpr::Tuple(elements) => {
+            let elem_ids: TypeIdVec = elements
+                .iter()
+                .map(|e| resolve_type_with_arena(e, ctx, arena))
+                .collect();
+            arena.tuple(elem_ids)
+        }
+        TypeExpr::FixedArray { element, size } => {
+            let elem_id = resolve_type_with_arena(element, ctx, arena);
+            arena.fixed_array(elem_id, *size)
+        }
+        // For complex cases (Generic, SelfType, Fallible, Structural, Combination),
+        // fall back to Type-based resolution and convert
+        _ => {
+            let ty = resolve_type_impl(ty, ctx);
+            arena.from_type(&ty)
+        }
+    }
+}
+
+/// Internal implementation of resolve_type (non-arena version).
+fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type {
     match ty {
         TypeExpr::Primitive(p) => Type::from_primitive(*p),
         TypeExpr::Named(sym) => {
@@ -494,6 +575,118 @@ mod tests {
         with_empty_context(&interner, |ctx| {
             // Self type is only valid in interface/implement context
             assert!(resolve_type(&TypeExpr::SelfType, ctx).is_invalid());
+        });
+    }
+
+    // ========================================================================
+    // Phase 2.2 tests: resolve_type_with_arena
+    // ========================================================================
+
+    #[test]
+    fn resolve_with_arena_primitives() {
+        let interner = Interner::new();
+        with_empty_context(&interner, |ctx| {
+            let mut arena = TypeArena::new();
+
+            let i32_expr = TypeExpr::Primitive(FrontendPrimitiveType::I32);
+            let type_id = resolve_type_with_arena(&i32_expr, ctx, &mut arena);
+            let back = arena.to_type(type_id);
+
+            assert_eq!(back, Type::Primitive(PrimitiveType::I32));
+
+            // Interning should work - same expr gives same TypeId
+            let type_id2 = resolve_type_with_arena(&i32_expr, ctx, &mut arena);
+            assert_eq!(type_id, type_id2);
+        });
+    }
+
+    #[test]
+    fn resolve_with_arena_array() {
+        let interner = Interner::new();
+        with_empty_context(&interner, |ctx| {
+            let mut arena = TypeArena::new();
+
+            let array_expr =
+                TypeExpr::Array(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::String)));
+            let type_id = resolve_type_with_arena(&array_expr, ctx, &mut arena);
+            let back = arena.to_type(type_id);
+
+            assert_eq!(
+                back,
+                Type::Array(Box::new(Type::Primitive(PrimitiveType::String)))
+            );
+        });
+    }
+
+    #[test]
+    fn resolve_with_arena_function() {
+        let interner = Interner::new();
+        with_empty_context(&interner, |ctx| {
+            let mut arena = TypeArena::new();
+
+            let func_expr = TypeExpr::Function {
+                params: vec![TypeExpr::Primitive(FrontendPrimitiveType::I32)],
+                return_type: Box::new(TypeExpr::Primitive(FrontendPrimitiveType::Bool)),
+            };
+            let type_id = resolve_type_with_arena(&func_expr, ctx, &mut arena);
+            let back = arena.to_type(type_id);
+
+            if let Type::Function(ft) = back {
+                assert_eq!(ft.params.len(), 1);
+                assert_eq!(ft.params[0], Type::Primitive(PrimitiveType::I32));
+                assert_eq!(*ft.return_type, Type::Primitive(PrimitiveType::Bool));
+            } else {
+                panic!("Expected function type, got {:?}", back);
+            }
+        });
+    }
+
+    #[test]
+    fn resolve_with_arena_optional() {
+        let interner = Interner::new();
+        with_empty_context(&interner, |ctx| {
+            let mut arena = TypeArena::new();
+
+            let opt_expr =
+                TypeExpr::Optional(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::I32)));
+            let type_id = resolve_type_with_arena(&opt_expr, ctx, &mut arena);
+            let back = arena.to_type(type_id);
+
+            // Optional is represented as Union([inner, nil])
+            if let Type::Union(variants) = back {
+                assert_eq!(variants.len(), 2);
+                assert!(variants.contains(&Type::Primitive(PrimitiveType::I32)));
+                assert!(variants.contains(&Type::Nil));
+            } else {
+                panic!("Expected union type for optional, got {:?}", back);
+            }
+        });
+    }
+
+    #[test]
+    fn resolve_with_arena_matches_resolve_type() {
+        let interner = Interner::new();
+        with_empty_context(&interner, |ctx| {
+            let mut arena = TypeArena::new();
+
+            // Test various expressions
+            let exprs = vec![
+                TypeExpr::Nil,
+                TypeExpr::Done,
+                TypeExpr::Primitive(FrontendPrimitiveType::F64),
+                TypeExpr::Array(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::I32))),
+                TypeExpr::Tuple(vec![
+                    TypeExpr::Primitive(FrontendPrimitiveType::I32),
+                    TypeExpr::Primitive(FrontendPrimitiveType::String),
+                ]),
+            ];
+
+            for expr in exprs {
+                let legacy = resolve_type(&expr, ctx);
+                let type_id = resolve_type_with_arena(&expr, ctx, &mut arena);
+                let arena_result = arena.to_type(type_id);
+                assert_eq!(legacy, arena_result, "Mismatch for {:?}", expr);
+            }
         });
     }
 }
