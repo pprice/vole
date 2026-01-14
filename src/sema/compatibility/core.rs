@@ -224,10 +224,13 @@ mod tests {
 
     #[test]
     fn test_literal_fits_union() {
-        let union_ty = Type::Union(vec![
-            Type::Primitive(PrimitiveType::I8),
-            Type::Primitive(PrimitiveType::I32),
-        ].into());
+        let union_ty = Type::Union(
+            vec![
+                Type::Primitive(PrimitiveType::I8),
+                Type::Primitive(PrimitiveType::I32),
+            ]
+            .into(),
+        );
         assert!(literal_fits(100, &union_ty)); // Fits in i8
         assert!(literal_fits(1000, &union_ty)); // Fits in i32
         assert!(!literal_fits(i64::MAX, &union_ty)); // Doesn't fit in either
@@ -267,10 +270,13 @@ mod tests {
 
     #[test]
     fn test_types_compatible_union() {
-        let union_ty = Type::Union(vec![
-            Type::Primitive(PrimitiveType::I32),
-            Type::Primitive(PrimitiveType::String),
-        ].into());
+        let union_ty = Type::Union(
+            vec![
+                Type::Primitive(PrimitiveType::I32),
+                Type::Primitive(PrimitiveType::String),
+            ]
+            .into(),
+        );
         assert!(types_compatible_core(
             &Type::Primitive(PrimitiveType::I32),
             &union_ty
@@ -337,7 +343,8 @@ mod tests {
             params: vec![
                 Type::Primitive(PrimitiveType::I32),
                 Type::Primitive(PrimitiveType::I32),
-            ].into(),
+            ]
+            .into(),
             return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
             is_closure: true,
         };
@@ -349,18 +356,27 @@ mod tests {
 
     #[test]
     fn test_types_compatible_tuple() {
-        let tuple1 = Type::Tuple(vec![
-            Type::Primitive(PrimitiveType::I32),
-            Type::Primitive(PrimitiveType::String),
-        ].into());
-        let tuple2 = Type::Tuple(vec![
-            Type::Primitive(PrimitiveType::I32),
-            Type::Primitive(PrimitiveType::String),
-        ].into());
-        let tuple3 = Type::Tuple(vec![
-            Type::Primitive(PrimitiveType::I32),
-            Type::Primitive(PrimitiveType::Bool),
-        ].into()); // Different element type
+        let tuple1 = Type::Tuple(
+            vec![
+                Type::Primitive(PrimitiveType::I32),
+                Type::Primitive(PrimitiveType::String),
+            ]
+            .into(),
+        );
+        let tuple2 = Type::Tuple(
+            vec![
+                Type::Primitive(PrimitiveType::I32),
+                Type::Primitive(PrimitiveType::String),
+            ]
+            .into(),
+        );
+        let tuple3 = Type::Tuple(
+            vec![
+                Type::Primitive(PrimitiveType::I32),
+                Type::Primitive(PrimitiveType::Bool),
+            ]
+            .into(),
+        ); // Different element type
         let tuple4 = Type::Tuple(vec![Type::Primitive(PrimitiveType::I32)].into()); // Different length
 
         assert!(types_compatible_core(&tuple1, &tuple2));
@@ -371,14 +387,20 @@ mod tests {
     #[test]
     fn test_types_compatible_tuple_widening() {
         // Tuple with widening: [i32, f32] compatible with [i64, f64]
-        let narrow = Type::Tuple(vec![
-            Type::Primitive(PrimitiveType::I32),
-            Type::Primitive(PrimitiveType::F32),
-        ].into());
-        let wide = Type::Tuple(vec![
-            Type::Primitive(PrimitiveType::I64),
-            Type::Primitive(PrimitiveType::F64),
-        ].into());
+        let narrow = Type::Tuple(
+            vec![
+                Type::Primitive(PrimitiveType::I32),
+                Type::Primitive(PrimitiveType::F32),
+            ]
+            .into(),
+        );
+        let wide = Type::Tuple(
+            vec![
+                Type::Primitive(PrimitiveType::I64),
+                Type::Primitive(PrimitiveType::F64),
+            ]
+            .into(),
+        );
         assert!(types_compatible_core(&narrow, &wide));
     }
 

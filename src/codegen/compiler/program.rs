@@ -311,13 +311,10 @@ impl Compiler<'_> {
             // Instance methods are skipped - they're handled through the main program path.
             // External methods are resolved via the native registry.
             for decl in &program.declarations {
-                if let Decl::Implement(impl_block) = decl {
-                    if impl_block.statics.is_some() {
-                        self.register_implement_statics_only_with_interner(
-                            impl_block,
-                            module_interner,
-                        );
-                    }
+                if let Decl::Implement(impl_block) = decl
+                    && impl_block.statics.is_some()
+                {
+                    self.register_implement_statics_only_with_interner(impl_block, module_interner);
                 }
             }
 
@@ -434,10 +431,10 @@ impl Compiler<'_> {
             // Import implement block statics (using Linkage::Import for pre-compiled modules)
             // Note: Instance methods are handled through external dispatch, only statics need importing
             for decl in &program.declarations {
-                if let Decl::Implement(impl_block) = decl {
-                    if impl_block.statics.is_some() {
-                        self.import_implement_statics_only_with_interner(impl_block, module_interner);
-                    }
+                if let Decl::Implement(impl_block) = decl
+                    && impl_block.statics.is_some()
+                {
+                    self.import_implement_statics_only_with_interner(impl_block, module_interner);
                 }
             }
 
@@ -454,7 +451,11 @@ impl Compiler<'_> {
 
     /// Import a module class - register metadata and import methods.
     /// Used when modules are already compiled in a shared cache.
-    fn import_module_class(&mut self, class: &crate::frontend::ClassDecl, module_interner: &Interner) {
+    fn import_module_class(
+        &mut self,
+        class: &crate::frontend::ClassDecl,
+        module_interner: &Interner,
+    ) {
         // First finalize to get type metadata registered
         self.finalize_module_class(class, module_interner);
 

@@ -15,11 +15,9 @@ use crate::errors::{SemanticError, SemanticWarning};
 use crate::frontend::*;
 use crate::identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
 use crate::module::ModuleLoader;
-use crate::sema::analysis_cache::ModuleCache;
 use crate::sema::EntityRegistry;
 use crate::sema::ExpressionData;
-use std::cell::RefCell;
-use std::rc::Rc;
+use crate::sema::analysis_cache::ModuleCache;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
     ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,
@@ -35,7 +33,9 @@ use crate::sema::{
     scope::{Scope, Variable},
 };
 use rustc_hash::FxHashMap;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 /// Check if a type param's constraint (found) satisfies a required constraint.
 /// Returns true if found has at least as strong constraints as required.
@@ -268,11 +268,7 @@ impl Analyzer {
     /// Create an analyzer with a shared module cache.
     /// The cache is shared across multiple Analyzer instances to avoid
     /// re-analyzing the same modules (prelude, stdlib, user imports).
-    pub fn with_cache(
-        _file: &str,
-        _source: &str,
-        cache: Rc<RefCell<ModuleCache>>,
-    ) -> Self {
+    pub fn with_cache(_file: &str, _source: &str, cache: Rc<RefCell<ModuleCache>>) -> Self {
         let mut analyzer = Self::new(_file, _source);
         analyzer.module_cache = Some(cache);
         analyzer

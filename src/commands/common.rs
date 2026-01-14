@@ -15,7 +15,7 @@ use crate::identity::NameTable;
 use crate::runtime::set_stdout_capture;
 use crate::sema::{
     AnalysisOutput, Analyzer, EntityRegistry, ExpressionData, ImplementRegistry, ModuleCache,
-    ProgramQuery, TypeError, TypeWarning,
+    ProgramQuery, TypeArena, TypeError, TypeWarning,
 };
 use crate::transforms;
 use std::cell::RefCell;
@@ -35,6 +35,8 @@ pub struct AnalyzedProgram {
     pub name_table: NameTable,
     /// Entity registry for first-class type/method/field/function identity (includes type_table)
     pub entity_registry: EntityRegistry,
+    /// Interned type arena for O(1) type comparison (Phase 1 of TypeArena refactor)
+    pub type_arena: TypeArena,
 }
 
 impl AnalyzedProgram {
@@ -48,6 +50,7 @@ impl AnalyzedProgram {
             module_programs: output.module_programs,
             name_table: output.name_table,
             entity_registry: output.entity_registry,
+            type_arena: TypeArena::new(),
         }
     }
 

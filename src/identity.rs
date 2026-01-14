@@ -27,6 +27,15 @@ impl ModuleId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NameId(u32);
 
+impl NameId {
+    /// Create a NameId for testing purposes only.
+    /// Production code should use NameTable::intern() instead.
+    #[cfg(test)]
+    pub fn new_for_test(index: u32) -> Self {
+        Self(index)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QualifiedName {
     module: ModuleId,

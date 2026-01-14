@@ -50,7 +50,9 @@ impl CompiledModules {
     pub fn has_module(&self, module_prefix: &str) -> bool {
         // If no functions with this prefix exist, we assume the module wasn't compiled
         // This is a heuristic - a module might have no pure Vole functions
-        self.functions.keys().any(|name| name.starts_with(module_prefix))
+        self.functions
+            .keys()
+            .any(|name| name.starts_with(module_prefix))
     }
 }
 

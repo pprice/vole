@@ -7,6 +7,7 @@ use crate::identity::NameTable;
 use crate::sema::EntityRegistry;
 use crate::sema::ExpressionData;
 use crate::sema::ImplementRegistry;
+use crate::sema::TypeArena;
 
 fn compile_and_run(source: &str) -> i64 {
     let mut parser = Parser::new(source);
@@ -21,6 +22,7 @@ fn compile_and_run(source: &str) -> i64 {
         module_programs: FxHashMap::default(),
         name_table: NameTable::new(),
         entity_registry: EntityRegistry::new(),
+        type_arena: TypeArena::new(),
     };
 
     let mut jit = JitContext::new();

@@ -52,23 +52,26 @@ impl Analyzer {
     /// Load a single prelude file and merge its registries
     pub(super) fn load_prelude_file(&mut self, import_path: &str, _interner: &Interner) {
         // Check cache first
-        if let Some(ref cache) = self.module_cache {
-            if let Some(cached) = cache.borrow().get(import_path) {
-                // Use cached analysis results
-                self.name_table = cached.name_table.clone();
-                self.entity_registry.merge(&cached.entity_registry);
-                self.implement_registry.merge(&cached.implement_registry);
-                for (name, func_type) in &cached.functions_by_name {
-                    self.functions_by_name.insert(name.clone(), func_type.clone());
-                }
-                self.module_programs
-                    .insert(import_path.to_string(), (cached.program.clone(), cached.interner.clone()));
-                self.module_expr_types
-                    .insert(import_path.to_string(), cached.expr_types.clone());
-                self.module_method_resolutions
-                    .insert(import_path.to_string(), cached.method_resolutions.clone());
-                return;
+        if let Some(ref cache) = self.module_cache
+            && let Some(cached) = cache.borrow().get(import_path)
+        {
+            // Use cached analysis results
+            self.name_table = cached.name_table.clone();
+            self.entity_registry.merge(&cached.entity_registry);
+            self.implement_registry.merge(&cached.implement_registry);
+            for (name, func_type) in &cached.functions_by_name {
+                self.functions_by_name
+                    .insert(name.clone(), func_type.clone());
             }
+            self.module_programs.insert(
+                import_path.to_string(),
+                (cached.program.clone(), cached.interner.clone()),
+            );
+            self.module_expr_types
+                .insert(import_path.to_string(), cached.expr_types.clone());
+            self.module_method_resolutions
+                .insert(import_path.to_string(), cached.method_resolutions.clone());
+            return;
         }
 
         // Load source via module_loader

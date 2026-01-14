@@ -531,14 +531,16 @@ impl Type {
 
             Type::Nominal(NominalType::Interface(interface_type)) => {
                 let new_type_args = substitute_slice(&interface_type.type_args, substitutions);
-                let new_methods = substitute_interface_methods(&interface_type.methods, substitutions);
+                let new_methods =
+                    substitute_interface_methods(&interface_type.methods, substitutions);
 
                 if new_type_args.is_none() && new_methods.is_none() {
                     self.clone()
                 } else {
                     Type::Nominal(NominalType::Interface(InterfaceType {
                         type_def_id: interface_type.type_def_id,
-                        type_args: new_type_args.unwrap_or_else(|| interface_type.type_args.clone()),
+                        type_args: new_type_args
+                            .unwrap_or_else(|| interface_type.type_args.clone()),
                         methods: new_methods.unwrap_or_else(|| interface_type.methods.clone()),
                         extends: interface_type.extends.clone(),
                     }))
@@ -628,7 +630,11 @@ impl Type {
                     .methods
                     .iter()
                     .map(|m| {
-                        let new_params: Vec<_> = m.params.iter().map(|p| p.substitute(substitutions)).collect();
+                        let new_params: Vec<_> = m
+                            .params
+                            .iter()
+                            .map(|p| p.substitute(substitutions))
+                            .collect();
                         let new_return = m.return_type.substitute(substitutions);
                         if new_params.iter().zip(m.params.iter()).any(|(a, b)| a != b)
                             || new_return != m.return_type

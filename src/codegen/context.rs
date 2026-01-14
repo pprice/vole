@@ -9,12 +9,12 @@ use cranelift::prelude::{AbiParam, FunctionBuilder, InstBuilder, Value, Variable
 use cranelift_module::{FuncId, Module};
 
 use crate::codegen::{FunctionKey, RuntimeFn};
-use smallvec::SmallVec;
 use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::{PrimitiveType, Type};
+use smallvec::SmallVec;
 
 use super::lambda::CaptureBinding;
 use super::types::{CompileCtx, CompiledValue, native_type_to_cranelift, type_to_cranelift};
@@ -66,6 +66,9 @@ pub(crate) struct Captures<'a> {
     pub closure_var: Variable,
 }
 
+/// Key for caching pure runtime function calls
+pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
+
 /// Unified codegen context - all state needed for code generation.
 ///
 /// Lifetimes:
@@ -80,9 +83,6 @@ pub(crate) struct Captures<'a> {
 /// - calls.rs: call(), println(), assert()
 /// - ops.rs: binary(), compound_assign()
 /// - structs.rs: struct_literal(), field_access(), method_call()
-/// Key for caching pure runtime function calls
-pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
-
 pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub builder: &'a mut FunctionBuilder<'b>,
     pub vars: &'a mut HashMap<Symbol, (Variable, Type)>,
@@ -190,7 +190,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Call a pure runtime function with caching (CSE)
-    pub fn call_runtime_cached(&mut self, func: RuntimeFn, args: &[Value]) -> Result<Value, String> {
+    pub fn call_runtime_cached(
+        &mut self,
+        func: RuntimeFn,
+        args: &[Value],
+    ) -> Result<Value, String> {
         let key = (func, SmallVec::from_slice(args));
         if let Some(&cached) = self.call_cache.get(&key) {
             return Ok(cached);

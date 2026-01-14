@@ -14,15 +14,15 @@ use std::time::{Duration, Instant};
 
 use super::common::{TermColors, parse_and_analyze_with_cache, read_stdin};
 use crate::cli::{ColorMode, ReportMode, expand_paths, should_skip_path};
-use crate::sema::ModuleCache;
-use std::cell::RefCell;
-use std::rc::Rc;
 use crate::codegen::{CompiledModules, Compiler, JitContext, TestInfo};
 use crate::runtime::{
     AssertFailure, JmpBuf, call_setjmp, clear_current_test, clear_test_jmp_buf, set_current_file,
     set_current_test, set_stdout_capture, set_test_jmp_buf, take_assert_failure,
 };
+use crate::sema::ModuleCache;
 use crate::util::format_duration;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// A thread-safe buffer for capturing stdout during test execution
 #[derive(Clone)]
@@ -214,7 +214,14 @@ pub fn run_tests(
         // Set current file for signal handler
         set_current_file(&file.display().to_string());
 
-        match run_file_tests_with_modules(file, filter, &colors, &report, cache.clone(), &mut compiled_modules) {
+        match run_file_tests_with_modules(
+            file,
+            filter,
+            &colors,
+            &report,
+            cache.clone(),
+            &mut compiled_modules,
+        ) {
             Ok(results) => {
                 all_results.merge(results);
             }
@@ -272,7 +279,15 @@ fn run_stdin_tests(
         let _ = io::stdout().flush();
     }
 
-    match run_source_tests_with_progress(&source, "<stdin>", &stdin_path, filter, colors, report, cache) {
+    match run_source_tests_with_progress(
+        &source,
+        "<stdin>",
+        &stdin_path,
+        filter,
+        colors,
+        report,
+        cache,
+    ) {
         Ok(results) => {
             all_results.merge(results);
         }
@@ -326,10 +341,20 @@ fn run_file_tests_with_modules(
 ) -> Result<TestResults, String> {
     let source = fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
     let file_path = path.to_string_lossy();
-    run_source_tests_with_modules(&source, &file_path, path, filter, colors, report, cache, compiled_modules)
+    run_source_tests_with_modules(
+        &source,
+        &file_path,
+        path,
+        filter,
+        colors,
+        report,
+        cache,
+        compiled_modules,
+    )
 }
 
 /// Parse, type check, compile, and run tests with shared compiled modules
+#[allow(clippy::too_many_arguments)]
 fn run_source_tests_with_modules(
     source: &str,
     file_path: &str,
@@ -343,14 +368,15 @@ fn run_source_tests_with_modules(
     let sema_start = Instant::now();
 
     // Parse and type check with shared cache
-    let analyzed = parse_and_analyze_with_cache(source, file_path, cache).map_err(|()| String::new())?;
+    let analyzed =
+        parse_and_analyze_with_cache(source, file_path, cache).map_err(|()| String::new())?;
     let sema_time = sema_start.elapsed();
 
     // Compile - either with pre-compiled modules or compiling them fresh
     let codegen_start = Instant::now();
 
     // Check if cached modules contain all modules needed by this file
-    let can_use_cache = compiled_modules.as_ref().map_or(false, |modules| {
+    let can_use_cache = compiled_modules.as_ref().is_some_and(|modules| {
         // Check if all module paths in the current file are present in the cache
         analyzed.module_programs.keys().all(|module_path| {
             // Module path like "std:math" becomes prefix "std:math::"
@@ -464,7 +490,7 @@ fn run_source_tests_with_modules(
 
 /// Helper to run tests from an already-finalized JIT
 /// Note: Kept for potential future use
-#[allow(dead_code)]
+#[allow(dead_code, clippy::too_many_arguments)]
 fn run_tests_from_jit(
     jit: JitContext,
     tests: Vec<TestInfo>,
@@ -519,7 +545,8 @@ fn run_source_tests_with_progress(
     let sema_start = Instant::now();
 
     // Parse and type check with shared cache
-    let analyzed = parse_and_analyze_with_cache(source, file_path, cache).map_err(|()| String::new())?;
+    let analyzed =
+        parse_and_analyze_with_cache(source, file_path, cache).map_err(|()| String::new())?;
     let sema_time = sema_start.elapsed();
 
     // Compile

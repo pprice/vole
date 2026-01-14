@@ -77,7 +77,7 @@ fn interface_instance(
         .collect();
 
     // Keep extends as TypeDefIds directly
-    let extends: Vec<_> = type_def.extends.iter().copied().collect();
+    let extends = type_def.extends.to_vec();
 
     Some(Type::Nominal(NominalType::Interface(InterfaceType {
         type_def_id,

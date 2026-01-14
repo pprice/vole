@@ -11,6 +11,7 @@ pub mod query;
 pub mod resolution;
 pub mod resolve;
 pub mod scope;
+pub mod type_arena;
 pub mod type_table;
 pub mod types;
 pub mod well_known;
@@ -29,3 +30,7 @@ pub use types::{
     Type,
 };
 pub use well_known::{WellKnownMethods, WellKnownTypes};
+
+// TypeArena for interned type representation (Phase 1 of TypeArena refactor)
+// Note: type_arena::TypeId is accessed via module path to avoid conflict with implement_registry::TypeId
+pub use type_arena::TypeArena;

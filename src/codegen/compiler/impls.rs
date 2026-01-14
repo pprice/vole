@@ -215,11 +215,10 @@ impl Compiler<'_> {
                 self.analyzed.entity_registry.type_by_name(name_id)
             }
             TypeExpr::Named(sym) => {
-                let name_id = self.analyzed.name_table.name_id(
-                    self.query().main_module(),
-                    &[*sym],
-                    interner,
-                );
+                let name_id =
+                    self.analyzed
+                        .name_table
+                        .name_id(self.query().main_module(), &[*sym], interner);
                 name_id.and_then(|id| self.analyzed.entity_registry.type_by_name(id))
             }
             _ => None,
@@ -309,11 +308,10 @@ impl Compiler<'_> {
                 self.analyzed.entity_registry.type_by_name(name_id)
             }
             TypeExpr::Named(sym) => {
-                let name_id = self.analyzed.name_table.name_id(
-                    self.query().main_module(),
-                    &[*sym],
-                    interner,
-                );
+                let name_id =
+                    self.analyzed
+                        .name_table
+                        .name_id(self.query().main_module(), &[*sym], interner);
                 name_id.and_then(|id| self.analyzed.entity_registry.type_by_name(id))
             }
             _ => None,
@@ -1051,7 +1049,7 @@ impl Compiler<'_> {
     /// Compile a method from an implement block using a specific interner.
     /// Used for module implement blocks where we need the module's interner.
     /// Note: Currently unused due to Cranelift issues with module-scoped instance methods.
-    #[allow(dead_code)]
+    #[allow(dead_code, clippy::too_many_arguments)]
     fn compile_implement_method_with_interner(
         &mut self,
         method: &FuncDecl,
@@ -1105,7 +1103,14 @@ impl Compiler<'_> {
             if matches!(ty, TypeExpr::SelfType) {
                 self_type.clone()
             } else {
-                resolve_type_expr_with_metadata(ty, registry, type_metadata, interner, name_table, module_id)
+                resolve_type_expr_with_metadata(
+                    ty,
+                    registry,
+                    type_metadata,
+                    interner,
+                    name_table,
+                    module_id,
+                )
             }
         };
 
