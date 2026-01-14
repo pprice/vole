@@ -38,37 +38,12 @@ impl Analyzer {
         match (pattern, actual) {
             // If the pattern is a type param, bind it
             (Type::TypeParam(name_id), actual) => {
-                // Only bind if it's one of our type params
-                if type_params.iter().any(|tp| tp.name_id == *name_id) {
-                    // Special case: if actual is Nil, check if the type param is already in
-                    // scope with the same name_id. If so, bind to the type param instead of Nil.
-                    // This preserves type params in generic contexts (e.g., Box { value: nil }).
-                    let actual_to_bind = if matches!(actual, Type::Nil) {
-                        // Check if this type param is in our current scope - if so, preserve it
-                        if let Some(scope) = self.type_param_stack.current()
-                            && scope.get_by_name_id(*name_id).is_some()
-                        {
-                            // Preserve the type param
-                            Type::TypeParam(*name_id)
-                        } else {
-                            actual.clone()
-                        }
-                    } else if let Type::TypeParam(actual_name_id) = actual {
-                        // If actual is also a type param, check if it's in our scope
-                        if let Some(scope) = self.type_param_stack.current()
-                            && scope.get_by_name_id(*actual_name_id).is_some()
-                        {
-                            // Preserve the actual type param
-                            actual.clone()
-                        } else {
-                            actual.clone()
-                        }
-                    } else {
-                        actual.clone()
-                    };
-
-                    // Only bind if not already bound (first binding wins)
-                    inferred.entry(*name_id).or_insert(actual_to_bind);
+                self.unify_type_param(*name_id, actual, type_params, inferred);
+            }
+            // If the pattern is a type param ref, resolve to name_id and bind
+            (Type::TypeParamRef(type_param_id), actual) => {
+                if let Some(info) = self.type_param_stack.get_by_type_param_id(*type_param_id) {
+                    self.unify_type_param(info.name_id, actual, type_params, inferred);
                 }
             }
             // Array: unify element types
@@ -117,6 +92,59 @@ impl Analyzer {
             }
             // Everything else: no type params to extract
             _ => {}
+        }
+    }
+
+    /// Helper to unify a type parameter with an actual type
+    fn unify_type_param(
+        &self,
+        name_id: NameId,
+        actual: &Type,
+        type_params: &[TypeParamInfo],
+        inferred: &mut HashMap<NameId, Type>,
+    ) {
+        // Only bind if it's one of our type params
+        if type_params.iter().any(|tp| tp.name_id == name_id) {
+            // Special case: if actual is Nil, check if the type param is already in
+            // scope with the same name_id. If so, bind to the type param instead of Nil.
+            // This preserves type params in generic contexts (e.g., Box { value: nil }).
+            let actual_to_bind = if matches!(actual, Type::Nil) {
+                // Check if this type param is in our current scope - if so, preserve it
+                if let Some(scope) = self.type_param_stack.current()
+                    && scope.get_by_name_id(name_id).is_some()
+                {
+                    // Preserve the type param
+                    Type::TypeParam(name_id)
+                } else {
+                    actual.clone()
+                }
+            } else if let Type::TypeParam(actual_name_id) = actual {
+                // If actual is also a type param, check if it's in our scope
+                if let Some(scope) = self.type_param_stack.current()
+                    && scope.get_by_name_id(*actual_name_id).is_some()
+                {
+                    // Preserve the actual type param
+                    actual.clone()
+                } else {
+                    actual.clone()
+                }
+            } else if let Type::TypeParamRef(type_param_id) = actual {
+                // If actual is a type param ref, preserve it
+                if self
+                    .type_param_stack
+                    .get_by_type_param_id(*type_param_id)
+                    .is_some()
+                {
+                    actual.clone()
+                } else {
+                    actual.clone()
+                }
+            } else {
+                actual.clone()
+            };
+
+            // Only bind if not already bound (first binding wins)
+            inferred.entry(name_id).or_insert(actual_to_bind);
         }
     }
 }

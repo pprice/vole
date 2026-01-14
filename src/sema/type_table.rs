@@ -295,6 +295,10 @@ impl TypeTable {
                 // In practice, TypeParams should be substituted before display
                 names.display(*name_id)
             }
+            Type::TypeParamRef(type_param_id) => {
+                // TypeParamRef displays by its internal ID
+                format!("TypeParam#{}", type_param_id.index())
+            }
             Type::Tuple(elements) => {
                 let elem_list = elements
                     .iter()

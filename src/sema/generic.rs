@@ -225,6 +225,45 @@ pub struct TypeParamInfo {
     pub variance: TypeParamVariance,
 }
 
+/// Registry for allocating and looking up TypeParamIds.
+/// Each type parameter gets a unique ID that can be used in Type::TypeParamRef.
+#[derive(Debug, Default)]
+pub struct TypeParamRegistry {
+    /// Maps TypeParamId -> (NameId, Symbol) for lookups
+    params: Vec<(NameId, Symbol)>,
+}
+
+impl TypeParamRegistry {
+    pub fn new() -> Self {
+        Self { params: Vec::new() }
+    }
+
+    /// Allocate a new TypeParamId for a type parameter.
+    pub fn allocate(&mut self, name_id: NameId, name: Symbol) -> TypeParamId {
+        let id = TypeParamId::new(self.params.len() as u32);
+        self.params.push((name_id, name));
+        id
+    }
+
+    /// Look up the NameId for a TypeParamId (for substitution).
+    pub fn get_name_id(&self, id: TypeParamId) -> Option<NameId> {
+        self.params.get(id.index() as usize).map(|(name_id, _)| *name_id)
+    }
+
+    /// Look up the Symbol for a TypeParamId (for display).
+    pub fn get_symbol(&self, id: TypeParamId) -> Option<Symbol> {
+        self.params.get(id.index() as usize).map(|(_, sym)| *sym)
+    }
+}
+
+impl Clone for TypeParamRegistry {
+    fn clone(&self) -> Self {
+        Self {
+            params: self.params.clone(),
+        }
+    }
+}
+
 /// Merge two type parameter lists into one.
 /// This is useful for combining class/record type params with method type params.
 pub fn merge_type_params(base: &[TypeParamInfo], additional: &[TypeParamInfo]) -> Vec<TypeParamInfo> {
@@ -375,6 +414,18 @@ impl TypeParamScopeStack {
         for scope in self.scopes.iter().rev() {
             if let Some(info) = scope.get_by_name_id(name_id) {
                 return Some(info);
+            }
+        }
+        None
+    }
+
+    /// Look up a type parameter by TypeParamId in any scope (innermost first)
+    pub fn get_by_type_param_id(&self, type_param_id: TypeParamId) -> Option<&TypeParamInfo> {
+        for scope in self.scopes.iter().rev() {
+            for param in scope.params() {
+                if param.type_param_id == Some(type_param_id) {
+                    return Some(param);
+                }
             }
         }
         None

@@ -282,8 +282,7 @@ impl Type {
             Type::Nominal(n) => n.name(),
             Type::Fallible(_) => "fallible",
             Type::Module(_) => "module",
-            Type::TypeParam(_) => "type parameter",
-            Type::TypeParamRef(_) => "type parameter",
+            Type::TypeParam(_) | Type::TypeParamRef(_) => "type parameter",
             Type::RuntimeIterator(_) => "iterator",
             Type::Tuple(_) => "tuple",
             Type::FixedArray { .. } => "fixed array",
@@ -476,6 +475,9 @@ impl Type {
                 .cloned()
                 .unwrap_or_else(|| self.clone()),
 
+            // TypeParamRef doesn't substitute based on NameId - it's an opaque reference
+            Type::TypeParamRef(_) => self.clone(),
+
             // Recursive substitution for compound types
             Type::Array(elem) => Type::Array(Box::new(elem.substitute(substitutions))),
 
@@ -586,11 +588,6 @@ impl Type {
                     .collect(),
             }),
 
-            // TypeParamRef uses TypeParamId, not NameId, so it doesn't participate
-            // in NameId-based substitution. In the future, we may need a separate
-            // substitution map for TypeParamId.
-            Type::TypeParamRef(_) => self.clone(),
-
             // Types without nested type parameters - return unchanged
             Type::Primitive(_)
             | Type::Void
@@ -631,6 +628,7 @@ impl std::fmt::Display for Type {
             }
             Type::Module(m) => write!(f, "module(id:{})", m.module_id.index()),
             Type::TypeParam(name_id) => write!(f, "{:?}", name_id), // NameId Debug shows the identity
+            Type::TypeParamRef(id) => write!(f, "TypeParam#{}", id.index()),
             Type::Tuple(elements) => {
                 write!(f, "[")?;
                 for (i, elem) in elements.iter().enumerate() {

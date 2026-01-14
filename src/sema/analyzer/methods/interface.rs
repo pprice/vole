@@ -15,6 +15,7 @@ fn substitute_type(ty: &Type, substitutions: &StdHashMap<NameId, Type>) -> Type 
             .get(name_id)
             .cloned()
             .unwrap_or_else(|| ty.clone()),
+        Type::TypeParamRef(_) => ty.clone(), // Opaque reference, doesn't participate in NameId substitution
         Type::Array(inner) => Type::Array(Box::new(substitute_type(inner, substitutions))),
         Type::Union(variants) => Type::Union(
             variants

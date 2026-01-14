@@ -32,9 +32,19 @@ impl Analyzer {
         method_name: Symbol,
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
-        // Handle Type::TypeParam by looking up constraint interfaces
-        if let Type::TypeParam(param_name_id) = object_type {
-            return self.resolve_method_on_type_param(*param_name_id, method_name, interner);
+        // Handle Type::TypeParam and Type::TypeParamRef by looking up constraint interfaces
+        match object_type {
+            Type::TypeParam(param_name_id) => {
+                return self.resolve_method_on_type_param(*param_name_id, method_name, interner);
+            }
+            Type::TypeParamRef(type_param_id) => {
+                // Look up the NameId from the type param stack
+                if let Some(info) = self.type_param_stack.get_by_type_param_id(*type_param_id) {
+                    return self.resolve_method_on_type_param(info.name_id, method_name, interner);
+                }
+                return None;
+            }
+            _ => {}
         }
 
         // Try to get TypeDefId from the object type

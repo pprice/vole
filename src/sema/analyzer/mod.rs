@@ -1036,8 +1036,16 @@ impl Analyzer {
 
             // If the inferred type is itself a type param that has a matching or stronger constraint,
             // the constraint is satisfied. Check if it's a type param in our current scope.
-            if let Type::TypeParam(found_name_id) = found
-                && let Some(found_param) = self.type_param_stack.get_by_name_id(*found_name_id)
+            let found_param = match found {
+                Type::TypeParam(found_name_id) => {
+                    self.type_param_stack.get_by_name_id(*found_name_id)
+                }
+                Type::TypeParamRef(type_param_id) => {
+                    self.type_param_stack.get_by_type_param_id(*type_param_id)
+                }
+                _ => None,
+            };
+            if let Some(found_param) = found_param
                 && constraint_satisfied(&found_param.constraint, constraint)
             {
                 continue; // Constraint is satisfied
