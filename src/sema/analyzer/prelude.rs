@@ -1,0 +1,147 @@
+//! Prelude file loading for standard library definitions.
+
+use super::Analyzer;
+use crate::frontend::{Interner, Parser};
+use crate::identity::NameTable;
+use crate::sema::EntityRegistry;
+use crate::sema::implement_registry::ImplementRegistry;
+use crate::sema::resolution::MethodResolutions;
+use crate::sema::scope::Scope;
+use rustc_hash::FxHashMap;
+use std::collections::HashMap;
+
+impl Analyzer {
+    /// Load prelude files (trait definitions and primitive type implementations)
+    /// This is called at the start of analyze() to make stdlib methods available.
+    pub(super) fn load_prelude(&mut self, interner: &Interner) {
+        // Don't load prelude if we're already loading it (prevents recursion)
+        if self.loading_prelude {
+            return;
+        }
+
+        // Check if stdlib is available
+        if self.module_loader.stdlib_root().is_none() {
+            return;
+        }
+
+        self.loading_prelude = true;
+
+        // Load traits first (defines interfaces like Sized)
+        self.load_prelude_file("std:prelude/traits", interner);
+
+        // Load type preludes (implement blocks for primitive types)
+        for path in [
+            "std:prelude/string",
+            "std:prelude/i64",
+            "std:prelude/i32",
+            "std:prelude/f64",
+            "std:prelude/bool",
+            "std:prelude/iterators",
+            "std:prelude/map",
+            "std:prelude/set",
+        ] {
+            self.load_prelude_file(path, interner);
+        }
+
+        self.loading_prelude = false;
+    }
+
+    /// Load a single prelude file and merge its registries
+    pub(super) fn load_prelude_file(&mut self, import_path: &str, _interner: &Interner) {
+        use crate::module::ModuleLoader;
+
+        // Load source via module_loader
+        let module_info = match self.module_loader.load(import_path) {
+            Ok(info) => info,
+            Err(_) => return, // Silently ignore missing prelude files
+        };
+
+        // Parse the module
+        let mut parser = Parser::new(&module_info.source);
+        let program = match parser.parse_program() {
+            Ok(p) => p,
+            Err(_) => return, // Silently ignore parse errors in prelude
+        };
+
+        let mut prelude_interner = parser.into_interner();
+        prelude_interner.seed_builtin_symbols();
+
+        // Get the module ID for this prelude file path
+        let prelude_module = self.name_table.module_id(import_path);
+
+        // Create a sub-analyzer to analyze the prelude
+        // Note: We don't call new() because that would try to load prelude again
+        let mut sub_analyzer = Analyzer {
+            scope: Scope::new(),
+            functions: HashMap::new(),
+            functions_by_name: FxHashMap::default(),
+            globals: HashMap::new(),
+            current_function_return: None,
+            current_function_error_type: None,
+            current_generator_element_type: None,
+            current_static_method: None,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+            type_overrides: HashMap::new(),
+            lambda_captures: Vec::new(),
+            lambda_locals: Vec::new(),
+            lambda_side_effects: Vec::new(),
+            expr_types: HashMap::new(),
+            implement_registry: ImplementRegistry::new(),
+            method_resolutions: MethodResolutions::new(),
+            module_loader: ModuleLoader::new(),
+            module_types: FxHashMap::default(),
+            module_programs: FxHashMap::default(),
+            module_expr_types: FxHashMap::default(),
+            module_method_resolutions: FxHashMap::default(),
+            loading_prelude: true, // Prevent sub-analyzer from loading prelude
+            generic_calls: HashMap::new(),
+            class_method_calls: HashMap::new(),
+            static_method_calls: HashMap::new(),
+            name_table: NameTable::new(),
+            current_module: prelude_module, // Use the prelude module path!
+            entity_registry: EntityRegistry::new(),
+            current_type_param_scope: None,
+        };
+
+        // Copy existing registries so prelude files can reference earlier definitions
+        sub_analyzer.name_table = self.name_table.clone();
+        sub_analyzer.entity_registry = self.entity_registry.clone();
+        sub_analyzer.implement_registry = self.implement_registry.clone();
+
+        // Analyze the prelude file
+        let analyze_result = sub_analyzer.analyze(&program, &prelude_interner);
+        if let Err(ref errors) = analyze_result {
+            tracing::warn!(import_path, ?errors, "prelude analysis errors");
+        }
+        if analyze_result.is_ok() {
+            // Merge the entity registry (types, methods, fields)
+            self.entity_registry.merge(&sub_analyzer.entity_registry);
+            // Merge the implement registry
+            self.implement_registry
+                .merge(&sub_analyzer.implement_registry);
+            // Merge functions by name (for standalone external function declarations)
+            // We use by_name because the Symbol lookup won't work across interners
+            for (name, func_type) in sub_analyzer.functions_by_name {
+                self.functions_by_name.insert(name, func_type);
+            }
+            // Note: external_func_info is now part of implement_registry and merged via merge() above
+            // Keep name table in sync with prelude interned ids.
+            // Note: type_table is now in entity_registry and merged via merge() above
+            self.name_table = sub_analyzer.name_table;
+
+            // Store prelude program for codegen (needed for implement block compilation)
+            self.module_programs
+                .insert(import_path.to_string(), (program, prelude_interner));
+            // Store module-specific expr_types separately (NodeIds are per-program)
+            self.module_expr_types
+                .insert(import_path.to_string(), sub_analyzer.expr_types);
+            // Store module-specific method_resolutions separately (NodeIds are per-program)
+            self.module_method_resolutions.insert(
+                import_path.to_string(),
+                sub_analyzer.method_resolutions.into_inner(),
+            );
+        }
+        // Silently ignore analysis errors in prelude
+    }
+}
