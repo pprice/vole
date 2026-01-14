@@ -26,9 +26,7 @@ use crate::runtime::value::TaggedValue;
 // Equality function type for generic collections
 // =============================================================================
 
-/// Type alias for equality function pointers injected from Vole.
-/// For primitives, this points to native eq functions (fast path).
-/// For custom types, this points to a trampoline that calls Vole's Eq.eq().
+/// Type alias for equality function pointers (for primitive fast path).
 pub type EqFn = extern "C" fn(i64, i64) -> bool;
 
 /// Default equality function for i64 values (most common case).
@@ -36,47 +34,125 @@ pub extern "C" fn i64_eq(a: i64, b: i64) -> bool {
     a == b
 }
 
+/// Equality function for string values.
+pub extern "C" fn string_eq(a: i64, b: i64) -> bool {
+    use crate::runtime::string::RcString;
+    unsafe {
+        let a_str = &*(a as *const RcString);
+        let b_str = &*(b as *const RcString);
+        a_str.as_str() == b_str.as_str()
+    }
+}
+
+/// Equality function for f64 values (bit-exact comparison).
+pub extern "C" fn f64_eq(a: i64, b: i64) -> bool {
+    // f64 values are passed as raw bits in i64
+    f64::from_bits(a as u64) == f64::from_bits(b as u64)
+}
+
+/// Equality function for bool values (stored in lower byte).
+pub extern "C" fn bool_eq(a: i64, b: i64) -> bool {
+    (a & 0xFF) == (b & 0xFF)
+}
+
+// =============================================================================
+// Closure-based equality for generic types
+// =============================================================================
+
+use crate::runtime::closure::Closure;
+
+/// Call a Vole closure for equality comparison.
+/// The closure signature is (closure_ptr, a, b) -> bool (as i8).
+#[inline]
+fn call_eq_closure(closure: *const Closure, a: i64, b: i64) -> bool {
+    unsafe {
+        let func_ptr = Closure::get_func(closure);
+        let eq_fn: extern "C" fn(*const Closure, i64, i64) -> i8 = std::mem::transmute(func_ptr);
+        eq_fn(closure, a, b) != 0
+    }
+}
+
 // =============================================================================
 // VoleMap - Hash map for Vole Map<K, V> type
 // =============================================================================
 
+/// Equality comparison mode for collections.
+/// Supports both fast native functions and Vole closure callbacks.
+#[derive(Clone, Copy)]
+pub enum EqMode {
+    /// Fast path: direct native function call (for primitives)
+    Native(EqFn),
+    /// Slow path: call through Vole closure (for custom types)
+    Closure(*const Closure),
+}
+
+impl EqMode {
+    /// Compare two values using this equality mode.
+    #[inline]
+    fn eq(&self, a: i64, b: i64) -> bool {
+        match self {
+            EqMode::Native(f) => f(a, b),
+            EqMode::Closure(c) => call_eq_closure(*c, a, b),
+        }
+    }
+}
+
 /// A Vole map storing key-value pairs as i64 words.
 /// Uses HashTable for full control over hashing and equality.
 /// Hash is pre-computed in Vole via Hashable.hash() and stored with entries.
-/// Equality is provided via injected eq_fn at construction.
+/// Equality is provided via injected eq mode at construction.
 pub struct VoleMap {
     table: HashTable<(u64, i64, i64)>, // (hash, key, value) tuples
-    eq_fn: EqFn,
+    eq_mode: EqMode,
 }
 
 impl VoleMap {
+    /// Create a new map with a native equality function (fast path).
     pub fn new(eq_fn: EqFn) -> Self {
         Self {
             table: HashTable::new(),
-            eq_fn,
+            eq_mode: EqMode::Native(eq_fn),
         }
     }
 
+    /// Create a new map with a closure-based equality (generic path).
+    pub fn new_with_closure(eq_closure: *const Closure) -> Self {
+        Self {
+            table: HashTable::new(),
+            eq_mode: EqMode::Closure(eq_closure),
+        }
+    }
+
+    /// Create a new map with capacity and a native equality function.
     pub fn with_capacity(capacity: usize, eq_fn: EqFn) -> Self {
         Self {
             table: HashTable::with_capacity(capacity),
-            eq_fn,
+            eq_mode: EqMode::Native(eq_fn),
+        }
+    }
+
+    /// Create a new map with capacity and closure-based equality.
+    pub fn with_capacity_closure(capacity: usize, eq_closure: *const Closure) -> Self {
+        Self {
+            table: HashTable::with_capacity(capacity),
+            eq_mode: EqMode::Closure(eq_closure),
         }
     }
 
     pub fn get(&self, key: i64, key_hash: i64) -> Option<i64> {
         let hash = key_hash as u64;
+        let eq_mode = self.eq_mode;
         self.table
-            .find(hash, |(_, k, _)| (self.eq_fn)(*k, key))
+            .find(hash, |(_, k, _)| eq_mode.eq(*k, key))
             .map(|(_, _, v)| *v)
     }
 
     pub fn set(&mut self, key: i64, key_hash: i64, value: i64) {
         let hash = key_hash as u64;
-        let eq_fn = self.eq_fn;
+        let eq_mode = self.eq_mode;
 
         // Check if key exists and update
-        if let Some((_, _, v)) = self.table.find_mut(hash, |(_, k, _)| eq_fn(*k, key)) {
+        if let Some((_, _, v)) = self.table.find_mut(hash, |(_, k, _)| eq_mode.eq(*k, key)) {
             *v = value;
             return;
         }
@@ -88,9 +164,9 @@ impl VoleMap {
 
     pub fn remove(&mut self, key: i64, key_hash: i64) -> Option<i64> {
         let hash = key_hash as u64;
-        let eq_fn = self.eq_fn;
+        let eq_mode = self.eq_mode;
 
-        match self.table.find_entry(hash, |(_, k, _)| eq_fn(*k, key)) {
+        match self.table.find_entry(hash, |(_, k, _)| eq_mode.eq(*k, key)) {
             Ok(entry) => {
                 let (_, _, value) = entry.remove().0;
                 Some(value)
@@ -101,8 +177,9 @@ impl VoleMap {
 
     pub fn contains_key(&self, key: i64, key_hash: i64) -> bool {
         let hash = key_hash as u64;
+        let eq_mode = self.eq_mode;
         self.table
-            .find(hash, |(_, k, _)| (self.eq_fn)(*k, key))
+            .find(hash, |(_, k, _)| eq_mode.eq(*k, key))
             .is_some()
     }
 
@@ -142,30 +219,52 @@ pub type RcMap = Rc<RefCell<VoleMap>>;
 /// Uses HashTable for full control over hashing and equality.
 pub struct VoleSet {
     table: HashTable<(u64, i64)>, // (hash, value) pairs
-    eq_fn: EqFn,
+    eq_mode: EqMode,
 }
 
 impl VoleSet {
+    /// Create a new set with a native equality function (fast path).
     pub fn new(eq_fn: EqFn) -> Self {
         Self {
             table: HashTable::new(),
-            eq_fn,
+            eq_mode: EqMode::Native(eq_fn),
         }
     }
 
+    /// Create a new set with closure-based equality (generic path).
+    pub fn new_with_closure(eq_closure: *const Closure) -> Self {
+        Self {
+            table: HashTable::new(),
+            eq_mode: EqMode::Closure(eq_closure),
+        }
+    }
+
+    /// Create a new set with capacity and native equality function.
     pub fn with_capacity(capacity: usize, eq_fn: EqFn) -> Self {
         Self {
             table: HashTable::with_capacity(capacity),
-            eq_fn,
+            eq_mode: EqMode::Native(eq_fn),
+        }
+    }
+
+    /// Create a new set with capacity and closure-based equality.
+    pub fn with_capacity_closure(capacity: usize, eq_closure: *const Closure) -> Self {
+        Self {
+            table: HashTable::with_capacity(capacity),
+            eq_mode: EqMode::Closure(eq_closure),
         }
     }
 
     pub fn add(&mut self, value: i64, hash: i64) -> bool {
         let hash = hash as u64;
-        let eq_fn = self.eq_fn;
+        let eq_mode = self.eq_mode;
 
         // Check if already present
-        if self.table.find(hash, |(_, v)| eq_fn(*v, value)).is_some() {
+        if self
+            .table
+            .find(hash, |(_, v)| eq_mode.eq(*v, value))
+            .is_some()
+        {
             return false;
         }
 
@@ -176,9 +275,9 @@ impl VoleSet {
 
     pub fn remove(&mut self, value: i64, hash: i64) -> bool {
         let hash = hash as u64;
-        let eq_fn = self.eq_fn;
+        let eq_mode = self.eq_mode;
 
-        match self.table.find_entry(hash, |(_, v)| eq_fn(*v, value)) {
+        match self.table.find_entry(hash, |(_, v)| eq_mode.eq(*v, value)) {
             Ok(entry) => {
                 entry.remove();
                 true
@@ -189,8 +288,9 @@ impl VoleSet {
 
     pub fn contains(&self, value: i64, hash: i64) -> bool {
         let hash = hash as u64;
+        let eq_mode = self.eq_mode;
         self.table
-            .find(hash, |(_, v)| (self.eq_fn)(*v, value))
+            .find(hash, |(_, v)| eq_mode.eq(*v, value))
             .is_some()
     }
 
@@ -210,9 +310,19 @@ impl VoleSet {
         self.table.iter().map(|(_, v)| *v).collect()
     }
 
-    // Set operations - these use self's eq_fn for the result
+    /// Internal helper to create a result set with the same eq_mode.
+    fn new_result(&self) -> VoleSet {
+        VoleSet {
+            table: HashTable::new(),
+            eq_mode: self.eq_mode,
+        }
+    }
+
+    // Set operations - these use self's eq_mode for the result
     pub fn union(&self, other: &VoleSet) -> VoleSet {
-        let mut result = VoleSet::new(self.eq_fn);
+        let mut result = self.new_result();
+        let eq_mode = self.eq_mode;
+
         // Add all from self
         for (hash, value) in self.table.iter() {
             result
@@ -223,7 +333,7 @@ impl VoleSet {
         for (hash, value) in other.table.iter() {
             if result
                 .table
-                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .find(*hash, |(_, v)| eq_mode.eq(*v, *value))
                 .is_none()
             {
                 result
@@ -235,11 +345,13 @@ impl VoleSet {
     }
 
     pub fn intersection(&self, other: &VoleSet) -> VoleSet {
-        let mut result = VoleSet::new(self.eq_fn);
+        let mut result = self.new_result();
+        let eq_mode = self.eq_mode;
+
         for (hash, value) in self.table.iter() {
             if other
                 .table
-                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .find(*hash, |(_, v)| eq_mode.eq(*v, *value))
                 .is_some()
             {
                 result
@@ -251,11 +363,13 @@ impl VoleSet {
     }
 
     pub fn difference(&self, other: &VoleSet) -> VoleSet {
-        let mut result = VoleSet::new(self.eq_fn);
+        let mut result = self.new_result();
+        let eq_mode = self.eq_mode;
+
         for (hash, value) in self.table.iter() {
             if other
                 .table
-                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .find(*hash, |(_, v)| eq_mode.eq(*v, *value))
                 .is_none()
             {
                 result
@@ -267,12 +381,14 @@ impl VoleSet {
     }
 
     pub fn symmetric_difference(&self, other: &VoleSet) -> VoleSet {
-        let mut result = VoleSet::new(self.eq_fn);
+        let mut result = self.new_result();
+        let eq_mode = self.eq_mode;
+
         // Add elements in self but not in other
         for (hash, value) in self.table.iter() {
             if other
                 .table
-                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .find(*hash, |(_, v)| eq_mode.eq(*v, *value))
                 .is_none()
             {
                 result
@@ -284,7 +400,7 @@ impl VoleSet {
         for (hash, value) in other.table.iter() {
             if self
                 .table
-                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .find(*hash, |(_, v)| eq_mode.eq(*v, *value))
                 .is_none()
             {
                 result
@@ -296,10 +412,11 @@ impl VoleSet {
     }
 
     pub fn is_subset(&self, other: &VoleSet) -> bool {
+        let eq_mode = self.eq_mode;
         for (hash, value) in self.table.iter() {
             if other
                 .table
-                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .find(*hash, |(_, v)| eq_mode.eq(*v, *value))
                 .is_none()
             {
                 return false;
@@ -313,10 +430,11 @@ impl VoleSet {
     }
 
     pub fn is_disjoint(&self, other: &VoleSet) -> bool {
+        let eq_mode = self.eq_mode;
         for (hash, value) in self.table.iter() {
             if other
                 .table
-                .find(*hash, |(_, v)| (self.eq_fn)(*v, *value))
+                .find(*hash, |(_, v)| eq_mode.eq(*v, *value))
                 .is_some()
             {
                 return false;
@@ -333,14 +451,20 @@ pub type RcSet = Rc<RefCell<VoleSet>>;
 // FFI Functions for Map<K, V>
 // =============================================================================
 
-// Note: These FFI functions currently use i64_eq as the default equality function.
-// When generic Map<K,V> support is added (vole-9x0.2), codegen will inject the
-// appropriate eq_fn based on the type parameter's Eq implementation.
+// Default functions use i64_eq for backward compatibility.
+// Generic Map<K,V> uses map_new_with_eq with a closure for custom equality.
 
 /// Create a new empty map (uses i64 equality by default)
 #[unsafe(no_mangle)]
 pub extern "C" fn map_new() -> *const RefCell<VoleMap> {
     Rc::into_raw(Rc::new(RefCell::new(VoleMap::new(i64_eq))))
+}
+
+/// Create a new empty map with closure-based equality (for generic Map<K, V>)
+/// The eq_closure is a Vole closure: (closure_ptr, a: K, b: K) -> bool
+#[unsafe(no_mangle)]
+pub extern "C" fn map_new_with_eq(eq_closure: *const Closure) -> *const RefCell<VoleMap> {
+    Rc::into_raw(Rc::new(RefCell::new(VoleMap::new_with_closure(eq_closure))))
 }
 
 /// Create a new map with the given capacity (uses i64 equality by default)
@@ -349,6 +473,18 @@ pub extern "C" fn map_with_capacity(capacity: i64) -> *const RefCell<VoleMap> {
     Rc::into_raw(Rc::new(RefCell::new(VoleMap::with_capacity(
         capacity as usize,
         i64_eq,
+    ))))
+}
+
+/// Create a new map with capacity and closure-based equality
+#[unsafe(no_mangle)]
+pub extern "C" fn map_with_capacity_eq(
+    capacity: i64,
+    eq_closure: *const Closure,
+) -> *const RefCell<VoleMap> {
+    Rc::into_raw(Rc::new(RefCell::new(VoleMap::with_capacity_closure(
+        capacity as usize,
+        eq_closure,
     ))))
 }
 
@@ -505,14 +641,20 @@ pub extern "C" fn map_dec_ref(map_ptr: *const RefCell<VoleMap>) {
 // FFI Functions for Set<T>
 // =============================================================================
 
-// Note: These FFI functions currently use i64_eq as the default equality function.
-// When generic Set<T> support is added (vole-9x0.2), codegen will inject the
-// appropriate eq_fn based on the type parameter's Eq implementation.
+// Default functions use i64_eq for backward compatibility.
+// Generic Set<T> uses set_new_with_eq with a closure for custom equality.
 
 /// Create a new empty set (uses i64 equality by default)
 #[unsafe(no_mangle)]
 pub extern "C" fn set_new() -> *const RefCell<VoleSet> {
     Rc::into_raw(Rc::new(RefCell::new(VoleSet::new(i64_eq))))
+}
+
+/// Create a new empty set with closure-based equality (for generic Set<T>)
+/// The eq_closure is a Vole closure: (closure_ptr, a: T, b: T) -> bool
+#[unsafe(no_mangle)]
+pub extern "C" fn set_new_with_eq(eq_closure: *const Closure) -> *const RefCell<VoleSet> {
+    Rc::into_raw(Rc::new(RefCell::new(VoleSet::new_with_closure(eq_closure))))
 }
 
 /// Create a new set with the given capacity (uses i64 equality by default)
@@ -521,6 +663,18 @@ pub extern "C" fn set_with_capacity(capacity: i64) -> *const RefCell<VoleSet> {
     Rc::into_raw(Rc::new(RefCell::new(VoleSet::with_capacity(
         capacity as usize,
         i64_eq,
+    ))))
+}
+
+/// Create a new set with capacity and closure-based equality
+#[unsafe(no_mangle)]
+pub extern "C" fn set_with_capacity_eq(
+    capacity: i64,
+    eq_closure: *const Closure,
+) -> *const RefCell<VoleSet> {
+    Rc::into_raw(Rc::new(RefCell::new(VoleSet::with_capacity_closure(
+        capacity as usize,
+        eq_closure,
     ))))
 }
 

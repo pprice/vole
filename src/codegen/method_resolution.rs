@@ -91,7 +91,15 @@ pub(crate) fn resolve_method_target(
             })
     };
 
-    if let Some(resolution) = input.resolution {
+    // Filter out InterfaceMethod resolution when the concrete type is not an interface.
+    // This happens in monomorphized code where sema stored InterfaceMethod for TypeParam,
+    // but at codegen time the type is concrete (e.g., i64).
+    let effective_resolution = input.resolution.filter(|resolution| {
+        !matches!(resolution, ResolvedMethod::InterfaceMethod { .. })
+            || matches!(input.object_type, Type::Interface(_))
+    });
+
+    if let Some(resolution) = effective_resolution {
         return match resolution {
             ResolvedMethod::Direct { func_type } => {
                 let type_name_id =
@@ -200,32 +208,25 @@ pub(crate) fn resolve_method_target(
                 method_name: _,
                 func_type,
             } => {
-                // Use object type's interface info for EntityRegistry-based dispatch
-                let interface_type_id = match input.object_type {
-                    Type::Interface(interface_type) => Some(interface_type.type_def_id),
-                    _ => None,
+                // This branch is only taken when object_type is an interface
+                // (non-interface types are filtered out before the match)
+                let interface_type = match input.object_type {
+                    Type::Interface(it) => it,
+                    _ => unreachable!("InterfaceMethod filtered out for non-interface types"),
                 };
-
-                if let Some(interface_type_id) = interface_type_id {
-                    let method_name_id = method_name_id_by_str(
-                        input.analyzed,
-                        &input.analyzed.interner,
-                        input.method_name_str,
-                    )
-                    .ok_or_else(|| {
-                        format!("method name {} not found as NameId", input.method_name_str)
-                    })?;
-                    Ok(MethodTarget::InterfaceDispatch {
-                        interface_type_id,
-                        method_name_id,
-                        func_type: func_type.clone(),
-                    })
-                } else {
-                    Err(format!(
-                        "InterfaceMethod resolution on non-interface type: {:?}",
-                        input.object_type
-                    ))
-                }
+                let method_name_id = method_name_id_by_str(
+                    input.analyzed,
+                    &input.analyzed.interner,
+                    input.method_name_str,
+                )
+                .ok_or_else(|| {
+                    format!("method name {} not found as NameId", input.method_name_str)
+                })?;
+                Ok(MethodTarget::InterfaceDispatch {
+                    interface_type_id: interface_type.type_def_id,
+                    method_name_id,
+                    func_type: func_type.clone(),
+                })
             }
             ResolvedMethod::Static {
                 type_def_id,

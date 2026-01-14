@@ -1,5 +1,8 @@
 // stdlib/prelude/map.vole
 // Map - Hash map collection for i64 keys and values
+//
+// Note: Generic Map<K, V> requires fixing constraint resolution for lambdas
+// inside generic class methods. See vole-9x0.4 for tracking.
 
 class Map implements MapLike<i64, i64> {
     _ptr: i64,  // Pointer to native VoleMap

@@ -32,6 +32,27 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // map_new_with_eq: (eq_closure) -> Map
+    // For generic Map<K, V> with custom equality
+    m.register(
+        "map_new_with_eq",
+        collections::map_new_with_eq as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64], // Closure pointer
+            return_type: NativeType::I64,
+        },
+    );
+
+    // map_with_capacity_eq: (capacity, eq_closure) -> Map
+    m.register(
+        "map_with_capacity_eq",
+        collections::map_with_capacity_eq as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+
     // map_get: (Map, key, key_hash) -> value
     m.register(
         "map_get",
@@ -157,6 +178,27 @@ pub fn module() -> NativeModule {
         collections::set_with_capacity as *const u8,
         NativeSignature {
             params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // set_new_with_eq: (eq_closure) -> Set
+    // For generic Set<T> with custom equality
+    m.register(
+        "set_new_with_eq",
+        collections::set_new_with_eq as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64], // Closure pointer
+            return_type: NativeType::I64,
+        },
+    );
+
+    // set_with_capacity_eq: (capacity, eq_closure) -> Set
+    m.register(
+        "set_with_capacity_eq",
+        collections::set_with_capacity_eq as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
             return_type: NativeType::I64,
         },
     );

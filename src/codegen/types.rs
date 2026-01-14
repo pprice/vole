@@ -191,14 +191,36 @@ pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
         .current_module
         .and_then(|path| ctx.analyzed.name_table.module_id_if_known(path))
         .unwrap_or_else(|| ctx.analyzed.name_table.main_module());
-    resolve_type_expr_with_metadata(
+    let resolved = resolve_type_expr_with_metadata(
         ty,
         &ctx.analyzed.entity_registry,
         ctx.type_metadata,
         ctx.interner,
         &ctx.analyzed.name_table,
         module_id,
-    )
+    );
+    // Apply type substitutions if compiling a monomorphized context
+    // This allows lambda params like (a: T, b: T) to use concrete types
+    if let Some(substitutions) = ctx.type_substitutions {
+        // First handle Placeholder::TypeParam which has a string name
+        // We need to find the matching NameId in substitutions
+        if let Type::Placeholder(crate::sema::types::PlaceholderKind::TypeParam(ref name)) =
+            resolved
+        {
+            // Look for a substitution with matching name
+            for (name_id, concrete_type) in substitutions {
+                if let Some(name_str) = ctx.analyzed.name_table.last_segment_str(*name_id)
+                    && &name_str == name
+                {
+                    return concrete_type.clone();
+                }
+            }
+        }
+        // Then apply normal TypeParam substitution
+        substitute_type(&resolved, substitutions)
+    } else {
+        resolved
+    }
 }
 
 pub(crate) fn module_name_id(

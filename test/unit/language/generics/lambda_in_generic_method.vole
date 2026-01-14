@@ -1,0 +1,35 @@
+// Test: lambdas inside generic class methods can use constraint methods on type params
+
+// Use a unique interface name to avoid shadowing prelude's Comparable
+interface Subtractable {
+    func subtract(other: Self) -> i64
+}
+
+implement Subtractable for i64 {
+    func subtract(other: i64) -> i64 {
+        return self - other
+    }
+}
+
+// A generic container that creates lambdas using constraint methods
+class Differencer<T: Subtractable> {
+    value: T,
+
+    // Instance method that creates a subtraction lambda
+    func make_subtractor() -> (T, T) -> i64 {
+        // Lambda uses constraint method T.subtract
+        // Explicit return type annotation to ensure correct codegen
+        return (a: T, b: T) -> i64 => a.subtract(b)
+    }
+}
+
+tests {
+    test "lambda in generic method uses constraint methods" {
+        let diff = Differencer { value: 42 }
+        let sub_fn = diff.make_subtractor()
+
+        assert(sub_fn(10, 5) == 5)
+        assert(sub_fn(3, 7) == -4)
+        assert(sub_fn(5, 5) == 0)
+    }
+}

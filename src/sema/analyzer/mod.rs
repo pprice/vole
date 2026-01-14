@@ -1060,7 +1060,8 @@ impl Analyzer {
             interner,
             name_table: &mut self.name_table,
             module_id,
-            type_params: None,
+            // Propagate type param scope to nested contexts (lambdas, etc.)
+            type_params: self.current_type_param_scope.as_ref(),
             self_type,
         };
         resolve_type(ty, &mut ctx)

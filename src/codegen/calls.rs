@@ -455,15 +455,21 @@ impl Cg<'_, '_, '_> {
                 if results.is_empty() {
                     return Ok(self.void_value());
                 } else {
-                    // Try to get declared Vole return type from implement_registry
-                    // Fall back to native type conversion
+                    // For generic external functions, use sema-inferred type first.
+                    // Fall back to declared type for non-generic externals.
                     let ext_info = self
                         .ctx
                         .analyzed
                         .implement_registry
                         .get_external_func(callee_name);
-                    let vole_type = ext_info
-                        .and_then(|info| info.return_type.as_ref().map(|t| (**t).clone()))
+                    let vole_type = self
+                        .ctx
+                        .get_expr_type(&call_expr_id)
+                        .cloned()
+                        .or_else(|| {
+                            ext_info
+                                .and_then(|info| info.return_type.as_ref().map(|t| (**t).clone()))
+                        })
                         .unwrap_or_else(|| {
                             native_type_to_vole_type(&native_func.signature.return_type)
                         });
@@ -536,10 +542,16 @@ impl Cg<'_, '_, '_> {
             if results.is_empty() {
                 return Ok(self.void_value());
             } else {
-                // Use declared Vole return type if available (e.g., Iterator<i64>)
-                // Fall back to native type conversion (e.g., I64 -> i64)
-                let vole_type = ext_info
-                    .and_then(|info| info.return_type.as_ref().map(|t| (**t).clone()))
+                // For generic external functions, the sema analyzer stores the inferred
+                // concrete return type in expr_types. Use that first.
+                // Fall back to declared type for non-generic externals.
+                let vole_type = self
+                    .ctx
+                    .get_expr_type(&call_expr_id)
+                    .cloned()
+                    .or_else(|| {
+                        ext_info.and_then(|info| info.return_type.as_ref().map(|t| (**t).clone()))
+                    })
                     .unwrap_or_else(|| {
                         native_type_to_vole_type(&native_func.signature.return_type)
                     });

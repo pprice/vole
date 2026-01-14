@@ -1829,19 +1829,33 @@ impl Analyzer {
     /// Register external block functions as top-level functions
     /// This is called for standalone external blocks (not inside implement blocks)
     fn collect_external_block(&mut self, ext_block: &ExternalBlock, interner: &Interner) {
+        let builtin_mod = self.name_table.builtin_module();
+
         for func in &ext_block.functions {
-            // For generic external functions, set up type param scope
-            let (params, return_type) = if !func.type_params.is_empty() {
-                let builtin_mod = self.name_table.builtin_module();
+            let name_id = self
+                .name_table
+                .intern(self.current_module, &[func.vole_name], interner);
+
+            // For generic external functions, set up type param scope and register with GenericFuncInfo
+            if !func.type_params.is_empty() {
+                // Build TypeParamInfo list (like regular generic functions)
+                let type_params: Vec<TypeParamInfo> = func
+                    .type_params
+                    .iter()
+                    .map(|tp| {
+                        let tp_name_str = interner.resolve(tp.name);
+                        let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
+                        TypeParamInfo {
+                            name: tp.name,
+                            name_id: tp_name_id,
+                            constraint: None, // External functions don't have constraints for now
+                        }
+                    })
+                    .collect();
+
                 let mut type_param_scope = TypeParamScope::new();
-                for tp in &func.type_params {
-                    let tp_name_str = interner.resolve(tp.name);
-                    let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
-                    type_param_scope.add(TypeParamInfo {
-                        name: tp.name,
-                        name_id: tp_name_id,
-                        constraint: None,
-                    });
+                for info in &type_params {
+                    type_param_scope.add(info.clone());
                 }
 
                 // Resolve with type params in scope
@@ -1853,7 +1867,7 @@ impl Analyzer {
                     module_id,
                     &type_param_scope,
                 );
-                let params: Vec<Type> = func
+                let param_types: Vec<Type> = func
                     .params
                     .iter()
                     .map(|p| resolve_type(&p.ty, &mut ctx))
@@ -1863,7 +1877,47 @@ impl Analyzer {
                     .as_ref()
                     .map(|t| resolve_type(t, &mut ctx))
                     .unwrap_or(Type::Void);
-                (params, return_type)
+
+                // Create signature with TypeParam placeholders
+                let signature = FunctionType {
+                    params: param_types.clone(),
+                    return_type: Box::new(return_type.clone()),
+                    is_closure: false,
+                };
+
+                // Register in EntityRegistry (like regular generic functions)
+                let func_id = self.entity_registry.register_function(
+                    name_id,
+                    name_id,
+                    self.current_module,
+                    signature.clone(),
+                );
+
+                // Set generic info for call-site type inference
+                self.entity_registry.set_function_generic_info(
+                    func_id,
+                    GenericFuncInfo {
+                        type_params,
+                        param_types,
+                        return_type: return_type.clone(),
+                    },
+                );
+
+                // NOTE: Don't register in self.functions for generic externals!
+                // The call handler checks self.functions first without doing type inference.
+                // Generic functions must go through EntityRegistry's generic_info path.
+
+                // Store external info for codegen
+                let name_str = interner.resolve(func.vole_name).to_string();
+                let native_name = func.native_name.clone().unwrap_or_else(|| name_str.clone());
+                self.implement_registry.register_external_func(
+                    name_str,
+                    ExternalMethodInfo {
+                        module_path: ext_block.module_path.clone(),
+                        native_name,
+                        return_type: Some(Box::new(return_type)),
+                    },
+                );
             } else {
                 // Non-generic external function
                 let params: Vec<Type> = func
@@ -1876,32 +1930,40 @@ impl Analyzer {
                     .as_ref()
                     .map(|t| self.resolve_type(t, interner))
                     .unwrap_or(Type::Void);
-                (params, return_type)
-            };
 
-            let func_type = FunctionType {
-                params,
-                return_type: Box::new(return_type.clone()),
-                is_closure: false,
-            };
+                let func_type = FunctionType {
+                    params,
+                    return_type: Box::new(return_type.clone()),
+                    is_closure: false,
+                };
 
-            // Register the function with its Vole name (Symbol)
-            self.functions.insert(func.vole_name, func_type.clone());
+                // Register the function with its Vole name (Symbol)
+                self.functions.insert(func.vole_name, func_type.clone());
 
-            // Also register by string name for cross-interner lookups (prelude functions)
-            let name_str = interner.resolve(func.vole_name).to_string();
-            self.functions_by_name.insert(name_str.clone(), func_type);
+                // Also register by string name for cross-interner lookups (prelude functions)
+                let name_str = interner.resolve(func.vole_name).to_string();
+                self.functions_by_name
+                    .insert(name_str.clone(), func_type.clone());
 
-            // Store the external info (module path and native name) for codegen
-            let native_name = func.native_name.clone().unwrap_or_else(|| name_str.clone());
-            self.implement_registry.register_external_func(
-                name_str,
-                ExternalMethodInfo {
-                    module_path: ext_block.module_path.clone(),
-                    native_name,
-                    return_type: Some(Box::new(return_type)),
-                },
-            );
+                // Register in EntityRegistry for consistency
+                self.entity_registry.register_function(
+                    name_id,
+                    name_id,
+                    self.current_module,
+                    func_type,
+                );
+
+                // Store the external info (module path and native name) for codegen
+                let native_name = func.native_name.clone().unwrap_or_else(|| name_str.clone());
+                self.implement_registry.register_external_func(
+                    name_str,
+                    ExternalMethodInfo {
+                        module_path: ext_block.module_path.clone(),
+                        native_name,
+                        return_type: Some(Box::new(return_type)),
+                    },
+                );
+            }
         }
     }
 }
