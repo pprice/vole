@@ -3,73 +3,10 @@ use std::collections::HashMap as StdHashMap;
 use crate::identity::{NameId, TypeDefId};
 use crate::sema::Type;
 use crate::sema::entity_defs::TypeDefKind;
-use crate::sema::types::{InterfaceMethodType, InterfaceType, NominalType, StructuralType};
+use crate::sema::generic::substitute_type;
+use crate::sema::types::{NominalType, StructuralType};
 
 use super::super::*;
-
-/// Substitute type parameters in a type with concrete types.
-/// Used when checking interface satisfaction with generic interfaces.
-fn substitute_type(ty: &Type, substitutions: &StdHashMap<NameId, Type>) -> Type {
-    match ty {
-        Type::TypeParam(name_id) => substitutions
-            .get(name_id)
-            .cloned()
-            .unwrap_or_else(|| ty.clone()),
-        Type::TypeParamRef(_) => ty.clone(), // Opaque reference, doesn't participate in NameId substitution
-        Type::Array(inner) => Type::Array(Box::new(substitute_type(inner, substitutions))),
-        Type::Union(variants) => Type::Union(
-            variants
-                .iter()
-                .map(|v| substitute_type(v, substitutions))
-                .collect(),
-        ),
-        Type::Function(ft) => Type::Function(FunctionType {
-            params: ft
-                .params
-                .iter()
-                .map(|p| substitute_type(p, substitutions))
-                .collect(),
-            return_type: Box::new(substitute_type(&ft.return_type, substitutions)),
-            is_closure: ft.is_closure,
-        }),
-        Type::RuntimeIterator(inner) => {
-            Type::RuntimeIterator(Box::new(substitute_type(inner, substitutions)))
-        }
-        Type::Nominal(NominalType::Interface(iface)) => {
-            Type::Nominal(NominalType::Interface(InterfaceType {
-                type_def_id: iface.type_def_id,
-                type_args: iface
-                    .type_args
-                    .iter()
-                    .map(|a| substitute_type(a, substitutions))
-                    .collect(),
-                methods: iface
-                    .methods
-                    .iter()
-                    .map(|m| InterfaceMethodType {
-                        name: m.name,
-                        params: m
-                            .params
-                            .iter()
-                            .map(|p| substitute_type(p, substitutions))
-                            .collect(),
-                        return_type: Box::new(substitute_type(&m.return_type, substitutions)),
-                        has_default: m.has_default,
-                    })
-                    .collect(),
-                extends: iface.extends.clone(),
-            }))
-        }
-        Type::Tuple(elements) => Type::Tuple(
-            elements
-                .iter()
-                .map(|e| substitute_type(e, substitutions))
-                .collect(),
-        ),
-        // Primitive and other types don't need substitution
-        _ => ty.clone(),
-    }
-}
 
 impl Analyzer {
     /// Check if a type structurally satisfies an interface by TypeDefId
