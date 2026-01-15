@@ -9,18 +9,18 @@ use crate::frontend::{
 };
 use crate::runtime::type_registry::{FieldTypeTag, register_instance_type};
 use crate::sema::types::NominalType;
-use crate::sema::{ClassType, PrimitiveType, RecordType, Type};
+use crate::sema::{ClassType, LegacyType, PrimitiveType, RecordType, Type};
 
 /// Convert a Vole Type to a FieldTypeTag for runtime cleanup
 fn type_to_field_tag(ty: &Type) -> FieldTypeTag {
     match ty {
-        Type::Primitive(PrimitiveType::String) => FieldTypeTag::String,
-        Type::Array(_) => FieldTypeTag::Array,
-        Type::Nominal(NominalType::Class(_)) | Type::Nominal(NominalType::Record(_)) => {
+        LegacyType::Primitive(PrimitiveType::String) => FieldTypeTag::String,
+        LegacyType::Array(_) => FieldTypeTag::Array,
+        LegacyType::Nominal(NominalType::Class(_)) | LegacyType::Nominal(NominalType::Record(_)) => {
             FieldTypeTag::Instance
         }
         // Optional types containing reference types also need cleanup
-        Type::Union(variants) => {
+        LegacyType::Union(variants) => {
             // If any variant is a reference type, mark as needing cleanup
             for variant in variants.iter() {
                 let tag = type_to_field_tag(variant);
@@ -98,7 +98,7 @@ impl Compiler<'_> {
             .expect("class should be registered in entity registry");
 
         // Create a placeholder vole_type (will be replaced in finalize_class)
-        let placeholder_type = Type::Nominal(NominalType::Class(ClassType {
+        let placeholder_type = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![].into(),
         }));
@@ -150,7 +150,7 @@ impl Compiler<'_> {
             .expect("class should be registered in entity registry");
 
         // Create the Vole type
-        let vole_type = Type::Nominal(NominalType::Class(ClassType {
+        let vole_type = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![].into(),
         }));
@@ -163,7 +163,7 @@ impl Compiler<'_> {
                 .return_type
                 .as_ref()
                 .map(|t| self.resolve_type_with_metadata(t))
-                .unwrap_or(Type::Void);
+                .unwrap_or(LegacyType::Void);
             let sig = self.build_signature(
                 &method.params,
                 method.return_type.as_ref(),
@@ -219,7 +219,7 @@ impl Compiler<'_> {
                             .return_type
                             .as_ref()
                             .map(|t| self.resolve_type_with_metadata(t))
-                            .unwrap_or(Type::Void);
+                            .unwrap_or(LegacyType::Void);
                         let sig = self.build_signature(
                             &method.params,
                             method.return_type.as_ref(),
@@ -282,7 +282,7 @@ impl Compiler<'_> {
             .expect("record should be registered in entity registry");
 
         // Create a placeholder vole_type (will be replaced in finalize_record)
-        let placeholder_type = Type::Nominal(NominalType::Record(RecordType {
+        let placeholder_type = LegacyType::Nominal(NominalType::Record(RecordType {
             type_def_id,
             type_args: vec![].into(),
         }));
@@ -334,7 +334,7 @@ impl Compiler<'_> {
             .expect("record should be registered in entity registry");
 
         // Create the Vole type
-        let vole_type = Type::Nominal(NominalType::Record(RecordType {
+        let vole_type = LegacyType::Nominal(NominalType::Record(RecordType {
             type_def_id,
             type_args: vec![].into(),
         }));
@@ -347,7 +347,7 @@ impl Compiler<'_> {
                 .return_type
                 .as_ref()
                 .map(|t| self.resolve_type_with_metadata(t))
-                .unwrap_or(Type::Void);
+                .unwrap_or(LegacyType::Void);
             let sig = self.build_signature(
                 &method.params,
                 method.return_type.as_ref(),
@@ -403,7 +403,7 @@ impl Compiler<'_> {
                             .return_type
                             .as_ref()
                             .map(|t| self.resolve_type_with_metadata(t))
-                            .unwrap_or(Type::Void);
+                            .unwrap_or(LegacyType::Void);
                         let sig = self.build_signature(
                             &method.params,
                             method.return_type.as_ref(),
@@ -468,7 +468,7 @@ impl Compiler<'_> {
                 .return_type
                 .as_ref()
                 .map(|t| self.resolve_type_with_metadata(t))
-                .unwrap_or(Type::Void);
+                .unwrap_or(LegacyType::Void);
 
             // Create signature without self parameter
             let sig = self.build_signature(
@@ -521,7 +521,7 @@ impl Compiler<'_> {
 
         // Skip if already registered - check by type name string to avoid Symbol collisions across interners
         let already_registered = self.type_metadata.values().any(|meta| {
-            if let Type::Nominal(NominalType::Class(class_type)) = &meta.vole_type {
+            if let LegacyType::Nominal(NominalType::Class(class_type)) = &meta.vole_type {
                 self.analyzed
                     .name_table
                     .last_segment_str(self.analyzed.entity_registry.class_name_id(class_type))
@@ -554,7 +554,7 @@ impl Compiler<'_> {
         register_instance_type(type_id, field_type_tags);
 
         // Create the Vole type
-        let vole_type = Type::Nominal(NominalType::Class(ClassType {
+        let vole_type = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![].into(),
         }));
@@ -572,7 +572,7 @@ impl Compiler<'_> {
                 .return_type
                 .as_ref()
                 .map(|t| self.resolve_type_with_interner(t, module_interner))
-                .unwrap_or(Type::Void);
+                .unwrap_or(LegacyType::Void);
 
             let sig = self.build_signature(
                 &method.params,
@@ -645,7 +645,7 @@ impl Compiler<'_> {
                     .return_type
                     .as_ref()
                     .map(|t| self.resolve_type_with_interner(t, module_interner))
-                    .unwrap_or(Type::Void);
+                    .unwrap_or(LegacyType::Void);
 
                 let sig = self.build_signature(
                     &method.params,

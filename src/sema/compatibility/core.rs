@@ -3,12 +3,12 @@
 // Type compatibility checking functions.
 // These are pure functions that determine if types are compatible for assignment.
 
-use crate::sema::types::{FunctionType, NominalType, PrimitiveType, Type};
+use crate::sema::types::{FunctionType, LegacyType, NominalType, PrimitiveType, Type};
 
 /// Check if an integer literal value fits within a type's range
 pub fn literal_fits(value: i64, target: &Type) -> bool {
     match target {
-        Type::Primitive(prim) => match prim {
+        LegacyType::Primitive(prim) => match prim {
             PrimitiveType::I8 => value >= i8::MIN as i64 && value <= i8::MAX as i64,
             PrimitiveType::I16 => value >= i16::MIN as i64 && value <= i16::MAX as i64,
             PrimitiveType::I32 => value >= i32::MIN as i64 && value <= i32::MAX as i64,
@@ -22,7 +22,7 @@ pub fn literal_fits(value: i64, target: &Type) -> bool {
             PrimitiveType::Bool | PrimitiveType::String => false,
         },
         // For unions, check if literal fits any numeric variant
-        Type::Union(variants) => variants.iter().any(|v| literal_fits(value, v)),
+        LegacyType::Union(variants) => variants.iter().any(|v| literal_fits(value, v)),
         _ => false,
     }
 }
@@ -44,15 +44,15 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
     }
 
     // Allow numeric coercion (kept for backwards compatibility)
-    if from.is_integer() && *to == Type::Primitive(PrimitiveType::I64) {
+    if from.is_integer() && *to == LegacyType::Primitive(PrimitiveType::I64) {
         return true;
     }
-    if from.is_numeric() && *to == Type::Primitive(PrimitiveType::F64) {
+    if from.is_numeric() && *to == LegacyType::Primitive(PrimitiveType::F64) {
         return true;
     }
 
     // Check if assigning to a union that contains the from type
-    if let Type::Union(variants) = to {
+    if let LegacyType::Union(variants) = to {
         // Direct containment
         if variants.contains(from) {
             return true;
@@ -66,7 +66,7 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
     }
 
     // Nil is compatible with any optional (union containing Nil)
-    if *from == Type::Nil && to.is_optional() {
+    if *from == LegacyType::Nil && to.is_optional() {
         return true;
     }
 
@@ -77,8 +77,8 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
 
     // Class compatibility: compare by type_def_id and type_args
     if let (
-        Type::Nominal(NominalType::Class(from_class)),
-        Type::Nominal(NominalType::Class(to_class)),
+        LegacyType::Nominal(NominalType::Class(from_class)),
+        LegacyType::Nominal(NominalType::Class(to_class)),
     ) = (from, to)
         && from_class.type_def_id == to_class.type_def_id
         && from_class.type_args.len() == to_class.type_args.len()
@@ -93,8 +93,8 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
 
     // Record compatibility: compare by type_def_id and type_args
     if let (
-        Type::Nominal(NominalType::Record(from_rec)),
-        Type::Nominal(NominalType::Record(to_rec)),
+        LegacyType::Nominal(NominalType::Record(from_rec)),
+        LegacyType::Nominal(NominalType::Record(to_rec)),
     ) = (from, to)
         && from_rec.type_def_id == to_rec.type_def_id
         && from_rec.type_args.len() == to_rec.type_args.len()
@@ -113,7 +113,7 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
     // but these are different ID types. The full compatibility check handles interface subtyping.
 
     // Tuple compatibility: same length and each element is compatible
-    if let (Type::Tuple(from_elems), Type::Tuple(to_elems)) = (from, to)
+    if let (LegacyType::Tuple(from_elems), LegacyType::Tuple(to_elems)) = (from, to)
         && from_elems.len() == to_elems.len()
     {
         return from_elems
@@ -124,11 +124,11 @@ pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
 
     // Fixed array compatibility: same element type and same size
     if let (
-        Type::FixedArray {
+        LegacyType::FixedArray {
             element: from_elem,
             size: from_size,
         },
-        Type::FixedArray {
+        LegacyType::FixedArray {
             element: to_elem,
             size: to_size,
         },
@@ -163,71 +163,71 @@ mod tests {
     #[test]
     fn test_literal_fits_signed() {
         // i8 range: -128 to 127
-        assert!(literal_fits(0, &Type::Primitive(PrimitiveType::I8)));
-        assert!(literal_fits(127, &Type::Primitive(PrimitiveType::I8)));
-        assert!(literal_fits(-128, &Type::Primitive(PrimitiveType::I8)));
-        assert!(!literal_fits(128, &Type::Primitive(PrimitiveType::I8)));
-        assert!(!literal_fits(-129, &Type::Primitive(PrimitiveType::I8)));
+        assert!(literal_fits(0, &LegacyType::Primitive(PrimitiveType::I8)));
+        assert!(literal_fits(127, &LegacyType::Primitive(PrimitiveType::I8)));
+        assert!(literal_fits(-128, &LegacyType::Primitive(PrimitiveType::I8)));
+        assert!(!literal_fits(128, &LegacyType::Primitive(PrimitiveType::I8)));
+        assert!(!literal_fits(-129, &LegacyType::Primitive(PrimitiveType::I8)));
 
         // i16 range
-        assert!(literal_fits(32767, &Type::Primitive(PrimitiveType::I16)));
-        assert!(!literal_fits(32768, &Type::Primitive(PrimitiveType::I16)));
+        assert!(literal_fits(32767, &LegacyType::Primitive(PrimitiveType::I16)));
+        assert!(!literal_fits(32768, &LegacyType::Primitive(PrimitiveType::I16)));
 
         // i32 range
         assert!(literal_fits(
             2147483647,
-            &Type::Primitive(PrimitiveType::I32)
+            &LegacyType::Primitive(PrimitiveType::I32)
         ));
         assert!(!literal_fits(
             2147483648,
-            &Type::Primitive(PrimitiveType::I32)
+            &LegacyType::Primitive(PrimitiveType::I32)
         ));
 
         // i64 always fits
-        assert!(literal_fits(i64::MAX, &Type::Primitive(PrimitiveType::I64)));
-        assert!(literal_fits(i64::MIN, &Type::Primitive(PrimitiveType::I64)));
+        assert!(literal_fits(i64::MAX, &LegacyType::Primitive(PrimitiveType::I64)));
+        assert!(literal_fits(i64::MIN, &LegacyType::Primitive(PrimitiveType::I64)));
     }
 
     #[test]
     fn test_literal_fits_unsigned() {
         // u8 range: 0 to 255
-        assert!(literal_fits(0, &Type::Primitive(PrimitiveType::U8)));
-        assert!(literal_fits(255, &Type::Primitive(PrimitiveType::U8)));
-        assert!(!literal_fits(256, &Type::Primitive(PrimitiveType::U8)));
-        assert!(!literal_fits(-1, &Type::Primitive(PrimitiveType::U8)));
+        assert!(literal_fits(0, &LegacyType::Primitive(PrimitiveType::U8)));
+        assert!(literal_fits(255, &LegacyType::Primitive(PrimitiveType::U8)));
+        assert!(!literal_fits(256, &LegacyType::Primitive(PrimitiveType::U8)));
+        assert!(!literal_fits(-1, &LegacyType::Primitive(PrimitiveType::U8)));
 
         // u16 range
-        assert!(literal_fits(65535, &Type::Primitive(PrimitiveType::U16)));
-        assert!(!literal_fits(65536, &Type::Primitive(PrimitiveType::U16)));
+        assert!(literal_fits(65535, &LegacyType::Primitive(PrimitiveType::U16)));
+        assert!(!literal_fits(65536, &LegacyType::Primitive(PrimitiveType::U16)));
 
         // u32 range
         assert!(literal_fits(
             4294967295,
-            &Type::Primitive(PrimitiveType::U32)
+            &LegacyType::Primitive(PrimitiveType::U32)
         ));
         assert!(!literal_fits(
             4294967296,
-            &Type::Primitive(PrimitiveType::U32)
+            &LegacyType::Primitive(PrimitiveType::U32)
         ));
 
         // u64 accepts all positive i64 values
-        assert!(literal_fits(0, &Type::Primitive(PrimitiveType::U64)));
-        assert!(literal_fits(i64::MAX, &Type::Primitive(PrimitiveType::U64)));
-        assert!(!literal_fits(-1, &Type::Primitive(PrimitiveType::U64)));
+        assert!(literal_fits(0, &LegacyType::Primitive(PrimitiveType::U64)));
+        assert!(literal_fits(i64::MAX, &LegacyType::Primitive(PrimitiveType::U64)));
+        assert!(!literal_fits(-1, &LegacyType::Primitive(PrimitiveType::U64)));
     }
 
     #[test]
     fn test_literal_fits_float() {
-        assert!(literal_fits(0, &Type::Primitive(PrimitiveType::F32)));
-        assert!(literal_fits(i64::MAX, &Type::Primitive(PrimitiveType::F64)));
+        assert!(literal_fits(0, &LegacyType::Primitive(PrimitiveType::F32)));
+        assert!(literal_fits(i64::MAX, &LegacyType::Primitive(PrimitiveType::F64)));
     }
 
     #[test]
     fn test_literal_fits_union() {
-        let union_ty = Type::Union(
+        let union_ty = LegacyType::Union(
             vec![
-                Type::Primitive(PrimitiveType::I8),
-                Type::Primitive(PrimitiveType::I32),
+                LegacyType::Primitive(PrimitiveType::I8),
+                LegacyType::Primitive(PrimitiveType::I32),
             ]
             .into(),
         );
@@ -239,64 +239,64 @@ mod tests {
     #[test]
     fn test_types_compatible_same() {
         assert!(types_compatible_core(
-            &Type::Primitive(PrimitiveType::I32),
-            &Type::Primitive(PrimitiveType::I32)
+            &LegacyType::Primitive(PrimitiveType::I32),
+            &LegacyType::Primitive(PrimitiveType::I32)
         ));
         assert!(types_compatible_core(
-            &Type::Primitive(PrimitiveType::String),
-            &Type::Primitive(PrimitiveType::String)
+            &LegacyType::Primitive(PrimitiveType::String),
+            &LegacyType::Primitive(PrimitiveType::String)
         ));
         assert!(types_compatible_core(
-            &Type::Primitive(PrimitiveType::Bool),
-            &Type::Primitive(PrimitiveType::Bool)
+            &LegacyType::Primitive(PrimitiveType::Bool),
+            &LegacyType::Primitive(PrimitiveType::Bool)
         ));
     }
 
     #[test]
     fn test_types_compatible_widening() {
         assert!(types_compatible_core(
-            &Type::Primitive(PrimitiveType::I32),
-            &Type::Primitive(PrimitiveType::I64)
+            &LegacyType::Primitive(PrimitiveType::I32),
+            &LegacyType::Primitive(PrimitiveType::I64)
         ));
         assert!(types_compatible_core(
-            &Type::Primitive(PrimitiveType::F32),
-            &Type::Primitive(PrimitiveType::F64)
+            &LegacyType::Primitive(PrimitiveType::F32),
+            &LegacyType::Primitive(PrimitiveType::F64)
         ));
         assert!(types_compatible_core(
-            &Type::Primitive(PrimitiveType::U8),
-            &Type::Primitive(PrimitiveType::I16)
+            &LegacyType::Primitive(PrimitiveType::U8),
+            &LegacyType::Primitive(PrimitiveType::I16)
         ));
     }
 
     #[test]
     fn test_types_compatible_union() {
-        let union_ty = Type::Union(
+        let union_ty = LegacyType::Union(
             vec![
-                Type::Primitive(PrimitiveType::I32),
-                Type::Primitive(PrimitiveType::String),
+                LegacyType::Primitive(PrimitiveType::I32),
+                LegacyType::Primitive(PrimitiveType::String),
             ]
             .into(),
         );
         assert!(types_compatible_core(
-            &Type::Primitive(PrimitiveType::I32),
+            &LegacyType::Primitive(PrimitiveType::I32),
             &union_ty
         ));
         assert!(types_compatible_core(
-            &Type::Primitive(PrimitiveType::String),
+            &LegacyType::Primitive(PrimitiveType::String),
             &union_ty
         ));
         assert!(!types_compatible_core(
-            &Type::Primitive(PrimitiveType::Bool),
+            &LegacyType::Primitive(PrimitiveType::Bool),
             &union_ty
         ));
     }
 
     #[test]
     fn test_types_compatible_optional() {
-        let optional = Type::optional(Type::Primitive(PrimitiveType::I32));
-        assert!(types_compatible_core(&Type::Nil, &optional));
+        let optional = Type::optional(LegacyType::Primitive(PrimitiveType::I32));
+        assert!(types_compatible_core(&LegacyType::Nil, &optional));
         assert!(types_compatible_core(
-            &Type::Primitive(PrimitiveType::I32),
+            &LegacyType::Primitive(PrimitiveType::I32),
             &optional
         ));
     }
@@ -306,10 +306,10 @@ mod tests {
         let err = Type::invalid("test");
         assert!(types_compatible_core(
             &err,
-            &Type::Primitive(PrimitiveType::I32)
+            &LegacyType::Primitive(PrimitiveType::I32)
         ));
         assert!(types_compatible_core(
-            &Type::Primitive(PrimitiveType::I32),
+            &LegacyType::Primitive(PrimitiveType::I32),
             &err
         ));
     }
@@ -317,14 +317,14 @@ mod tests {
     #[test]
     fn test_function_compatible_with_interface() {
         let fn_type = FunctionType {
-            params: vec![Type::Primitive(PrimitiveType::I32)].into(),
-            return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
+            params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
+            return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
             is_closure: false,
         };
 
         let iface_fn = FunctionType {
-            params: vec![Type::Primitive(PrimitiveType::I32)].into(),
-            return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
+            params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
+            return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
             is_closure: true,
         };
 
@@ -332,8 +332,8 @@ mod tests {
 
         // Incompatible return type
         let iface_fn_bad = FunctionType {
-            params: vec![Type::Primitive(PrimitiveType::I32)].into(),
-            return_type: Box::new(Type::Primitive(PrimitiveType::String)),
+            params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
+            return_type: Box::new(LegacyType::Primitive(PrimitiveType::String)),
             is_closure: true,
         };
         assert!(!function_compatible_with_interface(&fn_type, &iface_fn_bad));
@@ -341,11 +341,11 @@ mod tests {
         // Different param count
         let iface_fn_wrong_params = FunctionType {
             params: vec![
-                Type::Primitive(PrimitiveType::I32),
-                Type::Primitive(PrimitiveType::I32),
+                LegacyType::Primitive(PrimitiveType::I32),
+                LegacyType::Primitive(PrimitiveType::I32),
             ]
             .into(),
-            return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
+            return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
             is_closure: true,
         };
         assert!(!function_compatible_with_interface(
@@ -356,28 +356,28 @@ mod tests {
 
     #[test]
     fn test_types_compatible_tuple() {
-        let tuple1 = Type::Tuple(
+        let tuple1 = LegacyType::Tuple(
             vec![
-                Type::Primitive(PrimitiveType::I32),
-                Type::Primitive(PrimitiveType::String),
+                LegacyType::Primitive(PrimitiveType::I32),
+                LegacyType::Primitive(PrimitiveType::String),
             ]
             .into(),
         );
-        let tuple2 = Type::Tuple(
+        let tuple2 = LegacyType::Tuple(
             vec![
-                Type::Primitive(PrimitiveType::I32),
-                Type::Primitive(PrimitiveType::String),
+                LegacyType::Primitive(PrimitiveType::I32),
+                LegacyType::Primitive(PrimitiveType::String),
             ]
             .into(),
         );
-        let tuple3 = Type::Tuple(
+        let tuple3 = LegacyType::Tuple(
             vec![
-                Type::Primitive(PrimitiveType::I32),
-                Type::Primitive(PrimitiveType::Bool),
+                LegacyType::Primitive(PrimitiveType::I32),
+                LegacyType::Primitive(PrimitiveType::Bool),
             ]
             .into(),
         ); // Different element type
-        let tuple4 = Type::Tuple(vec![Type::Primitive(PrimitiveType::I32)].into()); // Different length
+        let tuple4 = LegacyType::Tuple(vec![LegacyType::Primitive(PrimitiveType::I32)].into()); // Different length
 
         assert!(types_compatible_core(&tuple1, &tuple2));
         assert!(!types_compatible_core(&tuple1, &tuple3));
@@ -387,17 +387,17 @@ mod tests {
     #[test]
     fn test_types_compatible_tuple_widening() {
         // Tuple with widening: [i32, f32] compatible with [i64, f64]
-        let narrow = Type::Tuple(
+        let narrow = LegacyType::Tuple(
             vec![
-                Type::Primitive(PrimitiveType::I32),
-                Type::Primitive(PrimitiveType::F32),
+                LegacyType::Primitive(PrimitiveType::I32),
+                LegacyType::Primitive(PrimitiveType::F32),
             ]
             .into(),
         );
-        let wide = Type::Tuple(
+        let wide = LegacyType::Tuple(
             vec![
-                Type::Primitive(PrimitiveType::I64),
-                Type::Primitive(PrimitiveType::F64),
+                LegacyType::Primitive(PrimitiveType::I64),
+                LegacyType::Primitive(PrimitiveType::F64),
             ]
             .into(),
         );
@@ -406,20 +406,20 @@ mod tests {
 
     #[test]
     fn test_types_compatible_fixed_array() {
-        let arr1 = Type::FixedArray {
-            element: Box::new(Type::Primitive(PrimitiveType::I32)),
+        let arr1 = LegacyType::FixedArray {
+            element: Box::new(LegacyType::Primitive(PrimitiveType::I32)),
             size: 10,
         };
-        let arr2 = Type::FixedArray {
-            element: Box::new(Type::Primitive(PrimitiveType::I32)),
+        let arr2 = LegacyType::FixedArray {
+            element: Box::new(LegacyType::Primitive(PrimitiveType::I32)),
             size: 10,
         };
-        let arr3 = Type::FixedArray {
-            element: Box::new(Type::Primitive(PrimitiveType::I32)),
+        let arr3 = LegacyType::FixedArray {
+            element: Box::new(LegacyType::Primitive(PrimitiveType::I32)),
             size: 5,
         }; // Different size
-        let arr4 = Type::FixedArray {
-            element: Box::new(Type::Primitive(PrimitiveType::String)),
+        let arr4 = LegacyType::FixedArray {
+            element: Box::new(LegacyType::Primitive(PrimitiveType::String)),
             size: 10,
         }; // Different element type
 
@@ -431,12 +431,12 @@ mod tests {
     #[test]
     fn test_types_compatible_fixed_array_widening() {
         // Fixed array with widening: [i32; 5] compatible with [i64; 5]
-        let narrow = Type::FixedArray {
-            element: Box::new(Type::Primitive(PrimitiveType::I32)),
+        let narrow = LegacyType::FixedArray {
+            element: Box::new(LegacyType::Primitive(PrimitiveType::I32)),
             size: 5,
         };
-        let wide = Type::FixedArray {
-            element: Box::new(Type::Primitive(PrimitiveType::I64)),
+        let wide = LegacyType::FixedArray {
+            element: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
             size: 5,
         };
         assert!(types_compatible_core(&narrow, &wide));

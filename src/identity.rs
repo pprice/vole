@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::frontend::{Interner, Span, Symbol};
 use crate::sema::PrimitiveType;
-use crate::sema::types::Type;
+use crate::sema::types::{LegacyType, Type};
 
 mod entities;
 mod namer;
@@ -120,19 +120,19 @@ impl Primitives {
     /// Map resolved Type to NameId for primitive types
     pub fn name_id_for_type(&self, ty: &Type) -> Option<NameId> {
         match ty {
-            Type::Primitive(PrimitiveType::I8) => Some(self.i8),
-            Type::Primitive(PrimitiveType::I16) => Some(self.i16),
-            Type::Primitive(PrimitiveType::I32) => Some(self.i32),
-            Type::Primitive(PrimitiveType::I64) => Some(self.i64),
-            Type::Primitive(PrimitiveType::I128) => Some(self.i128),
-            Type::Primitive(PrimitiveType::U8) => Some(self.u8),
-            Type::Primitive(PrimitiveType::U16) => Some(self.u16),
-            Type::Primitive(PrimitiveType::U32) => Some(self.u32),
-            Type::Primitive(PrimitiveType::U64) => Some(self.u64),
-            Type::Primitive(PrimitiveType::F32) => Some(self.f32),
-            Type::Primitive(PrimitiveType::F64) => Some(self.f64),
-            Type::Primitive(PrimitiveType::Bool) => Some(self.bool),
-            Type::Primitive(PrimitiveType::String) => Some(self.string),
+            LegacyType::Primitive(PrimitiveType::I8) => Some(self.i8),
+            LegacyType::Primitive(PrimitiveType::I16) => Some(self.i16),
+            LegacyType::Primitive(PrimitiveType::I32) => Some(self.i32),
+            LegacyType::Primitive(PrimitiveType::I64) => Some(self.i64),
+            LegacyType::Primitive(PrimitiveType::I128) => Some(self.i128),
+            LegacyType::Primitive(PrimitiveType::U8) => Some(self.u8),
+            LegacyType::Primitive(PrimitiveType::U16) => Some(self.u16),
+            LegacyType::Primitive(PrimitiveType::U32) => Some(self.u32),
+            LegacyType::Primitive(PrimitiveType::U64) => Some(self.u64),
+            LegacyType::Primitive(PrimitiveType::F32) => Some(self.f32),
+            LegacyType::Primitive(PrimitiveType::F64) => Some(self.f64),
+            LegacyType::Primitive(PrimitiveType::Bool) => Some(self.bool),
+            LegacyType::Primitive(PrimitiveType::String) => Some(self.string),
             _ => None,
         }
     }

@@ -14,7 +14,7 @@ type ArgVec = SmallVec<[Value; 8]>;
 use crate::frontend::{CallExpr, ExprKind, LetInit, NodeId, StringPart};
 use crate::runtime::native_registry::{NativeFunction, NativeType};
 use crate::sema::types::NominalType;
-use crate::sema::{FunctionType, PrimitiveType, Type};
+use crate::sema::{FunctionType, LegacyType, PrimitiveType, Type};
 
 use super::context::Cg;
 use super::types::{
@@ -55,7 +55,7 @@ pub(crate) fn compile_string_literal(
     Ok(CompiledValue {
         value: result,
         ty: pointer_type,
-        vole_type: Type::Primitive(PrimitiveType::String),
+        vole_type: LegacyType::Primitive(PrimitiveType::String),
     })
 }
 
@@ -69,7 +69,7 @@ pub(crate) fn value_to_string(
     func_registry: &FunctionRegistry,
 ) -> Result<Value, String> {
     // If already a string, return as-is
-    if matches!(val.vole_type, Type::Primitive(PrimitiveType::String)) {
+    if matches!(val.vole_type, LegacyType::Primitive(PrimitiveType::String)) {
         return Ok(val.value);
     }
 
@@ -148,23 +148,23 @@ impl Cg<'_, '_, '_> {
 
     /// Convert a value to a string
     fn value_to_string(&mut self, val: CompiledValue) -> Result<Value, String> {
-        if matches!(val.vole_type, Type::Primitive(PrimitiveType::String)) {
+        if matches!(val.vole_type, LegacyType::Primitive(PrimitiveType::String)) {
             return Ok(val.value);
         }
 
         // Handle arrays
-        if matches!(val.vole_type, Type::Array(_)) {
+        if matches!(val.vole_type, LegacyType::Array(_)) {
             return self.call_runtime(RuntimeFn::ArrayI64ToString, &[val.value]);
         }
 
         // Handle nil type directly
-        if matches!(val.vole_type, Type::Nil) {
+        if matches!(val.vole_type, LegacyType::Nil) {
             return self.call_runtime(RuntimeFn::NilToString, &[]);
         }
 
         // Handle optionals (unions with nil variant)
-        if let Type::Union(variants) = &val.vole_type
-            && let Some(nil_idx) = variants.iter().position(|v| matches!(v, Type::Nil))
+        if let LegacyType::Union(variants) = &val.vole_type
+            && let Some(nil_idx) = variants.iter().position(|v| matches!(v, LegacyType::Nil))
         {
             return self.optional_to_string(val.value, variants, nil_idx);
         }
@@ -222,9 +222,9 @@ impl Cg<'_, '_, '_> {
         // Find the non-nil variant
         let inner_type = variants
             .iter()
-            .find(|v| !matches!(v, Type::Nil))
+            .find(|v| !matches!(v, LegacyType::Nil))
             .cloned()
-            .unwrap_or(Type::Nil);
+            .unwrap_or(LegacyType::Nil);
         let inner_cr_type = type_to_cranelift(&inner_type, self.ctx.pointer_type);
         let inner_val = self
             .builder
@@ -269,14 +269,14 @@ impl Cg<'_, '_, '_> {
 
         // Check if it's a closure variable
         if let Some((var, vole_type)) = self.vars.get(&callee_sym)
-            && let Type::Function(func_type) = vole_type
+            && let LegacyType::Function(func_type) = vole_type
         {
             return self.call_closure(*var, func_type.clone(), call);
         }
 
         // Check if it's a functional interface variable
         if let Some((var, vole_type)) = self.vars.get(&callee_sym)
-            && let Type::Nominal(NominalType::Interface(iface)) = vole_type
+            && let LegacyType::Nominal(NominalType::Interface(iface)) = vole_type
             && let Some(method_id) = self
                 .ctx
                 .analyzed
@@ -319,7 +319,7 @@ impl Cg<'_, '_, '_> {
                 let declared_type = resolve_type_expr(ty_expr, self.ctx);
 
                 // If declared as functional interface, call via vtable dispatch
-                if let Type::Nominal(NominalType::Interface(iface)) = &declared_type
+                if let LegacyType::Nominal(NominalType::Interface(iface)) = &declared_type
                     && let Some(method_id) = self
                         .ctx
                         .analyzed
@@ -347,12 +347,12 @@ impl Cg<'_, '_, '_> {
             }
 
             // If it's a function type, call as closure
-            if let Type::Function(func_type) = &lambda_val.vole_type {
+            if let LegacyType::Function(func_type) = &lambda_val.vole_type {
                 return self.call_closure_value(lambda_val.value, func_type.clone(), call);
             }
 
             // If it's an interface type (functional interface), call via vtable
-            if let Type::Nominal(NominalType::Interface(iface)) = &lambda_val.vole_type
+            if let LegacyType::Nominal(NominalType::Interface(iface)) = &lambda_val.vole_type
                 && let Some(method_id) = self
                     .ctx
                     .analyzed
@@ -671,7 +671,7 @@ impl Cg<'_, '_, '_> {
             .func_registry
             .return_type(func_key)
             .cloned()
-            .unwrap_or(Type::Void);
+            .unwrap_or(LegacyType::Void);
 
         if results.is_empty() {
             Ok(self.void_value())
@@ -684,7 +684,7 @@ impl Cg<'_, '_, '_> {
     fn indirect_call(&mut self, call: &CallExpr) -> Result<CompiledValue, String> {
         let callee = self.expr(&call.callee)?;
 
-        if let Type::Function(func_type) = &callee.vole_type {
+        if let LegacyType::Function(func_type) = &callee.vole_type {
             return self.call_closure_value(callee.value, func_type.clone(), call);
         }
 
@@ -701,7 +701,7 @@ impl Cg<'_, '_, '_> {
         let arg = self.expr(&call.args[0])?;
 
         // Dispatch based on argument type
-        let (runtime, call_arg) = if matches!(arg.vole_type, Type::Primitive(PrimitiveType::String))
+        let (runtime, call_arg) = if matches!(arg.vole_type, LegacyType::Primitive(PrimitiveType::String))
         {
             (
                 if newline {
@@ -862,7 +862,7 @@ impl Cg<'_, '_, '_> {
                 self.ctx.pointer_type,
             )));
         }
-        if func_type.return_type.as_ref() != &Type::Void {
+        if func_type.return_type.as_ref() != &LegacyType::Void {
             sig.returns.push(AbiParam::new(type_to_cranelift(
                 &func_type.return_type,
                 self.ctx.pointer_type,
@@ -874,10 +874,10 @@ impl Cg<'_, '_, '_> {
         let mut args: ArgVec = smallvec![closure_ptr];
         for (arg, param_type) in call.args.iter().zip(func_type.params.iter()) {
             let compiled = self.expr(arg)?;
-            let compiled = if matches!(param_type, Type::Nominal(NominalType::Interface(_))) {
+            let compiled = if matches!(param_type, LegacyType::Nominal(NominalType::Interface(_))) {
                 box_interface_value(self.builder, self.ctx, compiled, param_type)?
-            } else if matches!(param_type, Type::Union(_))
-                && !matches!(&compiled.vole_type, Type::Union(_))
+            } else if matches!(param_type, LegacyType::Union(_))
+                && !matches!(&compiled.vole_type, LegacyType::Union(_))
             {
                 // Box concrete type into union representation
                 self.construct_union(compiled, param_type)?
@@ -963,23 +963,23 @@ impl Cg<'_, '_, '_> {
 /// Convert NativeType to Vole Type
 fn native_type_to_vole_type(nt: &NativeType) -> Type {
     match nt {
-        NativeType::I8 => Type::Primitive(PrimitiveType::I8),
-        NativeType::I16 => Type::Primitive(PrimitiveType::I16),
-        NativeType::I32 => Type::Primitive(PrimitiveType::I32),
-        NativeType::I64 => Type::Primitive(PrimitiveType::I64),
-        NativeType::I128 => Type::Primitive(PrimitiveType::I128),
-        NativeType::U8 => Type::Primitive(PrimitiveType::U8),
-        NativeType::U16 => Type::Primitive(PrimitiveType::U16),
-        NativeType::U32 => Type::Primitive(PrimitiveType::U32),
-        NativeType::U64 => Type::Primitive(PrimitiveType::U64),
-        NativeType::F32 => Type::Primitive(PrimitiveType::F32),
-        NativeType::F64 => Type::Primitive(PrimitiveType::F64),
-        NativeType::Bool => Type::Primitive(PrimitiveType::Bool),
-        NativeType::String => Type::Primitive(PrimitiveType::String),
-        NativeType::Nil => Type::Nil,
+        NativeType::I8 => LegacyType::Primitive(PrimitiveType::I8),
+        NativeType::I16 => LegacyType::Primitive(PrimitiveType::I16),
+        NativeType::I32 => LegacyType::Primitive(PrimitiveType::I32),
+        NativeType::I64 => LegacyType::Primitive(PrimitiveType::I64),
+        NativeType::I128 => LegacyType::Primitive(PrimitiveType::I128),
+        NativeType::U8 => LegacyType::Primitive(PrimitiveType::U8),
+        NativeType::U16 => LegacyType::Primitive(PrimitiveType::U16),
+        NativeType::U32 => LegacyType::Primitive(PrimitiveType::U32),
+        NativeType::U64 => LegacyType::Primitive(PrimitiveType::U64),
+        NativeType::F32 => LegacyType::Primitive(PrimitiveType::F32),
+        NativeType::F64 => LegacyType::Primitive(PrimitiveType::F64),
+        NativeType::Bool => LegacyType::Primitive(PrimitiveType::Bool),
+        NativeType::String => LegacyType::Primitive(PrimitiveType::String),
+        NativeType::Nil => LegacyType::Nil,
         NativeType::Optional(inner) => {
-            Type::Union(vec![native_type_to_vole_type(inner), Type::Nil].into())
+            LegacyType::Union(vec![native_type_to_vole_type(inner), LegacyType::Nil].into())
         }
-        NativeType::Array(inner) => Type::Array(Box::new(native_type_to_vole_type(inner))),
+        NativeType::Array(inner) => LegacyType::Array(Box::new(native_type_to_vole_type(inner))),
     }
 }

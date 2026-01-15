@@ -16,7 +16,7 @@ use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::types::NominalType;
-use crate::sema::{EntityRegistry, FunctionType, Type};
+use crate::sema::{EntityRegistry, FunctionType, LegacyType, Type};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 enum InterfaceConcreteType {
@@ -89,7 +89,7 @@ impl InterfaceVtableRegistry {
         concrete_type: &Type,
     ) -> Result<DataId, String> {
         let concrete_key = match concrete_type {
-            Type::Function(func_type) => InterfaceConcreteType::Function {
+            LegacyType::Function(func_type) => InterfaceConcreteType::Function {
                 is_closure: func_type.is_closure,
             },
             _ => {
@@ -229,7 +229,7 @@ impl InterfaceVtableRegistry {
     ) -> Result<DataId, String> {
         // Build key for lookup
         let concrete_key = match concrete_type {
-            Type::Function(func_type) => InterfaceConcreteType::Function {
+            LegacyType::Function(func_type) => InterfaceConcreteType::Function {
                 is_closure: func_type.is_closure,
             },
             _ => {
@@ -345,7 +345,7 @@ impl InterfaceVtableRegistry {
     ) -> Result<DataId, String> {
         // Build key for lookup
         let concrete_key = match concrete_type {
-            Type::Function(func_type) => InterfaceConcreteType::Function {
+            LegacyType::Function(func_type) => InterfaceConcreteType::Function {
                 is_closure: func_type.is_closure,
             },
             _ => {
@@ -449,7 +449,7 @@ impl InterfaceVtableRegistry {
         for _ in func_type.params.iter() {
             sig.params.push(AbiParam::new(word_type));
         }
-        if func_type.return_type.as_ref() != &Type::Void {
+        if func_type.return_type.as_ref() != &LegacyType::Void {
             sig.returns.push(AbiParam::new(word_type));
         }
 
@@ -513,7 +513,7 @@ impl InterfaceVtableRegistry {
             };
 
             // Handle return value
-            if func_type.return_type.as_ref() == &Type::Void {
+            if func_type.return_type.as_ref() == &LegacyType::Void {
                 builder.ins().return_(&[]);
             } else {
                 let Some(result) = results.first().copied() else {
@@ -593,7 +593,7 @@ fn compile_function_wrapper(
                 ctx.pointer_type,
             )));
         }
-        if func_type.return_type.as_ref() != &Type::Void {
+        if func_type.return_type.as_ref() != &LegacyType::Void {
             sig.returns.push(AbiParam::new(type_to_cranelift(
                 &func_type.return_type,
                 ctx.pointer_type,
@@ -612,7 +612,7 @@ fn compile_function_wrapper(
                 ctx.pointer_type,
             )));
         }
-        if func_type.return_type.as_ref() != &Type::Void {
+        if func_type.return_type.as_ref() != &LegacyType::Void {
             sig.returns.push(AbiParam::new(type_to_cranelift(
                 &func_type.return_type,
                 ctx.pointer_type,
@@ -729,7 +729,7 @@ fn compile_external_wrapper(
             ctx.pointer_type,
         )));
     }
-    if func_type.return_type.as_ref() != &Type::Void {
+    if func_type.return_type.as_ref() != &LegacyType::Void {
         native_sig.returns.push(AbiParam::new(type_to_cranelift(
             &func_type.return_type,
             ctx.pointer_type,
@@ -847,7 +847,7 @@ pub(crate) fn box_interface_value(
     value: CompiledValue,
     interface_type: &Type,
 ) -> Result<CompiledValue, String> {
-    let Type::Nominal(NominalType::Interface(interface)) = interface_type else {
+    let LegacyType::Nominal(NominalType::Interface(interface)) = interface_type else {
         return Ok(value);
     };
 
@@ -878,7 +878,7 @@ pub(crate) fn box_interface_value(
         "boxing value as interface"
     );
 
-    if matches!(value.vole_type, Type::Nominal(NominalType::Interface(_))) {
+    if matches!(value.vole_type, LegacyType::Nominal(NominalType::Interface(_))) {
         tracing::debug!("already interface, skip boxing");
         return Ok(value);
     }
@@ -954,7 +954,7 @@ fn resolve_vtable_target(
     let substituted_return_type =
         substitute_type(&interface_method.signature.return_type, substitutions);
 
-    if let Type::Function(func_type) = concrete_type {
+    if let LegacyType::Function(func_type) = concrete_type {
         return Ok(VtableMethod {
             func_type: func_type.clone(),
             target: VtableMethodTarget::Function,
@@ -1003,10 +1003,10 @@ fn resolve_vtable_target(
     // Check direct methods on class/record
     if let Some(method_name_id) = method_name_id
         && let Some(type_name_id) = match concrete_type {
-            Type::Nominal(NominalType::Class(class_type)) => {
+            LegacyType::Nominal(NominalType::Class(class_type)) => {
                 Some(ctx.analyzed.entity_registry.class_name_id(class_type))
             }
-            Type::Nominal(NominalType::Record(record_type)) => {
+            LegacyType::Nominal(NominalType::Record(record_type)) => {
                 Some(ctx.analyzed.entity_registry.record_name_id(record_type))
             }
             _ => None,

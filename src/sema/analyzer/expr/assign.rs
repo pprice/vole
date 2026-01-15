@@ -1,6 +1,6 @@
 use super::super::*;
 use crate::sema::PrimitiveType;
-use crate::sema::types::NominalType;
+use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
     pub(super) fn check_assign_expr(
@@ -35,7 +35,7 @@ impl Analyzer {
                 let field_name = interner.resolve(*field);
 
                 match &obj_ty {
-                    Type::Nominal(NominalType::Class(c)) => {
+                    LegacyType::Nominal(NominalType::Class(c)) => {
                         // Look up field via EntityRegistry
                         let type_def = self.entity_registry.get_type(c.type_def_id);
                         let type_name = self
@@ -85,7 +85,7 @@ impl Analyzer {
                             (Type::invalid("propagate"), false, false)
                         }
                     }
-                    Type::Nominal(NominalType::Record(r)) => {
+                    LegacyType::Nominal(NominalType::Record(r)) => {
                         // Records are immutable - reject field assignment
                         let type_def = self.entity_registry.get_type(r.type_def_id);
                         self.add_error(
@@ -125,12 +125,12 @@ impl Analyzer {
                 // Check index is integer
                 if !matches!(
                     idx_type,
-                    Type::Primitive(PrimitiveType::I32)
-                        | Type::Primitive(PrimitiveType::I64)
-                        | Type::Primitive(PrimitiveType::U8)
-                        | Type::Primitive(PrimitiveType::U16)
-                        | Type::Primitive(PrimitiveType::U32)
-                        | Type::Primitive(PrimitiveType::U64)
+                    LegacyType::Primitive(PrimitiveType::I32)
+                        | LegacyType::Primitive(PrimitiveType::I64)
+                        | LegacyType::Primitive(PrimitiveType::U8)
+                        | LegacyType::Primitive(PrimitiveType::U16)
+                        | LegacyType::Primitive(PrimitiveType::U32)
+                        | LegacyType::Primitive(PrimitiveType::U64)
                 ) {
                     let found = self.type_display(&idx_type);
                     self.add_error(
@@ -145,8 +145,8 @@ impl Analyzer {
 
                 // Get element type
                 match obj_type {
-                    Type::Array(elem_ty) => (*elem_ty, true, true),
-                    Type::FixedArray { element, .. } => (*element, true, true),
+                    LegacyType::Array(elem_ty) => (*elem_ty, true, true),
+                    LegacyType::FixedArray { element, .. } => (*element, true, true),
                     _ => {
                         if !obj_type.is_invalid() {
                             let found = self.type_display(&obj_type);
@@ -256,12 +256,12 @@ impl Analyzer {
                 // Check index is integer
                 if !matches!(
                     idx_type,
-                    Type::Primitive(PrimitiveType::I32)
-                        | Type::Primitive(PrimitiveType::I64)
-                        | Type::Primitive(PrimitiveType::U8)
-                        | Type::Primitive(PrimitiveType::U16)
-                        | Type::Primitive(PrimitiveType::U32)
-                        | Type::Primitive(PrimitiveType::U64)
+                    LegacyType::Primitive(PrimitiveType::I32)
+                        | LegacyType::Primitive(PrimitiveType::I64)
+                        | LegacyType::Primitive(PrimitiveType::U8)
+                        | LegacyType::Primitive(PrimitiveType::U16)
+                        | LegacyType::Primitive(PrimitiveType::U32)
+                        | LegacyType::Primitive(PrimitiveType::U64)
                 ) {
                     let found = self.type_display(&idx_type);
                     self.add_error(
@@ -276,8 +276,8 @@ impl Analyzer {
 
                 // Get element type
                 match obj_type {
-                    Type::Array(elem_ty) => *elem_ty,
-                    Type::FixedArray { element, .. } => *element,
+                    LegacyType::Array(elem_ty) => *elem_ty,
+                    LegacyType::FixedArray { element, .. } => *element,
                     _ => {
                         if !obj_type.is_invalid() {
                             let found = self.type_display(&obj_type);
@@ -303,7 +303,7 @@ impl Analyzer {
                 let field_name = interner.resolve(*field);
 
                 match &obj_ty {
-                    Type::Nominal(NominalType::Class(c)) => {
+                    LegacyType::Nominal(NominalType::Class(c)) => {
                         // Look up field via EntityRegistry
                         let type_def = self.entity_registry.get_type(c.type_def_id);
                         let type_name = self
@@ -352,7 +352,7 @@ impl Analyzer {
                             Type::invalid("propagate")
                         }
                     }
-                    Type::Nominal(NominalType::Record(r)) => {
+                    LegacyType::Nominal(NominalType::Record(r)) => {
                         // Records are immutable - reject field assignment
                         let type_def = self.entity_registry.get_type(r.type_def_id);
                         self.add_error(

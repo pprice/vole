@@ -2,7 +2,7 @@ use super::super::*;
 use crate::identity::{MethodId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
-use crate::sema::types::NominalType;
+use crate::sema::types::{LegacyType, NominalType};
 use std::collections::{HashMap, HashSet};
 
 impl Analyzer {
@@ -32,12 +32,12 @@ impl Analyzer {
         method_name: Symbol,
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
-        // Handle Type::TypeParam and Type::TypeParamRef by looking up constraint interfaces
+        // Handle LegacyType::TypeParam and LegacyType::TypeParamRef by looking up constraint interfaces
         match object_type {
-            Type::TypeParam(param_name_id) => {
+            LegacyType::TypeParam(param_name_id) => {
                 return self.resolve_method_on_type_param(*param_name_id, method_name, interner);
             }
-            Type::TypeParamRef(type_param_id) => {
+            LegacyType::TypeParamRef(type_param_id) => {
                 // Look up the NameId from the type param stack
                 if let Some(info) = self.type_param_stack.get_by_type_param_id(*type_param_id) {
                     return self.resolve_method_on_type_param(info.name_id, method_name, interner);
@@ -72,7 +72,7 @@ impl Analyzer {
                         // the concrete type. Generators implement Iterator with their own next()
                         // method, so calling external functions directly would crash.
                         let is_interface_type =
-                            matches!(object_type, Type::Nominal(NominalType::Interface(_)));
+                            matches!(object_type, LegacyType::Nominal(NominalType::Interface(_)));
 
                         // For external default methods on CONCRETE types (not interface types),
                         // we can call the external directly
@@ -101,8 +101,8 @@ impl Analyzer {
                         if method_def.has_default
                             && matches!(
                                 object_type,
-                                Type::Nominal(NominalType::Class(_))
-                                    | Type::Nominal(NominalType::Record(_))
+                                LegacyType::Nominal(NominalType::Class(_))
+                                    | LegacyType::Nominal(NominalType::Record(_))
                             )
                             && let Some(type_name_id) = self.get_type_name_id(object_type)
                         {
@@ -148,7 +148,7 @@ impl Analyzer {
     /// Build substitution map for generic interface types
     fn build_interface_substitutions(&self, object_type: &Type) -> HashMap<NameId, Type> {
         // Extract type_def_id and type_args from nominal types
-        if let Type::Nominal(n) = object_type {
+        if let LegacyType::Nominal(n) = object_type {
             self.entity_registry
                 .substitution_map(n.type_def_id(), n.type_args())
         } else {
@@ -180,9 +180,9 @@ impl Analyzer {
     /// Get TypeDefId for a Type if it's registered in EntityRegistry
     fn get_type_def_id_for_type(&self, ty: &Type) -> Option<TypeDefId> {
         match ty {
-            Type::Nominal(NominalType::Class(c)) => Some(c.type_def_id),
-            Type::Nominal(NominalType::Record(r)) => Some(r.type_def_id),
-            Type::Nominal(NominalType::Interface(i)) => Some(i.type_def_id),
+            LegacyType::Nominal(NominalType::Class(c)) => Some(c.type_def_id),
+            LegacyType::Nominal(NominalType::Record(r)) => Some(r.type_def_id),
+            LegacyType::Nominal(NominalType::Interface(i)) => Some(i.type_def_id),
             _ => None,
         }
     }
@@ -190,13 +190,13 @@ impl Analyzer {
     /// Get the name_id for a type
     fn get_type_name_id(&self, ty: &Type) -> Option<NameId> {
         match ty {
-            Type::Nominal(NominalType::Class(c)) => {
+            LegacyType::Nominal(NominalType::Class(c)) => {
                 Some(self.entity_registry.get_type(c.type_def_id).name_id)
             }
-            Type::Nominal(NominalType::Record(r)) => {
+            LegacyType::Nominal(NominalType::Record(r)) => {
                 Some(self.entity_registry.get_type(r.type_def_id).name_id)
             }
-            Type::Nominal(NominalType::Interface(interface_type)) => {
+            LegacyType::Nominal(NominalType::Interface(interface_type)) => {
                 Some(self.entity_registry.name_id(interface_type.type_def_id))
             }
             _ => None,
@@ -378,7 +378,7 @@ impl Analyzer {
 
         // 2. Interface methods (vtable dispatch)
         let (interface_type_def_id, type_args): (Option<TypeDefId>, &[Type]) = match object_type {
-            Type::Nominal(NominalType::Interface(iface)) => {
+            LegacyType::Nominal(NominalType::Interface(iface)) => {
                 (Some(iface.type_def_id), &iface.type_args)
             }
             _ => (None, &[]),
@@ -462,8 +462,8 @@ impl Analyzer {
 
         // 3. Direct methods on class/record via EntityRegistry
         let (type_def_id_opt, record_type_args) = match object_type {
-            Type::Nominal(NominalType::Class(c)) => (Some(c.type_def_id), None),
-            Type::Nominal(NominalType::Record(r)) => (
+            LegacyType::Nominal(NominalType::Class(c)) => (Some(c.type_def_id), None),
+            LegacyType::Nominal(NominalType::Record(r)) => (
                 Some(r.type_def_id),
                 if r.type_args.is_empty() {
                     None
@@ -511,8 +511,8 @@ impl Analyzer {
         // 4. Default methods from implemented interfaces
         // Get type_def_id from the object type (reusing earlier logic or via name_id)
         let type_def_id_opt = match object_type {
-            Type::Nominal(NominalType::Class(c)) => Some(c.type_def_id),
-            Type::Nominal(NominalType::Record(r)) => Some(r.type_def_id),
+            LegacyType::Nominal(NominalType::Class(c)) => Some(c.type_def_id),
+            LegacyType::Nominal(NominalType::Record(r)) => Some(r.type_def_id),
             _ => None,
         };
         if let Some(type_def_id) = type_def_id_opt {

@@ -13,7 +13,7 @@ use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::implement_registry::ExternalMethodInfo;
-use crate::sema::{PrimitiveType, Type};
+use crate::sema::{LegacyType, PrimitiveType, Type};
 use smallvec::SmallVec;
 
 use super::lambda::CaptureBinding;
@@ -246,7 +246,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I8,
-            vole_type: Type::Primitive(PrimitiveType::Bool),
+            vole_type: LegacyType::Primitive(PrimitiveType::Bool),
         }
     }
 
@@ -261,7 +261,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I64,
-            vole_type: Type::Primitive(PrimitiveType::I64),
+            vole_type: LegacyType::Primitive(PrimitiveType::I64),
         }
     }
 
@@ -286,7 +286,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a float constant with explicit type (for bidirectional inference)
     pub fn float_const(&mut self, n: f64, vole_type: Type) -> CompiledValue {
         let (ty, value) = match vole_type {
-            Type::Primitive(PrimitiveType::F32) => {
+            LegacyType::Primitive(PrimitiveType::F32) => {
                 let v = self.builder.ins().f32const(n as f32);
                 (types::F32, v)
             }
@@ -309,7 +309,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I8,
-            vole_type: Type::Nil,
+            vole_type: LegacyType::Nil,
         }
     }
 
@@ -319,7 +319,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I8,
-            vole_type: Type::Done,
+            vole_type: LegacyType::Done,
         }
     }
 
@@ -328,7 +328,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: self.ctx.pointer_type,
-            vole_type: Type::Primitive(PrimitiveType::String),
+            vole_type: LegacyType::Primitive(PrimitiveType::String),
         }
     }
 

@@ -3,7 +3,7 @@
 use crate::frontend::Symbol;
 use crate::identity::NameId;
 use crate::sema::type_table::TypeTable;
-use crate::sema::types::{FunctionType, NominalType, PrimitiveType, Type};
+use crate::sema::types::{FunctionType, LegacyType, NominalType, PrimitiveType, Type};
 use std::collections::HashMap;
 
 /// Identifier for primitive types
@@ -63,7 +63,7 @@ impl TypeId {
         entity_registry: &crate::sema::entity_registry::EntityRegistry,
     ) -> Option<Self> {
         match ty {
-            Type::Primitive(prim) => {
+            LegacyType::Primitive(prim) => {
                 let prim_id = match prim {
                     PrimitiveType::I8 => PrimitiveTypeId::I8,
                     PrimitiveType::I16 => PrimitiveTypeId::I16,
@@ -81,10 +81,10 @@ impl TypeId {
                 };
                 types.primitive_name_id(prim_id).map(TypeId)
             }
-            Type::Range => types.primitive_name_id(PrimitiveTypeId::Range).map(TypeId),
-            Type::Array(_) => types.array_name_id().map(TypeId),
-            Type::Nominal(NominalType::Class(c)) => Some(TypeId(entity_registry.class_name_id(c))),
-            Type::Nominal(NominalType::Record(r)) => {
+            LegacyType::Range => types.primitive_name_id(PrimitiveTypeId::Range).map(TypeId),
+            LegacyType::Array(_) => types.array_name_id().map(TypeId),
+            LegacyType::Nominal(NominalType::Class(c)) => Some(TypeId(entity_registry.class_name_id(c))),
+            LegacyType::Nominal(NominalType::Record(r)) => {
                 Some(TypeId(entity_registry.record_name_id(r)))
             }
             _ => None,
@@ -217,7 +217,7 @@ mod tests {
                 trait_name: Some(sym(2)), // "Sized"
                 func_type: FunctionType {
                     params: vec![].into(),
-                    return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
+                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 },
                 is_builtin: true,
@@ -260,7 +260,7 @@ mod tests {
 
         assert_eq!(
             TypeId::from_type(
-                &Type::Primitive(PrimitiveType::I64),
+                &LegacyType::Primitive(PrimitiveType::I64),
                 &types,
                 &entity_registry
             ),
@@ -268,14 +268,14 @@ mod tests {
         );
         assert_eq!(
             TypeId::from_type(
-                &Type::Array(Box::new(Type::Primitive(PrimitiveType::I32))),
+                &LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::I32))),
                 &types,
                 &entity_registry
             ),
             Some(TypeId(array_name))
         );
         assert_eq!(
-            TypeId::from_type(&Type::Void, &types, &entity_registry),
+            TypeId::from_type(&LegacyType::Void, &types, &entity_registry),
             None
         );
     }
@@ -303,7 +303,7 @@ mod tests {
                 trait_name: None,
                 func_type: FunctionType {
                     params: vec![].into(),
-                    return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
+                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 },
                 is_builtin: true,
@@ -318,7 +318,7 @@ mod tests {
                 trait_name: None,
                 func_type: FunctionType {
                     params: vec![].into(),
-                    return_type: Box::new(Type::Primitive(PrimitiveType::String)),
+                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::String)),
                     is_closure: false,
                 },
                 is_builtin: true,
@@ -357,8 +357,8 @@ mod tests {
             MethodImpl {
                 trait_name: Some(sym(20)), // "Equatable"
                 func_type: FunctionType {
-                    params: vec![Type::Primitive(PrimitiveType::I64)].into(),
-                    return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
+                    params: vec![LegacyType::Primitive(PrimitiveType::I64)].into(),
+                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
                     is_closure: false,
                 },
                 is_builtin: false,
@@ -374,7 +374,7 @@ mod tests {
                 trait_name: None,
                 func_type: FunctionType {
                     params: vec![].into(),
-                    return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
+                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 },
                 is_builtin: false,

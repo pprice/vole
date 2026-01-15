@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::sema::PrimitiveType;
+use crate::sema::types::LegacyType;
 
 impl Analyzer {
     /// Check if a pattern is a type pattern (matches a class/record/primitive type name)
@@ -47,7 +48,7 @@ impl Analyzer {
         }
 
         // For fallible types, require at least one error arm
-        if let Type::Fallible(_) = &scrutinee_type {
+        if let LegacyType::Fallible(_) = &scrutinee_type {
             let has_error_arm = match_expr
                 .arms
                 .iter()
@@ -85,7 +86,7 @@ impl Analyzer {
                     if !self.is_type_pattern(&arm.pattern, interner))
             {
                 // Wildcard or binding pattern - narrow to remaining types
-                if let Type::Union(variants) = &scrutinee_type {
+                if let LegacyType::Union(variants) = &scrutinee_type {
                     let remaining: Vec<_> = variants
                         .iter()
                         .filter(|v| !covered_types.contains(v))
@@ -94,7 +95,7 @@ impl Analyzer {
                     if remaining.len() == 1 {
                         Some(remaining[0].clone())
                     } else if remaining.len() > 1 {
-                        Some(Type::Union(remaining.into()))
+                        Some(LegacyType::Union(remaining.into()))
                     } else {
                         narrowed_type
                     }
@@ -117,7 +118,7 @@ impl Analyzer {
             // Check guard if present (must be bool)
             if let Some(guard) = &arm.guard {
                 let guard_type = self.check_expr(guard, interner)?;
-                if guard_type != Type::Primitive(PrimitiveType::Bool) && !guard_type.is_numeric() {
+                if guard_type != LegacyType::Primitive(PrimitiveType::Bool) && !guard_type.is_numeric() {
                     let found = self.type_display(&guard_type);
                     self.add_error(
                         SemanticError::MatchGuardNotBool {
@@ -165,6 +166,6 @@ impl Analyzer {
             }
         }
 
-        Ok(result_type.unwrap_or(Type::Void))
+        Ok(result_type.unwrap_or(LegacyType::Void))
     }
 }

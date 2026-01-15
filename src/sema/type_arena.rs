@@ -11,8 +11,7 @@ use hashbrown::HashMap;
 use smallvec::SmallVec;
 
 use crate::identity::{ModuleId, NameId, TypeDefId, TypeParamId};
-use crate::sema::Type;
-use crate::sema::types::{PlaceholderKind, PrimitiveType};
+use crate::sema::types::{LegacyType, PlaceholderKind, PrimitiveType, Type};
 
 /// Concrete type identity in the TypeArena.
 ///
@@ -72,7 +71,7 @@ pub enum InternedType {
     Nil,
     Done,
     Range,
-    Type, // metatype - the type of types
+    MetaType, // metatype - the type of types
 
     // Error/invalid type
     Invalid {
@@ -226,7 +225,7 @@ impl TypeArena {
         arena.primitives.nil = arena.intern(InternedType::Nil);
         arena.primitives.done = arena.intern(InternedType::Done);
         arena.primitives.range = arena.intern(InternedType::Range);
-        arena.primitives.metatype = arena.intern(InternedType::Type);
+        arena.primitives.metatype = arena.intern(InternedType::MetaType);
 
         arena
     }
@@ -641,7 +640,7 @@ impl TypeArena {
             InternedType::Nil => "nil".to_string(),
             InternedType::Done => "Done".to_string(),
             InternedType::Range => "range".to_string(),
-            InternedType::Type => "type".to_string(),
+            InternedType::MetaType => "type".to_string(),
             InternedType::Invalid { kind } => format!("<invalid: {}>", kind),
             InternedType::Union(variants) => {
                 let parts: Vec<String> = variants.iter().map(|&v| self.display_basic(v)).collect();
@@ -869,7 +868,7 @@ impl TypeArena {
             | InternedType::Nil
             | InternedType::Done
             | InternedType::Range
-            | InternedType::Type
+            | InternedType::MetaType
             | InternedType::Invalid { .. }
             | InternedType::Error { .. }
             | InternedType::Module(_)
@@ -891,77 +890,77 @@ impl TypeArena {
         use crate::sema::types::NominalType;
 
         match ty {
-            Type::Primitive(p) => self.primitive(*p),
-            Type::Void => self.void(),
-            Type::Nil => self.nil(),
-            Type::Done => self.done(),
-            Type::Range => self.range(),
-            Type::Type => self.metatype(),
-            Type::Invalid(_) => self.invalid(),
+            LegacyType::Primitive(p) => self.primitive(*p),
+            LegacyType::Void => self.void(),
+            LegacyType::Nil => self.nil(),
+            LegacyType::Done => self.done(),
+            LegacyType::Range => self.range(),
+            LegacyType::MetaType => self.metatype(),
+            LegacyType::Invalid(_) => self.invalid(),
 
-            Type::Array(elem) => {
+            LegacyType::Array(elem) => {
                 let elem_id = self.from_type(elem);
                 self.array(elem_id)
             }
 
-            Type::Union(variants) => {
+            LegacyType::Union(variants) => {
                 let variant_ids: TypeIdVec = variants.iter().map(|v| self.from_type(v)).collect();
                 self.union(variant_ids)
             }
 
-            Type::Tuple(elements) => {
+            LegacyType::Tuple(elements) => {
                 let elem_ids: TypeIdVec = elements.iter().map(|e| self.from_type(e)).collect();
                 self.tuple(elem_ids)
             }
 
-            Type::FixedArray { element, size } => {
+            LegacyType::FixedArray { element, size } => {
                 let elem_id = self.from_type(element);
                 self.fixed_array(elem_id, *size)
             }
 
-            Type::RuntimeIterator(elem) => {
+            LegacyType::RuntimeIterator(elem) => {
                 let elem_id = self.from_type(elem);
                 self.runtime_iterator(elem_id)
             }
 
-            Type::Function(ft) => {
+            LegacyType::Function(ft) => {
                 let param_ids: TypeIdVec = ft.params.iter().map(|p| self.from_type(p)).collect();
                 let ret_id = self.from_type(&ft.return_type);
                 self.function(param_ids, ret_id, ft.is_closure)
             }
 
-            Type::Nominal(NominalType::Class(c)) => {
+            LegacyType::Nominal(NominalType::Class(c)) => {
                 let arg_ids: TypeIdVec = c.type_args.iter().map(|a| self.from_type(a)).collect();
                 self.class(c.type_def_id, arg_ids)
             }
 
-            Type::Nominal(NominalType::Record(r)) => {
+            LegacyType::Nominal(NominalType::Record(r)) => {
                 let arg_ids: TypeIdVec = r.type_args.iter().map(|a| self.from_type(a)).collect();
                 self.record(r.type_def_id, arg_ids)
             }
 
-            Type::Nominal(NominalType::Interface(i)) => {
+            LegacyType::Nominal(NominalType::Interface(i)) => {
                 let arg_ids: TypeIdVec = i.type_args.iter().map(|a| self.from_type(a)).collect();
                 self.interface(i.type_def_id, arg_ids)
             }
 
-            Type::Nominal(NominalType::Error(e)) => self.error_type(e.type_def_id),
+            LegacyType::Nominal(NominalType::Error(e)) => self.error_type(e.type_def_id),
 
-            Type::TypeParam(name_id) => self.type_param(*name_id),
+            LegacyType::TypeParam(name_id) => self.type_param(*name_id),
 
-            Type::TypeParamRef(param_id) => self.type_param_ref(*param_id),
+            LegacyType::TypeParamRef(param_id) => self.type_param_ref(*param_id),
 
-            Type::Module(module_type) => self.module(module_type.module_id),
+            LegacyType::Module(module_type) => self.module(module_type.module_id),
 
-            Type::Placeholder(kind) => self.placeholder(kind.clone()),
+            LegacyType::Placeholder(kind) => self.placeholder(kind.clone()),
 
-            Type::Fallible(ft) => {
+            LegacyType::Fallible(ft) => {
                 let success_id = self.from_type(&ft.success_type);
                 let error_id = self.from_type(&ft.error_type);
                 self.fallible(success_id, error_id)
             }
 
-            Type::Structural(st) => {
+            LegacyType::Structural(st) => {
                 let fields: SmallVec<[(NameId, TypeId); 4]> = st
                     .fields
                     .iter()
@@ -993,33 +992,33 @@ impl TypeArena {
         };
 
         match self.get(id) {
-            InternedType::Primitive(p) => Type::Primitive(*p),
-            InternedType::Void => Type::Void,
-            InternedType::Nil => Type::Nil,
-            InternedType::Done => Type::Done,
-            InternedType::Range => Type::Range,
-            InternedType::Type => Type::Type,
+            InternedType::Primitive(p) => LegacyType::Primitive(*p),
+            InternedType::Void => LegacyType::Void,
+            InternedType::Nil => LegacyType::Nil,
+            InternedType::Done => LegacyType::Done,
+            InternedType::Range => LegacyType::Range,
+            InternedType::MetaType => LegacyType::MetaType,
             InternedType::Invalid { kind } => Type::invalid(kind),
 
-            InternedType::Array(elem) => Type::Array(Box::new(self.to_type(*elem))),
+            InternedType::Array(elem) => LegacyType::Array(Box::new(self.to_type(*elem))),
 
             InternedType::Union(variants) => {
                 let types: Vec<Type> = variants.iter().map(|&v| self.to_type(v)).collect();
-                Type::Union(types.into())
+                LegacyType::Union(types.into())
             }
 
             InternedType::Tuple(elements) => {
                 let types: Vec<Type> = elements.iter().map(|&e| self.to_type(e)).collect();
-                Type::Tuple(types.into())
+                LegacyType::Tuple(types.into())
             }
 
-            InternedType::FixedArray { element, size } => Type::FixedArray {
+            InternedType::FixedArray { element, size } => LegacyType::FixedArray {
                 element: Box::new(self.to_type(*element)),
                 size: *size,
             },
 
             InternedType::RuntimeIterator(elem) => {
-                Type::RuntimeIterator(Box::new(self.to_type(*elem)))
+                LegacyType::RuntimeIterator(Box::new(self.to_type(*elem)))
             }
 
             InternedType::Function {
@@ -1028,7 +1027,7 @@ impl TypeArena {
                 is_closure,
             } => {
                 let param_types: Vec<Type> = params.iter().map(|&p| self.to_type(p)).collect();
-                Type::Function(FunctionType {
+                LegacyType::Function(FunctionType {
                     params: param_types.into(),
                     return_type: Box::new(self.to_type(*ret)),
                     is_closure: *is_closure,
@@ -1040,7 +1039,7 @@ impl TypeArena {
                 type_args,
             } => {
                 let args: Vec<Type> = type_args.iter().map(|&a| self.to_type(a)).collect();
-                Type::Nominal(NominalType::Class(ClassType {
+                LegacyType::Nominal(NominalType::Class(ClassType {
                     type_def_id: *type_def_id,
                     type_args: args.into(),
                 }))
@@ -1051,7 +1050,7 @@ impl TypeArena {
                 type_args,
             } => {
                 let args: Vec<Type> = type_args.iter().map(|&a| self.to_type(a)).collect();
-                Type::Nominal(NominalType::Record(RecordType {
+                LegacyType::Nominal(NominalType::Record(RecordType {
                     type_def_id: *type_def_id,
                     type_args: args.into(),
                 }))
@@ -1065,7 +1064,7 @@ impl TypeArena {
                 // Note: We lose methods/extends info here - this is a limitation of
                 // storing types by TypeDefId only. For full interface type, lookup
                 // from EntityRegistry is needed.
-                Type::Nominal(NominalType::Interface(InterfaceType {
+                LegacyType::Nominal(NominalType::Interface(InterfaceType {
                     type_def_id: *type_def_id,
                     type_args: args.into(),
                     methods: vec![].into(),
@@ -1075,21 +1074,21 @@ impl TypeArena {
 
             InternedType::Error { type_def_id } => {
                 // Note: We lose field info here - lookup from EntityRegistry if needed
-                Type::Nominal(NominalType::Error(ErrorTypeInfo {
+                LegacyType::Nominal(NominalType::Error(ErrorTypeInfo {
                     type_def_id: *type_def_id,
                     fields: vec![],
                 }))
             }
 
-            InternedType::TypeParam(name_id) => Type::TypeParam(*name_id),
+            InternedType::TypeParam(name_id) => LegacyType::TypeParam(*name_id),
 
-            InternedType::TypeParamRef(param_id) => Type::TypeParamRef(*param_id),
+            InternedType::TypeParamRef(param_id) => LegacyType::TypeParamRef(*param_id),
 
             InternedType::Module(module_id) => {
                 // Note: We lose exports/constants/external_funcs info here -
                 // only module_id is stored in TypeArena. For full module type,
                 // lookup from Analyzer's module state is needed.
-                Type::Module(ModuleType {
+                LegacyType::Module(ModuleType {
                     module_id: *module_id,
                     exports: std::collections::HashMap::new(),
                     constants: std::collections::HashMap::new(),
@@ -1099,7 +1098,7 @@ impl TypeArena {
 
             InternedType::Fallible { success, error } => {
                 use crate::sema::types::FallibleType;
-                Type::Fallible(FallibleType {
+                LegacyType::Fallible(FallibleType {
                     success_type: Box::new(self.to_type(*success)),
                     error_type: Box::new(self.to_type(*error)),
                 })
@@ -1107,7 +1106,7 @@ impl TypeArena {
 
             InternedType::Structural(st) => {
                 use crate::sema::types::{StructuralFieldType, StructuralMethodType, StructuralType};
-                Type::Structural(StructuralType {
+                LegacyType::Structural(StructuralType {
                     fields: st.fields
                         .iter()
                         .map(|(name, ty)| StructuralFieldType {
@@ -1126,7 +1125,7 @@ impl TypeArena {
                 })
             }
 
-            InternedType::Placeholder(kind) => Type::Placeholder(kind.clone()),
+            InternedType::Placeholder(kind) => LegacyType::Placeholder(kind.clone()),
         }
     }
 }
@@ -1602,17 +1601,17 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = Type::Primitive(PrimitiveType::I32);
+        let original = LegacyType::Primitive(PrimitiveType::I32);
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
         assert_eq!(original, back);
 
         // Test other primitives
-        let string_type = Type::Primitive(PrimitiveType::String);
+        let string_type = LegacyType::Primitive(PrimitiveType::String);
         let string_id = arena.from_type(&string_type);
         assert_eq!(arena.to_type(string_id), string_type);
 
-        let bool_type = Type::Primitive(PrimitiveType::Bool);
+        let bool_type = LegacyType::Primitive(PrimitiveType::Bool);
         let bool_id = arena.from_type(&bool_type);
         assert_eq!(arena.to_type(bool_id), bool_type);
     }
@@ -1622,27 +1621,27 @@ mod tests {
         let mut arena = TypeArena::new();
 
         // Void
-        let void = Type::Void;
+        let void = LegacyType::Void;
         let void_id = arena.from_type(&void);
         assert_eq!(arena.to_type(void_id), void);
 
         // Nil
-        let nil = Type::Nil;
+        let nil = LegacyType::Nil;
         let nil_id = arena.from_type(&nil);
         assert_eq!(arena.to_type(nil_id), nil);
 
         // Done
-        let done = Type::Done;
+        let done = LegacyType::Done;
         let done_id = arena.from_type(&done);
         assert_eq!(arena.to_type(done_id), done);
 
         // Range
-        let range = Type::Range;
+        let range = LegacyType::Range;
         let range_id = arena.from_type(&range);
         assert_eq!(arena.to_type(range_id), range);
 
         // Type (metatype)
-        let metatype = Type::Type;
+        let metatype = LegacyType::MetaType;
         let metatype_id = arena.from_type(&metatype);
         assert_eq!(arena.to_type(metatype_id), metatype);
     }
@@ -1652,7 +1651,7 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = Type::Array(Box::new(Type::Primitive(PrimitiveType::String)));
+        let original = LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::String)));
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
         assert_eq!(original, back);
@@ -1663,7 +1662,7 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = Type::Union(vec![Type::Primitive(PrimitiveType::I32), Type::Nil].into());
+        let original = LegacyType::Union(vec![LegacyType::Primitive(PrimitiveType::I32), LegacyType::Nil].into());
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
         assert_eq!(original, back);
@@ -1674,11 +1673,11 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = Type::Tuple(
+        let original = LegacyType::Tuple(
             vec![
-                Type::Primitive(PrimitiveType::I32),
-                Type::Primitive(PrimitiveType::String),
-                Type::Primitive(PrimitiveType::Bool),
+                LegacyType::Primitive(PrimitiveType::I32),
+                LegacyType::Primitive(PrimitiveType::String),
+                LegacyType::Primitive(PrimitiveType::Bool),
             ]
             .into(),
         );
@@ -1692,9 +1691,9 @@ mod tests {
         use crate::sema::types::{FunctionType, PrimitiveType};
 
         let mut arena = TypeArena::new();
-        let original = Type::Function(FunctionType {
-            params: vec![Type::Primitive(PrimitiveType::I32)].into(),
-            return_type: Box::new(Type::Primitive(PrimitiveType::String)),
+        let original = LegacyType::Function(FunctionType {
+            params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
+            return_type: Box::new(LegacyType::Primitive(PrimitiveType::String)),
             is_closure: false,
         });
         let id = arena.from_type(&original);
@@ -1702,9 +1701,9 @@ mod tests {
         assert_eq!(original, back);
 
         // Test with closure flag
-        let closure = Type::Function(FunctionType {
+        let closure = LegacyType::Function(FunctionType {
             params: vec![].into(),
-            return_type: Box::new(Type::Void),
+            return_type: Box::new(LegacyType::Void),
             is_closure: true,
         });
         let closure_id = arena.from_type(&closure);
@@ -1718,9 +1717,9 @@ mod tests {
 
         let mut arena = TypeArena::new();
         let type_def_id = TypeDefId::new(42);
-        let original = Type::Nominal(NominalType::Class(ClassType {
+        let original = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
-            type_args: vec![Type::Primitive(PrimitiveType::I32)].into(),
+            type_args: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
         }));
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
@@ -1733,11 +1732,11 @@ mod tests {
 
         let mut arena = TypeArena::new();
         let type_def_id = TypeDefId::new(123);
-        let original = Type::Nominal(NominalType::Record(RecordType {
+        let original = LegacyType::Nominal(NominalType::Record(RecordType {
             type_def_id,
             type_args: vec![
-                Type::Primitive(PrimitiveType::String),
-                Type::Primitive(PrimitiveType::Bool),
+                LegacyType::Primitive(PrimitiveType::String),
+                LegacyType::Primitive(PrimitiveType::Bool),
             ]
             .into(),
         }));
@@ -1751,8 +1750,8 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = Type::FixedArray {
-            element: Box::new(Type::Primitive(PrimitiveType::I32)),
+        let original = LegacyType::FixedArray {
+            element: Box::new(LegacyType::Primitive(PrimitiveType::I32)),
             size: 10,
         };
         let id = arena.from_type(&original);
@@ -1765,7 +1764,7 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = Type::RuntimeIterator(Box::new(Type::Primitive(PrimitiveType::String)));
+        let original = LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(PrimitiveType::String)));
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
         assert_eq!(original, back);
@@ -1775,7 +1774,7 @@ mod tests {
     fn bridge_roundtrip_type_param() {
         let mut arena = TypeArena::new();
         let name_id = NameId::new_for_test(999);
-        let original = Type::TypeParam(name_id);
+        let original = LegacyType::TypeParam(name_id);
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
         assert_eq!(original, back);
@@ -1786,8 +1785,8 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let ty1 = Type::Array(Box::new(Type::Primitive(PrimitiveType::I32)));
-        let ty2 = Type::Array(Box::new(Type::Primitive(PrimitiveType::I32)));
+        let ty1 = LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::I32)));
+        let ty2 = LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::I32)));
 
         let id1 = arena.from_type(&ty1);
         let id2 = arena.from_type(&ty2);
@@ -1803,16 +1802,16 @@ mod tests {
         let mut arena = TypeArena::new();
 
         // Array<(i32, string) -> bool>
-        let func = Type::Function(FunctionType {
+        let func = LegacyType::Function(FunctionType {
             params: vec![
-                Type::Primitive(PrimitiveType::I32),
-                Type::Primitive(PrimitiveType::String),
+                LegacyType::Primitive(PrimitiveType::I32),
+                LegacyType::Primitive(PrimitiveType::String),
             ]
             .into(),
-            return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
+            return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
             is_closure: false,
         });
-        let original = Type::Array(Box::new(func));
+        let original = LegacyType::Array(Box::new(func));
 
         let id = arena.from_type(&original);
         let back = arena.to_type(id);

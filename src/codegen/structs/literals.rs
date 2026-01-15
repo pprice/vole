@@ -8,7 +8,7 @@ use crate::codegen::context::Cg;
 use crate::codegen::types::{CompiledValue, box_interface_value, type_size};
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, StructLiteralExpr};
-use crate::sema::Type;
+use crate::sema::{LegacyType, Type};
 use crate::sema::types::NominalType;
 use cranelift::prelude::*;
 
@@ -64,7 +64,7 @@ impl Cg<'_, '_, '_> {
 
         // Get field types for wrapping optional values
         let field_types: HashMap<String, Type> = match &vole_type {
-            Type::Nominal(NominalType::Record(rt)) => {
+            LegacyType::Nominal(NominalType::Record(rt)) => {
                 let type_def = self.ctx.analyzed.entity_registry.get_type(rt.type_def_id);
                 if let Some(generic_info) = &type_def.generic_info {
                     generic_info
@@ -86,7 +86,7 @@ impl Cg<'_, '_, '_> {
                     HashMap::new()
                 }
             }
-            Type::Nominal(NominalType::Class(ct)) => {
+            LegacyType::Nominal(NominalType::Class(ct)) => {
                 let type_def = self.ctx.analyzed.entity_registry.get_type(ct.type_def_id);
                 if let Some(generic_info) = &type_def.generic_info {
                     generic_info
@@ -127,11 +127,11 @@ impl Cg<'_, '_, '_> {
             // Use heap allocation for unions stored in class/record fields since stack slots
             // don't persist beyond the current function's stack frame
             let final_value = if let Some(field_type) = field_types.get(init_name) {
-                if matches!(field_type, Type::Union(_))
-                    && !matches!(&value.vole_type, Type::Union(_))
+                if matches!(field_type, LegacyType::Union(_))
+                    && !matches!(&value.vole_type, LegacyType::Union(_))
                 {
                     self.construct_union_heap(value, field_type)?
-                } else if matches!(field_type, Type::Nominal(NominalType::Interface(_))) {
+                } else if matches!(field_type, LegacyType::Nominal(NominalType::Interface(_))) {
                     box_interface_value(self.builder, self.ctx, value, field_type)?
                 } else {
                     value
@@ -163,7 +163,7 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_type: &Type,
     ) -> Result<CompiledValue, String> {
-        let Type::Union(variants) = union_type else {
+        let LegacyType::Union(variants) = union_type else {
             return Err(CodegenError::type_mismatch(
                 "union construction",
                 "union type",
@@ -213,7 +213,7 @@ impl Cg<'_, '_, '_> {
             .store(MemFlags::new(), tag_val, heap_ptr, 0);
 
         // Store payload at offset 8 (if not nil)
-        if value.vole_type != Type::Nil {
+        if value.vole_type != LegacyType::Nil {
             self.builder
                 .ins()
                 .store(MemFlags::new(), value.value, heap_ptr, 8);

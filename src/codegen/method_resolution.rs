@@ -9,7 +9,7 @@ use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::types::NominalType;
-use crate::sema::{FunctionType, PrimitiveType, Type};
+use crate::sema::{FunctionType, LegacyType, PrimitiveType, Type};
 
 #[derive(Debug)]
 pub(crate) enum MethodTarget {
@@ -97,7 +97,7 @@ pub(crate) fn resolve_method_target(
     // but at codegen time the type is concrete (e.g., i64).
     let effective_resolution = input.resolution.filter(|resolution| {
         !matches!(resolution, ResolvedMethod::InterfaceMethod { .. })
-            || matches!(input.object_type, Type::Nominal(NominalType::Interface(_)))
+            || matches!(input.object_type, LegacyType::Nominal(NominalType::Interface(_)))
     });
 
     if let Some(resolution) = effective_resolution {
@@ -127,7 +127,7 @@ pub(crate) fn resolve_method_target(
 
                 // For interface types, we need vtable dispatch - the external_info is for
                 // the default implementation, but the concrete type may override it
-                if let Type::Nominal(NominalType::Interface(interface_type)) = input.object_type {
+                if let LegacyType::Nominal(NominalType::Interface(interface_type)) = input.object_type {
                     // Use TypeDefId directly for EntityRegistry-based dispatch
                     let interface_type_id = interface_type.type_def_id;
                     let method_name_id = method_name_id_by_str(
@@ -212,7 +212,7 @@ pub(crate) fn resolve_method_target(
                 // This branch is only taken when object_type is an interface
                 // (non-interface types are filtered out before the match)
                 let interface_type = match input.object_type {
-                    Type::Nominal(NominalType::Interface(it)) => it,
+                    LegacyType::Nominal(NominalType::Interface(it)) => it,
                     _ => unreachable!("InterfaceMethod filtered out for non-interface types"),
                 };
                 let method_name_id = method_name_id_by_str(
@@ -347,27 +347,27 @@ pub(crate) fn resolve_method_target(
 fn get_type_def_id_for_codegen(ty: &Type, analyzed: &AnalyzedProgram) -> Option<TypeDefId> {
     // For Class, Record, and Interface, we already have the TypeDefId
     match ty {
-        Type::Nominal(NominalType::Class(c)) => return Some(c.type_def_id),
-        Type::Nominal(NominalType::Record(r)) => return Some(r.type_def_id),
-        Type::Nominal(NominalType::Interface(i)) => return Some(i.type_def_id),
+        LegacyType::Nominal(NominalType::Class(c)) => return Some(c.type_def_id),
+        LegacyType::Nominal(NominalType::Record(r)) => return Some(r.type_def_id),
+        LegacyType::Nominal(NominalType::Interface(i)) => return Some(i.type_def_id),
         _ => {}
     }
 
     let name_id = match ty {
         // Primitives - look up via well-known NameIds
-        Type::Primitive(PrimitiveType::I8) => Some(analyzed.name_table.primitives.i8),
-        Type::Primitive(PrimitiveType::I16) => Some(analyzed.name_table.primitives.i16),
-        Type::Primitive(PrimitiveType::I32) => Some(analyzed.name_table.primitives.i32),
-        Type::Primitive(PrimitiveType::I64) => Some(analyzed.name_table.primitives.i64),
-        Type::Primitive(PrimitiveType::I128) => Some(analyzed.name_table.primitives.i128),
-        Type::Primitive(PrimitiveType::U8) => Some(analyzed.name_table.primitives.u8),
-        Type::Primitive(PrimitiveType::U16) => Some(analyzed.name_table.primitives.u16),
-        Type::Primitive(PrimitiveType::U32) => Some(analyzed.name_table.primitives.u32),
-        Type::Primitive(PrimitiveType::U64) => Some(analyzed.name_table.primitives.u64),
-        Type::Primitive(PrimitiveType::F32) => Some(analyzed.name_table.primitives.f32),
-        Type::Primitive(PrimitiveType::F64) => Some(analyzed.name_table.primitives.f64),
-        Type::Primitive(PrimitiveType::Bool) => Some(analyzed.name_table.primitives.bool),
-        Type::Primitive(PrimitiveType::String) => Some(analyzed.name_table.primitives.string),
+        LegacyType::Primitive(PrimitiveType::I8) => Some(analyzed.name_table.primitives.i8),
+        LegacyType::Primitive(PrimitiveType::I16) => Some(analyzed.name_table.primitives.i16),
+        LegacyType::Primitive(PrimitiveType::I32) => Some(analyzed.name_table.primitives.i32),
+        LegacyType::Primitive(PrimitiveType::I64) => Some(analyzed.name_table.primitives.i64),
+        LegacyType::Primitive(PrimitiveType::I128) => Some(analyzed.name_table.primitives.i128),
+        LegacyType::Primitive(PrimitiveType::U8) => Some(analyzed.name_table.primitives.u8),
+        LegacyType::Primitive(PrimitiveType::U16) => Some(analyzed.name_table.primitives.u16),
+        LegacyType::Primitive(PrimitiveType::U32) => Some(analyzed.name_table.primitives.u32),
+        LegacyType::Primitive(PrimitiveType::U64) => Some(analyzed.name_table.primitives.u64),
+        LegacyType::Primitive(PrimitiveType::F32) => Some(analyzed.name_table.primitives.f32),
+        LegacyType::Primitive(PrimitiveType::F64) => Some(analyzed.name_table.primitives.f64),
+        LegacyType::Primitive(PrimitiveType::Bool) => Some(analyzed.name_table.primitives.bool),
+        LegacyType::Primitive(PrimitiveType::String) => Some(analyzed.name_table.primitives.string),
         _ => None,
     }?;
 

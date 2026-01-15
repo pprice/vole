@@ -19,7 +19,7 @@ use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, substitute_type};
 use crate::sema::type_arena::TypeArena;
 use crate::sema::types::NominalType;
-use crate::sema::{EntityRegistry, FunctionType, PrimitiveType, Type, TypeId, TypeKey};
+use crate::sema::{EntityRegistry, FunctionType, LegacyType, PrimitiveType, Type, TypeId, TypeKey};
 
 // Re-export box_interface_value for centralized access to all boxing helpers
 pub(crate) use super::interface_vtable::box_interface_value;
@@ -40,7 +40,7 @@ impl CompiledValue {
         Self {
             value: zero,
             ty: types::I64,
-            vole_type: Type::Void,
+            vole_type: LegacyType::Void,
         }
     }
 
@@ -93,12 +93,12 @@ pub(crate) fn type_metadata_by_name_id<'a>(
         "type_metadata_by_name_id lookup"
     );
     let result = type_metadata.values().find(|meta| match &meta.vole_type {
-        Type::Nominal(NominalType::Class(c)) => {
+        LegacyType::Nominal(NominalType::Class(c)) => {
             let class_name_id = entity_registry.class_name_id(c);
             tracing::trace!(target_name_id = ?name_id, class_name_id = ?class_name_id, "comparing class name_id");
             class_name_id == name_id
         }
-        Type::Nominal(NominalType::Record(r)) => entity_registry.record_name_id(r) == name_id,
+        LegacyType::Nominal(NominalType::Record(r)) => entity_registry.record_name_id(r) == name_id,
         _ => false,
     });
     if result.is_none() {
@@ -106,7 +106,7 @@ pub(crate) fn type_metadata_by_name_id<'a>(
         let class_name_ids: Vec<_> = type_metadata
             .values()
             .filter_map(|meta| {
-                if let Type::Nominal(NominalType::Class(c)) = &meta.vole_type {
+                if let LegacyType::Nominal(NominalType::Class(c)) = &meta.vole_type {
                     Some(entity_registry.class_name_id(c))
                 } else {
                     None
@@ -222,7 +222,7 @@ pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
     if let Some(substitutions) = ctx.type_substitutions {
         // First handle Placeholder::TypeParam which has a string name
         // We need to find the matching NameId in substitutions
-        if let Type::Placeholder(crate::sema::types::PlaceholderKind::TypeParam(ref name)) =
+        if let LegacyType::Placeholder(crate::sema::types::PlaceholderKind::TypeParam(ref name)) =
             resolved
         {
             // Look for a substitution with matching name
@@ -288,7 +288,7 @@ pub(crate) fn function_name_id_with_interner(
 #[allow(clippy::only_used_in_recursion)]
 pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: &Type) -> String {
     match ty {
-        Type::Nominal(NominalType::Class(class_type)) => {
+        LegacyType::Nominal(NominalType::Class(class_type)) => {
             let name_id = analyzed.entity_registry.class_name_id(class_type);
             let base = analyzed.name_table.display(name_id);
             if class_type.type_args.is_empty() {
@@ -303,7 +303,7 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
                 format!("{}<{}>", base, arg_list)
             }
         }
-        Type::Nominal(NominalType::Record(record_type)) => {
+        LegacyType::Nominal(NominalType::Record(record_type)) => {
             let name_id = analyzed.entity_registry.record_name_id(record_type);
             let base = analyzed.name_table.display(name_id);
             if record_type.type_args.is_empty() {
@@ -318,7 +318,7 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
                 format!("{}<{}>", base, arg_list)
             }
         }
-        Type::Nominal(NominalType::Interface(interface_type)) => {
+        LegacyType::Nominal(NominalType::Interface(interface_type)) => {
             let name_id = analyzed.entity_registry.name_id(interface_type.type_def_id);
             let base = analyzed.name_table.display(name_id);
             if interface_type.type_args.is_empty() {
@@ -333,15 +333,15 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
                 format!("{}<{}>", base, arg_list)
             }
         }
-        Type::Nominal(NominalType::Error(error_type)) => {
+        LegacyType::Nominal(NominalType::Error(error_type)) => {
             let name_id = analyzed.entity_registry.name_id(error_type.type_def_id);
             analyzed.name_table.display(name_id)
         }
-        Type::Module(module_type) => format!(
+        LegacyType::Module(module_type) => format!(
             "module(\"{}\")",
             analyzed.name_table.module_path(module_type.module_id)
         ),
-        Type::Tuple(elements) => {
+        LegacyType::Tuple(elements) => {
             let elem_list = elements
                 .iter()
                 .map(|elem| display_type(analyzed, interner, elem))
@@ -349,7 +349,7 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
                 .join(", ");
             format!("[{}]", elem_list)
         }
-        Type::FixedArray { element, size } => {
+        LegacyType::FixedArray { element, size } => {
             format!("[{}; {}]", display_type(analyzed, interner, element), size)
         }
         _ => ty.name().to_string(),
@@ -382,7 +382,7 @@ fn build_interface_type_from_entity(
     // Keep extends as TypeDefIds directly
     let extends = type_def.extends.clone();
 
-    Type::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
+    LegacyType::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
         type_def_id,
         type_args: type_args.into(),
         methods: methods.into(),
@@ -438,7 +438,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     TypeDefKind::ErrorType => {
                         // Error type - get info from EntityRegistry
                         if let Some(error_info) = type_def.error_info.clone() {
-                            Type::Nominal(NominalType::Error(error_info))
+                            LegacyType::Nominal(NominalType::Error(error_info))
                         } else {
                             panic!(
                                 "INTERNAL ERROR: error type has no error_info\n\
@@ -455,10 +455,10 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         if let Some(metadata) = type_metadata.get(sym) {
                             // Verify this is the right type by comparing type_def_ids
                             let matches = match &metadata.vole_type {
-                                Type::Nominal(NominalType::Record(r)) => {
+                                LegacyType::Nominal(NominalType::Record(r)) => {
                                     r.type_def_id == type_def_id
                                 }
-                                Type::Nominal(NominalType::Class(c)) => {
+                                LegacyType::Nominal(NominalType::Class(c)) => {
                                     c.type_def_id == type_def_id
                                 }
                                 _ => false,
@@ -474,12 +474,12 @@ pub(crate) fn resolve_type_expr_with_metadata(
                             if let Some(record_type) =
                                 entity_registry.build_record_type(type_def_id)
                             {
-                                return Type::Nominal(NominalType::Record(record_type));
+                                return LegacyType::Nominal(NominalType::Record(record_type));
                             }
                         } else if let Some(class_type) =
                             entity_registry.build_class_type(type_def_id)
                         {
-                            return Type::Nominal(NominalType::Class(class_type));
+                            return LegacyType::Nominal(NominalType::Class(class_type));
                         }
                         panic!(
                             "INTERNAL ERROR: failed to build record/class type\n\
@@ -520,7 +520,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 name_table,
                 module_id,
             );
-            Type::Array(Box::new(elem_ty))
+            LegacyType::Array(Box::new(elem_ty))
         }
         TypeExpr::Optional(inner) => {
             // T? desugars to T | nil
@@ -532,7 +532,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 name_table,
                 module_id,
             );
-            Type::Union(vec![inner_ty, Type::Nil].into())
+            LegacyType::Union(vec![inner_ty, LegacyType::Nil].into())
         }
         TypeExpr::Union(variants) => {
             let variant_types: Vec<Type> = variants
@@ -550,8 +550,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 .collect();
             Type::normalize_union(variant_types)
         }
-        TypeExpr::Nil => Type::Nil,
-        TypeExpr::Done => Type::Done,
+        TypeExpr::Nil => LegacyType::Nil,
+        TypeExpr::Done => LegacyType::Done,
         TypeExpr::Function {
             params,
             return_type,
@@ -577,7 +577,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 name_table,
                 module_id,
             );
-            Type::Function(FunctionType {
+            LegacyType::Function(FunctionType {
                 params: param_types.into(),
                 return_type: Box::new(ret_type),
                 is_closure: false, // Type expressions don't know if closure
@@ -609,7 +609,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 name_table,
                 module_id,
             );
-            Type::Fallible(crate::sema::types::FallibleType {
+            LegacyType::Fallible(crate::sema::types::FallibleType {
                 success_type: Box::new(success),
                 error_type: Box::new(error),
             })
@@ -637,13 +637,13 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 let type_def = entity_registry.get_type(type_def_id);
                 match type_def.kind {
                     TypeDefKind::Class => {
-                        return Type::Nominal(NominalType::Class(crate::sema::types::ClassType {
+                        return LegacyType::Nominal(NominalType::Class(crate::sema::types::ClassType {
                             type_def_id,
                             type_args: resolved_args.into(),
                         }));
                     }
                     TypeDefKind::Record => {
-                        return Type::Nominal(NominalType::Record(
+                        return LegacyType::Nominal(NominalType::Record(
                             crate::sema::types::RecordType {
                                 type_def_id,
                                 type_args: resolved_args.into(),
@@ -698,7 +698,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         // Keep extends as TypeDefIds directly
                         let extends = type_def.extends.clone();
 
-                        return Type::Nominal(NominalType::Interface(
+                        return LegacyType::Nominal(NominalType::Interface(
                             crate::sema::types::InterfaceType {
                                 type_def_id,
                                 type_args: resolved_args.into(),
@@ -736,7 +736,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     )
                 })
                 .collect();
-            Type::Tuple(resolved_elements.into())
+            LegacyType::Tuple(resolved_elements.into())
         }
         TypeExpr::FixedArray { element, size } => {
             let elem_ty = resolve_type_expr_with_metadata(
@@ -747,18 +747,18 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 name_table,
                 module_id,
             );
-            Type::FixedArray {
+            LegacyType::FixedArray {
                 element: Box::new(elem_ty),
                 size: *size,
             }
         }
         TypeExpr::Structural { .. } => {
             // Structural types are constraint-only, not concrete types for codegen
-            Type::Void
+            LegacyType::Void
         }
         TypeExpr::Combination(_) => {
             // Type combinations are constraint-only, not concrete types for codegen
-            Type::Void
+            LegacyType::Void
         }
     }
 }
@@ -766,24 +766,24 @@ pub(crate) fn resolve_type_expr_with_metadata(
 /// Convert a Vole type to a Cranelift type
 pub(crate) fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::Type {
     match ty {
-        Type::Primitive(PrimitiveType::I8) | Type::Primitive(PrimitiveType::U8) => types::I8,
-        Type::Primitive(PrimitiveType::I16) | Type::Primitive(PrimitiveType::U16) => types::I16,
-        Type::Primitive(PrimitiveType::I32) | Type::Primitive(PrimitiveType::U32) => types::I32,
-        Type::Primitive(PrimitiveType::I64) | Type::Primitive(PrimitiveType::U64) => types::I64,
-        Type::Primitive(PrimitiveType::I128) => types::I128,
-        Type::Primitive(PrimitiveType::F32) => types::F32,
-        Type::Primitive(PrimitiveType::F64) => types::F64,
-        Type::Primitive(PrimitiveType::Bool) => types::I8,
-        Type::Primitive(PrimitiveType::String) => pointer_type,
-        Type::Nominal(NominalType::Interface(_)) => pointer_type,
-        Type::Nil => types::I8,            // Nil uses minimal representation
-        Type::Done => types::I8,           // Done uses minimal representation (like Nil)
-        Type::Union(_) => pointer_type,    // Unions are passed by pointer
-        Type::Fallible(_) => pointer_type, // Fallibles are passed by pointer (tagged union)
-        Type::Function(_) => pointer_type, // Function pointers
-        Type::Range => pointer_type,       // Ranges are passed by pointer (start, end)
-        Type::Tuple(_) => pointer_type,    // Tuples are passed by pointer
-        Type::FixedArray { .. } => pointer_type, // Fixed arrays are passed by pointer
+        LegacyType::Primitive(PrimitiveType::I8) | LegacyType::Primitive(PrimitiveType::U8) => types::I8,
+        LegacyType::Primitive(PrimitiveType::I16) | LegacyType::Primitive(PrimitiveType::U16) => types::I16,
+        LegacyType::Primitive(PrimitiveType::I32) | LegacyType::Primitive(PrimitiveType::U32) => types::I32,
+        LegacyType::Primitive(PrimitiveType::I64) | LegacyType::Primitive(PrimitiveType::U64) => types::I64,
+        LegacyType::Primitive(PrimitiveType::I128) => types::I128,
+        LegacyType::Primitive(PrimitiveType::F32) => types::F32,
+        LegacyType::Primitive(PrimitiveType::F64) => types::F64,
+        LegacyType::Primitive(PrimitiveType::Bool) => types::I8,
+        LegacyType::Primitive(PrimitiveType::String) => pointer_type,
+        LegacyType::Nominal(NominalType::Interface(_)) => pointer_type,
+        LegacyType::Nil => types::I8,            // Nil uses minimal representation
+        LegacyType::Done => types::I8,           // Done uses minimal representation (like Nil)
+        LegacyType::Union(_) => pointer_type,    // Unions are passed by pointer
+        LegacyType::Fallible(_) => pointer_type, // Fallibles are passed by pointer (tagged union)
+        LegacyType::Function(_) => pointer_type, // Function pointers
+        LegacyType::Range => pointer_type,       // Ranges are passed by pointer (start, end)
+        LegacyType::Tuple(_) => pointer_type,    // Tuples are passed by pointer
+        LegacyType::FixedArray { .. } => pointer_type, // Fixed arrays are passed by pointer
         _ => types::I64,                   // Default
     }
 }
@@ -791,22 +791,22 @@ pub(crate) fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::
 /// Get the size in bytes for a Vole type (used for union layout)
 pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
     match ty {
-        Type::Primitive(PrimitiveType::I8)
-        | Type::Primitive(PrimitiveType::U8)
-        | Type::Primitive(PrimitiveType::Bool) => 1,
-        Type::Primitive(PrimitiveType::I16) | Type::Primitive(PrimitiveType::U16) => 2,
-        Type::Primitive(PrimitiveType::I32)
-        | Type::Primitive(PrimitiveType::U32)
-        | Type::Primitive(PrimitiveType::F32) => 4,
-        Type::Primitive(PrimitiveType::I64)
-        | Type::Primitive(PrimitiveType::U64)
-        | Type::Primitive(PrimitiveType::F64) => 8,
-        Type::Primitive(PrimitiveType::I128) => 16,
-        Type::Primitive(PrimitiveType::String) | Type::Array(_) => pointer_type.bytes(), // pointer size
-        Type::Nominal(NominalType::Interface(_)) => pointer_type.bytes(),
-        Type::Nil | Type::Done | Type::Void => 0,
-        Type::Range => 16, // start (i64) + end (i64)
-        Type::Union(variants) => {
+        LegacyType::Primitive(PrimitiveType::I8)
+        | LegacyType::Primitive(PrimitiveType::U8)
+        | LegacyType::Primitive(PrimitiveType::Bool) => 1,
+        LegacyType::Primitive(PrimitiveType::I16) | LegacyType::Primitive(PrimitiveType::U16) => 2,
+        LegacyType::Primitive(PrimitiveType::I32)
+        | LegacyType::Primitive(PrimitiveType::U32)
+        | LegacyType::Primitive(PrimitiveType::F32) => 4,
+        LegacyType::Primitive(PrimitiveType::I64)
+        | LegacyType::Primitive(PrimitiveType::U64)
+        | LegacyType::Primitive(PrimitiveType::F64) => 8,
+        LegacyType::Primitive(PrimitiveType::I128) => 16,
+        LegacyType::Primitive(PrimitiveType::String) | LegacyType::Array(_) => pointer_type.bytes(), // pointer size
+        LegacyType::Nominal(NominalType::Interface(_)) => pointer_type.bytes(),
+        LegacyType::Nil | LegacyType::Done | LegacyType::Void => 0,
+        LegacyType::Range => 16, // start (i64) + end (i64)
+        LegacyType::Union(variants) => {
             // Tag (1 byte) + padding + max payload size, aligned to 8
             let max_payload = variants
                 .iter()
@@ -816,7 +816,7 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
             // Layout: [tag:1][padding:7][payload:max_payload] aligned to 8
             8 + max_payload.div_ceil(8) * 8
         }
-        Type::Nominal(NominalType::Error(info)) => {
+        LegacyType::Nominal(NominalType::Error(info)) => {
             // Error types are struct-like: sum of all field sizes, aligned to 8
             let fields_size: u32 = info
                 .fields
@@ -825,26 +825,26 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
                 .sum();
             fields_size.div_ceil(8) * 8
         }
-        Type::Fallible(ft) => {
+        LegacyType::Fallible(ft) => {
             // Fallible layout: | tag (i64) | payload (max size of T or any E) |
             // Tag is always 8 bytes (i64)
             let success_size = type_size(&ft.success_type, pointer_type);
 
             // Compute max error payload size
             let error_size = match ft.error_type.as_ref() {
-                Type::Nominal(NominalType::Error(info)) => {
+                LegacyType::Nominal(NominalType::Error(info)) => {
                     // Single error type
                     info.fields
                         .iter()
                         .map(|f| type_size(&f.ty, pointer_type))
                         .sum()
                 }
-                Type::Union(variants) => {
+                LegacyType::Union(variants) => {
                     // Union of error types - find max payload
                     variants
                         .iter()
                         .filter_map(|v| match v {
-                            Type::Nominal(NominalType::Error(info)) => Some(
+                            LegacyType::Nominal(NominalType::Error(info)) => Some(
                                 info.fields
                                     .iter()
                                     .map(|f| type_size(&f.ty, pointer_type))
@@ -862,14 +862,14 @@ pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
             // Layout: [tag:8][payload:max_payload] aligned to 8
             8 + max_payload.div_ceil(8) * 8
         }
-        Type::Tuple(elements) => {
+        LegacyType::Tuple(elements) => {
             // Sum of element sizes, each aligned to 8 bytes
             elements
                 .iter()
                 .map(|t| type_size(t, pointer_type).div_ceil(8) * 8)
                 .sum()
         }
-        Type::FixedArray { element, size } => {
+        LegacyType::FixedArray { element, size } => {
             // Element size * count, each element aligned to 8 bytes
             let elem_size = type_size(element, pointer_type).div_ceil(8) * 8;
             elem_size * (*size as u32)
@@ -925,7 +925,7 @@ pub(crate) fn fallible_error_tag(
 ) -> Option<i64> {
     let error_name_str = interner.resolve(error_name);
     match fallible.error_type.as_ref() {
-        Type::Nominal(NominalType::Error(info)) => {
+        LegacyType::Nominal(NominalType::Error(info)) => {
             let info_name = name_table.last_segment_str(entity_registry.name_id(info.type_def_id));
             if info_name.as_deref() == Some(error_name_str) {
                 Some(1) // Single error type always gets tag 1
@@ -933,10 +933,10 @@ pub(crate) fn fallible_error_tag(
                 None
             }
         }
-        Type::Union(variants) => {
+        LegacyType::Union(variants) => {
             // Find the 1-based index of the error type in the union
             for (idx, variant) in variants.iter().enumerate() {
-                if let Type::Nominal(NominalType::Error(info)) = variant {
+                if let LegacyType::Nominal(NominalType::Error(info)) = variant {
                     let info_name =
                         name_table.last_segment_str(entity_registry.name_id(info.type_def_id));
                     if info_name.as_deref() == Some(error_name_str) {
@@ -954,13 +954,13 @@ pub(crate) fn fallible_error_tag(
 #[allow(dead_code)] // Used by compiler.rs during migration
 pub(crate) fn cranelift_to_vole_type(ty: types::Type) -> Type {
     match ty {
-        types::I8 => Type::Primitive(PrimitiveType::I8),
-        types::I16 => Type::Primitive(PrimitiveType::I16),
-        types::I32 => Type::Primitive(PrimitiveType::I32),
-        types::I64 => Type::Primitive(PrimitiveType::I64),
-        types::I128 => Type::Primitive(PrimitiveType::I128),
-        types::F32 => Type::Primitive(PrimitiveType::F32),
-        types::F64 => Type::Primitive(PrimitiveType::F64),
+        types::I8 => LegacyType::Primitive(PrimitiveType::I8),
+        types::I16 => LegacyType::Primitive(PrimitiveType::I16),
+        types::I32 => LegacyType::Primitive(PrimitiveType::I32),
+        types::I64 => LegacyType::Primitive(PrimitiveType::I64),
+        types::I128 => LegacyType::Primitive(PrimitiveType::I128),
+        types::F32 => LegacyType::Primitive(PrimitiveType::F32),
+        types::F64 => LegacyType::Primitive(PrimitiveType::F64),
         _ => Type::unknown(), // Pointer types, etc. use inference placeholder for now
     }
 }
@@ -1046,29 +1046,29 @@ pub(crate) fn value_to_word(
     }
 
     let word = match value.vole_type {
-        Type::Primitive(PrimitiveType::F64) => {
+        LegacyType::Primitive(PrimitiveType::F64) => {
             builder
                 .ins()
                 .bitcast(types::I64, MemFlags::new(), value.value)
         }
-        Type::Primitive(PrimitiveType::F32) => {
+        LegacyType::Primitive(PrimitiveType::F32) => {
             let i32_val = builder
                 .ins()
                 .bitcast(types::I32, MemFlags::new(), value.value);
             builder.ins().uextend(word_type, i32_val)
         }
-        Type::Primitive(PrimitiveType::Bool) => builder.ins().uextend(word_type, value.value),
-        Type::Primitive(PrimitiveType::I8) | Type::Primitive(PrimitiveType::U8) => {
+        LegacyType::Primitive(PrimitiveType::Bool) => builder.ins().uextend(word_type, value.value),
+        LegacyType::Primitive(PrimitiveType::I8) | LegacyType::Primitive(PrimitiveType::U8) => {
             builder.ins().uextend(word_type, value.value)
         }
-        Type::Primitive(PrimitiveType::I16) | Type::Primitive(PrimitiveType::U16) => {
+        LegacyType::Primitive(PrimitiveType::I16) | LegacyType::Primitive(PrimitiveType::U16) => {
             builder.ins().uextend(word_type, value.value)
         }
-        Type::Primitive(PrimitiveType::I32) | Type::Primitive(PrimitiveType::U32) => {
+        LegacyType::Primitive(PrimitiveType::I32) | LegacyType::Primitive(PrimitiveType::U32) => {
             builder.ins().uextend(word_type, value.value)
         }
-        Type::Primitive(PrimitiveType::I64) | Type::Primitive(PrimitiveType::U64) => value.value,
-        Type::Primitive(PrimitiveType::I128) => {
+        LegacyType::Primitive(PrimitiveType::I64) | LegacyType::Primitive(PrimitiveType::U64) => value.value,
+        LegacyType::Primitive(PrimitiveType::I128) => {
             let low = builder.ins().ireduce(types::I64, value.value);
             if word_type == types::I64 {
                 low
@@ -1104,25 +1104,25 @@ pub(crate) fn word_to_value(
     }
 
     match vole_type {
-        Type::Primitive(PrimitiveType::F64) => {
+        LegacyType::Primitive(PrimitiveType::F64) => {
             builder.ins().bitcast(types::F64, MemFlags::new(), word)
         }
-        Type::Primitive(PrimitiveType::F32) => {
+        LegacyType::Primitive(PrimitiveType::F32) => {
             let i32_val = builder.ins().ireduce(types::I32, word);
             builder.ins().bitcast(types::F32, MemFlags::new(), i32_val)
         }
-        Type::Primitive(PrimitiveType::Bool) => builder.ins().ireduce(types::I8, word),
-        Type::Primitive(PrimitiveType::I8) | Type::Primitive(PrimitiveType::U8) => {
+        LegacyType::Primitive(PrimitiveType::Bool) => builder.ins().ireduce(types::I8, word),
+        LegacyType::Primitive(PrimitiveType::I8) | LegacyType::Primitive(PrimitiveType::U8) => {
             builder.ins().ireduce(types::I8, word)
         }
-        Type::Primitive(PrimitiveType::I16) | Type::Primitive(PrimitiveType::U16) => {
+        LegacyType::Primitive(PrimitiveType::I16) | LegacyType::Primitive(PrimitiveType::U16) => {
             builder.ins().ireduce(types::I16, word)
         }
-        Type::Primitive(PrimitiveType::I32) | Type::Primitive(PrimitiveType::U32) => {
+        LegacyType::Primitive(PrimitiveType::I32) | LegacyType::Primitive(PrimitiveType::U32) => {
             builder.ins().ireduce(types::I32, word)
         }
-        Type::Primitive(PrimitiveType::I64) | Type::Primitive(PrimitiveType::U64) => word,
-        Type::Primitive(PrimitiveType::I128) => {
+        LegacyType::Primitive(PrimitiveType::I64) | LegacyType::Primitive(PrimitiveType::U64) => word,
+        LegacyType::Primitive(PrimitiveType::I128) => {
             let low = if word_type == types::I64 {
                 word
             } else {
@@ -1138,14 +1138,14 @@ pub(crate) fn word_to_value(
 /// These tags are used by the runtime to distinguish element types.
 pub(crate) fn array_element_tag(ty: &Type) -> i64 {
     match ty {
-        Type::Primitive(PrimitiveType::String) => 1,
-        Type::Primitive(PrimitiveType::I64)
-        | Type::Primitive(PrimitiveType::I32)
-        | Type::Primitive(PrimitiveType::I16)
-        | Type::Primitive(PrimitiveType::I8) => 2,
-        Type::Primitive(PrimitiveType::F64) | Type::Primitive(PrimitiveType::F32) => 3,
-        Type::Primitive(PrimitiveType::Bool) => 4,
-        Type::Array(_) => 5,
+        LegacyType::Primitive(PrimitiveType::String) => 1,
+        LegacyType::Primitive(PrimitiveType::I64)
+        | LegacyType::Primitive(PrimitiveType::I32)
+        | LegacyType::Primitive(PrimitiveType::I16)
+        | LegacyType::Primitive(PrimitiveType::I8) => 2,
+        LegacyType::Primitive(PrimitiveType::F64) | LegacyType::Primitive(PrimitiveType::F32) => 3,
+        LegacyType::Primitive(PrimitiveType::Bool) => 4,
+        LegacyType::Array(_) => 5,
         _ => 2, // default to integer
     }
 }

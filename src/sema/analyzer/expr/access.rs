@@ -5,7 +5,7 @@ use crate::sema::generic::{
     StaticMethodMonomorphKey, TypeParamInfo, merge_type_params, substitute_type,
 };
 use crate::sema::implement_registry::ExternalMethodInfo;
-use crate::sema::types::NominalType;
+use crate::sema::types::{LegacyType, NominalType};
 use std::collections::HashMap;
 
 impl Analyzer {
@@ -44,8 +44,8 @@ impl Analyzer {
     /// Get the type name and list of field names for a struct-like type (for error messages)
     fn get_struct_info(&self, ty: &Type) -> Option<(String, Vec<String>)> {
         let (type_def_id, _type_args) = match ty {
-            Type::Nominal(NominalType::Class(c)) => (c.type_def_id, &c.type_args),
-            Type::Nominal(NominalType::Record(r)) => (r.type_def_id, &r.type_args),
+            LegacyType::Nominal(NominalType::Class(c)) => (c.type_def_id, &c.type_args),
+            LegacyType::Nominal(NominalType::Record(r)) => (r.type_def_id, &r.type_args),
             _ => return None,
         };
 
@@ -77,7 +77,7 @@ impl Analyzer {
         let object_type = self.check_expr(&field_access.object, interner)?;
 
         // Handle module field access
-        if let Type::Module(ref module_type) = object_type {
+        if let LegacyType::Module(ref module_type) = object_type {
             let field_name = interner.resolve(field_access.field);
             if let Some(name_id) = self.module_name_id(module_type.module_id, field_name)
                 && let Some(export_type) = module_type.exports.get(&name_id)
@@ -116,7 +116,7 @@ impl Analyzer {
         let field_name = interner.resolve(field_access.field);
 
         // Extract type_def_id and type_args from the object type
-        let Type::Nominal(n) = &object_type else {
+        let LegacyType::Nominal(n) = &object_type else {
             self.type_error("class or record", &object_type, field_access.object.span);
             return Ok(self.ty_invalid_traced("field_access_non_struct"));
         };
@@ -149,7 +149,7 @@ impl Analyzer {
         let context = format!(
             "field '{}' not found on {} '{}' (available: {})",
             field_name,
-            if matches!(&object_type, Type::Nominal(NominalType::Class(_))) {
+            if matches!(&object_type, LegacyType::Nominal(NominalType::Class(_))) {
                 "class"
             } else {
                 "record"
@@ -187,13 +187,13 @@ impl Analyzer {
             object_type.clone()
         };
 
-        // Handle Type::Error early
+        // Handle LegacyType::Error early
         if inner_type.is_invalid() {
             return Ok(self.ty_invalid());
         }
 
         // Get type_def_id and type_args from inner type
-        let Type::Nominal(n) = &inner_type else {
+        let LegacyType::Nominal(n) = &inner_type else {
             self.type_error(
                 "optional class or record",
                 &object_type,
@@ -265,7 +265,7 @@ impl Analyzer {
         let object_type = self.check_expr(&method_call.object, interner)?;
         let method_name = interner.resolve(method_call.method);
 
-        // Handle Type::Error early
+        // Handle LegacyType::Error early
         if object_type.is_invalid() {
             return Ok(self.ty_invalid());
         }
@@ -287,7 +287,7 @@ impl Analyzer {
             return Ok(self.ty_invalid_traced("method_on_optional"));
         }
 
-        if matches!(object_type, Type::Union(_)) {
+        if matches!(object_type, LegacyType::Union(_)) {
             let ty = self.type_display(&object_type);
             self.add_error(
                 SemanticError::MethodOnUnion {
@@ -304,7 +304,7 @@ impl Analyzer {
         }
 
         // Handle module method calls (e.g., math.sqrt(16.0))
-        if let Type::Module(ref module_type) = object_type {
+        if let LegacyType::Module(ref module_type) = object_type {
             let method_name_str = interner.resolve(method_call.method);
             let name_id = self.module_name_id(module_type.module_id, method_name_str);
 
@@ -312,7 +312,7 @@ impl Analyzer {
             if let Some(name_id) = name_id
                 && let Some(export_type) = module_type.exports.get(&name_id)
             {
-                if let Type::Function(func_type) = export_type {
+                if let LegacyType::Function(func_type) = export_type {
                     // Check argument count
                     if method_call.args.len() != func_type.params.len() {
                         self.add_wrong_arg_count(
@@ -690,10 +690,10 @@ impl Analyzer {
         // method bodies to compile. Interface types use vtable dispatch and don't need monomorphs.
         tracing::debug!(object_type = ?object_type, "record_class_method_monomorph called");
         let (class_type_def_id, type_args) = match object_type {
-            Type::Nominal(NominalType::Class(c)) if !c.type_args.is_empty() => {
+            LegacyType::Nominal(NominalType::Class(c)) if !c.type_args.is_empty() => {
                 (c.type_def_id, &c.type_args)
             }
-            Type::Nominal(NominalType::Record(r)) if !r.type_args.is_empty() => {
+            LegacyType::Nominal(NominalType::Record(r)) if !r.type_args.is_empty() => {
                 (r.type_def_id, &r.type_args)
             }
             _ => {

@@ -1,7 +1,7 @@
 use super::super::*;
 use crate::identity::TypeDefId;
 use crate::sema::compatibility::TypeCompatibility;
-use crate::sema::types::NominalType;
+use crate::sema::types::{LegacyType, NominalType};
 use std::collections::HashSet;
 
 #[allow(dead_code)]
@@ -13,8 +13,8 @@ impl Analyzer {
         }
 
         // Non-functional interface compatibility
-        if let Type::Nominal(NominalType::Interface(iface)) = to {
-            if let Type::Nominal(NominalType::Interface(from_iface)) = from
+        if let LegacyType::Nominal(NominalType::Interface(iface)) = to {
+            if let LegacyType::Nominal(NominalType::Interface(from_iface)) = from
                 && self.interface_extends_by_type_def_id(from_iface.type_def_id, iface.type_def_id)
             {
                 return true;
@@ -26,8 +26,8 @@ impl Analyzer {
         }
 
         // Function type is compatible with functional interface if signatures match
-        if let Type::Function(fn_type) = from
-            && let Type::Nominal(NominalType::Interface(iface)) = to
+        if let LegacyType::Function(fn_type) = from
+            && let LegacyType::Nominal(NominalType::Interface(iface)) = to
             && let Some(iface_fn) =
                 self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
             && fn_type.is_compatible_with_interface(&iface_fn)
@@ -120,7 +120,7 @@ impl Analyzer {
     }
 
     /// Format a method signature for interface requirement messages.
-    /// Shows "Self" instead of "error" for Type::Error (which represents Self in interfaces).
+    /// Shows "Self" instead of "error" for LegacyType::Error (which represents Self in interfaces).
     pub(crate) fn format_interface_method_signature(
         &mut self,
         params: &[Type],

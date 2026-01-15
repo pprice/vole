@@ -235,7 +235,7 @@ pub struct TypeParamInfo {
 }
 
 /// Registry for allocating and looking up TypeParamIds.
-/// Each type parameter gets a unique ID that can be used in Type::TypeParamRef.
+/// Each type parameter gets a unique ID that can be used in LegacyType::TypeParamRef.
 #[derive(Debug, Default)]
 pub struct TypeParamRegistry {
     /// Maps TypeParamId -> (NameId, Symbol) for lookups
@@ -735,7 +735,7 @@ pub fn substitute_type(ty: &Type, substitutions: &HashMap<NameId, Type>) -> Type
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sema::types::PrimitiveType;
+    use crate::sema::types::{LegacyType, PrimitiveType};
 
     #[test]
     fn test_type_param_scope() {
@@ -773,15 +773,15 @@ mod tests {
 
         let key1 = MonomorphKey::new(
             func_name,
-            vec![table.key_for_type(&Type::Primitive(PrimitiveType::I64))],
+            vec![table.key_for_type(&LegacyType::Primitive(PrimitiveType::I64))],
         );
         let key2 = MonomorphKey::new(
             func_name,
-            vec![table.key_for_type(&Type::Primitive(PrimitiveType::String))],
+            vec![table.key_for_type(&LegacyType::Primitive(PrimitiveType::String))],
         );
         let key1_dup = MonomorphKey::new(
             func_name,
-            vec![table.key_for_type(&Type::Primitive(PrimitiveType::I64))],
+            vec![table.key_for_type(&LegacyType::Primitive(PrimitiveType::I64))],
         );
 
         assert!(!cache.contains(&key1));
@@ -793,8 +793,8 @@ mod tests {
                 mangled_name: names.intern_raw(names.main_module(), &["foo__mono_0"]),
                 instance_id: 0,
                 func_type: FunctionType {
-                    params: vec![Type::Primitive(PrimitiveType::I64)].into(),
-                    return_type: Box::new(Type::Primitive(PrimitiveType::I64)),
+                    params: vec![LegacyType::Primitive(PrimitiveType::I64)].into(),
+                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
                     is_closure: false,
                 },
                 substitutions: HashMap::new(),
@@ -811,22 +811,22 @@ mod tests {
         let mut names = crate::identity::NameTable::new();
         let t_name_id = names.intern_raw(names.main_module(), &["T"]);
         let mut subs = HashMap::new();
-        subs.insert(t_name_id, Type::Primitive(PrimitiveType::I64));
+        subs.insert(t_name_id, LegacyType::Primitive(PrimitiveType::I64));
 
         // Simple substitution
-        let result = substitute_type(&Type::TypeParam(t_name_id), &subs);
-        assert_eq!(result, Type::Primitive(PrimitiveType::I64));
+        let result = substitute_type(&LegacyType::TypeParam(t_name_id), &subs);
+        assert_eq!(result, LegacyType::Primitive(PrimitiveType::I64));
 
         // Array of type param
-        let arr = Type::Array(Box::new(Type::TypeParam(t_name_id)));
+        let arr = LegacyType::Array(Box::new(LegacyType::TypeParam(t_name_id)));
         let result = substitute_type(&arr, &subs);
         assert_eq!(
             result,
-            Type::Array(Box::new(Type::Primitive(PrimitiveType::I64)))
+            LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::I64)))
         );
 
         // Non-param types unchanged
-        let result = substitute_type(&Type::Primitive(PrimitiveType::Bool), &subs);
-        assert_eq!(result, Type::Primitive(PrimitiveType::Bool));
+        let result = substitute_type(&LegacyType::Primitive(PrimitiveType::Bool), &subs);
+        assert_eq!(result, LegacyType::Primitive(PrimitiveType::Bool));
     }
 }

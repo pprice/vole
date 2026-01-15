@@ -117,13 +117,13 @@ impl MethodResolutions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sema::types::{PrimitiveType, Type};
+    use crate::sema::types::{LegacyType, PrimitiveType, Type};
 
     #[test]
     fn resolved_method_func_type() {
         let ft = FunctionType {
-            params: vec![Type::Primitive(PrimitiveType::I32)].into(),
-            return_type: Box::new(Type::Primitive(PrimitiveType::Bool)),
+            params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
+            return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
             is_closure: false,
         };
 
@@ -151,7 +151,7 @@ mod tests {
             ResolvedMethod::Direct {
                 func_type: FunctionType {
                     params: vec![].into(),
-                    return_type: Box::new(Type::Void),
+                    return_type: Box::new(LegacyType::Void),
                     is_closure: false,
                 },
             },

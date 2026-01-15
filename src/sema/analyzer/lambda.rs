@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::sema::generic::{TypeParamInfo, TypeParamVariance};
+use crate::sema::types::LegacyType;
 
 impl Analyzer {
     /// Analyze a lambda expression, optionally with an expected function type for inference
@@ -114,7 +115,7 @@ impl Analyzer {
 
                 let _ = self.check_block(block, interner);
 
-                let ret = self.current_function_return.take().unwrap_or(Type::Void);
+                let ret = self.current_function_return.take().unwrap_or(LegacyType::Void);
                 self.current_function_return = old_return;
                 ret
             }
@@ -154,7 +155,7 @@ impl Analyzer {
         // Determine final return type
         let return_type = declared_return.or(expected_return).unwrap_or(body_type);
 
-        Type::Function(FunctionType {
+        LegacyType::Function(FunctionType {
             params: param_types.into(),
             return_type: Box::new(return_type),
             is_closure: has_captures,

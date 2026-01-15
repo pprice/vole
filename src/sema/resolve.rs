@@ -9,8 +9,8 @@ use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{TypeParamScope, substitute_type};
 use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use crate::sema::types::{
-    ClassType, FallibleType, FunctionType, InterfaceMethodType, InterfaceType, NominalType,
-    RecordType, StructuralFieldType, StructuralMethodType, StructuralType, Type,
+    ClassType, FallibleType, FunctionType, InterfaceMethodType, InterfaceType, LegacyType,
+    NominalType, RecordType, StructuralFieldType, StructuralMethodType, StructuralType, Type,
 };
 use std::collections::HashMap;
 
@@ -80,7 +80,7 @@ fn interface_instance(
     // Keep extends as TypeDefIds directly
     let extends = type_def.extends.to_vec();
 
-    Some(Type::Nominal(NominalType::Interface(InterfaceType {
+    Some(LegacyType::Nominal(NominalType::Interface(InterfaceType {
         type_def_id,
         type_args: type_args.into(),
         methods: methods.into(),
@@ -223,7 +223,7 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type
             if let Some(type_params) = ctx.type_params
                 && let Some(tp_info) = type_params.get(*sym)
             {
-                return Type::TypeParam(tp_info.name_id);
+                return LegacyType::TypeParam(tp_info.name_id);
             }
             // Look up type via EntityRegistry (handles aliases via TypeDefKind::Alias)
             // Uses resolve_type_or_interface to also find prelude classes like Map/Set
@@ -236,14 +236,14 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type
                 match type_def.kind {
                     TypeDefKind::Record => {
                         if let Some(record) = ctx.entity_registry.build_record_type(type_id) {
-                            Type::Nominal(NominalType::Record(record))
+                            LegacyType::Nominal(NominalType::Record(record))
                         } else {
                             Type::invalid("resolve_failed")
                         }
                     }
                     TypeDefKind::Class => {
                         if let Some(class) = ctx.entity_registry.build_class_type(type_id) {
-                            Type::Nominal(NominalType::Class(class))
+                            LegacyType::Nominal(NominalType::Class(class))
                         } else {
                             Type::invalid("resolve_failed")
                         }
@@ -256,7 +256,7 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type
                     TypeDefKind::ErrorType => {
                         // Get error info from EntityRegistry
                         if let Some(error_info) = type_def.error_info.clone() {
-                            Type::Nominal(NominalType::Error(error_info))
+                            LegacyType::Nominal(NominalType::Error(error_info))
                         } else {
                             Type::invalid("resolve_failed")
                         }
@@ -278,10 +278,10 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type
         }
         TypeExpr::Array(elem) => {
             let elem_ty = resolve_type(elem, ctx);
-            Type::Array(Box::new(elem_ty))
+            LegacyType::Array(Box::new(elem_ty))
         }
-        TypeExpr::Nil => Type::Nil,
-        TypeExpr::Done => Type::Done,
+        TypeExpr::Nil => LegacyType::Nil,
+        TypeExpr::Done => LegacyType::Done,
         TypeExpr::Optional(inner) => {
             let inner_ty = resolve_type(inner, ctx);
             Type::optional(inner_ty)
@@ -296,7 +296,7 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type
         } => {
             let param_types: Vec<Type> = params.iter().map(|p| resolve_type(p, ctx)).collect();
             let ret = resolve_type(return_type, ctx);
-            Type::Function(FunctionType {
+            LegacyType::Function(FunctionType {
                 params: param_types.into(),
                 return_type: Box::new(ret),
                 is_closure: false, // Type annotations don't know if it's a closure
@@ -317,7 +317,7 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type
         } => {
             let success = resolve_type(success_type, ctx);
             let error = resolve_type(error_type, ctx);
-            Type::Fallible(FallibleType {
+            LegacyType::Fallible(FallibleType {
                 success_type: Box::new(success),
                 error_type: Box::new(error),
             })
@@ -338,13 +338,13 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type
                 let type_def = ctx.entity_registry.get_type(type_id);
                 match type_def.kind {
                     TypeDefKind::Class => {
-                        return Type::Nominal(NominalType::Class(ClassType {
+                        return LegacyType::Nominal(NominalType::Class(ClassType {
                             type_def_id: type_id,
                             type_args: resolved_args.into(),
                         }));
                     }
                     TypeDefKind::Record => {
-                        return Type::Nominal(NominalType::Record(RecordType {
+                        return LegacyType::Nominal(NominalType::Record(RecordType {
                             type_def_id: type_id,
                             type_args: resolved_args.into(),
                         }));
@@ -393,11 +393,11 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type
         TypeExpr::Tuple(elements) => {
             let resolved_elements: Vec<Type> =
                 elements.iter().map(|e| resolve_type(e, ctx)).collect();
-            Type::Tuple(resolved_elements.into())
+            LegacyType::Tuple(resolved_elements.into())
         }
         TypeExpr::FixedArray { element, size } => {
             let elem_ty = resolve_type(element, ctx);
-            Type::FixedArray {
+            LegacyType::FixedArray {
                 element: Box::new(elem_ty),
                 size: *size,
             }
@@ -428,7 +428,7 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type
                     }
                 })
                 .collect();
-            Type::Structural(StructuralType {
+            LegacyType::Structural(StructuralType {
                 fields: resolved_fields,
                 methods: resolved_methods,
             })
@@ -474,15 +474,15 @@ mod tests {
         with_empty_context(&interner, |ctx| {
             assert_eq!(
                 resolve_type(&TypeExpr::Primitive(FrontendPrimitiveType::I32), ctx),
-                Type::Primitive(PrimitiveType::I32)
+                LegacyType::Primitive(PrimitiveType::I32)
             );
             assert_eq!(
                 resolve_type(&TypeExpr::Primitive(FrontendPrimitiveType::Bool), ctx),
-                Type::Primitive(PrimitiveType::Bool)
+                LegacyType::Primitive(PrimitiveType::Bool)
             );
             assert_eq!(
                 resolve_type(&TypeExpr::Primitive(FrontendPrimitiveType::String), ctx),
-                Type::Primitive(PrimitiveType::String)
+                LegacyType::Primitive(PrimitiveType::String)
             );
         });
     }
@@ -491,7 +491,7 @@ mod tests {
     fn resolve_nil_type() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
-            assert_eq!(resolve_type(&TypeExpr::Nil, ctx), Type::Nil);
+            assert_eq!(resolve_type(&TypeExpr::Nil, ctx), LegacyType::Nil);
         });
     }
 
@@ -504,7 +504,7 @@ mod tests {
             let resolved = resolve_type(&array_expr, ctx);
             assert_eq!(
                 resolved,
-                Type::Array(Box::new(Type::Primitive(PrimitiveType::I64)))
+                LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::I64)))
             );
         });
     }
@@ -532,11 +532,11 @@ mod tests {
                 return_type: Box::new(TypeExpr::Primitive(FrontendPrimitiveType::Bool)),
             };
             let resolved = resolve_type(&func_expr, ctx);
-            if let Type::Function(ft) = resolved {
+            if let LegacyType::Function(ft) = resolved {
                 assert_eq!(ft.params.len(), 2);
-                assert_eq!(ft.params[0], Type::Primitive(PrimitiveType::I32));
-                assert_eq!(ft.params[1], Type::Primitive(PrimitiveType::I32));
-                assert_eq!(*ft.return_type, Type::Primitive(PrimitiveType::Bool));
+                assert_eq!(ft.params[0], LegacyType::Primitive(PrimitiveType::I32));
+                assert_eq!(ft.params[1], LegacyType::Primitive(PrimitiveType::I32));
+                assert_eq!(*ft.return_type, LegacyType::Primitive(PrimitiveType::Bool));
                 assert!(!ft.is_closure);
             } else {
                 panic!("Expected function type");
@@ -592,7 +592,7 @@ mod tests {
             let type_id = resolve_type_with_arena(&i32_expr, ctx, &mut arena);
             let back = arena.to_type(type_id);
 
-            assert_eq!(back, Type::Primitive(PrimitiveType::I32));
+            assert_eq!(back, LegacyType::Primitive(PrimitiveType::I32));
 
             // Interning should work - same expr gives same TypeId
             let type_id2 = resolve_type_with_arena(&i32_expr, ctx, &mut arena);
@@ -613,7 +613,7 @@ mod tests {
 
             assert_eq!(
                 back,
-                Type::Array(Box::new(Type::Primitive(PrimitiveType::String)))
+                LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::String)))
             );
         });
     }
@@ -631,10 +631,10 @@ mod tests {
             let type_id = resolve_type_with_arena(&func_expr, ctx, &mut arena);
             let back = arena.to_type(type_id);
 
-            if let Type::Function(ft) = back {
+            if let LegacyType::Function(ft) = back {
                 assert_eq!(ft.params.len(), 1);
-                assert_eq!(ft.params[0], Type::Primitive(PrimitiveType::I32));
-                assert_eq!(*ft.return_type, Type::Primitive(PrimitiveType::Bool));
+                assert_eq!(ft.params[0], LegacyType::Primitive(PrimitiveType::I32));
+                assert_eq!(*ft.return_type, LegacyType::Primitive(PrimitiveType::Bool));
             } else {
                 panic!("Expected function type, got {:?}", back);
             }
@@ -653,10 +653,10 @@ mod tests {
             let back = arena.to_type(type_id);
 
             // Optional is represented as Union([inner, nil])
-            if let Type::Union(variants) = back {
+            if let LegacyType::Union(variants) = back {
                 assert_eq!(variants.len(), 2);
-                assert!(variants.contains(&Type::Primitive(PrimitiveType::I32)));
-                assert!(variants.contains(&Type::Nil));
+                assert!(variants.contains(&LegacyType::Primitive(PrimitiveType::I32)));
+                assert!(variants.contains(&LegacyType::Nil));
             } else {
                 panic!("Expected union type for optional, got {:?}", back);
             }

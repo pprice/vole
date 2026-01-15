@@ -19,7 +19,7 @@ use crate::sema::generic::{
     StaticMethodMonomorphInstance, substitute_type,
 };
 use crate::sema::types::{ClassType, NominalType, RecordType};
-use crate::sema::{PrimitiveType, Type};
+use crate::sema::{LegacyType, PrimitiveType, Type};
 
 /// Compilation phase for monomorphization pipeline.
 /// Allows separating function declaration from body compilation for forward references.
@@ -144,7 +144,7 @@ impl Compiler<'_> {
                         .return_type
                         .as_ref()
                         .map(|t| self.resolve_type_with_metadata(t))
-                        .unwrap_or(Type::Void);
+                        .unwrap_or(LegacyType::Void);
                     self.func_registry.set_return_type(func_key, return_type);
                 }
                 Decl::Tests(tests_decl) => {
@@ -155,7 +155,7 @@ impl Compiler<'_> {
                         let sig = self.jit.create_signature(&[], Some(types::I64));
                         let func_id = self.jit.declare_function(&func_name, &sig);
                         self.func_registry
-                            .set_return_type(func_key, Type::Primitive(PrimitiveType::I64));
+                            .set_return_type(func_key, LegacyType::Primitive(PrimitiveType::I64));
                         self.func_registry.set_func_id(func_key, func_id);
                         test_count += 1;
                     }
@@ -302,7 +302,7 @@ impl Compiler<'_> {
                                 module_id,
                             )
                         })
-                        .unwrap_or(Type::Void);
+                        .unwrap_or(LegacyType::Void);
                     self.func_registry.set_return_type(func_key, return_type);
                 }
             }
@@ -423,7 +423,7 @@ impl Compiler<'_> {
                                 module_id,
                             )
                         })
-                        .unwrap_or(Type::Void);
+                        .unwrap_or(LegacyType::Void);
                     self.func_registry.set_return_type(func_key, return_type);
                 }
             }
@@ -879,7 +879,7 @@ impl Compiler<'_> {
                                 module_id,
                             )
                         })
-                        .unwrap_or(Type::Void);
+                        .unwrap_or(LegacyType::Void);
                     self.func_registry.set_return_type(func_key, return_type);
                 }
                 Decl::Tests(tests_decl) if include_tests => {
@@ -889,7 +889,7 @@ impl Compiler<'_> {
                         let sig = self.jit.create_signature(&[], Some(types::I64));
                         let func_id = self.jit.declare_function(&func_name, &sig);
                         self.func_registry
-                            .set_return_type(func_key, Type::Primitive(PrimitiveType::I64));
+                            .set_return_type(func_key, LegacyType::Primitive(PrimitiveType::I64));
                         self.func_registry.set_func_id(func_key, func_id);
                         test_count += 1;
                     }
@@ -1143,7 +1143,7 @@ impl Compiler<'_> {
         for param_type in func_type.params.iter() {
             params.push(type_to_cranelift(param_type, self.pointer_type));
         }
-        let ret = if *func_type.return_type == Type::Void {
+        let ret = if *func_type.return_type == LegacyType::Void {
             None
         } else {
             Some(type_to_cranelift(&func_type.return_type, self.pointer_type))
@@ -1270,7 +1270,7 @@ impl Compiler<'_> {
         for param_type in instance.func_type.params.iter() {
             params.push(type_to_cranelift(param_type, self.pointer_type));
         }
-        let ret = if *instance.func_type.return_type == Type::Void {
+        let ret = if *instance.func_type.return_type == LegacyType::Void {
             None
         } else {
             Some(type_to_cranelift(
@@ -1520,7 +1520,7 @@ impl Compiler<'_> {
         for param_type in instance.func_type.params.iter() {
             params.push(type_to_cranelift(param_type, self.pointer_type));
         }
-        let ret = if *instance.func_type.return_type == Type::Void {
+        let ret = if *instance.func_type.return_type == LegacyType::Void {
             None
         } else {
             Some(type_to_cranelift(
@@ -1672,23 +1672,23 @@ impl Compiler<'_> {
                             substitutions
                                 .get(&param.name_id)
                                 .cloned()
-                                .unwrap_or(Type::TypeParam(param.name_id))
+                                .unwrap_or(LegacyType::TypeParam(param.name_id))
                         })
                         .collect();
 
                     // Determine if it's a class or record based on TypeDefKind
                     return match &type_def.kind {
-                        TypeDefKind::Record => Type::Nominal(NominalType::Record(RecordType {
+                        TypeDefKind::Record => LegacyType::Nominal(NominalType::Record(RecordType {
                             type_def_id,
                             type_args: type_args.into(),
                         })),
-                        TypeDefKind::Class => Type::Nominal(NominalType::Class(ClassType {
+                        TypeDefKind::Class => LegacyType::Nominal(NominalType::Class(ClassType {
                             type_def_id,
                             type_args: type_args.into(),
                         })),
                         _ => {
                             // Fallback for other kinds
-                            Type::Nominal(NominalType::Record(RecordType {
+                            LegacyType::Nominal(NominalType::Record(RecordType {
                                 type_def_id,
                                 type_args: type_args.into(),
                             }))
@@ -1703,7 +1703,7 @@ impl Compiler<'_> {
             substitute_type(&metadata.vole_type, substitutions)
         } else {
             // Final fallback
-            Type::Primitive(PrimitiveType::I64)
+            LegacyType::Primitive(PrimitiveType::I64)
         }
     }
 
@@ -1847,7 +1847,7 @@ impl Compiler<'_> {
         for param_type in instance.func_type.params.iter() {
             params.push(type_to_cranelift(param_type, self.pointer_type));
         }
-        let ret = if *instance.func_type.return_type == Type::Void {
+        let ret = if *instance.func_type.return_type == LegacyType::Void {
             None
         } else {
             Some(type_to_cranelift(

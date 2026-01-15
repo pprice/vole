@@ -4,7 +4,7 @@
 use super::*;
 use crate::frontend::ast::{ExprKind, LetInit, TypeExpr};
 use crate::sema::entity_defs::{GenericFuncInfo, GenericTypeInfo, TypeDefKind};
-use crate::sema::types::NominalType;
+use crate::sema::types::{LegacyType, NominalType};
 
 /// Extract the base interface name from a TypeExpr.
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
@@ -127,7 +127,7 @@ impl Analyzer {
                 .return_type
                 .as_ref()
                 .map(|t| self.resolve_type(t, interner))
-                .unwrap_or(Type::Void);
+                .unwrap_or(LegacyType::Void);
 
             let signature = FunctionType {
                 params: params.into(),
@@ -202,7 +202,7 @@ impl Analyzer {
                 .return_type
                 .as_ref()
                 .map(|t| resolve_type(t, &mut ctx))
-                .unwrap_or(Type::Void);
+                .unwrap_or(LegacyType::Void);
 
             // Create a FunctionType with TypeParam placeholders for the signature
             let signature = FunctionType {
@@ -292,7 +292,7 @@ impl Analyzer {
             if let Some(ref ct) = class_type {
                 self.register_named_type(
                     class.name,
-                    Type::Nominal(NominalType::Class(ct.clone())),
+                    LegacyType::Nominal(NominalType::Class(ct.clone())),
                     interner,
                 );
             }
@@ -307,7 +307,7 @@ impl Analyzer {
 
             // Register methods in EntityRegistry (single source of truth)
             // Use class_type as Self for resolving method signatures
-            let self_type_for_methods = class_type.map(|c| Type::Nominal(NominalType::Class(c)));
+            let self_type_for_methods = class_type.map(|c| LegacyType::Nominal(NominalType::Class(c)));
             let builtin_mod = self.name_table.builtin_module();
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
@@ -329,7 +329,7 @@ impl Analyzer {
                     .map(|t| {
                         self.resolve_type_with_self(t, interner, self_type_for_methods.clone())
                     })
-                    .unwrap_or(Type::Void);
+                    .unwrap_or(LegacyType::Void);
                 let signature = FunctionType {
                     params: params.into(),
                     return_type: Box::new(return_type),
@@ -364,7 +364,7 @@ impl Analyzer {
                         .return_type
                         .as_ref()
                         .map(|t| self.resolve_type(t, interner))
-                        .unwrap_or(Type::Void);
+                        .unwrap_or(LegacyType::Void);
                     let signature = FunctionType {
                         params: params.into(),
                         return_type: Box::new(return_type),
@@ -401,7 +401,7 @@ impl Analyzer {
                         .return_type
                         .as_ref()
                         .map(|t| self.resolve_type(t, interner))
-                        .unwrap_or(Type::Void);
+                        .unwrap_or(LegacyType::Void);
                     let signature = FunctionType {
                         params: params.into(),
                         return_type: Box::new(return_type.clone()),
@@ -546,7 +546,7 @@ impl Analyzer {
             if let Some(ref ct) = class_type {
                 self.register_named_type(
                     class.name,
-                    Type::Nominal(NominalType::Class(ct.clone())),
+                    LegacyType::Nominal(NominalType::Class(ct.clone())),
                     interner,
                 );
             }
@@ -560,7 +560,7 @@ impl Analyzer {
             );
 
             // Register methods in EntityRegistry with type params in scope
-            let self_type_for_methods = class_type.map(|c| Type::Nominal(NominalType::Class(c)));
+            let self_type_for_methods = class_type.map(|c| LegacyType::Nominal(NominalType::Class(c)));
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
                 let method_name_id = self.name_table.intern_raw(builtin_mod, &[method_name_str]);
@@ -601,7 +601,7 @@ impl Analyzer {
                         };
                         resolve_type(t, &mut ctx)
                     })
-                    .unwrap_or(Type::Void);
+                    .unwrap_or(LegacyType::Void);
 
                 let signature = FunctionType {
                     params: params.into(),
@@ -698,7 +698,7 @@ impl Analyzer {
                             );
                             resolve_type(t, &mut ctx)
                         })
-                        .unwrap_or(Type::Void);
+                        .unwrap_or(LegacyType::Void);
 
                     let signature = FunctionType {
                         params: params.into(),
@@ -759,7 +759,7 @@ impl Analyzer {
                             );
                             resolve_type(t, &mut ctx)
                         })
-                        .unwrap_or(Type::Void);
+                        .unwrap_or(LegacyType::Void);
 
                     let signature = FunctionType {
                         params: params.into(),
@@ -848,7 +848,7 @@ impl Analyzer {
             if let Some(ref rt) = record_type {
                 self.register_named_type(
                     record.name,
-                    Type::Nominal(NominalType::Record(rt.clone())),
+                    LegacyType::Nominal(NominalType::Record(rt.clone())),
                     interner,
                 );
             }
@@ -863,7 +863,7 @@ impl Analyzer {
 
             // Register methods in EntityRegistry (single source of truth)
             // Use record_type as Self for resolving method signatures
-            let self_type_for_methods = record_type.map(|r| Type::Nominal(NominalType::Record(r)));
+            let self_type_for_methods = record_type.map(|r| LegacyType::Nominal(NominalType::Record(r)));
             let builtin_mod = self.name_table.builtin_module();
             for method in &record.methods {
                 let method_name_str = interner.resolve(method.name);
@@ -885,7 +885,7 @@ impl Analyzer {
                     .map(|t| {
                         self.resolve_type_with_self(t, interner, self_type_for_methods.clone())
                     })
-                    .unwrap_or(Type::Void);
+                    .unwrap_or(LegacyType::Void);
                 let signature = FunctionType {
                     params: params.into(),
                     return_type: Box::new(return_type),
@@ -920,7 +920,7 @@ impl Analyzer {
                         .return_type
                         .as_ref()
                         .map(|t| self.resolve_type(t, interner))
-                        .unwrap_or(Type::Void);
+                        .unwrap_or(LegacyType::Void);
                     let signature = FunctionType {
                         params: params.into(),
                         return_type: Box::new(return_type),
@@ -1044,7 +1044,7 @@ impl Analyzer {
             };
             self.register_named_type(
                 record.name,
-                Type::Nominal(NominalType::Record(record_type.clone())),
+                LegacyType::Nominal(NominalType::Record(record_type.clone())),
                 interner,
             );
 
@@ -1106,7 +1106,7 @@ impl Analyzer {
                         module_id,
                         &type_param_scope,
                     );
-                    ctx.self_type = Some(Type::Nominal(NominalType::Record(record_type.clone())));
+                    ctx.self_type = Some(LegacyType::Nominal(NominalType::Record(record_type.clone())));
                     method
                         .params
                         .iter()
@@ -1121,12 +1121,12 @@ impl Analyzer {
                         module_id,
                         &type_param_scope,
                     );
-                    ctx.self_type = Some(Type::Nominal(NominalType::Record(record_type.clone())));
+                    ctx.self_type = Some(LegacyType::Nominal(NominalType::Record(record_type.clone())));
                     method
                         .return_type
                         .as_ref()
                         .map(|t| resolve_type(t, &mut ctx))
-                        .unwrap_or(Type::Void)
+                        .unwrap_or(LegacyType::Void)
                 };
 
                 let method_name_str = interner.resolve(method.name);
@@ -1230,7 +1230,7 @@ impl Analyzer {
                             );
                             resolve_type(t, &mut ctx)
                         })
-                        .unwrap_or(Type::Void);
+                        .unwrap_or(LegacyType::Void);
 
                     let signature = FunctionType {
                         params: params.into(),
@@ -1407,7 +1407,7 @@ impl Analyzer {
                     .return_type
                     .as_ref()
                     .map(|t| resolve_type(t, &mut type_ctx))
-                    .unwrap_or(Type::Void);
+                    .unwrap_or(LegacyType::Void);
                 let has_default =
                     m.is_default || m.body.is_some() || default_external_methods.contains(&m.name);
                 (name, name_str, params, return_type, has_default)
@@ -1589,7 +1589,7 @@ impl Analyzer {
                     .return_type
                     .as_ref()
                     .map(|t| resolve_type(t, &mut static_type_ctx))
-                    .unwrap_or(Type::Void);
+                    .unwrap_or(LegacyType::Void);
                 let has_default = method.is_default
                     || method.body.is_some()
                     || default_static_external_methods.contains(&method.name);
@@ -1632,7 +1632,7 @@ impl Analyzer {
 
         self.register_named_type(
             interface_decl.name,
-            Type::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
+            LegacyType::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
                 type_def_id: entity_type_id,
                 type_args: vec![].into(),
                 methods: interface_methods.into(),
@@ -1717,7 +1717,7 @@ impl Analyzer {
                             .return_type
                             .as_ref()
                             .map(|t| self.resolve_type(t, interner))
-                            .unwrap_or(Type::Void),
+                            .unwrap_or(LegacyType::Void),
                     ),
                     is_closure: false,
                 };
@@ -1795,7 +1795,7 @@ impl Analyzer {
                             .return_type
                             .as_ref()
                             .map(|t| self.resolve_type(t, interner))
-                            .unwrap_or(Type::Void);
+                            .unwrap_or(LegacyType::Void);
 
                         let signature = FunctionType {
                             params: params.into(),
@@ -1834,7 +1834,7 @@ impl Analyzer {
                                 .return_type
                                 .as_ref()
                                 .map(|t| self.resolve_type(t, interner))
-                                .unwrap_or(Type::Void);
+                                .unwrap_or(LegacyType::Void);
 
                             let signature = FunctionType {
                                 params: params.into(),
@@ -1919,7 +1919,7 @@ impl Analyzer {
                     .return_type
                     .as_ref()
                     .map(|t| resolve_type(t, &mut ctx))
-                    .unwrap_or(Type::Void);
+                    .unwrap_or(LegacyType::Void);
 
                 // Create signature with TypeParam placeholders
                 let signature = FunctionType {
@@ -1972,7 +1972,7 @@ impl Analyzer {
                     .return_type
                     .as_ref()
                     .map(|t| self.resolve_type(t, interner))
-                    .unwrap_or(Type::Void);
+                    .unwrap_or(LegacyType::Void);
 
                 let func_type = FunctionType {
                     params: params.into(),

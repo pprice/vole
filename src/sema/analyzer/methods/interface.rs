@@ -4,7 +4,7 @@ use crate::identity::{NameId, TypeDefId};
 use crate::sema::Type;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
-use crate::sema::types::{NominalType, StructuralType};
+use crate::sema::types::{LegacyType, NominalType, StructuralType};
 
 use super::super::*;
 
@@ -86,7 +86,7 @@ impl Analyzer {
         expected_type: &Type,
         interner: &Interner,
     ) -> bool {
-        let Type::Nominal(n) = ty else {
+        let LegacyType::Nominal(n) = ty else {
             return false;
         };
         if !n.is_struct_like() {
@@ -129,8 +129,8 @@ impl Analyzer {
     ) -> bool {
         // Get type name_id for method lookup
         let type_name_id = match ty {
-            Type::Nominal(NominalType::Record(r)) => Some(self.entity_registry.record_name_id(r)),
-            Type::Nominal(NominalType::Class(c)) => Some(self.entity_registry.class_name_id(c)),
+            LegacyType::Nominal(NominalType::Record(r)) => Some(self.entity_registry.record_name_id(r)),
+            LegacyType::Nominal(NominalType::Class(c)) => Some(self.entity_registry.class_name_id(c)),
             _ => None,
         };
 
@@ -273,11 +273,11 @@ impl Analyzer {
                 TypeDefKind::Class => self
                     .entity_registry
                     .build_class_type(type_id)
-                    .map(|c| Type::Nominal(NominalType::Class(c))),
+                    .map(|c| LegacyType::Nominal(NominalType::Class(c))),
                 TypeDefKind::Record => self
                     .entity_registry
                     .build_record_type(type_id)
-                    .map(|r| Type::Nominal(NominalType::Record(r))),
+                    .map(|r| LegacyType::Nominal(NominalType::Record(r))),
                 _ => None,
             }
         } else {
@@ -438,7 +438,7 @@ impl Analyzer {
         if required_params.len() != found.params.len() {
             return false;
         }
-        // Check parameter types, substituting Self (Type::Error) with implementing_type
+        // Check parameter types, substituting Self (LegacyType::Error) with implementing_type
         for (req_param, found_param) in required_params.iter().zip(found.params.iter()) {
             let effective_req = if req_param.is_invalid() {
                 implementing_type
@@ -449,7 +449,7 @@ impl Analyzer {
                 return false;
             }
         }
-        // Check return type, substituting Self (Type::Error) with implementing_type
+        // Check return type, substituting Self (LegacyType::Error) with implementing_type
         let effective_return = if required_return.is_invalid() {
             implementing_type
         } else {
@@ -648,7 +648,7 @@ impl Analyzer {
         expected_type: &Type,
         interner: &Interner,
     ) -> bool {
-        let Type::Nominal(n) = ty else {
+        let LegacyType::Nominal(n) = ty else {
             return false;
         };
         if !n.is_struct_like() {
@@ -693,8 +693,8 @@ impl Analyzer {
     ) -> bool {
         // Get type name_id for method lookup
         let type_name_id = match ty {
-            Type::Nominal(NominalType::Record(r)) => Some(self.entity_registry.record_name_id(r)),
-            Type::Nominal(NominalType::Class(c)) => Some(self.entity_registry.class_name_id(c)),
+            LegacyType::Nominal(NominalType::Record(r)) => Some(self.entity_registry.record_name_id(r)),
+            LegacyType::Nominal(NominalType::Class(c)) => Some(self.entity_registry.class_name_id(c)),
             _ => None,
         };
 

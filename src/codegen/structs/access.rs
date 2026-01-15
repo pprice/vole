@@ -8,8 +8,7 @@ use crate::codegen::types::{
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
-use crate::sema::PrimitiveType;
-use crate::sema::Type;
+use crate::sema::{LegacyType, PrimitiveType, Type};
 use crate::sema::types::ConstantValue;
 use crate::sema::types::NominalType;
 use cranelift::prelude::*;
@@ -21,7 +20,7 @@ impl Cg<'_, '_, '_> {
         tracing::trace!(object_type = ?obj.vole_type, "field access on");
 
         // Handle module field access for constants (e.g., math.PI)
-        if let Type::Module(ref module_type) = obj.vole_type {
+        if let LegacyType::Module(ref module_type) = obj.vole_type {
             let field_name = self.ctx.interner.resolve(fa.field);
             let module_path = self
                 .ctx
@@ -40,7 +39,7 @@ impl Cg<'_, '_, '_> {
                         Ok(CompiledValue {
                             value: val,
                             ty: types::F64,
-                            vole_type: Type::Primitive(PrimitiveType::F64),
+                            vole_type: LegacyType::Primitive(PrimitiveType::F64),
                         })
                     }
                     ConstantValue::I64(v) => {
@@ -48,7 +47,7 @@ impl Cg<'_, '_, '_> {
                         Ok(CompiledValue {
                             value: val,
                             ty: types::I64,
-                            vole_type: Type::Primitive(PrimitiveType::I64),
+                            vole_type: LegacyType::Primitive(PrimitiveType::I64),
                         })
                     }
                     ConstantValue::Bool(v) => {
@@ -56,7 +55,7 @@ impl Cg<'_, '_, '_> {
                         Ok(CompiledValue {
                             value: val,
                             ty: types::I8,
-                            vole_type: Type::Primitive(PrimitiveType::Bool),
+                            vole_type: LegacyType::Primitive(PrimitiveType::Bool),
                         })
                     }
                     ConstantValue::String(s) => self.string_literal(s),
@@ -67,7 +66,7 @@ impl Cg<'_, '_, '_> {
             if let Some(name_id) = name_id
                 && let Some(export_type) = module_type.exports.get(&name_id)
             {
-                if matches!(export_type, Type::Function(_)) {
+                if matches!(export_type, LegacyType::Function(_)) {
                     return Err(CodegenError::unsupported_with_context(
                         "function as field value",
                         format!("use {}() to call the function", field_name),
@@ -107,7 +106,7 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(&oc.object)?;
 
         // The object should be an optional type (union with nil)
-        let Type::Union(variants) = &obj.vole_type else {
+        let LegacyType::Union(variants) = &obj.vole_type else {
             return Err(CodegenError::type_mismatch(
                 "optional chain",
                 "optional type",
@@ -119,7 +118,7 @@ impl Cg<'_, '_, '_> {
         // Find the nil tag
         let nil_tag = variants
             .iter()
-            .position(|v| v == &Type::Nil)
+            .position(|v| v == &LegacyType::Nil)
             .unwrap_or(usize::MAX);
 
         // Check if object is nil by reading the tag
@@ -225,7 +224,7 @@ impl Cg<'_, '_, '_> {
 
         let field_name = self.ctx.interner.resolve(field);
         let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field_name, self.ctx)?;
-        let value = if matches!(field_type, Type::Nominal(NominalType::Interface(_))) {
+        let value = if matches!(field_type, LegacyType::Nominal(NominalType::Interface(_))) {
             box_interface_value(self.builder, self.ctx, value, &field_type)?
         } else {
             value

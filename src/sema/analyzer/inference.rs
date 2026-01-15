@@ -4,7 +4,7 @@ use super::Analyzer;
 use crate::identity::NameId;
 use crate::sema::Type;
 use crate::sema::generic::TypeParamInfo;
-use crate::sema::types::NominalType;
+use crate::sema::types::{LegacyType, NominalType};
 use std::collections::HashMap;
 
 impl Analyzer {
@@ -37,36 +37,36 @@ impl Analyzer {
     ) {
         match (pattern, actual) {
             // If the pattern is a type param, bind it
-            (Type::TypeParam(name_id), actual) => {
+            (LegacyType::TypeParam(name_id), actual) => {
                 self.unify_type_param(*name_id, actual, type_params, inferred);
             }
             // If the pattern is a type param ref, resolve to name_id and bind
-            (Type::TypeParamRef(type_param_id), actual) => {
+            (LegacyType::TypeParamRef(type_param_id), actual) => {
                 if let Some(info) = self.type_param_stack.get_by_type_param_id(*type_param_id) {
                     self.unify_type_param(info.name_id, actual, type_params, inferred);
                 }
             }
             // Array: unify element types
-            (Type::Array(p_elem), Type::Array(a_elem)) => {
+            (LegacyType::Array(p_elem), LegacyType::Array(a_elem)) => {
                 self.unify_types(p_elem, a_elem, type_params, inferred);
             }
             // Interface types: unify type args for the same interface
             (
-                Type::Nominal(NominalType::Interface(p_iface)),
-                Type::Nominal(NominalType::Interface(a_iface)),
+                LegacyType::Nominal(NominalType::Interface(p_iface)),
+                LegacyType::Nominal(NominalType::Interface(a_iface)),
             ) if p_iface.type_def_id == a_iface.type_def_id => {
                 for (p_arg, a_arg) in p_iface.type_args.iter().zip(a_iface.type_args.iter()) {
                     self.unify_types(p_arg, a_arg, type_params, inferred);
                 }
             }
             // Union: try to match each pattern variant
-            (Type::Union(p_types), Type::Union(a_types)) => {
+            (LegacyType::Union(p_types), LegacyType::Union(a_types)) => {
                 for (p, a) in p_types.iter().zip(a_types.iter()) {
                     self.unify_types(p, a, type_params, inferred);
                 }
             }
             // Function types: unify params and return
-            (Type::Function(p_ft), Type::Function(a_ft)) => {
+            (LegacyType::Function(p_ft), LegacyType::Function(a_ft)) => {
                 for (p, a) in p_ft.params.iter().zip(a_ft.params.iter()) {
                     self.unify_types(p, a, type_params, inferred);
                 }
@@ -74,8 +74,8 @@ impl Analyzer {
             }
             // Class: unify type args (for generic class parameters)
             (
-                Type::Nominal(NominalType::Class(p_class)),
-                Type::Nominal(NominalType::Class(a_class)),
+                LegacyType::Nominal(NominalType::Class(p_class)),
+                LegacyType::Nominal(NominalType::Class(a_class)),
             ) if p_class.type_def_id == a_class.type_def_id => {
                 for (p, a) in p_class.type_args.iter().zip(a_class.type_args.iter()) {
                     self.unify_types(p, a, type_params, inferred);
@@ -83,8 +83,8 @@ impl Analyzer {
             }
             // Record: unify type args (for generic record parameters)
             (
-                Type::Nominal(NominalType::Record(p_rec)),
-                Type::Nominal(NominalType::Record(a_rec)),
+                LegacyType::Nominal(NominalType::Record(p_rec)),
+                LegacyType::Nominal(NominalType::Record(a_rec)),
             ) if p_rec.type_def_id == a_rec.type_def_id => {
                 for (p, a) in p_rec.type_args.iter().zip(a_rec.type_args.iter()) {
                     self.unify_types(p, a, type_params, inferred);
@@ -108,17 +108,17 @@ impl Analyzer {
             // Special case: if actual is Nil, check if the type param is already in
             // scope with the same name_id. If so, bind to the type param instead of Nil.
             // This preserves type params in generic contexts (e.g., Box { value: nil }).
-            let actual_to_bind = if matches!(actual, Type::Nil) {
+            let actual_to_bind = if matches!(actual, LegacyType::Nil) {
                 // Check if this type param is in our current scope - if so, preserve it
                 if let Some(scope) = self.type_param_stack.current()
                     && scope.get_by_name_id(name_id).is_some()
                 {
                     // Preserve the type param
-                    Type::TypeParam(name_id)
+                    LegacyType::TypeParam(name_id)
                 } else {
                     actual.clone()
                 }
-            } else if let Type::TypeParam(actual_name_id) = actual {
+            } else if let LegacyType::TypeParam(actual_name_id) = actual {
                 // If actual is also a type param, check if it's in our scope
                 if let Some(scope) = self.type_param_stack.current()
                     && scope.get_by_name_id(*actual_name_id).is_some()
@@ -128,7 +128,7 @@ impl Analyzer {
                 } else {
                     actual.clone()
                 }
-            } else if matches!(actual, Type::TypeParamRef(_)) {
+            } else if matches!(actual, LegacyType::TypeParamRef(_)) {
                 // If actual is a type param ref, preserve it
                 actual.clone()
             } else {

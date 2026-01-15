@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::sema::PrimitiveType;
+use crate::sema::types::LegacyType;
 
 impl Analyzer {
     /// Check if a method call is a built-in method on a primitive type
@@ -19,14 +20,14 @@ impl Analyzer {
 
         match (object_type, method_name) {
             // Array.length() -> i64
-            (Type::Array(_), "length") => {
+            (LegacyType::Array(_), "length") => {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
                 Some(method_type(vec![], self.ty_i64()))
             }
             // Array.iter() -> Iterator<T>
-            (Type::Array(elem_ty), "iter") => {
+            (LegacyType::Array(elem_ty), "iter") => {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
@@ -35,7 +36,7 @@ impl Analyzer {
                 Some(method_type(vec![], iter_type))
             }
             // Range.iter() -> Iterator<i64>
-            (Type::Range, "iter") => {
+            (LegacyType::Range, "iter") => {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
@@ -44,14 +45,14 @@ impl Analyzer {
                 Some(method_type(vec![], iter_type))
             }
             // String.length() -> i64
-            (Type::Primitive(PrimitiveType::String), "length") => {
+            (LegacyType::Primitive(PrimitiveType::String), "length") => {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
                 Some(method_type(vec![], self.ty_i64()))
             }
             // String.iter() -> Iterator<string>
-            (Type::Primitive(PrimitiveType::String), "iter") => {
+            (LegacyType::Primitive(PrimitiveType::String), "iter") => {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }

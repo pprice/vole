@@ -1,6 +1,6 @@
 use super::super::*;
 use crate::sema::entity_defs::GenericTypeInfo;
-use crate::sema::types::NominalType;
+use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
     pub(super) fn check_struct_literal_expr(
@@ -76,7 +76,7 @@ impl Analyzer {
                         (
                             interner.resolve(struct_lit.name).to_string(),
                             fields,
-                            Type::Nominal(NominalType::Class(class_type)),
+                            LegacyType::Nominal(NominalType::Class(class_type)),
                         )
                     } else {
                         self.add_error(
@@ -95,7 +95,7 @@ impl Analyzer {
                         (
                             interner.resolve(struct_lit.name).to_string(),
                             fields,
-                            Type::Nominal(NominalType::Record(record_type)),
+                            LegacyType::Nominal(NominalType::Record(record_type)),
                         )
                     } else {
                         self.add_error(
@@ -288,7 +288,7 @@ impl Analyzer {
             type_def_id,
             type_args: type_args.into(),
         };
-        Ok(Type::Nominal(NominalType::Record(concrete_record)))
+        Ok(LegacyType::Nominal(NominalType::Record(concrete_record)))
     }
 
     /// Check a struct literal for a generic class, inferring type parameters from field values
@@ -414,7 +414,7 @@ impl Analyzer {
                             let scope_param_name =
                                 self.name_table.last_segment_str(scope_param.name_id);
                             if scope_param_name.as_deref() == Some(&param_name) {
-                                return Type::TypeParam(scope_param.name_id);
+                                return LegacyType::TypeParam(scope_param.name_id);
                             }
                         }
                     }
@@ -427,6 +427,6 @@ impl Analyzer {
             type_def_id,
             type_args: type_args.into(),
         };
-        Ok(Type::Nominal(NominalType::Class(concrete_class)))
+        Ok(LegacyType::Nominal(NominalType::Class(concrete_class)))
     }
 }

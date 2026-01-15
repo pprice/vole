@@ -2,7 +2,7 @@ use super::super::*;
 use crate::identity::Namer;
 use crate::sema::PrimitiveType;
 use crate::sema::compatibility::TypeCompatibility;
-use crate::sema::types::NominalType;
+use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
     pub(super) fn check_call_expr(
@@ -31,7 +31,7 @@ impl Analyzer {
             }
 
             let arg_ty = self.check_expr(&call.args[0], interner)?;
-            if arg_ty != Type::Primitive(PrimitiveType::Bool) && !arg_ty.is_invalid() {
+            if arg_ty != LegacyType::Primitive(PrimitiveType::Bool) && !arg_ty.is_invalid() {
                 let found = self.type_display(&arg_ty);
                 self.add_error(
                     SemanticError::TypeMismatch {
@@ -184,7 +184,7 @@ impl Analyzer {
             }
 
             // Check if it's a variable with a function type
-            if let Some(Type::Function(func_type)) = self.get_variable_type(*sym) {
+            if let Some(LegacyType::Function(func_type)) = self.get_variable_type(*sym) {
                 // Calling a function-typed variable - conservatively mark side effects
                 if self.in_lambda() {
                     self.mark_lambda_has_side_effects();
@@ -200,7 +200,7 @@ impl Analyzer {
             }
 
             // Check if it's a variable with a functional interface type
-            if let Some(Type::Nominal(NominalType::Interface(iface))) = self.get_variable_type(*sym)
+            if let Some(LegacyType::Nominal(NominalType::Interface(iface))) = self.get_variable_type(*sym)
                 && let Some(func_type) =
                     self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
             {
@@ -258,7 +258,7 @@ impl Analyzer {
 
         // Non-identifier callee (e.g., a lambda expression being called directly)
         let callee_ty = self.check_expr(&call.callee, interner)?;
-        if let Type::Function(func_type) = callee_ty {
+        if let LegacyType::Function(func_type) = callee_ty {
             // Calling a function-typed expression - conservatively mark side effects
             if self.in_lambda() {
                 self.mark_lambda_has_side_effects();

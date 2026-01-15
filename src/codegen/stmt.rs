@@ -10,7 +10,7 @@ use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
 use crate::frontend::{self, ExprKind, LetInit, Pattern, RaiseStmt, Stmt, Symbol};
 use crate::sema::types::NominalType;
-use crate::sema::{PrimitiveType, Type};
+use crate::sema::{LegacyType, PrimitiveType, Type};
 
 use super::compiler::ControlFlowCtx;
 use super::context::{Cg, ControlFlow};
@@ -43,7 +43,7 @@ pub(super) fn construct_union(
     union_type: &Type,
     pointer_type: types::Type,
 ) -> Result<CompiledValue, String> {
-    let Type::Union(variants) = union_type else {
+    let LegacyType::Union(variants) = union_type else {
         return Err(
             CodegenError::type_mismatch("union construction", "union type", "non-union").into(),
         );
@@ -96,7 +96,7 @@ pub(super) fn construct_union(
     let tag_val = builder.ins().iconst(types::I8, tag as i64);
     builder.ins().stack_store(tag_val, slot, 0);
 
-    if actual_type != Type::Nil {
+    if actual_type != LegacyType::Nil {
         builder.ins().stack_store(actual_value, slot, 8);
     }
 
@@ -137,8 +137,8 @@ impl Cg<'_, '_, '_> {
                     let declared_type = resolve_type_expr(ty_expr, self.ctx);
                     declared_type_opt = Some(declared_type.clone());
 
-                    if matches!(&declared_type, Type::Union(_))
-                        && !matches!(&init.vole_type, Type::Union(_))
+                    if matches!(&declared_type, LegacyType::Union(_))
+                        && !matches!(&init.vole_type, LegacyType::Union(_))
                     {
                         let wrapped = self.construct_union(init, &declared_type)?;
                         (wrapped.value, wrapped.vole_type)
@@ -154,17 +154,17 @@ impl Cg<'_, '_, '_> {
                         } else {
                             (init.value, declared_type)
                         }
-                    } else if declared_type == Type::Primitive(PrimitiveType::F32)
-                        && init.vole_type == Type::Primitive(PrimitiveType::F64)
+                    } else if declared_type == LegacyType::Primitive(PrimitiveType::F32)
+                        && init.vole_type == LegacyType::Primitive(PrimitiveType::F64)
                     {
                         let narrowed = self.builder.ins().fdemote(types::F32, init.value);
                         (narrowed, declared_type)
-                    } else if declared_type == Type::Primitive(PrimitiveType::F64)
-                        && init.vole_type == Type::Primitive(PrimitiveType::F32)
+                    } else if declared_type == LegacyType::Primitive(PrimitiveType::F64)
+                        && init.vole_type == LegacyType::Primitive(PrimitiveType::F32)
                     {
                         let widened = self.builder.ins().fpromote(types::F64, init.value);
                         (widened, declared_type)
-                    } else if let Type::Nominal(NominalType::Interface(_)) = &declared_type {
+                    } else if let LegacyType::Nominal(NominalType::Interface(_)) = &declared_type {
                         // For functional interfaces, keep the actual function type from the lambda
                         // This preserves the is_closure flag for proper calling convention
                         (init.value, init.vole_type)
@@ -176,8 +176,8 @@ impl Cg<'_, '_, '_> {
                 };
 
                 if let Some(declared_type) = declared_type_opt
-                    && matches!(declared_type, Type::Nominal(NominalType::Interface(_)))
-                    && !matches!(final_type, Type::Nominal(NominalType::Interface(_)))
+                    && matches!(declared_type, LegacyType::Nominal(NominalType::Interface(_)))
+                    && !matches!(final_type, LegacyType::Nominal(NominalType::Interface(_)))
                 {
                     let boxed = box_interface_value(
                         self.builder,
@@ -221,9 +221,9 @@ impl Cg<'_, '_, '_> {
 
                     // Box concrete types to interface representation if needed
                     // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
-                    if let Some(Type::Nominal(NominalType::Interface(_))) = &return_type
-                        && !matches!(compiled.vole_type, Type::Nominal(NominalType::Interface(_)))
-                        && !matches!(compiled.vole_type, Type::RuntimeIterator(_))
+                    if let Some(LegacyType::Nominal(NominalType::Interface(_))) = &return_type
+                        && !matches!(compiled.vole_type, LegacyType::Nominal(NominalType::Interface(_)))
+                        && !matches!(compiled.vole_type, LegacyType::RuntimeIterator(_))
                     {
                         let return_type =
                             return_type.as_ref().expect("return type should be present");
@@ -234,10 +234,10 @@ impl Cg<'_, '_, '_> {
                     }
 
                     // Check if the function has a fallible return type
-                    if let Some(Type::Fallible(ft)) = &return_type {
+                    if let Some(LegacyType::Fallible(ft)) = &return_type {
                         // For fallible functions, wrap the success value in a fallible struct
                         let fallible_size =
-                            type_size(&Type::Fallible(ft.clone()), self.ctx.pointer_type);
+                            type_size(&LegacyType::Fallible(ft.clone()), self.ctx.pointer_type);
 
                         // Allocate stack slot for the fallible result
                         let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
@@ -266,11 +266,11 @@ impl Cg<'_, '_, '_> {
                                 .stack_addr(self.ctx.pointer_type, slot, 0);
 
                         self.builder.ins().return_(&[fallible_ptr]);
-                    } else if let Some(Type::Union(variants)) =
+                    } else if let Some(LegacyType::Union(variants)) =
                         &self.ctx.current_function_return_type
                     {
                         // For union return types, wrap the value in a union
-                        let union_type = Type::Union(variants.clone());
+                        let union_type = LegacyType::Union(variants.clone());
                         let wrapped = self.construct_union(compiled, &union_type)?;
                         self.builder.ins().return_(&[wrapped.value]);
                     } else {
@@ -360,7 +360,7 @@ impl Cg<'_, '_, '_> {
                     let iterable_type = self.ctx.get_expr_type(&for_stmt.iterable.id);
                     let is_iterator = iterable_type.is_some_and(|ty| self.is_iterator_type(ty));
                     let is_string = iterable_type
-                        .is_some_and(|ty| matches!(ty, Type::Primitive(PrimitiveType::String)));
+                        .is_some_and(|ty| matches!(ty, LegacyType::Primitive(PrimitiveType::String)));
                     if is_iterator {
                         self.for_iterator(for_stmt)
                     } else if is_string {
@@ -405,7 +405,7 @@ impl Cg<'_, '_, '_> {
         self.builder.def_var(var, start_val.value);
         self.vars.insert(
             for_stmt.var_name,
-            (var, Type::Primitive(PrimitiveType::I64)),
+            (var, LegacyType::Primitive(PrimitiveType::I64)),
         );
 
         let header = self.builder.create_block();
@@ -466,8 +466,8 @@ impl Cg<'_, '_, '_> {
         self.builder.def_var(idx_var, zero);
 
         let elem_type = match &arr.vole_type {
-            Type::Array(elem) => elem.as_ref().clone(),
-            _ => Type::Primitive(PrimitiveType::I64),
+            LegacyType::Array(elem) => elem.as_ref().clone(),
+            _ => LegacyType::Primitive(PrimitiveType::I64),
         };
 
         let elem_var = self.builder.declare_var(types::I64);
@@ -524,7 +524,7 @@ impl Cg<'_, '_, '_> {
     /// Check if a type is an Iterator<T> type
     fn is_iterator_type(&self, ty: &Type) -> bool {
         match ty {
-            Type::Nominal(NominalType::Interface(iface)) => self
+            LegacyType::Nominal(NominalType::Interface(iface)) => self
                 .ctx
                 .analyzed
                 .name_table
@@ -537,13 +537,13 @@ impl Cg<'_, '_, '_> {
     /// Extract element type from Iterator<T>
     fn iterator_element_type(&self, ty: &Type) -> Type {
         match ty {
-            Type::Nominal(NominalType::Interface(iface)) => iface
+            LegacyType::Nominal(NominalType::Interface(iface)) => iface
                 .type_args
                 .first()
                 .cloned()
-                .unwrap_or(Type::Primitive(PrimitiveType::I64)),
-            Type::RuntimeIterator(elem) => (**elem).clone(),
-            _ => Type::Primitive(PrimitiveType::I64),
+                .unwrap_or(LegacyType::Primitive(PrimitiveType::I64)),
+            LegacyType::RuntimeIterator(elem) => (**elem).clone(),
+            _ => LegacyType::Primitive(PrimitiveType::I64),
         }
     }
 
@@ -639,7 +639,7 @@ impl Cg<'_, '_, '_> {
         self.builder.def_var(elem_var, zero);
         self.vars.insert(
             for_stmt.var_name,
-            (elem_var, Type::Primitive(PrimitiveType::String)),
+            (elem_var, LegacyType::Primitive(PrimitiveType::String)),
         );
 
         let header = self.builder.create_block();
@@ -693,7 +693,7 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_type: &Type,
     ) -> Result<CompiledValue, String> {
-        let Type::Union(variants) = union_type else {
+        let LegacyType::Union(variants) = union_type else {
             return Err(CodegenError::type_mismatch(
                 "union construction",
                 "union type",
@@ -750,7 +750,7 @@ impl Cg<'_, '_, '_> {
         let tag_val = self.builder.ins().iconst(types::I8, tag as i64);
         self.builder.ins().stack_store(tag_val, slot, 0);
 
-        if actual_type != Type::Nil {
+        if actual_type != LegacyType::Nil {
             self.builder.ins().stack_store(actual_value, slot, 8);
         }
 
@@ -783,7 +783,7 @@ impl Cg<'_, '_, '_> {
                 // Wildcard - nothing to bind
             }
             Pattern::Tuple { elements, .. } => match ty {
-                Type::Tuple(elem_types) => {
+                LegacyType::Tuple(elem_types) => {
                     let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
                     for (i, elem_pattern) in elements.iter().enumerate() {
                         let offset = offsets[i];
@@ -796,7 +796,7 @@ impl Cg<'_, '_, '_> {
                         self.compile_destructure_pattern(elem_pattern, elem_value, elem_type)?;
                     }
                 }
-                Type::FixedArray { element, .. } => {
+                LegacyType::FixedArray { element, .. } => {
                     let elem_cr_type = type_to_cranelift(element, self.ctx.pointer_type);
                     let elem_size = type_size(element, self.ctx.pointer_type).div_ceil(8) * 8;
                     for (i, elem_pattern) in elements.iter().enumerate() {
@@ -847,7 +847,7 @@ impl Cg<'_, '_, '_> {
             .ok_or("raise statement used outside of a function with declared return type")?;
 
         let fallible_type = match return_type {
-            Type::Fallible(ft) => ft,
+            LegacyType::Fallible(ft) => ft,
             _ => {
                 return Err(CodegenError::type_mismatch(
                     "raise statement",
@@ -892,7 +892,7 @@ impl Cg<'_, '_, '_> {
         // Get the error type info to know field order
         let raise_error_name = self.ctx.interner.resolve(raise_stmt.error_name);
         let error_type_info = match fallible_type.error_type.as_ref() {
-            Type::Nominal(NominalType::Error(info)) => {
+            LegacyType::Nominal(NominalType::Error(info)) => {
                 let name =
                     self.ctx.analyzed.name_table.last_segment_str(
                         self.ctx.analyzed.entity_registry.name_id(info.type_def_id),
@@ -903,8 +903,8 @@ impl Cg<'_, '_, '_> {
                     None
                 }
             }
-            Type::Union(variants) => variants.iter().find_map(|v| {
-                if let Type::Nominal(NominalType::Error(info)) = v {
+            LegacyType::Union(variants) => variants.iter().find_map(|v| {
+                if let LegacyType::Nominal(NominalType::Error(info)) = v {
                     let name = self.ctx.analyzed.name_table.last_segment_str(
                         self.ctx.analyzed.entity_registry.name_id(info.type_def_id),
                     );

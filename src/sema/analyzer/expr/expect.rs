@@ -1,7 +1,7 @@
 use super::super::*;
 use crate::sema::PrimitiveType;
 use crate::sema::compatibility::TypeCompatibility;
-use crate::sema::types::NominalType;
+use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
     /// Check expression against an expected type (bidirectional type checking)
@@ -26,14 +26,14 @@ impl Analyzer {
             ExprKind::IntLiteral(value) => match expected {
                 // Integer literals can be assigned to unions containing a matching integer type
                 // Return the concrete type, not the union, so codegen properly constructs the union
-                Some(Type::Union(variants)) => {
+                Some(LegacyType::Union(variants)) => {
                     if let Some(int_variant) = variants
                         .iter()
                         .find(|v| v.is_integer() && v.fits_literal(*value))
                     {
                         Ok(int_variant.clone())
                     } else {
-                        let expected = self.type_display(&Type::Union(variants.clone()));
+                        let expected = self.type_display(&LegacyType::Union(variants.clone()));
                         self.add_error(
                             SemanticError::TypeMismatch {
                                 expected,
@@ -61,7 +61,7 @@ impl Analyzer {
                 None => Ok(self.ty_i64()),
             },
             ExprKind::TypeLiteral(_) => match expected {
-                Some(Type::Type) | None => Ok(self.ty_type()),
+                Some(LegacyType::MetaType) | None => Ok(self.ty_type()),
                 Some(ty) => {
                     let expected = self.type_display(ty);
                     self.add_error(
@@ -76,11 +76,11 @@ impl Analyzer {
                 }
             },
             ExprKind::FloatLiteral(_) => match expected {
-                Some(ty) if ty == &Type::Primitive(PrimitiveType::F64) => Ok(self.ty_f64()),
+                Some(ty) if ty == &LegacyType::Primitive(PrimitiveType::F64) => Ok(self.ty_f64()),
                 Some(ty) if ty.is_numeric() => Ok(ty.clone()),
                 // Float literals can be assigned to unions containing f64
-                Some(Type::Union(variants))
-                    if variants.contains(&Type::Primitive(PrimitiveType::F64)) =>
+                Some(LegacyType::Union(variants))
+                    if variants.contains(&LegacyType::Primitive(PrimitiveType::F64)) =>
                 {
                     Ok(self.ty_f64())
                 }
@@ -105,8 +105,8 @@ impl Analyzer {
                     let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
 
                     // Handle string concatenation: string + Stringable
-                    if matches!(left_ty, Type::Primitive(PrimitiveType::String)) {
-                        if matches!(right_ty, Type::Primitive(PrimitiveType::String)) {
+                    if matches!(left_ty, LegacyType::Primitive(PrimitiveType::String)) {
+                        if matches!(right_ty, LegacyType::Primitive(PrimitiveType::String)) {
                             // string + string is always valid
                             Ok(self.ty_string())
                         } else if self.satisfies_stringable(&right_ty, interner) {
@@ -124,12 +124,12 @@ impl Analyzer {
                         {
                             return Ok(exp.clone());
                         }
-                        if left_ty == Type::Primitive(PrimitiveType::F64)
-                            || right_ty == Type::Primitive(PrimitiveType::F64)
+                        if left_ty == LegacyType::Primitive(PrimitiveType::F64)
+                            || right_ty == LegacyType::Primitive(PrimitiveType::F64)
                         {
                             Ok(self.ty_f64())
-                        } else if left_ty == Type::Primitive(PrimitiveType::I64)
-                            || right_ty == Type::Primitive(PrimitiveType::I64)
+                        } else if left_ty == LegacyType::Primitive(PrimitiveType::I64)
+                            || right_ty == LegacyType::Primitive(PrimitiveType::I64)
                         {
                             Ok(self.ty_i64())
                         } else {
@@ -154,12 +154,12 @@ impl Analyzer {
                             return Ok(exp.clone());
                         }
                         // Otherwise return wider type
-                        if left_ty == Type::Primitive(PrimitiveType::F64)
-                            || right_ty == Type::Primitive(PrimitiveType::F64)
+                        if left_ty == LegacyType::Primitive(PrimitiveType::F64)
+                            || right_ty == LegacyType::Primitive(PrimitiveType::F64)
                         {
                             Ok(self.ty_f64())
-                        } else if left_ty == Type::Primitive(PrimitiveType::I64)
-                            || right_ty == Type::Primitive(PrimitiveType::I64)
+                        } else if left_ty == LegacyType::Primitive(PrimitiveType::I64)
+                            || right_ty == LegacyType::Primitive(PrimitiveType::I64)
                         {
                             Ok(self.ty_i64())
                         } else {
@@ -187,8 +187,8 @@ impl Analyzer {
                     let left_ty = self.check_expr_expecting(&bin.left, Some(&bool_ty), interner)?;
                     let right_ty =
                         self.check_expr_expecting(&bin.right, Some(&bool_ty), interner)?;
-                    if left_ty == Type::Primitive(PrimitiveType::Bool)
-                        && right_ty == Type::Primitive(PrimitiveType::Bool)
+                    if left_ty == LegacyType::Primitive(PrimitiveType::Bool)
+                        && right_ty == LegacyType::Primitive(PrimitiveType::Bool)
                     {
                         Ok(self.ty_bool())
                     } else {
@@ -212,8 +212,8 @@ impl Analyzer {
                         {
                             return Ok(exp.clone());
                         }
-                        if left_ty == Type::Primitive(PrimitiveType::I64)
-                            || right_ty == Type::Primitive(PrimitiveType::I64)
+                        if left_ty == LegacyType::Primitive(PrimitiveType::I64)
+                            || right_ty == LegacyType::Primitive(PrimitiveType::I64)
                         {
                             Ok(self.ty_i64())
                         } else {
@@ -256,7 +256,7 @@ impl Analyzer {
                     let bool_ty = self.ty_bool();
                     let operand_ty =
                         self.check_expr_expecting(&un.operand, Some(&bool_ty), interner)?;
-                    if operand_ty == Type::Primitive(PrimitiveType::Bool) {
+                    if operand_ty == LegacyType::Primitive(PrimitiveType::Bool) {
                         Ok(self.ty_bool())
                     } else {
                         self.type_error("bool", &operand_ty, expr.span);
@@ -277,7 +277,7 @@ impl Analyzer {
             ExprKind::Grouping(inner) => self.check_expr_expecting(inner, expected, interner),
             ExprKind::ArrayLiteral(elements) => {
                 // Check if expecting a tuple type
-                if let Some(Type::Tuple(expected_elems)) = expected {
+                if let Some(LegacyType::Tuple(expected_elems)) = expected {
                     // Check that literal has correct number of elements
                     if elements.len() != expected_elems.len() {
                         self.add_error(
@@ -303,15 +303,15 @@ impl Analyzer {
 
                 // Check if expecting an array type
                 let elem_expected = match expected {
-                    Some(Type::Array(elem)) => Some(elem.as_ref()),
+                    Some(LegacyType::Array(elem)) => Some(elem.as_ref()),
                     _ => None,
                 };
 
                 if elements.is_empty() {
-                    if let Some(Type::Array(elem)) = expected {
+                    if let Some(LegacyType::Array(elem)) = expected {
                         return Ok(self.ty_array(elem));
                     }
-                    return Ok(Type::Array(Box::new(Type::unknown())));
+                    return Ok(LegacyType::Array(Box::new(Type::unknown())));
                 }
 
                 // Infer types for all elements, passing expected element type to each
@@ -342,9 +342,9 @@ impl Analyzer {
                 // Extract expected function type if available
                 // Support both direct function types and functional interfaces
                 let expected_fn = expected.and_then(|t| {
-                    if let Type::Function(ft) = t {
+                    if let LegacyType::Function(ft) = t {
                         Some(ft.clone())
-                    } else if let Type::Nominal(NominalType::Interface(iface)) = t {
+                    } else if let LegacyType::Nominal(NominalType::Interface(iface)) = t {
                         // Check if it's a functional interface (single abstract method, no fields)
                         self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
                     } else {

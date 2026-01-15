@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::sema::types::LegacyType;
 
 impl Analyzer {
     /// Check call arguments against expected parameter types.
@@ -29,7 +30,7 @@ impl Analyzer {
             let arg_ty = if with_inference {
                 // For lambda arguments, pass expected function type for inference
                 if let ExprKind::Lambda(lambda) = &arg.kind {
-                    let expected_fn = if let Type::Function(ft) = param_ty {
+                    let expected_fn = if let LegacyType::Function(ft) = param_ty {
                         Some(ft)
                     } else {
                         None

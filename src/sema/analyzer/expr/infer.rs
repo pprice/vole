@@ -1,6 +1,7 @@
 use super::super::*;
 use crate::sema::PrimitiveType;
 use crate::sema::compatibility::TypeCompatibility;
+use crate::sema::types::LegacyType;
 
 impl Analyzer {
     pub(crate) fn check_expr(
@@ -58,7 +59,7 @@ impl Analyzer {
                     Ok(ty)
                 } else if let Some(func_type) = self.get_function_type(*sym, interner) {
                     // Identifier refers to a function - treat it as a function value
-                    Ok(Type::Function(func_type))
+                    Ok(LegacyType::Function(func_type))
                 } else {
                     let name = interner.resolve(*sym);
                     self.add_error(
@@ -79,9 +80,9 @@ impl Analyzer {
                 match bin.op {
                     BinaryOp::Add => {
                         // Handle string concatenation: string + Stringable
-                        if matches!(left_ty, Type::Primitive(PrimitiveType::String)) {
+                        if matches!(left_ty, LegacyType::Primitive(PrimitiveType::String)) {
                             // Left is string - check if right implements Stringable
-                            if matches!(right_ty, Type::Primitive(PrimitiveType::String)) {
+                            if matches!(right_ty, LegacyType::Primitive(PrimitiveType::String)) {
                                 // string + string is always valid
                                 Ok(self.ty_string())
                             } else if self.satisfies_stringable(&right_ty, interner) {
@@ -94,12 +95,12 @@ impl Analyzer {
                             }
                         } else if left_ty.is_numeric() && right_ty.is_numeric() {
                             // Numeric addition
-                            if left_ty == Type::Primitive(PrimitiveType::F64)
-                                || right_ty == Type::Primitive(PrimitiveType::F64)
+                            if left_ty == LegacyType::Primitive(PrimitiveType::F64)
+                                || right_ty == LegacyType::Primitive(PrimitiveType::F64)
                             {
                                 Ok(self.ty_f64())
-                            } else if left_ty == Type::Primitive(PrimitiveType::I64)
-                                || right_ty == Type::Primitive(PrimitiveType::I64)
+                            } else if left_ty == LegacyType::Primitive(PrimitiveType::I64)
+                                || right_ty == LegacyType::Primitive(PrimitiveType::I64)
                             {
                                 Ok(self.ty_i64())
                             } else {
@@ -118,12 +119,12 @@ impl Analyzer {
                     BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                         if left_ty.is_numeric() && right_ty.is_numeric() {
                             // Return wider type
-                            if left_ty == Type::Primitive(PrimitiveType::F64)
-                                || right_ty == Type::Primitive(PrimitiveType::F64)
+                            if left_ty == LegacyType::Primitive(PrimitiveType::F64)
+                                || right_ty == LegacyType::Primitive(PrimitiveType::F64)
                             {
                                 Ok(self.ty_f64())
-                            } else if left_ty == Type::Primitive(PrimitiveType::I64)
-                                || right_ty == Type::Primitive(PrimitiveType::I64)
+                            } else if left_ty == LegacyType::Primitive(PrimitiveType::I64)
+                                || right_ty == LegacyType::Primitive(PrimitiveType::I64)
                             {
                                 Ok(self.ty_i64())
                             } else {
@@ -141,8 +142,8 @@ impl Analyzer {
                     | BinaryOp::Le
                     | BinaryOp::Ge => Ok(self.ty_bool()),
                     BinaryOp::And | BinaryOp::Or => {
-                        if left_ty == Type::Primitive(PrimitiveType::Bool)
-                            && right_ty == Type::Primitive(PrimitiveType::Bool)
+                        if left_ty == LegacyType::Primitive(PrimitiveType::Bool)
+                            && right_ty == LegacyType::Primitive(PrimitiveType::Bool)
                         {
                             Ok(self.ty_bool())
                         } else {
@@ -156,8 +157,8 @@ impl Analyzer {
                     | BinaryOp::Shl
                     | BinaryOp::Shr => {
                         if left_ty.is_integer() && right_ty.is_integer() {
-                            if left_ty == Type::Primitive(PrimitiveType::I64)
-                                || right_ty == Type::Primitive(PrimitiveType::I64)
+                            if left_ty == LegacyType::Primitive(PrimitiveType::I64)
+                                || right_ty == LegacyType::Primitive(PrimitiveType::I64)
                             {
                                 Ok(self.ty_i64())
                             } else {
@@ -183,7 +184,7 @@ impl Analyzer {
                         }
                     }
                     UnaryOp::Not => {
-                        if operand_ty == Type::Primitive(PrimitiveType::Bool) {
+                        if operand_ty == LegacyType::Primitive(PrimitiveType::Bool) {
                             Ok(self.ty_bool())
                         } else {
                             self.type_error("bool", &operand_ty, expr.span);
@@ -214,7 +215,7 @@ impl Analyzer {
             ExprKind::ArrayLiteral(elements) => {
                 if elements.is_empty() {
                     // Empty array needs type annotation or we use unknown placeholder
-                    Ok(Type::Array(Box::new(Type::unknown())))
+                    Ok(LegacyType::Array(Box::new(Type::unknown())))
                 } else {
                     // Infer types for all elements
                     let elem_types: Vec<Type> = elements
@@ -232,10 +233,10 @@ impl Analyzer {
 
                     if is_homogeneous {
                         // All same type → dynamic array
-                        Ok(Type::Array(Box::new(first_ty.clone())))
+                        Ok(LegacyType::Array(Box::new(first_ty.clone())))
                     } else {
                         // Different types → tuple
-                        Ok(Type::Tuple(elem_types.into()))
+                        Ok(LegacyType::Tuple(elem_types.into()))
                     }
                 }
             }
@@ -243,7 +244,7 @@ impl Analyzer {
             ExprKind::RepeatLiteral { element, count } => {
                 // [expr; N] creates a fixed-size array
                 let elem_ty = self.check_expr(element, interner)?;
-                Ok(Type::FixedArray {
+                Ok(LegacyType::FixedArray {
                     element: Box::new(elem_ty),
                     size: *count,
                 })
@@ -260,8 +261,8 @@ impl Analyzer {
 
                 // Object must be array, tuple, or fixed array
                 match obj_ty {
-                    Type::Array(elem_ty) => Ok(*elem_ty),
-                    Type::Tuple(ref elements) => {
+                    LegacyType::Array(elem_ty) => Ok(*elem_ty),
+                    LegacyType::Tuple(ref elements) => {
                         // For tuples, try to get element type from constant index
                         if let ExprKind::IntLiteral(i) = &idx.index.kind {
                             let i = *i as usize;
@@ -284,7 +285,7 @@ impl Analyzer {
                             Ok(elements.first().cloned().unwrap_or_else(Type::unknown))
                         }
                     }
-                    Type::FixedArray { element, .. } => Ok(*element),
+                    LegacyType::FixedArray { element, .. } => Ok(*element),
                     _ => {
                         self.type_error("array", &obj_ty, idx.object.span);
                         Ok(self.ty_invalid())
@@ -352,7 +353,7 @@ impl Analyzer {
                 };
 
                 // Warn/error if tested type is not a variant of value's union
-                if let Type::Union(variants) = &value_type
+                if let LegacyType::Union(variants) = &value_type
                     && !variants.contains(&tested_type)
                 {
                     let tested = self.type_display(&tested_type);
@@ -469,7 +470,7 @@ impl Analyzer {
             ExprKind::If(if_expr) => {
                 // Type check the condition (must be bool)
                 let cond_ty = self.check_expr(&if_expr.condition, interner)?;
-                if cond_ty != Type::Primitive(PrimitiveType::Bool) {
+                if cond_ty != LegacyType::Primitive(PrimitiveType::Bool) {
                     self.type_error("bool", &cond_ty, if_expr.condition.span);
                 }
 
@@ -523,7 +524,7 @@ impl Analyzer {
             ExprKind::FloatLiteral(_) => {
                 if matches!(
                     hint,
-                    Type::Primitive(PrimitiveType::F32) | Type::Primitive(PrimitiveType::F64)
+                    LegacyType::Primitive(PrimitiveType::F32) | LegacyType::Primitive(PrimitiveType::F64)
                 ) {
                     hint.clone()
                 } else {

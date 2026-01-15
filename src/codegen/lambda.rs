@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use crate::frontend::{BinaryOp, Expr, ExprKind, LambdaBody, LambdaExpr, Symbol};
-use crate::sema::{FunctionType, PrimitiveType, Type};
+use crate::sema::{FunctionType, LegacyType, PrimitiveType, Type};
 
 use super::RuntimeFn;
 use super::context::{Captures, Cg, ControlFlow};
@@ -39,7 +39,7 @@ pub(crate) fn build_capture_bindings(
         let vole_type = variables
             .get(&capture.name)
             .map(|(_, ty)| ty.clone())
-            .unwrap_or(Type::Primitive(PrimitiveType::I64));
+            .unwrap_or(LegacyType::Primitive(PrimitiveType::I64));
         bindings.insert(capture.name, CaptureBinding::new(i, vole_type));
     }
     bindings
@@ -53,7 +53,7 @@ pub(crate) fn infer_lambda_return_type(
 ) -> Type {
     match body {
         LambdaBody::Expr(expr) => infer_expr_type(expr, param_types, ctx),
-        LambdaBody::Block(_) => Type::Primitive(PrimitiveType::I64),
+        LambdaBody::Block(_) => LegacyType::Primitive(PrimitiveType::I64),
     }
 }
 
@@ -64,13 +64,13 @@ pub(crate) fn infer_expr_type(
     ctx: &CompileCtx,
 ) -> Type {
     match &expr.kind {
-        ExprKind::IntLiteral(_) => Type::Primitive(PrimitiveType::I64),
-        ExprKind::FloatLiteral(_) => Type::Primitive(PrimitiveType::F64),
-        ExprKind::BoolLiteral(_) => Type::Primitive(PrimitiveType::Bool),
-        ExprKind::StringLiteral(_) => Type::Primitive(PrimitiveType::String),
-        ExprKind::InterpolatedString(_) => Type::Primitive(PrimitiveType::String),
-        ExprKind::Nil => Type::Nil,
-        ExprKind::Done => Type::Done,
+        ExprKind::IntLiteral(_) => LegacyType::Primitive(PrimitiveType::I64),
+        ExprKind::FloatLiteral(_) => LegacyType::Primitive(PrimitiveType::F64),
+        ExprKind::BoolLiteral(_) => LegacyType::Primitive(PrimitiveType::Bool),
+        ExprKind::StringLiteral(_) => LegacyType::Primitive(PrimitiveType::String),
+        ExprKind::InterpolatedString(_) => LegacyType::Primitive(PrimitiveType::String),
+        ExprKind::Nil => LegacyType::Nil,
+        ExprKind::Done => LegacyType::Done,
 
         ExprKind::Identifier(sym) => {
             for (name, ty) in param_types {
@@ -85,7 +85,7 @@ pub(crate) fn infer_expr_type(
                     return resolve_type_expr(type_expr, ctx);
                 }
             }
-            Type::Primitive(PrimitiveType::I64)
+            LegacyType::Primitive(PrimitiveType::I64)
         }
 
         ExprKind::Binary(bin) => {
@@ -100,24 +100,24 @@ pub(crate) fn infer_expr_type(
                 | BinaryOp::Gt
                 | BinaryOp::Ge
                 | BinaryOp::And
-                | BinaryOp::Or => Type::Primitive(PrimitiveType::Bool),
+                | BinaryOp::Or => LegacyType::Primitive(PrimitiveType::Bool),
 
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                     if left_ty == right_ty {
                         left_ty
                     } else {
                         match (&left_ty, &right_ty) {
-                            (Type::Primitive(PrimitiveType::I64), _)
-                            | (_, Type::Primitive(PrimitiveType::I64)) => {
-                                Type::Primitive(PrimitiveType::I64)
+                            (LegacyType::Primitive(PrimitiveType::I64), _)
+                            | (_, LegacyType::Primitive(PrimitiveType::I64)) => {
+                                LegacyType::Primitive(PrimitiveType::I64)
                             }
-                            (Type::Primitive(PrimitiveType::F64), _)
-                            | (_, Type::Primitive(PrimitiveType::F64)) => {
-                                Type::Primitive(PrimitiveType::F64)
+                            (LegacyType::Primitive(PrimitiveType::F64), _)
+                            | (_, LegacyType::Primitive(PrimitiveType::F64)) => {
+                                LegacyType::Primitive(PrimitiveType::F64)
                             }
-                            (Type::Primitive(PrimitiveType::I32), _)
-                            | (_, Type::Primitive(PrimitiveType::I32)) => {
-                                Type::Primitive(PrimitiveType::I32)
+                            (LegacyType::Primitive(PrimitiveType::I32), _)
+                            | (_, LegacyType::Primitive(PrimitiveType::I32)) => {
+                                LegacyType::Primitive(PrimitiveType::I32)
                             }
                             _ => left_ty,
                         }
@@ -137,8 +137,8 @@ pub(crate) fn infer_expr_type(
         ExprKind::Call(call) => {
             let callee_ty = infer_expr_type(&call.callee, param_types, ctx);
             match callee_ty {
-                Type::Function(ft) => *ft.return_type,
-                _ => Type::Primitive(PrimitiveType::I64),
+                LegacyType::Function(ft) => *ft.return_type,
+                _ => LegacyType::Primitive(PrimitiveType::I64),
             }
         }
 
@@ -149,22 +149,22 @@ pub(crate) fn infer_expr_type(
                 .map(|p| {
                     p.ty.as_ref()
                         .map(|t| resolve_type_expr(t, ctx))
-                        .unwrap_or(Type::Primitive(PrimitiveType::I64))
+                        .unwrap_or(LegacyType::Primitive(PrimitiveType::I64))
                 })
                 .collect();
             let return_ty = lambda
                 .return_type
                 .as_ref()
                 .map(|t| resolve_type_expr(t, ctx))
-                .unwrap_or(Type::Primitive(PrimitiveType::I64));
-            Type::Function(FunctionType {
+                .unwrap_or(LegacyType::Primitive(PrimitiveType::I64));
+            LegacyType::Function(FunctionType {
                 params: lambda_params.into(),
                 return_type: Box::new(return_ty),
                 is_closure: !lambda.captures.borrow().is_empty(),
             })
         }
 
-        _ => Type::Primitive(PrimitiveType::I64),
+        _ => LegacyType::Primitive(PrimitiveType::I64),
     }
 }
 
@@ -216,7 +216,7 @@ fn compile_pure_lambda(
         .map(|p| {
             p.ty.as_ref()
                 .map(|t| resolve_type_expr(t, ctx))
-                .unwrap_or(Type::Primitive(PrimitiveType::I64))
+                .unwrap_or(LegacyType::Primitive(PrimitiveType::I64))
         })
         .collect();
 
@@ -319,7 +319,7 @@ fn compile_pure_lambda(
     Ok(CompiledValue {
         value: closure_ptr,
         ty: ctx.pointer_type,
-        vole_type: Type::Function(FunctionType {
+        vole_type: LegacyType::Function(FunctionType {
             params: param_vole_types.into(),
             return_type: Box::new(return_vole_type),
             is_closure: true, // Now always a closure struct
@@ -355,7 +355,7 @@ fn compile_lambda_with_captures(
         .map(|p| {
             p.ty.as_ref()
                 .map(|t| resolve_type_expr(t, ctx))
-                .unwrap_or(Type::Primitive(PrimitiveType::I64))
+                .unwrap_or(LegacyType::Primitive(PrimitiveType::I64))
         })
         .collect();
 
@@ -500,7 +500,7 @@ fn compile_lambda_with_captures(
     Ok(CompiledValue {
         value: closure_ptr,
         ty: ctx.pointer_type,
-        vole_type: Type::Function(FunctionType {
+        vole_type: LegacyType::Function(FunctionType {
             params: param_vole_types.into(),
             return_type: Box::new(return_vole_type),
             is_closure: true,
@@ -552,7 +552,7 @@ fn compile_lambda_body(
                 Ok(Some(CompiledValue {
                     value: zero,
                     ty: types::I64,
-                    vole_type: Type::Primitive(PrimitiveType::I64),
+                    vole_type: LegacyType::Primitive(PrimitiveType::I64),
                 }))
             }
         }

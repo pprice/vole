@@ -21,7 +21,7 @@ use crate::sema::Type;
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 use crate::sema::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
 use crate::sema::type_table::{TypeKey, TypeTable};
-use crate::sema::types::NominalType;
+use crate::sema::types::{LegacyType, NominalType};
 
 /// Central registry for all language entities
 #[derive(Debug, Clone)]
@@ -295,9 +295,9 @@ impl EntityRegistry {
     /// Get the name_id for any struct-like Type (Class, Record, Interface)
     pub fn type_name_id(&self, ty: &Type) -> Option<NameId> {
         match ty {
-            Type::Nominal(NominalType::Class(c)) => Some(self.class_name_id(c)),
-            Type::Nominal(NominalType::Record(r)) => Some(self.record_name_id(r)),
-            Type::Nominal(NominalType::Interface(i)) => Some(self.name_id(i.type_def_id)),
+            LegacyType::Nominal(NominalType::Class(c)) => Some(self.class_name_id(c)),
+            LegacyType::Nominal(NominalType::Record(r)) => Some(self.record_name_id(r)),
+            LegacyType::Nominal(NominalType::Interface(i)) => Some(self.name_id(i.type_def_id)),
             _ => None,
         }
     }
@@ -547,7 +547,7 @@ mod tests {
 
         let signature = FunctionType {
             params: vec![].into(),
-            return_type: Box::new(Type::Primitive(PrimitiveType::I32)),
+            return_type: Box::new(LegacyType::Primitive(PrimitiveType::I32)),
             is_closure: false,
         };
 
@@ -581,7 +581,7 @@ mod tests {
             type_id,
             field_name,
             full_field_name,
-            Type::Primitive(PrimitiveType::I32),
+            LegacyType::Primitive(PrimitiveType::I32),
             0,
         );
 
@@ -606,8 +606,8 @@ mod tests {
         let mut registry = EntityRegistry::new();
 
         let signature = FunctionType {
-            params: vec![Type::Primitive(PrimitiveType::F64)].into(),
-            return_type: Box::new(Type::Primitive(PrimitiveType::F64)),
+            params: vec![LegacyType::Primitive(PrimitiveType::F64)].into(),
+            return_type: Box::new(LegacyType::Primitive(PrimitiveType::F64)),
             is_closure: false,
         };
 
@@ -655,7 +655,7 @@ mod tests {
 
         let signature = FunctionType {
             params: vec![].into(),
-            return_type: Box::new(Type::Void),
+            return_type: Box::new(LegacyType::Void),
             is_closure: false,
         };
 

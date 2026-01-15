@@ -27,7 +27,7 @@ use crate::sema::generic::{
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry, MethodImpl, TypeId};
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::type_arena::TypeArena;
-use crate::sema::types::{ConstantValue, ModuleType, NominalType, StructuralType};
+use crate::sema::types::{ConstantValue, LegacyType, ModuleType, NominalType, StructuralType};
 use crate::sema::{
     ClassType, ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField, Type,
     compatibility::TypeCompatibility,
@@ -202,7 +202,7 @@ pub struct Analyzer {
     /// Entity registry for first-class type/method/field/function identity (includes type_table)
     pub entity_registry: EntityRegistry,
     /// Stack of type parameter scopes for nested generic contexts.
-    /// Used for resolving methods on Type::TypeParam via constraint interfaces.
+    /// Used for resolving methods on LegacyType::TypeParam via constraint interfaces.
     type_param_stack: TypeParamScopeStack,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
@@ -435,7 +435,7 @@ impl Analyzer {
             })
             .collect();
 
-        Some(Type::Nominal(NominalType::Interface(
+        Some(LegacyType::Nominal(NominalType::Interface(
             crate::sema::types::InterfaceType {
                 type_def_id,
                 type_args: type_args.into(),
@@ -647,7 +647,7 @@ impl Analyzer {
                             self.check_expr_expecting(init_expr, declared_type.as_ref(), interner)?;
 
                         // Check if trying to use void return value
-                        if init_type == Type::Void {
+                        if init_type == LegacyType::Void {
                             self.add_error(
                                 SemanticError::VoidReturnUsed {
                                     span: init_expr.span.into(),
@@ -659,7 +659,7 @@ impl Analyzer {
                         let var_type = declared_type.unwrap_or(init_type.clone());
 
                         // If this is a type alias (RHS is a type expression), store it
-                        if var_type == Type::Type
+                        if var_type == LegacyType::MetaType
                             && let ExprKind::TypeLiteral(type_expr) = &init_expr.kind
                         {
                             let aliased_type = self.resolve_type(type_expr, interner);
@@ -902,7 +902,7 @@ impl Analyzer {
 
         self.register_named_type(
             decl.name,
-            Type::Nominal(NominalType::Error(error_info.clone())),
+            LegacyType::Nominal(NominalType::Error(error_info.clone())),
             interner,
         );
 
@@ -959,7 +959,7 @@ impl Analyzer {
                         {
                             // Convert the aliased type to a union constraint
                             let types = match aliased_type {
-                                Type::Union(types) => types.to_vec(),
+                                LegacyType::Union(types) => types.to_vec(),
                                 other => vec![other.clone()],
                             };
                             return Some(crate::sema::generic::TypeConstraint::Union(types));
@@ -1059,10 +1059,10 @@ impl Analyzer {
             // If the inferred type is itself a type param that has a matching or stronger constraint,
             // the constraint is satisfied. Check if it's a type param in our current scope.
             let found_param = match found {
-                Type::TypeParam(found_name_id) => {
+                LegacyType::TypeParam(found_name_id) => {
                     self.type_param_stack.get_by_name_id(*found_name_id)
                 }
-                Type::TypeParamRef(type_param_id) => {
+                LegacyType::TypeParamRef(type_param_id) => {
                     self.type_param_stack.get_by_type_param_id(*type_param_id)
                 }
                 _ => None,
@@ -1170,7 +1170,7 @@ impl Analyzer {
             // Resolve return type
             let return_type = match &func.return_type {
                 Some(te) => self.resolve_type(te, interner),
-                None => Type::Void,
+                None => LegacyType::Void,
             };
 
             let func_type = FunctionType {
@@ -1243,7 +1243,7 @@ impl Analyzer {
         self.current_function_return = Some(return_type.clone());
 
         // Set error type context if this is a fallible function
-        if let Type::Fallible(ft) = return_type {
+        if let LegacyType::Fallible(ft) = return_type {
             self.current_function_error_type = Some((*ft.error_type).clone());
         }
 
@@ -1313,7 +1313,7 @@ impl Analyzer {
 
     /// Extract the element type from an Iterator<T> type, or None if not an iterator type
     fn extract_iterator_element_type(&self, ty: &Type, _interner: &Interner) -> Option<Type> {
-        let Type::Nominal(NominalType::Interface(interface_type)) = ty else {
+        let LegacyType::Nominal(NominalType::Interface(interface_type)) = ty else {
             return None;
         };
         if !self
@@ -1358,12 +1358,12 @@ impl Analyzer {
             TypeDefKind::Class => self
                 .entity_registry
                 .build_class_type(type_def_id)
-                .map(|c| Type::Nominal(NominalType::Class(c)))
+                .map(|c| LegacyType::Nominal(NominalType::Class(c)))
                 .unwrap_or_else(|| Type::invalid("unwrap_failed")),
             TypeDefKind::Record => self
                 .entity_registry
                 .build_record_type(type_def_id)
-                .map(|r| Type::Nominal(NominalType::Record(r)))
+                .map(|r| LegacyType::Nominal(NominalType::Record(r)))
                 .unwrap_or_else(|| Type::invalid("unwrap_failed")),
             _ => Type::invalid("fallback"),
         };
@@ -1484,7 +1484,7 @@ impl Analyzer {
             self.scope = Scope::with_parent(parent_scope);
 
             // Tests implicitly return void
-            let saved_ctx = self.enter_function_context(&Type::Void, interner);
+            let saved_ctx = self.enter_function_context(&LegacyType::Void, interner);
 
             // Type check all statements in the test body
             self.check_block(&test_case.body, interner)?;
@@ -1518,7 +1518,7 @@ impl Analyzer {
     ) -> Result<Type, ()> {
         // Check cache first
         if let Some(module_type) = self.module_types.get(import_path) {
-            return Ok(Type::Module(module_type.clone()));
+            return Ok(LegacyType::Module(module_type.clone()));
         }
 
         // Load the module
@@ -1584,11 +1584,11 @@ impl Analyzer {
                             .return_type
                             .as_ref()
                             .map(|rt| resolve_type(rt, &mut ctx))
-                            .unwrap_or(Type::Void);
+                            .unwrap_or(LegacyType::Void);
                         (params, return_type)
                     };
 
-                    let func_type = Type::Function(FunctionType {
+                    let func_type = LegacyType::Function(FunctionType {
                         params: params.into(),
                         return_type: Box::new(return_type),
                         is_closure: false,
@@ -1612,19 +1612,19 @@ impl Analyzer {
                         .intern(module_id, &[l.name], &module_interner);
                     let (ty, const_val) = match &init_expr.kind {
                         ExprKind::FloatLiteral(v) => (
-                            Type::Primitive(PrimitiveType::F64),
+                            LegacyType::Primitive(PrimitiveType::F64),
                             Some(ConstantValue::F64(*v)),
                         ),
                         ExprKind::IntLiteral(v) => (
-                            Type::Primitive(PrimitiveType::I64),
+                            LegacyType::Primitive(PrimitiveType::I64),
                             Some(ConstantValue::I64(*v)),
                         ),
                         ExprKind::BoolLiteral(v) => (
-                            Type::Primitive(PrimitiveType::Bool),
+                            LegacyType::Primitive(PrimitiveType::Bool),
                             Some(ConstantValue::Bool(*v)),
                         ),
                         ExprKind::StringLiteral(v) => (
-                            Type::Primitive(PrimitiveType::String),
+                            LegacyType::Primitive(PrimitiveType::String),
                             Some(ConstantValue::String(v.clone())),
                         ),
                         _ => (Type::unknown(), None), // Complex expressions need full analysis
@@ -1655,11 +1655,11 @@ impl Analyzer {
                                 .return_type
                                 .as_ref()
                                 .map(|rt| resolve_type(rt, &mut ctx))
-                                .unwrap_or(Type::Void);
+                                .unwrap_or(LegacyType::Void);
                             (params, return_type)
                         };
 
-                        let func_type = Type::Function(FunctionType {
+                        let func_type = LegacyType::Function(FunctionType {
                             params: params.into(),
                             return_type: Box::new(return_type),
                             is_closure: false,
@@ -1691,7 +1691,7 @@ impl Analyzer {
         self.module_programs
             .insert(import_path.to_string(), (program, module_interner));
 
-        Ok(Type::Module(module_type))
+        Ok(LegacyType::Module(module_type))
     }
 }
 

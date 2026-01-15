@@ -557,7 +557,7 @@ fn satisfies_interface_with_field() {
         .entity_registry
         .build_record_type(type_def_id)
         .unwrap();
-    let ty = Type::Nominal(NominalType::Record(person_type));
+    let ty = LegacyType::Nominal(NominalType::Record(person_type));
 
     // Check if Person satisfies Named
     assert!(analyzer.satisfies_interface(&ty, named_sym, &interner));
@@ -592,7 +592,7 @@ fn satisfies_interface_missing_field() {
         .entity_registry
         .build_record_type(type_def_id)
         .unwrap();
-    let ty = Type::Nominal(NominalType::Record(point_type));
+    let ty = LegacyType::Nominal(NominalType::Record(point_type));
 
     // Point does NOT satisfy Named (missing name field)
     assert!(!analyzer.satisfies_interface(&ty, named_sym, &interner));
@@ -629,7 +629,7 @@ fn satisfies_interface_with_method() {
         .entity_registry
         .build_record_type(type_def_id)
         .unwrap();
-    let ty = Type::Nominal(NominalType::Record(user_type));
+    let ty = LegacyType::Nominal(NominalType::Record(user_type));
 
     assert!(analyzer.satisfies_interface(&ty, hashable_sym, &interner));
 }

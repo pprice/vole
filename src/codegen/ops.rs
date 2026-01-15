@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 use crate::codegen::RuntimeFn;
 use crate::frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr};
 use crate::sema::implement_registry::TypeId;
-use crate::sema::{PrimitiveType, Type};
+use crate::sema::{LegacyType, PrimitiveType, Type};
 
 use super::context::Cg;
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
@@ -28,7 +28,7 @@ impl Cg<'_, '_, '_> {
 
         // Handle string concatenation: string + Stringable
         if bin.op == BinaryOp::Add
-            && matches!(left.vole_type, Type::Primitive(PrimitiveType::String))
+            && matches!(left.vole_type, LegacyType::Primitive(PrimitiveType::String))
         {
             let right = self.expr(&bin.right)?;
             return self.string_concat(left, right);
@@ -47,7 +47,7 @@ impl Cg<'_, '_, '_> {
         right: CompiledValue,
     ) -> Result<CompiledValue, String> {
         // Get the right operand as a string
-        let right_string = if matches!(right.vole_type, Type::Primitive(PrimitiveType::String)) {
+        let right_string = if matches!(right.vole_type, LegacyType::Primitive(PrimitiveType::String)) {
             // Right is already a string, use it directly
             right.value
         } else {
@@ -94,7 +94,7 @@ impl Cg<'_, '_, '_> {
             let result = self.call_external(
                 external_info,
                 &[val.value],
-                &Type::Primitive(PrimitiveType::String),
+                &LegacyType::Primitive(PrimitiveType::String),
             )?;
             return Ok(result.value);
         }
@@ -200,11 +200,11 @@ impl Cg<'_, '_, '_> {
         // When comparing optional == nil or optional != nil, we need to check the tag
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
             // Check if left is optional and right is nil
-            if left.vole_type.is_optional() && matches!(right.vole_type, Type::Nil) {
+            if left.vole_type.is_optional() && matches!(right.vole_type, LegacyType::Nil) {
                 return self.optional_nil_compare(left, op);
             }
             // Check if right is optional and left is nil
-            if right.vole_type.is_optional() && matches!(left.vole_type, Type::Nil) {
+            if right.vole_type.is_optional() && matches!(left.vole_type, LegacyType::Nil) {
                 return self.optional_nil_compare(right, op);
             }
             // Check if left is optional and right is a compatible value type
@@ -283,7 +283,7 @@ impl Cg<'_, '_, '_> {
                 }
             }
             BinaryOp::Eq => {
-                if matches!(left_vole_type, Type::Primitive(PrimitiveType::String)) {
+                if matches!(left_vole_type, LegacyType::Primitive(PrimitiveType::String)) {
                     self.string_eq(left_val, right_val)?
                 } else if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fcmp(FloatCC::Equal, left_val, right_val)
@@ -292,7 +292,7 @@ impl Cg<'_, '_, '_> {
                 }
             }
             BinaryOp::Ne => {
-                if matches!(left_vole_type, Type::Primitive(PrimitiveType::String)) {
+                if matches!(left_vole_type, LegacyType::Primitive(PrimitiveType::String)) {
                     let eq = self.string_eq(left_val, right_val)?;
                     let one = self.builder.ins().iconst(types::I8, 1);
                     self.builder.ins().isub(one, eq)
@@ -397,7 +397,7 @@ impl Cg<'_, '_, '_> {
             | BinaryOp::Lt
             | BinaryOp::Gt
             | BinaryOp::Le
-            | BinaryOp::Ge => Type::Primitive(PrimitiveType::Bool),
+            | BinaryOp::Ge => LegacyType::Primitive(PrimitiveType::Bool),
             BinaryOp::And | BinaryOp::Or => unreachable!(),
             _ => left_vole_type,
         };
@@ -425,14 +425,14 @@ impl Cg<'_, '_, '_> {
         optional: CompiledValue,
         op: BinaryOp,
     ) -> Result<CompiledValue, String> {
-        let Type::Union(variants) = &optional.vole_type else {
+        let LegacyType::Union(variants) = &optional.vole_type else {
             return Err("optional_nil_compare called on non-union type".into());
         };
 
         // Find the position of nil in the variants (this is the nil tag value)
         let nil_tag = variants
             .iter()
-            .position(|v| v == &Type::Nil)
+            .position(|v| v == &LegacyType::Nil)
             .unwrap_or(usize::MAX);
 
         // Load the tag from the optional (first byte)
@@ -466,14 +466,14 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         op: BinaryOp,
     ) -> Result<CompiledValue, String> {
-        let Type::Union(variants) = &optional.vole_type else {
+        let LegacyType::Union(variants) = &optional.vole_type else {
             return Err("optional_value_compare called on non-union type".into());
         };
 
         // Find the position of nil in the variants (this is the nil tag value)
         let nil_tag = variants
             .iter()
-            .position(|v| v == &Type::Nil)
+            .position(|v| v == &LegacyType::Nil)
             .unwrap_or(usize::MAX);
 
         // Load the tag from the optional (first byte)
@@ -491,7 +491,7 @@ impl Cg<'_, '_, '_> {
         let inner_type = optional
             .vole_type
             .unwrap_optional()
-            .unwrap_or(Type::Primitive(PrimitiveType::I64));
+            .unwrap_or(LegacyType::Primitive(PrimitiveType::I64));
         let payload_cranelift_type = type_to_cranelift(&inner_type, self.ctx.pointer_type);
         let payload =
             self.builder
@@ -593,8 +593,8 @@ impl Cg<'_, '_, '_> {
         let idx = self.expr(index)?;
 
         let elem_type = match &arr.vole_type {
-            Type::Array(elem) => elem.as_ref().clone(),
-            _ => Type::Primitive(PrimitiveType::I64),
+            LegacyType::Array(elem) => elem.as_ref().clone(),
+            _ => LegacyType::Primitive(PrimitiveType::I64),
         };
 
         // Load current element

@@ -26,9 +26,12 @@ use crate::identity::{NameId, TypeDefId, TypeParamId};
 // AnalysisError, PlaceholderKind, FallibleType, ModuleType, ConstantValue
 // are now defined in special.rs and re-exported above
 
-/// Resolved types in the type system
+/// Legacy type enum - being replaced by Type(TypeId) newtype
+///
+/// During migration, LegacyType is the recursive structure and
+/// Type will become an alias then a newtype over TypeId.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Type {
+pub enum LegacyType {
     /// Primitive types (integers, floats, bool, string)
     Primitive(PrimitiveType),
     /// Void (no return value)
@@ -42,11 +45,11 @@ pub enum Type {
     /// Union type - value can be any of the variant types
     /// Represented at runtime as tagged union (discriminant + payload)
     /// TODO: Consider nullable pointer optimization for pointer types (String, Array)
-    Union(Arc<[Type]>),
+    Union(Arc<[LegacyType]>),
     /// Range type (e.g., 0..10)
     Range,
     /// Array type (e.g., [i32], [string])
-    Array(Box<Type>),
+    Array(Box<LegacyType>),
     /// Function type
     Function(FunctionType),
     /// Placeholder type - waiting for substitution or inference.
@@ -56,7 +59,7 @@ pub enum Type {
     Invalid(AnalysisError),
     /// The metatype - the type of types themselves
     /// e.g., `i32` has type `Type`, `let MyInt = i32` assigns a type value
-    Type,
+    MetaType,
     /// Nominal types (Class, Record, Interface, Error) - types with a TypeDefId
     Nominal(NominalType),
     /// Fallible return type: fallible(T, E)
@@ -66,7 +69,7 @@ pub enum Type {
     /// Runtime iterator type - represents builtin iterators (array.iter(), range.iter(), etc.)
     /// These are raw pointers to UnifiedIterator and should call external functions directly
     /// without interface boxing. The inner type is the element type.
-    RuntimeIterator(Box<Type>),
+    RuntimeIterator(Box<LegacyType>),
     /// Type parameter placeholder (e.g., T during inference)
     /// Only valid within generic context during type checking.
     /// Note: This is for inference placeholders. For resolved type parameter
@@ -78,14 +81,17 @@ pub enum Type {
     TypeParamRef(TypeParamId),
     /// Tuple type - heterogeneous fixed-size collection
     /// e.g., [i32, string, bool] - different types per position
-    Tuple(Arc<[Type]>),
+    Tuple(Arc<[LegacyType]>),
     /// Fixed-size array - homogeneous fixed-size array
     /// e.g., [i32; 10] - single element type, compile-time known size
-    FixedArray { element: Box<Type>, size: usize },
+    FixedArray { element: Box<LegacyType>, size: usize },
     /// Structural type - duck typing constraint
     /// e.g., { name: string, func greet() -> string }
     Structural(StructuralType),
 }
+
+/// Type alias for migration - allows existing code to keep using `Type`
+pub type Type = LegacyType;
 
 /// Structural type - defines shape constraints for duck typing
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -179,13 +185,13 @@ impl FunctionType {
 impl Type {
     /// Convert from AST PrimitiveType to Type
     pub fn from_primitive(p: AstPrimitiveType) -> Self {
-        Type::Primitive(PrimitiveType::from_ast(p))
+        LegacyType::Primitive(PrimitiveType::from_ast(p))
     }
 
     /// Get the primitive type if this is a primitive, None otherwise
     pub fn as_primitive(&self) -> Option<PrimitiveType> {
         match self {
-            Type::Primitive(p) => Some(*p),
+            LegacyType::Primitive(p) => Some(*p),
             _ => None,
         }
     }
@@ -194,7 +200,7 @@ impl Type {
     /// Returns None for primitives, functions, unions, etc.
     pub fn type_def_id(&self) -> Option<TypeDefId> {
         match self {
-            Type::Nominal(n) => Some(n.type_def_id()),
+            LegacyType::Nominal(n) => Some(n.type_def_id()),
             _ => None,
         }
     }
@@ -203,7 +209,7 @@ impl Type {
     /// Returns empty slice for non-generic or primitive types.
     pub fn type_args(&self) -> &[Type] {
         match self {
-            Type::Nominal(n) => n.type_args(),
+            LegacyType::Nominal(n) => n.type_args(),
             _ => &[],
         }
     }
@@ -211,7 +217,7 @@ impl Type {
     /// Check if this type is numeric (can do arithmetic)
     pub fn is_numeric(&self) -> bool {
         match self {
-            Type::Primitive(p) => p.is_numeric(),
+            LegacyType::Primitive(p) => p.is_numeric(),
             _ => false,
         }
     }
@@ -219,7 +225,7 @@ impl Type {
     /// Check if this type is an integer
     pub fn is_integer(&self) -> bool {
         match self {
-            Type::Primitive(p) => p.is_integer(),
+            LegacyType::Primitive(p) => p.is_integer(),
             _ => false,
         }
     }
@@ -227,7 +233,7 @@ impl Type {
     /// Check if this is a signed integer type
     pub fn is_signed(&self) -> bool {
         match self {
-            Type::Primitive(p) => p.is_signed(),
+            LegacyType::Primitive(p) => p.is_signed(),
             _ => false,
         }
     }
@@ -235,7 +241,7 @@ impl Type {
     /// Check if this is an unsigned integer type
     pub fn is_unsigned(&self) -> bool {
         match self {
-            Type::Primitive(p) => p.is_unsigned(),
+            LegacyType::Primitive(p) => p.is_unsigned(),
             _ => false,
         }
     }
@@ -243,7 +249,7 @@ impl Type {
     /// Check if this is a floating point type
     pub fn is_float(&self) -> bool {
         match self {
-            Type::Primitive(p) => p.is_float(),
+            LegacyType::Primitive(p) => p.is_float(),
             _ => false,
         }
     }
@@ -251,7 +257,7 @@ impl Type {
     /// Get the bit width of a numeric type
     pub fn bit_width(&self) -> Option<u8> {
         match self {
-            Type::Primitive(p) => p.bit_width(),
+            LegacyType::Primitive(p) => p.bit_width(),
             _ => None,
         }
     }
@@ -262,7 +268,7 @@ impl Type {
             return true;
         }
         match (self, target) {
-            (Type::Primitive(from), Type::Primitive(to)) => from.can_widen_to(*to),
+            (LegacyType::Primitive(from), LegacyType::Primitive(to)) => from.can_widen_to(*to),
             _ => false,
         }
     }
@@ -270,42 +276,42 @@ impl Type {
     /// Get the type name for error messages
     pub fn name(&self) -> &'static str {
         match self {
-            Type::Primitive(p) => p.name(),
-            Type::Void => "void",
-            Type::Nil => "nil",
-            Type::Done => "Done",
-            Type::Union(_) => "union", // Display impl handles full representation
-            Type::Range => "range",
-            Type::Array(_) => "array",
-            Type::Function(_) => "function",
-            Type::Placeholder(_) => "placeholder",
-            Type::Invalid(_) => "<invalid>",
-            Type::Type => "type",
-            Type::Nominal(n) => n.name(),
-            Type::Fallible(_) => "fallible",
-            Type::Module(_) => "module",
-            Type::TypeParam(_) | Type::TypeParamRef(_) => "type parameter",
-            Type::RuntimeIterator(_) => "iterator",
-            Type::Tuple(_) => "tuple",
-            Type::FixedArray { .. } => "fixed array",
-            Type::Structural(_) => "structural",
+            LegacyType::Primitive(p) => p.name(),
+            LegacyType::Void => "void",
+            LegacyType::Nil => "nil",
+            LegacyType::Done => "Done",
+            LegacyType::Union(_) => "union", // Display impl handles full representation
+            LegacyType::Range => "range",
+            LegacyType::Array(_) => "array",
+            LegacyType::Function(_) => "function",
+            LegacyType::Placeholder(_) => "placeholder",
+            LegacyType::Invalid(_) => "<invalid>",
+            LegacyType::MetaType => "type",
+            LegacyType::Nominal(n) => n.name(),
+            LegacyType::Fallible(_) => "fallible",
+            LegacyType::Module(_) => "module",
+            LegacyType::TypeParam(_) | LegacyType::TypeParamRef(_) => "type parameter",
+            LegacyType::RuntimeIterator(_) => "iterator",
+            LegacyType::Tuple(_) => "tuple",
+            LegacyType::FixedArray { .. } => "fixed array",
+            LegacyType::Structural(_) => "structural",
         }
     }
 
     /// Check if this is a union type containing Nil
     pub fn is_optional(&self) -> bool {
-        matches!(self, Type::Union(types) if types.contains(&Type::Nil))
+        matches!(self, LegacyType::Union(types) if types.contains(&LegacyType::Nil))
     }
 
     /// For an optional/union type, get the non-nil variants
     pub fn unwrap_optional(&self) -> Option<Type> {
         match self {
-            Type::Union(types) => {
-                let non_nil: Vec<_> = types.iter().filter(|t| **t != Type::Nil).cloned().collect();
+            LegacyType::Union(types) => {
+                let non_nil: Vec<_> = types.iter().filter(|t| **t != LegacyType::Nil).cloned().collect();
                 match non_nil.len() {
                     0 => None,
                     1 => Some(non_nil.into_iter().next().expect("len checked to be 1")),
-                    _ => Some(Type::Union(non_nil.into())),
+                    _ => Some(LegacyType::Union(non_nil.into())),
                 }
             }
             _ => None,
@@ -314,22 +320,22 @@ impl Type {
 
     /// Create an optional type (T | nil)
     pub fn optional(inner: Type) -> Type {
-        Type::Union(vec![inner, Type::Nil].into())
+        LegacyType::Union(vec![inner, LegacyType::Nil].into())
     }
 
     /// Create an invalid type with just a kind (for migration - prefer invalid_msg)
     pub fn invalid(kind: &'static str) -> Type {
-        Type::Invalid(AnalysisError::simple(kind))
+        LegacyType::Invalid(AnalysisError::simple(kind))
     }
 
     /// Create an invalid type with kind and descriptive message
     pub fn invalid_msg(kind: &'static str, message: impl Into<String>) -> Type {
-        Type::Invalid(AnalysisError::new(kind, message))
+        LegacyType::Invalid(AnalysisError::new(kind, message))
     }
 
     /// Create an invalid type with kind, message, and location
     pub fn invalid_at(kind: &'static str, message: impl Into<String>, span: Span) -> Type {
-        Type::Invalid(AnalysisError::at(kind, message, span))
+        LegacyType::Invalid(AnalysisError::at(kind, message, span))
     }
 
     /// Propagate an invalid type, chaining to the source error with context
@@ -338,11 +344,11 @@ impl Type {
         context: impl Into<String>,
         span: Option<Span>,
     ) -> Type {
-        if let Type::Invalid(err) = source {
-            Type::Invalid(AnalysisError::propagate(err, context, span))
+        if let LegacyType::Invalid(err) = source {
+            LegacyType::Invalid(AnalysisError::propagate(err, context, span))
         } else {
             // Shouldn't call this on non-invalid types
-            Type::Invalid(AnalysisError::new(
+            LegacyType::Invalid(AnalysisError::new(
                 "internal",
                 "propagate_invalid called on valid type",
             ))
@@ -351,33 +357,33 @@ impl Type {
 
     /// Check if this type is invalid (analysis failed)
     pub fn is_invalid(&self) -> bool {
-        matches!(self, Type::Invalid(_))
+        matches!(self, LegacyType::Invalid(_))
     }
 
     /// Create an inference placeholder (for type inference during analysis)
     pub fn unknown() -> Type {
-        Type::Placeholder(PlaceholderKind::Inference)
+        LegacyType::Placeholder(PlaceholderKind::Inference)
     }
 
     /// Create a type parameter placeholder (for generic type parameters like T)
     pub fn type_param_placeholder(name: impl Into<String>) -> Type {
-        Type::Placeholder(PlaceholderKind::TypeParam(name.into()))
+        LegacyType::Placeholder(PlaceholderKind::TypeParam(name.into()))
     }
 
     /// Create a Self type placeholder (for interface method signatures)
     pub fn self_placeholder() -> Type {
-        Type::Placeholder(PlaceholderKind::SelfType)
+        LegacyType::Placeholder(PlaceholderKind::SelfType)
     }
 
     /// Check if this is a placeholder type
     pub fn is_placeholder(&self) -> bool {
-        matches!(self, Type::Placeholder(_))
+        matches!(self, LegacyType::Placeholder(_))
     }
 
     /// Get the analysis error if this is an invalid type
     pub fn analysis_error(&self) -> Option<&AnalysisError> {
         match self {
-            Type::Invalid(err) => Some(err),
+            LegacyType::Invalid(err) => Some(err),
             _ => None,
         }
     }
@@ -386,9 +392,9 @@ impl Type {
     /// Use in codegen where Invalid types indicate a compiler bug.
     #[track_caller]
     pub fn expect_valid(&self, context: &str) -> &Self {
-        if let Type::Invalid(err) = self {
+        if let LegacyType::Invalid(err) = self {
             panic!(
-                "INTERNAL ERROR: Type::Invalid encountered in codegen\n\
+                "INTERNAL ERROR: LegacyType::Invalid encountered in codegen\n\
                  Context: {}\n\
                  Error chain:\n  {}\n\
                  Location: {}",
@@ -423,7 +429,7 @@ impl Type {
         let mut flattened = Vec::new();
         for ty in types.drain(..) {
             match ty {
-                Type::Union(inner) => flattened.extend(inner.iter().cloned()),
+                LegacyType::Union(inner) => flattened.extend(inner.iter().cloned()),
                 other => flattened.push(other),
             }
         }
@@ -438,16 +444,16 @@ impl Type {
         if flattened.len() == 1 {
             flattened.into_iter().next().expect("len checked to be 1")
         } else {
-            Type::Union(flattened.into())
+            LegacyType::Union(flattened.into())
         }
     }
 
     /// Promote two numeric types to their common supertype
     pub fn promote(left: &Type, right: &Type) -> Type {
         match (left, right) {
-            (Type::Primitive(l), Type::Primitive(r)) => {
+            (LegacyType::Primitive(l), LegacyType::Primitive(r)) => {
                 if let Some(promoted) = PrimitiveType::promote(*l, *r) {
-                    Type::Primitive(promoted)
+                    LegacyType::Primitive(promoted)
                 } else {
                     left.clone()
                 }
@@ -465,9 +471,9 @@ impl Type {
     /// # Example
     /// ```ignore
     /// // For a function `fn identity<T>(x: T) -> T` called with i64:
-    /// let substitutions = HashMap::from([(t_name_id, Type::Primitive(PrimitiveType::I64))]);
-    /// let param_type = Type::TypeParam(t_name_id);
-    /// assert_eq!(param_type.substitute(&substitutions), Type::Primitive(PrimitiveType::I64));
+    /// let substitutions = HashMap::from([(t_name_id, LegacyType::Primitive(PrimitiveType::I64))]);
+    /// let param_type = LegacyType::TypeParam(t_name_id);
+    /// assert_eq!(param_type.substitute(&substitutions), LegacyType::Primitive(PrimitiveType::I64));
     /// ```
     pub fn substitute(&self, substitutions: &std::collections::HashMap<NameId, Type>) -> Type {
         // Early exit if no substitutions - just clone (cheap for Arc-based types)
@@ -477,34 +483,34 @@ impl Type {
 
         match self {
             // Direct substitution for type parameters
-            Type::TypeParam(name_id) => substitutions
+            LegacyType::TypeParam(name_id) => substitutions
                 .get(name_id)
                 .cloned()
                 .unwrap_or_else(|| self.clone()),
 
             // TypeParamRef doesn't substitute based on NameId - it's an opaque reference
-            Type::TypeParamRef(_) => self.clone(),
+            LegacyType::TypeParamRef(_) => self.clone(),
 
             // Recursive substitution for compound types - reuse Arc if unchanged
-            Type::Array(elem) => {
+            LegacyType::Array(elem) => {
                 let new_elem = elem.substitute(substitutions);
                 if &new_elem == elem.as_ref() {
                     self.clone()
                 } else {
-                    Type::Array(Box::new(new_elem))
+                    LegacyType::Array(Box::new(new_elem))
                 }
             }
 
-            Type::Union(types) => {
+            LegacyType::Union(types) => {
                 let new_types = substitute_slice(types, substitutions);
                 if let Some(reused) = new_types {
-                    Type::Union(reused)
+                    LegacyType::Union(reused)
                 } else {
                     self.clone()
                 }
             }
 
-            Type::Function(ft) => {
+            LegacyType::Function(ft) => {
                 let new_params = substitute_slice(&ft.params, substitutions);
                 let new_return = ft.return_type.substitute(substitutions);
                 let return_changed = &new_return != ft.return_type.as_ref();
@@ -512,7 +518,7 @@ impl Type {
                 if new_params.is_none() && !return_changed {
                     self.clone()
                 } else {
-                    Type::Function(FunctionType {
+                    LegacyType::Function(FunctionType {
                         params: new_params.unwrap_or_else(|| ft.params.clone()),
                         return_type: Box::new(new_return),
                         is_closure: ft.is_closure,
@@ -520,16 +526,16 @@ impl Type {
                 }
             }
 
-            Type::Tuple(elements) => {
+            LegacyType::Tuple(elements) => {
                 let new_elements = substitute_slice(elements, substitutions);
                 if let Some(reused) = new_elements {
-                    Type::Tuple(reused)
+                    LegacyType::Tuple(reused)
                 } else {
                     self.clone()
                 }
             }
 
-            Type::Nominal(NominalType::Interface(interface_type)) => {
+            LegacyType::Nominal(NominalType::Interface(interface_type)) => {
                 let new_type_args = substitute_slice(&interface_type.type_args, substitutions);
                 let new_methods =
                     substitute_interface_methods(&interface_type.methods, substitutions);
@@ -537,7 +543,7 @@ impl Type {
                 if new_type_args.is_none() && new_methods.is_none() {
                     self.clone()
                 } else {
-                    Type::Nominal(NominalType::Interface(InterfaceType {
+                    LegacyType::Nominal(NominalType::Interface(InterfaceType {
                         type_def_id: interface_type.type_def_id,
                         type_args: new_type_args
                             .unwrap_or_else(|| interface_type.type_args.clone()),
@@ -547,10 +553,10 @@ impl Type {
                 }
             }
 
-            Type::Nominal(NominalType::Record(record_type)) => {
+            LegacyType::Nominal(NominalType::Record(record_type)) => {
                 let new_type_args = substitute_slice(&record_type.type_args, substitutions);
                 if let Some(args) = new_type_args {
-                    Type::Nominal(NominalType::Record(RecordType {
+                    LegacyType::Nominal(NominalType::Record(RecordType {
                         type_def_id: record_type.type_def_id,
                         type_args: args,
                     }))
@@ -559,10 +565,10 @@ impl Type {
                 }
             }
 
-            Type::Nominal(NominalType::Class(class_type)) => {
+            LegacyType::Nominal(NominalType::Class(class_type)) => {
                 let new_type_args = substitute_slice(&class_type.type_args, substitutions);
                 if let Some(args) = new_type_args {
-                    Type::Nominal(NominalType::Class(ClassType {
+                    LegacyType::Nominal(NominalType::Class(ClassType {
                         type_def_id: class_type.type_def_id,
                         type_args: args,
                     }))
@@ -571,28 +577,28 @@ impl Type {
                 }
             }
 
-            Type::RuntimeIterator(elem) => {
+            LegacyType::RuntimeIterator(elem) => {
                 let new_elem = elem.substitute(substitutions);
                 if &new_elem == elem.as_ref() {
                     self.clone()
                 } else {
-                    Type::RuntimeIterator(Box::new(new_elem))
+                    LegacyType::RuntimeIterator(Box::new(new_elem))
                 }
             }
 
-            Type::FixedArray { element, size } => {
+            LegacyType::FixedArray { element, size } => {
                 let new_elem = element.substitute(substitutions);
                 if &new_elem == element.as_ref() {
                     self.clone()
                 } else {
-                    Type::FixedArray {
+                    LegacyType::FixedArray {
                         element: Box::new(new_elem),
                         size: *size,
                     }
                 }
             }
 
-            Type::Fallible(ft) => {
+            LegacyType::Fallible(ft) => {
                 let new_success = ft.success_type.substitute(substitutions);
                 let new_error = ft.error_type.substitute(substitutions);
                 let success_changed = &new_success != ft.success_type.as_ref();
@@ -601,14 +607,14 @@ impl Type {
                 if !success_changed && !error_changed {
                     self.clone()
                 } else {
-                    Type::Fallible(FallibleType {
+                    LegacyType::Fallible(FallibleType {
                         success_type: Box::new(new_success),
                         error_type: Box::new(new_error),
                     })
                 }
             }
 
-            Type::Structural(st) => {
+            LegacyType::Structural(st) => {
                 let mut fields_changed = false;
                 let new_fields: Vec<_> = st
                     .fields
@@ -652,7 +658,7 @@ impl Type {
                 if !fields_changed && !methods_changed {
                     self.clone()
                 } else {
-                    Type::Structural(StructuralType {
+                    LegacyType::Structural(StructuralType {
                         fields: new_fields,
                         methods: new_methods,
                     })
@@ -660,16 +666,16 @@ impl Type {
             }
 
             // Types without nested type parameters - return unchanged
-            Type::Primitive(_)
-            | Type::Void
-            | Type::Nil
-            | Type::Done
-            | Type::Range
-            | Type::Type
-            | Type::Placeholder(_)
-            | Type::Invalid(_)
-            | Type::Module(_)
-            | Type::Nominal(NominalType::Error(_)) => self.clone(),
+            LegacyType::Primitive(_)
+            | LegacyType::Void
+            | LegacyType::Nil
+            | LegacyType::Done
+            | LegacyType::Range
+            | LegacyType::MetaType
+            | LegacyType::Placeholder(_)
+            | LegacyType::Invalid(_)
+            | LegacyType::Module(_)
+            | LegacyType::Nominal(NominalType::Error(_)) => self.clone(),
         }
     }
 }
@@ -735,8 +741,8 @@ fn substitute_interface_methods(
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Primitive(p) => write!(f, "{}", p),
-            Type::Function(ft) => {
+            LegacyType::Primitive(p) => write!(f, "{}", p),
+            LegacyType::Function(ft) => {
                 write!(f, "(")?;
                 for (i, param) in ft.params.iter().enumerate() {
                     if i > 0 {
@@ -746,19 +752,19 @@ impl std::fmt::Display for Type {
                 }
                 write!(f, ") -> {}", ft.return_type)
             }
-            Type::Union(types) => {
+            LegacyType::Union(types) => {
                 let parts: Vec<String> = types.iter().map(|t| format!("{}", t)).collect();
                 write!(f, "{}", parts.join(" | "))
             }
-            Type::Array(elem) => write!(f, "[{}]", elem),
-            Type::Nominal(n) => write!(f, "{}", n),
-            Type::Fallible(ft) => {
+            LegacyType::Array(elem) => write!(f, "[{}]", elem),
+            LegacyType::Nominal(n) => write!(f, "{}", n),
+            LegacyType::Fallible(ft) => {
                 write!(f, "fallible({}, {})", ft.success_type, ft.error_type)
             }
-            Type::Module(m) => write!(f, "module(id:{})", m.module_id.index()),
-            Type::TypeParam(name_id) => write!(f, "{:?}", name_id), // NameId Debug shows the identity
-            Type::TypeParamRef(id) => write!(f, "TypeParam#{}", id.index()),
-            Type::Tuple(elements) => {
+            LegacyType::Module(m) => write!(f, "module(id:{})", m.module_id.index()),
+            LegacyType::TypeParam(name_id) => write!(f, "{:?}", name_id), // NameId Debug shows the identity
+            LegacyType::TypeParamRef(id) => write!(f, "TypeParam#{}", id.index()),
+            LegacyType::Tuple(elements) => {
                 write!(f, "[")?;
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
@@ -768,7 +774,7 @@ impl std::fmt::Display for Type {
                 }
                 write!(f, "]")
             }
-            Type::FixedArray { element, size } => {
+            LegacyType::FixedArray { element, size } => {
                 write!(f, "[{}; {}]", element, size)
             }
             _ => write!(f, "{}", self.name()),
@@ -794,7 +800,7 @@ mod tests {
     use super::*;
 
     fn p(p: PrimitiveType) -> Type {
-        Type::Primitive(p)
+        LegacyType::Primitive(p)
     }
 
     #[test]
@@ -885,9 +891,9 @@ mod tests {
         // Nested unions flatten
         let normalized = Type::normalize_union(vec![
             p(PrimitiveType::I32),
-            Type::Union(vec![p(PrimitiveType::String), Type::Nil].into()),
+            LegacyType::Union(vec![p(PrimitiveType::String), LegacyType::Nil].into()),
         ]);
-        assert!(matches!(normalized, Type::Union(v) if v.len() == 3));
+        assert!(matches!(normalized, LegacyType::Union(v) if v.len() == 3));
 
         // Single element unwraps
         let single = Type::normalize_union(vec![p(PrimitiveType::I32)]);

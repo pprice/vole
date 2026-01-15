@@ -1,7 +1,7 @@
 // src/sema/analyzer/patterns.rs
 
 use super::*;
-use crate::sema::types::NominalType;
+use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
     /// Check a pattern against the scrutinee type.
@@ -49,7 +49,7 @@ impl Analyzer {
                         TypeDefKind::Class => {
                             if let Some(class_type) = self.entity_registry.build_class_type(type_id)
                             {
-                                let pattern_type = Type::Nominal(NominalType::Class(class_type));
+                                let pattern_type = LegacyType::Nominal(NominalType::Class(class_type));
                                 self.check_type_pattern_compatibility(
                                     &pattern_type,
                                     scrutinee_type,
@@ -73,7 +73,7 @@ impl Analyzer {
                             if let Some(record_type) =
                                 self.entity_registry.build_record_type(type_id)
                             {
-                                let pattern_type = Type::Nominal(NominalType::Record(record_type));
+                                let pattern_type = LegacyType::Nominal(NominalType::Record(record_type));
                                 self.check_type_pattern_compatibility(
                                     &pattern_type,
                                     scrutinee_type,
@@ -161,7 +161,7 @@ impl Analyzer {
             Pattern::Success { inner, span } => {
                 // Success pattern only valid when matching on fallible type
                 let success_type = match scrutinee_type {
-                    Type::Fallible(ft) => (*ft.success_type).clone(),
+                    LegacyType::Fallible(ft) => (*ft.success_type).clone(),
                     _ => {
                         let found = self.type_display(scrutinee_type);
                         self.add_error(
@@ -186,7 +186,7 @@ impl Analyzer {
             Pattern::Error { inner, span } => {
                 // Error pattern only valid when matching on fallible type
                 let error_type = match scrutinee_type {
-                    Type::Fallible(ft) => (*ft.error_type).clone(),
+                    LegacyType::Fallible(ft) => (*ft.error_type).clone(),
                     _ => {
                         let found = self.type_display(scrutinee_type);
                         self.add_error(
@@ -210,7 +210,7 @@ impl Analyzer {
             }
             Pattern::Tuple { elements, span } => {
                 // Tuple pattern - check against tuple type
-                if let Type::Tuple(elem_types) = scrutinee_type {
+                if let LegacyType::Tuple(elem_types) = scrutinee_type {
                     if elements.len() != elem_types.len() {
                         self.add_error(
                             SemanticError::TypeMismatch {
@@ -277,7 +277,7 @@ impl Analyzer {
                                 {
                                     let fields_ref = get_fields(type_def);
                                     (
-                                        Some(Type::Nominal(NominalType::Record(record_type))),
+                                        Some(LegacyType::Nominal(NominalType::Record(record_type))),
                                         fields_ref,
                                     )
                                 } else {
@@ -290,7 +290,7 @@ impl Analyzer {
                                 {
                                     let fields_ref = get_fields(type_def);
                                     (
-                                        Some(Type::Nominal(NominalType::Class(class_type))),
+                                        Some(LegacyType::Nominal(NominalType::Class(class_type))),
                                         fields_ref,
                                     )
                                 } else {
@@ -302,7 +302,7 @@ impl Analyzer {
                                 if let Some(error_info) = type_def.error_info.clone() {
                                     let fields_ref = error_info.fields.clone();
                                     (
-                                        Some(Type::Nominal(NominalType::Error(error_info))),
+                                        Some(LegacyType::Nominal(NominalType::Error(error_info))),
                                         fields_ref,
                                     )
                                 } else {
@@ -371,7 +371,7 @@ impl Analyzer {
                     // Untyped record pattern in match - bind fields from scrutinee type
                     // Get fields from EntityRegistry via type_def_id
                     let type_fields: Option<Vec<StructField>> = match scrutinee_type {
-                        Type::Nominal(NominalType::Record(r)) => {
+                        LegacyType::Nominal(NominalType::Record(r)) => {
                             let type_def = self.entity_registry.get_type(r.type_def_id);
                             type_def.generic_info.as_ref().map(|gi| {
                                 gi.field_names
@@ -388,7 +388,7 @@ impl Analyzer {
                                     .collect()
                             })
                         }
-                        Type::Nominal(NominalType::Class(c)) => {
+                        LegacyType::Nominal(NominalType::Class(c)) => {
                             let type_def = self.entity_registry.get_type(c.type_def_id);
                             type_def.generic_info.as_ref().map(|gi| {
                                 gi.field_names
@@ -413,11 +413,11 @@ impl Analyzer {
 
                     if let Some(type_fields) = type_fields {
                         let type_name_str = match scrutinee_type {
-                            Type::Nominal(NominalType::Record(r)) => {
+                            LegacyType::Nominal(NominalType::Record(r)) => {
                                 let type_def = self.entity_registry.get_type(r.type_def_id);
                                 self.name_table.display(type_def.name_id)
                             }
-                            Type::Nominal(NominalType::Class(c)) => {
+                            LegacyType::Nominal(NominalType::Class(c)) => {
                                 let type_def = self.entity_registry.get_type(c.type_def_id);
                                 self.name_table.display(type_def.name_id)
                             }
@@ -482,7 +482,7 @@ impl Analyzer {
         }
 
         // For union types, check if all variants are covered by type patterns
-        if let Type::Union(variants) = scrutinee_type {
+        if let LegacyType::Union(variants) = scrutinee_type {
             let mut covered: Vec<bool> = vec![false; variants.len()];
 
             for arm in arms {
@@ -527,11 +527,11 @@ impl Analyzer {
                             TypeDefKind::Class => self
                                 .entity_registry
                                 .build_class_type(type_id)
-                                .map(|c| Type::Nominal(NominalType::Class(c))),
+                                .map(|c| LegacyType::Nominal(NominalType::Class(c))),
                             TypeDefKind::Record => self
                                 .entity_registry
                                 .build_record_type(type_id)
-                                .map(|r| Type::Nominal(NominalType::Record(r))),
+                                .map(|r| LegacyType::Nominal(NominalType::Record(r))),
                             _ => None,
                         }
                     })
@@ -549,11 +549,11 @@ impl Analyzer {
                             TypeDefKind::Class => self
                                 .entity_registry
                                 .build_class_type(type_id)
-                                .map(|c| Type::Nominal(NominalType::Class(c))),
+                                .map(|c| LegacyType::Nominal(NominalType::Class(c))),
                             TypeDefKind::Record => self
                                 .entity_registry
                                 .build_record_type(type_id)
-                                .map(|r| Type::Nominal(NominalType::Record(r))),
+                                .map(|r| LegacyType::Nominal(NominalType::Record(r))),
                             _ => None,
                         }
                     })
@@ -571,7 +571,7 @@ impl Analyzer {
         interner: &Interner,
     ) {
         // For union types, the pattern type must be one of the variants
-        if let Type::Union(variants) = scrutinee_type {
+        if let LegacyType::Union(variants) = scrutinee_type {
             if !variants.iter().any(|v| v == pattern_type) {
                 let expected = self.type_display(scrutinee_type);
                 let found = self.type_display(pattern_type);

@@ -3,7 +3,7 @@
 use super::*;
 use crate::sema::PrimitiveType;
 use crate::sema::compatibility::TypeCompatibility;
-use crate::sema::types::NominalType;
+use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
     pub(crate) fn check_block(
@@ -53,7 +53,7 @@ impl Analyzer {
                             self.check_expr_expecting(init_expr, declared_type.as_ref(), interner)?;
 
                         // Check if trying to use void return value
-                        if init_type == Type::Void {
+                        if init_type == LegacyType::Void {
                             self.add_error(
                                 SemanticError::VoidReturnUsed {
                                     span: init_expr.span.into(),
@@ -65,7 +65,7 @@ impl Analyzer {
                         let var_type = declared_type.unwrap_or(init_type);
 
                         // If this is a type alias (RHS is a type expression), store it
-                        if var_type == Type::Type
+                        if var_type == LegacyType::MetaType
                             && let ExprKind::TypeLiteral(type_expr) = &init_expr.kind
                         {
                             let aliased_type = self.resolve_type(type_expr, interner);
@@ -95,7 +95,7 @@ impl Analyzer {
             }
             Stmt::While(while_stmt) => {
                 let cond_type = self.check_expr(&while_stmt.condition, interner)?;
-                if cond_type != Type::Primitive(PrimitiveType::Bool) && !cond_type.is_numeric() {
+                if cond_type != LegacyType::Primitive(PrimitiveType::Bool) && !cond_type.is_numeric() {
                     let found = self.type_display(&cond_type);
                     self.add_error(
                         SemanticError::ConditionNotBool {
@@ -115,7 +115,7 @@ impl Analyzer {
             }
             Stmt::If(if_stmt) => {
                 let cond_type = self.check_expr(&if_stmt.condition, interner)?;
-                if cond_type != Type::Primitive(PrimitiveType::Bool) && !cond_type.is_numeric() {
+                if cond_type != LegacyType::Primitive(PrimitiveType::Bool) && !cond_type.is_numeric() {
                     let found = self.type_display(&cond_type);
                     self.add_error(
                         SemanticError::ConditionNotBool {
@@ -162,7 +162,7 @@ impl Analyzer {
                     self.scope = Scope::with_parent(parent);
 
                     // Apply else-branch narrowing: if x is T, else branch has x: (original - T)
-                    if let Some((sym, tested_type, Some(Type::Union(variants)))) = &narrowing_info {
+                    if let Some((sym, tested_type, Some(LegacyType::Union(variants)))) = &narrowing_info {
                         // Remove tested type from union
                         let remaining: Vec<_> = variants
                             .iter()
@@ -175,7 +175,7 @@ impl Analyzer {
                         } else if remaining.len() > 1 {
                             // Multiple types remaining - narrow to smaller union
                             self.type_overrides
-                                .insert(*sym, Type::Union(remaining.into()));
+                                .insert(*sym, LegacyType::Union(remaining.into()));
                         }
                     }
 
@@ -192,13 +192,13 @@ impl Analyzer {
                 let iterable_ty = self.check_expr(&for_stmt.iterable, interner)?;
 
                 let elem_ty = match &iterable_ty {
-                    Type::Range => self.ty_i64(),
-                    Type::Array(elem) => *elem.clone(),
+                    LegacyType::Range => self.ty_i64(),
+                    LegacyType::Array(elem) => *elem.clone(),
                     // String is iterable - yields string (individual characters)
-                    Type::Primitive(PrimitiveType::String) => self.ty_string(),
+                    LegacyType::Primitive(PrimitiveType::String) => self.ty_string(),
                     // Runtime iterators have their element type directly
-                    Type::RuntimeIterator(elem) => *elem.clone(),
-                    Type::Nominal(NominalType::Interface(_)) => {
+                    LegacyType::RuntimeIterator(elem) => *elem.clone(),
+                    LegacyType::Nominal(NominalType::Interface(_)) => {
                         if let Some(elem) =
                             self.extract_iterator_element_type(&iterable_ty, interner)
                         {
@@ -250,7 +250,7 @@ impl Analyzer {
                     // If expected is fallible, extract success type for comparison
                     // A `return value` statement returns the success type, not the full fallible type
                     match expected {
-                        Type::Fallible(ft) => (*ft.success_type).clone(),
+                        LegacyType::Fallible(ft) => (*ft.success_type).clone(),
                         other => other.clone(),
                     }
                 });
@@ -320,7 +320,7 @@ impl Analyzer {
                 // Wildcard - nothing to bind
             }
             Pattern::Tuple { elements, span } => match ty {
-                Type::Tuple(elem_types) => {
+                LegacyType::Tuple(elem_types) => {
                     if elements.len() != elem_types.len() {
                         self.add_error(
                             SemanticError::TypeMismatch {
@@ -345,7 +345,7 @@ impl Analyzer {
                         }
                     }
                 }
-                Type::FixedArray { element, size } => {
+                LegacyType::FixedArray { element, size } => {
                     if elements.len() != *size {
                         self.add_error(
                             SemanticError::TypeMismatch {
@@ -478,17 +478,17 @@ impl Analyzer {
         // Verify that raised error type is compatible with declared error type
         let stmt_error_name = interner.resolve(stmt.error_name);
         let is_compatible = match &error_type {
-            Type::Nominal(NominalType::Error(declared_info)) => {
+            LegacyType::Nominal(NominalType::Error(declared_info)) => {
                 // Single error type - must match exactly
                 let name = self
                     .name_table
                     .last_segment_str(self.entity_registry.name_id(declared_info.type_def_id));
                 name.as_deref() == Some(stmt_error_name)
             }
-            Type::Union(variants) => {
+            LegacyType::Union(variants) => {
                 // Union of error types - raised error must be one of the variants
                 variants.iter().any(|variant| {
-                    if let Type::Nominal(NominalType::Error(info)) = variant {
+                    if let LegacyType::Nominal(NominalType::Error(info)) = variant {
                         let name = self
                             .name_table
                             .last_segment_str(self.entity_registry.name_id(info.type_def_id));
@@ -503,7 +503,7 @@ impl Analyzer {
 
         if !is_compatible {
             let declared_str = self.type_display(&error_type);
-            let raised_str = self.type_display(&Type::Nominal(NominalType::Error(error_info)));
+            let raised_str = self.type_display(&LegacyType::Nominal(NominalType::Error(error_info)));
 
             self.add_error(
                 SemanticError::IncompatibleRaiseError {
@@ -532,7 +532,7 @@ impl Analyzer {
         let inner_type = self.check_expr(inner_expr, interner)?;
 
         let (success_type, error_type) = match &inner_type {
-            Type::Fallible(ft) => ((*ft.success_type).clone(), (*ft.error_type).clone()),
+            LegacyType::Fallible(ft) => ((*ft.success_type).clone(), (*ft.error_type).clone()),
             _ => {
                 let found = self.type_display(&inner_type);
                 self.add_error(
@@ -584,12 +584,12 @@ impl Analyzer {
         }
 
         // error_type is a member of func_error union
-        if let Type::Union(variants) = func_error {
+        if let LegacyType::Union(variants) = func_error {
             if variants.contains(error_type) {
                 return true;
             }
             // Also check if error_type is a union whose members are all in func_error
-            if let Type::Union(error_variants) = error_type {
+            if let LegacyType::Union(error_variants) = error_type {
                 return error_variants.iter().all(|ev| variants.contains(ev));
             }
         }
@@ -609,8 +609,8 @@ impl Analyzer {
     ) {
         // Get type_def_id from the type
         let type_def_id = match init_type {
-            Type::Nominal(NominalType::Record(record_type)) => record_type.type_def_id,
-            Type::Nominal(NominalType::Class(class_type)) => class_type.type_def_id,
+            LegacyType::Nominal(NominalType::Record(record_type)) => record_type.type_def_id,
+            LegacyType::Nominal(NominalType::Class(class_type)) => class_type.type_def_id,
             _ => {
                 self.type_error("record or class", init_type, init_span);
                 return;

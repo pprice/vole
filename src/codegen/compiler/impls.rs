@@ -14,7 +14,7 @@ use crate::frontend::{
     Symbol, TypeExpr,
 };
 use crate::identity::ModuleId;
-use crate::sema::Type;
+use crate::sema::{LegacyType, Type};
 use crate::sema::types::NominalType;
 
 impl Compiler<'_> {
@@ -243,7 +243,7 @@ impl Compiler<'_> {
                         module_id,
                     )
                 })
-                .unwrap_or(Type::Void);
+                .unwrap_or(LegacyType::Void);
 
             // Create signature without self parameter
             let sig = self.build_signature(
@@ -336,7 +336,7 @@ impl Compiler<'_> {
                         module_id,
                     )
                 })
-                .unwrap_or(Type::Void);
+                .unwrap_or(LegacyType::Void);
 
             // Create signature without self parameter
             let sig = self.build_signature(
@@ -432,7 +432,7 @@ impl Compiler<'_> {
                         module_id,
                     )
                 })
-                .unwrap_or(Type::Void);
+                .unwrap_or(LegacyType::Void);
             let sig = self.build_signature(
                 &method.params,
                 method.return_type.as_ref(),
@@ -504,7 +504,7 @@ impl Compiler<'_> {
                             module_id,
                         )
                     })
-                    .unwrap_or(Type::Void);
+                    .unwrap_or(LegacyType::Void);
 
                 // Create signature without self parameter
                 let sig = self.build_signature(
@@ -758,7 +758,7 @@ impl Compiler<'_> {
                         module_id,
                     )
                 })
-                .unwrap_or(Type::Void);
+                .unwrap_or(LegacyType::Void);
 
             // Create signature (no self parameter)
             let sig = self.build_signature(
@@ -1725,7 +1725,7 @@ impl Compiler<'_> {
             .type_metadata
             .values()
             .find(|meta| {
-                if let Type::Nominal(NominalType::Class(class_type)) = &meta.vole_type {
+                if let LegacyType::Nominal(NominalType::Class(class_type)) = &meta.vole_type {
                     let name_id = self.analyzed.entity_registry.class_name_id(class_type);
                     self.analyzed
                         .name_table
@@ -1819,7 +1819,7 @@ impl Compiler<'_> {
                         module_id,
                     )
                 })
-                .unwrap_or(Type::Void);
+                .unwrap_or(LegacyType::Void);
 
             // Create function builder
             let mut builder_ctx = FunctionBuilderContext::new();
@@ -1929,7 +1929,7 @@ impl Compiler<'_> {
                             module_id,
                         )
                     })
-                    .unwrap_or(Type::Void);
+                    .unwrap_or(LegacyType::Void);
 
                 // Create signature (no self parameter) - use module interner
                 let sig = self.build_signature(

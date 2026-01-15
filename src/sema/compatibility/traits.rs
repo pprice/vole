@@ -85,12 +85,12 @@ impl TypeCompatibility for Type {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sema::types::PrimitiveType;
+    use crate::sema::types::{LegacyType, PrimitiveType};
 
     #[test]
     fn test_trait_is_numeric() {
-        let i32_ty = Type::Primitive(PrimitiveType::I32);
-        let bool_ty = Type::Primitive(PrimitiveType::Bool);
+        let i32_ty = LegacyType::Primitive(PrimitiveType::I32);
+        let bool_ty = LegacyType::Primitive(PrimitiveType::Bool);
 
         assert!(i32_ty.is_numeric());
         assert!(!bool_ty.is_numeric());
@@ -98,9 +98,9 @@ mod tests {
 
     #[test]
     fn test_trait_can_widen_to() {
-        let i32_ty = Type::Primitive(PrimitiveType::I32);
-        let i64_ty = Type::Primitive(PrimitiveType::I64);
-        let string_ty = Type::Primitive(PrimitiveType::String);
+        let i32_ty = LegacyType::Primitive(PrimitiveType::I32);
+        let i64_ty = LegacyType::Primitive(PrimitiveType::I64);
+        let string_ty = LegacyType::Primitive(PrimitiveType::String);
 
         assert!(i32_ty.can_widen_to(&i64_ty));
         assert!(!i64_ty.can_widen_to(&i32_ty));
@@ -109,8 +109,8 @@ mod tests {
 
     #[test]
     fn test_trait_fits_literal() {
-        let i8_ty = Type::Primitive(PrimitiveType::I8);
-        let i32_ty = Type::Primitive(PrimitiveType::I32);
+        let i8_ty = LegacyType::Primitive(PrimitiveType::I8);
+        let i32_ty = LegacyType::Primitive(PrimitiveType::I32);
 
         assert!(i8_ty.fits_literal(100));
         assert!(!i8_ty.fits_literal(200));
@@ -119,8 +119,8 @@ mod tests {
 
     #[test]
     fn test_trait_is_compatible() {
-        let i32_ty = Type::Primitive(PrimitiveType::I32);
-        let i64_ty = Type::Primitive(PrimitiveType::I64);
+        let i32_ty = LegacyType::Primitive(PrimitiveType::I32);
+        let i64_ty = LegacyType::Primitive(PrimitiveType::I64);
 
         // Same type is compatible
         assert!(i32_ty.is_compatible(&i32_ty));
