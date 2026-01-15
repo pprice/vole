@@ -692,6 +692,145 @@ impl TypeArena {
         id
     }
 
+    // =========================================================================
+    // Type predicates for codegen pattern matching
+    // =========================================================================
+
+    /// Check if this is an array type
+    pub fn is_array(&self, id: TypeId) -> bool {
+        matches!(self.get(id), InternedType::Array(_))
+    }
+
+    /// Check if this is a fixed array type
+    pub fn is_fixed_array(&self, id: TypeId) -> bool {
+        matches!(self.get(id), InternedType::FixedArray { .. })
+    }
+
+    /// Check if this is a function type
+    pub fn is_function(&self, id: TypeId) -> bool {
+        matches!(self.get(id), InternedType::Function { .. })
+    }
+
+    /// Check if this is a closure (function with is_closure=true)
+    pub fn is_closure(&self, id: TypeId) -> bool {
+        matches!(self.get(id), InternedType::Function { is_closure: true, .. })
+    }
+
+    /// Check if this is a class type
+    pub fn is_class(&self, id: TypeId) -> bool {
+        matches!(self.get(id), InternedType::Class { .. })
+    }
+
+    /// Check if this is a record type
+    pub fn is_record(&self, id: TypeId) -> bool {
+        matches!(self.get(id), InternedType::Record { .. })
+    }
+
+    /// Check if this is an interface type
+    pub fn is_interface(&self, id: TypeId) -> bool {
+        matches!(self.get(id), InternedType::Interface { .. })
+    }
+
+    /// Check if this is an error type
+    pub fn is_error(&self, id: TypeId) -> bool {
+        matches!(self.get(id), InternedType::Error { .. })
+    }
+
+    /// Check if this is a union type
+    pub fn is_union(&self, id: TypeId) -> bool {
+        matches!(self.get(id), InternedType::Union(_))
+    }
+
+    /// Check if this is a tuple type
+    pub fn is_tuple(&self, id: TypeId) -> bool {
+        matches!(self.get(id), InternedType::Tuple(_))
+    }
+
+    /// Check if this is the string primitive
+    pub fn is_string(&self, id: TypeId) -> bool {
+        id == self.primitives.string
+    }
+
+    /// Check if this is nil
+    pub fn is_nil(&self, id: TypeId) -> bool {
+        id == self.primitives.nil
+    }
+
+    /// Check if this is void
+    pub fn is_void(&self, id: TypeId) -> bool {
+        id == self.primitives.void
+    }
+
+    /// Check if this is a runtime iterator type
+    pub fn is_runtime_iterator(&self, id: TypeId) -> bool {
+        matches!(self.get(id), InternedType::RuntimeIterator(_))
+    }
+
+    /// Check if this is a fallible type
+    pub fn is_fallible(&self, id: TypeId) -> bool {
+        matches!(self.get(id), InternedType::Fallible { .. })
+    }
+
+    // =========================================================================
+    // Unwrap helpers for codegen
+    // =========================================================================
+
+    /// Unwrap a class type, returning (type_def_id, type_args)
+    pub fn unwrap_class(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
+        match self.get(id) {
+            InternedType::Class { type_def_id, type_args } => Some((*type_def_id, type_args)),
+            _ => None,
+        }
+    }
+
+    /// Unwrap a record type, returning (type_def_id, type_args)
+    pub fn unwrap_record(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
+        match self.get(id) {
+            InternedType::Record { type_def_id, type_args } => Some((*type_def_id, type_args)),
+            _ => None,
+        }
+    }
+
+    /// Unwrap an interface type, returning (type_def_id, type_args)
+    pub fn unwrap_interface(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
+        match self.get(id) {
+            InternedType::Interface { type_def_id, type_args } => Some((*type_def_id, type_args)),
+            _ => None,
+        }
+    }
+
+    /// Unwrap an error type, returning type_def_id
+    pub fn unwrap_error(&self, id: TypeId) -> Option<TypeDefId> {
+        match self.get(id) {
+            InternedType::Error { type_def_id } => Some(*type_def_id),
+            _ => None,
+        }
+    }
+
+    /// Unwrap a union type, returning the variants
+    pub fn unwrap_union(&self, id: TypeId) -> Option<&TypeIdVec> {
+        match self.get(id) {
+            InternedType::Union(variants) => Some(variants),
+            _ => None,
+        }
+    }
+
+    /// Unwrap a runtime iterator type, returning the element type
+    pub fn unwrap_runtime_iterator(&self, id: TypeId) -> Option<TypeId> {
+        match self.get(id) {
+            InternedType::RuntimeIterator(elem) => Some(*elem),
+            _ => None,
+        }
+    }
+
+    /// Unwrap a fallible type, returning (success, error)
+    pub fn unwrap_fallible(&self, id: TypeId) -> Option<(TypeId, TypeId)> {
+        match self.get(id) {
+            InternedType::Fallible { success, error } => Some((*success, *error)),
+            _ => None,
+        }
+    }
+
     /// Display a type for error messages (basic version without name resolution)
     pub fn display_basic(&self, id: TypeId) -> String {
         match self.get(id) {
