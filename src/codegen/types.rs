@@ -17,6 +17,7 @@ use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, substitute_type};
+use crate::sema::type_arena::TypeArena;
 use crate::sema::types::NominalType;
 use crate::sema::{EntityRegistry, FunctionType, PrimitiveType, Type, TypeId, TypeKey};
 
@@ -128,6 +129,9 @@ pub(crate) struct CompileCtx<'a> {
     pub analyzed: &'a AnalyzedProgram,
     /// Interner for symbol resolution (may differ from analyzed.interner for module code)
     pub interner: &'a Interner,
+    /// Type arena for interned type access (read-only in codegen)
+    #[allow(dead_code)] // Will be used in Phase 4.2+ of TypeArena migration
+    pub arena: &'a TypeArena,
     pub pointer_type: types::Type,
     pub module: &'a mut JITModule,
     pub func_registry: &'a mut FunctionRegistry,

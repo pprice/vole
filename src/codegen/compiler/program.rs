@@ -570,6 +570,7 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: module_interner, // Use module's interner
+                arena: &self.analyzed.type_arena,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
@@ -707,6 +708,7 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
+                arena: &self.analyzed.type_arena,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
@@ -784,6 +786,7 @@ impl Compiler<'_> {
                 let mut ctx = CompileCtx {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,
+                    arena: &self.analyzed.type_arena,
                     pointer_type: self.pointer_type,
                     module: &mut self.jit.module,
                     func_registry: &mut self.func_registry,
@@ -1014,6 +1017,7 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
+                arena: &self.analyzed.type_arena,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
@@ -1080,6 +1084,7 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
+                arena: &self.analyzed.type_arena,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
@@ -1322,6 +1327,7 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
+                arena: &self.analyzed.type_arena,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
@@ -1582,6 +1588,7 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
+                arena: &self.analyzed.type_arena,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
@@ -1903,6 +1910,7 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
+                arena: &self.analyzed.type_arena,
                 pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
