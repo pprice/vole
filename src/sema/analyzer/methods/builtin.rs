@@ -23,7 +23,7 @@ impl Analyzer {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                Some(method_type(vec![], Type::Primitive(PrimitiveType::I64)))
+                Some(method_type(vec![], self.ty_i64()))
             }
             // Array.iter() -> Iterator<T>
             (Type::Array(elem_ty), "iter") => {
@@ -39,11 +39,8 @@ impl Analyzer {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                let iter_type = self.interface_type(
-                    "Iterator",
-                    vec![Type::Primitive(PrimitiveType::I64)],
-                    interner,
-                )?;
+                let i64_ty = self.ty_i64();
+                let iter_type = self.interface_type("Iterator", vec![i64_ty], interner)?;
                 Some(method_type(vec![], iter_type))
             }
             // String.length() -> i64
@@ -51,18 +48,15 @@ impl Analyzer {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                Some(method_type(vec![], Type::Primitive(PrimitiveType::I64)))
+                Some(method_type(vec![], self.ty_i64()))
             }
             // String.iter() -> Iterator<string>
             (Type::Primitive(PrimitiveType::String), "iter") => {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                let iter_type = self.interface_type(
-                    "Iterator",
-                    vec![Type::Primitive(PrimitiveType::String)],
-                    interner,
-                )?;
+                let string_ty = self.ty_string();
+                let iter_type = self.interface_type("Iterator", vec![string_ty], interner)?;
                 Some(method_type(vec![], iter_type))
             }
             _ => None,
