@@ -133,7 +133,7 @@ impl<'a> Compiler<'a> {
     }
 
     /// Get TypeId from a Type (wraps TypeId::from_type with entity_registry.type_table)
-    fn type_id_from_type(&self, ty: &crate::sema::Type) -> Option<TypeId> {
+    fn type_id_from_type(&self, ty: &crate::sema::LegacyType) -> Option<TypeId> {
         TypeId::from_type(
             ty,
             &self.analyzed.entity_registry.type_table,

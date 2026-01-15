@@ -10,7 +10,7 @@ use crate::sema::generic::{TypeParamScope, substitute_type};
 use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use crate::sema::types::{
     ClassType, FallibleType, FunctionType, InterfaceMethodType, InterfaceType, LegacyType,
-    NominalType, RecordType, StructuralFieldType, StructuralMethodType, StructuralType, Type,
+    NominalType, RecordType, StructuralFieldType, StructuralMethodType, StructuralType,
 };
 use std::collections::HashMap;
 
@@ -44,7 +44,7 @@ fn interface_instance(
     }
 
     if !type_def.type_params.is_empty() && type_def.type_params.len() != type_args.len() {
-        return Some(Type::invalid("propagate"));
+        return Some(LegacyType::invalid("propagate"));
     }
 
     // Build substitution map using type param NameIds
@@ -217,7 +217,7 @@ pub fn resolve_type_with_arena(
 /// Internal implementation of resolve_type (non-arena version).
 fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> LegacyType {
     match ty {
-        TypeExpr::Primitive(p) => Type::from_primitive(*p),
+        TypeExpr::Primitive(p) => LegacyType::from_primitive(*p),
         TypeExpr::Named(sym) => {
             // Check if it's a type parameter in scope first
             if let Some(type_params) = ctx.type_params
@@ -238,42 +238,42 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                         if let Some(record) = ctx.entity_registry.build_record_type(type_id) {
                             LegacyType::Nominal(NominalType::Record(record))
                         } else {
-                            Type::invalid("resolve_failed")
+                            LegacyType::invalid("resolve_failed")
                         }
                     }
                     TypeDefKind::Class => {
                         if let Some(class) = ctx.entity_registry.build_class_type(type_id) {
                             LegacyType::Nominal(NominalType::Class(class))
                         } else {
-                            Type::invalid("resolve_failed")
+                            LegacyType::invalid("resolve_failed")
                         }
                     }
                     TypeDefKind::Interface => {
                         // Use interface_instance for proper method resolution
                         interface_instance(*sym, Vec::new(), ctx)
-                            .unwrap_or_else(|| Type::invalid("unwrap_failed"))
+                            .unwrap_or_else(|| LegacyType::invalid("unwrap_failed"))
                     }
                     TypeDefKind::ErrorType => {
                         // Get error info from EntityRegistry
                         if let Some(error_info) = type_def.error_info.clone() {
                             LegacyType::Nominal(NominalType::Error(error_info))
                         } else {
-                            Type::invalid("resolve_failed")
+                            LegacyType::invalid("resolve_failed")
                         }
                     }
-                    TypeDefKind::Primitive => Type::invalid("resolve_primitive"),
+                    TypeDefKind::Primitive => LegacyType::invalid("resolve_primitive"),
                     TypeDefKind::Alias => {
                         if let Some(ref aliased) = type_def.aliased_type {
                             aliased.clone()
                         } else {
-                            Type::invalid("resolve_failed")
+                            LegacyType::invalid("resolve_failed")
                         }
                     }
                 }
             } else if let Some(interface) = interface_instance(*sym, Vec::new(), ctx) {
                 interface
             } else {
-                Type::invalid("unknown_type_name") // Unknown type name
+                LegacyType::invalid("unknown_type_name") // Unknown type name
             }
         }
         TypeExpr::Array(elem) => {
@@ -284,11 +284,11 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
         TypeExpr::Done => LegacyType::Done,
         TypeExpr::Optional(inner) => {
             let inner_ty = resolve_type(inner, ctx);
-            Type::optional(inner_ty)
+            LegacyType::optional(inner_ty)
         }
         TypeExpr::Union(variants) => {
             let types: Vec<LegacyType> = variants.iter().map(|t| resolve_type(t, ctx)).collect();
-            Type::normalize_union(types)
+            LegacyType::normalize_union(types)
         }
         TypeExpr::Function {
             params,
@@ -308,7 +308,7 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                 self_type.clone()
             } else {
                 // Return Error to indicate Self can't be used outside method context
-                Type::invalid("resolve_failed")
+                LegacyType::invalid("resolve_failed")
             }
         }
         TypeExpr::Fallible {
@@ -352,43 +352,33 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                     TypeDefKind::Interface => {
                         // interface_instance() should have handled this, but as fallback
                         // return invalid - interfaces need full method info
-                        return Type::invalid_msg(
-                            "resolve_generic_interface",
-                            format!(
-                                "interface '{}' requires interface_instance resolution",
-                                name_str
-                            ),
-                        );
+                        return LegacyType::invalid_msg("resolve_generic_interface",
+                        format!(
+                            "interface '{}' requires interface_instance resolution",
+                            name_str
+                        ),);
                     }
                     TypeDefKind::Alias => {
                         // Type aliases don't support type parameters
-                        return Type::invalid_msg(
-                            "resolve_generic_alias",
-                            format!("type alias '{}' cannot have type arguments", name_str),
-                        );
+                        return LegacyType::invalid_msg("resolve_generic_alias",
+                        format!("type alias '{}' cannot have type arguments", name_str),);
                     }
                     TypeDefKind::ErrorType => {
                         // Error types don't support type parameters
-                        return Type::invalid_msg(
-                            "resolve_generic_error",
-                            format!("error type '{}' cannot have type arguments", name_str),
-                        );
+                        return LegacyType::invalid_msg("resolve_generic_error",
+                        format!("error type '{}' cannot have type arguments", name_str),);
                     }
                     TypeDefKind::Primitive => {
                         // Primitives don't support type parameters
-                        return Type::invalid_msg(
-                            "resolve_generic_primitive",
-                            format!("primitive type '{}' cannot have type arguments", name_str),
-                        );
+                        return LegacyType::invalid_msg("resolve_generic_primitive",
+                        format!("primitive type '{}' cannot have type arguments", name_str),);
                     }
                 }
             }
 
             // Type not found - return invalid
-            Type::invalid_msg(
-                "resolve_unknown_generic",
-                format!("unknown generic type '{}'", name_str),
-            )
+            LegacyType::invalid_msg("resolve_unknown_generic",
+            format!("unknown generic type '{}'", name_str),)
         }
         TypeExpr::Tuple(elements) => {
             let resolved_elements: Vec<LegacyType> =
@@ -436,7 +426,7 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
         TypeExpr::Combination(_) => {
             // Type combinations are constraint-only, not resolved to a concrete Type
             // Semantic analysis handles these specially in constraint contexts
-            Type::invalid("resolve_failed")
+            LegacyType::invalid("resolve_failed")
         }
     }
 }

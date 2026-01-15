@@ -15,7 +15,7 @@ impl Analyzer {
     pub(crate) fn check_call_args(
         &mut self,
         args: &[Expr],
-        param_types: &[Type],
+        param_types: &[LegacyType],
         call_span: Span,
         with_inference: bool,
         interner: &Interner,

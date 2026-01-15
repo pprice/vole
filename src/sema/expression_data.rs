@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
 use crate::frontend::NodeId;
-use crate::sema::{LegacyType, Type};
+use crate::sema::LegacyType;
 use crate::sema::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::sema::resolution::ResolvedMethod;
 

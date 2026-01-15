@@ -17,7 +17,6 @@ mod types;
 use std::collections::{HashMap, HashSet};
 
 use crate::identity::{FieldId, FunctionId, MethodId, NameId, TypeDefId};
-use crate::sema::Type;
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 use crate::sema::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
 use crate::sema::type_table::{TypeKey, TypeTable};
@@ -195,7 +194,7 @@ impl EntityRegistry {
         &self,
         type_id: TypeDefId,
         interface_id: TypeDefId,
-    ) -> &[Type] {
+    ) -> &[LegacyType] {
         let type_def = &self.type_defs[type_id.index() as usize];
         for impl_ in &type_def.implements {
             if impl_.interface == interface_id {

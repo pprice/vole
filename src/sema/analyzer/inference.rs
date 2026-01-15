@@ -2,7 +2,6 @@
 
 use super::Analyzer;
 use crate::identity::NameId;
-use crate::sema::Type;
 use crate::sema::generic::TypeParamInfo;
 use crate::sema::types::{LegacyType, NominalType};
 use std::collections::HashMap;
@@ -14,8 +13,8 @@ impl Analyzer {
     pub(crate) fn infer_type_params(
         &self,
         type_params: &[TypeParamInfo],
-        param_types: &[Type],
-        arg_types: &[Type],
+        param_types: &[LegacyType],
+        arg_types: &[LegacyType],
     ) -> HashMap<NameId, LegacyType> {
         let mut inferred = HashMap::new();
 

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::identity::{NameId, NameTable, TypeDefId};
 use crate::sema::implement_registry::PrimitiveTypeId;
-use crate::sema::types::{LegacyType, NominalType, PrimitiveType, Type};
+use crate::sema::types::{LegacyType, NominalType, PrimitiveType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeKey(u32);
@@ -28,7 +28,7 @@ pub struct TypeTable {
     types: Vec<TypeInfo>,
     name_lookup: HashMap<NameId, TypeKey>,
     type_def_lookup: HashMap<TypeDefId, TypeKey>,
-    type_lookup: HashMap<Type, TypeKey>,
+    type_lookup: HashMap<LegacyType, TypeKey>,
     primitive_names: HashMap<PrimitiveTypeId, NameId>,
     array_name: Option<NameId>,
 }

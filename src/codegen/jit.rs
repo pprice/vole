@@ -860,7 +860,7 @@ impl JitContext {
     }
 
     /// Get the pointer type for the target
-    pub fn pointer_type(&self) -> types::Type {
+    pub fn pointer_type(&self) -> Type {
         self.module.target_config().pointer_type()
     }
 
@@ -880,7 +880,7 @@ impl JitContext {
     }
 
     /// Create a function signature with given parameters and return type
-    pub fn create_signature(&self, params: &[types::Type], ret: Option<types::Type>) -> Signature {
+    pub fn create_signature(&self, params: &[Type], ret: Option<Type>) -> Signature {
         let mut sig = self.module.make_signature();
         for &param in params {
             sig.params.push(AbiParam::new(param));

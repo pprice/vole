@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 use crate::codegen::RuntimeFn;
 use crate::frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr};
 use crate::sema::implement_registry::TypeId;
-use crate::sema::{LegacyType, PrimitiveType, Type};
+use crate::sema::{LegacyType, PrimitiveType};
 
 use super::context::Cg;
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};

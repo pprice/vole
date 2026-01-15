@@ -3,7 +3,7 @@
 // Type compatibility checking functions.
 // These are pure functions that determine if types are compatible for assignment.
 
-use crate::sema::types::{FunctionType, LegacyType, NominalType, PrimitiveType, Type};
+use crate::sema::types::{FunctionType, LegacyType, NominalType, PrimitiveType};
 
 /// Check if an integer literal value fits within a type's range
 pub fn literal_fits(value: i64, target: &LegacyType) -> bool {
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn test_types_compatible_optional() {
-        let optional = Type::optional(LegacyType::Primitive(PrimitiveType::I32));
+        let optional = LegacyType::optional(LegacyType::Primitive(PrimitiveType::I32));
         assert!(types_compatible_core(&LegacyType::Nil, &optional));
         assert!(types_compatible_core(
             &LegacyType::Primitive(PrimitiveType::I32),
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn test_types_compatible_error() {
-        let err = Type::invalid("test");
+        let err = LegacyType::invalid("test");
         assert!(types_compatible_core(
             &err,
             &LegacyType::Primitive(PrimitiveType::I32)

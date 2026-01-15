@@ -14,9 +14,9 @@ impl Analyzer {
     fn get_field_type(
         &self,
         type_def_id: TypeDefId,
-        type_args: &[Type],
+        type_args: &[LegacyType],
         field_name: &str,
-    ) -> Option<(String, Type)> {
+    ) -> Option<(String, LegacyType)> {
         let type_def = self.entity_registry.get_type(type_def_id);
         let generic_info = type_def.generic_info.as_ref()?;
 
@@ -73,7 +73,7 @@ impl Analyzer {
         &mut self,
         field_access: &FieldAccessExpr,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         let object_type = self.check_expr(&field_access.object, interner)?;
 
         // Handle module field access
@@ -102,14 +102,12 @@ impl Analyzer {
 
         // Handle Invalid type early - propagate with context
         if object_type.is_invalid() {
-            return Ok(Type::propagate_invalid(
-                &object_type,
-                format!(
-                    "checking field access '.{}'",
-                    interner.resolve(field_access.field)
-                ),
-                Some(field_access.field_span),
-            ));
+            return Ok(LegacyType::propagate_invalid(&object_type,
+            format!(
+                "checking field access '.{}'",
+                interner.resolve(field_access.field)
+            ),
+            Some(field_access.field_span),));
         }
 
         // Get fields from object type (Class or Record)
@@ -168,7 +166,7 @@ impl Analyzer {
         &mut self,
         opt_chain: &OptionalChainExpr,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         let object_type = self.check_expr(&opt_chain.object, interner)?;
 
         // Handle errors early
@@ -221,7 +219,7 @@ impl Analyzer {
             if field_type.is_optional() {
                 Ok(field_type)
             } else {
-                Ok(Type::optional(field_type))
+                Ok(LegacyType::optional(field_type))
             }
         } else {
             let (type_name, _) = self
@@ -244,7 +242,7 @@ impl Analyzer {
         expr: &Expr,
         method_call: &MethodCallExpr,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         // Check for static method call: TypeName.method()
         // Handle both identifier types (Point.create) and primitive keywords (i32.default_value)
         if let Some((type_def_id, type_name_str)) =
@@ -514,7 +512,7 @@ impl Analyzer {
         args: &[Expr],
         method_span: Span,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         let method_name_str = interner.resolve(method_sym);
         let method_name_id = self.method_name_id(method_sym, interner);
 

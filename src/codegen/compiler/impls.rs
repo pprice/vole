@@ -14,7 +14,7 @@ use crate::frontend::{
     Symbol, TypeExpr,
 };
 use crate::identity::ModuleId;
-use crate::sema::{LegacyType, Type};
+use crate::sema::LegacyType;
 use crate::sema::types::NominalType;
 
 impl Compiler<'_> {
@@ -173,7 +173,7 @@ impl Compiler<'_> {
     /// Get the type name string from a TypeExpr (works for primitives and named types)
     fn get_type_name_from_expr(&self, ty: &TypeExpr) -> Option<String> {
         match ty {
-            TypeExpr::Primitive(p) => Some(Type::from_primitive(*p).name().to_string()),
+            TypeExpr::Primitive(p) => Some(LegacyType::from_primitive(*p).name().to_string()),
             TypeExpr::Named(sym) => Some(self.query().resolve_symbol(*sym).to_string()),
             _ => None,
         }
@@ -393,7 +393,7 @@ impl Compiler<'_> {
         // Get the Vole type for the target (used for creating signature)
         // For named types (records/classes), look up in type_metadata since they're not in type_aliases
         let self_vole_type = match &impl_block.target_type {
-            TypeExpr::Primitive(p) => Type::from_primitive(*p),
+            TypeExpr::Primitive(p) => LegacyType::from_primitive(*p),
             TypeExpr::Named(sym) => self
                 .type_metadata
                 .get(sym)
@@ -554,7 +554,7 @@ impl Compiler<'_> {
         // Get the Vole type for `self` binding
         // For named types (records/classes), look up in type_metadata since they're not in type_aliases
         let self_vole_type = match &impl_block.target_type {
-            TypeExpr::Primitive(p) => Type::from_primitive(*p),
+            TypeExpr::Primitive(p) => LegacyType::from_primitive(*p),
             TypeExpr::Named(sym) => self
                 .type_metadata
                 .get(sym)
@@ -669,7 +669,7 @@ impl Compiler<'_> {
 
         // Get the Vole type for `self` binding
         let self_vole_type = match &impl_block.target_type {
-            TypeExpr::Primitive(p) => Type::from_primitive(*p),
+            TypeExpr::Primitive(p) => LegacyType::from_primitive(*p),
             TypeExpr::Named(sym) => self
                 .type_metadata
                 .get(sym)

@@ -13,7 +13,7 @@ use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::implement_registry::ExternalMethodInfo;
-use crate::sema::{LegacyType, PrimitiveType, Type};
+use crate::sema::{LegacyType, PrimitiveType};
 use smallvec::SmallVec;
 
 use super::lambda::CaptureBinding;
@@ -85,7 +85,7 @@ pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
 /// - structs.rs: struct_literal(), field_access(), method_call()
 pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub builder: &'a mut FunctionBuilder<'b>,
-    pub vars: &'a mut HashMap<Symbol, (Variable, Type)>,
+    pub vars: &'a mut HashMap<Symbol, (Variable, LegacyType)>,
     pub ctx: &'a mut CompileCtx<'ctx>,
     pub cf: &'a mut ControlFlow,
     pub captures: Option<Captures<'a>>,
@@ -99,7 +99,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a new codegen context
     pub fn new(
         builder: &'a mut FunctionBuilder<'b>,
-        vars: &'a mut HashMap<Symbol, (Variable, Type)>,
+        vars: &'a mut HashMap<Symbol, (Variable, LegacyType)>,
         ctx: &'a mut CompileCtx<'ctx>,
         cf: &'a mut ControlFlow,
     ) -> Self {
@@ -117,7 +117,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a codegen context with capture information for closures
     pub fn with_captures(
         builder: &'a mut FunctionBuilder<'b>,
-        vars: &'a mut HashMap<Symbol, (Variable, Type)>,
+        vars: &'a mut HashMap<Symbol, (Variable, LegacyType)>,
         ctx: &'a mut CompileCtx<'ctx>,
         cf: &'a mut ControlFlow,
         captures: Captures<'a>,

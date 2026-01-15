@@ -8,7 +8,7 @@ impl Analyzer {
         expr: &Expr,
         struct_lit: &StructLiteralExpr,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         // Look up the type (class or record) via Resolver
         let type_id_opt = self
             .resolver(interner)
@@ -182,7 +182,7 @@ impl Analyzer {
         type_def_id: TypeDefId,
         generic_info: &GenericTypeInfo,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         let type_name = interner.resolve(struct_lit.name).to_string();
 
         // First, type-check all field values to get their actual types
@@ -299,7 +299,7 @@ impl Analyzer {
         type_def_id: TypeDefId,
         generic_info: &GenericTypeInfo,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         let type_name = interner.resolve(struct_lit.name).to_string();
 
         // First, type-check all field values to get their actual types
@@ -419,7 +419,7 @@ impl Analyzer {
                         }
                     }
                 }
-                Type::unknown()
+                LegacyType::unknown()
             })
             .collect();
 

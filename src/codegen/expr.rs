@@ -16,7 +16,7 @@ use crate::frontend::{
 };
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::types::NominalType;
-use crate::sema::{LegacyType, PrimitiveType, Type};
+use crate::sema::{LegacyType, PrimitiveType};
 
 use super::context::Cg;
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
@@ -98,7 +98,7 @@ impl Cg<'_, '_, '_> {
                     .query()
                     .type_of(expr.id)
                     .cloned()
-                    .unwrap_or(Type::unknown());
+                    .unwrap_or(LegacyType::unknown());
                 Ok(CompiledValue {
                     value: self.builder.ins().iconst(types::I64, 0),
                     ty: types::I64,
@@ -388,7 +388,7 @@ impl Cg<'_, '_, '_> {
             .query()
             .type_of(expr.id)
             .cloned()
-            .unwrap_or(Type::unknown());
+            .unwrap_or(LegacyType::unknown());
 
         // If it's a tuple, use stack allocation
         if let LegacyType::Tuple(ref elem_types) = inferred_type {
@@ -404,7 +404,7 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| "vole_array_push not found".to_string())?;
         let array_push_ref = self.func_ref(array_push_key)?;
 
-        let mut elem_type = Type::unknown();
+        let mut elem_type = LegacyType::unknown();
 
         for (i, elem) in elements.iter().enumerate() {
             let compiled = self.expr(elem)?;
@@ -435,7 +435,7 @@ impl Cg<'_, '_, '_> {
     fn tuple_literal(
         &mut self,
         elements: &[Expr],
-        elem_types: &[Type],
+        elem_types: &[LegacyType],
     ) -> Result<CompiledValue, String> {
         // Calculate layout
         let (total_size, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
@@ -483,7 +483,7 @@ impl Cg<'_, '_, '_> {
             .query()
             .type_of(element.id)
             .cloned()
-            .unwrap_or(Type::unknown());
+            .unwrap_or(LegacyType::unknown());
 
         // Compile the element once
         let elem_value = self.expr(element)?;
@@ -1509,7 +1509,7 @@ impl Cg<'_, '_, '_> {
         inner: &Option<Box<Pattern>>,
         scrutinee: &CompiledValue,
         tag: Value,
-        arm_variables: &mut HashMap<Symbol, (Variable, Type)>,
+        arm_variables: &mut HashMap<Symbol, (Variable, LegacyType)>,
     ) -> Result<Option<Value>, String> {
         let Some(inner_pat) = inner else {
             // Bare error pattern: error => ...
@@ -1547,7 +1547,7 @@ impl Cg<'_, '_, '_> {
         name: Symbol,
         scrutinee: &CompiledValue,
         tag: Value,
-        arm_variables: &mut HashMap<Symbol, (Variable, Type)>,
+        arm_variables: &mut HashMap<Symbol, (Variable, LegacyType)>,
     ) -> Result<Option<Value>, String> {
         // Check if this is an error type name via EntityRegistry
         let is_error_type = self
@@ -1620,7 +1620,7 @@ impl Cg<'_, '_, '_> {
         fields: &[RecordFieldPattern],
         scrutinee: &CompiledValue,
         tag: Value,
-        arm_variables: &mut HashMap<Symbol, (Variable, Type)>,
+        arm_variables: &mut HashMap<Symbol, (Variable, LegacyType)>,
     ) -> Result<Option<Value>, String> {
         // Look up error_info via EntityRegistry
         let error_info = self

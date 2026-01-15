@@ -8,7 +8,7 @@ use crate::frontend::Symbol;
 use crate::identity::{NameId, TypeParamId};
 use crate::sema::TypeKey;
 use crate::sema::implement_registry::ExternalMethodInfo;
-use crate::sema::types::{FunctionType, LegacyType, StructuralType, Type};
+use crate::sema::types::{FunctionType, LegacyType, StructuralType};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::atomic::{AtomicU32, Ordering};

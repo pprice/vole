@@ -8,7 +8,7 @@ impl Analyzer {
         &mut self,
         expr: &Expr,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         let ty = self.check_expr_inner(expr, interner)?;
         tracing::trace!(
             line = expr.span.line,
@@ -22,7 +22,7 @@ impl Analyzer {
         &mut self,
         expr: &Expr,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         match &expr.kind {
             ExprKind::IntLiteral(_) => Ok(self.ty_i64()), // Default to i64 for now
             ExprKind::FloatLiteral(_) => Ok(self.ty_f64()),
@@ -44,7 +44,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    return Ok(Type::invalid("propagate"));
+                    return Ok(LegacyType::invalid("propagate"));
                 }
 
                 // Use get_variable_type to respect flow-sensitive narrowing
@@ -69,7 +69,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    Ok(Type::invalid("propagate"))
+                    Ok(LegacyType::invalid("propagate"))
                 }
             }
 
@@ -215,7 +215,7 @@ impl Analyzer {
             ExprKind::ArrayLiteral(elements) => {
                 if elements.is_empty() {
                     // Empty array needs type annotation or we use unknown placeholder
-                    Ok(LegacyType::Array(Box::new(Type::unknown())))
+                    Ok(LegacyType::Array(Box::new(LegacyType::unknown())))
                 } else {
                     // Infer types for all elements
                     let elem_types: Vec<LegacyType> = elements
@@ -282,7 +282,7 @@ impl Analyzer {
                         } else {
                             // Non-constant index - return union of all element types
                             // For now, just return first element type (common case: 2-tuples)
-                            Ok(elements.first().cloned().unwrap_or_else(Type::unknown))
+                            Ok(elements.first().cloned().unwrap_or_else(LegacyType::unknown))
                         }
                     }
                     LegacyType::FixedArray { element, .. } => Ok(*element),

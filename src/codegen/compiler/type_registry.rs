@@ -9,7 +9,7 @@ use crate::frontend::{
 };
 use crate::runtime::type_registry::{FieldTypeTag, register_instance_type};
 use crate::sema::types::NominalType;
-use crate::sema::{ClassType, LegacyType, PrimitiveType, RecordType, Type};
+use crate::sema::{ClassType, LegacyType, PrimitiveType, RecordType};
 
 /// Convert a Vole Type to a FieldTypeTag for runtime cleanup
 fn type_to_field_tag(ty: &LegacyType) -> FieldTypeTag {

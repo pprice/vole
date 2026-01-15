@@ -1366,7 +1366,7 @@ impl Analyzer {
         );
 
         // Resolve field types directly from AST (store for later registration)
-        let resolved_fields: Vec<(Symbol, Type)> = interface_decl
+        let resolved_fields: Vec<(Symbol, LegacyType)> = interface_decl
             .fields
             .iter()
             .map(|f| (f.name, resolve_type(&f.ty, &mut type_ctx)))
@@ -1392,7 +1392,7 @@ impl Analyzer {
 
         // Build interface_methods for Type and collect method data for EntityRegistry registration
         // We resolve types once and reuse the data
-        let method_data: Vec<(Symbol, String, Vec<LegacyType>, Type, bool)> = interface_decl
+        let method_data: Vec<(Symbol, String, Vec<LegacyType>, LegacyType, bool)> = interface_decl
             .methods
             .iter()
             .map(|m| {

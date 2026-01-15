@@ -8,7 +8,7 @@ use crate::codegen::types::{
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
-use crate::sema::{LegacyType, PrimitiveType, Type};
+use crate::sema::{LegacyType, PrimitiveType};
 use crate::sema::types::ConstantValue;
 use crate::sema::types::NominalType;
 use cranelift::prelude::*;
@@ -148,7 +148,7 @@ impl Cg<'_, '_, '_> {
         let result_vole_type = if field_type.is_optional() {
             field_type.clone()
         } else {
-            Type::optional(field_type.clone())
+            LegacyType::optional(field_type.clone())
         };
         let cranelift_type = type_to_cranelift(&result_vole_type, self.ctx.pointer_type);
         self.builder.append_block_param(merge_block, cranelift_type);

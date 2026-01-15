@@ -10,7 +10,7 @@ use smallvec::SmallVec;
 
 use crate::identity::{NameId, TypeDefId};
 
-use super::{LegacyType, StructField, Type};
+use super::{LegacyType, StructField};
 
 /// SmallVec for interface extends list - most interfaces extend 0-2 parents
 pub type ExtendsVec = SmallVec<[TypeDefId; 2]>;
@@ -42,7 +42,7 @@ impl NominalType {
 
     /// Get type arguments for generic types.
     /// Returns empty slice for non-generic types or error types.
-    pub fn type_args(&self) -> &[Type] {
+    pub fn type_args(&self) -> &[LegacyType] {
         match self {
             NominalType::Class(c) => &c.type_args,
             NominalType::Record(r) => &r.type_args,

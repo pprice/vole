@@ -17,13 +17,13 @@ use crate::sema::generic::{
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_table::TypeKey;
-use crate::sema::types::Type;
+use crate::sema::types::LegacyType;
 
 /// Information about a call site, bundling all call-related data.
 #[derive(Debug, Clone)]
 pub struct CallInfo<'a> {
     /// The type of the call expression
-    pub result_type: Option<&'a Type>,
+    pub result_type: Option<&'a LegacyType>,
     /// Resolved method (for method calls)
     pub method: Option<&'a ResolvedMethod>,
     /// Monomorphization key (for generic function calls)
@@ -70,7 +70,7 @@ impl<'a> ProgramQuery<'a> {
 
     /// Get the type of an expression by its NodeId
     #[must_use]
-    pub fn type_of(&self, node: NodeId) -> Option<&'a Type> {
+    pub fn type_of(&self, node: NodeId) -> Option<&'a LegacyType> {
         self.expr_data.get_type(node)
     }
 
@@ -226,7 +226,7 @@ impl<'a> ProgramQuery<'a> {
     /// Resolve a type alias to its underlying type.
     /// Returns None if the type is not an alias or has no aliased_type.
     #[must_use]
-    pub fn resolve_alias(&self, type_id: TypeDefId) -> Option<&'a Type> {
+    pub fn resolve_alias(&self, type_id: TypeDefId) -> Option<&'a LegacyType> {
         self.registry.get_type(type_id).aliased_type.as_ref()
     }
 

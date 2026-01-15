@@ -6,7 +6,7 @@
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::generic::TypeParamInfo;
 use crate::sema::implement_registry::ExternalMethodInfo;
-use crate::sema::{FunctionType, LegacyType, Type};
+use crate::sema::{FunctionType, LegacyType};
 
 /// What kind of type definition this is
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

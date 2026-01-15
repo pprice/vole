@@ -4,7 +4,7 @@ use super::{TypeError, TypeWarning};
 use crate::errors::{SemanticError, SemanticWarning};
 use crate::frontend::Span;
 use crate::sema::types::StructuralType;
-use crate::sema::{LegacyType, Type, TypeKey};
+use crate::sema::{LegacyType, TypeKey};
 
 use super::Analyzer;
 

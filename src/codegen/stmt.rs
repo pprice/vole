@@ -10,7 +10,7 @@ use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
 use crate::frontend::{self, ExprKind, LetInit, Pattern, RaiseStmt, Stmt, Symbol};
 use crate::sema::types::NominalType;
-use crate::sema::{LegacyType, PrimitiveType, Type};
+use crate::sema::{LegacyType, PrimitiveType};
 
 use super::compiler::ControlFlowCtx;
 use super::context::{Cg, ControlFlow};
@@ -25,7 +25,7 @@ use super::types::{
 pub(super) fn compile_block(
     builder: &mut FunctionBuilder,
     block: &frontend::Block,
-    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    variables: &mut HashMap<Symbol, (Variable, LegacyType)>,
     _cf_ctx: &mut ControlFlowCtx,
     ctx: &mut CompileCtx,
 ) -> Result<bool, String> {
@@ -41,7 +41,7 @@ pub(super) fn construct_union(
     builder: &mut FunctionBuilder,
     value: CompiledValue,
     union_type: &LegacyType,
-    pointer_type: types::Type,
+    pointer_type: Type,
 ) -> Result<CompiledValue, String> {
     let LegacyType::Union(variants) = union_type else {
         return Err(

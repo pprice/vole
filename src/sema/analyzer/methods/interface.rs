@@ -1,7 +1,6 @@
 use std::collections::HashMap as StdHashMap;
 
 use crate::identity::{NameId, TypeDefId};
-use crate::sema::Type;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
 use crate::sema::types::{LegacyType, NominalType, StructuralType};
@@ -429,7 +428,7 @@ impl Analyzer {
 
     /// Check if method signature matches (EntityRegistry version)
     fn signatures_match_entity(
-        required_params: &[Type],
+        required_params: &[LegacyType],
         required_return: &LegacyType,
         found: &FunctionType,
         implementing_type: &LegacyType,
@@ -462,7 +461,7 @@ impl Analyzer {
     /// Returns a human-readable description of the differences.
     fn describe_signature_mismatch(
         &mut self,
-        required_params: &[Type],
+        required_params: &[LegacyType],
         required_return: &LegacyType,
         found: &FunctionType,
         implementing_type: &LegacyType,
@@ -687,7 +686,7 @@ impl Analyzer {
         &self,
         ty: &LegacyType,
         method_name: &str,
-        expected_params: &[Type],
+        expected_params: &[LegacyType],
         expected_return: &LegacyType,
         interner: &Interner,
     ) -> bool {
@@ -757,7 +756,7 @@ impl Analyzer {
     /// contravariant parameter types (actual can be wider).
     fn check_structural_method_signature(
         &self,
-        expected_params: &[Type],
+        expected_params: &[LegacyType],
         expected_return: &LegacyType,
         actual: &FunctionType,
         interner: &Interner,

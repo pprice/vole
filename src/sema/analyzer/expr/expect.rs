@@ -11,7 +11,7 @@ impl Analyzer {
         expr: &Expr,
         expected: Option<&LegacyType>,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         let ty = self.check_expr_expecting_inner(expr, expected, interner)?;
         Ok(self.record_expr_type(expr, ty))
     }
@@ -21,7 +21,7 @@ impl Analyzer {
         expr: &Expr,
         expected: Option<&LegacyType>,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         match &expr.kind {
             ExprKind::IntLiteral(value) => match expected {
                 // Integer literals can be assigned to unions containing a matching integer type
@@ -311,7 +311,7 @@ impl Analyzer {
                     if let Some(LegacyType::Array(elem)) = expected {
                         return Ok(self.ty_array(elem));
                     }
-                    return Ok(LegacyType::Array(Box::new(Type::unknown())));
+                    return Ok(LegacyType::Array(Box::new(LegacyType::unknown())));
                 }
 
                 // Infer types for all elements, passing expected element type to each

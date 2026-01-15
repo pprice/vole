@@ -10,7 +10,7 @@ impl Analyzer {
         expr: &Expr,
         call: &CallExpr,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         // Handle assert specially
         if self.is_assert_call(&call.callee, interner) {
             // Assert is an impure builtin - mark side effects if inside lambda

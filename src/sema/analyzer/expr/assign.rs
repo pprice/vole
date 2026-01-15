@@ -8,7 +8,7 @@ impl Analyzer {
         expr: &Expr,
         assign: &AssignExpr,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         // First, determine the expected type from the target (bidirectional type checking)
         let (target_ty, is_mutable, target_valid) = match &assign.target {
             AssignTarget::Variable(sym) => {
@@ -23,7 +23,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    (Type::invalid("propagate"), false, false)
+                    (LegacyType::invalid("propagate"), false, false)
                 }
             }
             AssignTarget::Field {
@@ -71,7 +71,7 @@ impl Analyzer {
                                     },
                                     *field_span,
                                 );
-                                (Type::invalid("propagate"), false, false)
+                                (LegacyType::invalid("propagate"), false, false)
                             }
                         } else {
                             self.add_error(
@@ -82,7 +82,7 @@ impl Analyzer {
                                 },
                                 *field_span,
                             );
-                            (Type::invalid("propagate"), false, false)
+                            (LegacyType::invalid("propagate"), false, false)
                         }
                     }
                     LegacyType::Nominal(NominalType::Record(r)) => {
@@ -99,7 +99,7 @@ impl Analyzer {
                             },
                             *field_span,
                         );
-                        (Type::invalid("propagate"), false, false)
+                        (LegacyType::invalid("propagate"), false, false)
                     }
                     _ => {
                         if !obj_ty.is_invalid() {
@@ -113,7 +113,7 @@ impl Analyzer {
                                 *field_span,
                             );
                         }
-                        (Type::invalid("propagate"), false, false)
+                        (LegacyType::invalid("propagate"), false, false)
                     }
                 }
             }
@@ -159,7 +159,7 @@ impl Analyzer {
                                 object.span,
                             );
                         }
-                        (Type::invalid("propagate"), false, false)
+                        (LegacyType::invalid("propagate"), false, false)
                     }
                 }
             }
@@ -210,7 +210,7 @@ impl Analyzer {
         expr: &Expr,
         compound: &CompoundAssignExpr,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         // Get target type and check mutability
         let target_type = match &compound.target {
             AssignTarget::Variable(sym) => {
@@ -290,7 +290,7 @@ impl Analyzer {
                                 object.span,
                             );
                         }
-                        Type::invalid("propagate")
+                        LegacyType::invalid("propagate")
                     }
                 }
             }
@@ -338,7 +338,7 @@ impl Analyzer {
                                     },
                                     *field_span,
                                 );
-                                Type::invalid("propagate")
+                                LegacyType::invalid("propagate")
                             }
                         } else {
                             self.add_error(
@@ -349,7 +349,7 @@ impl Analyzer {
                                 },
                                 *field_span,
                             );
-                            Type::invalid("propagate")
+                            LegacyType::invalid("propagate")
                         }
                     }
                     LegacyType::Nominal(NominalType::Record(r)) => {
@@ -366,7 +366,7 @@ impl Analyzer {
                             },
                             *field_span,
                         );
-                        Type::invalid("propagate")
+                        LegacyType::invalid("propagate")
                     }
                     _ => {
                         if !obj_ty.is_invalid() {
@@ -380,7 +380,7 @@ impl Analyzer {
                                 *field_span,
                             );
                         }
-                        Type::invalid("propagate")
+                        LegacyType::invalid("propagate")
                     }
                 }
             }

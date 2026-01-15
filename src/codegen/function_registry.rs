@@ -8,7 +8,7 @@ use cranelift_module::FuncId;
 
 use crate::frontend::{Interner, Symbol};
 use crate::identity::{ModuleId, NameId, NameTable};
-use crate::sema::{LegacyType, Type};
+use crate::sema::LegacyType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FunctionKey(u32);

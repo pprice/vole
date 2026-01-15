@@ -23,7 +23,7 @@ use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::generic::substitute_type;
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::types::NominalType;
-use crate::sema::{FunctionType, LegacyType, PrimitiveType, Type};
+use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
 impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)

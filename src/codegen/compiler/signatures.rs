@@ -4,7 +4,7 @@ use smallvec::{SmallVec, smallvec};
 use super::Compiler;
 use crate::codegen::types::{resolve_type_expr_with_metadata, type_to_cranelift};
 use crate::frontend::{Interner, Param, TypeExpr};
-use crate::sema::Type;
+use crate::sema::LegacyType;
 
 /// SmallVec for function parameters - most functions have <= 8 params
 type ParamVec = SmallVec<[CraneliftType; 8]>;
@@ -16,7 +16,7 @@ pub enum SelfParam<'a> {
     /// Self is a pointer (regular methods)
     Pointer,
     /// Self has a specific type (implement blocks on primitives)
-    Typed(&'a Type),
+    Typed(&'a LegacyType),
 }
 
 /// Describes how to resolve type expressions

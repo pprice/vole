@@ -16,7 +16,7 @@ use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::types::NominalType;
-use crate::sema::{EntityRegistry, FunctionType, LegacyType, Type};
+use crate::sema::{EntityRegistry, FunctionType, LegacyType};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 enum InterfaceConcreteType {
@@ -85,7 +85,7 @@ impl InterfaceVtableRegistry {
         &mut self,
         ctx: &mut CompileCtx,
         interface_name: Symbol,
-        interface_type_args: &[Type],
+        interface_type_args: &[LegacyType],
         concrete_type: &LegacyType,
     ) -> Result<DataId, String> {
         let concrete_key = match concrete_type {
@@ -224,7 +224,7 @@ impl InterfaceVtableRegistry {
         &mut self,
         ctx: &mut CompileCtx,
         interface_name: Symbol,
-        interface_type_args: &[Type],
+        interface_type_args: &[LegacyType],
         concrete_type: &LegacyType,
     ) -> Result<DataId, String> {
         // Build key for lookup

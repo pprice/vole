@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::frontend::{Interner, Span, Symbol};
 use crate::sema::PrimitiveType;
-use crate::sema::types::{LegacyType, Type};
+use crate::sema::types::LegacyType;
 
 mod entities;
 mod namer;

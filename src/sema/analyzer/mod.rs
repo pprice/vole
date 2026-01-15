@@ -29,7 +29,7 @@ use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::type_arena::TypeArena;
 use crate::sema::types::{ConstantValue, LegacyType, ModuleType, NominalType, StructuralType};
 use crate::sema::{
-    ClassType, ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField, Type,
+    ClassType, ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField,
     compatibility::TypeCompatibility,
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
@@ -404,7 +404,7 @@ impl Analyzer {
 
         // Check type params match
         if !type_def.type_params.is_empty() && type_def.type_params.len() != type_args.len() {
-            return Some(Type::invalid("propagate"));
+            return Some(LegacyType::invalid("propagate"));
         }
 
         // Build substitution map using type param NameIds
@@ -1092,7 +1092,7 @@ impl Analyzer {
                     }
                 }
                 crate::sema::generic::TypeConstraint::Union(variants) => {
-                    let expected = Type::normalize_union(variants.clone());
+                    let expected = LegacyType::normalize_union(variants.clone());
                     if !found.is_compatible(&expected) {
                         let expected_display = self.type_display(&expected);
                         let found_display = self.type_display(found);
@@ -1359,13 +1359,13 @@ impl Analyzer {
                 .entity_registry
                 .build_class_type(type_def_id)
                 .map(|c| LegacyType::Nominal(NominalType::Class(c)))
-                .unwrap_or_else(|| Type::invalid("unwrap_failed")),
+                .unwrap_or_else(|| LegacyType::invalid("unwrap_failed")),
             TypeDefKind::Record => self
                 .entity_registry
                 .build_record_type(type_def_id)
                 .map(|r| LegacyType::Nominal(NominalType::Record(r)))
-                .unwrap_or_else(|| Type::invalid("unwrap_failed")),
-            _ => Type::invalid("fallback"),
+                .unwrap_or_else(|| LegacyType::invalid("unwrap_failed")),
+            _ => LegacyType::invalid("fallback"),
         };
         self.scope.define(
             self_sym,
@@ -1515,7 +1515,7 @@ impl Analyzer {
         import_path: &str,
         span: Span,
         _interner: &Interner,
-    ) -> Result<Type, ()> {
+    ) -> Result<LegacyType, ()> {
         // Check cache first
         if let Some(module_type) = self.module_types.get(import_path) {
             return Ok(LegacyType::Module(module_type.clone()));
@@ -1627,7 +1627,7 @@ impl Analyzer {
                             LegacyType::Primitive(PrimitiveType::String),
                             Some(ConstantValue::String(v.clone())),
                         ),
-                        _ => (Type::unknown(), None), // Complex expressions need full analysis
+                        _ => (LegacyType::unknown(), None), // Complex expressions need full analysis
                     };
                     exports.insert(name_id, ty);
                     if let Some(cv) = const_val {

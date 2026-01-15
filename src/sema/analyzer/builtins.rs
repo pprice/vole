@@ -4,7 +4,7 @@ use super::Analyzer;
 use crate::frontend::Interner;
 use crate::identity::Namer;
 use crate::sema::implement_registry::{ExternalMethodInfo, MethodImpl, PrimitiveTypeId, TypeId};
-use crate::sema::{FunctionType, LegacyType, PrimitiveType, Type};
+use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
 impl Analyzer {
     /// Register built-in interfaces and their implementations
@@ -73,7 +73,7 @@ impl Analyzer {
                 method_iter,
                 FunctionType {
                     params: vec![].into(),
-                    return_type: Box::new(Type::unknown()),
+                    return_type: Box::new(LegacyType::unknown()),
                     is_closure: false,
                 },
                 Some(ExternalMethodInfo {
@@ -99,7 +99,7 @@ impl Analyzer {
                 method_iter,
                 FunctionType {
                     params: vec![].into(),
-                    return_type: Box::new(Type::unknown()), // Will be refined by check_builtin_method
+                    return_type: Box::new(LegacyType::unknown()), // Will be refined by check_builtin_method
                     is_closure: false,
                 },
                 Some(ExternalMethodInfo {
@@ -122,7 +122,7 @@ impl Analyzer {
                 method_iter,
                 FunctionType {
                     params: vec![].into(),
-                    return_type: Box::new(Type::unknown()), // Will be refined by check_builtin_method
+                    return_type: Box::new(LegacyType::unknown()), // Will be refined by check_builtin_method
                     is_closure: false,
                 },
                 Some(ExternalMethodInfo {

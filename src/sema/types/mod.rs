@@ -90,11 +90,12 @@ pub enum LegacyType {
     Structural(StructuralType),
 }
 
-/// Type alias for migration - allows existing code to keep using `Type`.
+/// Interned type handle - O(1) equality, Copy, minimal allocation.
 ///
-/// Once migration to LegacyType is complete, this will be replaced with:
-/// `pub struct Type(pub crate::sema::type_arena::TypeId);`
-pub type Type = LegacyType;
+/// This is the new type representation that wraps a TypeId from the TypeArena.
+/// Use TypeArena::to_type() to convert back to LegacyType when needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Type(pub crate::sema::type_arena::TypeId);
 
 /// Structural type - defines shape constraints for duck typing
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -185,7 +186,7 @@ impl FunctionType {
     }
 }
 
-impl Type {
+impl LegacyType {
     /// Convert from AST PrimitiveType to Type
     pub fn from_primitive(p: AstPrimitiveType) -> Self {
         LegacyType::Primitive(PrimitiveType::from_ast(p))
@@ -210,7 +211,7 @@ impl Type {
 
     /// Get type arguments for generic types.
     /// Returns empty slice for non-generic or primitive types.
-    pub fn type_args(&self) -> &[Type] {
+    pub fn type_args(&self) -> &[LegacyType] {
         match self {
             LegacyType::Nominal(n) => n.type_args(),
             _ => &[],
@@ -741,7 +742,7 @@ fn substitute_interface_methods(
     }
 }
 
-impl std::fmt::Display for Type {
+impl std::fmt::Display for LegacyType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LegacyType::Primitive(p) => write!(f, "{}", p),
@@ -869,22 +870,22 @@ mod tests {
     fn type_from_primitive() {
         use crate::frontend::PrimitiveType as AstPrimitive;
         assert_eq!(
-            Type::from_primitive(AstPrimitive::I32),
+            LegacyType::from_primitive(AstPrimitive::I32),
             p(PrimitiveType::I32)
         );
         assert_eq!(
-            Type::from_primitive(AstPrimitive::U64),
+            LegacyType::from_primitive(AstPrimitive::U64),
             p(PrimitiveType::U64)
         );
         assert_eq!(
-            Type::from_primitive(AstPrimitive::F32),
+            LegacyType::from_primitive(AstPrimitive::F32),
             p(PrimitiveType::F32)
         );
     }
 
     #[test]
     fn type_optional() {
-        let opt = Type::optional(p(PrimitiveType::I32));
+        let opt = LegacyType::optional(p(PrimitiveType::I32));
         assert!(opt.is_optional());
         assert_eq!(opt.unwrap_optional(), Some(p(PrimitiveType::I32)));
     }
@@ -892,14 +893,14 @@ mod tests {
     #[test]
     fn type_normalize_union() {
         // Nested unions flatten
-        let normalized = Type::normalize_union(vec![
+        let normalized = LegacyType::normalize_union(vec![
             p(PrimitiveType::I32),
             LegacyType::Union(vec![p(PrimitiveType::String), LegacyType::Nil].into()),
         ]);
         assert!(matches!(normalized, LegacyType::Union(v) if v.len() == 3));
 
         // Single element unwraps
-        let single = Type::normalize_union(vec![p(PrimitiveType::I32)]);
+        let single = LegacyType::normalize_union(vec![p(PrimitiveType::I32)]);
         assert_eq!(single, p(PrimitiveType::I32));
     }
 }

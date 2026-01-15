@@ -28,7 +28,7 @@ pub struct CachedModule {
     /// Module type (exports, constants, external functions) - only for user imports
     pub module_type: Option<ModuleType>,
     /// Expression types from analysis
-    pub expr_types: HashMap<NodeId, super::Type>,
+    pub expr_types: HashMap<NodeId, super::LegacyType>,
     /// Method resolutions from analysis
     pub method_resolutions: HashMap<NodeId, ResolvedMethod>,
     /// Entity registry contributions (types, methods, fields)

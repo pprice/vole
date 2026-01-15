@@ -2,7 +2,7 @@
 //
 // TypeCompatibility trait for unified type compatibility checking.
 
-use crate::sema::types::{LegacyType, Type};
+use crate::sema::types::LegacyType;
 
 /// Trait for type compatibility operations.
 ///
@@ -43,38 +43,38 @@ pub trait TypeCompatibility {
     fn fits_literal(&self, value: i64) -> bool;
 }
 
-impl TypeCompatibility for Type {
+impl TypeCompatibility for LegacyType {
     fn is_compatible(&self, other: &LegacyType) -> bool {
         super::core::types_compatible_core(self, other)
     }
 
     fn can_widen_to(&self, target: &LegacyType) -> bool {
         // Delegate to Type's existing method
-        Type::can_widen_to(self, target)
+        LegacyType::can_widen_to(self, target)
     }
 
     fn is_numeric(&self) -> bool {
-        Type::is_numeric(self)
+        LegacyType::is_numeric(self)
     }
 
     fn is_integer(&self) -> bool {
-        Type::is_integer(self)
+        LegacyType::is_integer(self)
     }
 
     fn is_signed(&self) -> bool {
-        Type::is_signed(self)
+        LegacyType::is_signed(self)
     }
 
     fn is_float(&self) -> bool {
-        Type::is_float(self)
+        LegacyType::is_float(self)
     }
 
     fn is_unsigned(&self) -> bool {
-        Type::is_unsigned(self)
+        LegacyType::is_unsigned(self)
     }
 
     fn bit_width(&self) -> Option<u8> {
-        Type::bit_width(self)
+        LegacyType::bit_width(self)
     }
 
     fn fits_literal(&self, value: i64) -> bool {

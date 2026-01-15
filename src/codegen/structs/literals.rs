@@ -8,7 +8,7 @@ use crate::codegen::context::Cg;
 use crate::codegen::types::{CompiledValue, box_interface_value, type_size};
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, StructLiteralExpr};
-use crate::sema::{LegacyType, Type};
+use crate::sema::LegacyType;
 use crate::sema::types::NominalType;
 use cranelift::prelude::*;
 

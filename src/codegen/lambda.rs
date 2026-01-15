@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use crate::frontend::{BinaryOp, Expr, ExprKind, LambdaBody, LambdaExpr, Symbol};
-use crate::sema::{FunctionType, LegacyType, PrimitiveType, Type};
+use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
 use super::RuntimeFn;
 use super::context::{Captures, Cg, ControlFlow};
@@ -32,7 +32,7 @@ impl CaptureBinding {
 /// Build capture bindings from a list of captures and variable types
 pub(crate) fn build_capture_bindings(
     captures: &[crate::frontend::Capture],
-    variables: &HashMap<Symbol, (Variable, Type)>,
+    variables: &HashMap<Symbol, (Variable, LegacyType)>,
 ) -> HashMap<Symbol, CaptureBinding> {
     let mut bindings = HashMap::new();
     for (i, capture) in captures.iter().enumerate() {
@@ -48,7 +48,7 @@ pub(crate) fn build_capture_bindings(
 /// Infer the return type of a lambda expression body.
 pub(crate) fn infer_lambda_return_type(
     body: &LambdaBody,
-    param_types: &[(Symbol, Type)],
+    param_types: &[(Symbol, LegacyType)],
     ctx: &CompileCtx,
 ) -> LegacyType {
     match body {
@@ -60,7 +60,7 @@ pub(crate) fn infer_lambda_return_type(
 /// Infer the type of an expression given parameter types as context.
 pub(crate) fn infer_expr_type(
     expr: &Expr,
-    param_types: &[(Symbol, Type)],
+    param_types: &[(Symbol, LegacyType)],
     ctx: &CompileCtx,
 ) -> LegacyType {
     match &expr.kind {
@@ -172,7 +172,7 @@ pub(crate) fn infer_expr_type(
 pub(super) fn compile_lambda(
     builder: &mut FunctionBuilder,
     lambda: &LambdaExpr,
-    variables: &HashMap<Symbol, (Variable, Type)>,
+    variables: &HashMap<Symbol, (Variable, LegacyType)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     let captures = lambda.captures.borrow();
@@ -200,7 +200,7 @@ fn compile_pure_lambda(
 ) -> Result<CompiledValue, String> {
     *ctx.lambda_counter += 1;
 
-    let param_types: Vec<types::Type> = lambda
+    let param_types: Vec<Type> = lambda
         .params
         .iter()
         .map(|p| {
@@ -220,7 +220,7 @@ fn compile_pure_lambda(
         })
         .collect();
 
-    let param_context: Vec<(Symbol, Type)> = lambda
+    let param_context: Vec<(Symbol, LegacyType)> = lambda
         .params
         .iter()
         .zip(param_vole_types.iter())
@@ -267,7 +267,7 @@ fn compile_pure_lambda(
         lambda_builder.append_block_params_for_function_params(entry_block);
         lambda_builder.switch_to_block(entry_block);
 
-        let mut lambda_variables: HashMap<Symbol, (Variable, Type)> = HashMap::new();
+        let mut lambda_variables: HashMap<Symbol, (Variable, LegacyType)> = HashMap::new();
         let block_params = lambda_builder.block_params(entry_block).to_vec();
         // Skip block_params[0] which is the closure pointer (unused for pure lambdas)
         for (i, param) in lambda.params.iter().enumerate() {
@@ -331,7 +331,7 @@ fn compile_pure_lambda(
 fn compile_lambda_with_captures(
     builder: &mut FunctionBuilder,
     lambda: &LambdaExpr,
-    variables: &HashMap<Symbol, (Variable, Type)>,
+    variables: &HashMap<Symbol, (Variable, LegacyType)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     let captures = lambda.captures.borrow();
@@ -339,7 +339,7 @@ fn compile_lambda_with_captures(
 
     *ctx.lambda_counter += 1;
 
-    let param_types: Vec<types::Type> = lambda
+    let param_types: Vec<Type> = lambda
         .params
         .iter()
         .map(|p| {
@@ -359,7 +359,7 @@ fn compile_lambda_with_captures(
         })
         .collect();
 
-    let param_context: Vec<(Symbol, Type)> = lambda
+    let param_context: Vec<(Symbol, LegacyType)> = lambda
         .params
         .iter()
         .zip(param_vole_types.iter())
@@ -410,7 +410,7 @@ fn compile_lambda_with_captures(
         let block_params = lambda_builder.block_params(entry_block).to_vec();
         let closure_ptr = block_params[0];
 
-        let mut lambda_variables: HashMap<Symbol, (Variable, Type)> = HashMap::new();
+        let mut lambda_variables: HashMap<Symbol, (Variable, LegacyType)> = HashMap::new();
         for (i, param) in lambda.params.iter().enumerate() {
             let var = lambda_builder.declare_var(param_types[i]);
             lambda_builder.def_var(var, block_params[i + 1]);
@@ -512,7 +512,7 @@ fn compile_lambda_with_captures(
 fn compile_lambda_body(
     builder: &mut FunctionBuilder,
     body: &LambdaBody,
-    variables: &mut HashMap<Symbol, (Variable, Type)>,
+    variables: &mut HashMap<Symbol, (Variable, LegacyType)>,
     capture_bindings: &HashMap<Symbol, CaptureBinding>,
     closure_var: Option<Variable>,
     cf: &mut ControlFlow,

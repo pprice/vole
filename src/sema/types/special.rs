@@ -32,7 +32,7 @@
 use crate::frontend::Span;
 use crate::identity::{ModuleId, NameId};
 
-use super::{LegacyType, Type};
+use super::LegacyType;
 
 /// Analysis error - represents a type that couldn't be determined.
 ///

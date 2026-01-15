@@ -1,7 +1,7 @@
 //! Field registration and lookup for EntityRegistry.
 
 use crate::identity::{FieldId, NameId, TypeDefId};
-use crate::sema::{LegacyType, Type};
+use crate::sema::LegacyType;
 use crate::sema::entity_defs::FieldDef;
 use crate::sema::generic::substitute_type;
 use std::collections::HashMap;
@@ -73,7 +73,7 @@ impl EntityRegistry {
     pub fn substitution_map(
         &self,
         type_def_id: TypeDefId,
-        type_args: &[Type],
+        type_args: &[LegacyType],
     ) -> HashMap<NameId, LegacyType> {
         let type_def = self.get_type(type_def_id);
         type_def
@@ -88,7 +88,7 @@ impl EntityRegistry {
     pub fn substitute_type_with_args(
         &self,
         type_def_id: TypeDefId,
-        type_args: &[Type],
+        type_args: &[LegacyType],
         ty: &LegacyType,
     ) -> LegacyType {
         if type_args.is_empty() {
@@ -102,7 +102,7 @@ impl EntityRegistry {
     pub fn field_type(
         &self,
         type_def_id: TypeDefId,
-        type_args: &[Type],
+        type_args: &[LegacyType],
         field_name_id: NameId,
     ) -> Option<LegacyType> {
         let type_def = self.get_type(type_def_id);

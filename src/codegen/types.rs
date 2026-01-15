@@ -19,7 +19,7 @@ use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, substitute_type};
 use crate::sema::type_arena::TypeArena;
 use crate::sema::types::NominalType;
-use crate::sema::{EntityRegistry, FunctionType, LegacyType, PrimitiveType, Type, TypeId, TypeKey};
+use crate::sema::{EntityRegistry, FunctionType, LegacyType, PrimitiveType, TypeId, TypeKey};
 
 // Re-export box_interface_value for centralized access to all boxing helpers
 pub(crate) use super::interface_vtable::box_interface_value;
@@ -405,7 +405,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
     let resolver = Resolver::new(interner, name_table, module_id, &[]);
 
     match ty {
-        TypeExpr::Primitive(p) => Type::from_primitive(*p),
+        TypeExpr::Primitive(p) => LegacyType::from_primitive(*p),
         TypeExpr::Named(sym) => {
             // Check entity registry for type definition (aliases, interfaces, etc.)
             let type_def_id = resolver.resolve_type_or_interface(*sym, entity_registry);
@@ -508,7 +508,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 // Use Placeholder with the param name for debugging clarity.
                 let name = interner.resolve(*sym);
                 tracing::trace!(name, "type parameter in codegen, using Placeholder");
-                Type::type_param_placeholder(name)
+                LegacyType::type_param_placeholder(name)
             }
         }
         TypeExpr::Array(elem) => {
@@ -548,7 +548,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     )
                 })
                 .collect();
-            Type::normalize_union(variant_types)
+            LegacyType::normalize_union(variant_types)
         }
         TypeExpr::Nil => LegacyType::Nil,
         TypeExpr::Done => LegacyType::Done,
@@ -587,7 +587,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
             // Self type in interface signatures is resolved when the interface is implemented.
             // For interface method signature compilation, we use a Self placeholder.
             // The actual Self type is substituted when compiling implement blocks.
-            Type::self_placeholder()
+            LegacyType::self_placeholder()
         }
         TypeExpr::Fallible {
             success_type,
@@ -881,7 +881,7 @@ pub(crate) fn type_size(ty: &LegacyType, pointer_type: types::Type) -> u32 {
 /// Calculate layout for tuple elements.
 /// Returns (total_size, offsets) where offsets[i] is the byte offset for element i.
 /// Each element is aligned to 8 bytes for simplicity.
-pub(crate) fn tuple_layout(elements: &[Type], pointer_type: types::Type) -> (u32, Vec<i32>) {
+pub(crate) fn tuple_layout(elements: &[LegacyType], pointer_type: types::Type) -> (u32, Vec<i32>) {
     let mut offsets = Vec::with_capacity(elements.len());
     let mut offset = 0i32;
 
@@ -961,7 +961,7 @@ pub(crate) fn cranelift_to_vole_type(ty: types::Type) -> LegacyType {
         types::I128 => LegacyType::Primitive(PrimitiveType::I128),
         types::F32 => LegacyType::Primitive(PrimitiveType::F32),
         types::F64 => LegacyType::Primitive(PrimitiveType::F64),
-        _ => Type::unknown(), // Pointer types, etc. use inference placeholder for now
+        _ => LegacyType::unknown(), // Pointer types, etc. use inference placeholder for now
     }
 }
 

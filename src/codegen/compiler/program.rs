@@ -19,7 +19,7 @@ use crate::sema::generic::{
     StaticMethodMonomorphInstance, substitute_type,
 };
 use crate::sema::types::{ClassType, NominalType, RecordType};
-use crate::sema::{LegacyType, PrimitiveType, Type};
+use crate::sema::{LegacyType, PrimitiveType};
 
 /// Compilation phase for monomorphization pipeline.
 /// Allows separating function declaration from body compilation for forward references.

@@ -107,7 +107,7 @@ impl Analyzer {
     /// Format a method signature for error messages
     pub(crate) fn format_method_signature(
         &mut self,
-        params: &[Type],
+        params: &[LegacyType],
         return_type: &LegacyType,
         _interner: &Interner,
     ) -> String {
@@ -123,7 +123,7 @@ impl Analyzer {
     /// Shows "Self" instead of "error" for LegacyType::Error (which represents Self in interfaces).
     pub(crate) fn format_interface_method_signature(
         &mut self,
-        params: &[Type],
+        params: &[LegacyType],
         return_type: &LegacyType,
     ) -> String {
         let params_str: Vec<String> = params

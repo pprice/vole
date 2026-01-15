@@ -11,7 +11,7 @@ use hashbrown::HashMap;
 use smallvec::SmallVec;
 
 use crate::identity::{ModuleId, NameId, TypeDefId, TypeParamId};
-use crate::sema::types::{LegacyType, PlaceholderKind, PrimitiveType, Type};
+use crate::sema::types::{LegacyType, PlaceholderKind, PrimitiveType};
 
 /// Concrete type identity in the TypeArena.
 ///
@@ -998,7 +998,7 @@ impl TypeArena {
             InternedType::Done => LegacyType::Done,
             InternedType::Range => LegacyType::Range,
             InternedType::MetaType => LegacyType::MetaType,
-            InternedType::Invalid { kind } => Type::invalid(kind),
+            InternedType::Invalid { kind } => LegacyType::invalid(kind),
 
             InternedType::Array(elem) => LegacyType::Array(Box::new(self.to_type(*elem))),
 

@@ -14,7 +14,7 @@ type ArgVec = SmallVec<[Value; 8]>;
 use crate::frontend::{CallExpr, ExprKind, LetInit, NodeId, StringPart};
 use crate::runtime::native_registry::{NativeFunction, NativeType};
 use crate::sema::types::NominalType;
-use crate::sema::{FunctionType, LegacyType, PrimitiveType, Type};
+use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
 use super::context::Cg;
 use super::types::{
@@ -27,7 +27,7 @@ use super::{FunctionKey, FunctionRegistry, RuntimeFn};
 pub(crate) fn compile_string_literal(
     builder: &mut FunctionBuilder,
     s: &str,
-    pointer_type: types::Type,
+    pointer_type: Type,
     module: &mut JITModule,
     func_registry: &FunctionRegistry,
 ) -> Result<CompiledValue, String> {
@@ -64,7 +64,7 @@ pub(crate) fn compile_string_literal(
 pub(crate) fn value_to_string(
     builder: &mut FunctionBuilder,
     val: CompiledValue,
-    _pointer_type: types::Type,
+    _pointer_type: Type,
     module: &mut JITModule,
     func_registry: &FunctionRegistry,
 ) -> Result<Value, String> {
@@ -189,7 +189,7 @@ impl Cg<'_, '_, '_> {
     fn optional_to_string(
         &mut self,
         ptr: Value,
-        variants: &[Type],
+        variants: &[LegacyType],
         nil_idx: usize,
     ) -> Result<Value, String> {
         use crate::codegen::types::type_to_cranelift;
@@ -634,7 +634,7 @@ impl Cg<'_, '_, '_> {
         // Get expected parameter types from the function's signature
         let sig_ref = self.builder.func.dfg.ext_funcs[func_ref].signature;
         let sig = &self.builder.func.dfg.signatures[sig_ref];
-        let expected_types: Vec<types::Type> = sig.params.iter().map(|p| p.value_type).collect();
+        let expected_types: Vec<Type> = sig.params.iter().map(|p| p.value_type).collect();
 
         // Compile arguments with type narrowing
         let mut args = Vec::new();

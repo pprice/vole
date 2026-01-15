@@ -20,7 +20,7 @@ impl Analyzer {
         &mut self,
         match_expr: &MatchExpr,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         // Check scrutinee type
         let scrutinee_type = self.check_expr(&match_expr.scrutinee, interner)?;
 

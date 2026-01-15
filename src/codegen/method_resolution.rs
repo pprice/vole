@@ -9,7 +9,7 @@ use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::types::NominalType;
-use crate::sema::{FunctionType, LegacyType, PrimitiveType, Type};
+use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
 #[derive(Debug)]
 pub(crate) enum MethodTarget {
@@ -50,7 +50,7 @@ pub(crate) struct MethodResolutionInput<'a> {
     pub type_metadata: &'a HashMap<Symbol, crate::codegen::types::TypeMetadata>,
     pub impl_method_infos: &'a HashMap<(TypeId, NameId), MethodInfo>,
     pub method_name_str: &'a str,
-    pub object_type: &'a Type,
+    pub object_type: &'a LegacyType,
     pub method_id: NameId,
     pub resolution: Option<&'a ResolvedMethod>,
 }

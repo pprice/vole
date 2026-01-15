@@ -527,7 +527,7 @@ impl Analyzer {
         &mut self,
         inner_expr: &Expr,
         interner: &Interner,
-    ) -> Result<Type, Vec<TypeError>> {
+    ) -> Result<LegacyType, Vec<TypeError>> {
         // Check the inner expression - must be fallible
         let inner_type = self.check_expr(inner_expr, interner)?;
 

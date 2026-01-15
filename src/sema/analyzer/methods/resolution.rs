@@ -377,7 +377,7 @@ impl Analyzer {
         }
 
         // 2. Interface methods (vtable dispatch)
-        let (interface_type_def_id, type_args): (Option<TypeDefId>, &[Type]) = match object_type {
+        let (interface_type_def_id, type_args): (Option<TypeDefId>, &[LegacyType]) = match object_type {
             LegacyType::Nominal(NominalType::Interface(iface)) => {
                 (Some(iface.type_def_id), &iface.type_args)
             }

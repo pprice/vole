@@ -3,7 +3,7 @@
 use crate::frontend::Symbol;
 use crate::identity::NameId;
 use crate::sema::type_table::TypeTable;
-use crate::sema::types::{FunctionType, LegacyType, NominalType, PrimitiveType, Type};
+use crate::sema::types::{FunctionType, LegacyType, NominalType, PrimitiveType};
 use std::collections::HashMap;
 
 /// Identifier for primitive types

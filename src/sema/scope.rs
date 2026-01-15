@@ -1,7 +1,7 @@
 // src/sema/scope.rs
 
 use crate::frontend::Symbol;
-use crate::sema::{LegacyType, Type};
+use crate::sema::LegacyType;
 use std::collections::HashMap;
 
 #[derive(Debug)]
