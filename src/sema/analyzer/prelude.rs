@@ -5,6 +5,7 @@ use crate::frontend::{Interner, Parser};
 use crate::identity::NameTable;
 use crate::module::ModuleLoader;
 use crate::sema::EntityRegistry;
+use crate::sema::TypeArena;
 use crate::sema::analysis_cache::CachedModule;
 use crate::sema::generic::TypeParamScopeStack;
 use crate::sema::implement_registry::ImplementRegistry;
@@ -127,6 +128,7 @@ impl Analyzer {
             entity_registry: EntityRegistry::new(),
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None, // Sub-analyzers don't need the cache
+            type_arena: TypeArena::new(),
         };
 
         // Copy existing registries so prelude files can reference earlier definitions

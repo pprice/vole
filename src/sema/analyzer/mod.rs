@@ -25,6 +25,7 @@ use crate::sema::generic::{
 };
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry, MethodImpl, TypeId};
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
+use crate::sema::type_arena::TypeArena;
 use crate::sema::types::{ConstantValue, ModuleType, NominalType, StructuralType};
 use crate::sema::{
     ClassType, ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField, Type,
@@ -205,6 +206,9 @@ pub struct Analyzer {
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
     module_cache: Option<Rc<RefCell<ModuleCache>>>,
+    /// Type arena for interned types (O(1) equality, reduced allocations).
+    /// Part of the Phase 3 TypeArena migration.
+    pub type_arena: TypeArena,
 }
 
 /// Result of looking up a method on a type via EntityRegistry
@@ -251,6 +255,7 @@ impl Analyzer {
             entity_registry: EntityRegistry::new(),
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,
+            type_arena: TypeArena::new(),
         };
 
         // Register primitives in EntityRegistry so they can have static methods
