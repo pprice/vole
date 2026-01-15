@@ -96,7 +96,7 @@ impl Analyzer {
                     },
                     field_access.field_span,
                 );
-                return Ok(Type::invalid("module_no_export"));
+                return Ok(self.ty_invalid_traced("module_no_export"));
             }
         }
 
@@ -118,11 +118,11 @@ impl Analyzer {
         // Extract type_def_id and type_args from the object type
         let Type::Nominal(n) = &object_type else {
             self.type_error("class or record", &object_type, field_access.object.span);
-            return Ok(Type::invalid("field_access_non_struct"));
+            return Ok(self.ty_invalid_traced("field_access_non_struct"));
         };
         if !n.is_struct_like() {
             self.type_error("class or record", &object_type, field_access.object.span);
-            return Ok(Type::invalid("field_access_non_struct"));
+            return Ok(self.ty_invalid_traced("field_access_non_struct"));
         }
         let (type_def_id, type_args) = (n.type_def_id(), n.type_args());
 
@@ -146,25 +146,22 @@ impl Analyzer {
             },
             field_access.field_span,
         );
-        Ok(Type::invalid_at(
-            "unknown_field",
-            format!(
-                "field '{}' not found on {} '{}' (available: {})",
-                field_name,
-                if matches!(&object_type, Type::Nominal(NominalType::Class(_))) {
-                    "class"
-                } else {
-                    "record"
-                },
-                type_name,
-                if available_fields.is_empty() {
-                    "none".to_string()
-                } else {
-                    available_fields.join(", ")
-                }
-            ),
-            field_access.field_span,
-        ))
+        let context = format!(
+            "field '{}' not found on {} '{}' (available: {})",
+            field_name,
+            if matches!(&object_type, Type::Nominal(NominalType::Class(_))) {
+                "class"
+            } else {
+                "record"
+            },
+            type_name,
+            if available_fields.is_empty() {
+                "none".to_string()
+            } else {
+                available_fields.join(", ")
+            }
+        );
+        Ok(self.ty_invalid_traced(&context))
     }
 
     pub(super) fn check_optional_chain_expr(
@@ -176,14 +173,14 @@ impl Analyzer {
 
         // Handle errors early
         if object_type.is_invalid() {
-            return Ok(Type::invalid("propagate_optional_chain"));
+            return Ok(self.ty_invalid());
         }
 
         // The object must be an optional type (union with nil)
         let inner_type = if object_type.is_optional() {
             object_type
                 .unwrap_optional()
-                .unwrap_or_else(|| Type::invalid("unwrap_optional_failed"))
+                .unwrap_or_else(|| self.ty_invalid_traced("unwrap_optional_failed"))
         } else {
             // If not optional, treat it as regular field access wrapped in optional
             // This allows `obj?.field` where obj is not optional (returns T?)
@@ -192,7 +189,7 @@ impl Analyzer {
 
         // Handle Type::Error early
         if inner_type.is_invalid() {
-            return Ok(Type::invalid("propagate_optional_inner"));
+            return Ok(self.ty_invalid());
         }
 
         // Get type_def_id and type_args from inner type
@@ -202,7 +199,7 @@ impl Analyzer {
                 &object_type,
                 opt_chain.object.span,
             );
-            return Ok(Type::invalid("optional_chain_non_struct"));
+            return Ok(self.ty_invalid_traced("optional_chain_non_struct"));
         };
         if !n.is_struct_like() {
             self.type_error(
@@ -210,7 +207,7 @@ impl Analyzer {
                 &object_type,
                 opt_chain.object.span,
             );
-            return Ok(Type::invalid("optional_chain_non_struct"));
+            return Ok(self.ty_invalid_traced("optional_chain_non_struct"));
         }
         let (type_def_id, type_args) = (n.type_def_id(), n.type_args());
 
@@ -238,7 +235,7 @@ impl Analyzer {
                 },
                 opt_chain.field_span,
             );
-            Ok(Type::invalid("unknown_optional_field"))
+            Ok(self.ty_invalid_traced("unknown_optional_field"))
         }
     }
 
@@ -270,7 +267,7 @@ impl Analyzer {
 
         // Handle Type::Error early
         if object_type.is_invalid() {
-            return Ok(Type::invalid("propagate_method_call"));
+            return Ok(self.ty_invalid());
         }
 
         // Optional/union method calls require explicit narrowing.
@@ -287,7 +284,7 @@ impl Analyzer {
             for arg in &method_call.args {
                 self.check_expr(arg, interner)?;
             }
-            return Ok(Type::invalid("method_on_optional"));
+            return Ok(self.ty_invalid_traced("method_on_optional"));
         }
 
         if matches!(object_type, Type::Union(_)) {
@@ -303,7 +300,7 @@ impl Analyzer {
             for arg in &method_call.args {
                 self.check_expr(arg, interner)?;
             }
-            return Ok(Type::invalid("method_on_union"));
+            return Ok(self.ty_invalid_traced("method_on_union"));
         }
 
         // Handle module method calls (e.g., math.sqrt(16.0))
@@ -361,7 +358,7 @@ impl Analyzer {
                     return Ok(*func_type.return_type.clone());
                 } else {
                     self.type_error("function", export_type, method_call.method_span);
-                    return Ok(Type::invalid("propagate"));
+                    return Ok(self.ty_invalid());
                 }
             } else {
                 self.add_error(
@@ -375,7 +372,7 @@ impl Analyzer {
                     },
                     method_call.method_span,
                 );
-                return Ok(Type::invalid("propagate"));
+                return Ok(self.ty_invalid());
             }
         }
 
@@ -462,7 +459,7 @@ impl Analyzer {
         for arg in &method_call.args {
             self.check_expr(arg, interner)?;
         }
-        Ok(Type::invalid("propagate"))
+        Ok(self.ty_invalid())
     }
 
     /// Try to resolve a static method call target from an expression.
@@ -674,7 +671,7 @@ impl Analyzer {
             self.check_expr(arg, interner)?;
         }
 
-        Ok(Type::invalid("propagate"))
+        Ok(self.ty_invalid())
     }
 
     /// Record a class method monomorphization for generic class/record method calls.

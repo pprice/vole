@@ -27,7 +27,7 @@ impl Analyzer {
                     },
                     expr.span,
                 );
-                return Ok(Type::Void);
+                return Ok(self.ty_void());
             }
 
             let arg_ty = self.check_expr(&call.args[0], interner)?;
@@ -43,7 +43,7 @@ impl Analyzer {
                 );
             }
 
-            return Ok(Type::Void);
+            return Ok(self.ty_void());
         }
 
         if let ExprKind::Identifier(sym) = &call.callee.kind {
@@ -119,7 +119,7 @@ impl Analyzer {
                 // Check arg count
                 if call.args.len() != concrete_params.len() {
                     self.add_wrong_arg_count(concrete_params.len(), call.args.len(), expr.span);
-                    return Ok(Type::invalid("propagate"));
+                    return Ok(self.ty_invalid());
                 }
 
                 // Type check arguments against concrete params
@@ -228,7 +228,7 @@ impl Analyzer {
                 for arg in &call.args {
                     self.check_expr(arg, interner)?;
                 }
-                return Ok(Type::Void);
+                return Ok(self.ty_void());
             }
 
             // Check if it's a variable with a non-function type
@@ -245,7 +245,7 @@ impl Analyzer {
                 for arg in &call.args {
                     self.check_expr(arg, interner)?;
                 }
-                return Ok(Type::invalid("propagate"));
+                return Ok(self.ty_invalid());
             }
 
             // Unknown identifier - might be an undefined function
@@ -253,7 +253,7 @@ impl Analyzer {
             for arg in &call.args {
                 self.check_expr(arg, interner)?;
             }
-            return Ok(Type::Void);
+            return Ok(self.ty_void());
         }
 
         // Non-identifier callee (e.g., a lambda expression being called directly)
@@ -284,6 +284,6 @@ impl Analyzer {
                 call.callee.span,
             );
         }
-        Ok(Type::invalid("propagate"))
+        Ok(self.ty_invalid())
     }
 }

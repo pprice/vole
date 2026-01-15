@@ -10,6 +10,7 @@ mod methods;
 mod patterns;
 mod prelude;
 mod stmt;
+mod type_helpers;
 
 use crate::errors::{SemanticError, SemanticWarning};
 use crate::frontend::*;

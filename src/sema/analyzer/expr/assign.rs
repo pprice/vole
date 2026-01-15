@@ -245,7 +245,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    return Ok(Type::invalid("propagate"));
+                    return Ok(self.ty_invalid());
                 }
             }
             AssignTarget::Index { object, index } => {
