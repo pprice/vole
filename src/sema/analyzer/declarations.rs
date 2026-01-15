@@ -307,7 +307,8 @@ impl Analyzer {
 
             // Register methods in EntityRegistry (single source of truth)
             // Use class_type as Self for resolving method signatures
-            let self_type_for_methods = class_type.map(|c| LegacyType::Nominal(NominalType::Class(c)));
+            let self_type_for_methods =
+                class_type.map(|c| LegacyType::Nominal(NominalType::Class(c)));
             let builtin_mod = self.name_table.builtin_module();
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
@@ -560,7 +561,8 @@ impl Analyzer {
             );
 
             // Register methods in EntityRegistry with type params in scope
-            let self_type_for_methods = class_type.map(|c| LegacyType::Nominal(NominalType::Class(c)));
+            let self_type_for_methods =
+                class_type.map(|c| LegacyType::Nominal(NominalType::Class(c)));
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
                 let method_name_id = self.name_table.intern_raw(builtin_mod, &[method_name_str]);
@@ -863,7 +865,8 @@ impl Analyzer {
 
             // Register methods in EntityRegistry (single source of truth)
             // Use record_type as Self for resolving method signatures
-            let self_type_for_methods = record_type.map(|r| LegacyType::Nominal(NominalType::Record(r)));
+            let self_type_for_methods =
+                record_type.map(|r| LegacyType::Nominal(NominalType::Record(r)));
             let builtin_mod = self.name_table.builtin_module();
             for method in &record.methods {
                 let method_name_str = interner.resolve(method.name);
@@ -1106,7 +1109,9 @@ impl Analyzer {
                         module_id,
                         &type_param_scope,
                     );
-                    ctx.self_type = Some(LegacyType::Nominal(NominalType::Record(record_type.clone())));
+                    ctx.self_type = Some(LegacyType::Nominal(NominalType::Record(
+                        record_type.clone(),
+                    )));
                     method
                         .params
                         .iter()
@@ -1121,7 +1126,9 @@ impl Analyzer {
                         module_id,
                         &type_param_scope,
                     );
-                    ctx.self_type = Some(LegacyType::Nominal(NominalType::Record(record_type.clone())));
+                    ctx.self_type = Some(LegacyType::Nominal(NominalType::Record(
+                        record_type.clone(),
+                    )));
                     method
                         .return_type
                         .as_ref()

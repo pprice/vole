@@ -102,12 +102,14 @@ impl Analyzer {
 
         // Handle Invalid type early - propagate with context
         if object_type.is_invalid() {
-            return Ok(LegacyType::propagate_invalid(&object_type,
-            format!(
-                "checking field access '.{}'",
-                interner.resolve(field_access.field)
-            ),
-            Some(field_access.field_span),));
+            return Ok(LegacyType::propagate_invalid(
+                &object_type,
+                format!(
+                    "checking field access '.{}'",
+                    interner.resolve(field_access.field)
+                ),
+                Some(field_access.field_span),
+            ));
         }
 
         // Get fields from object type (Class or Record)

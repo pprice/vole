@@ -97,7 +97,10 @@ pub(crate) fn resolve_method_target(
     // but at codegen time the type is concrete (e.g., i64).
     let effective_resolution = input.resolution.filter(|resolution| {
         !matches!(resolution, ResolvedMethod::InterfaceMethod { .. })
-            || matches!(input.object_type, LegacyType::Nominal(NominalType::Interface(_)))
+            || matches!(
+                input.object_type,
+                LegacyType::Nominal(NominalType::Interface(_))
+            )
     });
 
     if let Some(resolution) = effective_resolution {
@@ -127,7 +130,9 @@ pub(crate) fn resolve_method_target(
 
                 // For interface types, we need vtable dispatch - the external_info is for
                 // the default implementation, but the concrete type may override it
-                if let LegacyType::Nominal(NominalType::Interface(interface_type)) = input.object_type {
+                if let LegacyType::Nominal(NominalType::Interface(interface_type)) =
+                    input.object_type
+                {
                     // Use TypeDefId directly for EntityRegistry-based dispatch
                     let interface_type_id = interface_type.type_def_id;
                     let method_name_id = method_name_id_by_str(

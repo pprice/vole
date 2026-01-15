@@ -117,7 +117,7 @@ impl MethodResolutions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sema::types::{LegacyType, PrimitiveType, Type};
+    use crate::sema::types::{LegacyType, PrimitiveType};
 
     #[test]
     fn resolved_method_func_type() {

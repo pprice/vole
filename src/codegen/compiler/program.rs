@@ -1678,10 +1678,12 @@ impl Compiler<'_> {
 
                     // Determine if it's a class or record based on TypeDefKind
                     return match &type_def.kind {
-                        TypeDefKind::Record => LegacyType::Nominal(NominalType::Record(RecordType {
-                            type_def_id,
-                            type_args: type_args.into(),
-                        })),
+                        TypeDefKind::Record => {
+                            LegacyType::Nominal(NominalType::Record(RecordType {
+                                type_def_id,
+                                type_args: type_args.into(),
+                            }))
+                        }
                         TypeDefKind::Class => LegacyType::Nominal(NominalType::Class(ClassType {
                             type_def_id,
                             type_args: type_args.into(),

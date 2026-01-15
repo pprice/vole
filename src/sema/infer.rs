@@ -101,15 +101,9 @@ impl From<Type> for InferType {
 #[derive(Debug, Clone)]
 pub enum UnifyError {
     /// Types are incompatible and cannot be unified.
-    Mismatch {
-        expected: Type,
-        found: Type,
-    },
+    Mismatch { expected: Type, found: Type },
     /// Occurs check failed - infinite type detected.
-    OccursCheck {
-        var: InferVarId,
-        ty: Type,
-    },
+    OccursCheck { var: InferVarId, ty: Type },
 }
 
 /// Inference context for managing variable bindings.
@@ -348,7 +342,10 @@ mod tests {
         let a = InferType::Resolved(ty1);
         let b = InferType::Resolved(ty2);
 
-        assert!(matches!(ctx.unify(a, b, &arena), Err(UnifyError::Mismatch { .. })));
+        assert!(matches!(
+            ctx.unify(a, b, &arena),
+            Err(UnifyError::Mismatch { .. })
+        ));
     }
 
     #[test]

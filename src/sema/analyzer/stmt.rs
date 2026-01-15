@@ -95,7 +95,9 @@ impl Analyzer {
             }
             Stmt::While(while_stmt) => {
                 let cond_type = self.check_expr(&while_stmt.condition, interner)?;
-                if cond_type != LegacyType::Primitive(PrimitiveType::Bool) && !cond_type.is_numeric() {
+                if cond_type != LegacyType::Primitive(PrimitiveType::Bool)
+                    && !cond_type.is_numeric()
+                {
                     let found = self.type_display(&cond_type);
                     self.add_error(
                         SemanticError::ConditionNotBool {
@@ -115,7 +117,9 @@ impl Analyzer {
             }
             Stmt::If(if_stmt) => {
                 let cond_type = self.check_expr(&if_stmt.condition, interner)?;
-                if cond_type != LegacyType::Primitive(PrimitiveType::Bool) && !cond_type.is_numeric() {
+                if cond_type != LegacyType::Primitive(PrimitiveType::Bool)
+                    && !cond_type.is_numeric()
+                {
                     let found = self.type_display(&cond_type);
                     self.add_error(
                         SemanticError::ConditionNotBool {
@@ -162,7 +166,9 @@ impl Analyzer {
                     self.scope = Scope::with_parent(parent);
 
                     // Apply else-branch narrowing: if x is T, else branch has x: (original - T)
-                    if let Some((sym, tested_type, Some(LegacyType::Union(variants)))) = &narrowing_info {
+                    if let Some((sym, tested_type, Some(LegacyType::Union(variants)))) =
+                        &narrowing_info
+                    {
                         // Remove tested type from union
                         let remaining: Vec<_> = variants
                             .iter()
@@ -503,7 +509,8 @@ impl Analyzer {
 
         if !is_compatible {
             let declared_str = self.type_display(&error_type);
-            let raised_str = self.type_display(&LegacyType::Nominal(NominalType::Error(error_info)));
+            let raised_str =
+                self.type_display(&LegacyType::Nominal(NominalType::Error(error_info)));
 
             self.add_error(
                 SemanticError::IncompatibleRaiseError {

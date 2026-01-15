@@ -115,7 +115,10 @@ impl Analyzer {
 
                 let _ = self.check_block(block, interner);
 
-                let ret = self.current_function_return.take().unwrap_or(LegacyType::Void);
+                let ret = self
+                    .current_function_return
+                    .take()
+                    .unwrap_or(LegacyType::Void);
                 self.current_function_return = old_return;
                 ret
             }

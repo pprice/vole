@@ -701,50 +701,50 @@ impl Cg<'_, '_, '_> {
         let arg = self.expr(&call.args[0])?;
 
         // Dispatch based on argument type
-        let (runtime, call_arg) = if matches!(arg.vole_type, LegacyType::Primitive(PrimitiveType::String))
-        {
-            (
-                if newline {
-                    RuntimeFn::PrintlnString
-                } else {
-                    RuntimeFn::PrintString
-                },
-                arg.value,
-            )
-        } else if arg.ty == types::F64 {
-            (
-                if newline {
-                    RuntimeFn::PrintlnF64
-                } else {
-                    RuntimeFn::PrintF64
-                },
-                arg.value,
-            )
-        } else if arg.ty == types::I8 {
-            (
-                if newline {
-                    RuntimeFn::PrintlnBool
-                } else {
-                    RuntimeFn::PrintBool
-                },
-                arg.value,
-            )
-        } else {
-            // Extend smaller integer types to I64
-            let extended = if arg.ty.is_int() && arg.ty != types::I64 {
-                self.builder.ins().sextend(types::I64, arg.value)
+        let (runtime, call_arg) =
+            if matches!(arg.vole_type, LegacyType::Primitive(PrimitiveType::String)) {
+                (
+                    if newline {
+                        RuntimeFn::PrintlnString
+                    } else {
+                        RuntimeFn::PrintString
+                    },
+                    arg.value,
+                )
+            } else if arg.ty == types::F64 {
+                (
+                    if newline {
+                        RuntimeFn::PrintlnF64
+                    } else {
+                        RuntimeFn::PrintF64
+                    },
+                    arg.value,
+                )
+            } else if arg.ty == types::I8 {
+                (
+                    if newline {
+                        RuntimeFn::PrintlnBool
+                    } else {
+                        RuntimeFn::PrintBool
+                    },
+                    arg.value,
+                )
             } else {
-                arg.value
-            };
-            (
-                if newline {
-                    RuntimeFn::PrintlnI64
+                // Extend smaller integer types to I64
+                let extended = if arg.ty.is_int() && arg.ty != types::I64 {
+                    self.builder.ins().sextend(types::I64, arg.value)
                 } else {
-                    RuntimeFn::PrintI64
-                },
-                extended,
-            )
-        };
+                    arg.value
+                };
+                (
+                    if newline {
+                        RuntimeFn::PrintlnI64
+                    } else {
+                        RuntimeFn::PrintI64
+                    },
+                    extended,
+                )
+            };
 
         self.call_runtime_void(runtime, &[call_arg])?;
         Ok(self.void_value())

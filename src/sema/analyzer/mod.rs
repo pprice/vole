@@ -27,7 +27,9 @@ use crate::sema::generic::{
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry, MethodImpl, TypeId};
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::type_arena::TypeArena;
-use crate::sema::types::{ConstantValue, LegacyType, ModuleType, NominalType, StructuralType};
+use crate::sema::types::{
+    ConstantValue, LegacyType, ModuleType, NominalType, StructuralType, Type,
+};
 use crate::sema::{
     ClassType, ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField,
     compatibility::TypeCompatibility,
@@ -169,8 +171,12 @@ pub struct Analyzer {
     /// Stack of side effect flags for currently analyzed lambdas
     lambda_side_effects: Vec<bool>,
     /// Resolved types for each expression node (for codegen)
-    /// Maps expression node IDs to their resolved types, including narrowed types
-    expr_types: HashMap<NodeId, LegacyType>,
+    /// Maps expression node IDs to their interned type handles for O(1) equality.
+    /// Converted to LegacyType at boundaries when passed to codegen.
+    expr_types: HashMap<NodeId, Type>,
+    /// Module types that bypass arena conversion (arena loses exports/constants).
+    /// These are merged directly into ExpressionData as LegacyType::Module.
+    module_type_cache: HashMap<NodeId, LegacyType>,
     /// Methods added via implement blocks
     pub implement_registry: ImplementRegistry,
     /// Resolved method calls for codegen
@@ -181,9 +187,10 @@ pub struct Analyzer {
     module_types: FxHashMap<String, ModuleType>,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     module_programs: FxHashMap<String, (Program, Interner)>,
-    /// Expression types for module programs (keyed by module path -> NodeId -> LegacyType)
-    /// Stored separately since NodeIds are per-program and can't be merged into main expr_types
-    pub module_expr_types: FxHashMap<String, HashMap<NodeId, LegacyType>>,
+    /// Expression types for module programs (keyed by module path -> NodeId -> Type)
+    /// Stored separately since NodeIds are per-program and can't be merged into main expr_types.
+    /// Uses interned Type handles for O(1) equality during analysis.
+    pub module_expr_types: FxHashMap<String, HashMap<NodeId, Type>>,
     /// Method resolutions for module programs (keyed by module path -> NodeId -> ResolvedMethod)
     /// Stored separately since NodeIds are per-program and can't be merged into main method_resolutions
     pub module_method_resolutions: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
@@ -240,6 +247,7 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             expr_types: HashMap::new(),
+            module_type_cache: HashMap::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
@@ -285,8 +293,9 @@ impl Analyzer {
     // Error/display helpers: errors.rs
     // Type inference: inference.rs
 
-    /// Get the resolved expression types (for use by codegen)
-    pub fn expr_types(&self) -> &HashMap<NodeId, LegacyType> {
+    /// Get the resolved expression types as interned Type handles.
+    /// Use type_arena.to_type() to convert back to LegacyType if needed.
+    pub fn expr_types(&self) -> &HashMap<NodeId, Type> {
         &self.expr_types
     }
 
@@ -299,7 +308,7 @@ impl Analyzer {
     }
 
     /// Take ownership of the expression types (consuming self)
-    pub fn into_expr_types(self) -> HashMap<NodeId, LegacyType> {
+    pub fn into_expr_types(self) -> HashMap<NodeId, Type> {
         self.expr_types
     }
 
@@ -310,13 +319,37 @@ impl Analyzer {
 
     /// Take ownership of analysis results (consuming self)
     pub fn into_analysis_results(self) -> AnalysisOutput {
+        // Convert Type handles to LegacyType for codegen compatibility
+        let mut expr_types_legacy: HashMap<NodeId, LegacyType> = self
+            .expr_types
+            .into_iter()
+            .map(|(id, ty)| (id, self.type_arena.to_type(ty.0)))
+            .collect();
+
+        // Merge module_type_cache - these bypass the arena to preserve exports/constants
+        for (id, ty) in self.module_type_cache {
+            expr_types_legacy.insert(id, ty);
+        }
+
+        let module_expr_types_legacy: FxHashMap<String, HashMap<NodeId, LegacyType>> = self
+            .module_expr_types
+            .into_iter()
+            .map(|(module, types)| {
+                let converted: HashMap<NodeId, LegacyType> = types
+                    .into_iter()
+                    .map(|(id, ty)| (id, self.type_arena.to_type(ty.0)))
+                    .collect();
+                (module, converted)
+            })
+            .collect();
+
         let expression_data = ExpressionData::from_analysis(
-            self.expr_types,
+            expr_types_legacy,
             self.method_resolutions.into_inner(),
             self.generic_calls,
             self.class_method_calls,
             self.static_method_calls,
-            self.module_expr_types,
+            module_expr_types_legacy,
             self.module_method_resolutions,
         );
         AnalysisOutput {
@@ -328,9 +361,16 @@ impl Analyzer {
         }
     }
 
-    /// Record the resolved type for an expression, returning the type for chaining
+    /// Record the resolved type for an expression, returning the type for chaining.
+    /// Interns the LegacyType to a Type handle for O(1) storage and comparison.
     fn record_expr_type(&mut self, expr: &Expr, ty: LegacyType) -> LegacyType {
-        self.expr_types.insert(expr.id, ty.clone());
+        // Module types bypass the arena - it loses exports/constants/external_funcs.
+        // Store them directly in module_type_cache for merging in into_analysis_results.
+        if matches!(&ty, LegacyType::Module(_)) {
+            self.module_type_cache.insert(expr.id, ty.clone());
+        }
+        let type_id = self.type_arena.from_type(&ty);
+        self.expr_types.insert(expr.id, Type(type_id));
         ty
     }
 
@@ -1312,7 +1352,11 @@ impl Analyzer {
     }
 
     /// Extract the element type from an Iterator<T> type, or None if not an iterator type
-    fn extract_iterator_element_type(&self, ty: &LegacyType, _interner: &Interner) -> Option<LegacyType> {
+    fn extract_iterator_element_type(
+        &self,
+        ty: &LegacyType,
+        _interner: &Interner,
+    ) -> Option<LegacyType> {
         let LegacyType::Nominal(NominalType::Interface(interface_type)) = ty else {
             return None;
         };

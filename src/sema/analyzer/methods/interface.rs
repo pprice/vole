@@ -128,8 +128,12 @@ impl Analyzer {
     ) -> bool {
         // Get type name_id for method lookup
         let type_name_id = match ty {
-            LegacyType::Nominal(NominalType::Record(r)) => Some(self.entity_registry.record_name_id(r)),
-            LegacyType::Nominal(NominalType::Class(c)) => Some(self.entity_registry.class_name_id(c)),
+            LegacyType::Nominal(NominalType::Record(r)) => {
+                Some(self.entity_registry.record_name_id(r))
+            }
+            LegacyType::Nominal(NominalType::Class(c)) => {
+                Some(self.entity_registry.class_name_id(c))
+            }
             _ => None,
         };
 
@@ -301,18 +305,19 @@ impl Analyzer {
 
             // Build substitution map for generic interface type parameters
             // E.g., MapLike<K, V> implemented as MapLike<i64, i64> → {K: i64, V: i64}
-            let substitutions: StdHashMap<NameId, LegacyType> = if let Some(impl_type_id) = type_id_opt {
-                let type_args = self
-                    .entity_registry
-                    .get_implementation_type_args(impl_type_id, interface_type_id);
-                interface_type_params
-                    .iter()
-                    .zip(type_args.iter())
-                    .map(|(param, arg)| (*param, arg.clone()))
-                    .collect()
-            } else {
-                StdHashMap::new()
-            };
+            let substitutions: StdHashMap<NameId, LegacyType> =
+                if let Some(impl_type_id) = type_id_opt {
+                    let type_args = self
+                        .entity_registry
+                        .get_implementation_type_args(impl_type_id, interface_type_id);
+                    interface_type_params
+                        .iter()
+                        .zip(type_args.iter())
+                        .map(|(param, arg)| (*param, arg.clone()))
+                        .collect()
+                } else {
+                    StdHashMap::new()
+                };
 
             // Collect method info upfront (name_str, has_default, signature with substitutions applied)
             let method_infos: Vec<(String, bool, FunctionType)> = method_ids
@@ -692,8 +697,12 @@ impl Analyzer {
     ) -> bool {
         // Get type name_id for method lookup
         let type_name_id = match ty {
-            LegacyType::Nominal(NominalType::Record(r)) => Some(self.entity_registry.record_name_id(r)),
-            LegacyType::Nominal(NominalType::Class(c)) => Some(self.entity_registry.class_name_id(c)),
+            LegacyType::Nominal(NominalType::Record(r)) => {
+                Some(self.entity_registry.record_name_id(r))
+            }
+            LegacyType::Nominal(NominalType::Class(c)) => {
+                Some(self.entity_registry.class_name_id(c))
+            }
             _ => None,
         };
 

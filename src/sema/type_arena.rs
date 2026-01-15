@@ -478,12 +478,16 @@ impl TypeArena {
         if fields.iter().any(|(_, ty)| self.is_invalid(*ty)) {
             return self.invalid();
         }
-        if methods.iter().any(|m| {
-            self.is_invalid(m.return_type) || m.params.iter().any(|&p| self.is_invalid(p))
-        }) {
+        if methods
+            .iter()
+            .any(|m| self.is_invalid(m.return_type) || m.params.iter().any(|&p| self.is_invalid(p)))
+        {
             return self.invalid();
         }
-        self.intern(InternedType::Structural(Box::new(InternedStructural { fields, methods })))
+        self.intern(InternedType::Structural(Box::new(InternedStructural {
+            fields,
+            methods,
+        })))
     }
 
     /// Create a placeholder type (for inference)
@@ -720,11 +724,13 @@ impl TypeArena {
                 )
             }
             InternedType::Structural(st) => {
-                let field_strs: Vec<String> = st.fields
+                let field_strs: Vec<String> = st
+                    .fields
                     .iter()
                     .map(|(name, ty)| format!("{:?}: {}", name, self.display_basic(*ty)))
                     .collect();
-                let method_strs: Vec<String> = st.methods
+                let method_strs: Vec<String> = st
+                    .methods
                     .iter()
                     .map(|m| {
                         let params: Vec<String> =
@@ -737,7 +743,11 @@ impl TypeArena {
                         )
                     })
                     .collect();
-                format!("{{ {} | {} }}", field_strs.join(", "), method_strs.join(", "))
+                format!(
+                    "{{ {} | {} }}",
+                    field_strs.join(", "),
+                    method_strs.join(", ")
+                )
             }
             InternedType::Placeholder(kind) => format!("{}", kind),
         }
@@ -847,11 +857,13 @@ impl TypeArena {
             }
 
             InternedType::Structural(st) => {
-                let new_fields: SmallVec<[(NameId, TypeId); 4]> = st.fields
+                let new_fields: SmallVec<[(NameId, TypeId); 4]> = st
+                    .fields
                     .iter()
                     .map(|(name, ty)| (*name, self.substitute(*ty, subs)))
                     .collect();
-                let new_methods: SmallVec<[InternedStructuralMethod; 2]> = st.methods
+                let new_methods: SmallVec<[InternedStructuralMethod; 2]> = st
+                    .methods
                     .iter()
                     .map(|m| InternedStructuralMethod {
                         name: m.name,
@@ -1026,7 +1038,8 @@ impl TypeArena {
                 ret,
                 is_closure,
             } => {
-                let param_types: Vec<LegacyType> = params.iter().map(|&p| self.to_type(p)).collect();
+                let param_types: Vec<LegacyType> =
+                    params.iter().map(|&p| self.to_type(p)).collect();
                 LegacyType::Function(FunctionType {
                     params: param_types.into(),
                     return_type: Box::new(self.to_type(*ret)),
@@ -1105,16 +1118,20 @@ impl TypeArena {
             }
 
             InternedType::Structural(st) => {
-                use crate::sema::types::{StructuralFieldType, StructuralMethodType, StructuralType};
+                use crate::sema::types::{
+                    StructuralFieldType, StructuralMethodType, StructuralType,
+                };
                 LegacyType::Structural(StructuralType {
-                    fields: st.fields
+                    fields: st
+                        .fields
                         .iter()
                         .map(|(name, ty)| StructuralFieldType {
                             name: *name,
                             ty: self.to_type(*ty),
                         })
                         .collect(),
-                    methods: st.methods
+                    methods: st
+                        .methods
                         .iter()
                         .map(|m| StructuralMethodType {
                             name: m.name,
@@ -1662,7 +1679,9 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = LegacyType::Union(vec![LegacyType::Primitive(PrimitiveType::I32), LegacyType::Nil].into());
+        let original = LegacyType::Union(
+            vec![LegacyType::Primitive(PrimitiveType::I32), LegacyType::Nil].into(),
+        );
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
         assert_eq!(original, back);
@@ -1764,7 +1783,8 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(PrimitiveType::String)));
+        let original =
+            LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(PrimitiveType::String)));
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
         assert_eq!(original, back);

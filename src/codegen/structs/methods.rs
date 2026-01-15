@@ -190,7 +190,8 @@ impl Cg<'_, '_, '_> {
         let (method_info, return_type) = match target {
             MethodTarget::FunctionalInterface { func_type } => {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
-                if let LegacyType::Nominal(NominalType::Interface(interface_type)) = &obj.vole_type {
+                if let LegacyType::Nominal(NominalType::Interface(interface_type)) = &obj.vole_type
+                {
                     let method_name_id = self.method_name_id(mc.method);
                     return self.interface_dispatch_call_args_by_type_def_id(
                         &obj,
@@ -224,7 +225,8 @@ impl Cg<'_, '_, '_> {
                     for (arg, param_type) in mc.args.iter().zip(param_types.iter()) {
                         let compiled = self.expr(arg)?;
                         let compiled =
-                            if matches!(param_type, LegacyType::Nominal(NominalType::Interface(_))) {
+                            if matches!(param_type, LegacyType::Nominal(NominalType::Interface(_)))
+                            {
                                 box_interface_value(self.builder, self.ctx, compiled, param_type)?
                             } else {
                                 compiled
@@ -307,11 +309,12 @@ impl Cg<'_, '_, '_> {
         if let Some(param_types) = &param_types {
             for (arg, param_type) in mc.args.iter().zip(param_types.iter()) {
                 let compiled = self.expr(arg)?;
-                let compiled = if matches!(param_type, LegacyType::Nominal(NominalType::Interface(_))) {
-                    box_interface_value(self.builder, self.ctx, compiled, param_type)?
-                } else {
-                    compiled
-                };
+                let compiled =
+                    if matches!(param_type, LegacyType::Nominal(NominalType::Interface(_))) {
+                        box_interface_value(self.builder, self.ctx, compiled, param_type)?
+                    } else {
+                        compiled
+                    };
 
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
@@ -428,7 +431,9 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: result,
             ty: self.ctx.pointer_type,
-            vole_type: LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(PrimitiveType::I64))),
+            vole_type: LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(
+                PrimitiveType::I64,
+            ))),
         })
     }
 
@@ -480,7 +485,9 @@ impl Cg<'_, '_, '_> {
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
-                    vole_type: LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(PrimitiveType::I64))),
+                    vole_type: LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(
+                        PrimitiveType::I64,
+                    ))),
                 }))
             }
             _ => Ok(None),
@@ -557,7 +564,11 @@ impl Cg<'_, '_, '_> {
     /// When calling external iterator methods, the runtime returns raw iterator pointers,
     /// not boxed interface values. This function converts Interface/GenericInstance types
     /// for Iterator to RuntimeIterator so that subsequent method calls use direct dispatch.
-    fn convert_iterator_return_type(&self, ty: LegacyType, iterator_type_id: TypeDefId) -> LegacyType {
+    fn convert_iterator_return_type(
+        &self,
+        ty: LegacyType,
+        iterator_type_id: TypeDefId,
+    ) -> LegacyType {
         self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
     }
 
@@ -835,11 +846,12 @@ impl Cg<'_, '_, '_> {
                 for (arg, param_ty) in mc.args.iter().zip(instance.func_type.params.iter()) {
                     let compiled = self.expr(arg)?;
                     // Box interface values if needed
-                    let compiled = if matches!(param_ty, LegacyType::Nominal(NominalType::Interface(_))) {
-                        box_interface_value(self.builder, self.ctx, compiled, param_ty)?
-                    } else {
-                        compiled
-                    };
+                    let compiled =
+                        if matches!(param_ty, LegacyType::Nominal(NominalType::Interface(_))) {
+                            box_interface_value(self.builder, self.ctx, compiled, param_ty)?
+                        } else {
+                            compiled
+                        };
                     args.push(compiled.value);
                 }
 

@@ -84,7 +84,10 @@ pub enum LegacyType {
     Tuple(Arc<[LegacyType]>),
     /// Fixed-size array - homogeneous fixed-size array
     /// e.g., [i32; 10] - single element type, compile-time known size
-    FixedArray { element: Box<LegacyType>, size: usize },
+    FixedArray {
+        element: Box<LegacyType>,
+        size: usize,
+    },
     /// Structural type - duck typing constraint
     /// e.g., { name: string, func greet() -> string }
     Structural(StructuralType),
@@ -311,7 +314,11 @@ impl LegacyType {
     pub fn unwrap_optional(&self) -> Option<LegacyType> {
         match self {
             LegacyType::Union(types) => {
-                let non_nil: Vec<_> = types.iter().filter(|t| **t != LegacyType::Nil).cloned().collect();
+                let non_nil: Vec<_> = types
+                    .iter()
+                    .filter(|t| **t != LegacyType::Nil)
+                    .cloned()
+                    .collect();
                 match non_nil.len() {
                     0 => None,
                     1 => Some(non_nil.into_iter().next().expect("len checked to be 1")),
@@ -479,7 +486,10 @@ impl LegacyType {
     /// let param_type = LegacyType::TypeParam(t_name_id);
     /// assert_eq!(param_type.substitute(&substitutions), LegacyType::Primitive(PrimitiveType::I64));
     /// ```
-    pub fn substitute(&self, substitutions: &std::collections::HashMap<NameId, LegacyType>) -> LegacyType {
+    pub fn substitute(
+        &self,
+        substitutions: &std::collections::HashMap<NameId, LegacyType>,
+    ) -> LegacyType {
         // Early exit if no substitutions - just clone (cheap for Arc-based types)
         if substitutions.is_empty() {
             return self.clone();

@@ -146,7 +146,10 @@ impl Analyzer {
     }
 
     /// Build substitution map for generic interface types
-    fn build_interface_substitutions(&self, object_type: &LegacyType) -> HashMap<NameId, LegacyType> {
+    fn build_interface_substitutions(
+        &self,
+        object_type: &LegacyType,
+    ) -> HashMap<NameId, LegacyType> {
         // Extract type_def_id and type_args from nominal types
         if let LegacyType::Nominal(n) = object_type {
             self.entity_registry
@@ -377,12 +380,13 @@ impl Analyzer {
         }
 
         // 2. Interface methods (vtable dispatch)
-        let (interface_type_def_id, type_args): (Option<TypeDefId>, &[LegacyType]) = match object_type {
-            LegacyType::Nominal(NominalType::Interface(iface)) => {
-                (Some(iface.type_def_id), &iface.type_args)
-            }
-            _ => (None, &[]),
-        };
+        let (interface_type_def_id, type_args): (Option<TypeDefId>, &[LegacyType]) =
+            match object_type {
+                LegacyType::Nominal(NominalType::Interface(iface)) => {
+                    (Some(iface.type_def_id), &iface.type_args)
+                }
+                _ => (None, &[]),
+            };
         if let Some(type_def_id) = interface_type_def_id {
             let interface_def = self.entity_registry.get_type(type_def_id);
             let name_id = interface_def.name_id;

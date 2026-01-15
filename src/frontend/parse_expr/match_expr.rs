@@ -120,8 +120,10 @@ impl<'src> Parser<'src> {
         // Check for type keyword patterns (primitives and nil)
         if let Some(type_expr) = self.token_to_type_expr(&token) {
             self.advance();
-            return Ok(Pattern::Type { type_expr,
-            span: token.span, });
+            return Ok(Pattern::Type {
+                type_expr,
+                span: token.span,
+            });
         }
 
         match token.ty {

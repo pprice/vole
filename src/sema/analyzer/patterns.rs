@@ -49,7 +49,8 @@ impl Analyzer {
                         TypeDefKind::Class => {
                             if let Some(class_type) = self.entity_registry.build_class_type(type_id)
                             {
-                                let pattern_type = LegacyType::Nominal(NominalType::Class(class_type));
+                                let pattern_type =
+                                    LegacyType::Nominal(NominalType::Class(class_type));
                                 self.check_type_pattern_compatibility(
                                     &pattern_type,
                                     scrutinee_type,
@@ -73,7 +74,8 @@ impl Analyzer {
                             if let Some(record_type) =
                                 self.entity_registry.build_record_type(type_id)
                             {
-                                let pattern_type = LegacyType::Nominal(NominalType::Record(record_type));
+                                let pattern_type =
+                                    LegacyType::Nominal(NominalType::Record(record_type));
                                 self.check_type_pattern_compatibility(
                                     &pattern_type,
                                     scrutinee_type,

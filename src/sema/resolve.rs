@@ -294,7 +294,8 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
             params,
             return_type,
         } => {
-            let param_types: Vec<LegacyType> = params.iter().map(|p| resolve_type(p, ctx)).collect();
+            let param_types: Vec<LegacyType> =
+                params.iter().map(|p| resolve_type(p, ctx)).collect();
             let ret = resolve_type(return_type, ctx);
             LegacyType::Function(FunctionType {
                 params: param_types.into(),
@@ -324,7 +325,8 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
         }
         TypeExpr::Generic { name, args } => {
             // Resolve all type arguments
-            let resolved_args: Vec<LegacyType> = args.iter().map(|a| resolve_type(a, ctx)).collect();
+            let resolved_args: Vec<LegacyType> =
+                args.iter().map(|a| resolve_type(a, ctx)).collect();
             if let Some(interface) = interface_instance(*name, resolved_args.clone(), ctx) {
                 return interface;
             }
@@ -352,33 +354,43 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                     TypeDefKind::Interface => {
                         // interface_instance() should have handled this, but as fallback
                         // return invalid - interfaces need full method info
-                        return LegacyType::invalid_msg("resolve_generic_interface",
-                        format!(
-                            "interface '{}' requires interface_instance resolution",
-                            name_str
-                        ),);
+                        return LegacyType::invalid_msg(
+                            "resolve_generic_interface",
+                            format!(
+                                "interface '{}' requires interface_instance resolution",
+                                name_str
+                            ),
+                        );
                     }
                     TypeDefKind::Alias => {
                         // Type aliases don't support type parameters
-                        return LegacyType::invalid_msg("resolve_generic_alias",
-                        format!("type alias '{}' cannot have type arguments", name_str),);
+                        return LegacyType::invalid_msg(
+                            "resolve_generic_alias",
+                            format!("type alias '{}' cannot have type arguments", name_str),
+                        );
                     }
                     TypeDefKind::ErrorType => {
                         // Error types don't support type parameters
-                        return LegacyType::invalid_msg("resolve_generic_error",
-                        format!("error type '{}' cannot have type arguments", name_str),);
+                        return LegacyType::invalid_msg(
+                            "resolve_generic_error",
+                            format!("error type '{}' cannot have type arguments", name_str),
+                        );
                     }
                     TypeDefKind::Primitive => {
                         // Primitives don't support type parameters
-                        return LegacyType::invalid_msg("resolve_generic_primitive",
-                        format!("primitive type '{}' cannot have type arguments", name_str),);
+                        return LegacyType::invalid_msg(
+                            "resolve_generic_primitive",
+                            format!("primitive type '{}' cannot have type arguments", name_str),
+                        );
                     }
                 }
             }
 
             // Type not found - return invalid
-            LegacyType::invalid_msg("resolve_unknown_generic",
-            format!("unknown generic type '{}'", name_str),)
+            LegacyType::invalid_msg(
+                "resolve_unknown_generic",
+                format!("unknown generic type '{}'", name_str),
+            )
         }
         TypeExpr::Tuple(elements) => {
             let resolved_elements: Vec<LegacyType> =

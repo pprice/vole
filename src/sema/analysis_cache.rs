@@ -11,7 +11,7 @@
 use crate::frontend::{Interner, NodeId, Program};
 use crate::identity::NameTable;
 use crate::sema::resolution::ResolvedMethod;
-use crate::sema::types::{FunctionType, ModuleType};
+use crate::sema::types::{FunctionType, LegacyType, ModuleType};
 use crate::sema::{EntityRegistry, ImplementRegistry};
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -27,8 +27,10 @@ pub struct CachedModule {
     pub interner: Interner,
     /// Module type (exports, constants, external functions) - only for user imports
     pub module_type: Option<ModuleType>,
-    /// Expression types from analysis
-    pub expr_types: HashMap<NodeId, super::LegacyType>,
+    /// Expression types from analysis.
+    /// Note: Stored as LegacyType because TypeIds are arena-specific and cannot
+    /// be shared across analyzers. Converted to/from Type at cache boundaries.
+    pub expr_types: HashMap<NodeId, LegacyType>,
     /// Method resolutions from analysis
     pub method_resolutions: HashMap<NodeId, ResolvedMethod>,
     /// Entity registry contributions (types, methods, fields)

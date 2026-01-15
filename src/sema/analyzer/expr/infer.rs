@@ -282,7 +282,10 @@ impl Analyzer {
                         } else {
                             // Non-constant index - return union of all element types
                             // For now, just return first element type (common case: 2-tuples)
-                            Ok(elements.first().cloned().unwrap_or_else(LegacyType::unknown))
+                            Ok(elements
+                                .first()
+                                .cloned()
+                                .unwrap_or_else(LegacyType::unknown))
                         }
                     }
                     LegacyType::FixedArray { element, .. } => Ok(*element),
@@ -524,7 +527,8 @@ impl Analyzer {
             ExprKind::FloatLiteral(_) => {
                 if matches!(
                     hint,
-                    LegacyType::Primitive(PrimitiveType::F32) | LegacyType::Primitive(PrimitiveType::F64)
+                    LegacyType::Primitive(PrimitiveType::F32)
+                        | LegacyType::Primitive(PrimitiveType::F64)
                 ) {
                     hint.clone()
                 } else {

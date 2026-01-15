@@ -83,7 +83,9 @@ impl TypeId {
             }
             LegacyType::Range => types.primitive_name_id(PrimitiveTypeId::Range).map(TypeId),
             LegacyType::Array(_) => types.array_name_id().map(TypeId),
-            LegacyType::Nominal(NominalType::Class(c)) => Some(TypeId(entity_registry.class_name_id(c))),
+            LegacyType::Nominal(NominalType::Class(c)) => {
+                Some(TypeId(entity_registry.class_name_id(c)))
+            }
             LegacyType::Nominal(NominalType::Record(r)) => {
                 Some(TypeId(entity_registry.record_name_id(r)))
             }

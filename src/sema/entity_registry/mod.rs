@@ -118,7 +118,12 @@ impl EntityRegistry {
     }
 
     /// Set the aliased type for a type alias
-    pub fn set_aliased_type(&mut self, type_id: TypeDefId, aliased_type: LegacyType, type_key: TypeKey) {
+    pub fn set_aliased_type(
+        &mut self,
+        type_id: TypeDefId,
+        aliased_type: LegacyType,
+        type_key: TypeKey,
+    ) {
         self.type_defs[type_id.index() as usize].aliased_type = Some(aliased_type);
         // Update the alias index for inverse lookups
         self.alias_index.entry(type_key).or_default().push(type_id);

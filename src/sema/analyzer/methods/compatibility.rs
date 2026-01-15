@@ -6,7 +6,12 @@ use std::collections::HashSet;
 
 #[allow(dead_code)]
 impl Analyzer {
-    pub(crate) fn types_compatible(&self, from: &LegacyType, to: &LegacyType, interner: &Interner) -> bool {
+    pub(crate) fn types_compatible(
+        &self,
+        from: &LegacyType,
+        to: &LegacyType,
+        interner: &Interner,
+    ) -> bool {
         // Use the core compatibility check for most cases
         if from.is_compatible(to) {
             return true;

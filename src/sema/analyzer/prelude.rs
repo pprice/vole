@@ -1,7 +1,7 @@
 //! Prelude file loading for standard library definitions.
 
 use super::Analyzer;
-use crate::frontend::{Interner, Parser};
+use crate::frontend::{Interner, NodeId, Parser};
 use crate::identity::NameTable;
 use crate::module::ModuleLoader;
 use crate::sema::EntityRegistry;
@@ -11,6 +11,7 @@ use crate::sema::generic::TypeParamScopeStack;
 use crate::sema::implement_registry::ImplementRegistry;
 use crate::sema::resolution::MethodResolutions;
 use crate::sema::scope::Scope;
+use crate::sema::types::{LegacyType, Type};
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
@@ -68,8 +69,17 @@ impl Analyzer {
                 import_path.to_string(),
                 (cached.program.clone(), cached.interner.clone()),
             );
+            // Convert LegacyType from cache to Type using current arena
+            let converted_types: HashMap<NodeId, Type> = cached
+                .expr_types
+                .iter()
+                .map(|(id, ty)| {
+                    let type_id = self.type_arena.from_type(ty);
+                    (*id, Type(type_id))
+                })
+                .collect();
             self.module_expr_types
-                .insert(import_path.to_string(), cached.expr_types.clone());
+                .insert(import_path.to_string(), converted_types);
             self.module_method_resolutions
                 .insert(import_path.to_string(), cached.method_resolutions.clone());
             return;
@@ -112,6 +122,7 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             expr_types: HashMap::new(),
+            module_type_cache: HashMap::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
@@ -144,13 +155,19 @@ impl Analyzer {
         if analyze_result.is_ok() {
             // Cache the analysis results before merging
             if let Some(ref cache) = self.module_cache {
+                // Convert Type to LegacyType for cache storage (TypeIds are arena-specific)
+                let cached_expr_types: HashMap<NodeId, LegacyType> = sub_analyzer
+                    .expr_types
+                    .iter()
+                    .map(|(id, ty)| (*id, sub_analyzer.type_arena.to_type(ty.0)))
+                    .collect();
                 cache.borrow_mut().insert(
                     import_path.to_string(),
                     CachedModule {
                         program: program.clone(),
                         interner: prelude_interner.clone(),
                         module_type: None,
-                        expr_types: sub_analyzer.expr_types.clone(),
+                        expr_types: cached_expr_types,
                         method_resolutions: sub_analyzer.method_resolutions.clone_inner(),
                         entity_registry: sub_analyzer.entity_registry.clone(),
                         implement_registry: sub_analyzer.implement_registry.clone(),
@@ -179,8 +196,19 @@ impl Analyzer {
             self.module_programs
                 .insert(import_path.to_string(), (program, prelude_interner));
             // Store module-specific expr_types separately (NodeIds are per-program)
+            // Convert TypeIds from sub_analyzer's arena to self's arena
+            let converted_module_types: HashMap<NodeId, Type> = sub_analyzer
+                .expr_types
+                .iter()
+                .map(|(id, ty)| {
+                    // Convert sub_analyzer's TypeId to LegacyType, then intern in self's arena
+                    let legacy = sub_analyzer.type_arena.to_type(ty.0);
+                    let new_type_id = self.type_arena.from_type(&legacy);
+                    (*id, Type(new_type_id))
+                })
+                .collect();
             self.module_expr_types
-                .insert(import_path.to_string(), sub_analyzer.expr_types);
+                .insert(import_path.to_string(), converted_module_types);
             // Store module-specific method_resolutions separately (NodeIds are per-program)
             self.module_method_resolutions.insert(
                 import_path.to_string(),

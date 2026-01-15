@@ -28,7 +28,7 @@ pub(crate) use super::interface_vtable::box_interface_value;
 #[derive(Clone)]
 pub struct CompiledValue {
     pub value: Value,
-    pub ty: types::Type,
+    pub ty: Type,
     /// The Vole type of this value (needed to distinguish strings/arrays from regular I64)
     pub vole_type: LegacyType,
 }
@@ -132,7 +132,7 @@ pub(crate) struct CompileCtx<'a> {
     /// Type arena for interned type access (read-only in codegen)
     #[allow(dead_code)] // Will be used in Phase 4.2+ of TypeArena migration
     pub arena: &'a TypeArena,
-    pub pointer_type: types::Type,
+    pub pointer_type: Type,
     pub module: &'a mut JITModule,
     pub func_registry: &'a mut FunctionRegistry,
     pub source_file_ptr: (*const u8, usize),
@@ -286,7 +286,11 @@ pub(crate) fn function_name_id_with_interner(
 }
 
 #[allow(clippy::only_used_in_recursion)]
-pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: &LegacyType) -> String {
+pub(crate) fn display_type(
+    analyzed: &AnalyzedProgram,
+    interner: &Interner,
+    ty: &LegacyType,
+) -> String {
     match ty {
         LegacyType::Nominal(NominalType::Class(class_type)) => {
             let name_id = analyzed.entity_registry.class_name_id(class_type);
@@ -637,10 +641,12 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 let type_def = entity_registry.get_type(type_def_id);
                 match type_def.kind {
                     TypeDefKind::Class => {
-                        return LegacyType::Nominal(NominalType::Class(crate::sema::types::ClassType {
-                            type_def_id,
-                            type_args: resolved_args.into(),
-                        }));
+                        return LegacyType::Nominal(NominalType::Class(
+                            crate::sema::types::ClassType {
+                                type_def_id,
+                                type_args: resolved_args.into(),
+                            },
+                        ));
                     }
                     TypeDefKind::Record => {
                         return LegacyType::Nominal(NominalType::Record(
@@ -764,32 +770,40 @@ pub(crate) fn resolve_type_expr_with_metadata(
 }
 
 /// Convert a Vole type to a Cranelift type
-pub(crate) fn type_to_cranelift(ty: &LegacyType, pointer_type: types::Type) -> types::Type {
+pub(crate) fn type_to_cranelift(ty: &LegacyType, pointer_type: Type) -> Type {
     match ty {
-        LegacyType::Primitive(PrimitiveType::I8) | LegacyType::Primitive(PrimitiveType::U8) => types::I8,
-        LegacyType::Primitive(PrimitiveType::I16) | LegacyType::Primitive(PrimitiveType::U16) => types::I16,
-        LegacyType::Primitive(PrimitiveType::I32) | LegacyType::Primitive(PrimitiveType::U32) => types::I32,
-        LegacyType::Primitive(PrimitiveType::I64) | LegacyType::Primitive(PrimitiveType::U64) => types::I64,
+        LegacyType::Primitive(PrimitiveType::I8) | LegacyType::Primitive(PrimitiveType::U8) => {
+            types::I8
+        }
+        LegacyType::Primitive(PrimitiveType::I16) | LegacyType::Primitive(PrimitiveType::U16) => {
+            types::I16
+        }
+        LegacyType::Primitive(PrimitiveType::I32) | LegacyType::Primitive(PrimitiveType::U32) => {
+            types::I32
+        }
+        LegacyType::Primitive(PrimitiveType::I64) | LegacyType::Primitive(PrimitiveType::U64) => {
+            types::I64
+        }
         LegacyType::Primitive(PrimitiveType::I128) => types::I128,
         LegacyType::Primitive(PrimitiveType::F32) => types::F32,
         LegacyType::Primitive(PrimitiveType::F64) => types::F64,
         LegacyType::Primitive(PrimitiveType::Bool) => types::I8,
         LegacyType::Primitive(PrimitiveType::String) => pointer_type,
         LegacyType::Nominal(NominalType::Interface(_)) => pointer_type,
-        LegacyType::Nil => types::I8,            // Nil uses minimal representation
-        LegacyType::Done => types::I8,           // Done uses minimal representation (like Nil)
-        LegacyType::Union(_) => pointer_type,    // Unions are passed by pointer
+        LegacyType::Nil => types::I8, // Nil uses minimal representation
+        LegacyType::Done => types::I8, // Done uses minimal representation (like Nil)
+        LegacyType::Union(_) => pointer_type, // Unions are passed by pointer
         LegacyType::Fallible(_) => pointer_type, // Fallibles are passed by pointer (tagged union)
         LegacyType::Function(_) => pointer_type, // Function pointers
-        LegacyType::Range => pointer_type,       // Ranges are passed by pointer (start, end)
-        LegacyType::Tuple(_) => pointer_type,    // Tuples are passed by pointer
+        LegacyType::Range => pointer_type, // Ranges are passed by pointer (start, end)
+        LegacyType::Tuple(_) => pointer_type, // Tuples are passed by pointer
         LegacyType::FixedArray { .. } => pointer_type, // Fixed arrays are passed by pointer
-        _ => types::I64,                   // Default
+        _ => types::I64,              // Default
     }
 }
 
 /// Get the size in bytes for a Vole type (used for union layout)
-pub(crate) fn type_size(ty: &LegacyType, pointer_type: types::Type) -> u32 {
+pub(crate) fn type_size(ty: &LegacyType, pointer_type: Type) -> u32 {
     match ty {
         LegacyType::Primitive(PrimitiveType::I8)
         | LegacyType::Primitive(PrimitiveType::U8)
@@ -881,7 +895,7 @@ pub(crate) fn type_size(ty: &LegacyType, pointer_type: types::Type) -> u32 {
 /// Calculate layout for tuple elements.
 /// Returns (total_size, offsets) where offsets[i] is the byte offset for element i.
 /// Each element is aligned to 8 bytes for simplicity.
-pub(crate) fn tuple_layout(elements: &[LegacyType], pointer_type: types::Type) -> (u32, Vec<i32>) {
+pub(crate) fn tuple_layout(elements: &[LegacyType], pointer_type: Type) -> (u32, Vec<i32>) {
     let mut offsets = Vec::with_capacity(elements.len());
     let mut offset = 0i32;
 
@@ -952,7 +966,7 @@ pub(crate) fn fallible_error_tag(
 
 /// Convert a Cranelift type back to a Vole type (for return value inference)
 #[allow(dead_code)] // Used by compiler.rs during migration
-pub(crate) fn cranelift_to_vole_type(ty: types::Type) -> LegacyType {
+pub(crate) fn cranelift_to_vole_type(ty: Type) -> LegacyType {
     match ty {
         types::I8 => LegacyType::Primitive(PrimitiveType::I8),
         types::I16 => LegacyType::Primitive(PrimitiveType::I16),
@@ -969,7 +983,7 @@ pub(crate) fn cranelift_to_vole_type(ty: types::Type) -> LegacyType {
 pub(crate) fn convert_to_type(
     builder: &mut FunctionBuilder,
     val: CompiledValue,
-    target: types::Type,
+    target: Type,
 ) -> Value {
     if val.ty == target {
         return val.value;
@@ -1014,7 +1028,7 @@ pub(crate) fn convert_to_type(
 pub(crate) fn value_to_word(
     builder: &mut FunctionBuilder,
     value: &CompiledValue,
-    pointer_type: types::Type,
+    pointer_type: Type,
     heap_alloc_ref: Option<FuncRef>,
 ) -> Result<Value, String> {
     let word_type = pointer_type;
@@ -1067,7 +1081,9 @@ pub(crate) fn value_to_word(
         LegacyType::Primitive(PrimitiveType::I32) | LegacyType::Primitive(PrimitiveType::U32) => {
             builder.ins().uextend(word_type, value.value)
         }
-        LegacyType::Primitive(PrimitiveType::I64) | LegacyType::Primitive(PrimitiveType::U64) => value.value,
+        LegacyType::Primitive(PrimitiveType::I64) | LegacyType::Primitive(PrimitiveType::U64) => {
+            value.value
+        }
         LegacyType::Primitive(PrimitiveType::I128) => {
             let low = builder.ins().ireduce(types::I64, value.value);
             if word_type == types::I64 {
@@ -1087,7 +1103,7 @@ pub(crate) fn word_to_value(
     builder: &mut FunctionBuilder,
     word: Value,
     vole_type: &LegacyType,
-    pointer_type: types::Type,
+    pointer_type: Type,
 ) -> Value {
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
@@ -1121,7 +1137,9 @@ pub(crate) fn word_to_value(
         LegacyType::Primitive(PrimitiveType::I32) | LegacyType::Primitive(PrimitiveType::U32) => {
             builder.ins().ireduce(types::I32, word)
         }
-        LegacyType::Primitive(PrimitiveType::I64) | LegacyType::Primitive(PrimitiveType::U64) => word,
+        LegacyType::Primitive(PrimitiveType::I64) | LegacyType::Primitive(PrimitiveType::U64) => {
+            word
+        }
         LegacyType::Primitive(PrimitiveType::I128) => {
             let low = if word_type == types::I64 {
                 word
@@ -1152,7 +1170,7 @@ pub(crate) fn array_element_tag(ty: &LegacyType) -> i64 {
 
 /// Convert NativeType to Cranelift type.
 /// Shared utility for external function calls in both compiler.rs and context.rs.
-pub(crate) fn native_type_to_cranelift(nt: &NativeType, pointer_type: types::Type) -> types::Type {
+pub(crate) fn native_type_to_cranelift(nt: &NativeType, pointer_type: Type) -> Type {
     match nt {
         NativeType::I8 => types::I8,
         NativeType::I16 => types::I16,

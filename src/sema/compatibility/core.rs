@@ -165,13 +165,28 @@ mod tests {
         // i8 range: -128 to 127
         assert!(literal_fits(0, &LegacyType::Primitive(PrimitiveType::I8)));
         assert!(literal_fits(127, &LegacyType::Primitive(PrimitiveType::I8)));
-        assert!(literal_fits(-128, &LegacyType::Primitive(PrimitiveType::I8)));
-        assert!(!literal_fits(128, &LegacyType::Primitive(PrimitiveType::I8)));
-        assert!(!literal_fits(-129, &LegacyType::Primitive(PrimitiveType::I8)));
+        assert!(literal_fits(
+            -128,
+            &LegacyType::Primitive(PrimitiveType::I8)
+        ));
+        assert!(!literal_fits(
+            128,
+            &LegacyType::Primitive(PrimitiveType::I8)
+        ));
+        assert!(!literal_fits(
+            -129,
+            &LegacyType::Primitive(PrimitiveType::I8)
+        ));
 
         // i16 range
-        assert!(literal_fits(32767, &LegacyType::Primitive(PrimitiveType::I16)));
-        assert!(!literal_fits(32768, &LegacyType::Primitive(PrimitiveType::I16)));
+        assert!(literal_fits(
+            32767,
+            &LegacyType::Primitive(PrimitiveType::I16)
+        ));
+        assert!(!literal_fits(
+            32768,
+            &LegacyType::Primitive(PrimitiveType::I16)
+        ));
 
         // i32 range
         assert!(literal_fits(
@@ -184,8 +199,14 @@ mod tests {
         ));
 
         // i64 always fits
-        assert!(literal_fits(i64::MAX, &LegacyType::Primitive(PrimitiveType::I64)));
-        assert!(literal_fits(i64::MIN, &LegacyType::Primitive(PrimitiveType::I64)));
+        assert!(literal_fits(
+            i64::MAX,
+            &LegacyType::Primitive(PrimitiveType::I64)
+        ));
+        assert!(literal_fits(
+            i64::MIN,
+            &LegacyType::Primitive(PrimitiveType::I64)
+        ));
     }
 
     #[test]
@@ -193,12 +214,21 @@ mod tests {
         // u8 range: 0 to 255
         assert!(literal_fits(0, &LegacyType::Primitive(PrimitiveType::U8)));
         assert!(literal_fits(255, &LegacyType::Primitive(PrimitiveType::U8)));
-        assert!(!literal_fits(256, &LegacyType::Primitive(PrimitiveType::U8)));
+        assert!(!literal_fits(
+            256,
+            &LegacyType::Primitive(PrimitiveType::U8)
+        ));
         assert!(!literal_fits(-1, &LegacyType::Primitive(PrimitiveType::U8)));
 
         // u16 range
-        assert!(literal_fits(65535, &LegacyType::Primitive(PrimitiveType::U16)));
-        assert!(!literal_fits(65536, &LegacyType::Primitive(PrimitiveType::U16)));
+        assert!(literal_fits(
+            65535,
+            &LegacyType::Primitive(PrimitiveType::U16)
+        ));
+        assert!(!literal_fits(
+            65536,
+            &LegacyType::Primitive(PrimitiveType::U16)
+        ));
 
         // u32 range
         assert!(literal_fits(
@@ -212,14 +242,23 @@ mod tests {
 
         // u64 accepts all positive i64 values
         assert!(literal_fits(0, &LegacyType::Primitive(PrimitiveType::U64)));
-        assert!(literal_fits(i64::MAX, &LegacyType::Primitive(PrimitiveType::U64)));
-        assert!(!literal_fits(-1, &LegacyType::Primitive(PrimitiveType::U64)));
+        assert!(literal_fits(
+            i64::MAX,
+            &LegacyType::Primitive(PrimitiveType::U64)
+        ));
+        assert!(!literal_fits(
+            -1,
+            &LegacyType::Primitive(PrimitiveType::U64)
+        ));
     }
 
     #[test]
     fn test_literal_fits_float() {
         assert!(literal_fits(0, &LegacyType::Primitive(PrimitiveType::F32)));
-        assert!(literal_fits(i64::MAX, &LegacyType::Primitive(PrimitiveType::F64)));
+        assert!(literal_fits(
+            i64::MAX,
+            &LegacyType::Primitive(PrimitiveType::F64)
+        ));
     }
 
     #[test]

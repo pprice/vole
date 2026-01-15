@@ -16,9 +16,8 @@ fn type_to_field_tag(ty: &LegacyType) -> FieldTypeTag {
     match ty {
         LegacyType::Primitive(PrimitiveType::String) => FieldTypeTag::String,
         LegacyType::Array(_) => FieldTypeTag::Array,
-        LegacyType::Nominal(NominalType::Class(_)) | LegacyType::Nominal(NominalType::Record(_)) => {
-            FieldTypeTag::Instance
-        }
+        LegacyType::Nominal(NominalType::Class(_))
+        | LegacyType::Nominal(NominalType::Record(_)) => FieldTypeTag::Instance,
         // Optional types containing reference types also need cleanup
         LegacyType::Union(variants) => {
             // If any variant is a reference type, mark as needing cleanup
@@ -68,7 +67,11 @@ impl Compiler<'_> {
 
     /// Resolve a type expression using a specific interner (for module types)
     /// This is needed because module classes have symbols from their own interner
-    pub(super) fn resolve_type_with_interner(&self, ty: &TypeExpr, interner: &Interner) -> LegacyType {
+    pub(super) fn resolve_type_with_interner(
+        &self,
+        ty: &TypeExpr,
+        interner: &Interner,
+    ) -> LegacyType {
         resolve_type_expr_with_metadata(
             ty,
             &self.analyzed.entity_registry,

@@ -47,7 +47,10 @@ impl Cg<'_, '_, '_> {
         right: CompiledValue,
     ) -> Result<CompiledValue, String> {
         // Get the right operand as a string
-        let right_string = if matches!(right.vole_type, LegacyType::Primitive(PrimitiveType::String)) {
+        let right_string = if matches!(
+            right.vole_type,
+            LegacyType::Primitive(PrimitiveType::String)
+        ) {
             // Right is already a string, use it directly
             right.value
         } else {

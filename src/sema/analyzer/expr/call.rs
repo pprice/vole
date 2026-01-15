@@ -200,7 +200,8 @@ impl Analyzer {
             }
 
             // Check if it's a variable with a functional interface type
-            if let Some(LegacyType::Nominal(NominalType::Interface(iface))) = self.get_variable_type(*sym)
+            if let Some(LegacyType::Nominal(NominalType::Interface(iface))) =
+                self.get_variable_type(*sym)
                 && let Some(func_type) =
                     self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
             {

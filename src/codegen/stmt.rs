@@ -176,7 +176,10 @@ impl Cg<'_, '_, '_> {
                 };
 
                 if let Some(declared_type) = declared_type_opt
-                    && matches!(declared_type, LegacyType::Nominal(NominalType::Interface(_)))
+                    && matches!(
+                        declared_type,
+                        LegacyType::Nominal(NominalType::Interface(_))
+                    )
                     && !matches!(final_type, LegacyType::Nominal(NominalType::Interface(_)))
                 {
                     let boxed = box_interface_value(
@@ -222,7 +225,10 @@ impl Cg<'_, '_, '_> {
                     // Box concrete types to interface representation if needed
                     // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
                     if let Some(LegacyType::Nominal(NominalType::Interface(_))) = &return_type
-                        && !matches!(compiled.vole_type, LegacyType::Nominal(NominalType::Interface(_)))
+                        && !matches!(
+                            compiled.vole_type,
+                            LegacyType::Nominal(NominalType::Interface(_))
+                        )
                         && !matches!(compiled.vole_type, LegacyType::RuntimeIterator(_))
                     {
                         let return_type =
@@ -359,8 +365,9 @@ impl Cg<'_, '_, '_> {
                     // Check if iterable is an Iterator type or string type
                     let iterable_type = self.ctx.get_expr_type(&for_stmt.iterable.id);
                     let is_iterator = iterable_type.is_some_and(|ty| self.is_iterator_type(ty));
-                    let is_string = iterable_type
-                        .is_some_and(|ty| matches!(ty, LegacyType::Primitive(PrimitiveType::String)));
+                    let is_string = iterable_type.is_some_and(|ty| {
+                        matches!(ty, LegacyType::Primitive(PrimitiveType::String))
+                    });
                     if is_iterator {
                         self.for_iterator(for_stmt)
                     } else if is_string {

@@ -8,9 +8,9 @@ use crate::codegen::types::{
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
-use crate::sema::{LegacyType, PrimitiveType};
 use crate::sema::types::ConstantValue;
 use crate::sema::types::NominalType;
+use crate::sema::{LegacyType, PrimitiveType};
 use cranelift::prelude::*;
 
 impl Cg<'_, '_, '_> {

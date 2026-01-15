@@ -878,7 +878,10 @@ pub(crate) fn box_interface_value(
         "boxing value as interface"
     );
 
-    if matches!(value.vole_type, LegacyType::Nominal(NominalType::Interface(_))) {
+    if matches!(
+        value.vole_type,
+        LegacyType::Nominal(NominalType::Interface(_))
+    ) {
         tracing::debug!("already interface, skip boxing");
         return Ok(value);
     }

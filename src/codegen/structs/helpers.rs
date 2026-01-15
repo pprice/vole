@@ -5,9 +5,9 @@ use cranelift::prelude::*;
 use crate::codegen::types::CompileCtx;
 use crate::codegen::types::CompiledValue;
 use crate::errors::CodegenError;
-use crate::sema::{LegacyType, PrimitiveType};
 use crate::sema::generic::substitute_type;
 use crate::sema::types::NominalType;
+use crate::sema::{LegacyType, PrimitiveType};
 
 pub(crate) fn get_field_slot_and_type(
     vole_type: &LegacyType,

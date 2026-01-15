@@ -151,9 +151,13 @@ impl Cg<'_, '_, '_> {
             // If the global has a declared interface type, box the value
             if let Some(ref ty_expr) = global.ty {
                 let declared_type = resolve_type_expr(ty_expr, self.ctx);
-                if matches!(&declared_type, LegacyType::Nominal(NominalType::Interface(_)))
-                    && !matches!(&value.vole_type, LegacyType::Nominal(NominalType::Interface(_)))
-                {
+                if matches!(
+                    &declared_type,
+                    LegacyType::Nominal(NominalType::Interface(_))
+                ) && !matches!(
+                    &value.vole_type,
+                    LegacyType::Nominal(NominalType::Interface(_))
+                ) {
                     value = box_interface_value(self.builder, self.ctx, value, &declared_type)?;
                 }
             }
@@ -195,7 +199,7 @@ impl Cg<'_, '_, '_> {
         let wrapper_index = *self.ctx.lambda_counter;
 
         // Build wrapper signature: (closure_ptr, params...) -> return_type
-        let param_types: Vec<types::Type> = func_type
+        let param_types: Vec<Type> = func_type
             .params
             .iter()
             .map(|t| type_to_cranelift(t, self.ctx.pointer_type))
@@ -354,7 +358,10 @@ impl Cg<'_, '_, '_> {
                 let var_type = var_type.clone();
 
                 if matches!(&var_type, LegacyType::Nominal(NominalType::Interface(_)))
-                    && !matches!(value.vole_type, LegacyType::Nominal(NominalType::Interface(_)))
+                    && !matches!(
+                        value.vole_type,
+                        LegacyType::Nominal(NominalType::Interface(_))
+                    )
                 {
                     value = box_interface_value(self.builder, self.ctx, value, &var_type)?;
                 }
@@ -1149,8 +1156,8 @@ impl Cg<'_, '_, '_> {
 
                     // For typed patterns on union types, we must defer field extraction
                     // until after the pattern check passes to avoid accessing invalid memory
-                    let is_conditional_extract =
-                        pattern_check.is_some() && matches!(&scrutinee.vole_type, LegacyType::Union(_));
+                    let is_conditional_extract = pattern_check.is_some()
+                        && matches!(&scrutinee.vole_type, LegacyType::Union(_));
 
                     if is_conditional_extract {
                         // Create an extraction block that only runs if pattern matches
