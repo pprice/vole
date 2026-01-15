@@ -36,6 +36,40 @@ cargo run -- test dir/        # Run test blocks
 
 Dev tools: `just dev-next-error sema`, `just dev-trace-keyword raise`, `just dev-test-for lambda`
 
+## Refactoring with ast-grep
+
+Use `ast-grep` (command: `ast-grep`) for structural search/replace. It understands Rust syntax.
+
+```bash
+# Find pattern (dry-run)
+ast-grep run --pattern 'Type::$VARIANT' --lang rust src/
+
+# Find and replace (shows diff)
+ast-grep run --pattern 'OldName::$V' --rewrite 'NewName::$V' --lang rust src/
+
+# Apply changes
+ast-grep run --pattern 'OldName::$V' --rewrite 'NewName::$V' --lang rust src/ --update-all
+```
+
+**Pattern syntax:**
+- `$VAR` - single AST node
+- `$$$VAR` - multiple nodes (variadic)
+- Literal code matches literally
+
+**Common patterns:**
+```bash
+# Rename enum variants
+ast-grep run -p 'Type::$V($$$A)' -r 'LegacyType::$V($$$A)' -l rust src/
+
+# Rename type annotations
+ast-grep run -p ': Type' -r ': LegacyType' -l rust src/
+
+# Find impl blocks
+ast-grep run -p 'impl Type { $$$BODY }' -l rust src/
+```
+
+Always test without `--update-all` first, then run `just check` after applying.
+
 ## Where to Edit
 
 | Task | Files |

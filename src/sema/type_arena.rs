@@ -12,7 +12,7 @@ use smallvec::SmallVec;
 
 use crate::identity::{ModuleId, NameId, TypeDefId, TypeParamId};
 use crate::sema::Type;
-use crate::sema::types::PrimitiveType;
+use crate::sema::types::{PlaceholderKind, PrimitiveType};
 
 /// Concrete type identity in the TypeArena.
 ///
@@ -41,6 +41,21 @@ pub enum NominalKind {
     Record,
     Interface,
     Error,
+}
+
+/// Interned representation of a structural method
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InternedStructuralMethod {
+    pub name: NameId,
+    pub params: TypeIdVec,
+    pub return_type: TypeId,
+}
+
+/// Interned representation of a structural type (duck typing constraint)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InternedStructural {
+    pub fields: SmallVec<[(NameId, TypeId); 4]>,
+    pub methods: SmallVec<[InternedStructuralMethod; 2]>,
 }
 
 /// Internal representation of interned types.
@@ -104,6 +119,20 @@ pub enum InternedType {
 
     // Module type
     Module(ModuleId),
+
+    // Fallible type: fallible(T, E) - result-like type
+    Fallible {
+        success: TypeId,
+        error: TypeId,
+    },
+
+    // Structural type: duck typing constraint
+    // e.g., { name: string, func greet() -> string }
+    // Note: Boxed to keep InternedType size small
+    Structural(Box<InternedStructural>),
+
+    // Placeholder for inference (if we decide to intern these)
+    Placeholder(PlaceholderKind),
 }
 
 /// Pre-interned primitive and common types for O(1) access
@@ -432,6 +461,37 @@ impl TypeArena {
         self.intern(InternedType::Module(module_id))
     }
 
+    /// Create a fallible type: fallible(success, error)
+    pub fn fallible(&mut self, success: TypeId, error: TypeId) -> TypeId {
+        if self.is_invalid(success) || self.is_invalid(error) {
+            return self.invalid();
+        }
+        self.intern(InternedType::Fallible { success, error })
+    }
+
+    /// Create a structural type (duck typing constraint)
+    pub fn structural(
+        &mut self,
+        fields: SmallVec<[(NameId, TypeId); 4]>,
+        methods: SmallVec<[InternedStructuralMethod; 2]>,
+    ) -> TypeId {
+        // Check for invalid types in fields or methods
+        if fields.iter().any(|(_, ty)| self.is_invalid(*ty)) {
+            return self.invalid();
+        }
+        if methods.iter().any(|m| {
+            self.is_invalid(m.return_type) || m.params.iter().any(|&p| self.is_invalid(p))
+        }) {
+            return self.invalid();
+        }
+        self.intern(InternedType::Structural(Box::new(InternedStructural { fields, methods })))
+    }
+
+    /// Create a placeholder type (for inference)
+    pub fn placeholder(&mut self, kind: PlaceholderKind) -> TypeId {
+        self.intern(InternedType::Placeholder(kind))
+    }
+
     // ========================================================================
     // Query methods - predicates and unwrap helpers
     // ========================================================================
@@ -653,6 +713,34 @@ impl TypeArena {
             InternedType::TypeParam(name_id) => format!("TypeParam({:?})", name_id),
             InternedType::TypeParamRef(id) => format!("TypeParamRef#{}", id.index()),
             InternedType::Module(module_id) => format!("module#{}", module_id.index()),
+            InternedType::Fallible { success, error } => {
+                format!(
+                    "fallible({}, {})",
+                    self.display_basic(*success),
+                    self.display_basic(*error)
+                )
+            }
+            InternedType::Structural(st) => {
+                let field_strs: Vec<String> = st.fields
+                    .iter()
+                    .map(|(name, ty)| format!("{:?}: {}", name, self.display_basic(*ty)))
+                    .collect();
+                let method_strs: Vec<String> = st.methods
+                    .iter()
+                    .map(|m| {
+                        let params: Vec<String> =
+                            m.params.iter().map(|&p| self.display_basic(p)).collect();
+                        format!(
+                            "{:?}({}) -> {}",
+                            m.name,
+                            params.join(", "),
+                            self.display_basic(m.return_type)
+                        )
+                    })
+                    .collect();
+                format!("{{ {} | {} }}", field_strs.join(", "), method_strs.join(", "))
+            }
+            InternedType::Placeholder(kind) => format!("{}", kind),
         }
     }
 
@@ -753,6 +841,28 @@ impl TypeArena {
                 self.fixed_array(new_elem, size)
             }
 
+            InternedType::Fallible { success, error } => {
+                let new_success = self.substitute(success, subs);
+                let new_error = self.substitute(error, subs);
+                self.fallible(new_success, new_error)
+            }
+
+            InternedType::Structural(st) => {
+                let new_fields: SmallVec<[(NameId, TypeId); 4]> = st.fields
+                    .iter()
+                    .map(|(name, ty)| (*name, self.substitute(*ty, subs)))
+                    .collect();
+                let new_methods: SmallVec<[InternedStructuralMethod; 2]> = st.methods
+                    .iter()
+                    .map(|m| InternedStructuralMethod {
+                        name: m.name,
+                        params: m.params.iter().map(|&p| self.substitute(p, subs)).collect(),
+                        return_type: self.substitute(m.return_type, subs),
+                    })
+                    .collect();
+                self.structural(new_fields, new_methods)
+            }
+
             // Types without nested type parameters - return unchanged
             InternedType::Primitive(_)
             | InternedType::Void
@@ -762,7 +872,8 @@ impl TypeArena {
             | InternedType::Type
             | InternedType::Invalid { .. }
             | InternedType::Error { .. }
-            | InternedType::Module(_) => ty,
+            | InternedType::Module(_)
+            | InternedType::Placeholder(_) => ty,
         }
     }
 
@@ -842,10 +953,31 @@ impl TypeArena {
 
             Type::Module(module_type) => self.module(module_type.module_id),
 
-            // Types that don't have direct TypeArena equivalents - return invalid
-            Type::Placeholder(_) => self.invalid(),
-            Type::Fallible(_) => self.invalid(),
-            Type::Structural(_) => self.invalid(),
+            Type::Placeholder(kind) => self.placeholder(kind.clone()),
+
+            Type::Fallible(ft) => {
+                let success_id = self.from_type(&ft.success_type);
+                let error_id = self.from_type(&ft.error_type);
+                self.fallible(success_id, error_id)
+            }
+
+            Type::Structural(st) => {
+                let fields: SmallVec<[(NameId, TypeId); 4]> = st
+                    .fields
+                    .iter()
+                    .map(|f| (f.name, self.from_type(&f.ty)))
+                    .collect();
+                let methods: SmallVec<[InternedStructuralMethod; 2]> = st
+                    .methods
+                    .iter()
+                    .map(|m| InternedStructuralMethod {
+                        name: m.name,
+                        params: m.params.iter().map(|p| self.from_type(p)).collect(),
+                        return_type: self.from_type(&m.return_type),
+                    })
+                    .collect();
+                self.structural(fields, methods)
+            }
         }
     }
 
@@ -964,6 +1096,37 @@ impl TypeArena {
                     external_funcs: std::collections::HashSet::new(),
                 })
             }
+
+            InternedType::Fallible { success, error } => {
+                use crate::sema::types::FallibleType;
+                Type::Fallible(FallibleType {
+                    success_type: Box::new(self.to_type(*success)),
+                    error_type: Box::new(self.to_type(*error)),
+                })
+            }
+
+            InternedType::Structural(st) => {
+                use crate::sema::types::{StructuralFieldType, StructuralMethodType, StructuralType};
+                Type::Structural(StructuralType {
+                    fields: st.fields
+                        .iter()
+                        .map(|(name, ty)| StructuralFieldType {
+                            name: *name,
+                            ty: self.to_type(*ty),
+                        })
+                        .collect(),
+                    methods: st.methods
+                        .iter()
+                        .map(|m| StructuralMethodType {
+                            name: m.name,
+                            params: m.params.iter().map(|&p| self.to_type(p)).collect(),
+                            return_type: self.to_type(m.return_type),
+                        })
+                        .collect(),
+                })
+            }
+
+            InternedType::Placeholder(kind) => Type::Placeholder(kind.clone()),
         }
     }
 }
