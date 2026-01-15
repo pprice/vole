@@ -364,7 +364,9 @@ impl Cg<'_, '_, '_> {
                 } else {
                     // Check if iterable is an Iterator type or string type
                     let iterable_type = self.ctx.get_expr_type(&for_stmt.iterable.id);
-                    let is_iterator = iterable_type.is_some_and(|ty| self.is_iterator_type(ty));
+                    let is_iterator = iterable_type
+                        .as_ref()
+                        .is_some_and(|ty| self.is_iterator_type(ty));
                     let is_string = iterable_type.is_some_and(|ty| {
                         matches!(ty, LegacyType::Primitive(PrimitiveType::String))
                     });

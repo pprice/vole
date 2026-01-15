@@ -22,8 +22,8 @@ use crate::sema::types::LegacyType;
 /// Information about a call site, bundling all call-related data.
 #[derive(Debug, Clone)]
 pub struct CallInfo<'a> {
-    /// The type of the call expression
-    pub result_type: Option<&'a LegacyType>,
+    /// The type of the call expression (owned, converted from interned Type)
+    pub result_type: Option<LegacyType>,
     /// Resolved method (for method calls)
     pub method: Option<&'a ResolvedMethod>,
     /// Monomorphization key (for generic function calls)
@@ -68,9 +68,10 @@ impl<'a> ProgramQuery<'a> {
     // Expression queries
     // =========================================================================
 
-    /// Get the type of an expression by its NodeId
+    /// Get the type of an expression by its NodeId.
+    /// Returns an owned LegacyType (converted from the interned Type handle).
     #[must_use]
-    pub fn type_of(&self, node: NodeId) -> Option<&'a LegacyType> {
+    pub fn type_of(&self, node: NodeId) -> Option<LegacyType> {
         self.expr_data.get_type(node)
     }
 

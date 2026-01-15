@@ -512,7 +512,6 @@ impl Cg<'_, '_, '_> {
                     let vole_type = self
                         .ctx
                         .get_expr_type(&call_expr_id)
-                        .cloned()
                         .or_else(|| {
                             ext_info
                                 .and_then(|info| info.return_type.as_ref().map(|t| (**t).clone()))
@@ -595,7 +594,6 @@ impl Cg<'_, '_, '_> {
                 let vole_type = self
                     .ctx
                     .get_expr_type(&call_expr_id)
-                    .cloned()
                     .or_else(|| {
                         ext_info.and_then(|info| info.return_type.as_ref().map(|t| (**t).clone()))
                     })

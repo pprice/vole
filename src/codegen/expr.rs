@@ -44,7 +44,6 @@ impl Cg<'_, '_, '_> {
                 let vole_type = self
                     .ctx
                     .get_expr_type(&expr.id)
-                    .cloned()
                     .unwrap_or(LegacyType::Primitive(PrimitiveType::I64));
                 Ok(self.int_const(*n, vole_type))
             }
@@ -53,7 +52,6 @@ impl Cg<'_, '_, '_> {
                 let vole_type = self
                     .ctx
                     .get_expr_type(&expr.id)
-                    .cloned()
                     .unwrap_or(LegacyType::Primitive(PrimitiveType::F64));
                 Ok(self.float_const(*n, vole_type))
             }
@@ -97,7 +95,6 @@ impl Cg<'_, '_, '_> {
                     .analyzed
                     .query()
                     .type_of(expr.id)
-                    .cloned()
                     .unwrap_or(LegacyType::unknown());
                 Ok(CompiledValue {
                     value: self.builder.ins().iconst(types::I64, 0),
@@ -121,7 +118,7 @@ impl Cg<'_, '_, '_> {
             let ty = self.builder.func.dfg.value_type(val);
 
             // Check for narrowed type from semantic analysis
-            if let Some(narrowed_type) = self.ctx.get_expr_type(&expr.id)
+            if let Some(ref narrowed_type) = self.ctx.get_expr_type(&expr.id)
                 && matches!(vole_type, LegacyType::Union(_))
                 && !matches!(narrowed_type, LegacyType::Union(_))
             {
@@ -164,7 +161,7 @@ impl Cg<'_, '_, '_> {
             Ok(value)
         } else if let Some(LegacyType::Function(func_type)) = self.ctx.get_expr_type(&expr.id) {
             // Identifier refers to a named function - create a closure wrapper
-            self.function_reference(sym, func_type.clone())
+            self.function_reference(sym, func_type)
         } else {
             Err(CodegenError::not_found("variable", self.ctx.interner.resolve(sym)).into())
         }
@@ -394,7 +391,6 @@ impl Cg<'_, '_, '_> {
             .analyzed
             .query()
             .type_of(expr.id)
-            .cloned()
             .unwrap_or(LegacyType::unknown());
 
         // If it's a tuple, use stack allocation
@@ -489,7 +485,6 @@ impl Cg<'_, '_, '_> {
             .analyzed
             .query()
             .type_of(element.id)
-            .cloned()
             .unwrap_or(LegacyType::unknown());
 
         // Compile the element once
@@ -521,16 +516,15 @@ impl Cg<'_, '_, '_> {
             .stack_addr(self.ctx.pointer_type, slot, 0);
 
         // Get the full type from sema
-        let vole_type = self
-            .ctx
-            .analyzed
-            .query()
-            .type_of(expr.id)
-            .cloned()
-            .unwrap_or(LegacyType::FixedArray {
-                element: Box::new(elem_type),
-                size: count,
-            });
+        let vole_type =
+            self.ctx
+                .analyzed
+                .query()
+                .type_of(expr.id)
+                .unwrap_or(LegacyType::FixedArray {
+                    element: Box::new(elem_type),
+                    size: count,
+                });
 
         Ok(CompiledValue {
             value: ptr,
@@ -1440,7 +1434,6 @@ impl Cg<'_, '_, '_> {
             .analyzed
             .query()
             .type_of(if_expr.then_branch.id)
-            .cloned()
             .unwrap_or(LegacyType::Void);
 
         let result_cranelift_type = type_to_cranelift(&result_type, self.ctx.pointer_type);

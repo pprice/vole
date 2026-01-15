@@ -130,6 +130,8 @@ pub struct AnalysisOutput {
     pub name_table: NameTable,
     /// Entity registry for first-class type/method/field/function identity (includes type_table)
     pub entity_registry: EntityRegistry,
+    /// Shared type arena for interned types (needed by ExpressionData for type lookups)
+    pub type_arena: Rc<RefCell<TypeArena>>,
 }
 
 /// Saved state when entering a function/method check context.
@@ -321,33 +323,17 @@ impl Analyzer {
 
     /// Take ownership of analysis results (consuming self)
     pub fn into_analysis_results(self) -> AnalysisOutput {
-        // Convert Type handles to LegacyType for codegen compatibility
-        let expr_types_legacy: HashMap<NodeId, LegacyType> = self
-            .expr_types
-            .into_iter()
-            .map(|(id, ty)| (id, self.type_arena.borrow().to_type(ty.0)))
-            .collect();
-
-        let module_expr_types_legacy: FxHashMap<String, HashMap<NodeId, LegacyType>> = self
-            .module_expr_types
-            .into_iter()
-            .map(|(module, types)| {
-                let converted: HashMap<NodeId, LegacyType> = types
-                    .into_iter()
-                    .map(|(id, ty)| (id, self.type_arena.borrow().to_type(ty.0)))
-                    .collect();
-                (module, converted)
-            })
-            .collect();
-
+        // Pass Types directly - ExpressionData now stores Type handles
+        // and has access to the shared arena for LegacyType conversion
         let expression_data = ExpressionData::from_analysis(
-            expr_types_legacy,
+            self.expr_types,
             self.method_resolutions.into_inner(),
             self.generic_calls,
             self.class_method_calls,
             self.static_method_calls,
-            module_expr_types_legacy,
+            self.module_expr_types,
             self.module_method_resolutions,
+            self.type_arena.clone(),
         );
         AnalysisOutput {
             expression_data,
@@ -355,6 +341,7 @@ impl Analyzer {
             module_programs: self.module_programs,
             name_table: self.name_table,
             entity_registry: self.entity_registry,
+            type_arena: self.type_arena,
         }
     }
 

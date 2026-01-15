@@ -188,15 +188,18 @@ impl<'a> CompileCtx<'a> {
         )
     }
 
-    /// Look up expression type, checking module-specific expr_types if compiling module code
-    pub fn get_expr_type(&self, node_id: &NodeId) -> Option<&LegacyType> {
+    /// Look up expression type, checking module-specific expr_types if compiling module code.
+    /// Returns an owned LegacyType (converted from interned Type handle).
+    pub fn get_expr_type(&self, node_id: &NodeId) -> Option<LegacyType> {
         // When compiling module code, NodeIds are relative to that module's program
         // Use module-specific expr_types if available
         if let Some(module_path) = self.current_module
             && let Some(module_types) = self.analyzed.query().expr_data().module_types(module_path)
             && let Some(ty) = module_types.get(node_id)
         {
-            return Some(ty);
+            // Convert Type handle to LegacyType
+            let arena = self.analyzed.query().expr_data().type_arena();
+            return Some(arena.borrow().to_type(ty.0));
         }
         // Fall back to main program expr_types via query interface
         self.analyzed.query().type_of(*node_id)

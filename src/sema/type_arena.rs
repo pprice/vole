@@ -203,6 +203,14 @@ pub struct TypeArena {
     module_metadata: std::collections::HashMap<ModuleId, ModuleMetadata>,
 }
 
+impl std::fmt::Debug for TypeArena {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TypeArena")
+            .field("types_count", &self.types.len())
+            .finish_non_exhaustive()
+    }
+}
+
 impl TypeArena {
     /// Create a new TypeArena with pre-interned primitive types
     pub fn new() -> Self {
