@@ -95,10 +95,18 @@ impl Analyzer {
                     .map(|arg| self.check_expr(arg, interner))
                     .collect::<Result<Vec<_>, _>>()?;
 
+                // Convert TypeIds to LegacyTypes for inference and substitution
+                let param_types: Vec<LegacyType> = generic_def
+                    .param_types
+                    .iter()
+                    .map(|&t| self.type_arena.borrow().to_type(t))
+                    .collect();
+                let return_type = self.type_arena.borrow().to_type(generic_def.return_type);
+
                 // Infer type parameters from argument types
                 let inferred = self.infer_type_params(
                     &generic_def.type_params,
-                    &generic_def.param_types,
+                    &param_types,
                     &arg_types,
                 );
                 self.check_type_param_constraints(
@@ -109,12 +117,11 @@ impl Analyzer {
                 );
 
                 // Create the concrete function type by substituting
-                let concrete_params: Vec<LegacyType> = generic_def
-                    .param_types
+                let concrete_params: Vec<LegacyType> = param_types
                     .iter()
                     .map(|t| substitute_type(t, &inferred))
                     .collect();
-                let concrete_return = substitute_type(&generic_def.return_type, &inferred);
+                let concrete_return = substitute_type(&return_type, &inferred);
 
                 // Check arg count
                 if call.args.len() != concrete_params.len() {
@@ -161,6 +168,14 @@ impl Analyzer {
                         let mut namer = Namer::new(&mut self.name_table, interner);
                         namer.monomorph_str(module_id, &base_str, id)
                     };
+                    // Convert substitutions to TypeId for storage
+                    let substitutions = {
+                        let mut arena = self.type_arena.borrow_mut();
+                        inferred
+                            .iter()
+                            .map(|(k, v)| (*k, arena.from_type(v)))
+                            .collect()
+                    };
                     self.entity_registry.monomorph_cache.insert(
                         key.clone(),
                         MonomorphInstance {
@@ -172,7 +187,7 @@ impl Analyzer {
                                 return_type: Box::new(concrete_return.clone()),
                                 is_closure: false,
                             },
-                            substitutions: inferred,
+                            substitutions,
                         },
                     );
                 }

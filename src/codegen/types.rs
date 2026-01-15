@@ -225,6 +225,7 @@ pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> LegacyType {
         ctx.interner,
         &ctx.analyzed.name_table,
         module_id,
+        &ctx.arena.borrow(),
     );
     // Apply type substitutions if compiling a monomorphized context
     // This allows lambda params like (a: T, b: T) to use concrete types
@@ -413,6 +414,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
     interner: &Interner,
     name_table: &NameTable,
     module_id: ModuleId,
+    arena: &TypeArena,
 ) -> LegacyType {
     // Create resolver for name lookups
     let resolver = Resolver::new(interner, name_table, module_id, &[]);
@@ -428,8 +430,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 match type_def.kind {
                     TypeDefKind::Alias => {
                         // Type alias - return the aliased type
-                        if let Some(ref aliased) = type_def.aliased_type {
-                            return aliased.clone();
+                        if let Some(aliased_id) = type_def.aliased_type {
+                            return arena.to_type(aliased_id);
                         }
                         panic!(
                             "INTERNAL ERROR: type alias has no aliased_type\n\
@@ -532,6 +534,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 interner,
                 name_table,
                 module_id,
+                arena,
             );
             LegacyType::Array(Box::new(elem_ty))
         }
@@ -544,6 +547,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 interner,
                 name_table,
                 module_id,
+                arena,
             );
             LegacyType::Union(vec![inner_ty, LegacyType::Nil].into())
         }
@@ -558,6 +562,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         interner,
                         name_table,
                         module_id,
+                        arena,
                     )
                 })
                 .collect();
@@ -579,6 +584,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         interner,
                         name_table,
                         module_id,
+                        arena,
                     )
                 })
                 .collect();
@@ -589,6 +595,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 interner,
                 name_table,
                 module_id,
+                arena,
             );
             LegacyType::Function(FunctionType {
                 params: param_types.into(),
@@ -613,6 +620,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 interner,
                 name_table,
                 module_id,
+                arena,
             );
             let error = resolve_type_expr_with_metadata(
                 error_type,
@@ -621,6 +629,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 interner,
                 name_table,
                 module_id,
+                arena,
             );
             LegacyType::Fallible(crate::sema::types::FallibleType {
                 success_type: Box::new(success),
@@ -639,6 +648,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         interner,
                         name_table,
                         module_id,
+                        arena,
                     )
                 })
                 .collect();
@@ -748,6 +758,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         interner,
                         name_table,
                         module_id,
+                        arena,
                     )
                 })
                 .collect();
@@ -761,6 +772,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 interner,
                 name_table,
                 module_id,
+                arena,
             );
             LegacyType::FixedArray {
                 element: Box::new(elem_ty),

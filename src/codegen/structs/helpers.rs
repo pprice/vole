@@ -34,12 +34,13 @@ pub(crate) fn get_field_slot_and_type(
             for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
                 let name = ctx.analyzed.name_table.last_segment_str(*field_name_id);
                 if name.as_deref() == Some(field_name) {
-                    let base_type = &generic_info.field_types[slot];
+                    let base_type_id = generic_info.field_types[slot];
+                    let base_type = ctx.arena.borrow().to_type(base_type_id);
                     // Apply type substitutions from type args, then from monomorphization context
                     let field_type = if !substitutions.is_empty() {
-                        substitute_type(base_type, &substitutions)
+                        substitute_type(&base_type, &substitutions)
                     } else {
-                        base_type.clone()
+                        base_type
                     };
                     let field_type = ctx.substitute_type(&field_type);
                     return Ok((slot, field_type));
@@ -66,12 +67,13 @@ pub(crate) fn get_field_slot_and_type(
             for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
                 let name = ctx.analyzed.name_table.last_segment_str(*field_name_id);
                 if name.as_deref() == Some(field_name) {
-                    let base_type = &generic_info.field_types[slot];
+                    let base_type_id = generic_info.field_types[slot];
+                    let base_type = ctx.arena.borrow().to_type(base_type_id);
                     // Apply type substitutions from type args, then from monomorphization context
                     let field_type = if !substitutions.is_empty() {
-                        substitute_type(base_type, &substitutions)
+                        substitute_type(&base_type, &substitutions)
                     } else {
-                        base_type.clone()
+                        base_type
                     };
                     let field_type = ctx.substitute_type(&field_type);
                     return Ok((slot, field_type));

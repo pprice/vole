@@ -32,7 +32,9 @@ impl Analyzer {
                 .name_table
                 .last_segment_str(field.name_id)
                 .unwrap_or_default();
-            if !self.type_has_field_by_str(ty, &field_name_str, &field.ty, interner) {
+            // Convert TypeId to LegacyType for interface checking
+            let field_type = self.type_arena.borrow().to_type(field.ty);
+            if !self.type_has_field_by_str(ty, &field_name_str, &field_type, interner) {
                 return false;
             }
         }
@@ -108,8 +110,11 @@ impl Analyzer {
         // Find field and check type compatibility
         for (i, name_id) in generic_info.field_names.iter().enumerate() {
             if self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name) {
+                // Convert TypeId to LegacyType for substitution
+                let field_type_id = generic_info.field_types[i];
+                let field_type = self.type_arena.borrow().to_type(field_type_id);
                 let field_ty = crate::sema::generic::substitute_type(
-                    &generic_info.field_types[i],
+                    &field_type,
                     &substitutions,
                 );
                 return self.types_compatible(&field_ty, expected_type, interner);
@@ -310,10 +315,11 @@ impl Analyzer {
                     let type_args = self
                         .entity_registry
                         .get_implementation_type_args(impl_type_id, interface_type_id);
+                    let arena = self.type_arena.borrow();
                     interface_type_params
                         .iter()
                         .zip(type_args.iter())
-                        .map(|(param, arg)| (*param, arg.clone()))
+                        .map(|(param, arg)| (*param, arena.to_type(*arg)))
                         .collect()
                 } else {
                     StdHashMap::new()
@@ -675,8 +681,11 @@ impl Analyzer {
         // Find field and check type compatibility
         for (i, name_id) in generic_info.field_names.iter().enumerate() {
             if self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name) {
+                // Convert TypeId to LegacyType for substitution
+                let field_type_id = generic_info.field_types[i];
+                let field_type = self.type_arena.borrow().to_type(field_type_id);
                 let field_ty = crate::sema::generic::substitute_type(
-                    &generic_info.field_types[i],
+                    &field_type,
                     &substitutions,
                 );
                 return self.types_compatible(&field_ty, expected_type, interner);

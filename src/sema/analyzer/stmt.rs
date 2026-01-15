@@ -653,7 +653,8 @@ impl Analyzer {
                 });
 
             if let Some((slot, _)) = found {
-                let field_type = generic_info.field_types[slot].clone();
+                let field_type_id = generic_info.field_types[slot];
+                let field_type = self.type_arena.borrow().to_type(field_type_id);
                 // Bind the field to the binding name
                 self.scope.define(
                     field_pattern.binding,

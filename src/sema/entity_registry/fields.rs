@@ -4,6 +4,7 @@ use crate::identity::{FieldId, NameId, TypeDefId};
 use crate::sema::LegacyType;
 use crate::sema::entity_defs::FieldDef;
 use crate::sema::generic::substitute_type;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use std::collections::HashMap;
 
 use super::EntityRegistry;
@@ -15,7 +16,7 @@ impl EntityRegistry {
         defining_type: TypeDefId,
         name_id: NameId,
         full_name_id: NameId,
-        ty: LegacyType,
+        ty: ArenaTypeId,
         slot: usize,
     ) -> FieldId {
         let id = FieldId::new(self.field_defs.len() as u32);
@@ -99,11 +100,13 @@ impl EntityRegistry {
     }
 
     /// Get field type with type argument substitution applied
+    /// Requires arena to convert stored TypeId to LegacyType for substitution
     pub fn field_type(
         &self,
         type_def_id: TypeDefId,
         type_args: &[LegacyType],
         field_name_id: NameId,
+        arena: &crate::sema::type_arena::TypeArena,
     ) -> Option<LegacyType> {
         let type_def = self.get_type(type_def_id);
         let generic_info = type_def.generic_info.as_ref()?;
@@ -111,12 +114,13 @@ impl EntityRegistry {
             .field_names
             .iter()
             .position(|n| *n == field_name_id)?;
-        let field_type = &generic_info.field_types[idx];
+        // Convert stored TypeId to LegacyType for substitution
+        let field_type = arena.to_type(generic_info.field_types[idx]);
 
         if type_args.is_empty() {
-            Some(field_type.clone())
+            Some(field_type)
         } else {
-            Some(self.substitute_type_with_args(type_def_id, type_args, field_type))
+            Some(self.substitute_type_with_args(type_def_id, type_args, &field_type))
         }
     }
 

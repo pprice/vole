@@ -8,6 +8,7 @@ use crate::frontend::Symbol;
 use crate::identity::{NameId, TypeParamId};
 use crate::sema::TypeKey;
 use crate::sema::implement_registry::ExternalMethodInfo;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{FunctionType, LegacyType, StructuralType};
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -557,8 +558,8 @@ pub trait MonomorphInstanceTrait {
     fn instance_id(&self) -> u32;
     /// Get the concrete function type after substitution
     fn func_type(&self) -> &FunctionType;
-    /// Get the type parameter substitutions
-    fn substitutions(&self) -> &HashMap<NameId, LegacyType>;
+    /// Get the type parameter substitutions (as TypeId handles)
+    fn substitutions(&self) -> &HashMap<NameId, ArenaTypeId>;
 }
 
 /// A monomorphized function instance
@@ -572,8 +573,8 @@ pub struct MonomorphInstance {
     pub instance_id: u32,
     /// The concrete function type after substitution
     pub func_type: FunctionType,
-    /// Map from type param NameId to concrete type
-    pub substitutions: HashMap<NameId, LegacyType>,
+    /// Map from type param NameId to concrete type (as TypeId handles)
+    pub substitutions: HashMap<NameId, ArenaTypeId>,
 }
 
 impl MonomorphInstanceTrait for MonomorphInstance {
@@ -586,7 +587,7 @@ impl MonomorphInstanceTrait for MonomorphInstance {
     fn func_type(&self) -> &FunctionType {
         &self.func_type
     }
-    fn substitutions(&self) -> &HashMap<NameId, LegacyType> {
+    fn substitutions(&self) -> &HashMap<NameId, ArenaTypeId> {
         &self.substitutions
     }
 }
@@ -631,8 +632,8 @@ pub struct ClassMethodMonomorphInstance {
     pub instance_id: u32,
     /// The concrete method type after substitution
     pub func_type: FunctionType,
-    /// Map from type param NameId to concrete type
-    pub substitutions: HashMap<NameId, LegacyType>,
+    /// Map from type param NameId to concrete type (as TypeId handles)
+    pub substitutions: HashMap<NameId, ArenaTypeId>,
     /// External method info (if this is an external method, call the runtime function)
     pub external_info: Option<ExternalMethodInfo>,
 }
@@ -647,7 +648,7 @@ impl MonomorphInstanceTrait for ClassMethodMonomorphInstance {
     fn func_type(&self) -> &FunctionType {
         &self.func_type
     }
-    fn substitutions(&self) -> &HashMap<NameId, LegacyType> {
+    fn substitutions(&self) -> &HashMap<NameId, ArenaTypeId> {
         &self.substitutions
     }
 }
@@ -701,8 +702,8 @@ pub struct StaticMethodMonomorphInstance {
     pub instance_id: u32,
     /// The concrete method type after substitution
     pub func_type: FunctionType,
-    /// Map from type param NameId to concrete type
-    pub substitutions: HashMap<NameId, LegacyType>,
+    /// Map from type param NameId to concrete type (as TypeId handles)
+    pub substitutions: HashMap<NameId, ArenaTypeId>,
 }
 
 impl MonomorphInstanceTrait for StaticMethodMonomorphInstance {
@@ -715,7 +716,7 @@ impl MonomorphInstanceTrait for StaticMethodMonomorphInstance {
     fn func_type(&self) -> &FunctionType {
         &self.func_type
     }
-    fn substitutions(&self) -> &HashMap<NameId, LegacyType> {
+    fn substitutions(&self) -> &HashMap<NameId, ArenaTypeId> {
         &self.substitutions
     }
 }

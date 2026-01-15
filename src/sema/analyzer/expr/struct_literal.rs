@@ -44,6 +44,8 @@ impl Analyzer {
         }
 
         // Helper to get fields from TypeDef
+        // Borrows arena to convert TypeIds to LegacyTypes
+        let arena = &self.type_arena;
         let get_fields_from_typedef = |type_def: &crate::sema::entity_defs::TypeDef,
                                        name_table: &NameTable|
          -> Vec<StructField> {
@@ -55,10 +57,12 @@ impl Analyzer {
                         .iter()
                         .zip(gi.field_types.iter())
                         .enumerate()
-                        .filter_map(|(i, (name_id, ty))| {
+                        .filter_map(|(i, (name_id, &ty_id))| {
+                            // Convert TypeId to LegacyType
+                            let ty = arena.borrow().to_type(ty_id);
                             Some(StructField {
                                 name: name_table.last_segment_str(*name_id)?,
-                                ty: ty.clone(),
+                                ty,
                                 slot: i,
                             })
                         })
@@ -198,11 +202,18 @@ impl Analyzer {
         let mut expected_types = Vec::new();
         let mut actual_types = Vec::new();
 
+        // Convert field types from TypeId to LegacyType
+        let field_types: Vec<LegacyType> = generic_info
+            .field_types
+            .iter()
+            .map(|&t| self.type_arena.borrow().to_type(t))
+            .collect();
+
         for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
             if let Some(field_name_str) = self.name_table.last_segment_str(*field_name_id)
                 && let Some(actual_ty) = field_value_types.get(&field_name_str)
             {
-                expected_types.push(generic_info.field_types[i].clone());
+                expected_types.push(field_types[i].clone());
                 actual_types.push(actual_ty.clone());
             }
         }
@@ -220,8 +231,7 @@ impl Analyzer {
         );
 
         // Substitute inferred types into field types to get concrete field types
-        let concrete_field_types: Vec<LegacyType> = generic_info
-            .field_types
+        let concrete_field_types: Vec<LegacyType> = field_types
             .iter()
             .map(|t| substitute_type(t, &inferred))
             .collect();
@@ -315,11 +325,18 @@ impl Analyzer {
         let mut expected_types = Vec::new();
         let mut actual_types = Vec::new();
 
+        // Convert field types from TypeId to LegacyType
+        let field_types: Vec<LegacyType> = generic_info
+            .field_types
+            .iter()
+            .map(|&t| self.type_arena.borrow().to_type(t))
+            .collect();
+
         for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
             if let Some(field_name_str) = self.name_table.last_segment_str(*field_name_id)
                 && let Some(actual_ty) = field_value_types.get(&field_name_str)
             {
-                expected_types.push(generic_info.field_types[i].clone());
+                expected_types.push(field_types[i].clone());
                 actual_types.push(actual_ty.clone());
             }
         }
@@ -337,8 +354,7 @@ impl Analyzer {
         );
 
         // Substitute inferred types into field types to get concrete field types
-        let concrete_field_types: Vec<LegacyType> = generic_info
-            .field_types
+        let concrete_field_types: Vec<LegacyType> = field_types
             .iter()
             .map(|t| substitute_type(t, &inferred))
             .collect();

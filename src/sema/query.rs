@@ -17,6 +17,7 @@ use crate::sema::generic::{
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_table::TypeKey;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, Type};
 
 /// Information about a call site, bundling all call-related data.
@@ -233,8 +234,8 @@ impl<'a> ProgramQuery<'a> {
     /// Resolve a type alias to its underlying type.
     /// Returns None if the type is not an alias or has no aliased_type.
     #[must_use]
-    pub fn resolve_alias(&self, type_id: TypeDefId) -> Option<&'a LegacyType> {
-        self.registry.get_type(type_id).aliased_type.as_ref()
+    pub fn resolve_alias(&self, type_id: TypeDefId) -> Option<ArenaTypeId> {
+        self.registry.get_type(type_id).aliased_type
     }
 
     /// Get all interface implementations for a type

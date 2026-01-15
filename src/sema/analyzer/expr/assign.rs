@@ -48,10 +48,12 @@ impl Analyzer {
                                 self.name_table.last_segment_str(*name_id).as_deref()
                                     == Some(field_name)
                             }) {
-                                let field_type = &generic_info.field_types[idx];
+                                // Convert TypeId to LegacyType for substitution
+                                let field_type_id = generic_info.field_types[idx];
+                                let field_type = self.type_arena.borrow().to_type(field_type_id);
                                 // Substitute type args if any
                                 let resolved_type = if c.type_args.is_empty() {
-                                    field_type.clone()
+                                    field_type
                                 } else {
                                     let substitutions: HashMap<_, _> = generic_info
                                         .type_params
@@ -59,7 +61,7 @@ impl Analyzer {
                                         .zip(c.type_args.iter())
                                         .map(|(tp, arg)| (tp.name_id, arg.clone()))
                                         .collect();
-                                    substitute_type(field_type, &substitutions)
+                                    substitute_type(&field_type, &substitutions)
                                 };
                                 (resolved_type, true, true)
                             } else {
@@ -316,10 +318,12 @@ impl Analyzer {
                                 self.name_table.last_segment_str(*name_id).as_deref()
                                     == Some(field_name)
                             }) {
-                                let field_type = &generic_info.field_types[idx];
+                                // Convert TypeId to LegacyType for substitution
+                                let field_type_id = generic_info.field_types[idx];
+                                let field_type = self.type_arena.borrow().to_type(field_type_id);
                                 // Substitute type args if any
                                 if c.type_args.is_empty() {
-                                    field_type.clone()
+                                    field_type
                                 } else {
                                     let substitutions: HashMap<_, _> = generic_info
                                         .type_params
@@ -327,7 +331,7 @@ impl Analyzer {
                                         .zip(c.type_args.iter())
                                         .map(|(tp, arg)| (tp.name_id, arg.clone()))
                                         .collect();
-                                    substitute_type(field_type, &substitutions)
+                                    substitute_type(&field_type, &substitutions)
                                 }
                             } else {
                                 self.add_error(

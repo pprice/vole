@@ -575,6 +575,11 @@ impl Analyzer {
         self_type: Option<LegacyType>,
     ) -> LegacyType {
         let module_id = self.current_module;
+        // Convert self_type from LegacyType to TypeId
+        let self_type_id = self_type
+            .as_ref()
+            .map(|t| self.type_arena.borrow_mut().from_type(t));
+        let arena = self.type_arena.borrow();
         let mut ctx = TypeResolutionContext {
             entity_registry: &self.entity_registry,
             interner,
@@ -582,7 +587,8 @@ impl Analyzer {
             module_id,
             // Propagate type param scope to nested contexts (lambdas, etc.)
             type_params: self.type_param_stack.current(),
-            self_type,
+            self_type: self_type_id,
+            type_arena: Some(&*arena),
         };
         resolve_type(ty, &mut ctx)
     }
@@ -619,8 +625,10 @@ impl Analyzer {
             .type_by_name(name_id)
             .expect("alias shell registered in register_all_type_shells");
         let type_key = self.entity_registry.type_table.key_for_type(&aliased_type);
+        // Convert to ArenaTypeId for storage
+        let aliased_type_id = self.type_arena.borrow_mut().from_type(&aliased_type);
         self.entity_registry
-            .set_aliased_type(type_id, aliased_type.clone(), type_key);
+            .set_aliased_type(type_id, aliased_type_id, type_key);
         // Also in type_table for display
         self.entity_registry
             .type_table
@@ -887,6 +895,7 @@ impl Analyzer {
 
         for (slot, field) in decl.fields.iter().enumerate() {
             let module_id = self.current_module;
+            let arena = self.type_arena.borrow();
             let mut ctx = TypeResolutionContext {
                 entity_registry: &self.entity_registry,
                 interner,
@@ -894,6 +903,7 @@ impl Analyzer {
                 module_id,
                 type_params: None,
                 self_type: None,
+                type_arena: Some(&*arena),
             };
             let ty = resolve_type(&field.ty, &mut ctx);
 
@@ -942,11 +952,13 @@ impl Analyzer {
                 .name_table
                 .intern_raw(self.current_module, &[type_name_str, field_name_str]);
             let field_ty = fields[i].ty.clone();
+            // Convert to ArenaTypeId for storage
+            let field_type_id = self.type_arena.borrow_mut().from_type(&field_ty);
             self.entity_registry.register_field(
                 entity_type_id,
                 field_name_id,
                 full_field_name_id,
-                field_ty,
+                field_type_id,
                 i,
             );
         }
@@ -975,10 +987,12 @@ impl Analyzer {
                     {
                         let type_def = self.entity_registry.get_type(type_def_id);
                         if type_def.kind == TypeDefKind::Alias
-                            && let Some(ref aliased_type) = type_def.aliased_type
+                            && let Some(aliased_type_id) = type_def.aliased_type
                         {
+                            // Convert TypeId to LegacyType for pattern matching
+                            let aliased_type = self.type_arena.borrow().to_type(aliased_type_id);
                             // Convert the aliased type to a union constraint
-                            let types = match aliased_type {
+                            let types = match &aliased_type {
                                 LegacyType::Union(types) => types.to_vec(),
                                 other => vec![other.clone()],
                             };
@@ -1596,6 +1610,7 @@ impl Analyzer {
                 Decl::Function(f) => {
                     // Build function type from signature
                     let (params, return_type) = {
+                        let arena = self.type_arena.borrow();
                         let mut ctx = TypeResolutionContext {
                             entity_registry: &self.entity_registry,
                             interner: &module_interner,
@@ -1603,6 +1618,7 @@ impl Analyzer {
                             module_id,
                             type_params: None,
                             self_type: None,
+                            type_arena: Some(&*arena),
                         };
                         let params: Vec<LegacyType> = f
                             .params
@@ -1667,6 +1683,7 @@ impl Analyzer {
                     // External block functions become exports and are marked as external
                     for func in &ext.functions {
                         let (params, return_type) = {
+                            let arena = self.type_arena.borrow();
                             let mut ctx = TypeResolutionContext {
                                 entity_registry: &self.entity_registry,
                                 interner: &module_interner,
@@ -1674,6 +1691,7 @@ impl Analyzer {
                                 module_id,
                                 type_params: None,
                                 self_type: None,
+                                type_arena: Some(&*arena),
                             };
                             let params: Vec<LegacyType> = func
                                 .params

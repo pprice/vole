@@ -248,36 +248,36 @@ impl Analyzer {
 
                     if let Some(type_id) = type_id_opt {
                         let type_def = self.entity_registry.get_type(type_id);
-                        // Get fields from generic_info as StructField
-                        let get_fields =
-                            |type_def: &crate::sema::entity_defs::TypeDef| -> Vec<StructField> {
-                                type_def
-                                    .generic_info
-                                    .as_ref()
-                                    .map(|gi| {
-                                        gi.field_names
-                                            .iter()
-                                            .zip(gi.field_types.iter())
-                                            .enumerate()
-                                            .filter_map(|(i, (name_id, ty))| {
-                                                Some(StructField {
-                                                    name: self
-                                                        .name_table
-                                                        .last_segment_str(*name_id)?,
-                                                    ty: ty.clone(),
-                                                    slot: i,
-                                                })
+                        // Helper to get fields from generic_info as StructField
+                        let get_fields = |type_def: &crate::sema::entity_defs::TypeDef,
+                                          arena: &TypeArena|
+                         -> Vec<StructField> {
+                            type_def
+                                .generic_info
+                                .as_ref()
+                                .map(|gi| {
+                                    gi.field_names
+                                        .iter()
+                                        .zip(gi.field_types.iter())
+                                        .enumerate()
+                                        .filter_map(|(i, (name_id, ty))| {
+                                            Some(StructField {
+                                                name: self.name_table.last_segment_str(*name_id)?,
+                                                ty: arena.to_type(*ty),
+                                                slot: i,
                                             })
-                                            .collect()
-                                    })
-                                    .unwrap_or_default()
-                            };
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default()
+                        };
                         let (pattern_type, type_fields) = match type_def.kind {
                             TypeDefKind::Record => {
                                 if let Some(record_type) =
                                     self.entity_registry.build_record_type(type_id)
                                 {
-                                    let fields_ref = get_fields(type_def);
+                                    let fields_ref =
+                                        get_fields(type_def, &self.type_arena.borrow());
                                     (
                                         Some(LegacyType::Nominal(NominalType::Record(record_type))),
                                         fields_ref,
@@ -290,7 +290,8 @@ impl Analyzer {
                                 if let Some(class_type) =
                                     self.entity_registry.build_class_type(type_id)
                                 {
-                                    let fields_ref = get_fields(type_def);
+                                    let fields_ref =
+                                        get_fields(type_def, &self.type_arena.borrow());
                                     (
                                         Some(LegacyType::Nominal(NominalType::Class(class_type))),
                                         fields_ref,
@@ -375,6 +376,7 @@ impl Analyzer {
                     let type_fields: Option<Vec<StructField>> = match scrutinee_type {
                         LegacyType::Nominal(NominalType::Record(r)) => {
                             let type_def = self.entity_registry.get_type(r.type_def_id);
+                            let arena = self.type_arena.borrow();
                             type_def.generic_info.as_ref().map(|gi| {
                                 gi.field_names
                                     .iter()
@@ -383,7 +385,7 @@ impl Analyzer {
                                     .filter_map(|(i, (name_id, ty))| {
                                         Some(StructField {
                                             name: self.name_table.last_segment_str(*name_id)?,
-                                            ty: ty.clone(),
+                                            ty: arena.to_type(*ty),
                                             slot: i,
                                         })
                                     })
@@ -392,6 +394,7 @@ impl Analyzer {
                         }
                         LegacyType::Nominal(NominalType::Class(c)) => {
                             let type_def = self.entity_registry.get_type(c.type_def_id);
+                            let arena = self.type_arena.borrow();
                             type_def.generic_info.as_ref().map(|gi| {
                                 gi.field_names
                                     .iter()
@@ -400,7 +403,7 @@ impl Analyzer {
                                     .filter_map(|(i, (name_id, ty))| {
                                         Some(StructField {
                                             name: self.name_table.last_segment_str(*name_id)?,
-                                            ty: ty.clone(),
+                                            ty: arena.to_type(*ty),
                                             slot: i,
                                         })
                                     })

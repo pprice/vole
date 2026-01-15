@@ -67,18 +67,19 @@ impl Cg<'_, '_, '_> {
             LegacyType::Nominal(NominalType::Record(rt)) => {
                 let type_def = self.ctx.analyzed.entity_registry.get_type(rt.type_def_id);
                 if let Some(generic_info) = &type_def.generic_info {
+                    let arena = self.ctx.arena.borrow();
                     generic_info
                         .field_names
                         .iter()
                         .zip(generic_info.field_types.iter())
-                        .map(|(name_id, ty)| {
+                        .map(|(name_id, ty_id)| {
                             (
                                 self.ctx
                                     .analyzed
                                     .name_table
                                     .last_segment_str(*name_id)
                                     .unwrap_or_default(),
-                                ty.clone(),
+                                arena.to_type(*ty_id),
                             )
                         })
                         .collect()
@@ -89,18 +90,19 @@ impl Cg<'_, '_, '_> {
             LegacyType::Nominal(NominalType::Class(ct)) => {
                 let type_def = self.ctx.analyzed.entity_registry.get_type(ct.type_def_id);
                 if let Some(generic_info) = &type_def.generic_info {
+                    let arena = self.ctx.arena.borrow();
                     generic_info
                         .field_names
                         .iter()
                         .zip(generic_info.field_types.iter())
-                        .map(|(name_id, ty)| {
+                        .map(|(name_id, ty_id)| {
                             (
                                 self.ctx
                                     .analyzed
                                     .name_table
                                     .last_segment_str(*name_id)
                                     .unwrap_or_default(),
-                                ty.clone(),
+                                arena.to_type(*ty_id),
                             )
                         })
                         .collect()

@@ -6,7 +6,8 @@
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
 use crate::sema::generic::TypeParamInfo;
 use crate::sema::implement_registry::ExternalMethodInfo;
-use crate::sema::{FunctionType, LegacyType};
+use crate::sema::type_arena::TypeId;
+use crate::sema::FunctionType;
 
 /// What kind of type definition this is
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +31,7 @@ pub struct GenericTypeInfo {
     /// Field names as stable NameIds (cross-module safe)
     pub field_names: Vec<NameId>,
     /// Field types with TypeParam placeholders (e.g., [TypeParam(T), i64])
-    pub field_types: Vec<LegacyType>,
+    pub field_types: Vec<TypeId>,
 }
 
 /// A method binding within an implementation block.
@@ -54,7 +55,7 @@ pub struct Implementation {
     /// The interface being implemented
     pub interface: TypeDefId,
     /// Type arguments for generic interfaces (e.g., [i64, i64] for MapLike<i64, i64>)
-    pub type_args: Vec<LegacyType>,
+    pub type_args: Vec<TypeId>,
     /// Method bindings for this implementation
     pub method_bindings: Vec<MethodBinding>,
 }
@@ -75,7 +76,7 @@ pub struct TypeDef {
     /// Static methods (called on the type, not on instances)
     pub static_methods: Vec<MethodId>,
     /// For TypeDefKind::Alias - the type this alias resolves to
-    pub aliased_type: Option<LegacyType>,
+    pub aliased_type: Option<TypeId>,
     /// For generic records/classes - type parameter and field type info
     pub generic_info: Option<GenericTypeInfo>,
     /// For TypeDefKind::ErrorType - the error type info with fields
@@ -109,7 +110,7 @@ pub struct FieldDef {
     pub name_id: NameId,      // "x"
     pub full_name_id: NameId, // "Point::x"
     pub defining_type: TypeDefId,
-    pub ty: LegacyType,
+    pub ty: TypeId,
     pub slot: usize,
 }
 
@@ -120,9 +121,9 @@ pub struct GenericFuncInfo {
     /// The type parameters (e.g., T, U) with names and constraints
     pub type_params: Vec<TypeParamInfo>,
     /// Parameter types with TypeParam placeholders
-    pub param_types: Vec<LegacyType>,
+    pub param_types: Vec<TypeId>,
     /// Return type with TypeParam placeholder
-    pub return_type: LegacyType,
+    pub return_type: TypeId,
 }
 
 /// A free function definition (belongs to a module)

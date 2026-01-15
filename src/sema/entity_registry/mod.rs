@@ -121,7 +121,7 @@ impl EntityRegistry {
     pub fn set_aliased_type(
         &mut self,
         type_id: TypeDefId,
-        aliased_type: LegacyType,
+        aliased_type: crate::sema::type_arena::TypeId,
         type_key: TypeKey,
     ) {
         self.type_defs[type_id.index() as usize].aliased_type = Some(aliased_type);
@@ -157,7 +157,7 @@ impl EntityRegistry {
         &mut self,
         type_id: TypeDefId,
         interface_id: TypeDefId,
-        type_args: Vec<LegacyType>,
+        type_args: Vec<crate::sema::type_arena::TypeId>,
     ) {
         use crate::sema::entity_defs::Implementation;
         self.type_defs[type_id.index() as usize]
@@ -199,7 +199,7 @@ impl EntityRegistry {
         &self,
         type_id: TypeDefId,
         interface_id: TypeDefId,
-    ) -> &[LegacyType] {
+    ) -> &[crate::sema::type_arena::TypeId] {
         let type_def = &self.type_defs[type_id.index() as usize];
         for impl_ in &type_def.implements {
             if impl_.interface == interface_id {
@@ -322,7 +322,7 @@ impl EntityRegistry {
         &mut self,
         name_id: NameId,
         module: crate::identity::ModuleId,
-        aliased_type: LegacyType,
+        aliased_type: crate::sema::type_arena::TypeId,
         type_key: TypeKey,
     ) -> TypeDefId {
         // Register the type with kind Alias
@@ -581,11 +581,15 @@ mod tests {
         let mut registry = EntityRegistry::new();
         let type_id = registry.register_type(type_name, TypeDefKind::Record, main_mod);
 
+        // Create arena for type interning
+        let mut arena = crate::sema::type_arena::TypeArena::new();
+        let field_type_id = arena.from_type(&LegacyType::Primitive(PrimitiveType::I32));
+
         let field_id = registry.register_field(
             type_id,
             field_name,
             full_field_name,
-            LegacyType::Primitive(PrimitiveType::I32),
+            field_type_id,
             0,
         );
 

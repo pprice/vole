@@ -300,6 +300,7 @@ impl Compiler<'_> {
                                 query.interner(),
                                 query.name_table(),
                                 module_id,
+                                &self.analyzed.type_arena.borrow(),
                             )
                         })
                         .unwrap_or(LegacyType::Void);
@@ -421,6 +422,7 @@ impl Compiler<'_> {
                                 query.interner(),
                                 query.name_table(),
                                 module_id,
+                                &self.analyzed.type_arena.borrow(),
                             )
                         })
                         .unwrap_or(LegacyType::Void);
@@ -492,6 +494,7 @@ impl Compiler<'_> {
 
         // Collect param types
         let query = self.query();
+        let arena = self.analyzed.type_arena.borrow();
         let param_types: Vec<types::Type> = func
             .params
             .iter()
@@ -504,6 +507,7 @@ impl Compiler<'_> {
                         query.interner(),
                         query.name_table(),
                         module_id,
+                        &arena,
                     ),
                     self.pointer_type,
                 )
@@ -520,9 +524,11 @@ impl Compiler<'_> {
                     query.interner(),
                     query.name_table(),
                     module_id,
+                    &arena,
                 )
             })
             .collect();
+        drop(arena);
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type
@@ -534,6 +540,7 @@ impl Compiler<'_> {
                 query.interner(),
                 query.name_table(),
                 module_id,
+                &self.analyzed.type_arena.borrow(),
             )
         });
 
@@ -630,6 +637,7 @@ impl Compiler<'_> {
 
         // Collect param types before borrowing ctx.func
         let query = self.query();
+        let arena = self.analyzed.type_arena.borrow();
         let param_types: Vec<types::Type> = func
             .params
             .iter()
@@ -642,6 +650,7 @@ impl Compiler<'_> {
                         query.interner(),
                         query.name_table(),
                         module_id,
+                        &arena,
                     ),
                     self.pointer_type,
                 )
@@ -658,9 +667,11 @@ impl Compiler<'_> {
                     query.interner(),
                     query.name_table(),
                     module_id,
+                    &arena,
                 )
             })
             .collect();
+        drop(arena);
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type (needed for raise statements in fallible functions)
@@ -672,6 +683,7 @@ impl Compiler<'_> {
                 query.interner(),
                 query.name_table(),
                 module_id,
+                &self.analyzed.type_arena.borrow(),
             )
         });
 
@@ -877,6 +889,7 @@ impl Compiler<'_> {
                                 query.interner(),
                                 query.name_table(),
                                 module_id,
+                                &self.analyzed.type_arena.borrow(),
                             )
                         })
                         .unwrap_or(LegacyType::Void);
@@ -938,6 +951,7 @@ impl Compiler<'_> {
 
         // Collect param types before borrowing ctx.func
         let query = self.query();
+        let arena = self.analyzed.type_arena.borrow();
         let param_types: Vec<types::Type> = func
             .params
             .iter()
@@ -950,6 +964,7 @@ impl Compiler<'_> {
                         query.interner(),
                         query.name_table(),
                         module_id,
+                        &arena,
                     ),
                     self.pointer_type,
                 )
@@ -966,9 +981,11 @@ impl Compiler<'_> {
                     query.interner(),
                     query.name_table(),
                     module_id,
+                    &arena,
                 )
             })
             .collect();
+        drop(arena);
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type (needed for raise statements in fallible functions)
@@ -980,6 +997,7 @@ impl Compiler<'_> {
                 query.interner(),
                 query.name_table(),
                 module_id,
+                &self.analyzed.type_arena.borrow(),
             )
         });
 
@@ -1544,8 +1562,18 @@ impl Compiler<'_> {
         // Get return type
         let return_type = Some((*instance.func_type.return_type).clone());
 
+        // Convert TypeId substitutions to LegacyType for codegen
+        let legacy_substitutions: HashMap<NameId, LegacyType> = {
+            let arena = self.analyzed.type_arena.borrow();
+            instance
+                .substitutions
+                .iter()
+                .map(|(k, v)| (*k, arena.to_type(*v)))
+                .collect()
+        };
+
         // Build self type with concrete type args
-        let self_vole_type = self.build_concrete_self_type(type_name, &instance.substitutions);
+        let self_vole_type = self.build_concrete_self_type(type_name, &legacy_substitutions);
 
         // Get source file pointer and self symbol
         let source_file_ptr = self.source_file_ptr();
@@ -1603,7 +1631,7 @@ impl Compiler<'_> {
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
-                type_substitutions: Some(&instance.substitutions),
+                type_substitutions: Some(&legacy_substitutions),
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1908,6 +1936,16 @@ impl Compiler<'_> {
                 format!("Internal error: static method {} has no body", mangled_name)
             })?;
 
+            // Convert TypeId substitutions to LegacyType for codegen
+            let legacy_substitutions: HashMap<NameId, LegacyType> = {
+                let arena = self.analyzed.type_arena.borrow();
+                instance
+                    .substitutions
+                    .iter()
+                    .map(|(k, v)| (*k, arena.to_type(*v)))
+                    .collect()
+            };
+
             let mut cf_ctx = ControlFlowCtx::default();
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
@@ -1927,7 +1965,7 @@ impl Compiler<'_> {
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
-                type_substitutions: Some(&instance.substitutions),
+                type_substitutions: Some(&legacy_substitutions),
             };
             let terminated =
                 compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;

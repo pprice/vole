@@ -4,6 +4,7 @@
 use super::*;
 use crate::frontend::ast::{ExprKind, LetInit, TypeExpr};
 use crate::sema::entity_defs::{GenericFuncInfo, GenericTypeInfo, TypeDefKind};
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType};
 
 /// Extract the base interface name from a TypeExpr.
@@ -220,12 +221,18 @@ impl Analyzer {
             );
 
             // Set generic info on the function
+            // Convert LegacyTypes to ArenaTypeIds for storage
+            let param_type_ids: Vec<ArenaTypeId> = param_types
+                .iter()
+                .map(|t| self.type_arena.borrow_mut().from_type(t))
+                .collect();
+            let return_type_id = self.type_arena.borrow_mut().from_type(&return_type);
             self.entity_registry.set_function_generic_info(
                 func_id,
                 GenericFuncInfo {
                     type_params,
-                    param_types,
-                    return_type,
+                    param_types: param_type_ids,
+                    return_type: return_type_id,
                 },
             );
         }
@@ -260,6 +267,11 @@ impl Analyzer {
                 .iter()
                 .map(|f| self.resolve_type(&f.ty, interner))
                 .collect();
+            // Convert to ArenaTypeIds for storage
+            let field_type_ids: Vec<ArenaTypeId> = field_types
+                .iter()
+                .map(|t| self.type_arena.borrow_mut().from_type(t))
+                .collect();
 
             // Set generic_info (with empty type_params for non-generic classes)
             self.entity_registry.set_generic_info(
@@ -267,7 +279,7 @@ impl Analyzer {
                 GenericTypeInfo {
                     type_params: vec![],
                     field_names: field_names.clone(),
-                    field_types: field_types.clone(),
+                    field_types: field_type_ids.clone(),
                 },
             );
 
@@ -282,7 +294,7 @@ impl Analyzer {
                     entity_type_id,
                     field_names[i],
                     full_field_name_id,
-                    field_types[i].clone(),
+                    field_type_ids[i],
                     i,
                 );
             }
@@ -495,6 +507,11 @@ impl Analyzer {
                 .iter()
                 .map(|f| resolve_type(&f.ty, &mut ctx))
                 .collect();
+            // Convert to ArenaTypeIds for storage
+            let field_type_ids: Vec<ArenaTypeId> = field_types
+                .iter()
+                .map(|t| self.type_arena.borrow_mut().from_type(t))
+                .collect();
 
             // Lookup shell registered in pass 0.5
             let entity_type_id = self
@@ -514,7 +531,7 @@ impl Analyzer {
                 GenericTypeInfo {
                     type_params,
                     field_names: field_names.clone(),
-                    field_types,
+                    field_types: field_type_ids.clone(),
                 },
             );
 
@@ -525,19 +542,12 @@ impl Analyzer {
                     self.current_module,
                     &[interner.resolve(class.name), field_name_str],
                 );
-                let mut ctx = TypeResolutionContext::with_type_params(
-                    &self.entity_registry,
-                    interner,
-                    &mut self.name_table,
-                    module_id,
-                    &type_param_scope,
-                );
-                let field_ty = resolve_type(&field.ty, &mut ctx);
+                // Use field_type_ids already computed above
                 self.entity_registry.register_field(
                     entity_type_id,
                     field_names[i],
                     full_field_name_id,
-                    field_ty,
+                    field_type_ids[i],
                     i,
                 );
             }
@@ -563,6 +573,10 @@ impl Analyzer {
             // Register methods in EntityRegistry with type params in scope
             let self_type_for_methods =
                 class_type.map(|c| LegacyType::Nominal(NominalType::Class(c)));
+            // Convert to TypeId for use in TypeResolutionContext
+            let self_type_id = self_type_for_methods
+                .as_ref()
+                .map(|t| self.type_arena.borrow_mut().from_type(t));
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
                 let method_name_id = self.name_table.intern_raw(builtin_mod, &[method_name_str]);
@@ -572,38 +586,46 @@ impl Analyzer {
                 );
 
                 // Resolve parameter types with type params and self in scope
-                let params: Vec<LegacyType> = method
-                    .params
-                    .iter()
-                    .map(|p| {
-                        let mut ctx = TypeResolutionContext {
-                            entity_registry: &self.entity_registry,
-                            interner,
-                            name_table: &mut self.name_table,
-                            module_id,
-                            type_params: Some(&type_param_scope),
-                            self_type: self_type_for_methods.clone(),
-                        };
-                        resolve_type(&p.ty, &mut ctx)
-                    })
-                    .collect();
+                let params: Vec<LegacyType> = {
+                    let arena = self.type_arena.borrow();
+                    method
+                        .params
+                        .iter()
+                        .map(|p| {
+                            let mut ctx = TypeResolutionContext {
+                                entity_registry: &self.entity_registry,
+                                interner,
+                                name_table: &mut self.name_table,
+                                module_id,
+                                type_params: Some(&type_param_scope),
+                                self_type: self_type_id,
+                                type_arena: Some(&*arena),
+                            };
+                            resolve_type(&p.ty, &mut ctx)
+                        })
+                        .collect()
+                };
 
                 // Resolve return type with type params and self in scope
-                let return_type = method
-                    .return_type
-                    .as_ref()
-                    .map(|t| {
-                        let mut ctx = TypeResolutionContext {
-                            entity_registry: &self.entity_registry,
-                            interner,
-                            name_table: &mut self.name_table,
-                            module_id,
-                            type_params: Some(&type_param_scope),
-                            self_type: self_type_for_methods.clone(),
-                        };
-                        resolve_type(t, &mut ctx)
-                    })
-                    .unwrap_or(LegacyType::Void);
+                let return_type = {
+                    let arena = self.type_arena.borrow();
+                    method
+                        .return_type
+                        .as_ref()
+                        .map(|t| {
+                            let mut ctx = TypeResolutionContext {
+                                entity_registry: &self.entity_registry,
+                                interner,
+                                name_table: &mut self.name_table,
+                                module_id,
+                                type_params: Some(&type_param_scope),
+                                self_type: self_type_id,
+                                type_arena: Some(&*arena),
+                            };
+                            resolve_type(t, &mut ctx)
+                        })
+                        .unwrap_or(LegacyType::Void)
+                };
 
                 let signature = FunctionType {
                     params: params.into(),
@@ -818,6 +840,11 @@ impl Analyzer {
                 .iter()
                 .map(|f| self.resolve_type(&f.ty, interner))
                 .collect();
+            // Convert to ArenaTypeIds for storage
+            let field_type_ids: Vec<ArenaTypeId> = field_types
+                .iter()
+                .map(|t| self.type_arena.borrow_mut().from_type(t))
+                .collect();
 
             // Set generic_info (with empty type_params for non-generic records)
             self.entity_registry.set_generic_info(
@@ -825,7 +852,7 @@ impl Analyzer {
                 GenericTypeInfo {
                     type_params: vec![],
                     field_names: field_names.clone(),
-                    field_types: field_types.clone(),
+                    field_types: field_type_ids.clone(),
                 },
             );
 
@@ -840,7 +867,7 @@ impl Analyzer {
                     entity_type_id,
                     field_names[i],
                     full_field_name_id,
-                    field_types[i].clone(),
+                    field_type_ids[i],
                     i,
                 );
             }
@@ -1009,6 +1036,11 @@ impl Analyzer {
                 .iter()
                 .map(|f| resolve_type(&f.ty, &mut ctx))
                 .collect();
+            // Convert to ArenaTypeIds for storage
+            let field_type_ids: Vec<ArenaTypeId> = field_types
+                .iter()
+                .map(|t| self.type_arena.borrow_mut().from_type(t))
+                .collect();
 
             // Extract type param name IDs before moving type_params
             let type_param_name_ids: Vec<NameId> =
@@ -1066,21 +1098,12 @@ impl Analyzer {
                     self.current_module,
                     &[interner.resolve(record.name), field_name_str],
                 );
-                let field_ty = {
-                    let mut ctx = TypeResolutionContext::with_type_params(
-                        &self.entity_registry,
-                        interner,
-                        &mut self.name_table,
-                        module_id,
-                        &type_param_scope,
-                    );
-                    resolve_type(&field.ty, &mut ctx)
-                };
+                // Use field_type_ids already computed above
                 self.entity_registry.register_field(
                     entity_type_id,
                     field_names[i],
                     full_field_name_id,
-                    field_ty,
+                    field_type_ids[i],
                     i,
                 );
             }
@@ -1095,13 +1118,18 @@ impl Analyzer {
                 GenericTypeInfo {
                     type_params,
                     field_names,
-                    field_types,
+                    field_types: field_type_ids,
                 },
             );
+
+            // Convert self type to TypeId once for all method resolutions
+            let self_type_legacy = LegacyType::Nominal(NominalType::Record(record_type.clone()));
+            let self_type_id = self.type_arena.borrow_mut().from_type(&self_type_legacy);
 
             for method in &record.methods {
                 // First resolve types, then intern names (to avoid borrow conflicts)
                 let params: Vec<LegacyType> = {
+                    let arena = self.type_arena.borrow();
                     let mut ctx = TypeResolutionContext::with_type_params(
                         &self.entity_registry,
                         interner,
@@ -1109,9 +1137,8 @@ impl Analyzer {
                         module_id,
                         &type_param_scope,
                     );
-                    ctx.self_type = Some(LegacyType::Nominal(NominalType::Record(
-                        record_type.clone(),
-                    )));
+                    ctx.self_type = Some(self_type_id);
+                    ctx.type_arena = Some(&*arena);
                     method
                         .params
                         .iter()
@@ -1119,6 +1146,7 @@ impl Analyzer {
                         .collect()
                 };
                 let return_type: LegacyType = {
+                    let arena = self.type_arena.borrow();
                     let mut ctx = TypeResolutionContext::with_type_params(
                         &self.entity_registry,
                         interner,
@@ -1126,9 +1154,8 @@ impl Analyzer {
                         module_id,
                         &type_param_scope,
                     );
-                    ctx.self_type = Some(LegacyType::Nominal(NominalType::Record(
-                        record_type.clone(),
-                    )));
+                    ctx.self_type = Some(self_type_id);
+                    ctx.type_arena = Some(&*arena);
                     method
                         .return_type
                         .as_ref()
@@ -1319,8 +1346,13 @@ impl Analyzer {
                 continue;
             }
 
+            // Convert type_args to ArenaTypeIds for storage
+            let type_arg_ids: Vec<ArenaTypeId> = type_args
+                .iter()
+                .map(|t| self.type_arena.borrow_mut().from_type(t))
+                .collect();
             self.entity_registry
-                .add_implementation(entity_type_id, interface_type_id, type_args);
+                .add_implementation(entity_type_id, interface_type_id, type_arg_ids);
         }
     }
 
@@ -1628,11 +1660,13 @@ impl Analyzer {
             let full_field_name_id = self
                 .name_table
                 .intern_raw(self.current_module, &[&name_str, &field_name_str]);
+            // Convert to ArenaTypeId for storage
+            let field_type_id = self.type_arena.borrow_mut().from_type(field_ty);
             self.entity_registry.register_field(
                 entity_type_id,
                 field_name_id,
                 full_field_name_id,
-                field_ty.clone(),
+                field_type_id,
                 i,
             );
         }
@@ -1944,12 +1978,18 @@ impl Analyzer {
                 );
 
                 // Set generic info for call-site type inference
+                // Convert LegacyTypes to ArenaTypeIds for storage
+                let param_type_ids: Vec<ArenaTypeId> = param_types
+                    .iter()
+                    .map(|t| self.type_arena.borrow_mut().from_type(t))
+                    .collect();
+                let return_type_id = self.type_arena.borrow_mut().from_type(&return_type);
                 self.entity_registry.set_function_generic_info(
                     func_id,
                     GenericFuncInfo {
                         type_params,
-                        param_types,
-                        return_type: return_type.clone(),
+                        param_types: param_type_ids,
+                        return_type: return_type_id,
                     },
                 );
 

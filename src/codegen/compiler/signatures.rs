@@ -57,6 +57,7 @@ impl Compiler<'_> {
                             query.interner(),
                             query.name_table(),
                             module_id,
+                            &self.analyzed.type_arena.borrow(),
                         ),
                         self.pointer_type,
                     ));
@@ -73,6 +74,7 @@ impl Compiler<'_> {
                             interner,
                             &self.analyzed.name_table,
                             module_id,
+                            &self.analyzed.type_arena.borrow(),
                         ),
                         self.pointer_type,
                     ));
@@ -93,6 +95,7 @@ impl Compiler<'_> {
                         query.interner(),
                         query.name_table(),
                         module_id,
+                        &self.analyzed.type_arena.borrow(),
                     ),
                     self.pointer_type,
                 )
@@ -107,6 +110,7 @@ impl Compiler<'_> {
                         interner,
                         &self.analyzed.name_table,
                         module_id,
+                        &self.analyzed.type_arena.borrow(),
                     ),
                     self.pointer_type,
                 )

@@ -24,11 +24,13 @@ impl Analyzer {
         for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
             let name = self.name_table.last_segment_str(*field_name_id);
             if name.as_deref() == Some(field_name) {
-                let field_type = &generic_info.field_types[i];
+                // Convert TypeId to LegacyType for substitution
+                let field_type_id = generic_info.field_types[i];
+                let field_type = self.type_arena.borrow().to_type(field_type_id);
                 let substituted = self.entity_registry.substitute_type_with_args(
                     type_def_id,
                     type_args,
-                    field_type,
+                    &field_type,
                 );
                 let type_name = self
                     .name_table
@@ -731,8 +733,9 @@ impl Analyzer {
             let type_def = self.entity_registry.get_type(class_type_def_id);
             let substitutions = if let Some(generic_info) = &type_def.generic_info {
                 let mut subs = HashMap::new();
+                let mut arena = self.type_arena.borrow_mut();
                 for (param, arg) in generic_info.type_params.iter().zip(type_args.iter()) {
-                    subs.insert(param.name_id, arg.clone());
+                    subs.insert(param.name_id, arena.from_type(arg));
                 }
                 subs
             } else {
@@ -831,7 +834,7 @@ impl Analyzer {
             .contains(&key)
         {
             // Build substitutions from type params to inferred types
-            let substitutions: HashMap<NameId, LegacyType> = inferred.clone();
+            let legacy_substitutions: HashMap<NameId, LegacyType> = inferred.clone();
 
             // Generate unique mangled name
             let instance_id = self
@@ -855,13 +858,23 @@ impl Analyzer {
             let substituted_params: Vec<LegacyType> = func_type
                 .params
                 .iter()
-                .map(|p| substitute_type(p, &substitutions))
+                .map(|p| substitute_type(p, &legacy_substitutions))
                 .collect();
-            let substituted_return = substitute_type(&func_type.return_type, &substitutions);
+            let substituted_return =
+                substitute_type(&func_type.return_type, &legacy_substitutions);
             let substituted_func_type = FunctionType {
                 params: substituted_params.into(),
                 return_type: Box::new(substituted_return),
                 is_closure: func_type.is_closure,
+            };
+
+            // Convert substitutions to TypeId for storage
+            let substitutions = {
+                let mut arena = self.type_arena.borrow_mut();
+                legacy_substitutions
+                    .iter()
+                    .map(|(k, v)| (*k, arena.from_type(v)))
+                    .collect()
             };
 
             let instance = StaticMethodMonomorphInstance {

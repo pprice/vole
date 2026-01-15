@@ -22,8 +22,10 @@ pub struct TypeResolutionContext<'a> {
     pub module_id: ModuleId,
     /// Type parameters in scope (for generic contexts)
     pub type_params: Option<&'a TypeParamScope>,
-    /// The concrete type that `Self` resolves to (for method signatures)
-    pub self_type: Option<LegacyType>,
+    /// The concrete type that `Self` resolves to (for method signatures), as interned TypeId
+    pub self_type: Option<TypeId>,
+    /// Type arena for converting TypeId to LegacyType
+    pub type_arena: Option<&'a TypeArena>,
 }
 
 fn interface_instance(
@@ -102,6 +104,7 @@ impl<'a> TypeResolutionContext<'a> {
             module_id,
             type_params: None,
             self_type: None,
+            type_arena: None,
         }
     }
 
@@ -120,6 +123,7 @@ impl<'a> TypeResolutionContext<'a> {
             module_id,
             type_params: Some(type_params),
             self_type: None,
+            type_arena: None,
         }
     }
 
@@ -263,8 +267,13 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                     }
                     TypeDefKind::Primitive => LegacyType::invalid("resolve_primitive"),
                     TypeDefKind::Alias => {
-                        if let Some(ref aliased) = type_def.aliased_type {
-                            aliased.clone()
+                        if let Some(aliased_type_id) = type_def.aliased_type {
+                            if let Some(arena) = ctx.type_arena {
+                                arena.to_type(aliased_type_id)
+                            } else {
+                                // Fallback when arena not available
+                                LegacyType::invalid("resolve_no_arena")
+                            }
                         } else {
                             LegacyType::invalid("resolve_failed")
                         }
@@ -305,8 +314,13 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
         }
         TypeExpr::SelfType => {
             // Self resolves to the implementing type when in a method context
-            if let Some(ref self_type) = ctx.self_type {
-                self_type.clone()
+            if let Some(self_type_id) = ctx.self_type {
+                // Convert TypeId to LegacyType using arena
+                if let Some(arena) = ctx.type_arena {
+                    arena.to_type(self_type_id)
+                } else {
+                    LegacyType::invalid("resolve_no_arena")
+                }
             } else {
                 // Return Error to indicate Self can't be used outside method context
                 LegacyType::invalid("resolve_failed")
