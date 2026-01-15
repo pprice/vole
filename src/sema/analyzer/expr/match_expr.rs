@@ -1,6 +1,6 @@
 use super::super::*;
 use crate::sema::PrimitiveType;
-use crate::sema::types::LegacyType;
+use crate::sema::types::{LegacyType, Type};
 
 impl Analyzer {
     /// Check if a pattern is a type pattern (matches a class/record/primitive type name)
@@ -112,7 +112,8 @@ impl Analyzer {
 
             // Apply type narrowing if scrutinee is an identifier and pattern provides narrowing
             if let (Some(sym), Some(narrow_ty)) = (scrutinee_sym, &effective_narrowed) {
-                self.type_overrides.insert(sym, narrow_ty.clone());
+                let narrow_ty_id = self.type_arena.from_type(narrow_ty);
+                self.type_overrides.insert(sym, Type(narrow_ty_id));
             }
 
             // Check guard if present (must be bool)

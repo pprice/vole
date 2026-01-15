@@ -3,7 +3,7 @@
 use super::*;
 use crate::sema::PrimitiveType;
 use crate::sema::compatibility::TypeCompatibility;
-use crate::sema::types::{LegacyType, NominalType};
+use crate::sema::types::{LegacyType, NominalType, Type};
 
 impl Analyzer {
     pub(crate) fn check_block(
@@ -151,7 +151,8 @@ impl Analyzer {
                 let parent = std::mem::take(&mut self.scope);
                 self.scope = Scope::with_parent(parent);
                 if let Some((sym, narrowed_type, _)) = &narrowing_info {
-                    self.type_overrides.insert(*sym, narrowed_type.clone());
+                    let narrowed_type_id = self.type_arena.from_type(narrowed_type);
+                    self.type_overrides.insert(*sym, Type(narrowed_type_id));
                 }
                 self.check_block(&if_stmt.then_branch, interner)?;
                 if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
@@ -177,11 +178,13 @@ impl Analyzer {
                             .collect();
                         if remaining.len() == 1 {
                             // Single type remaining - narrow to that
-                            self.type_overrides.insert(*sym, remaining[0].clone());
+                            let narrow_id = self.type_arena.from_type(&remaining[0]);
+                            self.type_overrides.insert(*sym, Type(narrow_id));
                         } else if remaining.len() > 1 {
                             // Multiple types remaining - narrow to smaller union
-                            self.type_overrides
-                                .insert(*sym, LegacyType::Union(remaining.into()));
+                            let narrow_type = LegacyType::Union(remaining.into());
+                            let narrow_id = self.type_arena.from_type(&narrow_type);
+                            self.type_overrides.insert(*sym, Type(narrow_id));
                         }
                     }
 
@@ -255,9 +258,10 @@ impl Analyzer {
                 let expected_value_type = self.current_function_return.as_ref().map(|expected| {
                     // If expected is fallible, extract success type for comparison
                     // A `return value` statement returns the success type, not the full fallible type
-                    match expected {
+                    let expected_legacy = self.type_arena.to_type(expected.0);
+                    match expected_legacy {
                         LegacyType::Fallible(ft) => (*ft.success_type).clone(),
-                        other => other.clone(),
+                        other => other,
                     }
                 });
 
@@ -392,7 +396,7 @@ impl Analyzer {
     /// Analyze a raise statement
     fn analyze_raise_stmt(&mut self, stmt: &RaiseStmt, interner: &Interner) -> LegacyType {
         // Check we're in a fallible function
-        let Some(error_type) = self.current_function_error_type.clone() else {
+        let Some(error_type) = self.current_function_error_type else {
             self.add_error(
                 SemanticError::RaiseOutsideFallible {
                     span: stmt.span.into(),
@@ -483,7 +487,8 @@ impl Analyzer {
 
         // Verify that raised error type is compatible with declared error type
         let stmt_error_name = interner.resolve(stmt.error_name);
-        let is_compatible = match &error_type {
+        let error_type_legacy = self.type_arena.to_type(error_type.0);
+        let is_compatible = match &error_type_legacy {
             LegacyType::Nominal(NominalType::Error(declared_info)) => {
                 // Single error type - must match exactly
                 let name = self
@@ -508,7 +513,7 @@ impl Analyzer {
         };
 
         if !is_compatible {
-            let declared_str = self.type_display(&error_type);
+            let declared_str = self.type_display(&error_type_legacy);
             let raised_str =
                 self.type_display(&LegacyType::Nominal(NominalType::Error(error_info)));
 
@@ -563,12 +568,12 @@ impl Analyzer {
             );
             return Ok(success_type);
         };
-        let current_error = current_error.clone();
+        let current_error_legacy = self.type_arena.to_type(current_error.0);
 
         // Check that the error type is compatible with the function's error type
-        if !self.error_type_compatible(&error_type, &current_error) {
+        if !self.error_type_compatible(&error_type, &current_error_legacy) {
             let try_error = self.type_display(&error_type);
-            let func_error = self.type_display(&current_error);
+            let func_error = self.type_display(&current_error_legacy);
             self.add_error(
                 SemanticError::IncompatibleTryError {
                     try_error,

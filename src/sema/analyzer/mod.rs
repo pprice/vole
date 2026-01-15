@@ -135,9 +135,9 @@ pub struct AnalysisOutput {
 /// Saved state when entering a function/method check context.
 /// Used by enter_function_context/exit_function_context for uniform save/restore.
 struct FunctionCheckContext {
-    return_type: Option<LegacyType>,
-    error_type: Option<LegacyType>,
-    generator_element_type: Option<LegacyType>,
+    return_type: Option<Type>,
+    error_type: Option<Type>,
+    generator_element_type: Option<Type>,
     static_method: Option<String>,
     /// How many scopes were on the stack when we entered this context
     type_param_stack_depth: usize,
@@ -148,20 +148,20 @@ pub struct Analyzer {
     functions: HashMap<Symbol, FunctionType>,
     /// Functions registered by string name (for prelude functions that cross interner boundaries)
     functions_by_name: FxHashMap<String, FunctionType>,
-    globals: HashMap<Symbol, LegacyType>,
-    current_function_return: Option<LegacyType>,
+    globals: HashMap<Symbol, Type>,
+    current_function_return: Option<Type>,
     /// Current function's error type (if fallible)
-    current_function_error_type: Option<LegacyType>,
+    current_function_error_type: Option<Type>,
     /// Generator context: if inside a generator function, this holds the Iterator element type.
     /// None means we're not in a generator (or not in a function at all).
-    current_generator_element_type: Option<LegacyType>,
+    current_generator_element_type: Option<Type>,
     /// If we're inside a static method, this holds the method name (for error reporting).
     /// None means we're not in a static method.
     current_static_method: Option<String>,
     errors: Vec<TypeError>,
     warnings: Vec<TypeWarning>,
     /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
-    type_overrides: HashMap<Symbol, LegacyType>,
+    type_overrides: HashMap<Symbol, Type>,
     /// Stack of lambda scopes for capture analysis. Each entry is a HashMap
     /// mapping captured variable names to their capture info.
     lambda_captures: Vec<HashMap<Symbol, CaptureInfo>>,
@@ -510,7 +510,7 @@ impl Analyzer {
     fn get_variable_type(&self, sym: Symbol) -> Option<LegacyType> {
         // Check overrides first (for narrowed types inside if-blocks)
         if let Some(ty) = self.type_overrides.get(&sym) {
-            return Some(ty.clone());
+            return Some(self.type_arena.to_type(ty.0));
         }
         // Then check scope
         self.scope.get(sym).map(|v| v.ty.clone())
@@ -692,7 +692,8 @@ impl Analyzer {
                             self.register_type_alias(let_stmt.name, aliased_type, interner);
                         }
 
-                        self.globals.insert(let_stmt.name, var_type.clone());
+                        let var_type_id = self.type_arena.from_type(&var_type);
+                        self.globals.insert(let_stmt.name, Type(var_type_id));
                         self.scope.define(
                             let_stmt.name,
                             Variable {
@@ -1266,16 +1267,21 @@ impl Analyzer {
             type_param_stack_depth: self.type_param_stack.depth(),
         };
 
-        self.current_function_return = Some(return_type.clone());
+        // Convert LegacyType to Type for storage
+        let return_type_id = self.type_arena.from_type(return_type);
+        self.current_function_return = Some(Type(return_type_id));
 
         // Set error type context if this is a fallible function
         if let LegacyType::Fallible(ft) = return_type {
-            self.current_function_error_type = Some((*ft.error_type).clone());
+            let error_type_id = self.type_arena.from_type(&ft.error_type);
+            self.current_function_error_type = Some(Type(error_type_id));
         }
 
         // Set generator context if return type is Iterator<T>
-        self.current_generator_element_type =
-            self.extract_iterator_element_type(return_type, interner);
+        if let Some(element_type) = self.extract_iterator_element_type(return_type, interner) {
+            let element_type_id = self.type_arena.from_type(&element_type);
+            self.current_generator_element_type = Some(Type(element_type_id));
+        }
 
         saved
     }

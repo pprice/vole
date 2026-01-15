@@ -416,13 +416,13 @@ impl Analyzer {
                 }
 
                 // Check if we're inside a generator function (Iterator<T> return type)
-                let Some(element_type) = self.current_generator_element_type.clone() else {
+                let Some(element_type) = self.current_generator_element_type else {
                     // Not a generator - report error with actual return type
                     let return_type = self
                         .current_function_return
-                        .clone()
                         .expect("yield only valid inside function");
-                    let found = self.type_display(&return_type);
+                    let return_type_legacy = self.type_arena.to_type(return_type.0);
+                    let found = self.type_display(&return_type_legacy);
                     self.add_error(
                         SemanticError::YieldInNonGenerator {
                             found,
@@ -434,12 +434,16 @@ impl Analyzer {
                 };
 
                 // Type check the yield expression against the Iterator element type
-                let yield_type =
-                    self.check_expr_expecting(&yield_expr.value, Some(&element_type), interner)?;
+                let element_type_legacy = self.type_arena.to_type(element_type.0);
+                let yield_type = self.check_expr_expecting(
+                    &yield_expr.value,
+                    Some(&element_type_legacy),
+                    interner,
+                )?;
 
                 // Check type compatibility
-                if !self.types_compatible(&yield_type, &element_type, interner) {
-                    let expected = self.type_display(&element_type);
+                if !self.types_compatible(&yield_type, &element_type_legacy, interner) {
+                    let expected = self.type_display(&element_type_legacy);
                     let found = self.type_display(&yield_type);
                     self.add_error(
                         SemanticError::YieldTypeMismatch {
