@@ -122,7 +122,6 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             expr_types: HashMap::new(),
-            module_type_cache: HashMap::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),

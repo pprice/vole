@@ -11,7 +11,7 @@ use hashbrown::HashMap;
 use smallvec::SmallVec;
 
 use crate::identity::{ModuleId, NameId, TypeDefId, TypeParamId};
-use crate::sema::types::{LegacyType, PlaceholderKind, PrimitiveType};
+use crate::sema::types::{ConstantValue, LegacyType, PlaceholderKind, PrimitiveType};
 
 /// Concrete type identity in the TypeArena.
 ///
@@ -55,6 +55,32 @@ pub struct InternedStructuralMethod {
 pub struct InternedStructural {
     pub fields: SmallVec<[(NameId, TypeId); 4]>,
     pub methods: SmallVec<[InternedStructuralMethod; 2]>,
+}
+
+/// Interned representation of a module type
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InternedModule {
+    pub module_id: ModuleId,
+    /// Exports as (name, type) pairs - part of the module's type signature
+    pub exports: SmallVec<[(NameId, TypeId); 8]>,
+}
+
+/// Module metadata stored separately from the type.
+///
+/// This contains codegen-relevant data that isn't part of the module's type identity.
+/// The type identity is just (module_id, exports) - this is the "extra" data.
+///
+/// FUTURE OPTIMIZATION:
+/// - `constants`: Can be eliminated with constant folding during analysis.
+///   Instead of storing constant values here, fold them directly into the AST.
+/// - `external_funcs`: Can be eliminated by treating external funcs as regular funcs.
+///   The "external" distinction is a codegen detail, not a type system concept.
+#[derive(Debug, Clone, Default)]
+pub struct ModuleMetadata {
+    /// Compile-time constant values (e.g., math.PI = 3.14159...)
+    pub constants: std::collections::HashMap<NameId, ConstantValue>,
+    /// Functions implemented via FFI rather than Vole code
+    pub external_funcs: std::collections::HashSet<NameId>,
 }
 
 /// Internal representation of interned types.
@@ -116,8 +142,9 @@ pub enum InternedType {
     TypeParam(NameId),
     TypeParamRef(TypeParamId),
 
-    // Module type
-    Module(ModuleId),
+    // Module type - exports are part of the type identity
+    // Note: Boxed to keep InternedType size small
+    Module(Box<InternedModule>),
 
     // Fallible type: fallible(T, E) - result-like type
     Fallible {
@@ -171,6 +198,9 @@ pub struct TypeArena {
     intern_map: HashMap<InternedType, TypeId>,
     /// Pre-interned primitives for O(1) access
     pub primitives: PrimitiveTypes,
+    /// Module metadata (constants, external_funcs) keyed by ModuleId.
+    /// This data is not part of the type identity, but needed by codegen.
+    module_metadata: std::collections::HashMap<ModuleId, ModuleMetadata>,
 }
 
 impl TypeArena {
@@ -179,6 +209,7 @@ impl TypeArena {
         let mut arena = Self {
             types: Vec::new(),
             intern_map: HashMap::new(),
+            module_metadata: std::collections::HashMap::new(),
             primitives: PrimitiveTypes {
                 // Temporary placeholders - will be filled in below
                 i8: TypeId(0),
@@ -455,9 +486,26 @@ impl TypeArena {
         self.intern(InternedType::TypeParamRef(type_param_id))
     }
 
-    /// Create a module type
-    pub fn module(&mut self, module_id: ModuleId) -> TypeId {
-        self.intern(InternedType::Module(module_id))
+    /// Create a module type with its exports
+    pub fn module(
+        &mut self,
+        module_id: ModuleId,
+        exports: SmallVec<[(NameId, TypeId); 8]>,
+    ) -> TypeId {
+        self.intern(InternedType::Module(Box::new(InternedModule {
+            module_id,
+            exports,
+        })))
+    }
+
+    /// Register module metadata (constants, external_funcs) for codegen
+    pub fn register_module_metadata(&mut self, module_id: ModuleId, metadata: ModuleMetadata) {
+        self.module_metadata.insert(module_id, metadata);
+    }
+
+    /// Get module metadata for codegen
+    pub fn module_metadata(&self, module_id: ModuleId) -> Option<&ModuleMetadata> {
+        self.module_metadata.get(&module_id)
     }
 
     /// Create a fallible type: fallible(success, error)
@@ -715,7 +763,7 @@ impl TypeArena {
             InternedType::Error { type_def_id } => format!("error#{}", type_def_id.index()),
             InternedType::TypeParam(name_id) => format!("TypeParam({:?})", name_id),
             InternedType::TypeParamRef(id) => format!("TypeParamRef#{}", id.index()),
-            InternedType::Module(module_id) => format!("module#{}", module_id.index()),
+            InternedType::Module(m) => format!("module#{}", m.module_id.index()),
             InternedType::Fallible { success, error } => {
                 format!(
                     "fallible({}, {})",
@@ -962,7 +1010,23 @@ impl TypeArena {
 
             LegacyType::TypeParamRef(param_id) => self.type_param_ref(*param_id),
 
-            LegacyType::Module(module_type) => self.module(module_type.module_id),
+            LegacyType::Module(module_type) => {
+                // Convert exports to (NameId, TypeId) pairs
+                let exports: SmallVec<[(NameId, TypeId); 8]> = module_type
+                    .exports
+                    .iter()
+                    .map(|(name_id, ty)| (*name_id, self.from_type(ty)))
+                    .collect();
+
+                // Register module metadata (constants, external_funcs)
+                let metadata = ModuleMetadata {
+                    constants: module_type.constants.clone(),
+                    external_funcs: module_type.external_funcs.clone(),
+                };
+                self.register_module_metadata(module_type.module_id, metadata);
+
+                self.module(module_type.module_id, exports)
+            }
 
             LegacyType::Placeholder(kind) => self.placeholder(kind.clone()),
 
@@ -1097,15 +1161,29 @@ impl TypeArena {
 
             InternedType::TypeParamRef(param_id) => LegacyType::TypeParamRef(*param_id),
 
-            InternedType::Module(module_id) => {
-                // Note: We lose exports/constants/external_funcs info here -
-                // only module_id is stored in TypeArena. For full module type,
-                // lookup from Analyzer's module state is needed.
+            InternedType::Module(m) => {
+                // Reconstruct exports from interned types
+                let exports_map: std::collections::HashMap<NameId, LegacyType> = m
+                    .exports
+                    .iter()
+                    .map(|(name_id, type_id)| (*name_id, self.to_type(*type_id)))
+                    .collect();
+
+                // Get metadata (constants, external_funcs) from arena storage
+                let metadata = self.module_metadata(m.module_id);
+                let (constants, external_funcs) = match metadata {
+                    Some(meta) => (meta.constants.clone(), meta.external_funcs.clone()),
+                    None => (
+                        std::collections::HashMap::new(),
+                        std::collections::HashSet::new(),
+                    ),
+                };
+
                 LegacyType::Module(ModuleType {
-                    module_id: *module_id,
-                    exports: std::collections::HashMap::new(),
-                    constants: std::collections::HashMap::new(),
-                    external_funcs: std::collections::HashSet::new(),
+                    module_id: m.module_id,
+                    exports: exports_map,
+                    constants,
+                    external_funcs,
                 })
             }
 

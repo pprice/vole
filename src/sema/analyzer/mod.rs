@@ -174,9 +174,6 @@ pub struct Analyzer {
     /// Maps expression node IDs to their interned type handles for O(1) equality.
     /// Converted to LegacyType at boundaries when passed to codegen.
     expr_types: HashMap<NodeId, Type>,
-    /// Module types that bypass arena conversion (arena loses exports/constants).
-    /// These are merged directly into ExpressionData as LegacyType::Module.
-    module_type_cache: HashMap<NodeId, LegacyType>,
     /// Methods added via implement blocks
     pub implement_registry: ImplementRegistry,
     /// Resolved method calls for codegen
@@ -247,7 +244,6 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             expr_types: HashMap::new(),
-            module_type_cache: HashMap::new(),
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
@@ -320,16 +316,11 @@ impl Analyzer {
     /// Take ownership of analysis results (consuming self)
     pub fn into_analysis_results(self) -> AnalysisOutput {
         // Convert Type handles to LegacyType for codegen compatibility
-        let mut expr_types_legacy: HashMap<NodeId, LegacyType> = self
+        let expr_types_legacy: HashMap<NodeId, LegacyType> = self
             .expr_types
             .into_iter()
             .map(|(id, ty)| (id, self.type_arena.to_type(ty.0)))
             .collect();
-
-        // Merge module_type_cache - these bypass the arena to preserve exports/constants
-        for (id, ty) in self.module_type_cache {
-            expr_types_legacy.insert(id, ty);
-        }
 
         let module_expr_types_legacy: FxHashMap<String, HashMap<NodeId, LegacyType>> = self
             .module_expr_types
@@ -364,11 +355,6 @@ impl Analyzer {
     /// Record the resolved type for an expression, returning the type for chaining.
     /// Interns the LegacyType to a Type handle for O(1) storage and comparison.
     fn record_expr_type(&mut self, expr: &Expr, ty: LegacyType) -> LegacyType {
-        // Module types bypass the arena - it loses exports/constants/external_funcs.
-        // Store them directly in module_type_cache for merging in into_analysis_results.
-        if matches!(&ty, LegacyType::Module(_)) {
-            self.module_type_cache.insert(expr.id, ty.clone());
-        }
         let type_id = self.type_arena.from_type(&ty);
         self.expr_types.insert(expr.id, Type(type_id));
         ty
