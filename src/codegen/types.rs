@@ -21,6 +21,7 @@ use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, substitute_type};
 use crate::sema::type_arena::TypeArena;
 use crate::sema::types::NominalType;
+use crate::sema::types::Type as VoleType;
 use crate::sema::{EntityRegistry, FunctionType, LegacyType, PrimitiveType, TypeId, TypeKey};
 
 // Re-export box_interface_value for centralized access to all boxing helpers
@@ -190,8 +191,23 @@ impl<'a> CompileCtx<'a> {
     }
 
     /// Look up expression type, checking module-specific expr_types if compiling module code.
-    /// Returns an owned LegacyType (converted from interned Type handle).
-    pub fn get_expr_type(&self, node_id: &NodeId) -> Option<LegacyType> {
+    /// Returns the interned Type handle.
+    pub fn get_expr_type(&self, node_id: &NodeId) -> Option<VoleType> {
+        // When compiling module code, NodeIds are relative to that module's program
+        // Use module-specific expr_types if available
+        if let Some(module_path) = self.current_module
+            && let Some(module_types) = self.analyzed.query().expr_data().module_types(module_path)
+            && let Some(ty) = module_types.get(node_id)
+        {
+            return Some(*ty);
+        }
+        // Fall back to main program expr_types via query interface
+        self.analyzed.query().type_of(*node_id)
+    }
+
+    /// Look up expression type, converting to LegacyType.
+    /// Use this when you need the full recursive type structure.
+    pub fn get_expr_type_legacy(&self, node_id: &NodeId) -> Option<LegacyType> {
         // When compiling module code, NodeIds are relative to that module's program
         // Use module-specific expr_types if available
         if let Some(module_path) = self.current_module
@@ -203,7 +219,7 @@ impl<'a> CompileCtx<'a> {
             return Some(arena.borrow().to_type(ty.0));
         }
         // Fall back to main program expr_types via query interface
-        self.analyzed.query().type_of(*node_id)
+        self.analyzed.query().type_of_legacy(*node_id)
     }
 }
 

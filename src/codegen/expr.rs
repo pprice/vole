@@ -40,10 +40,10 @@ impl Cg<'_, '_, '_> {
         match &expr.kind {
             ExprKind::IntLiteral(n) => {
                 // Look up inferred type from semantic analysis for bidirectional type inference
-                // Uses get_expr_type helper to check module-specific expr_types when compiling prelude
+                // Uses get_expr_type_legacy helper to check module-specific expr_types when compiling prelude
                 let vole_type = self
                     .ctx
-                    .get_expr_type(&expr.id)
+                    .get_expr_type_legacy(&expr.id)
                     .unwrap_or(LegacyType::Primitive(PrimitiveType::I64));
                 Ok(self.int_const(*n, vole_type))
             }
@@ -51,7 +51,7 @@ impl Cg<'_, '_, '_> {
                 // Look up inferred type from semantic analysis for bidirectional type inference
                 let vole_type = self
                     .ctx
-                    .get_expr_type(&expr.id)
+                    .get_expr_type_legacy(&expr.id)
                     .unwrap_or(LegacyType::Primitive(PrimitiveType::F64));
                 Ok(self.float_const(*n, vole_type))
             }
@@ -94,7 +94,7 @@ impl Cg<'_, '_, '_> {
                     .ctx
                     .analyzed
                     .query()
-                    .type_of(expr.id)
+                    .type_of_legacy(expr.id)
                     .unwrap_or(LegacyType::unknown());
                 Ok(CompiledValue {
                     value: self.builder.ins().iconst(types::I64, 0),
@@ -118,7 +118,7 @@ impl Cg<'_, '_, '_> {
             let ty = self.builder.func.dfg.value_type(val);
 
             // Check for narrowed type from semantic analysis
-            if let Some(ref narrowed_type) = self.ctx.get_expr_type(&expr.id)
+            if let Some(ref narrowed_type) = self.ctx.get_expr_type_legacy(&expr.id)
                 && matches!(vole_type, LegacyType::Union(_))
                 && !matches!(narrowed_type, LegacyType::Union(_))
             {
@@ -159,7 +159,8 @@ impl Cg<'_, '_, '_> {
                 }
             }
             Ok(value)
-        } else if let Some(LegacyType::Function(func_type)) = self.ctx.get_expr_type(&expr.id) {
+        } else if let Some(LegacyType::Function(func_type)) = self.ctx.get_expr_type_legacy(&expr.id)
+        {
             // Identifier refers to a named function - create a closure wrapper
             self.function_reference(sym, func_type)
         } else {
@@ -390,7 +391,7 @@ impl Cg<'_, '_, '_> {
             .ctx
             .analyzed
             .query()
-            .type_of(expr.id)
+            .type_of_legacy(expr.id)
             .unwrap_or(LegacyType::unknown());
 
         // If it's a tuple, use stack allocation
@@ -484,7 +485,7 @@ impl Cg<'_, '_, '_> {
             .ctx
             .analyzed
             .query()
-            .type_of(element.id)
+            .type_of_legacy(element.id)
             .unwrap_or(LegacyType::unknown());
 
         // Compile the element once
@@ -520,7 +521,7 @@ impl Cg<'_, '_, '_> {
             self.ctx
                 .analyzed
                 .query()
-                .type_of(expr.id)
+                .type_of_legacy(expr.id)
                 .unwrap_or(LegacyType::FixedArray {
                     element: Box::new(elem_type),
                     size: count,
@@ -1433,7 +1434,7 @@ impl Cg<'_, '_, '_> {
             .ctx
             .analyzed
             .query()
-            .type_of(if_expr.then_branch.id)
+            .type_of_legacy(if_expr.then_branch.id)
             .unwrap_or(LegacyType::Void);
 
         let result_cranelift_type = type_to_cranelift(&result_type, self.ctx.pointer_type);

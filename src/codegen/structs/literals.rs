@@ -41,7 +41,7 @@ impl Cg<'_, '_, '_> {
             .ctx
             .analyzed
             .query()
-            .type_of(expr.id)
+            .type_of_legacy(expr.id)
             .unwrap_or_else(|| metadata.vole_type.clone());
         let field_slots = metadata.field_slots.clone();
 

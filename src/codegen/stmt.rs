@@ -363,7 +363,7 @@ impl Cg<'_, '_, '_> {
                     self.for_range(for_stmt, range)
                 } else {
                     // Check if iterable is an Iterator type or string type
-                    let iterable_type = self.ctx.get_expr_type(&for_stmt.iterable.id);
+                    let iterable_type = self.ctx.get_expr_type_legacy(&for_stmt.iterable.id);
                     let is_iterator = iterable_type
                         .as_ref()
                         .is_some_and(|ty| self.is_iterator_type(ty));

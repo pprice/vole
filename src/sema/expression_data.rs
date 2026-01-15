@@ -81,17 +81,17 @@ impl ExpressionData {
         }
     }
 
-    /// Get the type of an expression by its NodeId.
-    /// Converts the interned Type back to LegacyType for codegen compatibility.
-    pub fn get_type(&self, node: NodeId) -> Option<LegacyType> {
+    /// Get the type of an expression by its NodeId (returns interned Type handle).
+    pub fn get_type(&self, node: NodeId) -> Option<Type> {
+        self.types.get(&node).copied()
+    }
+
+    /// Get the type of an expression, converting to LegacyType.
+    /// Use this when you need the full recursive type structure.
+    pub fn get_type_as_legacy(&self, node: NodeId) -> Option<LegacyType> {
         self.types
             .get(&node)
             .map(|ty| self.type_arena.borrow().to_type(ty.0))
-    }
-
-    /// Get the raw Type handle for an expression (for callers that work with Type directly)
-    pub fn get_type_handle(&self, node: NodeId) -> Option<Type> {
-        self.types.get(&node).copied()
     }
 
     /// Set the type of an expression (takes LegacyType, interns it)

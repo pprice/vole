@@ -17,7 +17,7 @@ use crate::sema::generic::{
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_table::TypeKey;
-use crate::sema::types::LegacyType;
+use crate::sema::types::{LegacyType, Type};
 
 /// Information about a call site, bundling all call-related data.
 #[derive(Debug, Clone)]
@@ -68,11 +68,17 @@ impl<'a> ProgramQuery<'a> {
     // Expression queries
     // =========================================================================
 
-    /// Get the type of an expression by its NodeId.
-    /// Returns an owned LegacyType (converted from the interned Type handle).
+    /// Get the type of an expression by its NodeId (returns interned Type handle).
     #[must_use]
-    pub fn type_of(&self, node: NodeId) -> Option<LegacyType> {
+    pub fn type_of(&self, node: NodeId) -> Option<Type> {
         self.expr_data.get_type(node)
+    }
+
+    /// Get the type of an expression, converting to LegacyType.
+    /// Use this when you need the full recursive type structure.
+    #[must_use]
+    pub fn type_of_legacy(&self, node: NodeId) -> Option<LegacyType> {
+        self.expr_data.get_type_as_legacy(node)
     }
 
     /// Get the resolved method at a call site
@@ -107,7 +113,7 @@ impl<'a> ProgramQuery<'a> {
     #[must_use]
     pub fn call_info(&self, node: NodeId) -> CallInfo<'a> {
         CallInfo {
-            result_type: self.type_of(node),
+            result_type: self.type_of_legacy(node),
             method: self.method_at(node),
             monomorph: self.monomorph_for(node),
         }

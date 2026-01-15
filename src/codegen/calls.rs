@@ -511,7 +511,7 @@ impl Cg<'_, '_, '_> {
                         .get_external_func(callee_name);
                     let vole_type = self
                         .ctx
-                        .get_expr_type(&call_expr_id)
+                        .get_expr_type_legacy(&call_expr_id)
                         .or_else(|| {
                             ext_info
                                 .and_then(|info| info.return_type.as_ref().map(|t| (**t).clone()))
@@ -593,7 +593,7 @@ impl Cg<'_, '_, '_> {
                 // Fall back to declared type for non-generic externals.
                 let vole_type = self
                     .ctx
-                    .get_expr_type(&call_expr_id)
+                    .get_expr_type_legacy(&call_expr_id)
                     .or_else(|| {
                         ext_info.and_then(|info| info.return_type.as_ref().map(|t| (**t).clone()))
                     })
