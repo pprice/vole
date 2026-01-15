@@ -90,7 +90,10 @@ pub enum LegacyType {
     Structural(StructuralType),
 }
 
-/// Type alias for migration - allows existing code to keep using `Type`
+/// Type alias for migration - allows existing code to keep using `Type`.
+///
+/// Once migration to LegacyType is complete, this will be replaced with:
+/// `pub struct Type(pub crate::sema::type_arena::TypeId);`
 pub type Type = LegacyType;
 
 /// Structural type - defines shape constraints for duck typing
