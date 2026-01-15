@@ -421,7 +421,7 @@ impl Analyzer {
                     let return_type = self
                         .current_function_return
                         .expect("yield only valid inside function");
-                    let return_type_legacy = self.type_arena.to_type(return_type.0);
+                    let return_type_legacy = self.type_arena.borrow().to_type(return_type.0);
                     let found = self.type_display(&return_type_legacy);
                     self.add_error(
                         SemanticError::YieldInNonGenerator {
@@ -434,7 +434,7 @@ impl Analyzer {
                 };
 
                 // Type check the yield expression against the Iterator element type
-                let element_type_legacy = self.type_arena.to_type(element_type.0);
+                let element_type_legacy = self.type_arena.borrow().to_type(element_type.0);
                 let yield_type = self.check_expr_expecting(
                     &yield_expr.value,
                     Some(&element_type_legacy),

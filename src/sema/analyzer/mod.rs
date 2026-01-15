@@ -211,9 +211,10 @@ pub struct Analyzer {
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
     module_cache: Option<Rc<RefCell<ModuleCache>>>,
-    /// Type arena for interned types (O(1) equality, reduced allocations).
-    /// Part of the Phase 3 TypeArena migration.
-    pub type_arena: TypeArena,
+    /// Shared type arena for interned types (O(1) equality, reduced allocations).
+    /// Shared via Rc<RefCell> so sub-analyzers use the same arena, making TypeIds
+    /// valid across all analyzers and eliminating conversion at cache boundaries.
+    pub type_arena: Rc<RefCell<TypeArena>>,
 }
 
 /// Result of looking up a method on a type via EntityRegistry
@@ -260,7 +261,7 @@ impl Analyzer {
             entity_registry: EntityRegistry::new(),
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,
-            type_arena: TypeArena::new(),
+            type_arena: Rc::new(RefCell::new(TypeArena::new())),
         };
 
         // Register primitives in EntityRegistry so they can have static methods
@@ -278,9 +279,14 @@ impl Analyzer {
     /// Create an analyzer with a shared module cache.
     /// The cache is shared across multiple Analyzer instances to avoid
     /// re-analyzing the same modules (prelude, stdlib, user imports).
+    /// The analyzer uses the TypeArena from the cache to ensure TypeIds remain valid.
     pub fn with_cache(_file: &str, _source: &str, cache: Rc<RefCell<ModuleCache>>) -> Self {
+        // Get the shared arena from the cache BEFORE borrowing cache again
+        let shared_arena = cache.borrow().type_arena();
         let mut analyzer = Self::new(_file, _source);
         analyzer.module_cache = Some(cache);
+        // Use the cache's arena instead of the freshly created one
+        analyzer.type_arena = shared_arena;
         analyzer
     }
 
@@ -319,7 +325,7 @@ impl Analyzer {
         let expr_types_legacy: HashMap<NodeId, LegacyType> = self
             .expr_types
             .into_iter()
-            .map(|(id, ty)| (id, self.type_arena.to_type(ty.0)))
+            .map(|(id, ty)| (id, self.type_arena.borrow().to_type(ty.0)))
             .collect();
 
         let module_expr_types_legacy: FxHashMap<String, HashMap<NodeId, LegacyType>> = self
@@ -328,7 +334,7 @@ impl Analyzer {
             .map(|(module, types)| {
                 let converted: HashMap<NodeId, LegacyType> = types
                     .into_iter()
-                    .map(|(id, ty)| (id, self.type_arena.to_type(ty.0)))
+                    .map(|(id, ty)| (id, self.type_arena.borrow().to_type(ty.0)))
                     .collect();
                 (module, converted)
             })
@@ -355,7 +361,7 @@ impl Analyzer {
     /// Record the resolved type for an expression, returning the type for chaining.
     /// Interns the LegacyType to a Type handle for O(1) storage and comparison.
     fn record_expr_type(&mut self, expr: &Expr, ty: LegacyType) -> LegacyType {
-        let type_id = self.type_arena.from_type(&ty);
+        let type_id = self.type_arena.borrow_mut().from_type(&ty);
         self.expr_types.insert(expr.id, Type(type_id));
         ty
     }
@@ -510,7 +516,7 @@ impl Analyzer {
     fn get_variable_type(&self, sym: Symbol) -> Option<LegacyType> {
         // Check overrides first (for narrowed types inside if-blocks)
         if let Some(ty) = self.type_overrides.get(&sym) {
-            return Some(self.type_arena.to_type(ty.0));
+            return Some(self.type_arena.borrow().to_type(ty.0));
         }
         // Then check scope
         self.scope.get(sym).map(|v| v.ty.clone())
@@ -692,7 +698,7 @@ impl Analyzer {
                             self.register_type_alias(let_stmt.name, aliased_type, interner);
                         }
 
-                        let var_type_id = self.type_arena.from_type(&var_type);
+                        let var_type_id = self.type_arena.borrow_mut().from_type(&var_type);
                         self.globals.insert(let_stmt.name, Type(var_type_id));
                         self.scope.define(
                             let_stmt.name,
@@ -1268,18 +1274,18 @@ impl Analyzer {
         };
 
         // Convert LegacyType to Type for storage
-        let return_type_id = self.type_arena.from_type(return_type);
+        let return_type_id = self.type_arena.borrow_mut().from_type(return_type);
         self.current_function_return = Some(Type(return_type_id));
 
         // Set error type context if this is a fallible function
         if let LegacyType::Fallible(ft) = return_type {
-            let error_type_id = self.type_arena.from_type(&ft.error_type);
+            let error_type_id = self.type_arena.borrow_mut().from_type(&ft.error_type);
             self.current_function_error_type = Some(Type(error_type_id));
         }
 
         // Set generator context if return type is Iterator<T>
         if let Some(element_type) = self.extract_iterator_element_type(return_type, interner) {
-            let element_type_id = self.type_arena.from_type(&element_type);
+            let element_type_id = self.type_arena.borrow_mut().from_type(&element_type);
             self.current_generator_element_type = Some(Type(element_type_id));
         }
 

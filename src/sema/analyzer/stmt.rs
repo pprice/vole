@@ -151,7 +151,7 @@ impl Analyzer {
                 let parent = std::mem::take(&mut self.scope);
                 self.scope = Scope::with_parent(parent);
                 if let Some((sym, narrowed_type, _)) = &narrowing_info {
-                    let narrowed_type_id = self.type_arena.from_type(narrowed_type);
+                    let narrowed_type_id = self.type_arena.borrow_mut().from_type(narrowed_type);
                     self.type_overrides.insert(*sym, Type(narrowed_type_id));
                 }
                 self.check_block(&if_stmt.then_branch, interner)?;
@@ -178,12 +178,12 @@ impl Analyzer {
                             .collect();
                         if remaining.len() == 1 {
                             // Single type remaining - narrow to that
-                            let narrow_id = self.type_arena.from_type(&remaining[0]);
+                            let narrow_id = self.type_arena.borrow_mut().from_type(&remaining[0]);
                             self.type_overrides.insert(*sym, Type(narrow_id));
                         } else if remaining.len() > 1 {
                             // Multiple types remaining - narrow to smaller union
                             let narrow_type = LegacyType::Union(remaining.into());
-                            let narrow_id = self.type_arena.from_type(&narrow_type);
+                            let narrow_id = self.type_arena.borrow_mut().from_type(&narrow_type);
                             self.type_overrides.insert(*sym, Type(narrow_id));
                         }
                     }
@@ -258,7 +258,7 @@ impl Analyzer {
                 let expected_value_type = self.current_function_return.as_ref().map(|expected| {
                     // If expected is fallible, extract success type for comparison
                     // A `return value` statement returns the success type, not the full fallible type
-                    let expected_legacy = self.type_arena.to_type(expected.0);
+                    let expected_legacy = self.type_arena.borrow().to_type(expected.0);
                     match expected_legacy {
                         LegacyType::Fallible(ft) => (*ft.success_type).clone(),
                         other => other,
@@ -487,7 +487,7 @@ impl Analyzer {
 
         // Verify that raised error type is compatible with declared error type
         let stmt_error_name = interner.resolve(stmt.error_name);
-        let error_type_legacy = self.type_arena.to_type(error_type.0);
+        let error_type_legacy = self.type_arena.borrow().to_type(error_type.0);
         let is_compatible = match &error_type_legacy {
             LegacyType::Nominal(NominalType::Error(declared_info)) => {
                 // Single error type - must match exactly
@@ -568,7 +568,7 @@ impl Analyzer {
             );
             return Ok(success_type);
         };
-        let current_error_legacy = self.type_arena.to_type(current_error.0);
+        let current_error_legacy = self.type_arena.borrow().to_type(current_error.0);
 
         // Check that the error type is compatible with the function's error type
         if !self.error_type_compatible(&error_type, &current_error_legacy) {

@@ -10,8 +10,9 @@
 
 use crate::frontend::{Interner, NodeId, Program};
 use crate::identity::NameTable;
+use crate::sema::TypeArena;
 use crate::sema::resolution::ResolvedMethod;
-use crate::sema::types::{FunctionType, LegacyType, ModuleType};
+use crate::sema::types::{FunctionType, ModuleType, Type};
 use crate::sema::{EntityRegistry, ImplementRegistry};
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -28,9 +29,9 @@ pub struct CachedModule {
     /// Module type (exports, constants, external functions) - only for user imports
     pub module_type: Option<ModuleType>,
     /// Expression types from analysis.
-    /// Note: Stored as LegacyType because TypeIds are arena-specific and cannot
-    /// be shared across analyzers. Converted to/from Type at cache boundaries.
-    pub expr_types: HashMap<NodeId, LegacyType>,
+    /// Stored as Type (interned handles) - valid because TypeArena is shared
+    /// across all analyzers via Rc<RefCell<TypeArena>>.
+    pub expr_types: HashMap<NodeId, Type>,
     /// Method resolutions from analysis
     pub method_resolutions: HashMap<NodeId, ResolvedMethod>,
     /// Entity registry contributions (types, methods, fields)
@@ -47,23 +48,39 @@ pub struct CachedModule {
 ///
 /// Thread-local cache that can be shared across multiple Analyzer instances.
 /// Use `Rc<RefCell<ModuleCache>>` to share between analyzers in the same thread.
-#[derive(Default)]
+/// The cache includes a shared TypeArena so that TypeIds in cached entries remain
+/// valid across all Analyzers that use this cache.
 pub struct ModuleCache {
     /// Cached modules keyed by import path (e.g., "std:prelude/string", "std:math")
     entries: HashMap<String, CachedModule>,
+    /// Shared type arena - all analyzers using this cache must share this arena
+    /// so that TypeIds in cached entries remain valid.
+    type_arena: Rc<RefCell<TypeArena>>,
+}
+
+impl Default for ModuleCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ModuleCache {
-    /// Create a new empty cache.
+    /// Create a new empty cache with a fresh TypeArena.
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
+            type_arena: Rc::new(RefCell::new(TypeArena::new())),
         }
     }
 
     /// Create a shareable cache wrapped in Rc<RefCell>.
     pub fn shared() -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(Self::new()))
+    }
+
+    /// Get the shared TypeArena that must be used by all Analyzers using this cache.
+    pub fn type_arena(&self) -> Rc<RefCell<TypeArena>> {
+        self.type_arena.clone()
     }
 
     /// Check if a module is cached.

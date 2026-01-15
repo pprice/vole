@@ -112,7 +112,7 @@ impl Analyzer {
 
             // Apply type narrowing if scrutinee is an identifier and pattern provides narrowing
             if let (Some(sym), Some(narrow_ty)) = (scrutinee_sym, &effective_narrowed) {
-                let narrow_ty_id = self.type_arena.from_type(narrow_ty);
+                let narrow_ty_id = self.type_arena.borrow_mut().from_type(narrow_ty);
                 self.type_overrides.insert(sym, Type(narrow_ty_id));
             }
 

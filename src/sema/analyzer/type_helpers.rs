@@ -17,8 +17,9 @@ impl Analyzer {
     /// Create a primitive type through the arena
     #[inline]
     pub(crate) fn ty_prim(&mut self, p: PrimitiveType) -> LegacyType {
-        let id = self.type_arena.primitive(p);
-        self.type_arena.to_type(id)
+        let arena = self.type_arena.borrow_mut();
+        let id = arena.primitive(p);
+        arena.to_type(id)
     }
 
     /// Create i64 type through the arena
@@ -54,72 +55,78 @@ impl Analyzer {
     /// Create void type through the arena
     #[inline]
     pub(crate) fn ty_void(&mut self) -> LegacyType {
-        let id = self.type_arena.void();
-        self.type_arena.to_type(id)
+        let arena = self.type_arena.borrow_mut();
+        let id = arena.void();
+        arena.to_type(id)
     }
 
     /// Create nil type through the arena
     #[inline]
     pub(crate) fn ty_nil(&mut self) -> LegacyType {
-        let id = self.type_arena.nil();
-        self.type_arena.to_type(id)
+        let arena = self.type_arena.borrow_mut();
+        let id = arena.nil();
+        arena.to_type(id)
     }
 
     /// Create done type through the arena
     #[inline]
     pub(crate) fn ty_done(&mut self) -> LegacyType {
-        let id = self.type_arena.done();
-        self.type_arena.to_type(id)
+        let arena = self.type_arena.borrow_mut();
+        let id = arena.done();
+        arena.to_type(id)
     }
 
     /// Create range type through the arena
     #[inline]
     pub(crate) fn ty_range(&mut self) -> LegacyType {
-        let id = self.type_arena.range();
-        self.type_arena.to_type(id)
+        let arena = self.type_arena.borrow_mut();
+        let id = arena.range();
+        arena.to_type(id)
     }
 
     /// Create metatype (type) through the arena
     #[inline]
     pub(crate) fn ty_type(&mut self) -> LegacyType {
-        let id = self.type_arena.metatype();
-        self.type_arena.to_type(id)
+        let arena = self.type_arena.borrow_mut();
+        let id = arena.metatype();
+        arena.to_type(id)
     }
 
     /// Create an array type through the arena
     #[inline]
     pub(crate) fn ty_array(&mut self, element: &LegacyType) -> LegacyType {
-        let elem_id = self.type_arena.from_type(element);
-        let arr_id = self.type_arena.array(elem_id);
-        self.type_arena.to_type(arr_id)
+        let mut arena = self.type_arena.borrow_mut();
+        let elem_id = arena.from_type(element);
+        let arr_id = arena.array(elem_id);
+        arena.to_type(arr_id)
     }
 
     /// Create a tuple type through the arena
     #[inline]
     pub(crate) fn ty_tuple(&mut self, elements: Vec<LegacyType>) -> LegacyType {
-        let elem_ids: Vec<ArenaTypeId> = elements
-            .iter()
-            .map(|t| self.type_arena.from_type(t))
-            .collect();
-        let tuple_id = self.type_arena.tuple(elem_ids);
-        self.type_arena.to_type(tuple_id)
+        let mut arena = self.type_arena.borrow_mut();
+        let elem_ids: Vec<ArenaTypeId> = elements.iter().map(|t| arena.from_type(t)).collect();
+        let tuple_id = arena.tuple(elem_ids);
+        arena.to_type(tuple_id)
     }
 
     /// Create an optional type through the arena (T | nil)
     #[inline]
     #[allow(unused)] // Will be used in Phase 3.3+ migration
     pub(crate) fn ty_optional(&mut self, inner: &LegacyType) -> LegacyType {
-        let inner_id = self.type_arena.from_type(inner);
-        let opt_id = self.type_arena.optional(inner_id);
-        self.type_arena.to_type(opt_id)
+        let mut arena = self.type_arena.borrow_mut();
+        let inner_id = arena.from_type(inner);
+        let opt_id = arena.optional(inner_id);
+        arena.to_type(opt_id)
     }
 
     /// Create an invalid/error type for propagation (error already reported).
     /// Use `ty_invalid_traced` for unexpected cases that should be logged.
     #[inline]
     pub(crate) fn ty_invalid(&mut self) -> LegacyType {
-        let id = self.type_arena.invalid();
-        self.type_arena.to_type(id)
+        let arena = self.type_arena.borrow_mut();
+        let id = arena.invalid();
+        arena.to_type(id)
     }
 
     /// Create an invalid/error type with tracing for debugging.
@@ -127,8 +134,9 @@ impl Analyzer {
     #[inline]
     pub(crate) fn ty_invalid_traced(&mut self, reason: &str) -> LegacyType {
         tracing::warn!(reason, "creating invalid type");
-        let id = self.type_arena.invalid();
-        self.type_arena.to_type(id)
+        let arena = self.type_arena.borrow_mut();
+        let id = arena.invalid();
+        arena.to_type(id)
     }
 
     // ========== Arena TypeId operations ==========
@@ -140,13 +148,13 @@ impl Analyzer {
     #[inline]
     #[allow(unused)] // Will be used in Phase 4+ migration
     pub(crate) fn type_to_id(&mut self, ty: &LegacyType) -> ArenaTypeId {
-        self.type_arena.from_type(ty)
+        self.type_arena.borrow_mut().from_type(ty)
     }
 
     /// Convert TypeId to Type
     #[inline]
     #[allow(unused)] // Will be used in Phase 4+ migration
     pub(crate) fn id_to_type(&self, id: ArenaTypeId) -> LegacyType {
-        self.type_arena.to_type(id)
+        self.type_arena.borrow().to_type(id)
     }
 }
