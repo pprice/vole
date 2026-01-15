@@ -19,40 +19,30 @@ use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, substitute_type};
-use crate::sema::type_arena::TypeArena;
+use crate::sema::implement_registry::TypeId as ImplTypeId;
+use crate::sema::type_arena::{TypeArena, TypeId};
 use crate::sema::types::NominalType;
-use crate::sema::types::Type as VoleType;
-use crate::sema::{EntityRegistry, FunctionType, LegacyType, PrimitiveType, TypeId, TypeKey};
+use crate::sema::{EntityRegistry, FunctionType, LegacyType, PrimitiveType, TypeKey};
 
 // Re-export box_interface_value for centralized access to all boxing helpers
 pub(crate) use super::interface_vtable::box_interface_value;
 
 /// Compiled value with its type
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct CompiledValue {
     pub value: Value,
     pub ty: Type,
-    /// The Vole type of this value (needed to distinguish strings/arrays from regular I64)
-    pub vole_type: LegacyType,
+    /// The Vole type of this value (interned TypeId handle - use arena to query)
+    pub type_id: TypeId,
 }
 
 impl CompiledValue {
-    /// Create a void return value (zero i64)
-    pub fn void(builder: &mut FunctionBuilder) -> Self {
-        let zero = builder.ins().iconst(types::I64, 0);
-        Self {
-            value: zero,
-            ty: types::I64,
-            vole_type: LegacyType::Void,
-        }
-    }
-
     /// Create a new CompiledValue with a different value but the same types
     pub fn with_value(&self, value: Value) -> Self {
         Self {
             value,
             ty: self.ty,
-            vole_type: self.vole_type.clone(),
+            type_id: self.type_id,
         }
     }
 }
@@ -145,12 +135,11 @@ pub(crate) struct CompileCtx<'a> {
     /// Class and record metadata for struct literals, field access, and method calls
     pub type_metadata: &'a HashMap<Symbol, TypeMetadata>,
     /// Implement block method info for primitive and named types
-    pub impl_method_infos: &'a HashMap<(TypeId, NameId), MethodInfo>,
+    pub impl_method_infos: &'a HashMap<(ImplTypeId, NameId), MethodInfo>,
     /// Static method info keyed by (TypeDefId, method_name)
     pub static_method_infos: &'a HashMap<(TypeDefId, NameId), MethodInfo>,
     /// Interface vtable registry (interface + concrete type -> data id)
-    pub interface_vtables:
-        &'a RefCell<crate::codegen::interface_vtable::InterfaceVtableRegistry>,
+    pub interface_vtables: &'a RefCell<crate::codegen::interface_vtable::InterfaceVtableRegistry>,
     /// Current function's return type (needed for raise statements in fallible functions)
     pub current_function_return_type: Option<LegacyType>,
     /// Registry of native functions for external method calls
@@ -191,18 +180,18 @@ impl<'a> CompileCtx<'a> {
     }
 
     /// Look up expression type, checking module-specific expr_types if compiling module code.
-    /// Returns the interned Type handle.
-    pub fn get_expr_type(&self, node_id: &NodeId) -> Option<VoleType> {
+    /// Returns the interned TypeId handle.
+    pub fn get_expr_type(&self, node_id: &NodeId) -> Option<TypeId> {
         // When compiling module code, NodeIds are relative to that module's program
         // Use module-specific expr_types if available
         if let Some(module_path) = self.current_module
             && let Some(module_types) = self.analyzed.query().expr_data().module_types(module_path)
             && let Some(ty) = module_types.get(node_id)
         {
-            return Some(*ty);
+            return Some(ty.0);
         }
         // Fall back to main program expr_types via query interface
-        self.analyzed.query().type_of(*node_id)
+        self.analyzed.query().type_of(*node_id).map(|t| t.0)
     }
 
     /// Look up expression type, converting to LegacyType.
@@ -1004,6 +993,7 @@ pub(crate) fn convert_to_type(
     builder: &mut FunctionBuilder,
     val: CompiledValue,
     target: Type,
+    arena: &Rc<RefCell<TypeArena>>,
 ) -> Value {
     if val.ty == target {
         return val.value;
@@ -1029,7 +1019,8 @@ pub(crate) fn convert_to_type(
 
     // Integer widening - use uextend for unsigned types, sextend for signed
     if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
-        if val.vole_type.is_unsigned() {
+        let legacy = arena.borrow().to_type(val.type_id);
+        if legacy.is_unsigned() {
             return builder.ins().uextend(target, val.value);
         } else {
             return builder.ins().sextend(target, val.value);
@@ -1050,10 +1041,12 @@ pub(crate) fn value_to_word(
     value: &CompiledValue,
     pointer_type: Type,
     heap_alloc_ref: Option<FuncRef>,
+    arena: &Rc<RefCell<TypeArena>>,
 ) -> Result<Value, String> {
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
-    let needs_box = type_size(&value.vole_type, pointer_type) > word_bytes;
+    let legacy_type = arena.borrow().to_type(value.type_id);
+    let needs_box = type_size(&legacy_type, pointer_type) > word_bytes;
 
     if needs_box {
         // If the Cranelift type is already a pointer and the Vole type needs boxing,
@@ -1067,10 +1060,9 @@ pub(crate) fn value_to_word(
                 CodegenError::missing_resource("heap allocator for interface boxing").into(),
             );
         };
-        let size_val = builder.ins().iconst(
-            pointer_type,
-            type_size(&value.vole_type, pointer_type) as i64,
-        );
+        let size_val = builder
+            .ins()
+            .iconst(pointer_type, type_size(&legacy_type, pointer_type) as i64);
         let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
         let alloc_ptr = builder.inst_results(alloc_call)[0];
         builder
@@ -1079,7 +1071,7 @@ pub(crate) fn value_to_word(
         return Ok(alloc_ptr);
     }
 
-    let word = match value.vole_type {
+    let word = match legacy_type {
         LegacyType::Primitive(PrimitiveType::F64) => {
             builder
                 .ins()

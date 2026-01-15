@@ -23,14 +23,15 @@ use super::types::{
 };
 use super::{FunctionKey, FunctionRegistry, RuntimeFn};
 
-/// Compile a string literal by calling vole_string_new
+/// Compile a string literal by calling vole_string_new.
+/// Returns the raw Cranelift Value - caller should wrap with string_value() for CompiledValue.
 pub(crate) fn compile_string_literal(
     builder: &mut FunctionBuilder,
     s: &str,
     pointer_type: Type,
     module: &mut JITModule,
     func_registry: &FunctionRegistry,
-) -> Result<CompiledValue, String> {
+) -> Result<Value, String> {
     // Get the vole_string_new function
     let func_id = func_registry
         .runtime_key(RuntimeFn::StringNew)
@@ -50,63 +51,19 @@ pub(crate) fn compile_string_literal(
 
     // Call vole_string_new(data, len) -> *mut RcString
     let call = builder.ins().call(func_ref, &[data_val, len_val]);
-    let result = builder.inst_results(call)[0];
-
-    Ok(CompiledValue {
-        value: result,
-        ty: pointer_type,
-        vole_type: LegacyType::Primitive(PrimitiveType::String),
-    })
-}
-
-/// Convert a compiled value to a string by calling the appropriate vole_*_to_string function
-#[allow(dead_code)] // Used by compiler.rs during migration
-pub(crate) fn value_to_string(
-    builder: &mut FunctionBuilder,
-    val: CompiledValue,
-    _pointer_type: Type,
-    module: &mut JITModule,
-    func_registry: &FunctionRegistry,
-) -> Result<Value, String> {
-    // If already a string, return as-is
-    if matches!(val.vole_type, LegacyType::Primitive(PrimitiveType::String)) {
-        return Ok(val.value);
-    }
-
-    let (runtime, call_val) = if val.ty == types::F64 {
-        (RuntimeFn::F64ToString, val.value)
-    } else if val.ty == types::I8 {
-        (RuntimeFn::BoolToString, val.value)
-    } else {
-        // Extend smaller integer types to I64
-        let extended = if val.ty.is_int() && val.ty != types::I64 {
-            builder.ins().sextend(types::I64, val.value)
-        } else {
-            val.value
-        };
-        (RuntimeFn::I64ToString, extended)
-    };
-
-    let func_id = func_registry
-        .runtime_key(runtime)
-        .and_then(|key| func_registry.func_id(key))
-        .ok_or_else(|| format!("{} not found", runtime.name()))?;
-    let func_ref = module.declare_func_in_func(func_id, builder.func);
-
-    let call = builder.ins().call(func_ref, &[call_val]);
     Ok(builder.inst_results(call)[0])
 }
-
 impl Cg<'_, '_, '_> {
     /// Compile a string literal
     pub fn string_literal(&mut self, s: &str) -> Result<CompiledValue, String> {
-        compile_string_literal(
+        let value = compile_string_literal(
             self.builder,
             s,
             self.ctx.pointer_type,
             self.ctx.module,
             self.ctx.func_registry,
-        )
+        )?;
+        Ok(self.string_value(value))
     }
 
     /// Compile an interpolated string
@@ -148,25 +105,26 @@ impl Cg<'_, '_, '_> {
 
     /// Convert a value to a string
     fn value_to_string(&mut self, val: CompiledValue) -> Result<Value, String> {
-        if matches!(val.vole_type, LegacyType::Primitive(PrimitiveType::String)) {
+        if self.is_string(val.type_id) {
             return Ok(val.value);
         }
 
         // Handle arrays
-        if matches!(val.vole_type, LegacyType::Array(_)) {
+        if self.is_array(val.type_id) {
             return self.call_runtime(RuntimeFn::ArrayI64ToString, &[val.value]);
         }
 
         // Handle nil type directly
-        if matches!(val.vole_type, LegacyType::Nil) {
+        if self.is_nil(val.type_id) {
             return self.call_runtime(RuntimeFn::NilToString, &[]);
         }
 
         // Handle optionals (unions with nil variant)
-        if let LegacyType::Union(variants) = &val.vole_type
-            && let Some(nil_idx) = variants.iter().position(|v| matches!(v, LegacyType::Nil))
-        {
-            return self.optional_to_string(val.value, variants, nil_idx);
+        if let Some(nil_idx) = self.find_nil_variant(val.type_id) {
+            let legacy = self.to_legacy(val.type_id);
+            if let LegacyType::Union(variants) = &legacy {
+                return self.optional_to_string(val.value, variants, nil_idx);
+            }
         }
 
         let (runtime, call_val) = if val.ty == types::F64 {
@@ -234,7 +192,7 @@ impl Cg<'_, '_, '_> {
         let inner_compiled = CompiledValue {
             value: inner_val,
             ty: inner_cr_type,
-            vole_type: inner_type,
+            type_id: self.intern_type(&inner_type),
         };
         let some_str = self.value_to_string(inner_compiled)?;
         self.builder.ins().jump(merge_block, &[some_str.into()]);
@@ -294,7 +252,7 @@ impl Cg<'_, '_, '_> {
             let obj = CompiledValue {
                 value,
                 ty: type_to_cranelift(vole_type, self.ctx.pointer_type),
-                vole_type: vole_type.clone(),
+                type_id: self.intern_type(vole_type),
             };
             return self.interface_dispatch_call_args_by_type_def_id(
                 &obj,
@@ -347,12 +305,12 @@ impl Cg<'_, '_, '_> {
             }
 
             // If it's a function type, call as closure
-            if let LegacyType::Function(func_type) = &lambda_val.vole_type {
-                return self.call_closure_value(lambda_val.value, func_type.clone(), call);
+            if let Some(func_type) = self.unwrap_function(lambda_val.type_id) {
+                return self.call_closure_value(lambda_val.value, func_type, call);
             }
 
             // If it's an interface type (functional interface), call via vtable
-            if let LegacyType::Nominal(NominalType::Interface(iface)) = &lambda_val.vole_type
+            if let Some(iface) = self.unwrap_interface_type(lambda_val.type_id)
                 && let Some(method_id) = self
                     .ctx
                     .analyzed
@@ -528,7 +486,7 @@ impl Cg<'_, '_, '_> {
                             &native_func.signature.return_type,
                             self.ctx.pointer_type,
                         ),
-                        vole_type,
+                        type_id: self.intern_type(&vole_type),
                     });
                 }
             }
@@ -609,7 +567,7 @@ impl Cg<'_, '_, '_> {
                         &native_func.signature.return_type,
                         self.ctx.pointer_type,
                     ),
-                    vole_type,
+                    type_id: self.intern_type(&vole_type),
                 });
             }
         }
@@ -674,7 +632,7 @@ impl Cg<'_, '_, '_> {
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            Ok(self.typed_value(results[0], return_type))
+            Ok(self.typed_value(results[0], &return_type))
         }
     }
 
@@ -682,8 +640,8 @@ impl Cg<'_, '_, '_> {
     fn indirect_call(&mut self, call: &CallExpr) -> Result<CompiledValue, String> {
         let callee = self.expr(&call.callee)?;
 
-        if let LegacyType::Function(func_type) = &callee.vole_type {
-            return self.call_closure_value(callee.value, func_type.clone(), call);
+        if let Some(func_type) = self.unwrap_function(callee.type_id) {
+            return self.call_closure_value(callee.value, func_type, call);
         }
 
         Err(CodegenError::type_mismatch("call expression", "function", "non-function").into())
@@ -699,50 +657,49 @@ impl Cg<'_, '_, '_> {
         let arg = self.expr(&call.args[0])?;
 
         // Dispatch based on argument type
-        let (runtime, call_arg) =
-            if matches!(arg.vole_type, LegacyType::Primitive(PrimitiveType::String)) {
-                (
-                    if newline {
-                        RuntimeFn::PrintlnString
-                    } else {
-                        RuntimeFn::PrintString
-                    },
-                    arg.value,
-                )
-            } else if arg.ty == types::F64 {
-                (
-                    if newline {
-                        RuntimeFn::PrintlnF64
-                    } else {
-                        RuntimeFn::PrintF64
-                    },
-                    arg.value,
-                )
-            } else if arg.ty == types::I8 {
-                (
-                    if newline {
-                        RuntimeFn::PrintlnBool
-                    } else {
-                        RuntimeFn::PrintBool
-                    },
-                    arg.value,
-                )
-            } else {
-                // Extend smaller integer types to I64
-                let extended = if arg.ty.is_int() && arg.ty != types::I64 {
-                    self.builder.ins().sextend(types::I64, arg.value)
+        let (runtime, call_arg) = if self.is_string(arg.type_id) {
+            (
+                if newline {
+                    RuntimeFn::PrintlnString
                 } else {
-                    arg.value
-                };
-                (
-                    if newline {
-                        RuntimeFn::PrintlnI64
-                    } else {
-                        RuntimeFn::PrintI64
-                    },
-                    extended,
-                )
+                    RuntimeFn::PrintString
+                },
+                arg.value,
+            )
+        } else if arg.ty == types::F64 {
+            (
+                if newline {
+                    RuntimeFn::PrintlnF64
+                } else {
+                    RuntimeFn::PrintF64
+                },
+                arg.value,
+            )
+        } else if arg.ty == types::I8 {
+            (
+                if newline {
+                    RuntimeFn::PrintlnBool
+                } else {
+                    RuntimeFn::PrintBool
+                },
+                arg.value,
+            )
+        } else {
+            // Extend smaller integer types to I64
+            let extended = if arg.ty.is_int() && arg.ty != types::I64 {
+                self.builder.ins().sextend(types::I64, arg.value)
+            } else {
+                arg.value
             };
+            (
+                if newline {
+                    RuntimeFn::PrintlnI64
+                } else {
+                    RuntimeFn::PrintI64
+                },
+                extended,
+            )
+        };
 
         self.call_runtime_void(runtime, &[call_arg])?;
         Ok(self.void_value())
@@ -874,8 +831,7 @@ impl Cg<'_, '_, '_> {
             let compiled = self.expr(arg)?;
             let compiled = if matches!(param_type, LegacyType::Nominal(NominalType::Interface(_))) {
                 box_interface_value(self.builder, self.ctx, compiled, param_type)?
-            } else if matches!(param_type, LegacyType::Union(_))
-                && !matches!(&compiled.vole_type, LegacyType::Union(_))
+            } else if matches!(param_type, LegacyType::Union(_)) && !self.is_union(compiled.type_id)
             {
                 // Box concrete type into union representation
                 self.construct_union(compiled, param_type)?
@@ -891,7 +847,7 @@ impl Cg<'_, '_, '_> {
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            Ok(self.typed_value(results[0], func_type.return_type.as_ref().clone()))
+            Ok(self.typed_value(results[0], func_type.return_type.as_ref()))
         }
     }
 
@@ -952,7 +908,7 @@ impl Cg<'_, '_, '_> {
                     &native_func.signature.return_type,
                     self.ctx.pointer_type,
                 ),
-                vole_type: return_type,
+                type_id: self.intern_type(&return_type),
             })
         }
     }

@@ -42,6 +42,7 @@ pub(super) fn construct_union(
     value: CompiledValue,
     union_type: &LegacyType,
     pointer_type: Type,
+    arena: &std::rc::Rc<std::cell::RefCell<crate::sema::type_arena::TypeArena>>,
 ) -> Result<CompiledValue, String> {
     let LegacyType::Union(variants) = union_type else {
         return Err(
@@ -49,42 +50,46 @@ pub(super) fn construct_union(
         );
     };
 
+    // Convert value's type_id to legacy for comparison
+    let value_legacy_type = arena.borrow().to_type(value.type_id);
+
     // If the value is already the same union type, just return it
-    if &value.vole_type == union_type {
+    if &value_legacy_type == union_type {
         return Ok(value);
     }
 
-    let (tag, actual_value, actual_type) =
-        if let Some(pos) = variants.iter().position(|v| v == &value.vole_type) {
-            (pos, value.value, value.vole_type.clone())
-        } else {
-            let compatible = variants.iter().enumerate().find(|(_, v)| {
-                value.vole_type.is_integer() && v.is_integer() && value.vole_type.can_widen_to(v)
-                    || v.is_integer() && value.vole_type.is_integer()
-            });
+    let (tag, actual_value, actual_type) = if let Some(pos) =
+        variants.iter().position(|v| v == &value_legacy_type)
+    {
+        (pos, value.value, value_legacy_type.clone())
+    } else {
+        let compatible = variants.iter().enumerate().find(|(_, v)| {
+            value_legacy_type.is_integer() && v.is_integer() && value_legacy_type.can_widen_to(v)
+                || v.is_integer() && value_legacy_type.is_integer()
+        });
 
-            match compatible {
-                Some((pos, variant_type)) => {
-                    let target_ty = type_to_cranelift(variant_type, pointer_type);
-                    let narrowed = if target_ty.bytes() < value.ty.bytes() {
-                        builder.ins().ireduce(target_ty, value.value)
-                    } else if target_ty.bytes() > value.ty.bytes() {
-                        builder.ins().sextend(target_ty, value.value)
-                    } else {
-                        value.value
-                    };
-                    (pos, narrowed, variant_type.clone())
-                }
-                None => {
-                    return Err(CodegenError::type_mismatch(
-                        "union variant",
-                        format!("one of {:?}", variants),
-                        format!("{:?}", value.vole_type),
-                    )
-                    .into());
-                }
+        match compatible {
+            Some((pos, variant_type)) => {
+                let target_ty = type_to_cranelift(variant_type, pointer_type);
+                let narrowed = if target_ty.bytes() < value.ty.bytes() {
+                    builder.ins().ireduce(target_ty, value.value)
+                } else if target_ty.bytes() > value.ty.bytes() {
+                    builder.ins().sextend(target_ty, value.value)
+                } else {
+                    value.value
+                };
+                (pos, narrowed, variant_type.clone())
             }
-        };
+            None => {
+                return Err(CodegenError::type_mismatch(
+                    "union variant",
+                    format!("one of {:?}", variants),
+                    format!("{:?}", value_legacy_type),
+                )
+                .into());
+            }
+        }
+    };
 
     let union_size = type_size(union_type, pointer_type);
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -101,10 +106,12 @@ pub(super) fn construct_union(
     }
 
     let ptr = builder.ins().stack_addr(pointer_type, slot, 0);
+    // Intern the union type for the return value
+    let interned_union_type = arena.borrow_mut().from_type(union_type);
     Ok(CompiledValue {
         value: ptr,
         ty: pointer_type,
-        vole_type: union_type.clone(),
+        type_id: interned_union_type,
     })
 }
 
@@ -131,18 +138,20 @@ impl Cg<'_, '_, '_> {
                     LetInit::TypeAlias(_) => return Ok(false),
                 };
                 let init = self.expr(init_expr)?;
+                let init_legacy_type = self.to_legacy(init.type_id);
 
                 let mut declared_type_opt = None;
+                // final_type is LegacyType during computation, converted to VoleType at the end
                 let (mut final_value, mut final_type) = if let Some(ty_expr) = &let_stmt.ty {
                     let declared_type = resolve_type_expr(ty_expr, self.ctx);
                     declared_type_opt = Some(declared_type.clone());
 
                     if matches!(&declared_type, LegacyType::Union(_))
-                        && !matches!(&init.vole_type, LegacyType::Union(_))
+                        && !matches!(&init_legacy_type, LegacyType::Union(_))
                     {
                         let wrapped = self.construct_union(init, &declared_type)?;
-                        (wrapped.value, wrapped.vole_type)
-                    } else if declared_type.is_integer() && init.vole_type.is_integer() {
+                        (wrapped.value, self.to_legacy(wrapped.type_id))
+                    } else if declared_type.is_integer() && init_legacy_type.is_integer() {
                         let declared_cty = type_to_cranelift(&declared_type, self.ctx.pointer_type);
                         let init_cty = init.ty;
                         if declared_cty.bits() < init_cty.bits() {
@@ -155,24 +164,26 @@ impl Cg<'_, '_, '_> {
                             (init.value, declared_type)
                         }
                     } else if declared_type == LegacyType::Primitive(PrimitiveType::F32)
-                        && init.vole_type == LegacyType::Primitive(PrimitiveType::F64)
+                        && init_legacy_type == LegacyType::Primitive(PrimitiveType::F64)
                     {
+                        // f64 -> f32: demote to narrower float
                         let narrowed = self.builder.ins().fdemote(types::F32, init.value);
                         (narrowed, declared_type)
                     } else if declared_type == LegacyType::Primitive(PrimitiveType::F64)
-                        && init.vole_type == LegacyType::Primitive(PrimitiveType::F32)
+                        && init_legacy_type == LegacyType::Primitive(PrimitiveType::F32)
                     {
+                        // f32 -> f64: promote to wider float
                         let widened = self.builder.ins().fpromote(types::F64, init.value);
                         (widened, declared_type)
                     } else if let LegacyType::Nominal(NominalType::Interface(_)) = &declared_type {
                         // For functional interfaces, keep the actual function type from the lambda
                         // This preserves the is_closure flag for proper calling convention
-                        (init.value, init.vole_type)
+                        (init.value, init_legacy_type)
                     } else {
                         (init.value, declared_type)
                     }
                 } else {
-                    (init.value, init.vole_type)
+                    (init.value, init_legacy_type)
                 };
 
                 if let Some(declared_type) = declared_type_opt
@@ -188,12 +199,12 @@ impl Cg<'_, '_, '_> {
                         CompiledValue {
                             value: final_value,
                             ty: type_to_cranelift(&final_type, self.ctx.pointer_type),
-                            vole_type: final_type.clone(),
+                            type_id: self.intern_type(&final_type),
                         },
                         &declared_type,
                     )?;
                     final_value = boxed.value;
-                    final_type = boxed.vole_type;
+                    final_type = self.to_legacy(boxed.type_id);
                 }
 
                 let cranelift_ty = type_to_cranelift(&final_type, self.ctx.pointer_type);
@@ -206,9 +217,14 @@ impl Cg<'_, '_, '_> {
             Stmt::LetTuple(let_tuple) => {
                 // Compile the initializer - should be a tuple, fixed array, or record
                 let init = self.expr(&let_tuple.init)?;
+                let init_legacy_type = self.to_legacy(init.type_id);
 
                 // Recursively compile the destructuring pattern
-                self.compile_destructure_pattern(&let_tuple.pattern, init.value, &init.vole_type)?;
+                self.compile_destructure_pattern(
+                    &let_tuple.pattern,
+                    init.value,
+                    &init_legacy_type,
+                )?;
                 Ok(false)
             }
 
@@ -221,15 +237,16 @@ impl Cg<'_, '_, '_> {
                 let return_type = self.ctx.current_function_return_type.clone();
                 if let Some(value) = &ret.value {
                     let compiled = self.expr(value)?;
+                    let compiled_legacy_type = self.to_legacy(compiled.type_id);
 
                     // Box concrete types to interface representation if needed
                     // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
                     if let Some(LegacyType::Nominal(NominalType::Interface(_))) = &return_type
                         && !matches!(
-                            compiled.vole_type,
+                            compiled_legacy_type,
                             LegacyType::Nominal(NominalType::Interface(_))
                         )
-                        && !matches!(compiled.vole_type, LegacyType::RuntimeIterator(_))
+                        && !matches!(compiled_legacy_type, LegacyType::RuntimeIterator(_))
                     {
                         let return_type =
                             return_type.as_ref().expect("return type should be present");
@@ -467,6 +484,7 @@ impl Cg<'_, '_, '_> {
     /// Compile a for loop over an array
     fn for_array(&mut self, for_stmt: &frontend::ForStmt) -> Result<bool, String> {
         let arr = self.expr(&for_stmt.iterable)?;
+        let arr_legacy_type = self.to_legacy(arr.type_id);
 
         let len_val = self.call_runtime(RuntimeFn::ArrayLen, &[arr.value])?;
 
@@ -474,7 +492,7 @@ impl Cg<'_, '_, '_> {
         let zero = self.builder.ins().iconst(types::I64, 0);
         self.builder.def_var(idx_var, zero);
 
-        let elem_type = match &arr.vole_type {
+        let elem_type = match &arr_legacy_type {
             LegacyType::Array(elem) => elem.as_ref().clone(),
             _ => LegacyType::Primitive(PrimitiveType::I64),
         };
@@ -559,7 +577,8 @@ impl Cg<'_, '_, '_> {
     /// Compile a for loop over an iterator
     fn for_iterator(&mut self, for_stmt: &frontend::ForStmt) -> Result<bool, String> {
         let iter = self.expr(&for_stmt.iterable)?;
-        let elem_type = self.iterator_element_type(&iter.vole_type);
+        let iter_legacy_type = self.to_legacy(iter.type_id);
+        let elem_type = self.iterator_element_type(&iter_legacy_type);
 
         // Create a stack slot for the out_value parameter
         let slot_data = self.builder.create_sized_stack_slot(StackSlotData::new(
@@ -711,43 +730,47 @@ impl Cg<'_, '_, '_> {
             .into());
         };
 
+        // Convert value's vole_type to legacy for comparisons
+        let value_legacy_type = self.to_legacy(value.type_id);
+
         // If the value is already the same union type, just return it
-        if &value.vole_type == union_type {
+        if &value_legacy_type == union_type {
             return Ok(value);
         }
 
-        let (tag, actual_value, actual_type) = if let Some(pos) =
-            variants.iter().position(|v| v == &value.vole_type)
-        {
-            (pos, value.value, value.vole_type.clone())
-        } else {
-            let compatible = variants.iter().enumerate().find(|(_, v)| {
-                value.vole_type.is_integer() && v.is_integer() && value.vole_type.can_widen_to(v)
-                    || v.is_integer() && value.vole_type.is_integer()
-            });
+        let (tag, actual_value, actual_type) =
+            if let Some(pos) = variants.iter().position(|v| v == &value_legacy_type) {
+                (pos, value.value, value_legacy_type.clone())
+            } else {
+                let compatible = variants.iter().enumerate().find(|(_, v)| {
+                    value_legacy_type.is_integer()
+                        && v.is_integer()
+                        && value_legacy_type.can_widen_to(v)
+                        || v.is_integer() && value_legacy_type.is_integer()
+                });
 
-            match compatible {
-                Some((pos, variant_type)) => {
-                    let target_ty = type_to_cranelift(variant_type, self.ctx.pointer_type);
-                    let narrowed = if target_ty.bytes() < value.ty.bytes() {
-                        self.builder.ins().ireduce(target_ty, value.value)
-                    } else if target_ty.bytes() > value.ty.bytes() {
-                        self.builder.ins().sextend(target_ty, value.value)
-                    } else {
-                        value.value
-                    };
-                    (pos, narrowed, variant_type.clone())
+                match compatible {
+                    Some((pos, variant_type)) => {
+                        let target_ty = type_to_cranelift(variant_type, self.ctx.pointer_type);
+                        let narrowed = if target_ty.bytes() < value.ty.bytes() {
+                            self.builder.ins().ireduce(target_ty, value.value)
+                        } else if target_ty.bytes() > value.ty.bytes() {
+                            self.builder.ins().sextend(target_ty, value.value)
+                        } else {
+                            value.value
+                        };
+                        (pos, narrowed, variant_type.clone())
+                    }
+                    None => {
+                        return Err(CodegenError::type_mismatch(
+                            "union variant",
+                            format!("one of {:?}", variants),
+                            format!("{:?}", value_legacy_type),
+                        )
+                        .into());
+                    }
                 }
-                None => {
-                    return Err(CodegenError::type_mismatch(
-                        "union variant",
-                        format!("one of {:?}", variants),
-                        format!("{:?}", value.vole_type),
-                    )
-                    .into());
-                }
-            }
-        };
+            };
 
         let union_size = type_size(union_type, self.ctx.pointer_type);
         let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
@@ -770,7 +793,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: ptr,
             ty: self.ctx.pointer_type,
-            vole_type: union_type.clone(),
+            type_id: self.intern_type(union_type),
         })
     }
 

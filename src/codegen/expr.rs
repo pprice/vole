@@ -99,7 +99,7 @@ impl Cg<'_, '_, '_> {
                 Ok(CompiledValue {
                     value: self.builder.ins().iconst(types::I64, 0),
                     ty: types::I64,
-                    vole_type,
+                    type_id: self.intern_type(&vole_type),
                 })
             }
             ExprKind::Yield(_) => {
@@ -128,14 +128,14 @@ impl Cg<'_, '_, '_> {
                 return Ok(CompiledValue {
                     value: payload,
                     ty: payload_ty,
-                    vole_type: narrowed_type.clone(),
+                    type_id: self.intern_type(narrowed_type),
                 });
             }
 
             Ok(CompiledValue {
                 value: val,
                 ty,
-                vole_type: vole_type.clone(),
+                type_id: self.intern_type(vole_type),
             })
         } else if let Some(global) = self.ctx.globals.iter().find(|g| g.name == sym) {
             // Compile global's initializer inline (skip type aliases)
@@ -148,18 +148,20 @@ impl Cg<'_, '_, '_> {
             // If the global has a declared interface type, box the value
             if let Some(ref ty_expr) = global.ty {
                 let declared_type = resolve_type_expr(ty_expr, self.ctx);
+                let value_legacy_type = self.to_legacy(value.type_id);
                 if matches!(
                     &declared_type,
                     LegacyType::Nominal(NominalType::Interface(_))
                 ) && !matches!(
-                    &value.vole_type,
+                    &value_legacy_type,
                     LegacyType::Nominal(NominalType::Interface(_))
                 ) {
                     value = box_interface_value(self.builder, self.ctx, value, &declared_type)?;
                 }
             }
             Ok(value)
-        } else if let Some(LegacyType::Function(func_type)) = self.ctx.get_expr_type_legacy(&expr.id)
+        } else if let Some(LegacyType::Function(func_type)) =
+            self.ctx.get_expr_type_legacy(&expr.id)
         {
             // Identifier refers to a named function - create a closure wrapper
             self.function_reference(sym, func_type)
@@ -307,14 +309,16 @@ impl Cg<'_, '_, '_> {
             .call(alloc_ref, &[wrapper_func_addr, zero_captures]);
         let closure_ptr = self.builder.inst_results(alloc_call)[0];
 
-        Ok(CompiledValue {
-            value: closure_ptr,
-            ty: self.ctx.pointer_type,
-            vole_type: LegacyType::Function(crate::sema::FunctionType {
+        let closure_vole_type =
+            self.intern_type(&LegacyType::Function(crate::sema::FunctionType {
                 params: func_type.params,
                 return_type: func_type.return_type,
                 is_closure: true, // Now wrapped as a closure struct
-            }),
+            }));
+        Ok(CompiledValue {
+            value: closure_ptr,
+            ty: self.ctx.pointer_type,
+            type_id: closure_vole_type,
         })
     }
 
@@ -354,10 +358,11 @@ impl Cg<'_, '_, '_> {
                 })?;
                 let var = *var;
                 let var_type = var_type.clone();
+                let value_legacy_type = self.to_legacy(value.type_id);
 
                 if matches!(&var_type, LegacyType::Nominal(NominalType::Interface(_)))
                     && !matches!(
-                        value.vole_type,
+                        value_legacy_type,
                         LegacyType::Nominal(NominalType::Interface(_))
                     )
                 {
@@ -365,9 +370,9 @@ impl Cg<'_, '_, '_> {
                 }
 
                 let final_value = if matches!(&var_type, LegacyType::Union(_))
-                    && !matches!(&value.vole_type, LegacyType::Union(_))
+                    && !matches!(&value_legacy_type, LegacyType::Union(_))
                 {
-                    let wrapped = self.construct_union(value.clone(), &var_type)?;
+                    let wrapped = self.construct_union(value, &var_type)?;
                     wrapped.value
                 } else {
                     value.value
@@ -412,15 +417,16 @@ impl Cg<'_, '_, '_> {
 
         for (i, elem) in elements.iter().enumerate() {
             let compiled = self.expr(elem)?;
+            let compiled_legacy_type = self.to_legacy(compiled.type_id);
 
             if i == 0 {
-                elem_type = compiled.vole_type.clone();
+                elem_type = compiled_legacy_type.clone();
             }
 
             let tag_val = self
                 .builder
                 .ins()
-                .iconst(types::I64, array_element_tag(&compiled.vole_type));
+                .iconst(types::I64, array_element_tag(&compiled_legacy_type));
             let value_bits = convert_to_i64_for_storage(self.builder, &compiled);
 
             self.builder
@@ -431,7 +437,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: arr_ptr,
             ty: self.ctx.pointer_type,
-            vole_type: LegacyType::Array(Box::new(elem_type)),
+            type_id: self.intern_type(&LegacyType::Array(Box::new(elem_type))),
         })
     }
 
@@ -469,7 +475,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: ptr,
             ty: self.ctx.pointer_type,
-            vole_type: LegacyType::Tuple(elem_types.to_vec().into()),
+            type_id: self.intern_type(&LegacyType::Tuple(elem_types.to_vec().into())),
         })
     }
 
@@ -517,20 +523,17 @@ impl Cg<'_, '_, '_> {
             .stack_addr(self.ctx.pointer_type, slot, 0);
 
         // Get the full type from sema
-        let vole_type =
-            self.ctx
-                .analyzed
-                .query()
-                .type_of_legacy(expr.id)
-                .unwrap_or(LegacyType::FixedArray {
-                    element: Box::new(elem_type),
-                    size: count,
-                });
+        let vole_type = self.ctx.get_expr_type(&expr.id).unwrap_or_else(|| {
+            self.intern_type(&LegacyType::FixedArray {
+                element: Box::new(elem_type),
+                size: count,
+            })
+        });
 
         Ok(CompiledValue {
             value: ptr,
             ty: self.ctx.pointer_type,
-            vole_type,
+            type_id: vole_type,
         })
     }
 
@@ -569,15 +572,16 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: ptr,
             ty: self.ctx.pointer_type,
-            vole_type: LegacyType::Range,
+            type_id: self.intern_type(&LegacyType::Range),
         })
     }
 
     /// Compile an index expression
     fn index(&mut self, object: &Expr, index: &Expr) -> Result<CompiledValue, String> {
         let obj = self.expr(object)?;
+        let obj_legacy_type = self.to_legacy(obj.type_id);
 
-        match &obj.vole_type {
+        match &obj_legacy_type {
             LegacyType::Tuple(elem_types) => {
                 // Tuple indexing - must be constant index (checked in sema)
                 if let ExprKind::IntLiteral(i) = &index.kind {
@@ -595,7 +599,7 @@ impl Cg<'_, '_, '_> {
                     Ok(CompiledValue {
                         value,
                         ty: elem_cr_type,
-                        vole_type: elem_type.clone(),
+                        type_id: self.intern_type(elem_type),
                     })
                 } else {
                     Err("tuple index must be a constant".to_string())
@@ -647,7 +651,7 @@ impl Cg<'_, '_, '_> {
                 Ok(CompiledValue {
                     value,
                     ty: elem_cr_type,
-                    vole_type: (**element).clone(),
+                    type_id: self.intern_type(element),
                 })
             }
             LegacyType::Array(elem) => {
@@ -663,10 +667,10 @@ impl Cg<'_, '_, '_> {
                 Ok(CompiledValue {
                     value: result_value,
                     ty: result_ty,
-                    vole_type: elem_type,
+                    type_id: self.intern_type(&elem_type),
                 })
             }
-            _ => Err(format!("cannot index type {}", obj.vole_type.name())),
+            _ => Err(format!("cannot index type {}", obj_legacy_type.name())),
         }
     }
 
@@ -679,8 +683,9 @@ impl Cg<'_, '_, '_> {
     ) -> Result<CompiledValue, String> {
         let arr = self.expr(object)?;
         let val = self.expr(value)?;
+        let arr_type = self.to_legacy(arr.type_id);
 
-        match &arr.vole_type {
+        match &arr_type {
             LegacyType::FixedArray { size, .. } => {
                 // Fixed array assignment - store directly at offset
                 let elem_size = 8i32; // All elements aligned to 8 bytes
@@ -732,10 +737,11 @@ impl Cg<'_, '_, '_> {
                     .runtime_key(RuntimeFn::ArraySet)
                     .ok_or_else(|| "vole_array_set not found".to_string())?;
                 let set_value_ref = self.func_ref(set_value_key)?;
+                let val_type = self.to_legacy(val.type_id);
                 let tag_val = self
                     .builder
                     .ins()
-                    .iconst(types::I64, array_element_tag(&val.vole_type));
+                    .iconst(types::I64, array_element_tag(&val_type));
                 let value_bits = convert_to_i64_for_storage(self.builder, &val);
 
                 self.builder
@@ -744,10 +750,13 @@ impl Cg<'_, '_, '_> {
 
                 Ok(val)
             }
-            _ => Err(format!(
-                "cannot assign to index of type {}",
-                arr.vole_type.name()
-            )),
+            _ => {
+                let arr_type = self.to_legacy(arr.type_id);
+                Err(format!(
+                    "cannot assign to index of type {}",
+                    arr_type.name()
+                ))
+            }
         }
     }
 
@@ -755,8 +764,9 @@ impl Cg<'_, '_, '_> {
     fn is_expr(&mut self, is_expr: &crate::frontend::IsExpr) -> Result<CompiledValue, String> {
         let value = self.expr(&is_expr.value)?;
         let tested_type = resolve_type_expr(&is_expr.type_expr, self.ctx);
+        let value_legacy_type = self.to_legacy(value.type_id);
 
-        if let LegacyType::Union(variants) = &value.vole_type {
+        if let LegacyType::Union(variants) = &value_legacy_type {
             let expected_tag = variants
                 .iter()
                 .position(|v| v == &tested_type)
@@ -771,7 +781,7 @@ impl Cg<'_, '_, '_> {
 
             Ok(self.bool_value(result))
         } else {
-            Ok(self.bool_const(value.vole_type == tested_type))
+            Ok(self.bool_const(value_legacy_type == tested_type))
         }
     }
 
@@ -782,7 +792,8 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         pattern_type: &LegacyType,
     ) -> Result<Option<Value>, String> {
-        if let LegacyType::Union(variants) = &scrutinee.vole_type {
+        let scrutinee_type = self.to_legacy(scrutinee.type_id);
+        if let LegacyType::Union(variants) = &scrutinee_type {
             let expected_tag = variants
                 .iter()
                 .position(|v| v == pattern_type)
@@ -804,7 +815,7 @@ impl Cg<'_, '_, '_> {
             Ok(Some(result))
         } else {
             // Non-union scrutinee - pattern matches if types are equal
-            if scrutinee.vole_type == *pattern_type {
+            if scrutinee_type == *pattern_type {
                 Ok(None) // Always matches
             } else {
                 // Never matches
@@ -843,8 +854,9 @@ impl Cg<'_, '_, '_> {
         nc: &crate::frontend::NullCoalesceExpr,
     ) -> Result<CompiledValue, String> {
         let value = self.expr(&nc.value)?;
+        let value_type = self.to_legacy(value.type_id);
 
-        let LegacyType::Union(variants) = &value.vole_type else {
+        let LegacyType::Union(variants) = &value_type else {
             return Err(CodegenError::type_mismatch(
                 "null coalesce operator",
                 "optional type",
@@ -868,9 +880,7 @@ impl Cg<'_, '_, '_> {
         let not_nil_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
 
-        let result_vole_type = value
-            .vole_type
-            .unwrap_optional_or_panic("unwrap expression result type");
+        let result_vole_type = value_type.unwrap_optional_or_panic("unwrap expression result type");
         let cranelift_type = type_to_cranelift(&result_vole_type, self.ctx.pointer_type);
         self.builder.append_block_param(merge_block, cranelift_type);
 
@@ -917,7 +927,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: result,
             ty: cranelift_type,
-            vole_type: result_vole_type,
+            type_id: self.intern_type(&result_vole_type),
         })
     }
 
@@ -944,7 +954,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value,
             ty: cranelift_ty,
-            vole_type: binding.vole_type.clone(),
+            type_id: self.intern_type(&binding.vole_type),
         })
     }
 
@@ -971,7 +981,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: value.value,
             ty: cranelift_ty,
-            vole_type: binding.vole_type.clone(),
+            type_id: self.intern_type(&binding.vole_type),
         })
     }
 
@@ -979,7 +989,8 @@ impl Cg<'_, '_, '_> {
     #[tracing::instrument(skip(self, match_expr), fields(arms = match_expr.arms.len()))]
     pub fn match_expr(&mut self, match_expr: &MatchExpr) -> Result<CompiledValue, String> {
         let scrutinee = self.expr(&match_expr.scrutinee)?;
-        tracing::trace!(scrutinee_type = ?scrutinee.vole_type, "match scrutinee");
+        let scrutinee_type = self.to_legacy(scrutinee.type_id);
+        tracing::trace!(scrutinee_type = ?scrutinee_type, "match scrutinee");
 
         let merge_block = self.builder.create_block();
         self.builder.append_block_param(merge_block, types::I64);
@@ -1025,7 +1036,7 @@ impl Cg<'_, '_, '_> {
                         // Regular identifier binding
                         let var = self.builder.declare_var(scrutinee.ty);
                         self.builder.def_var(var, scrutinee.value);
-                        arm_variables.insert(*name, (var, scrutinee.vole_type.clone()));
+                        arm_variables.insert(*name, (var, scrutinee_type.clone()));
                         None
                     }
                 }
@@ -1041,7 +1052,7 @@ impl Cg<'_, '_, '_> {
 
                     // Use Vole type (not Cranelift type) to determine comparison method
                     let cmp = self.compile_equality_check(
-                        &scrutinee.vole_type,
+                        &scrutinee_type,
                         scrutinee.value,
                         lit_val.value,
                     )?;
@@ -1074,7 +1085,7 @@ impl Cg<'_, '_, '_> {
                     // If there's an inner pattern, we need to extract payload and bind it
                     if let Some(inner_pat) = inner {
                         // Extract the success type from scrutinee's vole_type
-                        if let LegacyType::Fallible(ft) = &scrutinee.vole_type {
+                        if let LegacyType::Fallible(ft) = &scrutinee_type {
                             let success_type = &*ft.success_type;
                             let payload_ty = type_to_cranelift(success_type, self.ctx.pointer_type);
                             let payload = self.builder.ins().load(
@@ -1106,7 +1117,7 @@ impl Cg<'_, '_, '_> {
                 }
                 Pattern::Tuple { elements, .. } => {
                     // Tuple destructuring in match - extract elements and bind
-                    if let LegacyType::Tuple(elem_types) = &scrutinee.vole_type {
+                    if let LegacyType::Tuple(elem_types) = &scrutinee_type {
                         let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
                         for (i, pattern) in elements.iter().enumerate() {
                             if let Pattern::Identifier { name, .. } = pattern {
@@ -1151,8 +1162,8 @@ impl Cg<'_, '_, '_> {
 
                     // For typed patterns on union types, we must defer field extraction
                     // until after the pattern check passes to avoid accessing invalid memory
-                    let is_conditional_extract = pattern_check.is_some()
-                        && matches!(&scrutinee.vole_type, LegacyType::Union(_));
+                    let is_conditional_extract =
+                        pattern_check.is_some() && matches!(&scrutinee_type, LegacyType::Union(_));
 
                     if is_conditional_extract {
                         // Create an extraction block that only runs if pattern matches
@@ -1181,7 +1192,7 @@ impl Cg<'_, '_, '_> {
                             );
                             (payload, pt.clone())
                         } else {
-                            (scrutinee.value, scrutinee.vole_type.clone())
+                            (scrutinee.value, scrutinee_type.clone())
                         };
 
                         // Extract and bind fields
@@ -1209,7 +1220,7 @@ impl Cg<'_, '_, '_> {
                         // Non-conditional case: extract fields directly
                         // Determine the value to extract fields from
                         let (field_source, field_source_type) =
-                            if let LegacyType::Union(_) = &scrutinee.vole_type {
+                            if let LegacyType::Union(_) = &scrutinee_type {
                                 if let Some(ref pt) = pattern_type {
                                     let payload = self.builder.ins().load(
                                         types::I64,
@@ -1219,10 +1230,10 @@ impl Cg<'_, '_, '_> {
                                     );
                                     (payload, pt.clone())
                                 } else {
-                                    (scrutinee.value, scrutinee.vole_type.clone())
+                                    (scrutinee.value, scrutinee_type.clone())
                                 }
                             } else {
-                                (scrutinee.value, scrutinee.vole_type.clone())
+                                (scrutinee.value, scrutinee_type.clone())
                             };
 
                         // Extract and bind fields
@@ -1286,7 +1297,7 @@ impl Cg<'_, '_, '_> {
             let _ = std::mem::replace(&mut *self.vars, saved_vars);
 
             if i == 0 {
-                result_vole_type = body_val.vole_type.clone();
+                result_vole_type = self.to_legacy(body_val.type_id);
             }
 
             let result_val = if body_val.ty != types::I64 {
@@ -1328,7 +1339,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: result,
             ty: result_ty,
-            vole_type: result_vole_type,
+            type_id: self.intern_type(&result_vole_type),
         })
     }
 
@@ -1339,9 +1350,10 @@ impl Cg<'_, '_, '_> {
     fn try_propagate(&mut self, inner: &Expr) -> Result<CompiledValue, String> {
         // Compile the inner fallible expression
         let fallible = self.expr(inner)?;
+        let fallible_type = self.to_legacy(fallible.type_id);
 
         // Get type info
-        let success_type = match &fallible.vole_type {
+        let success_type = match &fallible_type {
             LegacyType::Fallible(ft) => (*ft.success_type).clone(),
             _ => {
                 return Err(CodegenError::type_mismatch(
@@ -1406,7 +1418,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: result,
             ty: payload_ty,
-            vole_type: success_type,
+            type_id: self.intern_type(&success_type),
         })
     }
 
@@ -1493,7 +1505,7 @@ impl Cg<'_, '_, '_> {
             Ok(CompiledValue {
                 value: result,
                 ty: result_cranelift_type,
-                vole_type: result_type,
+                type_id: self.intern_type(&result_type),
             })
         } else {
             Ok(self.void_value())
@@ -1570,7 +1582,8 @@ impl Cg<'_, '_, '_> {
             .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
 
         // Extract error type and bind
-        if let LegacyType::Fallible(ft) = &scrutinee.vole_type {
+        let scrutinee_type = self.to_legacy(scrutinee.type_id);
+        if let LegacyType::Fallible(ft) = &scrutinee_type {
             let error_type = &*ft.error_type;
             let payload_ty = type_to_cranelift(error_type, self.ctx.pointer_type);
             let payload = self.builder.ins().load(
@@ -1594,7 +1607,8 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         tag: Value,
     ) -> Result<Option<Value>, String> {
-        let LegacyType::Fallible(ft) = &scrutinee.vole_type else {
+        let scrutinee_type = self.to_legacy(scrutinee.type_id);
+        let LegacyType::Fallible(ft) = &scrutinee_type else {
             // Not matching on a fallible type
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
@@ -1642,7 +1656,8 @@ impl Cg<'_, '_, '_> {
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
-        let LegacyType::Fallible(ft) = &scrutinee.vole_type else {
+        let scrutinee_type = self.to_legacy(scrutinee.type_id);
+        let LegacyType::Fallible(ft) = &scrutinee_type else {
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 

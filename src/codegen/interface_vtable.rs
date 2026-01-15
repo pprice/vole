@@ -522,15 +522,17 @@ impl InterfaceVtableRegistry {
                     );
                 };
                 let heap_alloc_ref = runtime_heap_alloc_ref(ctx, &mut builder)?;
+                let interned_type = ctx.arena.borrow_mut().from_type(&func_type.return_type);
                 let word = value_to_word(
                     &mut builder,
                     &CompiledValue {
                         value: result,
                         ty: type_to_cranelift(&func_type.return_type, ctx.pointer_type),
-                        vole_type: (*func_type.return_type).clone(),
+                        type_id: interned_type,
                     },
                     ctx.pointer_type,
                     Some(heap_alloc_ref),
+                    ctx.arena,
                 )?;
                 builder.ins().return_(&[word]);
             }
@@ -872,14 +874,15 @@ pub(crate) fn box_interface_value(
         )
     })?;
 
+    let value_legacy_type = ctx.arena.borrow().to_type(value.type_id);
     tracing::debug!(
         interface = %ctx.interner.resolve(interface_name),
-        value_type = ?value.vole_type,
+        value_type = ?value_legacy_type,
         "boxing value as interface"
     );
 
     if matches!(
-        value.vole_type,
+        value_legacy_type,
         LegacyType::Nominal(NominalType::Interface(_))
     ) {
         tracing::debug!("already interface, skip boxing");
@@ -893,27 +896,37 @@ pub(crate) fn box_interface_value(
         .is_external_only(interface_type_id)
     {
         tracing::debug!("external-only interface, skip boxing");
+        let interned_interface = ctx.arena.borrow_mut().from_type(interface_type);
         return Ok(CompiledValue {
             value: value.value,
             ty: ctx.pointer_type,
-            vole_type: interface_type.clone(),
+            type_id: interned_interface,
         });
     }
 
     let heap_alloc_ref = runtime_heap_alloc_ref(ctx, builder)?;
-    let data_word = value_to_word(builder, &value, ctx.pointer_type, Some(heap_alloc_ref))?;
+    let data_word = value_to_word(
+        builder,
+        &value,
+        ctx.pointer_type,
+        Some(heap_alloc_ref),
+        ctx.arena,
+    )?;
+
+    // Get the legacy type for vtable lookup (needs the full type for matching)
+    let value_legacy_type = ctx.arena.borrow().to_type(value.type_id);
 
     // Phase 1: Declare vtable, getting DataId for forward reference
     let vtable_id = ctx.interface_vtables.borrow_mut().get_or_declare(
         ctx,
         interface_name,
         &interface.type_args,
-        &value.vole_type,
+        &value_legacy_type,
     )?;
     // Phase 2+3: Compile wrappers and define vtable data
     ctx.interface_vtables
         .borrow_mut()
-        .ensure_compiled(ctx, interface_name, &value.vole_type)?;
+        .ensure_compiled(ctx, interface_name, &value_legacy_type)?;
     let vtable_gv = ctx.module.declare_data_in_func(vtable_id, builder.func);
     let vtable_ptr = builder.ins().global_value(ctx.pointer_type, vtable_gv);
 
@@ -929,10 +942,11 @@ pub(crate) fn box_interface_value(
         .ins()
         .store(MemFlags::new(), vtable_ptr, iface_ptr, word_bytes as i32);
 
+    let interned_interface = ctx.arena.borrow_mut().from_type(interface_type);
     Ok(CompiledValue {
         value: iface_ptr,
         ty: ctx.pointer_type,
-        vole_type: interface_type.clone(),
+        type_id: interned_interface,
     })
 }
 

@@ -713,7 +713,13 @@ impl TypeArena {
 
     /// Check if this is a closure (function with is_closure=true)
     pub fn is_closure(&self, id: TypeId) -> bool {
-        matches!(self.get(id), InternedType::Function { is_closure: true, .. })
+        matches!(
+            self.get(id),
+            InternedType::Function {
+                is_closure: true,
+                ..
+            }
+        )
     }
 
     /// Check if this is a class type
@@ -778,7 +784,10 @@ impl TypeArena {
     /// Unwrap a class type, returning (type_def_id, type_args)
     pub fn unwrap_class(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
         match self.get(id) {
-            InternedType::Class { type_def_id, type_args } => Some((*type_def_id, type_args)),
+            InternedType::Class {
+                type_def_id,
+                type_args,
+            } => Some((*type_def_id, type_args)),
             _ => None,
         }
     }
@@ -786,7 +795,10 @@ impl TypeArena {
     /// Unwrap a record type, returning (type_def_id, type_args)
     pub fn unwrap_record(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
         match self.get(id) {
-            InternedType::Record { type_def_id, type_args } => Some((*type_def_id, type_args)),
+            InternedType::Record {
+                type_def_id,
+                type_args,
+            } => Some((*type_def_id, type_args)),
             _ => None,
         }
     }
@@ -794,7 +806,10 @@ impl TypeArena {
     /// Unwrap an interface type, returning (type_def_id, type_args)
     pub fn unwrap_interface(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
         match self.get(id) {
-            InternedType::Interface { type_def_id, type_args } => Some((*type_def_id, type_args)),
+            InternedType::Interface {
+                type_def_id,
+                type_args,
+            } => Some((*type_def_id, type_args)),
             _ => None,
         }
     }

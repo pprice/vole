@@ -27,9 +27,7 @@ impl Cg<'_, '_, '_> {
         let left = self.expr(&bin.left)?;
 
         // Handle string concatenation: string + Stringable
-        if bin.op == BinaryOp::Add
-            && matches!(left.vole_type, LegacyType::Primitive(PrimitiveType::String))
-        {
+        if bin.op == BinaryOp::Add && self.is_string(left.type_id) {
             let right = self.expr(&bin.right)?;
             return self.string_concat(left, right);
         }
@@ -47,10 +45,7 @@ impl Cg<'_, '_, '_> {
         right: CompiledValue,
     ) -> Result<CompiledValue, String> {
         // Get the right operand as a string
-        let right_string = if matches!(
-            right.vole_type,
-            LegacyType::Primitive(PrimitiveType::String)
-        ) {
+        let right_string = if self.is_string(right.type_id) {
             // Right is already a string, use it directly
             right.value
         } else {
@@ -69,12 +64,13 @@ impl Cg<'_, '_, '_> {
     /// Returns the resulting string value.
     fn call_to_string(&mut self, val: &CompiledValue) -> Result<Value, String> {
         // Look up the to_string method in the implement registry
-        let type_id = TypeId::from_type(
-            &val.vole_type,
+        let legacy_type = self.to_legacy(val.type_id);
+        let impl_type_id = TypeId::from_type(
+            &legacy_type,
             &self.ctx.analyzed.entity_registry.type_table,
             &self.ctx.analyzed.entity_registry,
         )
-        .ok_or_else(|| format!("Cannot find TypeId for {:?}", val.vole_type))?;
+        .ok_or_else(|| format!("Cannot find TypeId for {:?}", legacy_type))?;
 
         // Look up to_string method via query
         let method_id = self.ctx.analyzed.query().method_name_id_by_str("to_string");
@@ -83,11 +79,11 @@ impl Cg<'_, '_, '_> {
             .ctx
             .analyzed
             .implement_registry
-            .get_method(&type_id, method_id)
+            .get_method(&impl_type_id, method_id)
             .ok_or_else(|| {
                 format!(
                     "to_string method not implemented for type {:?}",
-                    val.vole_type
+                    legacy_type
                 )
             })?;
 
@@ -107,7 +103,7 @@ impl Cg<'_, '_, '_> {
         let method_info = self
             .ctx
             .impl_method_infos
-            .get(&(type_id, method_id))
+            .get(&(impl_type_id, method_id))
             .ok_or_else(|| "to_string method info not found in impl_method_infos".to_string())?;
 
         let func_ref = self.func_ref(method_info.func_key)?;
@@ -203,26 +199,32 @@ impl Cg<'_, '_, '_> {
         // When comparing optional == nil or optional != nil, we need to check the tag
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
             // Check if left is optional and right is nil
-            if left.vole_type.is_optional() && matches!(right.vole_type, LegacyType::Nil) {
+            if self.type_is_optional(left.type_id) && self.is_nil(right.type_id) {
                 return self.optional_nil_compare(left, op);
             }
             // Check if right is optional and left is nil
-            if right.vole_type.is_optional() && matches!(left.vole_type, LegacyType::Nil) {
+            if self.type_is_optional(right.type_id) && self.is_nil(left.type_id) {
                 return self.optional_nil_compare(right, op);
             }
             // Check if left is optional and right is a compatible value type
-            if let Some(inner_type) = left.vole_type.unwrap_optional()
-                && (inner_type == right.vole_type
-                    || (inner_type.is_integer() && right.vole_type.is_integer()))
-            {
-                return self.optional_value_compare(left, right, op);
+            let left_legacy = self.to_legacy(left.type_id);
+            if let Some(inner_type) = left_legacy.unwrap_optional() {
+                let right_legacy = self.to_legacy(right.type_id);
+                if inner_type == right_legacy
+                    || (inner_type.is_integer() && self.type_is_integer(right.type_id))
+                {
+                    return self.optional_value_compare(left, right, op);
+                }
             }
             // Check if right is optional and left is a compatible value type
-            if let Some(inner_type) = right.vole_type.unwrap_optional()
-                && (inner_type == left.vole_type
-                    || (inner_type.is_integer() && left.vole_type.is_integer()))
-            {
-                return self.optional_value_compare(right, left, op);
+            let right_legacy = self.to_legacy(right.type_id);
+            if let Some(inner_type) = right_legacy.unwrap_optional() {
+                let left_legacy = self.to_legacy(left.type_id);
+                if inner_type == left_legacy
+                    || (inner_type.is_integer() && self.type_is_integer(left.type_id))
+                {
+                    return self.optional_value_compare(right, left, op);
+                }
             }
         }
 
@@ -236,11 +238,12 @@ impl Cg<'_, '_, '_> {
             left.ty
         };
 
-        let left_vole_type = left.vole_type.clone();
+        let left_type_id = left.type_id;
+        let left_is_string = self.is_string(left_type_id);
 
         // Convert operands
-        let left_val = convert_to_type(self.builder, left, result_ty);
-        let right_val = convert_to_type(self.builder, right, result_ty);
+        let left_val = convert_to_type(self.builder, left, result_ty, self.ctx.arena);
+        let right_val = convert_to_type(self.builder, right, result_ty, self.ctx.arena);
 
         let result = match op {
             BinaryOp::Add => {
@@ -267,7 +270,7 @@ impl Cg<'_, '_, '_> {
             BinaryOp::Div => {
                 if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fdiv(left_val, right_val)
-                } else if left_vole_type.is_unsigned() {
+                } else if self.type_is_unsigned(left_type_id) {
                     self.builder.ins().udiv(left_val, right_val)
                 } else {
                     self.builder.ins().sdiv(left_val, right_val)
@@ -279,14 +282,14 @@ impl Cg<'_, '_, '_> {
                     let floor = self.builder.ins().floor(div);
                     let mul = self.builder.ins().fmul(floor, right_val);
                     self.builder.ins().fsub(left_val, mul)
-                } else if left_vole_type.is_unsigned() {
+                } else if self.type_is_unsigned(left_type_id) {
                     self.builder.ins().urem(left_val, right_val)
                 } else {
                     self.builder.ins().srem(left_val, right_val)
                 }
             }
             BinaryOp::Eq => {
-                if matches!(left_vole_type, LegacyType::Primitive(PrimitiveType::String)) {
+                if left_is_string {
                     self.string_eq(left_val, right_val)?
                 } else if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fcmp(FloatCC::Equal, left_val, right_val)
@@ -295,7 +298,7 @@ impl Cg<'_, '_, '_> {
                 }
             }
             BinaryOp::Ne => {
-                if matches!(left_vole_type, LegacyType::Primitive(PrimitiveType::String)) {
+                if left_is_string {
                     let eq = self.string_eq(left_val, right_val)?;
                     let one = self.builder.ins().iconst(types::I8, 1);
                     self.builder.ins().isub(one, eq)
@@ -314,7 +317,7 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .fcmp(FloatCC::LessThan, left_val, right_val)
-                } else if left_vole_type.is_unsigned() {
+                } else if self.type_is_unsigned(left_type_id) {
                     self.builder
                         .ins()
                         .icmp(IntCC::UnsignedLessThan, left_val, right_val)
@@ -329,7 +332,7 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .fcmp(FloatCC::GreaterThan, left_val, right_val)
-                } else if left_vole_type.is_unsigned() {
+                } else if self.type_is_unsigned(left_type_id) {
                     self.builder
                         .ins()
                         .icmp(IntCC::UnsignedGreaterThan, left_val, right_val)
@@ -344,7 +347,7 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .fcmp(FloatCC::LessThanOrEqual, left_val, right_val)
-                } else if left_vole_type.is_unsigned() {
+                } else if self.type_is_unsigned(left_type_id) {
                     self.builder
                         .ins()
                         .icmp(IntCC::UnsignedLessThanOrEqual, left_val, right_val)
@@ -359,7 +362,7 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .fcmp(FloatCC::GreaterThanOrEqual, left_val, right_val)
-                } else if left_vole_type.is_unsigned() {
+                } else if self.type_is_unsigned(left_type_id) {
                     self.builder
                         .ins()
                         .icmp(IntCC::UnsignedGreaterThanOrEqual, left_val, right_val)
@@ -375,7 +378,7 @@ impl Cg<'_, '_, '_> {
             BinaryOp::BitXor => self.builder.ins().bxor(left_val, right_val),
             BinaryOp::Shl => self.builder.ins().ishl(left_val, right_val),
             BinaryOp::Shr => {
-                if left_vole_type.is_unsigned() {
+                if self.type_is_unsigned(left_type_id) {
                     self.builder.ins().ushr(left_val, right_val)
                 } else {
                     self.builder.ins().sshr(left_val, right_val)
@@ -394,21 +397,21 @@ impl Cg<'_, '_, '_> {
             _ => result_ty,
         };
 
-        let vole_type = match op {
+        let result_type_id = match op {
             BinaryOp::Eq
             | BinaryOp::Ne
             | BinaryOp::Lt
             | BinaryOp::Gt
             | BinaryOp::Le
-            | BinaryOp::Ge => LegacyType::Primitive(PrimitiveType::Bool),
+            | BinaryOp::Ge => self.bool_type(),
             BinaryOp::And | BinaryOp::Or => unreachable!(),
-            _ => left_vole_type,
+            _ => left_type_id,
         };
 
         Ok(CompiledValue {
             value: result,
             ty: final_ty,
-            vole_type,
+            type_id: result_type_id,
         })
     }
 
@@ -428,7 +431,8 @@ impl Cg<'_, '_, '_> {
         optional: CompiledValue,
         op: BinaryOp,
     ) -> Result<CompiledValue, String> {
-        let LegacyType::Union(variants) = &optional.vole_type else {
+        let optional_legacy = self.to_legacy(optional.type_id);
+        let LegacyType::Union(variants) = &optional_legacy else {
             return Err("optional_nil_compare called on non-union type".into());
         };
 
@@ -469,7 +473,8 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         op: BinaryOp,
     ) -> Result<CompiledValue, String> {
-        let LegacyType::Union(variants) = &optional.vole_type else {
+        let optional_legacy = self.to_legacy(optional.type_id);
+        let LegacyType::Union(variants) = &optional_legacy else {
             return Err("optional_value_compare called on non-union type".into());
         };
 
@@ -491,8 +496,7 @@ impl Cg<'_, '_, '_> {
 
         // Load the payload (at offset 8) with the correct type
         // The payload type matches the inner (non-nil) type of the optional
-        let inner_type = optional
-            .vole_type
+        let inner_type = optional_legacy
             .unwrap_optional()
             .unwrap_or(LegacyType::Primitive(PrimitiveType::I64));
         let payload_cranelift_type = type_to_cranelift(&inner_type, self.ctx.pointer_type);
@@ -575,7 +579,7 @@ impl Cg<'_, '_, '_> {
         let var_type = var_type.clone();
         let current_val = self.builder.use_var(var);
 
-        let current = self.typed_value(current_val, var_type);
+        let current = self.typed_value(current_val, &var_type);
 
         let rhs = self.expr(&compound.value)?;
         let binary_op = compound.op.to_binary_op();
@@ -595,7 +599,8 @@ impl Cg<'_, '_, '_> {
         let arr = self.expr(object)?;
         let idx = self.expr(index)?;
 
-        let elem_type = match &arr.vole_type {
+        let arr_legacy = self.to_legacy(arr.type_id);
+        let elem_type = match &arr_legacy {
             LegacyType::Array(elem) => elem.as_ref().clone(),
             _ => LegacyType::Primitive(PrimitiveType::I64),
         };
@@ -607,7 +612,7 @@ impl Cg<'_, '_, '_> {
         let current = CompiledValue {
             value: current_val,
             ty: current_ty,
-            vole_type: elem_type.clone(),
+            type_id: self.intern_type(&elem_type),
         };
 
         let rhs = self.expr(&compound.value)?;
@@ -644,7 +649,8 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(object)?;
 
         let field_name = self.ctx.interner.resolve(field);
-        let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field_name, self.ctx)?;
+        let obj_legacy = self.to_legacy(obj.type_id);
+        let (slot, field_type) = get_field_slot_and_type(&obj_legacy, field_name, self.ctx)?;
 
         // Load current field
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
@@ -656,7 +662,7 @@ impl Cg<'_, '_, '_> {
         let current = CompiledValue {
             value: current_val,
             ty: cranelift_ty,
-            vole_type: field_type,
+            type_id: self.intern_type(&field_type),
         };
 
         let rhs = self.expr(&compound.value)?;

@@ -13,6 +13,8 @@ use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::implement_registry::ExternalMethodInfo;
+use crate::sema::type_arena::TypeId;
+use crate::sema::types::NominalType;
 use crate::sema::{LegacyType, PrimitiveType};
 use smallvec::SmallVec;
 
@@ -138,6 +140,161 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.captures.is_some()
     }
 
+    // ========== Type interning helpers ==========
+
+    /// Intern a LegacyType to get a TypeId handle
+    pub fn intern_type(&self, ty: &LegacyType) -> TypeId {
+        self.ctx.arena.borrow_mut().from_type(ty)
+    }
+
+    /// Get the interned void type
+    pub fn void_type(&self) -> TypeId {
+        self.ctx.arena.borrow().void()
+    }
+
+    /// Get the interned nil type
+    pub fn nil_type(&self) -> TypeId {
+        self.ctx.arena.borrow().nil()
+    }
+
+    /// Get the interned done type
+    pub fn done_type(&self) -> TypeId {
+        self.ctx.arena.borrow().done()
+    }
+
+    /// Get the interned bool type
+    pub fn bool_type(&self) -> TypeId {
+        self.ctx.arena.borrow().primitives.bool
+    }
+
+    /// Get the interned i64 type
+    pub fn i64_type(&self) -> TypeId {
+        self.ctx.arena.borrow().primitives.i64
+    }
+
+    /// Get the interned string type
+    pub fn string_type(&self) -> TypeId {
+        self.ctx.arena.borrow().primitives.string
+    }
+
+    // ========== Arena query helpers ==========
+
+    /// Check if type is a string
+    pub fn is_string(&self, ty: TypeId) -> bool {
+        self.ctx.arena.borrow().is_string(ty)
+    }
+
+    /// Check if type is nil
+    pub fn is_nil(&self, ty: TypeId) -> bool {
+        self.ctx.arena.borrow().is_nil(ty)
+    }
+
+    /// Check if type is an array
+    pub fn is_array(&self, ty: TypeId) -> bool {
+        self.ctx.arena.borrow().is_array(ty)
+    }
+
+    /// Check if type is a union
+    pub fn is_union(&self, ty: TypeId) -> bool {
+        self.ctx.arena.borrow().is_union(ty)
+    }
+
+    /// Check if type is a function
+    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    pub fn is_function(&self, ty: TypeId) -> bool {
+        self.ctx.arena.borrow().is_function(ty)
+    }
+
+    /// Check if type is an interface
+    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    pub fn is_interface(&self, ty: TypeId) -> bool {
+        self.ctx.arena.borrow().is_interface(ty)
+    }
+
+    /// Check if type is a class
+    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    pub fn is_class(&self, ty: TypeId) -> bool {
+        self.ctx.arena.borrow().is_class(ty)
+    }
+
+    /// Check if type is a record
+    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    pub fn is_record(&self, ty: TypeId) -> bool {
+        self.ctx.arena.borrow().is_record(ty)
+    }
+
+    /// Check if type is fallible
+    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    pub fn is_fallible(&self, ty: TypeId) -> bool {
+        self.ctx.arena.borrow().is_fallible(ty)
+    }
+
+    /// Get union variants as TypeIds (returns None if not a union)
+    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    pub fn get_union_variants(&self, ty: TypeId) -> Option<Vec<TypeId>> {
+        let arena = self.ctx.arena.borrow();
+        arena
+            .unwrap_union(ty)
+            .map(|variants| variants.iter().copied().collect())
+    }
+
+    /// Find the nil variant index in a union (for optional handling)
+    pub fn find_nil_variant(&self, ty: TypeId) -> Option<usize> {
+        let arena = self.ctx.arena.borrow();
+        if let Some(variants) = arena.unwrap_union(ty) {
+            variants.iter().position(|&id| arena.is_nil(id))
+        } else {
+            None
+        }
+    }
+
+    /// Get the LegacyType for a TypeId (for interop with existing code)
+    pub fn to_legacy(&self, ty: TypeId) -> LegacyType {
+        self.ctx.arena.borrow().to_type(ty)
+    }
+
+    /// Unwrap a function type, returning the FunctionType if it is one
+    pub fn unwrap_function(&self, ty: TypeId) -> Option<crate::sema::FunctionType> {
+        if let LegacyType::Function(ft) = self.to_legacy(ty) {
+            Some(ft)
+        } else {
+            None
+        }
+    }
+
+    /// Unwrap an interface type, returning the InterfaceType if it is one
+    pub fn unwrap_interface_type(&self, ty: TypeId) -> Option<crate::sema::types::InterfaceType> {
+        if let LegacyType::Nominal(NominalType::Interface(it)) = self.to_legacy(ty) {
+            Some(it)
+        } else {
+            None
+        }
+    }
+
+    // ========== TypeCompatibility delegation helpers ==========
+    // These delegate to the LegacyType methods for convenience during migration
+
+    /// Check if type is an integer type (signed or unsigned)
+    pub fn type_is_integer(&self, ty: TypeId) -> bool {
+        self.to_legacy(ty).is_integer()
+    }
+
+    /// Check if type is unsigned
+    pub fn type_is_unsigned(&self, ty: TypeId) -> bool {
+        self.to_legacy(ty).is_unsigned()
+    }
+
+    /// Check if type is optional (union with nil)
+    pub fn type_is_optional(&self, ty: TypeId) -> bool {
+        self.to_legacy(ty).is_optional()
+    }
+
+    /// Check if type can widen to another type
+    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    pub fn type_can_widen_to(&self, ty: TypeId, target: &LegacyType) -> bool {
+        self.to_legacy(ty).can_widen_to(target)
+    }
+
     /// Get capture binding for a symbol, if any
     pub fn get_capture(&self, sym: &Symbol) -> Option<&CaptureBinding> {
         self.captures.as_ref()?.bindings.get(sym)
@@ -236,7 +393,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Create a void return value
     pub fn void_value(&mut self) -> CompiledValue {
-        CompiledValue::void(self.builder)
+        let zero = self.builder.ins().iconst(types::I64, 0);
+        CompiledValue {
+            value: zero,
+            ty: types::I64,
+            type_id: self.void_type(),
+        }
     }
 
     // ========== CompiledValue constructors ==========
@@ -246,7 +408,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I8,
-            vole_type: LegacyType::Primitive(PrimitiveType::Bool),
+            type_id: self.bool_type(),
         }
     }
 
@@ -261,7 +423,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I64,
-            vole_type: LegacyType::Primitive(PrimitiveType::I64),
+            type_id: self.i64_type(),
         }
     }
 
@@ -279,7 +441,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty,
-            vole_type,
+            type_id: self.intern_type(&vole_type),
         }
     }
 
@@ -299,7 +461,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty,
-            vole_type,
+            type_id: self.intern_type(&vole_type),
         }
     }
 
@@ -309,7 +471,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I8,
-            vole_type: LegacyType::Nil,
+            type_id: self.nil_type(),
         }
     }
 
@@ -319,7 +481,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I8,
-            vole_type: LegacyType::Done,
+            type_id: self.done_type(),
         }
     }
 
@@ -328,16 +490,28 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: self.ctx.pointer_type,
-            vole_type: LegacyType::Primitive(PrimitiveType::String),
+            type_id: self.string_type(),
         }
     }
 
-    /// Create a CompiledValue with a dynamic Vole type
-    pub fn typed_value(&self, value: Value, vole_type: LegacyType) -> CompiledValue {
+    /// Create a CompiledValue with a dynamic Vole type (interns the type)
+    pub fn typed_value(&self, value: Value, vole_type: &LegacyType) -> CompiledValue {
         CompiledValue {
             value,
-            ty: type_to_cranelift(&vole_type, self.ctx.pointer_type),
-            vole_type,
+            ty: type_to_cranelift(vole_type, self.ctx.pointer_type),
+            type_id: self.intern_type(vole_type),
+        }
+    }
+
+    /// Create a CompiledValue with an already-interned type
+    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    pub fn typed_value_interned(&self, value: Value, type_id: TypeId) -> CompiledValue {
+        // For interned types we need to resolve back to get cranelift type
+        let legacy = self.to_legacy(type_id);
+        CompiledValue {
+            value,
+            ty: type_to_cranelift(&legacy, self.ctx.pointer_type),
+            type_id,
         }
     }
 
@@ -408,7 +582,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             Ok(CompiledValue {
                 value: results[0],
                 ty: type_to_cranelift(return_type, self.ctx.pointer_type),
-                vole_type: return_type.clone(),
+                type_id: self.intern_type(return_type),
             })
         }
     }

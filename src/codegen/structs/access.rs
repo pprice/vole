@@ -17,10 +17,11 @@ impl Cg<'_, '_, '_> {
     #[tracing::instrument(skip(self, fa), fields(field = %self.ctx.interner.resolve(fa.field)))]
     pub fn field_access(&mut self, fa: &FieldAccessExpr) -> Result<CompiledValue, String> {
         let obj = self.expr(&fa.object)?;
-        tracing::trace!(object_type = ?obj.vole_type, "field access on");
+        let obj_type = self.to_legacy(obj.type_id);
+        tracing::trace!(object_type = ?obj_type, "field access on");
 
         // Handle module field access for constants (e.g., math.PI)
-        if let LegacyType::Module(ref module_type) = obj.vole_type {
+        if let LegacyType::Module(ref module_type) = obj_type {
             let field_name = self.ctx.interner.resolve(fa.field);
             let module_path = self
                 .ctx
@@ -39,7 +40,7 @@ impl Cg<'_, '_, '_> {
                         Ok(CompiledValue {
                             value: val,
                             ty: types::F64,
-                            vole_type: LegacyType::Primitive(PrimitiveType::F64),
+                            type_id: self.intern_type(&LegacyType::Primitive(PrimitiveType::F64)),
                         })
                     }
                     ConstantValue::I64(v) => {
@@ -47,7 +48,7 @@ impl Cg<'_, '_, '_> {
                         Ok(CompiledValue {
                             value: val,
                             ty: types::I64,
-                            vole_type: LegacyType::Primitive(PrimitiveType::I64),
+                            type_id: self.intern_type(&LegacyType::Primitive(PrimitiveType::I64)),
                         })
                     }
                     ConstantValue::Bool(v) => {
@@ -55,7 +56,7 @@ impl Cg<'_, '_, '_> {
                         Ok(CompiledValue {
                             value: val,
                             ty: types::I8,
-                            vole_type: LegacyType::Primitive(PrimitiveType::Bool),
+                            type_id: self.intern_type(&LegacyType::Primitive(PrimitiveType::Bool)),
                         })
                     }
                     ConstantValue::String(s) => self.string_literal(s),
@@ -89,7 +90,7 @@ impl Cg<'_, '_, '_> {
         }
 
         let field_name = self.ctx.interner.resolve(fa.field);
-        let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field_name, self.ctx)?;
+        let (slot, field_type) = get_field_slot_and_type(&obj_type, field_name, self.ctx)?;
 
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
 
@@ -98,15 +99,16 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: result_val,
             ty: cranelift_ty,
-            vole_type: field_type,
+            type_id: self.intern_type(&field_type),
         })
     }
 
     pub fn optional_chain(&mut self, oc: &OptionalChainExpr) -> Result<CompiledValue, String> {
         let obj = self.expr(&oc.object)?;
+        let obj_type = self.to_legacy(obj.type_id);
 
         // The object should be an optional type (union with nil)
-        let LegacyType::Union(variants) = &obj.vole_type else {
+        let LegacyType::Union(variants) = &obj_type else {
             return Err(CodegenError::type_mismatch(
                 "optional chain",
                 "optional type",
@@ -135,9 +137,8 @@ impl Cg<'_, '_, '_> {
         let merge_block = self.builder.create_block();
 
         // Get the inner (non-nil) type for field access
-        let inner_type = obj
-            .vole_type
-            .unwrap_optional_or_panic("optional chain field access inner type");
+        let inner_type =
+            obj_type.unwrap_optional_or_panic("optional chain field access inner type");
 
         // Get the field type from the inner type
         let field_name = self.ctx.interner.resolve(oc.field);
@@ -188,7 +189,7 @@ impl Cg<'_, '_, '_> {
         let field_compiled = CompiledValue {
             value: field_val,
             ty: field_cranelift_ty,
-            vole_type: field_type.clone(),
+            type_id: self.intern_type(&field_type),
         };
         let final_value = if field_type.is_optional() {
             // Field is already optional, use as-is
@@ -209,7 +210,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: result,
             ty: cranelift_type,
-            vole_type: result_vole_type,
+            type_id: self.intern_type(&result_vole_type),
         })
     }
 
@@ -220,10 +221,11 @@ impl Cg<'_, '_, '_> {
         value_expr: &Expr,
     ) -> Result<CompiledValue, String> {
         let obj = self.expr(object)?;
+        let obj_type = self.to_legacy(obj.type_id);
         let value = self.expr(value_expr)?;
 
         let field_name = self.ctx.interner.resolve(field);
-        let (slot, field_type) = get_field_slot_and_type(&obj.vole_type, field_name, self.ctx)?;
+        let (slot, field_type) = get_field_slot_and_type(&obj_type, field_name, self.ctx)?;
         let value = if matches!(field_type, LegacyType::Nominal(NominalType::Interface(_))) {
             box_interface_value(self.builder, self.ctx, value, &field_type)?
         } else {

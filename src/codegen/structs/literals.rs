@@ -37,12 +37,13 @@ impl Cg<'_, '_, '_> {
         let type_id = metadata.type_id;
         let field_count = metadata.field_slots.len() as u32;
         // Prefer the type from semantic analysis (handles generic instantiation)
-        let vole_type = self
+        let result_type_legacy = self
             .ctx
             .analyzed
             .query()
             .type_of_legacy(expr.id)
             .unwrap_or_else(|| metadata.vole_type.clone());
+        let result_type_id = self.intern_type(&result_type_legacy);
         let field_slots = metadata.field_slots.clone();
 
         let type_id_val = self.builder.ins().iconst(types::I32, type_id as i64);
@@ -62,7 +63,7 @@ impl Cg<'_, '_, '_> {
         let set_func_ref = self.func_ref(set_key)?;
 
         // Get field types for wrapping optional values
-        let field_types: HashMap<String, LegacyType> = match &vole_type {
+        let field_types: HashMap<String, LegacyType> = match &result_type_legacy {
             LegacyType::Nominal(NominalType::Record(rt)) => {
                 let type_def = self.ctx.analyzed.entity_registry.get_type(rt.type_def_id);
                 if let Some(generic_info) = &type_def.generic_info {
@@ -125,9 +126,10 @@ impl Cg<'_, '_, '_> {
             // If field type is optional (union) and value type is not a union, wrap it
             // Use heap allocation for unions stored in class/record fields since stack slots
             // don't persist beyond the current function's stack frame
+            let value_type_legacy = self.to_legacy(value.type_id);
             let final_value = if let Some(field_type) = field_types.get(init_name) {
                 if matches!(field_type, LegacyType::Union(_))
-                    && !matches!(&value.vole_type, LegacyType::Union(_))
+                    && !matches!(&value_type_legacy, LegacyType::Union(_))
                 {
                     self.construct_union_heap(value, field_type)?
                 } else if matches!(field_type, LegacyType::Nominal(NominalType::Interface(_))) {
@@ -150,7 +152,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: instance_ptr,
             ty: self.ctx.pointer_type,
-            vole_type,
+            type_id: result_type_id,
         })
     }
 
@@ -171,20 +173,23 @@ impl Cg<'_, '_, '_> {
             .into());
         };
 
+        // Convert value's type_id to legacy for comparisons
+        let value_type_legacy = self.to_legacy(value.type_id);
+
         // If the value is already the same union type, just return it
-        if &value.vole_type == union_type {
+        if &value_type_legacy == union_type {
             return Ok(value);
         }
 
         // Find the tag for the value type
         let tag = variants
             .iter()
-            .position(|v| v == &value.vole_type)
+            .position(|v| v == &value_type_legacy)
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "union variant",
                     format!("one of {:?}", variants),
-                    format!("{:?}", value.vole_type),
+                    format!("{:?}", value_type_legacy),
                 )
             })?;
 
@@ -212,7 +217,7 @@ impl Cg<'_, '_, '_> {
             .store(MemFlags::new(), tag_val, heap_ptr, 0);
 
         // Store payload at offset 8 (if not nil)
-        if value.vole_type != LegacyType::Nil {
+        if value_type_legacy != LegacyType::Nil {
             self.builder
                 .ins()
                 .store(MemFlags::new(), value.value, heap_ptr, 8);
@@ -221,7 +226,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: heap_ptr,
             ty: self.ctx.pointer_type,
-            vole_type: union_type.clone(),
+            type_id: self.intern_type(union_type),
         })
     }
 }

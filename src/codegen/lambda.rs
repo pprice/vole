@@ -316,14 +316,15 @@ fn compile_pure_lambda(
     let alloc_call = builder.ins().call(alloc_ref, &[func_addr, zero_captures]);
     let closure_ptr = builder.inst_results(alloc_call)[0];
 
+    let func_type = LegacyType::Function(FunctionType {
+        params: param_vole_types.into(),
+        return_type: Box::new(return_vole_type),
+        is_closure: true, // Now always a closure struct
+    });
     Ok(CompiledValue {
         value: closure_ptr,
         ty: ctx.pointer_type,
-        vole_type: LegacyType::Function(FunctionType {
-            params: param_vole_types.into(),
-            return_type: Box::new(return_vole_type),
-            is_closure: true, // Now always a closure struct
-        }),
+        type_id: ctx.arena.borrow_mut().from_type(&func_type),
     })
 }
 
@@ -497,14 +498,15 @@ fn compile_lambda_with_captures(
             .call(set_capture_ref, &[closure_ptr, index_val, heap_ptr]);
     }
 
+    let func_type = LegacyType::Function(FunctionType {
+        params: param_vole_types.into(),
+        return_type: Box::new(return_vole_type),
+        is_closure: true,
+    });
     Ok(CompiledValue {
         value: closure_ptr,
         ty: ctx.pointer_type,
-        vole_type: LegacyType::Function(FunctionType {
-            params: param_vole_types.into(),
-            return_type: Box::new(return_vole_type),
-            is_closure: true,
-        }),
+        type_id: ctx.arena.borrow_mut().from_type(&func_type),
     })
 }
 
@@ -549,10 +551,11 @@ fn compile_lambda_body(
                 Ok(None)
             } else {
                 let zero = builder.ins().iconst(types::I64, 0);
+                let i64_type = LegacyType::Primitive(PrimitiveType::I64);
                 Ok(Some(CompiledValue {
                     value: zero,
                     ty: types::I64,
-                    vole_type: LegacyType::Primitive(PrimitiveType::I64),
+                    type_id: ctx.arena.borrow_mut().from_type(&i64_type),
                 }))
             }
         }

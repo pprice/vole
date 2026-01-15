@@ -76,7 +76,8 @@ impl Cg<'_, '_, '_> {
 
         // Handle module method calls (e.g., math.sqrt(16.0), math.lerp(...))
         // These go to either external native functions or pure Vole module functions
-        if let LegacyType::Module(ref module_type) = obj.vole_type {
+        let obj_type_for_module = self.to_legacy(obj.type_id);
+        if let LegacyType::Module(ref module_type) = obj_type_for_module {
             let module_path = self
                 .ctx
                 .analyzed
@@ -132,7 +133,7 @@ impl Cg<'_, '_, '_> {
                     if results.is_empty() {
                         return Ok(self.void_value());
                     } else {
-                        return Ok(self.typed_value(results[0], return_type));
+                        return Ok(self.typed_value(results[0], &return_type));
                     }
                 }
             } else {
@@ -151,7 +152,8 @@ impl Cg<'_, '_, '_> {
 
         // Handle RuntimeIterator methods - these call external functions directly
         // without interface boxing or vtable dispatch
-        if let LegacyType::RuntimeIterator(elem_ty) = &obj.vole_type {
+        let obj_type_for_iter = self.to_legacy(obj.type_id);
+        if let LegacyType::RuntimeIterator(elem_ty) = &obj_type_for_iter {
             return self.runtime_iterator_method(&obj, mc, method_name_str, elem_ty);
         }
 
@@ -170,8 +172,9 @@ impl Cg<'_, '_, '_> {
                 .method_at_in_module(expr_id, self.ctx.current_module)
         };
 
+        let obj_legacy_type = self.to_legacy(obj.type_id);
         tracing::debug!(
-            obj_type = ?obj.vole_type,
+            obj_type = ?obj_legacy_type,
             method = %method_name_str,
             resolution = ?resolution,
             "method call"
@@ -182,7 +185,7 @@ impl Cg<'_, '_, '_> {
             type_metadata: self.ctx.type_metadata,
             impl_method_infos: self.ctx.impl_method_infos,
             method_name_str,
-            object_type: &obj.vole_type,
+            object_type: &obj_legacy_type,
             method_id,
             resolution,
         })?;
@@ -190,7 +193,8 @@ impl Cg<'_, '_, '_> {
         let (method_info, return_type) = match target {
             MethodTarget::FunctionalInterface { func_type } => {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
-                if let LegacyType::Nominal(NominalType::Interface(interface_type)) = &obj.vole_type
+                if let LegacyType::Nominal(NominalType::Interface(interface_type)) =
+                    &obj_legacy_type
                 {
                     let method_name_id = self.method_name_id(mc.method);
                     return self.interface_dispatch_call_args_by_type_def_id(
@@ -203,7 +207,7 @@ impl Cg<'_, '_, '_> {
                 }
                 // For functional interfaces, the object holds the function ptr or closure
                 // The actual is_closure status depends on the lambda's compilation.
-                let is_closure = if let LegacyType::Function(ft) = &obj.vole_type {
+                let is_closure = if let LegacyType::Function(ft) = &obj_legacy_type {
                     ft.is_closure
                 } else {
                     func_type.is_closure
@@ -300,7 +304,7 @@ impl Cg<'_, '_, '_> {
             }
         } else {
             // Not a monomorphized class method, use regular dispatch
-            let is_generic_class = matches!(&obj.vole_type, LegacyType::Nominal(NominalType::Class(c)) if !c.type_args.is_empty());
+            let is_generic_class = matches!(&obj_legacy_type, LegacyType::Nominal(NominalType::Class(c)) if !c.type_args.is_empty());
             (self.func_ref(method_info.func_key)?, is_generic_class)
         };
 
@@ -323,6 +327,7 @@ impl Cg<'_, '_, '_> {
                         &compiled,
                         self.ctx.pointer_type,
                         None, // No heap alloc needed for primitive conversions
+                        self.ctx.arena,
                     )?
                 } else {
                     compiled.value
@@ -339,6 +344,7 @@ impl Cg<'_, '_, '_> {
                         &compiled,
                         self.ctx.pointer_type,
                         None, // No heap alloc needed for primitive conversions
+                        self.ctx.arena,
                     )?
                 } else {
                     compiled.value
@@ -406,7 +412,7 @@ impl Cg<'_, '_, '_> {
             Ok(CompiledValue {
                 value: final_value,
                 ty: final_type,
-                vole_type: return_type,
+                type_id: self.intern_type(&return_type),
             })
         }
     }
@@ -428,12 +434,12 @@ impl Cg<'_, '_, '_> {
         let result = self.call_runtime(RuntimeFn::RangeIter, &[start.value, end_value])?;
 
         // Return as RuntimeIterator<i64> - concrete type for builtin iterators
+        let iter_type =
+            LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(PrimitiveType::I64)));
         Ok(CompiledValue {
             value: result,
             ty: self.ctx.pointer_type,
-            vole_type: LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(
-                PrimitiveType::I64,
-            ))),
+            type_id: self.intern_type(&iter_type),
         })
     }
 
@@ -442,7 +448,8 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         method_name: &str,
     ) -> Result<Option<CompiledValue>, String> {
-        match (&obj.vole_type, method_name) {
+        let obj_type = self.to_legacy(obj.type_id);
+        match (&obj_type, method_name) {
             (LegacyType::Array(_), "length") => {
                 let result = self.call_runtime(RuntimeFn::ArrayLen, &[obj.value])?;
                 Ok(Some(self.i64_value(result)))
@@ -451,10 +458,11 @@ impl Cg<'_, '_, '_> {
                 let result = self.call_runtime(RuntimeFn::ArrayIter, &[obj.value])?;
                 // Return RuntimeIterator - a concrete type for builtin iterators
                 // This avoids interface boxing while still being compatible with Iterator<T>
+                let iter_type = LegacyType::RuntimeIterator(elem_ty.clone());
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
-                    vole_type: LegacyType::RuntimeIterator(elem_ty.clone()),
+                    type_id: self.intern_type(&iter_type),
                 }))
             }
             (LegacyType::Primitive(PrimitiveType::String), "length") => {
@@ -463,12 +471,13 @@ impl Cg<'_, '_, '_> {
             }
             (LegacyType::Primitive(PrimitiveType::String), "iter") => {
                 let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
+                let iter_type = LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(
+                    PrimitiveType::String,
+                )));
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
-                    vole_type: LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(
-                        PrimitiveType::String,
-                    ))),
+                    type_id: self.intern_type(&iter_type),
                 }))
             }
             (LegacyType::Range, "iter") => {
@@ -482,12 +491,13 @@ impl Cg<'_, '_, '_> {
                     .ins()
                     .load(types::I64, MemFlags::new(), obj.value, 8);
                 let result = self.call_runtime(RuntimeFn::RangeIter, &[start, end])?;
+                let iter_type = LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(
+                    PrimitiveType::I64,
+                )));
                 Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
-                    vole_type: LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(
-                        PrimitiveType::I64,
-                    ))),
+                    type_id: self.intern_type(&iter_type),
                 }))
             }
             _ => Ok(None),
@@ -667,10 +677,11 @@ impl Cg<'_, '_, '_> {
             if results.is_empty() {
                 Ok(self.void_value())
             } else {
+                let return_type = (*func_type.return_type).clone();
                 Ok(CompiledValue {
                     value: results[0],
-                    ty: type_to_cranelift(&func_type.return_type, self.ctx.pointer_type),
-                    vole_type: (*func_type.return_type).clone(),
+                    ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
+                    type_id: self.intern_type(&return_type),
                 })
             }
         } else {
@@ -706,10 +717,11 @@ impl Cg<'_, '_, '_> {
             if results.is_empty() {
                 Ok(self.void_value())
             } else {
+                let return_type = (*func_type.return_type).clone();
                 Ok(CompiledValue {
                     value: results[0],
-                    ty: type_to_cranelift(&func_type.return_type, self.ctx.pointer_type),
-                    vole_type: (*func_type.return_type).clone(),
+                    ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
+                    type_id: self.intern_type(&return_type),
                 })
             }
         }
@@ -786,7 +798,13 @@ impl Cg<'_, '_, '_> {
         let mut call_args: ArgVec = smallvec![obj.value];
         for arg in args {
             let compiled = self.expr(arg)?;
-            let word = value_to_word(self.builder, &compiled, word_type, Some(heap_alloc_ref))?;
+            let word = value_to_word(
+                self.builder,
+                &compiled,
+                word_type,
+                Some(heap_alloc_ref),
+                self.ctx.arena,
+            )?;
             call_args.push(word);
         }
 
@@ -813,7 +831,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value,
             ty: type_to_cranelift(&return_type, word_type),
-            vole_type: return_type,
+            type_id: self.intern_type(&return_type),
         })
     }
 
@@ -868,7 +886,7 @@ impl Cg<'_, '_, '_> {
                     return Ok(CompiledValue {
                         value: results[0],
                         ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
-                        vole_type: return_type,
+                        type_id: self.intern_type(&return_type),
                     });
                 }
             }
@@ -926,7 +944,7 @@ impl Cg<'_, '_, '_> {
             Ok(CompiledValue {
                 value: results[0],
                 ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
-                vole_type: return_type,
+                type_id: self.intern_type(&return_type),
             })
         }
     }
