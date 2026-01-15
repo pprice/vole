@@ -148,14 +148,11 @@ impl Cg<'_, '_, '_> {
             // If the global has a declared interface type, box the value
             if let Some(ref ty_expr) = global.ty {
                 let declared_type = resolve_type_expr(ty_expr, self.ctx);
-                let value_legacy_type = self.to_legacy(value.type_id);
                 if matches!(
                     &declared_type,
                     LegacyType::Nominal(NominalType::Interface(_))
-                ) && !matches!(
-                    &value_legacy_type,
-                    LegacyType::Nominal(NominalType::Interface(_))
-                ) {
+                ) && !self.is_interface(value.type_id)
+                {
                     value = box_interface_value(self.builder, self.ctx, value, &declared_type)?;
                 }
             }
@@ -358,25 +355,20 @@ impl Cg<'_, '_, '_> {
                 })?;
                 let var = *var;
                 let var_type = var_type.clone();
-                let value_legacy_type = self.to_legacy(value.type_id);
 
                 if matches!(&var_type, LegacyType::Nominal(NominalType::Interface(_)))
-                    && !matches!(
-                        value_legacy_type,
-                        LegacyType::Nominal(NominalType::Interface(_))
-                    )
+                    && !self.is_interface(value.type_id)
                 {
                     value = box_interface_value(self.builder, self.ctx, value, &var_type)?;
                 }
 
-                let final_value = if matches!(&var_type, LegacyType::Union(_))
-                    && !matches!(&value_legacy_type, LegacyType::Union(_))
-                {
-                    let wrapped = self.construct_union(value, &var_type)?;
-                    wrapped.value
-                } else {
-                    value.value
-                };
+                let final_value =
+                    if matches!(&var_type, LegacyType::Union(_)) && !self.is_union(value.type_id) {
+                        let wrapped = self.construct_union(value, &var_type)?;
+                        wrapped.value
+                    } else {
+                        value.value
+                    };
                 self.builder.def_var(var, final_value);
                 Ok(value)
             }
@@ -854,20 +846,9 @@ impl Cg<'_, '_, '_> {
         nc: &crate::frontend::NullCoalesceExpr,
     ) -> Result<CompiledValue, String> {
         let value = self.expr(&nc.value)?;
-        let value_type = self.to_legacy(value.type_id);
-
-        let LegacyType::Union(variants) = &value_type else {
-            return Err(CodegenError::type_mismatch(
-                "null coalesce operator",
-                "optional type",
-                "non-optional",
-            )
-            .into());
-        };
-        let nil_tag = variants
-            .iter()
-            .position(|v| v == &LegacyType::Nil)
-            .unwrap_or(usize::MAX);
+        let nil_tag = self.find_nil_variant(value.type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
+        })?;
 
         let tag = self
             .builder
@@ -880,6 +861,7 @@ impl Cg<'_, '_, '_> {
         let not_nil_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
 
+        let value_type = self.to_legacy(value.type_id);
         let result_vole_type = value_type.unwrap_optional_or_panic("unwrap expression result type");
         let cranelift_type = type_to_cranelift(&result_vole_type, self.ctx.pointer_type);
         self.builder.append_block_param(merge_block, cranelift_type);

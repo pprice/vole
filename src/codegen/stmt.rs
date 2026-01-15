@@ -138,7 +138,6 @@ impl Cg<'_, '_, '_> {
                     LetInit::TypeAlias(_) => return Ok(false),
                 };
                 let init = self.expr(init_expr)?;
-                let init_legacy_type = self.to_legacy(init.type_id);
 
                 let mut declared_type_opt = None;
                 // final_type is LegacyType during computation, converted to VoleType at the end
@@ -147,11 +146,11 @@ impl Cg<'_, '_, '_> {
                     declared_type_opt = Some(declared_type.clone());
 
                     if matches!(&declared_type, LegacyType::Union(_))
-                        && !matches!(&init_legacy_type, LegacyType::Union(_))
+                        && !self.is_union(init.type_id)
                     {
                         let wrapped = self.construct_union(init, &declared_type)?;
                         (wrapped.value, self.to_legacy(wrapped.type_id))
-                    } else if declared_type.is_integer() && init_legacy_type.is_integer() {
+                    } else if declared_type.is_integer() && self.type_is_integer(init.type_id) {
                         let declared_cty = type_to_cranelift(&declared_type, self.ctx.pointer_type);
                         let init_cty = init.ty;
                         if declared_cty.bits() < init_cty.bits() {
@@ -164,13 +163,15 @@ impl Cg<'_, '_, '_> {
                             (init.value, declared_type)
                         }
                     } else if declared_type == LegacyType::Primitive(PrimitiveType::F32)
-                        && init_legacy_type == LegacyType::Primitive(PrimitiveType::F64)
+                        && self.type_is_float(init.type_id)
+                        && init.ty == types::F64
                     {
                         // f64 -> f32: demote to narrower float
                         let narrowed = self.builder.ins().fdemote(types::F32, init.value);
                         (narrowed, declared_type)
                     } else if declared_type == LegacyType::Primitive(PrimitiveType::F64)
-                        && init_legacy_type == LegacyType::Primitive(PrimitiveType::F32)
+                        && self.type_is_float(init.type_id)
+                        && init.ty == types::F32
                     {
                         // f32 -> f64: promote to wider float
                         let widened = self.builder.ins().fpromote(types::F64, init.value);
@@ -178,12 +179,12 @@ impl Cg<'_, '_, '_> {
                     } else if let LegacyType::Nominal(NominalType::Interface(_)) = &declared_type {
                         // For functional interfaces, keep the actual function type from the lambda
                         // This preserves the is_closure flag for proper calling convention
-                        (init.value, init_legacy_type)
+                        (init.value, self.to_legacy(init.type_id))
                     } else {
                         (init.value, declared_type)
                     }
                 } else {
-                    (init.value, init_legacy_type)
+                    (init.value, self.to_legacy(init.type_id))
                 };
 
                 if let Some(declared_type) = declared_type_opt
@@ -237,16 +238,12 @@ impl Cg<'_, '_, '_> {
                 let return_type = self.ctx.current_function_return_type.clone();
                 if let Some(value) = &ret.value {
                     let compiled = self.expr(value)?;
-                    let compiled_legacy_type = self.to_legacy(compiled.type_id);
 
                     // Box concrete types to interface representation if needed
                     // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
                     if let Some(LegacyType::Nominal(NominalType::Interface(_))) = &return_type
-                        && !matches!(
-                            compiled_legacy_type,
-                            LegacyType::Nominal(NominalType::Interface(_))
-                        )
-                        && !matches!(compiled_legacy_type, LegacyType::RuntimeIterator(_))
+                        && !self.is_interface(compiled.type_id)
+                        && !self.is_runtime_iterator(compiled.type_id)
                     {
                         let return_type =
                             return_type.as_ref().expect("return type should be present");

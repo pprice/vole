@@ -229,6 +229,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.ctx.arena.borrow().is_fallible(ty)
     }
 
+    /// Check if type is a runtime iterator
+    pub fn is_runtime_iterator(&self, ty: TypeId) -> bool {
+        self.ctx.arena.borrow().is_runtime_iterator(ty)
+    }
+
     /// Get union variants as TypeIds (returns None if not a union)
     #[allow(dead_code)] // Reserved for task 5.5 arena migration
     pub fn get_union_variants(&self, ty: TypeId) -> Option<Vec<TypeId>> {
@@ -276,17 +281,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Check if type is an integer type (signed or unsigned)
     pub fn type_is_integer(&self, ty: TypeId) -> bool {
-        self.to_legacy(ty).is_integer()
+        self.ctx.arena.borrow().is_integer(ty)
+    }
+
+    /// Check if type is a float type (f32 or f64)
+    pub fn type_is_float(&self, ty: TypeId) -> bool {
+        self.ctx.arena.borrow().is_float(ty)
     }
 
     /// Check if type is unsigned
     pub fn type_is_unsigned(&self, ty: TypeId) -> bool {
-        self.to_legacy(ty).is_unsigned()
+        self.ctx.arena.borrow().is_unsigned(ty)
     }
 
     /// Check if type is optional (union with nil)
     pub fn type_is_optional(&self, ty: TypeId) -> bool {
-        self.to_legacy(ty).is_optional()
+        self.ctx.arena.borrow().is_optional(ty)
     }
 
     /// Check if type can widen to another type

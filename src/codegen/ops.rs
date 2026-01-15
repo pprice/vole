@@ -431,16 +431,10 @@ impl Cg<'_, '_, '_> {
         optional: CompiledValue,
         op: BinaryOp,
     ) -> Result<CompiledValue, String> {
-        let optional_legacy = self.to_legacy(optional.type_id);
-        let LegacyType::Union(variants) = &optional_legacy else {
-            return Err("optional_nil_compare called on non-union type".into());
-        };
-
         // Find the position of nil in the variants (this is the nil tag value)
-        let nil_tag = variants
-            .iter()
-            .position(|v| v == &LegacyType::Nil)
-            .unwrap_or(usize::MAX);
+        let nil_tag = self
+            .find_nil_variant(optional.type_id)
+            .ok_or("optional_nil_compare called on non-optional type")?;
 
         // Load the tag from the optional (first byte)
         let tag = self
@@ -473,16 +467,10 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         op: BinaryOp,
     ) -> Result<CompiledValue, String> {
-        let optional_legacy = self.to_legacy(optional.type_id);
-        let LegacyType::Union(variants) = &optional_legacy else {
-            return Err("optional_value_compare called on non-union type".into());
-        };
-
         // Find the position of nil in the variants (this is the nil tag value)
-        let nil_tag = variants
-            .iter()
-            .position(|v| v == &LegacyType::Nil)
-            .unwrap_or(usize::MAX);
+        let nil_tag = self
+            .find_nil_variant(optional.type_id)
+            .ok_or("optional_value_compare called on non-optional type")?;
 
         // Load the tag from the optional (first byte)
         let tag = self
@@ -496,6 +484,7 @@ impl Cg<'_, '_, '_> {
 
         // Load the payload (at offset 8) with the correct type
         // The payload type matches the inner (non-nil) type of the optional
+        let optional_legacy = self.to_legacy(optional.type_id);
         let inner_type = optional_legacy
             .unwrap_optional()
             .unwrap_or(LegacyType::Primitive(PrimitiveType::I64));
