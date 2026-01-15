@@ -273,7 +273,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Create an integer constant with a specific Vole type
-    pub fn int_const(&mut self, n: i64, vole_type: Type) -> CompiledValue {
+    pub fn int_const(&mut self, n: i64, vole_type: LegacyType) -> CompiledValue {
         let ty = type_to_cranelift(&vole_type, self.ctx.pointer_type);
         let value = self.builder.ins().iconst(ty, n);
         CompiledValue {
@@ -284,7 +284,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Create a float constant with explicit type (for bidirectional inference)
-    pub fn float_const(&mut self, n: f64, vole_type: Type) -> CompiledValue {
+    pub fn float_const(&mut self, n: f64, vole_type: LegacyType) -> CompiledValue {
         let (ty, value) = match vole_type {
             LegacyType::Primitive(PrimitiveType::F32) => {
                 let v = self.builder.ins().f32const(n as f32);
@@ -333,7 +333,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Create a CompiledValue with a dynamic Vole type
-    pub fn typed_value(&self, value: Value, vole_type: Type) -> CompiledValue {
+    pub fn typed_value(&self, value: Value, vole_type: LegacyType) -> CompiledValue {
         CompiledValue {
             value,
             ty: type_to_cranelift(&vole_type, self.ctx.pointer_type),
@@ -356,7 +356,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         external_info: &ExternalMethodInfo,
         args: &[Value],
-        return_type: &Type,
+        return_type: &LegacyType,
     ) -> Result<CompiledValue, String> {
         // Look up the native function in the registry
         let native_func = self

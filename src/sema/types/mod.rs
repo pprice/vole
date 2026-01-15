@@ -104,21 +104,21 @@ pub struct StructuralType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructuralFieldType {
     pub name: NameId,
-    pub ty: Type,
+    pub ty: LegacyType,
 }
 
 /// A method in a structural type
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructuralMethodType {
     pub name: NameId,
-    pub params: Vec<Type>,
-    pub return_type: Type,
+    pub params: Vec<LegacyType>,
+    pub return_type: LegacyType,
 }
 
 #[derive(Debug, Clone, Eq)]
 pub struct FunctionType {
-    pub params: Arc<[Type]>,
-    pub return_type: Box<Type>,
+    pub params: Arc<[LegacyType]>,
+    pub return_type: Box<LegacyType>,
     /// If true, this function is a closure (has captures) and needs
     /// to be called with the closure pointer as the first argument.
     /// The closure pointer is passed implicitly and is not included in `params`.
@@ -129,7 +129,7 @@ pub struct FunctionType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructField {
     pub name: String,
-    pub ty: Type,
+    pub ty: LegacyType,
     pub slot: usize, // Compile-time slot index
 }
 
@@ -263,7 +263,7 @@ impl Type {
     }
 
     /// Check if this type can be implicitly widened to target type
-    pub fn can_widen_to(&self, target: &Type) -> bool {
+    pub fn can_widen_to(&self, target: &LegacyType) -> bool {
         if self == target {
             return true;
         }
@@ -304,7 +304,7 @@ impl Type {
     }
 
     /// For an optional/union type, get the non-nil variants
-    pub fn unwrap_optional(&self) -> Option<Type> {
+    pub fn unwrap_optional(&self) -> Option<LegacyType> {
         match self {
             LegacyType::Union(types) => {
                 let non_nil: Vec<_> = types.iter().filter(|t| **t != LegacyType::Nil).cloned().collect();
@@ -319,31 +319,31 @@ impl Type {
     }
 
     /// Create an optional type (T | nil)
-    pub fn optional(inner: Type) -> Type {
+    pub fn optional(inner: LegacyType) -> LegacyType {
         LegacyType::Union(vec![inner, LegacyType::Nil].into())
     }
 
     /// Create an invalid type with just a kind (for migration - prefer invalid_msg)
-    pub fn invalid(kind: &'static str) -> Type {
+    pub fn invalid(kind: &'static str) -> LegacyType {
         LegacyType::Invalid(AnalysisError::simple(kind))
     }
 
     /// Create an invalid type with kind and descriptive message
-    pub fn invalid_msg(kind: &'static str, message: impl Into<String>) -> Type {
+    pub fn invalid_msg(kind: &'static str, message: impl Into<String>) -> LegacyType {
         LegacyType::Invalid(AnalysisError::new(kind, message))
     }
 
     /// Create an invalid type with kind, message, and location
-    pub fn invalid_at(kind: &'static str, message: impl Into<String>, span: Span) -> Type {
+    pub fn invalid_at(kind: &'static str, message: impl Into<String>, span: Span) -> LegacyType {
         LegacyType::Invalid(AnalysisError::at(kind, message, span))
     }
 
     /// Propagate an invalid type, chaining to the source error with context
     pub fn propagate_invalid(
-        source: &Type,
+        source: &LegacyType,
         context: impl Into<String>,
         span: Option<Span>,
-    ) -> Type {
+    ) -> LegacyType {
         if let LegacyType::Invalid(err) = source {
             LegacyType::Invalid(AnalysisError::propagate(err, context, span))
         } else {
@@ -361,17 +361,17 @@ impl Type {
     }
 
     /// Create an inference placeholder (for type inference during analysis)
-    pub fn unknown() -> Type {
+    pub fn unknown() -> LegacyType {
         LegacyType::Placeholder(PlaceholderKind::Inference)
     }
 
     /// Create a type parameter placeholder (for generic type parameters like T)
-    pub fn type_param_placeholder(name: impl Into<String>) -> Type {
+    pub fn type_param_placeholder(name: impl Into<String>) -> LegacyType {
         LegacyType::Placeholder(PlaceholderKind::TypeParam(name.into()))
     }
 
     /// Create a Self type placeholder (for interface method signatures)
-    pub fn self_placeholder() -> Type {
+    pub fn self_placeholder() -> LegacyType {
         LegacyType::Placeholder(PlaceholderKind::SelfType)
     }
 
@@ -409,7 +409,7 @@ impl Type {
     /// Unwrap optional, panicking with context if it fails.
     /// Use in codegen where unwrap failure indicates a compiler bug.
     #[track_caller]
-    pub fn unwrap_optional_or_panic(&self, context: &str) -> Type {
+    pub fn unwrap_optional_or_panic(&self, context: &str) -> LegacyType {
         self.unwrap_optional().unwrap_or_else(|| {
             panic!(
                 "INTERNAL ERROR: unwrap_optional failed\n\
@@ -424,7 +424,7 @@ impl Type {
     }
 
     /// Normalize a union: flatten nested unions, sort, dedupe, unwrap single-element
-    pub fn normalize_union(mut types: Vec<Type>) -> Type {
+    pub fn normalize_union(mut types: Vec<LegacyType>) -> LegacyType {
         // Flatten nested unions
         let mut flattened = Vec::new();
         for ty in types.drain(..) {
@@ -449,7 +449,7 @@ impl Type {
     }
 
     /// Promote two numeric types to their common supertype
-    pub fn promote(left: &Type, right: &Type) -> Type {
+    pub fn promote(left: &LegacyType, right: &LegacyType) -> LegacyType {
         match (left, right) {
             (LegacyType::Primitive(l), LegacyType::Primitive(r)) => {
                 if let Some(promoted) = PrimitiveType::promote(*l, *r) {
@@ -475,7 +475,7 @@ impl Type {
     /// let param_type = LegacyType::TypeParam(t_name_id);
     /// assert_eq!(param_type.substitute(&substitutions), LegacyType::Primitive(PrimitiveType::I64));
     /// ```
-    pub fn substitute(&self, substitutions: &std::collections::HashMap<NameId, Type>) -> Type {
+    pub fn substitute(&self, substitutions: &std::collections::HashMap<NameId, LegacyType>) -> LegacyType {
         // Early exit if no substitutions - just clone (cheap for Arc-based types)
         if substitutions.is_empty() {
             return self.clone();
@@ -682,9 +682,9 @@ impl Type {
 
 /// Helper: substitute types in a slice, returning Some(new_arc) only if any changed
 fn substitute_slice(
-    types: &Arc<[Type]>,
-    substitutions: &std::collections::HashMap<NameId, Type>,
-) -> Option<Arc<[Type]>> {
+    types: &Arc<[LegacyType]>,
+    substitutions: &std::collections::HashMap<NameId, LegacyType>,
+) -> Option<Arc<[LegacyType]>> {
     let mut changed = false;
     let new_types: Vec<_> = types
         .iter()
@@ -707,7 +707,7 @@ fn substitute_slice(
 /// Helper: substitute types in interface methods, returning Some only if any changed
 fn substitute_interface_methods(
     methods: &Arc<[InterfaceMethodType]>,
-    substitutions: &std::collections::HashMap<NameId, Type>,
+    substitutions: &std::collections::HashMap<NameId, LegacyType>,
 ) -> Option<Arc<[InterfaceMethodType]>> {
     let mut changed = false;
     let new_methods: Vec<_> = methods
@@ -799,7 +799,7 @@ impl std::fmt::Display for FunctionType {
 mod tests {
     use super::*;
 
-    fn p(p: PrimitiveType) -> Type {
+    fn p(p: PrimitiveType) -> LegacyType {
         LegacyType::Primitive(p)
     }
 

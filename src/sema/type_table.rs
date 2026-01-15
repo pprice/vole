@@ -19,7 +19,7 @@ impl TypeKey {
 
 #[derive(Debug, Clone)]
 pub struct TypeInfo {
-    pub ty: Type,
+    pub ty: LegacyType,
     pub name_id: Option<NameId>,
 }
 
@@ -84,7 +84,7 @@ impl TypeTable {
         self.array_name
     }
 
-    pub fn insert_named(&mut self, ty: Type, name_id: NameId) -> TypeKey {
+    pub fn insert_named(&mut self, ty: LegacyType, name_id: NameId) -> TypeKey {
         let id = self.insert(TypeInfo {
             ty,
             name_id: Some(name_id),
@@ -93,7 +93,7 @@ impl TypeTable {
         id
     }
 
-    pub fn insert_anonymous(&mut self, ty: Type) -> TypeKey {
+    pub fn insert_anonymous(&mut self, ty: LegacyType) -> TypeKey {
         self.insert(TypeInfo { ty, name_id: None })
     }
 
@@ -115,14 +115,14 @@ impl TypeTable {
 
     pub fn display_type(
         &self,
-        ty: &Type,
+        ty: &LegacyType,
         names: &NameTable,
         entity_registry: &crate::sema::entity_registry::EntityRegistry,
     ) -> String {
         self.display_type_inner(ty, names, entity_registry)
     }
 
-    pub fn key_for_type(&mut self, ty: &Type) -> TypeKey {
+    pub fn key_for_type(&mut self, ty: &LegacyType) -> TypeKey {
         match ty {
             // Primitives: use registered name if available, otherwise intern by type
             LegacyType::Primitive(prim) => {
@@ -169,14 +169,14 @@ impl TypeTable {
         id
     }
 
-    fn intern_named(&mut self, ty: Type, name_id: NameId) -> TypeKey {
+    fn intern_named(&mut self, ty: LegacyType, name_id: NameId) -> TypeKey {
         if let Some(key) = self.name_lookup.get(&name_id) {
             return *key;
         }
         self.insert_named(ty, name_id)
     }
 
-    fn intern_type_def(&mut self, ty: Type, type_def_id: TypeDefId) -> TypeKey {
+    fn intern_type_def(&mut self, ty: LegacyType, type_def_id: TypeDefId) -> TypeKey {
         if let Some(key) = self.type_def_lookup.get(&type_def_id) {
             return *key;
         }
@@ -185,7 +185,7 @@ impl TypeTable {
         key
     }
 
-    fn intern_type(&mut self, ty: Type) -> TypeKey {
+    fn intern_type(&mut self, ty: LegacyType) -> TypeKey {
         if let Some(key) = self.type_lookup.get(&ty) {
             return *key;
         }
@@ -194,7 +194,7 @@ impl TypeTable {
         key
     }
 
-    fn intern_primitive(&mut self, prim: PrimitiveTypeId, ty: &Type) -> TypeKey {
+    fn intern_primitive(&mut self, prim: PrimitiveTypeId, ty: &LegacyType) -> TypeKey {
         if let Some(name_id) = self.primitive_names.get(&prim) {
             self.intern_named(ty.clone(), *name_id)
         } else {
@@ -204,7 +204,7 @@ impl TypeTable {
 
     fn display_type_inner(
         &self,
-        ty: &Type,
+        ty: &LegacyType,
         names: &NameTable,
         entity_registry: &crate::sema::entity_registry::EntityRegistry,
     ) -> String {

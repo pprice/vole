@@ -64,11 +64,11 @@ impl Analyzer {
         }
 
         // Check each arm, collect result types
-        let mut result_type: Option<Type> = None;
+        let mut result_type: Option<LegacyType> = None;
         let mut first_arm_span: Option<Span> = None;
 
         // Track covered types for wildcard narrowing
-        let mut covered_types: Vec<Type> = Vec::new();
+        let mut covered_types: Vec<LegacyType> = Vec::new();
 
         for arm in &match_expr.arms {
             // Enter new scope for arm (bindings live here)

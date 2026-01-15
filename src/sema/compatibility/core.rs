@@ -6,7 +6,7 @@
 use crate::sema::types::{FunctionType, LegacyType, NominalType, PrimitiveType, Type};
 
 /// Check if an integer literal value fits within a type's range
-pub fn literal_fits(value: i64, target: &Type) -> bool {
+pub fn literal_fits(value: i64, target: &LegacyType) -> bool {
     match target {
         LegacyType::Primitive(prim) => match prim {
             PrimitiveType::I8 => value >= i8::MIN as i64 && value <= i8::MAX as i64,
@@ -33,7 +33,7 @@ pub fn literal_fits(value: i64, target: &Type) -> bool {
 /// compatibility, which requires access to the interface registry.
 ///
 /// Returns `true` if a value of type `from` can be assigned to a location of type `to`.
-pub fn types_compatible_core(from: &Type, to: &Type) -> bool {
+pub fn types_compatible_core(from: &LegacyType, to: &LegacyType) -> bool {
     if from == to {
         return true;
     }

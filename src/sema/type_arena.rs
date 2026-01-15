@@ -886,7 +886,7 @@ impl TypeArena {
     /// TEMPORARY: For migration only, delete in Phase 5.
     /// This allows existing code to continue using Type while we incrementally
     /// migrate to TypeId throughout the codebase.
-    pub fn from_type(&mut self, ty: &Type) -> TypeId {
+    pub fn from_type(&mut self, ty: &LegacyType) -> TypeId {
         use crate::sema::types::NominalType;
 
         match ty {
@@ -985,7 +985,7 @@ impl TypeArena {
     /// TEMPORARY: For migration only, delete in Phase 5.
     /// This allows existing code to continue using Type while we incrementally
     /// migrate to TypeId throughout the codebase.
-    pub fn to_type(&self, id: TypeId) -> Type {
+    pub fn to_type(&self, id: TypeId) -> LegacyType {
         use crate::sema::types::{
             ClassType, ErrorTypeInfo, FunctionType, InterfaceType, ModuleType, NominalType,
             RecordType,
@@ -1003,12 +1003,12 @@ impl TypeArena {
             InternedType::Array(elem) => LegacyType::Array(Box::new(self.to_type(*elem))),
 
             InternedType::Union(variants) => {
-                let types: Vec<Type> = variants.iter().map(|&v| self.to_type(v)).collect();
+                let types: Vec<LegacyType> = variants.iter().map(|&v| self.to_type(v)).collect();
                 LegacyType::Union(types.into())
             }
 
             InternedType::Tuple(elements) => {
-                let types: Vec<Type> = elements.iter().map(|&e| self.to_type(e)).collect();
+                let types: Vec<LegacyType> = elements.iter().map(|&e| self.to_type(e)).collect();
                 LegacyType::Tuple(types.into())
             }
 
@@ -1026,7 +1026,7 @@ impl TypeArena {
                 ret,
                 is_closure,
             } => {
-                let param_types: Vec<Type> = params.iter().map(|&p| self.to_type(p)).collect();
+                let param_types: Vec<LegacyType> = params.iter().map(|&p| self.to_type(p)).collect();
                 LegacyType::Function(FunctionType {
                     params: param_types.into(),
                     return_type: Box::new(self.to_type(*ret)),
@@ -1038,7 +1038,7 @@ impl TypeArena {
                 type_def_id,
                 type_args,
             } => {
-                let args: Vec<Type> = type_args.iter().map(|&a| self.to_type(a)).collect();
+                let args: Vec<LegacyType> = type_args.iter().map(|&a| self.to_type(a)).collect();
                 LegacyType::Nominal(NominalType::Class(ClassType {
                     type_def_id: *type_def_id,
                     type_args: args.into(),
@@ -1049,7 +1049,7 @@ impl TypeArena {
                 type_def_id,
                 type_args,
             } => {
-                let args: Vec<Type> = type_args.iter().map(|&a| self.to_type(a)).collect();
+                let args: Vec<LegacyType> = type_args.iter().map(|&a| self.to_type(a)).collect();
                 LegacyType::Nominal(NominalType::Record(RecordType {
                     type_def_id: *type_def_id,
                     type_args: args.into(),
@@ -1060,7 +1060,7 @@ impl TypeArena {
                 type_def_id,
                 type_args,
             } => {
-                let args: Vec<Type> = type_args.iter().map(|&a| self.to_type(a)).collect();
+                let args: Vec<LegacyType> = type_args.iter().map(|&a| self.to_type(a)).collect();
                 // Note: We lose methods/extends info here - this is a limitation of
                 // storing types by TypeDefId only. For full interface type, lookup
                 // from EntityRegistry is needed.

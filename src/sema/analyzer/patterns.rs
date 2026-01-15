@@ -10,9 +10,9 @@ impl Analyzer {
     pub(crate) fn check_pattern(
         &mut self,
         pattern: &Pattern,
-        scrutinee_type: &Type,
+        scrutinee_type: &LegacyType,
         interner: &Interner,
-    ) -> Option<Type> {
+    ) -> Option<LegacyType> {
         match pattern {
             Pattern::Wildcard(_) => {
                 // Wildcard always matches, nothing to check, no narrowing
@@ -457,7 +457,7 @@ impl Analyzer {
     pub(crate) fn check_match_exhaustiveness(
         &mut self,
         arms: &[MatchArm],
-        scrutinee_type: &Type,
+        scrutinee_type: &LegacyType,
         _span: Span,
         interner: &Interner,
     ) -> bool {
@@ -514,7 +514,7 @@ impl Analyzer {
     }
 
     /// Extract the type that a pattern matches against, if it's a type pattern
-    fn get_pattern_type(&mut self, pattern: &Pattern, interner: &Interner) -> Option<Type> {
+    fn get_pattern_type(&mut self, pattern: &Pattern, interner: &Interner) -> Option<LegacyType> {
         match pattern {
             Pattern::Type { type_expr, .. } => Some(self.resolve_type(type_expr, interner)),
             Pattern::Identifier { name, .. } => {
@@ -565,8 +565,8 @@ impl Analyzer {
     /// Check that a type pattern is compatible with the scrutinee type
     fn check_type_pattern_compatibility(
         &mut self,
-        pattern_type: &Type,
-        scrutinee_type: &Type,
+        pattern_type: &LegacyType,
+        scrutinee_type: &LegacyType,
         span: Span,
         interner: &Interner,
     ) {

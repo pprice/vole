@@ -30,7 +30,7 @@ pub struct CompiledValue {
     pub value: Value,
     pub ty: types::Type,
     /// The Vole type of this value (needed to distinguish strings/arrays from regular I64)
-    pub vole_type: Type,
+    pub vole_type: LegacyType,
 }
 
 impl CompiledValue {
@@ -68,7 +68,7 @@ pub(crate) struct TypeMetadata {
     #[allow(dead_code)]
     pub is_class: bool,
     /// The Vole type (Class or Record)
-    pub vole_type: Type,
+    pub vole_type: LegacyType,
     /// Method info: method name -> method info
     pub method_infos: HashMap<NameId, MethodInfo>,
 }
@@ -77,7 +77,7 @@ pub(crate) struct TypeMetadata {
 #[derive(Debug, Clone)]
 pub(crate) struct MethodInfo {
     pub func_key: crate::codegen::FunctionKey,
-    pub return_type: Type,
+    pub return_type: LegacyType,
 }
 
 /// Look up TypeMetadata by NameId (cross-interner safe)
@@ -150,7 +150,7 @@ pub(crate) struct CompileCtx<'a> {
     pub interface_vtables:
         &'a std::cell::RefCell<crate::codegen::interface_vtable::InterfaceVtableRegistry>,
     /// Current function's return type (needed for raise statements in fallible functions)
-    pub current_function_return_type: Option<Type>,
+    pub current_function_return_type: Option<LegacyType>,
     /// Registry of native functions for external method calls
     pub native_registry: &'a NativeRegistry,
     /// Current module path when compiling module code (e.g., "std:math")
@@ -160,13 +160,13 @@ pub(crate) struct CompileCtx<'a> {
     pub monomorph_cache: &'a MonomorphCache,
     /// Type substitutions for monomorphized class method compilation
     /// Maps type param NameId -> concrete Type
-    pub type_substitutions: Option<&'a HashMap<NameId, Type>>,
+    pub type_substitutions: Option<&'a HashMap<NameId, LegacyType>>,
 }
 
 impl<'a> CompileCtx<'a> {
     /// Substitute type parameters with concrete types using current context.
     /// If no type_substitutions are set, returns the original type unchanged.
-    pub fn substitute_type(&self, ty: &Type) -> Type {
+    pub fn substitute_type(&self, ty: &LegacyType) -> LegacyType {
         if let Some(substitutions) = self.type_substitutions {
             ty.substitute(substitutions)
         } else {
@@ -189,7 +189,7 @@ impl<'a> CompileCtx<'a> {
     }
 
     /// Look up expression type, checking module-specific expr_types if compiling module code
-    pub fn get_expr_type(&self, node_id: &NodeId) -> Option<&Type> {
+    pub fn get_expr_type(&self, node_id: &NodeId) -> Option<&LegacyType> {
         // When compiling module code, NodeIds are relative to that module's program
         // Use module-specific expr_types if available
         if let Some(module_path) = self.current_module
@@ -204,7 +204,7 @@ impl<'a> CompileCtx<'a> {
 }
 
 /// Resolve a type expression to a Vole Type (uses CompileCtx for full context)
-pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> Type {
+pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> LegacyType {
     let module_id = ctx
         .current_module
         .and_then(|path| ctx.analyzed.name_table.module_id_if_known(path))
@@ -286,7 +286,7 @@ pub(crate) fn function_name_id_with_interner(
 }
 
 #[allow(clippy::only_used_in_recursion)]
-pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: &Type) -> String {
+pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: &LegacyType) -> String {
     match ty {
         LegacyType::Nominal(NominalType::Class(class_type)) => {
             let name_id = analyzed.entity_registry.class_name_id(class_type);
@@ -360,8 +360,8 @@ pub(crate) fn display_type(analyzed: &AnalyzedProgram, interner: &Interner, ty: 
 fn build_interface_type_from_entity(
     type_def_id: TypeDefId,
     entity_registry: &EntityRegistry,
-    type_args: Vec<Type>,
-) -> Type {
+    type_args: Vec<LegacyType>,
+) -> LegacyType {
     let type_def = entity_registry.get_type(type_def_id);
 
     // Build methods from MethodDef
@@ -400,7 +400,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
     interner: &Interner,
     name_table: &NameTable,
     module_id: ModuleId,
-) -> Type {
+) -> LegacyType {
     // Create resolver for name lookups
     let resolver = Resolver::new(interner, name_table, module_id, &[]);
 
@@ -535,7 +535,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
             LegacyType::Union(vec![inner_ty, LegacyType::Nil].into())
         }
         TypeExpr::Union(variants) => {
-            let variant_types: Vec<Type> = variants
+            let variant_types: Vec<LegacyType> = variants
                 .iter()
                 .map(|v| {
                     resolve_type_expr_with_metadata(
@@ -556,7 +556,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
             params,
             return_type,
         } => {
-            let param_types: Vec<Type> = params
+            let param_types: Vec<LegacyType> = params
                 .iter()
                 .map(|p| {
                     resolve_type_expr_with_metadata(
@@ -616,7 +616,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
         }
         TypeExpr::Generic { name, args } => {
             // Resolve all type arguments
-            let resolved_args: Vec<Type> = args
+            let resolved_args: Vec<LegacyType> = args
                 .iter()
                 .map(|a| {
                     resolve_type_expr_with_metadata(
@@ -723,7 +723,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
             )
         }
         TypeExpr::Tuple(elements) => {
-            let resolved_elements: Vec<Type> = elements
+            let resolved_elements: Vec<LegacyType> = elements
                 .iter()
                 .map(|e| {
                     resolve_type_expr_with_metadata(
@@ -764,7 +764,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
 }
 
 /// Convert a Vole type to a Cranelift type
-pub(crate) fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::Type {
+pub(crate) fn type_to_cranelift(ty: &LegacyType, pointer_type: types::Type) -> types::Type {
     match ty {
         LegacyType::Primitive(PrimitiveType::I8) | LegacyType::Primitive(PrimitiveType::U8) => types::I8,
         LegacyType::Primitive(PrimitiveType::I16) | LegacyType::Primitive(PrimitiveType::U16) => types::I16,
@@ -789,7 +789,7 @@ pub(crate) fn type_to_cranelift(ty: &Type, pointer_type: types::Type) -> types::
 }
 
 /// Get the size in bytes for a Vole type (used for union layout)
-pub(crate) fn type_size(ty: &Type, pointer_type: types::Type) -> u32 {
+pub(crate) fn type_size(ty: &LegacyType, pointer_type: types::Type) -> u32 {
     match ty {
         LegacyType::Primitive(PrimitiveType::I8)
         | LegacyType::Primitive(PrimitiveType::U8)
@@ -952,7 +952,7 @@ pub(crate) fn fallible_error_tag(
 
 /// Convert a Cranelift type back to a Vole type (for return value inference)
 #[allow(dead_code)] // Used by compiler.rs during migration
-pub(crate) fn cranelift_to_vole_type(ty: types::Type) -> Type {
+pub(crate) fn cranelift_to_vole_type(ty: types::Type) -> LegacyType {
     match ty {
         types::I8 => LegacyType::Primitive(PrimitiveType::I8),
         types::I16 => LegacyType::Primitive(PrimitiveType::I16),
@@ -1086,7 +1086,7 @@ pub(crate) fn value_to_word(
 pub(crate) fn word_to_value(
     builder: &mut FunctionBuilder,
     word: Value,
-    vole_type: &Type,
+    vole_type: &LegacyType,
     pointer_type: types::Type,
 ) -> Value {
     let word_type = pointer_type;
@@ -1136,7 +1136,7 @@ pub(crate) fn word_to_value(
 
 /// Get the runtime tag value for an array element type.
 /// These tags are used by the runtime to distinguish element types.
-pub(crate) fn array_element_tag(ty: &Type) -> i64 {
+pub(crate) fn array_element_tag(ty: &LegacyType) -> i64 {
     match ty {
         LegacyType::Primitive(PrimitiveType::String) => 1,
         LegacyType::Primitive(PrimitiveType::I64)

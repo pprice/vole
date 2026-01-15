@@ -2,7 +2,7 @@
 //
 // TypeCompatibility trait for unified type compatibility checking.
 
-use crate::sema::types::Type;
+use crate::sema::types::{LegacyType, Type};
 
 /// Trait for type compatibility operations.
 ///
@@ -15,11 +15,11 @@ use crate::sema::types::Type;
 /// - Provide clear API contract for type system operations
 pub trait TypeCompatibility {
     /// Check if this type is compatible with (assignable to) another type.
-    fn is_compatible(&self, other: &Type) -> bool;
+    fn is_compatible(&self, other: &LegacyType) -> bool;
 
     /// Check if this type can be implicitly widened to the target type.
     /// e.g., i32 -> i64, f32 -> f64, u8 -> i16
-    fn can_widen_to(&self, target: &Type) -> bool;
+    fn can_widen_to(&self, target: &LegacyType) -> bool;
 
     /// Check if this type is numeric (supports arithmetic operations).
     fn is_numeric(&self) -> bool;
@@ -44,11 +44,11 @@ pub trait TypeCompatibility {
 }
 
 impl TypeCompatibility for Type {
-    fn is_compatible(&self, other: &Type) -> bool {
+    fn is_compatible(&self, other: &LegacyType) -> bool {
         super::core::types_compatible_core(self, other)
     }
 
-    fn can_widen_to(&self, target: &Type) -> bool {
+    fn can_widen_to(&self, target: &LegacyType) -> bool {
         // Delegate to Type's existing method
         Type::can_widen_to(self, target)
     }

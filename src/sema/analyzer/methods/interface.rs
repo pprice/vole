@@ -15,7 +15,7 @@ impl Analyzer {
     /// Uses TypeDefId and MethodId instead of string-based lookups.
     pub fn satisfies_interface_by_type_def_id(
         &self,
-        ty: &Type,
+        ty: &LegacyType,
         interface_id: TypeDefId,
         interner: &Interner,
     ) -> bool {
@@ -71,7 +71,7 @@ impl Analyzer {
     /// Check if a type satisfies an interface using TypeDefId directly.
     pub fn satisfies_interface_via_entity_registry(
         &self,
-        ty: &Type,
+        ty: &LegacyType,
         interface_type_def_id: TypeDefId,
         interner: &Interner,
     ) -> bool {
@@ -81,9 +81,9 @@ impl Analyzer {
     /// Check if a type has a field with the given name (string) and compatible type
     fn type_has_field_by_str(
         &self,
-        ty: &Type,
+        ty: &LegacyType,
         field_name: &str,
-        expected_type: &Type,
+        expected_type: &LegacyType,
         interner: &Interner,
     ) -> bool {
         let LegacyType::Nominal(n) = ty else {
@@ -122,7 +122,7 @@ impl Analyzer {
     /// Check if a type has a method matching the given name and signature
     fn type_has_method_by_str(
         &self,
-        ty: &Type,
+        ty: &LegacyType,
         method_name: &str,
         expected_sig: &FunctionType,
         interner: &Interner,
@@ -183,7 +183,7 @@ impl Analyzer {
         &self,
         expected: &FunctionType,
         found: &FunctionType,
-        _implementing_type: &Type,
+        _implementing_type: &LegacyType,
     ) -> bool {
         // Check param count
         if expected.params.len() != found.params.len() {
@@ -201,7 +201,7 @@ impl Analyzer {
     /// all required fields and methods, regardless of explicit `implements`.
     pub fn satisfies_interface_by_name_id(
         &self,
-        ty: &Type,
+        ty: &LegacyType,
         interface_name_id: NameId,
         interner: &Interner,
     ) -> bool {
@@ -213,7 +213,7 @@ impl Analyzer {
     }
 
     /// Check if a type implements Stringable (has to_string() -> string method)
-    pub fn satisfies_stringable(&self, ty: &Type, interner: &Interner) -> bool {
+    pub fn satisfies_stringable(&self, ty: &LegacyType, interner: &Interner) -> bool {
         // Use the well-known Stringable TypeDefId if available
         if let Some(stringable_type_def_id) = self.name_table.well_known.stringable_type_def {
             return self.satisfies_interface_via_entity_registry(
@@ -238,7 +238,7 @@ impl Analyzer {
     /// all required fields and methods, regardless of explicit `implements`.
     pub fn satisfies_interface(
         &self,
-        ty: &Type,
+        ty: &LegacyType,
         interface_name: Symbol,
         interner: &Interner,
     ) -> bool {
@@ -302,7 +302,7 @@ impl Analyzer {
 
             // Build substitution map for generic interface type parameters
             // E.g., MapLike<K, V> implemented as MapLike<i64, i64> → {K: i64, V: i64}
-            let substitutions: StdHashMap<NameId, Type> = if let Some(impl_type_id) = type_id_opt {
+            let substitutions: StdHashMap<NameId, LegacyType> = if let Some(impl_type_id) = type_id_opt {
                 let type_args = self
                     .entity_registry
                     .get_implementation_type_args(impl_type_id, interface_type_id);
@@ -325,7 +325,7 @@ impl Analyzer {
                         .last_segment_str(method.name_id)
                         .unwrap_or_default();
                     // Apply type parameter substitution to signature
-                    let subst_params: Vec<Type> = method
+                    let subst_params: Vec<LegacyType> = method
                         .signature
                         .params
                         .iter()
@@ -430,9 +430,9 @@ impl Analyzer {
     /// Check if method signature matches (EntityRegistry version)
     fn signatures_match_entity(
         required_params: &[Type],
-        required_return: &Type,
+        required_return: &LegacyType,
         found: &FunctionType,
-        implementing_type: &Type,
+        implementing_type: &LegacyType,
     ) -> bool {
         // Check parameter count
         if required_params.len() != found.params.len() {
@@ -463,9 +463,9 @@ impl Analyzer {
     fn describe_signature_mismatch(
         &mut self,
         required_params: &[Type],
-        required_return: &Type,
+        required_return: &LegacyType,
         found: &FunctionType,
-        implementing_type: &Type,
+        implementing_type: &LegacyType,
     ) -> String {
         let mut mismatches = Vec::new();
 
@@ -569,7 +569,7 @@ impl Analyzer {
     /// Returns None if satisfied, or Some(mismatch_description) if not.
     pub fn check_structural_constraint(
         &self,
-        ty: &Type,
+        ty: &LegacyType,
         structural: &StructuralType,
         interner: &Interner,
     ) -> Option<String> {
@@ -643,9 +643,9 @@ impl Analyzer {
     /// Check if a type has a field with compatible type
     fn type_has_field_with_type(
         &self,
-        ty: &Type,
+        ty: &LegacyType,
         field_name: &str,
-        expected_type: &Type,
+        expected_type: &LegacyType,
         interner: &Interner,
     ) -> bool {
         let LegacyType::Nominal(n) = ty else {
@@ -685,10 +685,10 @@ impl Analyzer {
     /// Uses covariant return types and contravariant parameter types
     fn type_has_structural_method(
         &self,
-        ty: &Type,
+        ty: &LegacyType,
         method_name: &str,
         expected_params: &[Type],
-        expected_return: &Type,
+        expected_return: &LegacyType,
         interner: &Interner,
     ) -> bool {
         // Get type name_id for method lookup
@@ -758,7 +758,7 @@ impl Analyzer {
     fn check_structural_method_signature(
         &self,
         expected_params: &[Type],
-        expected_return: &Type,
+        expected_return: &LegacyType,
         actual: &FunctionType,
         interner: &Interner,
     ) -> bool {

@@ -12,7 +12,7 @@ use crate::sema::types::NominalType;
 use crate::sema::{ClassType, LegacyType, PrimitiveType, RecordType, Type};
 
 /// Convert a Vole Type to a FieldTypeTag for runtime cleanup
-fn type_to_field_tag(ty: &Type) -> FieldTypeTag {
+fn type_to_field_tag(ty: &LegacyType) -> FieldTypeTag {
     match ty {
         LegacyType::Primitive(PrimitiveType::String) => FieldTypeTag::String,
         LegacyType::Array(_) => FieldTypeTag::Array,
@@ -53,7 +53,7 @@ impl Compiler<'_> {
 
     /// Resolve a type expression using type_metadata (for record/class field types)
     /// This allows resolving types like `Person?` where Person is another record/class
-    pub(super) fn resolve_type_with_metadata(&self, ty: &TypeExpr) -> Type {
+    pub(super) fn resolve_type_with_metadata(&self, ty: &TypeExpr) -> LegacyType {
         let query = self.query();
         let module_id = query.main_module();
         resolve_type_expr_with_metadata(
@@ -68,7 +68,7 @@ impl Compiler<'_> {
 
     /// Resolve a type expression using a specific interner (for module types)
     /// This is needed because module classes have symbols from their own interner
-    pub(super) fn resolve_type_with_interner(&self, ty: &TypeExpr, interner: &Interner) -> Type {
+    pub(super) fn resolve_type_with_interner(&self, ty: &TypeExpr, interner: &Interner) -> LegacyType {
         resolve_type_expr_with_metadata(
             ty,
             &self.analyzed.entity_registry,

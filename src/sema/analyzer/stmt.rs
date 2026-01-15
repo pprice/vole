@@ -300,7 +300,7 @@ impl Analyzer {
     fn check_destructure_pattern(
         &mut self,
         pattern: &Pattern,
-        ty: &Type,
+        ty: &LegacyType,
         mutable: bool,
         init_span: Span,
         interner: &Interner,
@@ -384,7 +384,7 @@ impl Analyzer {
     }
 
     /// Analyze a raise statement
-    fn analyze_raise_stmt(&mut self, stmt: &RaiseStmt, interner: &Interner) -> Type {
+    fn analyze_raise_stmt(&mut self, stmt: &RaiseStmt, interner: &Interner) -> LegacyType {
         // Check we're in a fallible function
         let Some(error_type) = self.current_function_error_type.clone() else {
             self.add_error(
@@ -577,7 +577,7 @@ impl Analyzer {
     }
 
     /// Check if error type is compatible with function's declared error type
-    fn error_type_compatible(&self, error_type: &Type, func_error: &Type) -> bool {
+    fn error_type_compatible(&self, error_type: &LegacyType, func_error: &LegacyType) -> bool {
         // Same type
         if error_type == func_error {
             return true;
@@ -600,7 +600,7 @@ impl Analyzer {
     /// Check record destructuring and bind variables
     fn check_record_destructuring(
         &mut self,
-        init_type: &Type,
+        init_type: &LegacyType,
         fields: &[RecordFieldPattern],
         mutable: bool,
         _pattern_span: Span,

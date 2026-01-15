@@ -1,7 +1,7 @@
 //! Field registration and lookup for EntityRegistry.
 
 use crate::identity::{FieldId, NameId, TypeDefId};
-use crate::sema::Type;
+use crate::sema::{LegacyType, Type};
 use crate::sema::entity_defs::FieldDef;
 use crate::sema::generic::substitute_type;
 use std::collections::HashMap;
@@ -15,7 +15,7 @@ impl EntityRegistry {
         defining_type: TypeDefId,
         name_id: NameId,
         full_name_id: NameId,
-        ty: Type,
+        ty: LegacyType,
         slot: usize,
     ) -> FieldId {
         let id = FieldId::new(self.field_defs.len() as u32);
@@ -74,7 +74,7 @@ impl EntityRegistry {
         &self,
         type_def_id: TypeDefId,
         type_args: &[Type],
-    ) -> HashMap<NameId, Type> {
+    ) -> HashMap<NameId, LegacyType> {
         let type_def = self.get_type(type_def_id);
         type_def
             .type_params
@@ -89,8 +89,8 @@ impl EntityRegistry {
         &self,
         type_def_id: TypeDefId,
         type_args: &[Type],
-        ty: &Type,
-    ) -> Type {
+        ty: &LegacyType,
+    ) -> LegacyType {
         if type_args.is_empty() {
             return ty.clone();
         }
@@ -104,7 +104,7 @@ impl EntityRegistry {
         type_def_id: TypeDefId,
         type_args: &[Type],
         field_name_id: NameId,
-    ) -> Option<Type> {
+    ) -> Option<LegacyType> {
         let type_def = self.get_type(type_def_id);
         let generic_info = type_def.generic_info.as_ref()?;
         let idx = generic_info

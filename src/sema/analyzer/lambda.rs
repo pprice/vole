@@ -11,7 +11,7 @@ impl Analyzer {
         lambda: &LambdaExpr,
         expected_type: Option<&FunctionType>,
         interner: &Interner,
-    ) -> Type {
+    ) -> LegacyType {
         // Push capture analysis stacks and side effects flag
         self.lambda_captures.push(HashMap::new());
         self.lambda_locals.push(HashSet::new());

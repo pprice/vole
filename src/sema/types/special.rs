@@ -23,7 +23,7 @@
 // ## Compound Special Types
 // - `Fallible(FallibleType)` - Result-like type: `fallible(T, E)`
 // - `Module(ModuleType)` - Imported module with exports
-// - `RuntimeIterator(Box<Type>)` - Builtin iterator (array.iter(), range.iter())
+// - `RuntimeIterator(Box<LegacyType>)` - Builtin iterator (array.iter(), range.iter())
 // - `Range` - Range literal type (0..10)
 //
 // This module defines the supporting structs for these variants. The variants
@@ -32,7 +32,7 @@
 use crate::frontend::Span;
 use crate::identity::{ModuleId, NameId};
 
-use super::Type;
+use super::{LegacyType, Type};
 
 /// Analysis error - represents a type that couldn't be determined.
 ///
@@ -214,9 +214,9 @@ impl std::fmt::Display for PlaceholderKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FallibleType {
     /// The success type (returned on success)
-    pub success_type: Box<Type>,
+    pub success_type: Box<LegacyType>,
     /// The error type (ErrorType or Union of ErrorTypes)
-    pub error_type: Box<Type>,
+    pub error_type: Box<LegacyType>,
 }
 
 /// A constant value that can be stored in a module.
@@ -267,7 +267,7 @@ pub struct ModuleType {
     /// Unique identifier for this module
     pub module_id: ModuleId,
     /// Exports keyed by fully-qualified name id
-    pub exports: std::collections::HashMap<NameId, Type>,
+    pub exports: std::collections::HashMap<NameId, LegacyType>,
     /// Constant values from the module (let PI = 3.14...)
     pub constants: std::collections::HashMap<NameId, ConstantValue>,
     /// Names of functions that are external (FFI) - others are pure Vole

@@ -509,7 +509,7 @@ impl Compiler<'_> {
                 )
             })
             .collect();
-        let param_vole_types: Vec<Type> = func
+        let param_vole_types: Vec<LegacyType> = func
             .params
             .iter()
             .map(|p| {
@@ -647,7 +647,7 @@ impl Compiler<'_> {
                 )
             })
             .collect();
-        let param_vole_types: Vec<Type> = func
+        let param_vole_types: Vec<LegacyType> = func
             .params
             .iter()
             .map(|p| {
@@ -955,7 +955,7 @@ impl Compiler<'_> {
                 )
             })
             .collect();
-        let param_vole_types: Vec<Type> = func
+        let param_vole_types: Vec<LegacyType> = func
             .params
             .iter()
             .map(|p| {
@@ -1289,7 +1289,7 @@ impl Compiler<'_> {
             .iter()
             .map(|t| type_to_cranelift(t, self.pointer_type))
             .collect();
-        let param_vole_types: Vec<Type> = instance.func_type.params.to_vec();
+        let param_vole_types: Vec<LegacyType> = instance.func_type.params.to_vec();
 
         // Get return type
         let return_type = Some((*instance.func_type.return_type).clone());
@@ -1539,7 +1539,7 @@ impl Compiler<'_> {
             .iter()
             .map(|t| type_to_cranelift(t, self.pointer_type))
             .collect();
-        let param_vole_types: Vec<Type> = instance.func_type.params.to_vec();
+        let param_vole_types: Vec<LegacyType> = instance.func_type.params.to_vec();
 
         // Get return type
         let return_type = Some((*instance.func_type.return_type).clone());
@@ -1633,8 +1633,8 @@ impl Compiler<'_> {
     fn build_concrete_self_type(
         &self,
         type_name: Symbol,
-        substitutions: &HashMap<NameId, Type>,
-    ) -> Type {
+        substitutions: &HashMap<NameId, LegacyType>,
+    ) -> LegacyType {
         let query = self.query();
         let module_id = query.main_module();
         let type_name_str = self.analyzed.interner.resolve(type_name);
@@ -1665,7 +1665,7 @@ impl Compiler<'_> {
                     );
 
                     // Build type_args from substituted type params
-                    let type_args: Vec<Type> = generic_info
+                    let type_args: Vec<LegacyType> = generic_info
                         .type_params
                         .iter()
                         .map(|param| {
@@ -1866,7 +1866,7 @@ impl Compiler<'_> {
             .iter()
             .map(|t| type_to_cranelift(t, self.pointer_type))
             .collect();
-        let param_vole_types: Vec<Type> = instance.func_type.params.to_vec();
+        let param_vole_types: Vec<LegacyType> = instance.func_type.params.to_vec();
 
         // Get return type
         let return_type = Some((*instance.func_type.return_type).clone());

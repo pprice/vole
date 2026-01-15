@@ -4,7 +4,7 @@ use super::{TypeError, TypeWarning};
 use crate::errors::{SemanticError, SemanticWarning};
 use crate::frontend::Span;
 use crate::sema::types::StructuralType;
-use crate::sema::{Type, TypeKey};
+use crate::sema::{LegacyType, Type, TypeKey};
 
 use super::Analyzer;
 
@@ -20,17 +20,17 @@ impl Analyzer {
         self.warnings.push(TypeWarning::new(warning, span));
     }
 
-    pub(super) fn type_key_for(&mut self, ty: &Type) -> TypeKey {
+    pub(super) fn type_key_for(&mut self, ty: &LegacyType) -> TypeKey {
         self.entity_registry.type_table.key_for_type(ty)
     }
 
-    pub(super) fn type_display(&self, ty: &Type) -> String {
+    pub(super) fn type_display(&self, ty: &LegacyType) -> String {
         self.entity_registry
             .type_table
             .display_type(ty, &self.name_table, &self.entity_registry)
     }
 
-    pub(super) fn type_display_pair(&mut self, left: &Type, right: &Type) -> String {
+    pub(super) fn type_display_pair(&mut self, left: &LegacyType, right: &LegacyType) -> String {
         format!(
             "{} and {}",
             self.type_display(left),
@@ -79,7 +79,7 @@ impl Analyzer {
     }
 
     /// Helper to add a type mismatch error with automatic type display
-    pub(crate) fn type_error(&mut self, expected: &str, found: &Type, span: Span) {
+    pub(crate) fn type_error(&mut self, expected: &str, found: &LegacyType, span: Span) {
         let found_str = self.type_display(found);
         self.add_error(
             SemanticError::TypeMismatch {
@@ -95,8 +95,8 @@ impl Analyzer {
     pub(crate) fn type_error_pair(
         &mut self,
         expected: &str,
-        left: &Type,
-        right: &Type,
+        left: &LegacyType,
+        right: &LegacyType,
         span: Span,
     ) {
         let found = self.type_display_pair(left, right);
@@ -111,7 +111,7 @@ impl Analyzer {
     }
 
     /// Helper to add a type mismatch error with two Type arguments
-    pub(crate) fn add_type_mismatch(&mut self, expected: &Type, found: &Type, span: Span) {
+    pub(crate) fn add_type_mismatch(&mut self, expected: &LegacyType, found: &LegacyType, span: Span) {
         let expected_str = self.type_display(expected);
         let found_str = self.type_display(found);
         self.add_error(

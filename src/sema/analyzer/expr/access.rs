@@ -42,7 +42,7 @@ impl Analyzer {
     }
 
     /// Get the type name and list of field names for a struct-like type (for error messages)
-    fn get_struct_info(&self, ty: &Type) -> Option<(String, Vec<String>)> {
+    fn get_struct_info(&self, ty: &LegacyType) -> Option<(String, Vec<String>)> {
         let (type_def_id, _type_args) = match ty {
             LegacyType::Nominal(NominalType::Class(c)) => (c.type_def_id, &c.type_args),
             LegacyType::Nominal(NominalType::Record(r)) => (r.type_def_id, &r.type_args),
@@ -581,7 +581,7 @@ impl Analyzer {
                 };
 
                 // Substitute inferred types into param types and return type
-                let substituted_params: Vec<Type> = func_type
+                let substituted_params: Vec<LegacyType> = func_type
                     .params
                     .iter()
                     .map(|p| crate::sema::generic::substitute_type(p, &inferred))
@@ -679,7 +679,7 @@ impl Analyzer {
     fn record_class_method_monomorph(
         &mut self,
         expr: &Expr,
-        object_type: &Type,
+        object_type: &LegacyType,
         method_sym: Symbol,
         func_type: &FunctionType,
         external_info: Option<ExternalMethodInfo>,
@@ -792,7 +792,7 @@ impl Analyzer {
         func_type: &FunctionType,
         class_type_params: &[TypeParamInfo],
         method_type_params: &[TypeParamInfo],
-        inferred: &std::collections::HashMap<NameId, Type>,
+        inferred: &std::collections::HashMap<NameId, LegacyType>,
         interner: &Interner,
     ) {
         // Get the type def to extract name and type args
@@ -831,7 +831,7 @@ impl Analyzer {
             .contains(&key)
         {
             // Build substitutions from type params to inferred types
-            let substitutions: HashMap<NameId, Type> = inferred.clone();
+            let substitutions: HashMap<NameId, LegacyType> = inferred.clone();
 
             // Generate unique mangled name
             let instance_id = self
@@ -852,7 +852,7 @@ impl Analyzer {
                 .intern_raw(self.current_module, &[&mangled_name_str]);
 
             // Create the substituted function type
-            let substituted_params: Vec<Type> = func_type
+            let substituted_params: Vec<LegacyType> = func_type
                 .params
                 .iter()
                 .map(|p| substitute_type(p, &substitutions))

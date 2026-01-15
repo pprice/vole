@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
 use crate::frontend::NodeId;
-use crate::sema::Type;
+use crate::sema::{LegacyType, Type};
 use crate::sema::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::sema::resolution::ResolvedMethod;
 
@@ -16,7 +16,7 @@ use crate::sema::resolution::ResolvedMethod;
 #[derive(Debug, Default, Clone)]
 pub struct ExpressionData {
     /// Type of each expression node
-    types: HashMap<NodeId, Type>,
+    types: HashMap<NodeId, LegacyType>,
     /// Resolved method information for method calls
     methods: HashMap<NodeId, ResolvedMethod>,
     /// Monomorphization key for generic function calls
@@ -26,7 +26,7 @@ pub struct ExpressionData {
     /// Monomorphization key for generic static method calls
     static_method_generics: HashMap<NodeId, StaticMethodMonomorphKey>,
     /// Per-module type mappings (for multi-module compilation)
-    module_types: FxHashMap<String, HashMap<NodeId, Type>>,
+    module_types: FxHashMap<String, HashMap<NodeId, LegacyType>>,
     /// Per-module method resolutions (for multi-module compilation)
     module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
 }
@@ -39,12 +39,12 @@ impl ExpressionData {
 
     /// Create ExpressionData from analysis results
     pub fn from_analysis(
-        types: HashMap<NodeId, Type>,
+        types: HashMap<NodeId, LegacyType>,
         methods: HashMap<NodeId, ResolvedMethod>,
         generics: HashMap<NodeId, MonomorphKey>,
         class_method_generics: HashMap<NodeId, ClassMethodMonomorphKey>,
         static_method_generics: HashMap<NodeId, StaticMethodMonomorphKey>,
-        module_types: FxHashMap<String, HashMap<NodeId, Type>>,
+        module_types: FxHashMap<String, HashMap<NodeId, LegacyType>>,
         module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
     ) -> Self {
         Self {
@@ -59,12 +59,12 @@ impl ExpressionData {
     }
 
     /// Get the type of an expression by its NodeId
-    pub fn get_type(&self, node: NodeId) -> Option<&Type> {
+    pub fn get_type(&self, node: NodeId) -> Option<&LegacyType> {
         self.types.get(&node)
     }
 
     /// Set the type of an expression
-    pub fn set_type(&mut self, node: NodeId, ty: Type) {
+    pub fn set_type(&mut self, node: NodeId, ty: LegacyType) {
         self.types.insert(node, ty);
     }
 
@@ -118,12 +118,12 @@ impl ExpressionData {
     }
 
     /// Get all expression types
-    pub fn types(&self) -> &HashMap<NodeId, Type> {
+    pub fn types(&self) -> &HashMap<NodeId, LegacyType> {
         &self.types
     }
 
     /// Get mutable access to expression types
-    pub fn types_mut(&mut self) -> &mut HashMap<NodeId, Type> {
+    pub fn types_mut(&mut self) -> &mut HashMap<NodeId, LegacyType> {
         &mut self.types
     }
 
@@ -188,17 +188,17 @@ impl ExpressionData {
     }
 
     /// Get types for a specific module
-    pub fn module_types(&self, module: &str) -> Option<&HashMap<NodeId, Type>> {
+    pub fn module_types(&self, module: &str) -> Option<&HashMap<NodeId, LegacyType>> {
         self.module_types.get(module)
     }
 
     /// Set types for a specific module
-    pub fn set_module_types(&mut self, module: String, types: HashMap<NodeId, Type>) {
+    pub fn set_module_types(&mut self, module: String, types: HashMap<NodeId, LegacyType>) {
         self.module_types.insert(module, types);
     }
 
     /// Get all module type mappings
-    pub fn all_module_types(&self) -> &FxHashMap<String, HashMap<NodeId, Type>> {
+    pub fn all_module_types(&self) -> &FxHashMap<String, HashMap<NodeId, LegacyType>> {
         &self.module_types
     }
 

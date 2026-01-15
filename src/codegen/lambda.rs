@@ -20,11 +20,11 @@ pub(crate) struct CaptureBinding {
     /// Index in the closure's captures array
     pub index: usize,
     /// Vole type of the captured variable
-    pub vole_type: Type,
+    pub vole_type: LegacyType,
 }
 
 impl CaptureBinding {
-    pub fn new(index: usize, vole_type: Type) -> Self {
+    pub fn new(index: usize, vole_type: LegacyType) -> Self {
         Self { index, vole_type }
     }
 }
@@ -50,7 +50,7 @@ pub(crate) fn infer_lambda_return_type(
     body: &LambdaBody,
     param_types: &[(Symbol, Type)],
     ctx: &CompileCtx,
-) -> Type {
+) -> LegacyType {
     match body {
         LambdaBody::Expr(expr) => infer_expr_type(expr, param_types, ctx),
         LambdaBody::Block(_) => LegacyType::Primitive(PrimitiveType::I64),
@@ -62,7 +62,7 @@ pub(crate) fn infer_expr_type(
     expr: &Expr,
     param_types: &[(Symbol, Type)],
     ctx: &CompileCtx,
-) -> Type {
+) -> LegacyType {
     match &expr.kind {
         ExprKind::IntLiteral(_) => LegacyType::Primitive(PrimitiveType::I64),
         ExprKind::FloatLiteral(_) => LegacyType::Primitive(PrimitiveType::F64),
@@ -143,7 +143,7 @@ pub(crate) fn infer_expr_type(
         }
 
         ExprKind::Lambda(lambda) => {
-            let lambda_params: Vec<Type> = lambda
+            let lambda_params: Vec<LegacyType> = lambda
                 .params
                 .iter()
                 .map(|p| {
@@ -210,7 +210,7 @@ fn compile_pure_lambda(
         })
         .collect();
 
-    let param_vole_types: Vec<Type> = lambda
+    let param_vole_types: Vec<LegacyType> = lambda
         .params
         .iter()
         .map(|p| {
@@ -349,7 +349,7 @@ fn compile_lambda_with_captures(
         })
         .collect();
 
-    let param_vole_types: Vec<Type> = lambda
+    let param_vole_types: Vec<LegacyType> = lambda
         .params
         .iter()
         .map(|p| {

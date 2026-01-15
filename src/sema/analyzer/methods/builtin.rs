@@ -7,12 +7,12 @@ impl Analyzer {
     /// Returns Some(function_type) if handled, None if not a built-in
     pub(crate) fn check_builtin_method(
         &mut self,
-        object_type: &Type,
+        object_type: &LegacyType,
         method_name: &str,
         args: &[Expr],
         interner: &Interner,
     ) -> Option<FunctionType> {
-        let method_type = |params: Vec<Type>, return_type: Type| FunctionType {
+        let method_type = |params: Vec<LegacyType>, return_type: LegacyType| FunctionType {
             params: params.into(),
             return_type: Box::new(return_type),
             is_closure: false,

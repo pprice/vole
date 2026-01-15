@@ -118,7 +118,7 @@ impl Primitives {
     }
 
     /// Map resolved Type to NameId for primitive types
-    pub fn name_id_for_type(&self, ty: &Type) -> Option<NameId> {
+    pub fn name_id_for_type(&self, ty: &LegacyType) -> Option<NameId> {
         match ty {
             LegacyType::Primitive(PrimitiveType::I8) => Some(self.i8),
             LegacyType::Primitive(PrimitiveType::I16) => Some(self.i16),

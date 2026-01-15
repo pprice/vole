@@ -23,14 +23,14 @@ pub struct TypeResolutionContext<'a> {
     /// Type parameters in scope (for generic contexts)
     pub type_params: Option<&'a TypeParamScope>,
     /// The concrete type that `Self` resolves to (for method signatures)
-    pub self_type: Option<Type>,
+    pub self_type: Option<LegacyType>,
 }
 
 fn interface_instance(
     name: Symbol,
-    type_args: Vec<Type>,
+    type_args: Vec<LegacyType>,
     ctx: &mut TypeResolutionContext<'_>,
-) -> Option<Type> {
+) -> Option<LegacyType> {
     // Look up interface by Symbol -> TypeDefId via resolver with interface fallback
     let name_str = ctx.interner.resolve(name);
     let type_def_id = ctx
@@ -135,7 +135,7 @@ impl<'a> TypeResolutionContext<'a> {
 /// This converts AST type expressions (from parsing) to semantic types (for type checking).
 /// It handles primitives, named types (aliases, classes, records, interfaces), arrays,
 /// optionals, unions, and function types.
-pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type {
+pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> LegacyType {
     resolve_type_impl(ty, ctx)
 }
 
@@ -215,7 +215,7 @@ pub fn resolve_type_with_arena(
 }
 
 /// Internal implementation of resolve_type (non-arena version).
-fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type {
+fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> LegacyType {
     match ty {
         TypeExpr::Primitive(p) => Type::from_primitive(*p),
         TypeExpr::Named(sym) => {
@@ -287,14 +287,14 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type
             Type::optional(inner_ty)
         }
         TypeExpr::Union(variants) => {
-            let types: Vec<Type> = variants.iter().map(|t| resolve_type(t, ctx)).collect();
+            let types: Vec<LegacyType> = variants.iter().map(|t| resolve_type(t, ctx)).collect();
             Type::normalize_union(types)
         }
         TypeExpr::Function {
             params,
             return_type,
         } => {
-            let param_types: Vec<Type> = params.iter().map(|p| resolve_type(p, ctx)).collect();
+            let param_types: Vec<LegacyType> = params.iter().map(|p| resolve_type(p, ctx)).collect();
             let ret = resolve_type(return_type, ctx);
             LegacyType::Function(FunctionType {
                 params: param_types.into(),
@@ -324,7 +324,7 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type
         }
         TypeExpr::Generic { name, args } => {
             // Resolve all type arguments
-            let resolved_args: Vec<Type> = args.iter().map(|a| resolve_type(a, ctx)).collect();
+            let resolved_args: Vec<LegacyType> = args.iter().map(|a| resolve_type(a, ctx)).collect();
             if let Some(interface) = interface_instance(*name, resolved_args.clone(), ctx) {
                 return interface;
             }
@@ -391,7 +391,7 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Type
             )
         }
         TypeExpr::Tuple(elements) => {
-            let resolved_elements: Vec<Type> =
+            let resolved_elements: Vec<LegacyType> =
                 elements.iter().map(|e| resolve_type(e, ctx)).collect();
             LegacyType::Tuple(resolved_elements.into())
         }

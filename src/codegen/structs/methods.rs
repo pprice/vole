@@ -493,7 +493,7 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         mc: &MethodCallExpr,
         method_name: &str,
-        elem_ty: &Type,
+        elem_ty: &LegacyType,
     ) -> Result<CompiledValue, String> {
         // Look up the Iterator interface via Resolver
         let iter_type_id = self
@@ -530,7 +530,7 @@ impl Cg<'_, '_, '_> {
             .clone();
 
         // Substitute the element type for T in the return type
-        let substitutions: std::collections::HashMap<NameId, Type> = iter_def
+        let substitutions: std::collections::HashMap<NameId, LegacyType> = iter_def
             .type_params
             .iter()
             .map(|param| (*param, elem_ty.clone()))
@@ -557,12 +557,12 @@ impl Cg<'_, '_, '_> {
     /// When calling external iterator methods, the runtime returns raw iterator pointers,
     /// not boxed interface values. This function converts Interface/GenericInstance types
     /// for Iterator to RuntimeIterator so that subsequent method calls use direct dispatch.
-    fn convert_iterator_return_type(&self, ty: Type, iterator_type_id: TypeDefId) -> Type {
+    fn convert_iterator_return_type(&self, ty: LegacyType, iterator_type_id: TypeDefId) -> LegacyType {
         self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
     }
 
     /// Convert Iterator<T> return types to RuntimeIterator(T), looking up Iterator interface by name
-    pub(crate) fn maybe_convert_iterator_return_type(&self, ty: Type) -> Type {
+    pub(crate) fn maybe_convert_iterator_return_type(&self, ty: LegacyType) -> LegacyType {
         // Look up the Iterator interface via Resolver
         let iterator_type_id = self
             .ctx
@@ -578,9 +578,9 @@ impl Cg<'_, '_, '_> {
     /// Core implementation of iterator return type conversion
     fn convert_iterator_return_type_by_type_def_id(
         &self,
-        ty: Type,
+        ty: LegacyType,
         iterator_type_id: TypeDefId,
-    ) -> Type {
+    ) -> LegacyType {
         match &ty {
             // Handle Iterator<T> stored as Interface
             LegacyType::Nominal(NominalType::Interface(iface))

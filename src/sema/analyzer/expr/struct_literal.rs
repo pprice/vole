@@ -187,7 +187,7 @@ impl Analyzer {
 
         // First, type-check all field values to get their actual types
         // Use string keys since Symbols may be from different interners
-        let mut field_value_types: HashMap<String, Type> = HashMap::new();
+        let mut field_value_types: HashMap<String, LegacyType> = HashMap::new();
         for field_init in &struct_lit.fields {
             let field_ty = self.check_expr(&field_init.value, interner)?;
             field_value_types.insert(interner.resolve(field_init.name).to_string(), field_ty);
@@ -220,7 +220,7 @@ impl Analyzer {
         );
 
         // Substitute inferred types into field types to get concrete field types
-        let concrete_field_types: Vec<Type> = generic_info
+        let concrete_field_types: Vec<LegacyType> = generic_info
             .field_types
             .iter()
             .map(|t| substitute_type(t, &inferred))
@@ -278,7 +278,7 @@ impl Analyzer {
         }
 
         // Build type_args from inferred types in order of type params
-        let type_args: Vec<Type> = generic_info
+        let type_args: Vec<LegacyType> = generic_info
             .type_params
             .iter()
             .filter_map(|tp| inferred.get(&tp.name_id).cloned())
@@ -304,7 +304,7 @@ impl Analyzer {
 
         // First, type-check all field values to get their actual types
         // Use string keys since Symbols may be from different interners
-        let mut field_value_types: HashMap<String, Type> = HashMap::new();
+        let mut field_value_types: HashMap<String, LegacyType> = HashMap::new();
         for field_init in &struct_lit.fields {
             let field_ty = self.check_expr(&field_init.value, interner)?;
             field_value_types.insert(interner.resolve(field_init.name).to_string(), field_ty);
@@ -337,7 +337,7 @@ impl Analyzer {
         );
 
         // Substitute inferred types into field types to get concrete field types
-        let concrete_field_types: Vec<Type> = generic_info
+        let concrete_field_types: Vec<LegacyType> = generic_info
             .field_types
             .iter()
             .map(|t| substitute_type(t, &inferred))
@@ -396,7 +396,7 @@ impl Analyzer {
 
         // Convert inferred substitutions to ordered type_args based on type param order
         // When inference fails, fall back to type params from current scope (for same-type struct literals in methods)
-        let type_args: Vec<Type> = generic_info
+        let type_args: Vec<LegacyType> = generic_info
             .type_params
             .iter()
             .map(|param| {

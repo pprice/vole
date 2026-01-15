@@ -28,7 +28,7 @@ impl Analyzer {
     #[tracing::instrument(skip(self, interner), fields(method = %interner.resolve(method_name)))]
     pub fn resolve_method_via_entity_registry(
         &mut self,
-        object_type: &Type,
+        object_type: &LegacyType,
         method_name: Symbol,
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
@@ -146,7 +146,7 @@ impl Analyzer {
     }
 
     /// Build substitution map for generic interface types
-    fn build_interface_substitutions(&self, object_type: &Type) -> HashMap<NameId, Type> {
+    fn build_interface_substitutions(&self, object_type: &LegacyType) -> HashMap<NameId, LegacyType> {
         // Extract type_def_id and type_args from nominal types
         if let LegacyType::Nominal(n) = object_type {
             self.entity_registry
@@ -160,7 +160,7 @@ impl Analyzer {
     fn apply_substitutions(
         &self,
         func_type: &FunctionType,
-        substitutions: &HashMap<NameId, Type>,
+        substitutions: &HashMap<NameId, LegacyType>,
     ) -> FunctionType {
         if substitutions.is_empty() {
             return func_type.clone();
@@ -178,7 +178,7 @@ impl Analyzer {
     }
 
     /// Get TypeDefId for a Type if it's registered in EntityRegistry
-    fn get_type_def_id_for_type(&self, ty: &Type) -> Option<TypeDefId> {
+    fn get_type_def_id_for_type(&self, ty: &LegacyType) -> Option<TypeDefId> {
         match ty {
             LegacyType::Nominal(NominalType::Class(c)) => Some(c.type_def_id),
             LegacyType::Nominal(NominalType::Record(r)) => Some(r.type_def_id),
@@ -188,7 +188,7 @@ impl Analyzer {
     }
 
     /// Get the name_id for a type
-    fn get_type_name_id(&self, ty: &Type) -> Option<NameId> {
+    fn get_type_name_id(&self, ty: &LegacyType) -> Option<NameId> {
         match ty {
             LegacyType::Nominal(NominalType::Class(c)) => {
                 Some(self.entity_registry.get_type(c.type_def_id).name_id)
@@ -331,7 +331,7 @@ impl Analyzer {
     /// Resolve a method call to a normalized resolution for later validation/codegen.
     pub(crate) fn resolve_method(
         &mut self,
-        object_type: &Type,
+        object_type: &LegacyType,
         method_name: Symbol,
         interner: &Interner,
     ) -> Option<ResolvedMethod> {

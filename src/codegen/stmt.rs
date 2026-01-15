@@ -40,7 +40,7 @@ pub(super) fn compile_block(
 pub(super) fn construct_union(
     builder: &mut FunctionBuilder,
     value: CompiledValue,
-    union_type: &Type,
+    union_type: &LegacyType,
     pointer_type: types::Type,
 ) -> Result<CompiledValue, String> {
     let LegacyType::Union(variants) = union_type else {
@@ -522,7 +522,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Check if a type is an Iterator<T> type
-    fn is_iterator_type(&self, ty: &Type) -> bool {
+    fn is_iterator_type(&self, ty: &LegacyType) -> bool {
         match ty {
             LegacyType::Nominal(NominalType::Interface(iface)) => self
                 .ctx
@@ -535,7 +535,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Extract element type from Iterator<T>
-    fn iterator_element_type(&self, ty: &Type) -> Type {
+    fn iterator_element_type(&self, ty: &LegacyType) -> LegacyType {
         match ty {
             LegacyType::Nominal(NominalType::Interface(iface)) => iface
                 .type_args
@@ -691,7 +691,7 @@ impl Cg<'_, '_, '_> {
     pub fn construct_union(
         &mut self,
         value: CompiledValue,
-        union_type: &Type,
+        union_type: &LegacyType,
     ) -> Result<CompiledValue, String> {
         let LegacyType::Union(variants) = union_type else {
             return Err(CodegenError::type_mismatch(
@@ -770,7 +770,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         pattern: &Pattern,
         value: Value,
-        ty: &Type,
+        ty: &LegacyType,
     ) -> Result<(), String> {
         match pattern {
             Pattern::Identifier { name, .. } => {

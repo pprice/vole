@@ -118,7 +118,7 @@ impl Analyzer {
             .intern(self.current_module, &[func.name], interner);
         if func.type_params.is_empty() {
             // Non-generic function: resolve types normally
-            let params: Vec<Type> = func
+            let params: Vec<LegacyType> = func
                 .params
                 .iter()
                 .map(|p| self.resolve_type(&p.ty, interner))
@@ -193,7 +193,7 @@ impl Analyzer {
                 module_id,
                 &type_param_scope,
             );
-            let param_types: Vec<Type> = func
+            let param_types: Vec<LegacyType> = func
                 .params
                 .iter()
                 .map(|p| resolve_type(&p.ty, &mut ctx))
@@ -255,7 +255,7 @@ impl Analyzer {
                     self.name_table.intern_raw(builtin_mod, &[name_str])
                 })
                 .collect();
-            let field_types: Vec<Type> = class
+            let field_types: Vec<LegacyType> = class
                 .fields
                 .iter()
                 .map(|f| self.resolve_type(&f.ty, interner))
@@ -316,7 +316,7 @@ impl Analyzer {
                     self.current_module,
                     &[interner.resolve(class.name), method_name_str],
                 );
-                let params: Vec<Type> = method
+                let params: Vec<LegacyType> = method
                     .params
                     .iter()
                     .map(|p| {
@@ -355,7 +355,7 @@ impl Analyzer {
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
-                    let params: Vec<Type> = method
+                    let params: Vec<LegacyType> = method
                         .params
                         .iter()
                         .map(|p| self.resolve_type(&p.ty, interner))
@@ -392,7 +392,7 @@ impl Analyzer {
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
-                    let params: Vec<Type> = func
+                    let params: Vec<LegacyType> = func
                         .params
                         .iter()
                         .map(|p| self.resolve_type(&p.ty, interner))
@@ -489,7 +489,7 @@ impl Analyzer {
                 &type_param_scope,
             );
 
-            let field_types: Vec<Type> = class
+            let field_types: Vec<LegacyType> = class
                 .fields
                 .iter()
                 .map(|f| resolve_type(&f.ty, &mut ctx))
@@ -570,7 +570,7 @@ impl Analyzer {
                 );
 
                 // Resolve parameter types with type params and self in scope
-                let params: Vec<Type> = method
+                let params: Vec<LegacyType> = method
                     .params
                     .iter()
                     .map(|p| {
@@ -669,7 +669,7 @@ impl Analyzer {
                         .collect();
 
                     // Resolve parameter types with merged type params in scope
-                    let params: Vec<Type> = method
+                    let params: Vec<LegacyType> = method
                         .params
                         .iter()
                         .map(|p| {
@@ -730,7 +730,7 @@ impl Analyzer {
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
 
                     // Resolve parameter types with type params in scope
-                    let params: Vec<Type> = func
+                    let params: Vec<LegacyType> = func
                         .params
                         .iter()
                         .map(|p| {
@@ -811,7 +811,7 @@ impl Analyzer {
                     self.name_table.intern_raw(builtin_mod, &[name_str])
                 })
                 .collect();
-            let field_types: Vec<Type> = record
+            let field_types: Vec<LegacyType> = record
                 .fields
                 .iter()
                 .map(|f| self.resolve_type(&f.ty, interner))
@@ -872,7 +872,7 @@ impl Analyzer {
                     self.current_module,
                     &[interner.resolve(record.name), method_name_str],
                 );
-                let params: Vec<Type> = method
+                let params: Vec<LegacyType> = method
                     .params
                     .iter()
                     .map(|p| {
@@ -911,7 +911,7 @@ impl Analyzer {
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[record_name_str, method_name_str]);
-                    let params: Vec<Type> = method
+                    let params: Vec<LegacyType> = method
                         .params
                         .iter()
                         .map(|p| self.resolve_type(&p.ty, interner))
@@ -1001,7 +1001,7 @@ impl Analyzer {
                 &type_param_scope,
             );
 
-            let field_types: Vec<Type> = record
+            let field_types: Vec<LegacyType> = record
                 .fields
                 .iter()
                 .map(|f| resolve_type(&f.ty, &mut ctx))
@@ -1098,7 +1098,7 @@ impl Analyzer {
 
             for method in &record.methods {
                 // First resolve types, then intern names (to avoid borrow conflicts)
-                let params: Vec<Type> = {
+                let params: Vec<LegacyType> = {
                     let mut ctx = TypeResolutionContext::with_type_params(
                         &self.entity_registry,
                         interner,
@@ -1113,7 +1113,7 @@ impl Analyzer {
                         .map(|p| resolve_type(&p.ty, &mut ctx))
                         .collect()
                 };
-                let return_type: Type = {
+                let return_type: LegacyType = {
                     let mut ctx = TypeResolutionContext::with_type_params(
                         &self.entity_registry,
                         interner,
@@ -1201,7 +1201,7 @@ impl Analyzer {
                         .collect();
 
                     // Resolve parameter types with merged type params in scope
-                    let params: Vec<Type> = method
+                    let params: Vec<LegacyType> = method
                         .params
                         .iter()
                         .map(|p| {
@@ -1288,7 +1288,7 @@ impl Analyzer {
             };
 
             // Extract and resolve type arguments for generic interfaces
-            let type_args: Vec<Type> = match iface_type {
+            let type_args: Vec<LegacyType> = match iface_type {
                 TypeExpr::Generic { args, .. } => args
                     .iter()
                     .map(|arg| self.resolve_type(arg, interner))
@@ -1392,13 +1392,13 @@ impl Analyzer {
 
         // Build interface_methods for Type and collect method data for EntityRegistry registration
         // We resolve types once and reuse the data
-        let method_data: Vec<(Symbol, String, Vec<Type>, Type, bool)> = interface_decl
+        let method_data: Vec<(Symbol, String, Vec<LegacyType>, Type, bool)> = interface_decl
             .methods
             .iter()
             .map(|m| {
                 let name = m.name;
                 let name_str = interner.resolve(m.name).to_string();
-                let params: Vec<Type> = m
+                let params: Vec<LegacyType> = m
                     .params
                     .iter()
                     .map(|p| resolve_type(&p.ty, &mut type_ctx))
@@ -1580,7 +1580,7 @@ impl Analyzer {
                     &type_param_scope,
                 );
 
-                let params: Vec<Type> = method
+                let params: Vec<LegacyType> = method
                     .params
                     .iter()
                     .map(|p| resolve_type(&p.ty, &mut static_type_ctx))
@@ -1786,7 +1786,7 @@ impl Analyzer {
                             .name_table
                             .intern_raw(self.current_module, &[&type_name_str, &method_name_str]);
 
-                        let params: Vec<Type> = method
+                        let params: Vec<LegacyType> = method
                             .params
                             .iter()
                             .map(|p| self.resolve_type(&p.ty, interner))
@@ -1825,7 +1825,7 @@ impl Analyzer {
                                 &[&type_name_str, &method_name_str],
                             );
 
-                            let params: Vec<Type> = func
+                            let params: Vec<LegacyType> = func
                                 .params
                                 .iter()
                                 .map(|p| self.resolve_type(&p.ty, interner))
@@ -1910,7 +1910,7 @@ impl Analyzer {
                     module_id,
                     &type_param_scope,
                 );
-                let param_types: Vec<Type> = func
+                let param_types: Vec<LegacyType> = func
                     .params
                     .iter()
                     .map(|p| resolve_type(&p.ty, &mut ctx))
@@ -1963,7 +1963,7 @@ impl Analyzer {
                 );
             } else {
                 // Non-generic external function
-                let params: Vec<Type> = func
+                let params: Vec<LegacyType> = func
                     .params
                     .iter()
                     .map(|p| self.resolve_type(&p.ty, interner))

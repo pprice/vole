@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 #[allow(dead_code)]
 impl Analyzer {
-    pub(crate) fn types_compatible(&self, from: &Type, to: &Type, interner: &Interner) -> bool {
+    pub(crate) fn types_compatible(&self, from: &LegacyType, to: &LegacyType, interner: &Interner) -> bool {
         // Use the core compatibility check for most cases
         if from.is_compatible(to) {
             return true;
@@ -108,7 +108,7 @@ impl Analyzer {
     pub(crate) fn format_method_signature(
         &mut self,
         params: &[Type],
-        return_type: &Type,
+        return_type: &LegacyType,
         _interner: &Interner,
     ) -> String {
         let params_str: Vec<String> = params.iter().map(|t| self.type_display(t)).collect();
@@ -124,7 +124,7 @@ impl Analyzer {
     pub(crate) fn format_interface_method_signature(
         &mut self,
         params: &[Type],
-        return_type: &Type,
+        return_type: &LegacyType,
     ) -> String {
         let params_str: Vec<String> = params
             .iter()

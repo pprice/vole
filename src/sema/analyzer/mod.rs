@@ -133,9 +133,9 @@ pub struct AnalysisOutput {
 /// Saved state when entering a function/method check context.
 /// Used by enter_function_context/exit_function_context for uniform save/restore.
 struct FunctionCheckContext {
-    return_type: Option<Type>,
-    error_type: Option<Type>,
-    generator_element_type: Option<Type>,
+    return_type: Option<LegacyType>,
+    error_type: Option<LegacyType>,
+    generator_element_type: Option<LegacyType>,
     static_method: Option<String>,
     /// How many scopes were on the stack when we entered this context
     type_param_stack_depth: usize,
@@ -146,20 +146,20 @@ pub struct Analyzer {
     functions: HashMap<Symbol, FunctionType>,
     /// Functions registered by string name (for prelude functions that cross interner boundaries)
     functions_by_name: FxHashMap<String, FunctionType>,
-    globals: HashMap<Symbol, Type>,
-    current_function_return: Option<Type>,
+    globals: HashMap<Symbol, LegacyType>,
+    current_function_return: Option<LegacyType>,
     /// Current function's error type (if fallible)
-    current_function_error_type: Option<Type>,
+    current_function_error_type: Option<LegacyType>,
     /// Generator context: if inside a generator function, this holds the Iterator element type.
     /// None means we're not in a generator (or not in a function at all).
-    current_generator_element_type: Option<Type>,
+    current_generator_element_type: Option<LegacyType>,
     /// If we're inside a static method, this holds the method name (for error reporting).
     /// None means we're not in a static method.
     current_static_method: Option<String>,
     errors: Vec<TypeError>,
     warnings: Vec<TypeWarning>,
     /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
-    type_overrides: HashMap<Symbol, Type>,
+    type_overrides: HashMap<Symbol, LegacyType>,
     /// Stack of lambda scopes for capture analysis. Each entry is a HashMap
     /// mapping captured variable names to their capture info.
     lambda_captures: Vec<HashMap<Symbol, CaptureInfo>>,
@@ -170,7 +170,7 @@ pub struct Analyzer {
     lambda_side_effects: Vec<bool>,
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their resolved types, including narrowed types
-    expr_types: HashMap<NodeId, Type>,
+    expr_types: HashMap<NodeId, LegacyType>,
     /// Methods added via implement blocks
     pub implement_registry: ImplementRegistry,
     /// Resolved method calls for codegen
@@ -181,9 +181,9 @@ pub struct Analyzer {
     module_types: FxHashMap<String, ModuleType>,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     module_programs: FxHashMap<String, (Program, Interner)>,
-    /// Expression types for module programs (keyed by module path -> NodeId -> Type)
+    /// Expression types for module programs (keyed by module path -> NodeId -> LegacyType)
     /// Stored separately since NodeIds are per-program and can't be merged into main expr_types
-    pub module_expr_types: FxHashMap<String, HashMap<NodeId, Type>>,
+    pub module_expr_types: FxHashMap<String, HashMap<NodeId, LegacyType>>,
     /// Method resolutions for module programs (keyed by module path -> NodeId -> ResolvedMethod)
     /// Stored separately since NodeIds are per-program and can't be merged into main method_resolutions
     pub module_method_resolutions: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
@@ -286,7 +286,7 @@ impl Analyzer {
     // Type inference: inference.rs
 
     /// Get the resolved expression types (for use by codegen)
-    pub fn expr_types(&self) -> &HashMap<NodeId, Type> {
+    pub fn expr_types(&self) -> &HashMap<NodeId, LegacyType> {
         &self.expr_types
     }
 
@@ -299,7 +299,7 @@ impl Analyzer {
     }
 
     /// Take ownership of the expression types (consuming self)
-    pub fn into_expr_types(self) -> HashMap<NodeId, Type> {
+    pub fn into_expr_types(self) -> HashMap<NodeId, LegacyType> {
         self.expr_types
     }
 
@@ -329,7 +329,7 @@ impl Analyzer {
     }
 
     /// Record the resolved type for an expression, returning the type for chaining
-    fn record_expr_type(&mut self, expr: &Expr, ty: Type) -> Type {
+    fn record_expr_type(&mut self, expr: &Expr, ty: LegacyType) -> LegacyType {
         self.expr_types.insert(expr.id, ty.clone());
         ty
     }
@@ -376,7 +376,7 @@ impl Analyzer {
         }
     }
 
-    fn register_named_type(&mut self, name: Symbol, ty: Type, interner: &Interner) {
+    fn register_named_type(&mut self, name: Symbol, ty: LegacyType, interner: &Interner) {
         let name_id = self
             .name_table
             .intern(self.current_module, &[name], interner);
@@ -393,9 +393,9 @@ impl Analyzer {
     fn interface_type(
         &mut self,
         name: &str,
-        type_args: Vec<Type>,
+        type_args: Vec<LegacyType>,
         interner: &Interner,
-    ) -> Option<Type> {
+    ) -> Option<LegacyType> {
         // Look up interface by string name using resolver with interface fallback
         let type_def_id = self
             .resolver(interner)
@@ -481,7 +481,7 @@ impl Analyzer {
     }
 
     /// Get variable type with flow-sensitive overrides
-    fn get_variable_type(&self, sym: Symbol) -> Option<Type> {
+    fn get_variable_type(&self, sym: Symbol) -> Option<LegacyType> {
         // Check overrides first (for narrowed types inside if-blocks)
         if let Some(ty) = self.type_overrides.get(&sym) {
             return Some(ty.clone());
@@ -544,7 +544,7 @@ impl Analyzer {
         }
     }
 
-    fn resolve_type(&mut self, ty: &TypeExpr, interner: &Interner) -> Type {
+    fn resolve_type(&mut self, ty: &TypeExpr, interner: &Interner) -> LegacyType {
         self.resolve_type_with_self(ty, interner, None)
     }
 
@@ -553,8 +553,8 @@ impl Analyzer {
         &mut self,
         ty: &TypeExpr,
         interner: &Interner,
-        self_type: Option<Type>,
-    ) -> Type {
+        self_type: Option<LegacyType>,
+    ) -> LegacyType {
         let module_id = self.current_module;
         let mut ctx = TypeResolutionContext {
             entity_registry: &self.entity_registry,
@@ -590,7 +590,7 @@ impl Analyzer {
     }
 
     /// Register a type alias in EntityRegistry
-    fn register_type_alias(&mut self, name: Symbol, aliased_type: Type, interner: &Interner) {
+    fn register_type_alias(&mut self, name: Symbol, aliased_type: LegacyType, interner: &Interner) {
         // Lookup shell registered in register_all_type_shells
         let name_id = self
             .name_table
@@ -681,7 +681,7 @@ impl Analyzer {
         Ok(())
     }
 
-    /// Pass 2: Type check function bodies, tests, and methods
+    /// Pass 2: LegacyType check function bodies, tests, and methods
     fn check_declaration_bodies(
         &mut self,
         program: &Program,
@@ -1044,7 +1044,7 @@ impl Analyzer {
     fn check_type_param_constraints(
         &mut self,
         type_params: &[TypeParamInfo],
-        inferred: &HashMap<NameId, Type>,
+        inferred: &HashMap<NameId, LegacyType>,
         span: Span,
         interner: &Interner,
     ) {
@@ -1131,7 +1131,7 @@ impl Analyzer {
     fn analyze_external_block(
         &mut self,
         external: &ExternalBlock,
-        target_type: &Type,
+        target_type: &LegacyType,
         trait_name: Option<Symbol>,
         interner: &Interner,
     ) {
@@ -1161,7 +1161,7 @@ impl Analyzer {
 
         for func in &external.functions {
             // Resolve parameter types
-            let param_types: Vec<Type> = func
+            let param_types: Vec<LegacyType> = func
                 .params
                 .iter()
                 .map(|p| self.resolve_type(&p.ty, interner))
@@ -1229,7 +1229,7 @@ impl Analyzer {
     /// For static methods, caller should set static_method and push type params after calling.
     fn enter_function_context(
         &mut self,
-        return_type: &Type,
+        return_type: &LegacyType,
         interner: &Interner,
     ) -> FunctionCheckContext {
         let saved = FunctionCheckContext {
@@ -1312,7 +1312,7 @@ impl Analyzer {
     }
 
     /// Extract the element type from an Iterator<T> type, or None if not an iterator type
-    fn extract_iterator_element_type(&self, ty: &Type, _interner: &Interner) -> Option<Type> {
+    fn extract_iterator_element_type(&self, ty: &LegacyType, _interner: &Interner) -> Option<LegacyType> {
         let LegacyType::Nominal(NominalType::Interface(interface_type)) = ty else {
             return None;
         };
@@ -1575,7 +1575,7 @@ impl Analyzer {
                             type_params: None,
                             self_type: None,
                         };
-                        let params: Vec<Type> = f
+                        let params: Vec<LegacyType> = f
                             .params
                             .iter()
                             .map(|p| resolve_type(&p.ty, &mut ctx))
@@ -1646,7 +1646,7 @@ impl Analyzer {
                                 type_params: None,
                                 self_type: None,
                             };
-                            let params: Vec<Type> = func
+                            let params: Vec<LegacyType> = func
                                 .params
                                 .iter()
                                 .map(|p| resolve_type(&p.ty, &mut ctx))

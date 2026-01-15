@@ -63,7 +63,7 @@ impl Cg<'_, '_, '_> {
         let set_func_ref = self.func_ref(set_key)?;
 
         // Get field types for wrapping optional values
-        let field_types: HashMap<String, Type> = match &vole_type {
+        let field_types: HashMap<String, LegacyType> = match &vole_type {
             LegacyType::Nominal(NominalType::Record(rt)) => {
                 let type_def = self.ctx.analyzed.entity_registry.get_type(rt.type_def_id);
                 if let Some(generic_info) = &type_def.generic_info {
@@ -161,7 +161,7 @@ impl Cg<'_, '_, '_> {
     fn construct_union_heap(
         &mut self,
         value: CompiledValue,
-        union_type: &Type,
+        union_type: &LegacyType,
     ) -> Result<CompiledValue, String> {
         let LegacyType::Union(variants) = union_type else {
             return Err(CodegenError::type_mismatch(

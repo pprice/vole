@@ -10,7 +10,7 @@ use crate::sema::generic::substitute_type;
 use crate::sema::types::NominalType;
 
 pub(crate) fn get_field_slot_and_type(
-    vole_type: &Type,
+    vole_type: &LegacyType,
     field_name: &str,
     ctx: &CompileCtx,
 ) -> Result<(usize, Type), String> {
@@ -90,7 +90,7 @@ pub(crate) fn get_field_slot_and_type(
 
 /// Get the NameId for a class, record, interface, or generic instance type
 pub(crate) fn get_type_name_id(
-    vole_type: &Type,
+    vole_type: &LegacyType,
     entity_registry: &crate::sema::entity_registry::EntityRegistry,
 ) -> Result<crate::identity::NameId, String> {
     match vole_type {
@@ -115,7 +115,7 @@ pub(crate) fn get_type_name_id(
 pub(crate) fn convert_field_value(
     builder: &mut FunctionBuilder,
     raw_value: Value,
-    field_type: &Type,
+    field_type: &LegacyType,
 ) -> (Value, types::Type) {
     match field_type {
         LegacyType::Primitive(PrimitiveType::F64) => {

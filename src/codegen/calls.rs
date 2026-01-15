@@ -961,7 +961,7 @@ impl Cg<'_, '_, '_> {
 }
 
 /// Convert NativeType to Vole Type
-fn native_type_to_vole_type(nt: &NativeType) -> Type {
+fn native_type_to_vole_type(nt: &NativeType) -> LegacyType {
     match nt {
         NativeType::I8 => LegacyType::Primitive(PrimitiveType::I8),
         NativeType::I16 => LegacyType::Primitive(PrimitiveType::I16),

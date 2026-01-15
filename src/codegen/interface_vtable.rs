@@ -38,9 +38,9 @@ struct VtableBuildState {
     /// Interface name ID for method resolution
     interface_name_id: NameId,
     /// Concrete type for wrapper compilation
-    concrete_type: Type,
+    concrete_type: LegacyType,
     /// Type substitutions for generic interfaces
-    substitutions: HashMap<NameId, Type>,
+    substitutions: HashMap<NameId, LegacyType>,
     /// Method IDs to compile wrappers for
     method_ids: Vec<MethodId>,
 }
@@ -86,7 +86,7 @@ impl InterfaceVtableRegistry {
         ctx: &mut CompileCtx,
         interface_name: Symbol,
         interface_type_args: &[Type],
-        concrete_type: &Type,
+        concrete_type: &LegacyType,
     ) -> Result<DataId, String> {
         let concrete_key = match concrete_type {
             LegacyType::Function(func_type) => InterfaceConcreteType::Function {
@@ -129,7 +129,7 @@ impl InterfaceVtableRegistry {
 
         // Build substitution map from interface type params to concrete type args
         let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_id);
-        let substitutions: HashMap<NameId, Type> = interface_def
+        let substitutions: HashMap<NameId, LegacyType> = interface_def
             .type_params
             .iter()
             .zip(interface_type_args.iter())
@@ -225,7 +225,7 @@ impl InterfaceVtableRegistry {
         ctx: &mut CompileCtx,
         interface_name: Symbol,
         interface_type_args: &[Type],
-        concrete_type: &Type,
+        concrete_type: &LegacyType,
     ) -> Result<DataId, String> {
         // Build key for lookup
         let concrete_key = match concrete_type {
@@ -276,7 +276,7 @@ impl InterfaceVtableRegistry {
 
         // Build substitution map
         let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_id);
-        let substitutions: HashMap<NameId, Type> = interface_def
+        let substitutions: HashMap<NameId, LegacyType> = interface_def
             .type_params
             .iter()
             .zip(interface_type_args.iter())
@@ -341,7 +341,7 @@ impl InterfaceVtableRegistry {
         &mut self,
         ctx: &mut CompileCtx,
         interface_name: Symbol,
-        concrete_type: &Type,
+        concrete_type: &LegacyType,
     ) -> Result<DataId, String> {
         // Build key for lookup
         let concrete_key = match concrete_type {
@@ -439,7 +439,7 @@ impl InterfaceVtableRegistry {
         ctx: &mut CompileCtx,
         interface_name: &str,
         method_name: &str,
-        concrete_type: &Type,
+        concrete_type: &LegacyType,
         method: &VtableMethod,
     ) -> Result<cranelift_module::FuncId, String> {
         let func_type = &method.func_type;
@@ -552,7 +552,7 @@ fn compile_function_wrapper(
     builder: &mut FunctionBuilder,
     ctx: &mut CompileCtx,
     func_type: &FunctionType,
-    concrete_type: &Type,
+    concrete_type: &LegacyType,
     data_word: Value,
     params: &[Value],
 ) -> Result<Vec<Value>, String> {
@@ -631,7 +631,7 @@ fn compile_method_wrapper(
     builder: &mut FunctionBuilder,
     ctx: &mut CompileCtx,
     func_type: &FunctionType,
-    concrete_type: &Type,
+    concrete_type: &LegacyType,
     data_word: Value,
     params: &[Value],
     method_info: &MethodInfo,
@@ -662,7 +662,7 @@ fn compile_external_wrapper(
     builder: &mut FunctionBuilder,
     ctx: &mut CompileCtx,
     func_type: &FunctionType,
-    concrete_type: &Type,
+    concrete_type: &LegacyType,
     data_word: Value,
     box_ptr: Value,
     params: &[Value],
@@ -845,7 +845,7 @@ pub(crate) fn box_interface_value(
     builder: &mut FunctionBuilder,
     ctx: &mut CompileCtx,
     value: CompiledValue,
-    interface_type: &Type,
+    interface_type: &LegacyType,
 ) -> Result<CompiledValue, String> {
     let LegacyType::Nominal(NominalType::Interface(interface)) = interface_type else {
         return Ok(value);
@@ -936,16 +936,16 @@ pub(crate) fn box_interface_value(
 fn resolve_vtable_target(
     ctx: &CompileCtx,
     interface_name_id: NameId,
-    concrete_type: &Type,
+    concrete_type: &LegacyType,
     interface_method_id: MethodId,
-    substitutions: &HashMap<NameId, Type>,
+    substitutions: &HashMap<NameId, LegacyType>,
 ) -> Result<VtableMethod, String> {
     // Get method info from EntityRegistry
     let interface_method = ctx.analyzed.entity_registry.get_method(interface_method_id);
     let method_name_str = ctx.analyzed.name_table.display(interface_method.name_id);
 
     // Apply substitutions to get concrete param/return types
-    let substituted_params: Vec<Type> = interface_method
+    let substituted_params: Vec<LegacyType> = interface_method
         .signature
         .params
         .iter()

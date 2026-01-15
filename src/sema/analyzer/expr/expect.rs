@@ -9,7 +9,7 @@ impl Analyzer {
     pub(crate) fn check_expr_expecting(
         &mut self,
         expr: &Expr,
-        expected: Option<&Type>,
+        expected: Option<&LegacyType>,
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
         let ty = self.check_expr_expecting_inner(expr, expected, interner)?;
@@ -19,7 +19,7 @@ impl Analyzer {
     fn check_expr_expecting_inner(
         &mut self,
         expr: &Expr,
-        expected: Option<&Type>,
+        expected: Option<&LegacyType>,
         interner: &Interner,
     ) -> Result<Type, Vec<TypeError>> {
         match &expr.kind {
@@ -291,7 +291,7 @@ impl Analyzer {
                         return Ok(self.ty_invalid());
                     }
                     // Check each element against its expected type
-                    let elem_types: Vec<Type> = elements
+                    let elem_types: Vec<LegacyType> = elements
                         .iter()
                         .zip(expected_elems.iter())
                         .map(|(elem, expected_elem)| {
@@ -315,7 +315,7 @@ impl Analyzer {
                 }
 
                 // Infer types for all elements, passing expected element type to each
-                let elem_types: Vec<Type> = elements
+                let elem_types: Vec<LegacyType> = elements
                     .iter()
                     .map(|e| self.check_expr_expecting(e, elem_expected, interner))
                     .collect::<Result<Vec<_>, _>>()?;

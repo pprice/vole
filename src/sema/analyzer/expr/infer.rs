@@ -218,7 +218,7 @@ impl Analyzer {
                     Ok(LegacyType::Array(Box::new(Type::unknown())))
                 } else {
                     // Infer types for all elements
-                    let elem_types: Vec<Type> = elements
+                    let elem_types: Vec<LegacyType> = elements
                         .iter()
                         .map(|e| self.check_expr(e, interner))
                         .collect::<Result<Vec<_>, _>>()?;
@@ -510,9 +510,9 @@ impl Analyzer {
     pub(crate) fn infer_literal_type(
         &mut self,
         expr: &Expr,
-        hint: &Type,
+        hint: &LegacyType,
         _interner: &Interner,
-    ) -> Type {
+    ) -> LegacyType {
         match &expr.kind {
             ExprKind::IntLiteral(value) => {
                 if hint.fits_literal(*value) {

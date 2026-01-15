@@ -119,7 +119,7 @@ impl EntityRegistry {
     }
 
     /// Set the aliased type for a type alias
-    pub fn set_aliased_type(&mut self, type_id: TypeDefId, aliased_type: Type, type_key: TypeKey) {
+    pub fn set_aliased_type(&mut self, type_id: TypeDefId, aliased_type: LegacyType, type_key: TypeKey) {
         self.type_defs[type_id.index() as usize].aliased_type = Some(aliased_type);
         // Update the alias index for inverse lookups
         self.alias_index.entry(type_key).or_default().push(type_id);
@@ -153,7 +153,7 @@ impl EntityRegistry {
         &mut self,
         type_id: TypeDefId,
         interface_id: TypeDefId,
-        type_args: Vec<Type>,
+        type_args: Vec<LegacyType>,
     ) {
         use crate::sema::entity_defs::Implementation;
         self.type_defs[type_id.index() as usize]
@@ -293,7 +293,7 @@ impl EntityRegistry {
     }
 
     /// Get the name_id for any struct-like Type (Class, Record, Interface)
-    pub fn type_name_id(&self, ty: &Type) -> Option<NameId> {
+    pub fn type_name_id(&self, ty: &LegacyType) -> Option<NameId> {
         match ty {
             LegacyType::Nominal(NominalType::Class(c)) => Some(self.class_name_id(c)),
             LegacyType::Nominal(NominalType::Record(r)) => Some(self.record_name_id(r)),
@@ -318,7 +318,7 @@ impl EntityRegistry {
         &mut self,
         name_id: NameId,
         module: crate::identity::ModuleId,
-        aliased_type: Type,
+        aliased_type: LegacyType,
         type_key: TypeKey,
     ) -> TypeDefId {
         // Register the type with kind Alias

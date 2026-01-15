@@ -787,7 +787,7 @@ impl Compiler<'_> {
                     )
                 })
                 .collect();
-            let param_vole_types: Vec<Type> = method
+            let param_vole_types: Vec<LegacyType> = method
                 .params
                 .iter()
                 .map(|p| {
@@ -882,7 +882,7 @@ impl Compiler<'_> {
         type_name: &str,
         type_sym: Option<Symbol>,
         func_module: ModuleId,
-        self_vole_type: &Type,
+        self_vole_type: &LegacyType,
         method_info: Option<MethodInfo>,
     ) -> Result<(), String> {
         let module_id = self.query().main_module();
@@ -922,7 +922,7 @@ impl Compiler<'_> {
         let registry = query.registry();
         let interner = query.interner();
         let name_table = query.name_table();
-        let resolve_param_type = |ty: &TypeExpr| -> Type {
+        let resolve_param_type = |ty: &TypeExpr| -> LegacyType {
             if matches!(ty, TypeExpr::SelfType) {
                 self_type.clone()
             } else {
@@ -943,7 +943,7 @@ impl Compiler<'_> {
             .iter()
             .map(|p| type_to_cranelift(&resolve_param_type(&p.ty), self.pointer_type))
             .collect();
-        let param_vole_types: Vec<Type> = method
+        let param_vole_types: Vec<LegacyType> = method
             .params
             .iter()
             .map(|p| resolve_param_type(&p.ty))
@@ -1058,7 +1058,7 @@ impl Compiler<'_> {
         type_name: &str,
         type_sym: Option<Symbol>,
         func_module: ModuleId,
-        self_vole_type: &Type,
+        self_vole_type: &LegacyType,
         method_info: Option<MethodInfo>,
         interner: &Interner,
         module_id: ModuleId,
@@ -1101,7 +1101,7 @@ impl Compiler<'_> {
         let registry = &self.analyzed.entity_registry;
         let name_table = &self.analyzed.name_table;
         let type_metadata = &self.type_metadata;
-        let resolve_param_type = |ty: &TypeExpr| -> Type {
+        let resolve_param_type = |ty: &TypeExpr| -> LegacyType {
             if matches!(ty, TypeExpr::SelfType) {
                 self_type.clone()
             } else {
@@ -1122,7 +1122,7 @@ impl Compiler<'_> {
             .iter()
             .map(|p| type_to_cranelift(&resolve_param_type(&p.ty), self.pointer_type))
             .collect();
-        let param_vole_types: Vec<Type> = method
+        let param_vole_types: Vec<LegacyType> = method
             .params
             .iter()
             .map(|p| resolve_param_type(&p.ty))
@@ -1269,7 +1269,7 @@ impl Compiler<'_> {
         let registry = query.registry();
         let interner = query.interner();
         let name_table = query.name_table();
-        let resolve_param_type = |ty: &TypeExpr| -> Type {
+        let resolve_param_type = |ty: &TypeExpr| -> LegacyType {
             if matches!(ty, TypeExpr::SelfType) {
                 self_vole_type.clone()
             } else {
@@ -1290,7 +1290,7 @@ impl Compiler<'_> {
             .iter()
             .map(|p| type_to_cranelift(&resolve_param_type(&p.ty), self.pointer_type))
             .collect();
-        let param_vole_types: Vec<Type> = method
+        let param_vole_types: Vec<LegacyType> = method
             .params
             .iter()
             .map(|p| resolve_param_type(&p.ty))
@@ -1438,7 +1438,7 @@ impl Compiler<'_> {
         let registry = query.registry();
         let interner = query.interner();
         let name_table = query.name_table();
-        let resolve_param_type = |ty: &TypeExpr| -> Type {
+        let resolve_param_type = |ty: &TypeExpr| -> LegacyType {
             if matches!(ty, TypeExpr::SelfType) {
                 self_vole_type.clone()
             } else {
@@ -1459,7 +1459,7 @@ impl Compiler<'_> {
             .iter()
             .map(|p| type_to_cranelift(&resolve_param_type(&p.ty), self.pointer_type))
             .collect();
-        let param_vole_types: Vec<Type> = method
+        let param_vole_types: Vec<LegacyType> = method
             .params
             .iter()
             .map(|p| resolve_param_type(&p.ty))
@@ -1621,7 +1621,7 @@ impl Compiler<'_> {
                     )
                 })
                 .collect();
-            let param_vole_types: Vec<Type> = method
+            let param_vole_types: Vec<LegacyType> = method
                 .params
                 .iter()
                 .map(|p| {
@@ -1782,7 +1782,7 @@ impl Compiler<'_> {
                     )
                 })
                 .collect();
-            let param_vole_types: Vec<Type> = method
+            let param_vole_types: Vec<LegacyType> = method
                 .params
                 .iter()
                 .map(|p| {
@@ -1958,7 +1958,7 @@ impl Compiler<'_> {
                         )
                     })
                     .collect();
-                let param_vole_types: Vec<Type> = method
+                let param_vole_types: Vec<LegacyType> = method
                     .params
                     .iter()
                     .map(|p| {

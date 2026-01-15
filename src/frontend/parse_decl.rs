@@ -195,7 +195,7 @@ impl<'src> Parser<'src> {
 
         let mut fields = Vec::new();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
-            // Parse field: name: Type
+            // Parse field: name: LegacyType
             let field_span = self.current.span;
             let field_name_token = self.current.clone();
             self.consume(TokenType::Identifier, "expected field name")?;
@@ -347,7 +347,7 @@ impl<'src> Parser<'src> {
         }))
     }
 
-    /// Parse interface method: func name(params) -> Type or func name(params) -> Type { body }
+    /// Parse interface method: func name(params) -> LegacyType or func name(params) -> LegacyType { body }
     /// The is_default flag indicates whether the method was preceded by 'default' keyword.
     fn interface_method(&mut self, is_default: bool) -> Result<InterfaceMethod, ParseError> {
         let start_span = self.current.span;
@@ -513,7 +513,7 @@ impl<'src> Parser<'src> {
                     methods.push(func);
                 }
             } else if self.check(TokenType::Identifier) {
-                // Parse field: name: Type,
+                // Parse field: name: LegacyType,
                 let field_span = self.current.span;
                 let name_token = self.current.clone();
                 self.advance();

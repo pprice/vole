@@ -58,7 +58,7 @@ impl TypeId {
 
     /// Convert a Type to a TypeId for registry lookup
     pub fn from_type(
-        ty: &Type,
+        ty: &LegacyType,
         types: &TypeTable,
         entity_registry: &crate::sema::entity_registry::EntityRegistry,
     ) -> Option<Self> {
@@ -115,7 +115,7 @@ pub struct ExternalMethodInfo {
     pub native_name: String,
     /// Declared Vole return type (for external functions with generic return types like Iterator<T>)
     /// Boxed to reduce enum variant size in ResolvedMethod
-    pub return_type: Option<Box<Type>>,
+    pub return_type: Option<Box<LegacyType>>,
 }
 
 /// Implementation of a method

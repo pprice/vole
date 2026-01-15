@@ -9,7 +9,7 @@ use super::parser::{ParseError, Parser};
 use crate::errors::ParserError;
 
 impl<'src> Parser<'src> {
-    /// Parse a function parameter (name: Type)
+    /// Parse a function parameter (name: LegacyType)
     pub(super) fn parse_param(&mut self) -> Result<Param, ParseError> {
         let name_token = self.current.clone();
         self.consume(TokenType::Identifier, "expected parameter name")?;
@@ -230,7 +230,7 @@ impl<'src> Parser<'src> {
                 })
             }
             TokenType::LBrace => {
-                // Structural type: { name: Type, func method() -> Type }
+                // Structural type: { name: LegacyType, func method() -> LegacyType }
                 self.advance(); // consume '{'
                 self.parse_structural_type()
             }
@@ -289,7 +289,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    /// Parse a structural type: { name: Type, func method() -> Type }
+    /// Parse a structural type: { name: LegacyType, func method() -> LegacyType }
     fn parse_structural_type(&mut self) -> Result<TypeExpr, ParseError> {
         let mut fields = Vec::new();
         let mut methods = Vec::new();
@@ -333,7 +333,7 @@ impl<'src> Parser<'src> {
                     span: name_token.span,
                 });
             } else if self.check(TokenType::Identifier) {
-                // Field: name: Type
+                // Field: name: LegacyType
                 self.advance(); // consume identifier
                 let name = self.interner.intern(&member_token.lexeme);
 

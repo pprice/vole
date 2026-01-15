@@ -15,22 +15,22 @@ use crate::sema::{FunctionType, LegacyType, PrimitiveType, Type};
 pub(crate) enum MethodTarget {
     Direct {
         method_info: MethodInfo,
-        return_type: Type,
+        return_type: LegacyType,
     },
     Implemented {
         method_info: MethodInfo,
-        return_type: Type,
+        return_type: LegacyType,
     },
     Default {
         method_info: MethodInfo,
-        return_type: Type,
+        return_type: LegacyType,
     },
     FunctionalInterface {
         func_type: FunctionType,
     },
     External {
         external_info: ExternalMethodInfo,
-        return_type: Type,
+        return_type: LegacyType,
     },
     InterfaceDispatch {
         interface_type_id: TypeDefId,
@@ -344,7 +344,7 @@ pub(crate) fn resolve_method_target(
 }
 
 /// Get TypeDefId for a type during codegen (handles primitives, records, classes, interfaces)
-fn get_type_def_id_for_codegen(ty: &Type, analyzed: &AnalyzedProgram) -> Option<TypeDefId> {
+fn get_type_def_id_for_codegen(ty: &LegacyType, analyzed: &AnalyzedProgram) -> Option<TypeDefId> {
     // For Class, Record, and Interface, we already have the TypeDefId
     match ty {
         LegacyType::Nominal(NominalType::Class(c)) => return Some(c.type_def_id),

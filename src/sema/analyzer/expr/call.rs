@@ -89,7 +89,7 @@ impl Analyzer {
                 }
 
                 // First, type-check the arguments to get their types
-                let arg_types: Vec<Type> = call
+                let arg_types: Vec<LegacyType> = call
                     .args
                     .iter()
                     .map(|arg| self.check_expr(arg, interner))
@@ -109,7 +109,7 @@ impl Analyzer {
                 );
 
                 // Create the concrete function type by substituting
-                let concrete_params: Vec<Type> = generic_def
+                let concrete_params: Vec<LegacyType> = generic_def
                     .param_types
                     .iter()
                     .map(|t| substitute_type(t, &inferred))
@@ -132,7 +132,7 @@ impl Analyzer {
                 }
 
                 // Get or create monomorphized instance
-                let type_args: Vec<Type> = generic_def
+                let type_args: Vec<LegacyType> = generic_def
                     .type_params
                     .iter()
                     .filter_map(|tp| inferred.get(&tp.name_id).cloned())

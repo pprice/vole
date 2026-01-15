@@ -8,7 +8,7 @@ use crate::frontend::Symbol;
 use crate::identity::{NameId, TypeParamId};
 use crate::sema::TypeKey;
 use crate::sema::implement_registry::ExternalMethodInfo;
-use crate::sema::types::{FunctionType, StructuralType, Type};
+use crate::sema::types::{FunctionType, LegacyType, StructuralType, Type};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -290,7 +290,7 @@ pub enum TypeConstraint {
     /// Interface constraints: T: Stringable or T: Hashable + Eq
     Interface(Vec<Symbol>),
     /// Union constraint: T: i32 | i64
-    Union(Vec<Type>),
+    Union(Vec<LegacyType>),
     /// Structural constraint: T: { name: string, func get() -> i32 }
     Structural(StructuralType),
 }
@@ -497,9 +497,9 @@ pub struct GenericFuncDef {
     /// The function's type parameters (e.g., T, U)
     pub type_params: Vec<TypeParamInfo>,
     /// Parameter types with TypeParam placeholders (e.g., [TypeParam(T), i64])
-    pub param_types: Vec<Type>,
+    pub param_types: Vec<LegacyType>,
     /// Return type with TypeParam placeholders
-    pub return_type: Type,
+    pub return_type: LegacyType,
 }
 
 /// Information about a generic record definition
@@ -512,7 +512,7 @@ pub struct GenericRecordDef {
     /// Field names
     pub field_names: Vec<Symbol>,
     /// Field types with TypeParam placeholders (e.g., [TypeParam(T), i64])
-    pub field_types: Vec<Type>,
+    pub field_types: Vec<LegacyType>,
 }
 
 /// Information about a generic class definition
@@ -525,7 +525,7 @@ pub struct GenericClassDef {
     /// Field names
     pub field_names: Vec<Symbol>,
     /// Field types with TypeParam placeholders (e.g., [TypeParam(T), i64])
-    pub field_types: Vec<Type>,
+    pub field_types: Vec<LegacyType>,
 }
 
 /// Key for looking up monomorphized function instances.
@@ -558,7 +558,7 @@ pub trait MonomorphInstanceTrait {
     /// Get the concrete function type after substitution
     fn func_type(&self) -> &FunctionType;
     /// Get the type parameter substitutions
-    fn substitutions(&self) -> &HashMap<NameId, Type>;
+    fn substitutions(&self) -> &HashMap<NameId, LegacyType>;
 }
 
 /// A monomorphized function instance
@@ -573,7 +573,7 @@ pub struct MonomorphInstance {
     /// The concrete function type after substitution
     pub func_type: FunctionType,
     /// Map from type param NameId to concrete type
-    pub substitutions: HashMap<NameId, Type>,
+    pub substitutions: HashMap<NameId, LegacyType>,
 }
 
 impl MonomorphInstanceTrait for MonomorphInstance {
@@ -586,7 +586,7 @@ impl MonomorphInstanceTrait for MonomorphInstance {
     fn func_type(&self) -> &FunctionType {
         &self.func_type
     }
-    fn substitutions(&self) -> &HashMap<NameId, Type> {
+    fn substitutions(&self) -> &HashMap<NameId, LegacyType> {
         &self.substitutions
     }
 }
@@ -632,7 +632,7 @@ pub struct ClassMethodMonomorphInstance {
     /// The concrete method type after substitution
     pub func_type: FunctionType,
     /// Map from type param NameId to concrete type
-    pub substitutions: HashMap<NameId, Type>,
+    pub substitutions: HashMap<NameId, LegacyType>,
     /// External method info (if this is an external method, call the runtime function)
     pub external_info: Option<ExternalMethodInfo>,
 }
@@ -647,7 +647,7 @@ impl MonomorphInstanceTrait for ClassMethodMonomorphInstance {
     fn func_type(&self) -> &FunctionType {
         &self.func_type
     }
-    fn substitutions(&self) -> &HashMap<NameId, Type> {
+    fn substitutions(&self) -> &HashMap<NameId, LegacyType> {
         &self.substitutions
     }
 }
@@ -702,7 +702,7 @@ pub struct StaticMethodMonomorphInstance {
     /// The concrete method type after substitution
     pub func_type: FunctionType,
     /// Map from type param NameId to concrete type
-    pub substitutions: HashMap<NameId, Type>,
+    pub substitutions: HashMap<NameId, LegacyType>,
 }
 
 impl MonomorphInstanceTrait for StaticMethodMonomorphInstance {
@@ -715,7 +715,7 @@ impl MonomorphInstanceTrait for StaticMethodMonomorphInstance {
     fn func_type(&self) -> &FunctionType {
         &self.func_type
     }
-    fn substitutions(&self) -> &HashMap<NameId, Type> {
+    fn substitutions(&self) -> &HashMap<NameId, LegacyType> {
         &self.substitutions
     }
 }
@@ -728,7 +728,7 @@ pub type StaticMethodMonomorphCache =
 ///
 /// This is a convenience wrapper around `Type::substitute`. Prefer calling
 /// `ty.substitute(substitutions)` directly in new code.
-pub fn substitute_type(ty: &Type, substitutions: &HashMap<NameId, Type>) -> Type {
+pub fn substitute_type(ty: &LegacyType, substitutions: &HashMap<NameId, LegacyType>) -> LegacyType {
     ty.substitute(substitutions)
 }
 

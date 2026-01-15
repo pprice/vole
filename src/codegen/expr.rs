@@ -778,7 +778,7 @@ impl Cg<'_, '_, '_> {
     fn compile_type_pattern_check(
         &mut self,
         scrutinee: &CompiledValue,
-        pattern_type: &Type,
+        pattern_type: &LegacyType,
     ) -> Result<Option<Value>, String> {
         if let LegacyType::Union(variants) = &scrutinee.vole_type {
             let expected_tag = variants
@@ -816,7 +816,7 @@ impl Cg<'_, '_, '_> {
     /// Handles string comparison via runtime function, f64 via fcmp, and integers via icmp.
     fn compile_equality_check(
         &mut self,
-        ty: &Type,
+        ty: &LegacyType,
         left: Value,
         right: Value,
     ) -> Result<Value, String> {

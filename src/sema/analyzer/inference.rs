@@ -10,13 +10,13 @@ use std::collections::HashMap;
 impl Analyzer {
     /// Infer type parameters from argument types.
     /// Given type params like [T, U], param types like [T, [U]], and arg types like [i64, [string]],
-    /// returns a map {NameId -> Type} for substitution.
+    /// returns a map {NameId -> LegacyType} for substitution.
     pub(crate) fn infer_type_params(
         &self,
         type_params: &[TypeParamInfo],
         param_types: &[Type],
         arg_types: &[Type],
-    ) -> HashMap<NameId, Type> {
+    ) -> HashMap<NameId, LegacyType> {
         let mut inferred = HashMap::new();
 
         // For each parameter, try to match its type against the argument type
@@ -30,10 +30,10 @@ impl Analyzer {
     /// Unify a parameter type pattern with an argument type, extracting type param bindings.
     pub(super) fn unify_types(
         &self,
-        pattern: &Type,
-        actual: &Type,
+        pattern: &LegacyType,
+        actual: &LegacyType,
         type_params: &[TypeParamInfo],
-        inferred: &mut HashMap<NameId, Type>,
+        inferred: &mut HashMap<NameId, LegacyType>,
     ) {
         match (pattern, actual) {
             // If the pattern is a type param, bind it
@@ -99,9 +99,9 @@ impl Analyzer {
     fn unify_type_param(
         &self,
         name_id: NameId,
-        actual: &Type,
+        actual: &LegacyType,
         type_params: &[TypeParamInfo],
-        inferred: &mut HashMap<NameId, Type>,
+        inferred: &mut HashMap<NameId, LegacyType>,
     ) {
         // Only bind if it's one of our type params
         if type_params.iter().any(|tp| tp.name_id == name_id) {

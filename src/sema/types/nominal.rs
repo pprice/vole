@@ -10,7 +10,7 @@ use smallvec::SmallVec;
 
 use crate::identity::{NameId, TypeDefId};
 
-use super::{StructField, Type};
+use super::{LegacyType, StructField, Type};
 
 /// SmallVec for interface extends list - most interfaces extend 0-2 parents
 pub type ExtendsVec = SmallVec<[TypeDefId; 2]>;
@@ -125,7 +125,7 @@ pub struct ClassType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
     /// Type arguments for generic classes (empty for non-generic classes)
-    pub type_args: Arc<[Type]>,
+    pub type_args: Arc<[LegacyType]>,
 }
 
 /// Record type information
@@ -134,7 +134,7 @@ pub struct RecordType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
     /// Type arguments for generic records (empty for non-generic records)
-    pub type_args: Arc<[Type]>,
+    pub type_args: Arc<[LegacyType]>,
 }
 
 /// Interface type information
@@ -142,7 +142,7 @@ pub struct RecordType {
 pub struct InterfaceType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
-    pub type_args: Arc<[Type]>,
+    pub type_args: Arc<[LegacyType]>,
     pub methods: Arc<[InterfaceMethodType]>,
     pub extends: ExtendsVec, // Parent interface TypeDefIds (inline for 0-2)
 }
@@ -180,8 +180,8 @@ impl std::hash::Hash for InterfaceType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InterfaceMethodType {
     pub name: NameId,
-    pub params: Arc<[Type]>,
-    pub return_type: Box<Type>,
+    pub params: Arc<[LegacyType]>,
+    pub return_type: Box<LegacyType>,
     pub has_default: bool, // True if interface provides default implementation
 }
 
