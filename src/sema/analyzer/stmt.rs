@@ -192,12 +192,10 @@ impl Analyzer {
                 let iterable_ty = self.check_expr(&for_stmt.iterable, interner)?;
 
                 let elem_ty = match &iterable_ty {
-                    Type::Range => Type::Primitive(PrimitiveType::I64),
+                    Type::Range => self.ty_i64(),
                     Type::Array(elem) => *elem.clone(),
                     // String is iterable - yields string (individual characters)
-                    Type::Primitive(PrimitiveType::String) => {
-                        Type::Primitive(PrimitiveType::String)
-                    }
+                    Type::Primitive(PrimitiveType::String) => self.ty_string(),
                     // Runtime iterators have their element type directly
                     Type::RuntimeIterator(elem) => *elem.clone(),
                     Type::Nominal(NominalType::Interface(_)) => {
@@ -211,7 +209,7 @@ impl Analyzer {
                                 &iterable_ty,
                                 for_stmt.iterable.span,
                             );
-                            Type::invalid("propagate")
+                            self.ty_invalid()
                         }
                     }
                     _ => {
@@ -220,7 +218,7 @@ impl Analyzer {
                             &iterable_ty,
                             for_stmt.iterable.span,
                         );
-                        Type::invalid("propagate")
+                        self.ty_invalid()
                     }
                 };
 
@@ -260,7 +258,7 @@ impl Analyzer {
                 let ret_type = if let Some(value) = &ret.value {
                     self.check_expr_expecting(value, expected_value_type.as_ref(), interner)?
                 } else {
-                    Type::Void
+                    self.ty_void()
                 };
 
                 if let Some(expected) = &expected_value_type
@@ -395,7 +393,7 @@ impl Analyzer {
                 },
                 stmt.span,
             );
-            return Type::invalid("propagate");
+            return self.ty_invalid();
         };
 
         // Look up the error type via resolver
@@ -411,7 +409,7 @@ impl Analyzer {
                 },
                 stmt.span,
             );
-            return Type::invalid("propagate");
+            return self.ty_invalid();
         };
 
         let type_def = self.entity_registry.get_type(type_id);
@@ -424,7 +422,7 @@ impl Analyzer {
                 },
                 stmt.span,
             );
-            return Type::invalid("propagate");
+            return self.ty_invalid();
         };
 
         // Get the error type name for error messages
@@ -456,7 +454,7 @@ impl Analyzer {
         for field_init in &stmt.fields {
             let value_type = match self.check_expr(&field_init.value, interner) {
                 Ok(ty) => ty,
-                Err(_) => Type::invalid("fallback"),
+                Err(_) => self.ty_invalid_traced("fallback"),
             };
             let field_init_name = interner.resolve(field_init.name);
             if let Some(field) = error_info.fields.iter().find(|f| f.name == field_init_name) {
@@ -517,7 +515,7 @@ impl Analyzer {
             );
         }
 
-        Type::Void // raise doesn't produce a value - it transfers control
+        self.ty_void() // raise doesn't produce a value - it transfers control
     }
 
     /// Analyze a try expression (propagation)
@@ -544,7 +542,7 @@ impl Analyzer {
                     },
                     inner_expr.span,
                 );
-                return Ok(Type::invalid("propagate"));
+                return Ok(self.ty_invalid());
             }
         };
 
