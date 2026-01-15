@@ -1,4 +1,6 @@
 use rustc_hash::FxHashMap;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use super::*;
 use crate::commands::common::AnalyzedProgram;
@@ -22,7 +24,7 @@ fn compile_and_run(source: &str) -> i64 {
         module_programs: FxHashMap::default(),
         name_table: NameTable::new(),
         entity_registry: EntityRegistry::new(),
-        type_arena: TypeArena::new(),
+        type_arena: Rc::new(RefCell::new(TypeArena::new())),
     };
 
     let mut jit = JitContext::new();

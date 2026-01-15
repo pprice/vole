@@ -6,7 +6,9 @@
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
 use cranelift_jit::JITModule;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::codegen::FunctionRegistry;
 use crate::commands::common::AnalyzedProgram;
@@ -129,9 +131,8 @@ pub(crate) struct CompileCtx<'a> {
     pub analyzed: &'a AnalyzedProgram,
     /// Interner for symbol resolution (may differ from analyzed.interner for module code)
     pub interner: &'a Interner,
-    /// Type arena for interned type access (read-only in codegen)
-    #[allow(dead_code)] // Will be used in Phase 4.2+ of TypeArena migration
-    pub arena: &'a TypeArena,
+    /// Shared type arena for interned type access (same arena used by ExpressionData)
+    pub arena: &'a Rc<RefCell<TypeArena>>,
     pub pointer_type: Type,
     pub module: &'a mut JITModule,
     pub func_registry: &'a mut FunctionRegistry,
@@ -148,7 +149,7 @@ pub(crate) struct CompileCtx<'a> {
     pub static_method_infos: &'a HashMap<(TypeDefId, NameId), MethodInfo>,
     /// Interface vtable registry (interface + concrete type -> data id)
     pub interface_vtables:
-        &'a std::cell::RefCell<crate::codegen::interface_vtable::InterfaceVtableRegistry>,
+        &'a RefCell<crate::codegen::interface_vtable::InterfaceVtableRegistry>,
     /// Current function's return type (needed for raise statements in fallible functions)
     pub current_function_return_type: Option<LegacyType>,
     /// Registry of native functions for external method calls

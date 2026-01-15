@@ -35,8 +35,8 @@ pub struct AnalyzedProgram {
     pub name_table: NameTable,
     /// Entity registry for first-class type/method/field/function identity (includes type_table)
     pub entity_registry: EntityRegistry,
-    /// Interned type arena for O(1) type comparison (Phase 1 of TypeArena refactor)
-    pub type_arena: TypeArena,
+    /// Shared type arena for interned types (same arena used by ExpressionData)
+    pub type_arena: Rc<RefCell<TypeArena>>,
 }
 
 impl AnalyzedProgram {
@@ -50,7 +50,7 @@ impl AnalyzedProgram {
             module_programs: output.module_programs,
             name_table: output.name_table,
             entity_registry: output.entity_registry,
-            type_arena: TypeArena::new(),
+            type_arena: output.type_arena,
         }
     }
 
