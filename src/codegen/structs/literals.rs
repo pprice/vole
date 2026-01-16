@@ -5,10 +5,9 @@ use std::collections::HashMap;
 use super::helpers::convert_to_i64_for_storage;
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
-use crate::codegen::types::{CompiledValue, box_interface_value_id, type_size};
+use crate::codegen::types::{CompiledValue, box_interface_value_id, type_id_size};
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, StructLiteralExpr};
-use crate::sema::LegacyType;
 use crate::sema::type_arena::TypeId;
 use cranelift::prelude::*;
 
@@ -119,9 +118,7 @@ impl Cg<'_, '_, '_> {
                 drop(arena);
 
                 if field_is_union && !value_is_union {
-                    // For union construction, we still need LegacyType
-                    let field_type_legacy = self.to_legacy(field_type_id);
-                    self.construct_union_heap(value, &field_type_legacy)?
+                    self.construct_union_heap_id(value, field_type_id)?
                 } else if field_is_interface {
                     box_interface_value_id(self.builder, self.ctx, value, field_type_id)?
                 } else {
@@ -147,39 +144,35 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Construct a union value on the heap (for storing in class/record fields).
-    /// Unlike the stack-based construct_union, this allocates on the heap so the
+    /// Unlike the stack-based construct_union_id, this allocates on the heap so the
     /// union persists beyond the current function's stack frame.
-    fn construct_union_heap(
+    fn construct_union_heap_id(
         &mut self,
         value: CompiledValue,
-        union_type: &LegacyType,
+        union_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        let LegacyType::Union(variants) = union_type else {
-            return Err(CodegenError::type_mismatch(
-                "union construction",
-                "union type",
-                "non-union",
-            )
-            .into());
-        };
-
-        // Convert value's type_id to legacy for comparisons
-        let value_type_legacy = self.to_legacy(value.type_id);
+        let arena = self.ctx.arena.borrow();
+        let variants = arena.unwrap_union(union_type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("union construction", "union type", "non-union").to_string()
+        })?;
+        let variants = variants.clone();
+        let nil_id = arena.nil();
+        drop(arena);
 
         // If the value is already the same union type, just return it
-        if &value_type_legacy == union_type {
+        if value.type_id == union_type_id {
             return Ok(value);
         }
 
         // Find the tag for the value type
         let tag = variants
             .iter()
-            .position(|v| v == &value_type_legacy)
+            .position(|&v| v == value.type_id)
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "union variant",
-                    format!("one of {:?}", variants),
-                    format!("{:?}", value_type_legacy),
+                    "compatible type",
+                    "incompatible type",
                 )
             })?;
 
@@ -192,7 +185,12 @@ impl Cg<'_, '_, '_> {
         let heap_alloc_ref = self.func_ref(heap_alloc_key)?;
 
         // Allocate union storage on the heap
-        let union_size = type_size(union_type, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
+        let union_size = type_id_size(
+            union_type_id,
+            self.ctx.pointer_type,
+            &self.ctx.analyzed.entity_registry,
+            &self.ctx.arena.borrow(),
+        );
         let size_val = self
             .builder
             .ins()
@@ -207,7 +205,7 @@ impl Cg<'_, '_, '_> {
             .store(MemFlags::new(), tag_val, heap_ptr, 0);
 
         // Store payload at offset 8 (if not nil)
-        if value_type_legacy != LegacyType::Nil {
+        if value.type_id != nil_id {
             self.builder
                 .ins()
                 .store(MemFlags::new(), value.value, heap_ptr, 8);
@@ -216,7 +214,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: heap_ptr,
             ty: self.ctx.pointer_type,
-            type_id: self.intern_type(union_type),
+            type_id: union_type_id,
         })
     }
 }
