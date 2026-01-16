@@ -12,7 +12,7 @@ use crate::sema::{LegacyType, PrimitiveType};
 
 use super::context::Cg;
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
-use super::types::{CompiledValue, array_element_tag, convert_to_type, type_to_cranelift};
+use super::types::{CompiledValue, array_element_tag, convert_to_type, type_id_to_cranelift};
 
 impl Cg<'_, '_, '_> {
     /// Compile a binary expression
@@ -208,26 +208,26 @@ impl Cg<'_, '_, '_> {
             if self.type_is_optional(right.type_id) && self.is_nil(left.type_id) {
                 return self.optional_nil_compare(right, op);
             }
-            // Check if left is optional and right is a compatible value type
-            let left_legacy = self.to_legacy(left.type_id);
-            if let Some(inner_type) = left_legacy.unwrap_optional() {
-                let right_legacy = self.to_legacy(right.type_id);
-                if inner_type == right_legacy
-                    || (inner_type.is_integer() && self.type_is_integer(right.type_id))
+            // Check if left is optional and right is a compatible value type (using TypeId)
+            let arena = self.ctx.arena.borrow();
+            if let Some(inner_type_id) = arena.unwrap_optional(left.type_id) {
+                if inner_type_id == right.type_id
+                    || (arena.is_integer(inner_type_id) && arena.is_integer(right.type_id))
                 {
+                    drop(arena);
                     return self.optional_value_compare(left, right, op);
                 }
             }
-            // Check if right is optional and left is a compatible value type
-            let right_legacy = self.to_legacy(right.type_id);
-            if let Some(inner_type) = right_legacy.unwrap_optional() {
-                let left_legacy = self.to_legacy(left.type_id);
-                if inner_type == left_legacy
-                    || (inner_type.is_integer() && self.type_is_integer(left.type_id))
+            // Check if right is optional and left is a compatible value type (using TypeId)
+            if let Some(inner_type_id) = arena.unwrap_optional(right.type_id) {
+                if inner_type_id == left.type_id
+                    || (arena.is_integer(inner_type_id) && arena.is_integer(left.type_id))
                 {
+                    drop(arena);
                     return self.optional_value_compare(right, left, op);
                 }
             }
+            drop(arena);
         }
 
         // Determine result type - original behavior: use left's type for integers
@@ -485,12 +485,13 @@ impl Cg<'_, '_, '_> {
         let is_not_nil = self.builder.ins().icmp(IntCC::NotEqual, tag, nil_tag_val);
 
         // Load the payload (at offset 8) with the correct type
-        // The payload type matches the inner (non-nil) type of the optional
-        let optional_legacy = self.to_legacy(optional.type_id);
-        let inner_type = optional_legacy
-            .unwrap_optional()
-            .unwrap_or(LegacyType::Primitive(PrimitiveType::I64));
-        let payload_cranelift_type = type_to_cranelift(&inner_type, self.ctx.pointer_type);
+        // The payload type matches the inner (non-nil) type of the optional (using TypeId)
+        let arena = self.ctx.arena.borrow();
+        let inner_type_id = arena
+            .unwrap_optional(optional.type_id)
+            .unwrap_or_else(|| arena.i64());
+        let payload_cranelift_type = type_id_to_cranelift(inner_type_id, &arena, self.ctx.pointer_type);
+        drop(arena);
         let payload =
             self.builder
                 .ins()
