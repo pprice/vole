@@ -1000,7 +1000,7 @@ pub(crate) fn type_size(
     }
 }
 
-/// Get the size in bytes for a TypeId (convenience wrapper for interned types)
+/// Get the size in bytes for a TypeId (no LegacyType conversion)
 #[allow(dead_code)]
 pub(crate) fn type_id_size(
     ty: TypeId,
@@ -1008,7 +1008,89 @@ pub(crate) fn type_id_size(
     entity_registry: &EntityRegistry,
     arena: &TypeArena,
 ) -> u32 {
-    type_size(&arena.to_type(ty), pointer_type, entity_registry, arena)
+    use crate::sema::type_arena::Type as ArenaType;
+    match arena.get(ty) {
+        ArenaType::Primitive(PrimitiveType::I8)
+        | ArenaType::Primitive(PrimitiveType::U8)
+        | ArenaType::Primitive(PrimitiveType::Bool) => 1,
+        ArenaType::Primitive(PrimitiveType::I16) | ArenaType::Primitive(PrimitiveType::U16) => 2,
+        ArenaType::Primitive(PrimitiveType::I32)
+        | ArenaType::Primitive(PrimitiveType::U32)
+        | ArenaType::Primitive(PrimitiveType::F32) => 4,
+        ArenaType::Primitive(PrimitiveType::I64)
+        | ArenaType::Primitive(PrimitiveType::U64)
+        | ArenaType::Primitive(PrimitiveType::F64) => 8,
+        ArenaType::Primitive(PrimitiveType::I128) => 16,
+        ArenaType::Primitive(PrimitiveType::String) | ArenaType::Array(_) => pointer_type.bytes(),
+        ArenaType::Interface { .. } => pointer_type.bytes(),
+        ArenaType::Nil | ArenaType::Done | ArenaType::Void => 0,
+        ArenaType::Range => 16,
+        ArenaType::Union(variants) => {
+            let max_payload = variants
+                .iter()
+                .map(|&t| type_id_size(t, pointer_type, entity_registry, arena))
+                .max()
+                .unwrap_or(0);
+            8 + max_payload.div_ceil(8) * 8
+        }
+        ArenaType::Error { type_def_id } => {
+            let fields_size: u32 = entity_registry
+                .fields_on_type(*type_def_id)
+                .map(|field_id| {
+                    let field = entity_registry.get_field(field_id);
+                    type_id_size(field.ty, pointer_type, entity_registry, arena)
+                })
+                .sum();
+            fields_size.div_ceil(8) * 8
+        }
+        ArenaType::Fallible { success, error } => {
+            let success_size = type_id_size(*success, pointer_type, entity_registry, arena);
+            let error_size = match arena.get(*error) {
+                ArenaType::Error { type_def_id } => {
+                    entity_registry
+                        .fields_on_type(*type_def_id)
+                        .map(|field_id| {
+                            let field = entity_registry.get_field(field_id);
+                            type_id_size(field.ty, pointer_type, entity_registry, arena)
+                        })
+                        .sum()
+                }
+                ArenaType::Union(variants) => {
+                    variants
+                        .iter()
+                        .filter_map(|&v| match arena.get(v) {
+                            ArenaType::Error { type_def_id } => {
+                                let size: u32 = entity_registry
+                                    .fields_on_type(*type_def_id)
+                                    .map(|field_id| {
+                                        let field = entity_registry.get_field(field_id);
+                                        type_id_size(field.ty, pointer_type, entity_registry, arena)
+                                    })
+                                    .sum();
+                                Some(size)
+                            }
+                            _ => None,
+                        })
+                        .max()
+                        .unwrap_or(0)
+                }
+                _ => 0,
+            };
+            let max_payload = success_size.max(error_size);
+            8 + max_payload.div_ceil(8) * 8
+        }
+        ArenaType::Tuple(elements) => {
+            elements
+                .iter()
+                .map(|&t| type_id_size(t, pointer_type, entity_registry, arena).div_ceil(8) * 8)
+                .sum()
+        }
+        ArenaType::FixedArray { element, size } => {
+            let elem_size = type_id_size(*element, pointer_type, entity_registry, arena).div_ceil(8) * 8;
+            elem_size * (*size as u32)
+        }
+        _ => 8,
+    }
 }
 
 /// Calculate layout for tuple elements.
