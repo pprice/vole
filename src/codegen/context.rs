@@ -206,31 +206,30 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if type is a function
-    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    #[allow(dead_code)] // Will be useful for future migration
     pub fn is_function(&self, ty: TypeId) -> bool {
         self.ctx.arena.borrow().is_function(ty)
     }
 
     /// Check if type is an interface
-    #[allow(dead_code)] // Reserved for task 5.5 arena migration
     pub fn is_interface(&self, ty: TypeId) -> bool {
         self.ctx.arena.borrow().is_interface(ty)
     }
 
     /// Check if type is a class
-    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    #[allow(dead_code)] // Will be useful for future migration
     pub fn is_class(&self, ty: TypeId) -> bool {
         self.ctx.arena.borrow().is_class(ty)
     }
 
     /// Check if type is a record
-    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    #[allow(dead_code)] // Will be useful for future migration
     pub fn is_record(&self, ty: TypeId) -> bool {
         self.ctx.arena.borrow().is_record(ty)
     }
 
     /// Check if type is fallible
-    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    #[allow(dead_code)] // Will be useful for future migration
     pub fn is_fallible(&self, ty: TypeId) -> bool {
         self.ctx.arena.borrow().is_fallible(ty)
     }
@@ -304,12 +303,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Check if type is optional (union with nil)
     pub fn type_is_optional(&self, ty: TypeId) -> bool {
         self.ctx.arena.borrow().is_optional(ty)
-    }
-
-    /// Check if type can widen to another type
-    #[allow(dead_code)] // Reserved for task 5.5 arena migration
-    pub fn type_can_widen_to(&self, ty: TypeId, target: &LegacyType) -> bool {
-        self.to_legacy(ty).can_widen_to(target)
     }
 
     /// Get capture binding for a symbol, if any
