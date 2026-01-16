@@ -555,11 +555,12 @@ impl Compiler<'_> {
 
         // Skip if already registered - check by type name string to avoid Symbol collisions across interners
         let already_registered = self.type_metadata.values().any(|meta| {
-            let vole_type = self.analyzed.type_arena.borrow().to_type(meta.vole_type);
-            if let LegacyType::Nominal(NominalType::Class(class_type)) = &vole_type {
+            // Use arena.unwrap_class() to avoid LegacyType conversion
+            let arena = self.analyzed.type_arena.borrow();
+            if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
                 self.analyzed
                     .name_table
-                    .last_segment_str(self.analyzed.entity_registry.class_name_id(class_type))
+                    .last_segment_str(self.analyzed.entity_registry.name_id(type_def_id))
                     .is_some_and(|name| name == type_name_str)
             } else {
                 false
