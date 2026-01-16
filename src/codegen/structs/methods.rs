@@ -627,30 +627,23 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Core implementation of iterator return type conversion
-    /// Takes TypeId and converts to LegacyType internally for pattern matching
+    /// Uses arena methods to check for Iterator interface and convert to RuntimeIterator
     fn convert_iterator_return_type_by_type_def_id(
         &self,
         ty: TypeId,
         iterator_type_id: TypeDefId,
     ) -> TypeId {
         let arena = self.ctx.arena.borrow();
-        let legacy_ty = arena.to_type(ty);
-        match &legacy_ty {
-            // Handle Iterator<T> stored as Interface
-            LegacyType::Nominal(NominalType::Interface(iface))
-                if iface.type_def_id == iterator_type_id =>
-            {
-                if let Some(elem_ty) = iface.type_args.first() {
-                    let result = LegacyType::RuntimeIterator(Box::new(elem_ty.clone()));
+        // Check if this is an Interface type matching Iterator
+        if let Some((type_def_id, type_args)) = arena.unwrap_interface(ty) {
+            if type_def_id == iterator_type_id {
+                if let Some(&elem_type_id) = type_args.first() {
                     drop(arena);
-                    self.ctx.arena.borrow_mut().from_type(&result)
-                } else {
-                    ty
+                    return self.ctx.arena.borrow_mut().runtime_iterator(elem_type_id);
                 }
             }
-            // Not an Iterator type, return as-is
-            _ => ty,
         }
+        ty
     }
 
     fn functional_interface_call(
