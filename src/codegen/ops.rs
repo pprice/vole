@@ -63,14 +63,16 @@ impl Cg<'_, '_, '_> {
     /// Call to_string() on a value via the Stringable interface.
     /// Returns the resulting string value.
     fn call_to_string(&mut self, val: &CompiledValue) -> Result<Value, String> {
-        // Look up the to_string method in the implement registry
-        let legacy_type = self.to_legacy(val.type_id);
-        let impl_type_id = ImplTypeId::from_type(
-            &legacy_type,
+        // Look up the to_string method in the implement registry (no LegacyType conversion)
+        let arena = self.ctx.arena.borrow();
+        let impl_type_id = ImplTypeId::from_type_id(
+            val.type_id,
+            &arena,
             &self.ctx.analyzed.entity_registry.type_table,
             &self.ctx.analyzed.entity_registry,
         )
-        .ok_or_else(|| format!("Cannot find ImplTypeId for {:?}", legacy_type))?;
+        .ok_or_else(|| format!("Cannot find ImplTypeId for type_id {:?}", val.type_id))?;
+        drop(arena);
 
         // Look up to_string method via query
         let method_id = self.ctx.analyzed.query().method_name_id_by_str("to_string");
@@ -82,8 +84,8 @@ impl Cg<'_, '_, '_> {
             .get_method(&impl_type_id, method_id)
             .ok_or_else(|| {
                 format!(
-                    "to_string method not implemented for type {:?}",
-                    legacy_type
+                    "to_string method not implemented for type_id {:?}",
+                    val.type_id
                 )
             })?;
 
