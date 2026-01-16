@@ -20,7 +20,6 @@ use crate::errors::CodegenError;
 use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use crate::identity::NamerLookup;
 use crate::identity::{MethodId, NameId, TypeDefId};
-use crate::sema::generic::substitute_type;
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::types::NominalType;
 use crate::sema::type_arena::TypeId;
@@ -77,14 +76,15 @@ impl Cg<'_, '_, '_> {
 
         // Handle module method calls (e.g., math.sqrt(16.0), math.lerp(...))
         // These go to either external native functions or pure Vole module functions
-        let obj_type_for_module = self.to_legacy(obj.type_id);
-        if let LegacyType::Module(ref module_type) = obj_type_for_module {
+        // Extract module_id before the if-let to avoid holding arena borrow
+        let module_id_opt = self.ctx.arena.borrow().unwrap_module(obj.type_id).map(|m| m.module_id);
+        if let Some(module_id) = module_id_opt {
             let module_path = self
                 .ctx
                 .analyzed
                 .name_table
-                .module_path(module_type.module_id);
-            let name_id = module_name_id(self.ctx.analyzed, module_type.module_id, method_name_str);
+                .module_path(module_id);
+            let name_id = module_name_id(self.ctx.analyzed, module_id, method_name_str);
             // Get the method resolution
             let resolution = self
                 .ctx
@@ -153,9 +153,9 @@ impl Cg<'_, '_, '_> {
 
         // Handle RuntimeIterator methods - these call external functions directly
         // without interface boxing or vtable dispatch
-        let obj_type_for_iter = self.to_legacy(obj.type_id);
-        if let LegacyType::RuntimeIterator(elem_ty) = &obj_type_for_iter {
-            return self.runtime_iterator_method(&obj, mc, method_name_str, elem_ty);
+        let runtime_iter_elem = self.ctx.arena.borrow().unwrap_runtime_iterator(obj.type_id);
+        if let Some(elem_type_id) = runtime_iter_elem {
+            return self.runtime_iterator_method(&obj, mc, method_name_str, elem_type_id);
         }
 
         let method_id = self.method_name_id(mc.method);
@@ -519,7 +519,7 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         mc: &MethodCallExpr,
         method_name: &str,
-        elem_ty: &LegacyType,
+        elem_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
         // Look up the Iterator interface via Resolver
         let iter_type_id = self
@@ -555,17 +555,17 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?
             .clone();
 
-        // Substitute the element type for T in the return type
-        let substitutions: std::collections::HashMap<NameId, LegacyType> = iter_def
+        // Substitute the element type for T in the return type using arena substitute
+        let substitutions: hashbrown::HashMap<NameId, TypeId> = iter_def
             .type_params
             .iter()
-            .map(|param| (*param, elem_ty.clone()))
+            .map(|param| (*param, elem_type_id))
             .collect();
-        let return_type_legacy = substitute_type(&method.signature.return_type, &substitutions);
+        let method_return_id = self.intern_type(&method.signature.return_type);
+        let return_type_id = self.ctx.arena.borrow_mut().substitute(method_return_id, &substitutions);
 
         // Convert Iterator<T> return types to RuntimeIterator(T) since the runtime
         // functions return raw iterator pointers, not boxed interface values
-        let return_type_id = self.intern_type(&return_type_legacy);
         let return_type_id = self.convert_iterator_return_type(return_type_id, iter_type_id);
         let return_type = self.to_legacy(return_type_id);
 

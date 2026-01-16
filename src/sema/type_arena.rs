@@ -846,6 +846,14 @@ impl TypeArena {
         }
     }
 
+    /// Unwrap a module type, returning the InternedModule
+    pub fn unwrap_module(&self, id: TypeId) -> Option<&InternedModule> {
+        match self.get(id) {
+            Type::Module(m) => Some(m.as_ref()),
+            _ => None,
+        }
+    }
+
     /// Display a type for error messages (basic version without name resolution)
     pub fn display_basic(&self, id: TypeId) -> String {
         match self.get(id) {
