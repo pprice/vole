@@ -93,13 +93,6 @@ pub enum LegacyType {
     Structural(StructuralType),
 }
 
-/// Interned type handle - O(1) equality, Copy, minimal allocation.
-///
-/// This is the new type representation that wraps a TypeId from the TypeArena.
-/// Use TypeArena::to_type() to convert back to LegacyType when needed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Type(pub crate::sema::type_arena::TypeId);
-
 /// Structural type - defines shape constraints for duck typing
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructuralType {

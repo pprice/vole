@@ -1726,7 +1726,7 @@ impl Analyzer {
             );
         }
 
-        if let Some(type_id) = TypeId::from_type(
+        if let Some(type_id) = ImplTypeId::from_type(
             &target_type,
             &self.entity_registry.type_table,
             &self.entity_registry,

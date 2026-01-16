@@ -418,7 +418,7 @@ impl Compiler<'_> {
             ),
         };
 
-        let type_id = self.type_id_from_type(&self_vole_type);
+        let type_id = self.impl_type_id_from_type(&self_vole_type);
 
         // Declare methods as functions: TypeName::methodName (implement block convention)
         for method in &impl_block.methods {
@@ -592,7 +592,7 @@ impl Compiler<'_> {
         };
 
         for method in &impl_block.methods {
-            let method_key = self.type_id_from_type(&self_vole_type).and_then(|type_id| {
+            let method_key = self.impl_type_id_from_type(&self_vole_type).and_then(|type_id| {
                 let method_id = self.method_name_id(method.name);
                 self.impl_method_infos.get(&(type_id, method_id)).cloned()
             });
@@ -703,7 +703,7 @@ impl Compiler<'_> {
         };
 
         for method in &impl_block.methods {
-            let method_key = self.type_id_from_type(&self_vole_type).and_then(|type_id| {
+            let method_key = self.impl_type_id_from_type(&self_vole_type).and_then(|type_id| {
                 let method_id = method_name_id_with_interner(self.analyzed, interner, method.name)?;
                 self.impl_method_infos.get(&(type_id, method_id)).cloned()
             });
@@ -901,7 +901,7 @@ impl Compiler<'_> {
             info.func_key
         } else if let Some(type_sym) = type_sym {
             self.intern_func(func_module, &[type_sym, method.name])
-        } else if let Some(type_id) = self.type_id_from_type(self_vole_type) {
+        } else if let Some(type_id) = self.impl_type_id_from_type(self_vole_type) {
             self.intern_func_prefixed(type_id.name_id(), method.name)
         } else {
             let method_name_str = self.resolve_symbol(method.name);
@@ -1083,7 +1083,7 @@ impl Compiler<'_> {
         } else if let Some(type_sym) = type_sym {
             self.func_registry
                 .intern_qualified(func_module, &[type_sym, method.name], interner)
-        } else if let Some(type_id) = self.type_id_from_type(self_vole_type) {
+        } else if let Some(type_id) = self.impl_type_id_from_type(self_vole_type) {
             self.func_registry
                 .intern_with_prefix(type_id.name_id(), method.name, interner)
         } else {

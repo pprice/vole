@@ -365,7 +365,7 @@ impl Analyzer {
             });
         }
         // Fall back to old implement_registry for backward compatibility
-        if let Some(type_id) = TypeId::from_type(
+        if let Some(type_id) = ImplTypeId::from_type(
             object_type,
             &self.entity_registry.type_table,
             &self.entity_registry,

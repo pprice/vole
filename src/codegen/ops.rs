@@ -7,7 +7,7 @@ use cranelift::prelude::*;
 
 use crate::codegen::RuntimeFn;
 use crate::frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr};
-use crate::sema::implement_registry::TypeId;
+use crate::sema::implement_registry::ImplTypeId;
 use crate::sema::{LegacyType, PrimitiveType};
 
 use super::context::Cg;
@@ -65,12 +65,12 @@ impl Cg<'_, '_, '_> {
     fn call_to_string(&mut self, val: &CompiledValue) -> Result<Value, String> {
         // Look up the to_string method in the implement registry
         let legacy_type = self.to_legacy(val.type_id);
-        let impl_type_id = TypeId::from_type(
+        let impl_type_id = ImplTypeId::from_type(
             &legacy_type,
             &self.ctx.analyzed.entity_registry.type_table,
             &self.ctx.analyzed.entity_registry,
         )
-        .ok_or_else(|| format!("Cannot find TypeId for {:?}", legacy_type))?;
+        .ok_or_else(|| format!("Cannot find ImplTypeId for {:?}", legacy_type))?;
 
         // Look up to_string method via query
         let method_id = self.ctx.analyzed.query().method_name_id_by_str("to_string");

@@ -47,16 +47,18 @@ impl PrimitiveTypeId {
     }
 }
 
-/// Unique identifier for types in the registry
+/// Unique identifier for types in the implement registry.
+/// Used for method lookup on types via implement blocks.
+/// Note: This is different from type_arena::ImplTypeId which is for interned types.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct TypeId(NameId);
+pub struct ImplTypeId(NameId);
 
-impl TypeId {
+impl ImplTypeId {
     pub fn from_name_id(name_id: NameId) -> Self {
-        TypeId(name_id)
+        ImplTypeId(name_id)
     }
 
-    /// Convert a Type to a TypeId for registry lookup
+    /// Convert a Type to an ImplTypeId for registry lookup
     pub fn from_type(
         ty: &LegacyType,
         types: &TypeTable,
@@ -79,15 +81,15 @@ impl TypeId {
                     PrimitiveType::Bool => PrimitiveTypeId::Bool,
                     PrimitiveType::String => PrimitiveTypeId::String,
                 };
-                types.primitive_name_id(prim_id).map(TypeId)
+                types.primitive_name_id(prim_id).map(ImplTypeId)
             }
-            LegacyType::Range => types.primitive_name_id(PrimitiveTypeId::Range).map(TypeId),
-            LegacyType::Array(_) => types.array_name_id().map(TypeId),
+            LegacyType::Range => types.primitive_name_id(PrimitiveTypeId::Range).map(ImplTypeId),
+            LegacyType::Array(_) => types.array_name_id().map(ImplTypeId),
             LegacyType::Nominal(NominalType::Class(c)) => {
-                Some(TypeId(entity_registry.class_name_id(c)))
+                Some(ImplTypeId(entity_registry.class_name_id(c)))
             }
             LegacyType::Nominal(NominalType::Record(r)) => {
-                Some(TypeId(entity_registry.record_name_id(r)))
+                Some(ImplTypeId(entity_registry.record_name_id(r)))
             }
             _ => None,
         }
@@ -106,7 +108,7 @@ impl TypeId {
 /// Key for looking up methods in the registry
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct MethodKey {
-    pub type_id: TypeId,
+    pub type_id: ImplTypeId,
     pub method_name: NameId,
 }
 
@@ -153,7 +155,7 @@ impl ImplementRegistry {
     }
 
     /// Register a method for a type
-    pub fn register_method(&mut self, type_id: TypeId, method_name: NameId, impl_: MethodImpl) {
+    pub fn register_method(&mut self, type_id: ImplTypeId, method_name: NameId, impl_: MethodImpl) {
         let key = MethodKey {
             type_id,
             method_name,
@@ -162,7 +164,7 @@ impl ImplementRegistry {
     }
 
     /// Look up a method for a type
-    pub fn get_method(&self, type_id: &TypeId, method_name: NameId) -> Option<&MethodImpl> {
+    pub fn get_method(&self, type_id: &ImplTypeId, method_name: NameId) -> Option<&MethodImpl> {
         let key = MethodKey {
             type_id: *type_id,
             method_name,
@@ -171,7 +173,7 @@ impl ImplementRegistry {
     }
 
     /// Get all methods for a type
-    pub fn get_methods_for_type(&self, type_id: &TypeId) -> Vec<(NameId, &MethodImpl)> {
+    pub fn get_methods_for_type(&self, type_id: &ImplTypeId) -> Vec<(NameId, &MethodImpl)> {
         self.methods
             .iter()
             .filter(|(k, _)| &k.type_id == type_id)
@@ -210,7 +212,7 @@ mod tests {
         let mut types = TypeTable::new();
         let array_name = names.intern_raw(builtin, &["array"]);
         types.register_array_name(array_name);
-        let type_id = TypeId(array_name);
+        let type_id = ImplTypeId(array_name);
 
         registry.register_method(
             type_id,
@@ -244,7 +246,7 @@ mod tests {
         let mut types = TypeTable::new();
         let array_name = names.intern_raw(builtin, &["array"]);
         types.register_array_name(array_name);
-        let method = registry.get_method(&TypeId(array_name), method_id);
+        let method = registry.get_method(&ImplTypeId(array_name), method_id);
         assert!(method.is_none());
     }
 
@@ -261,23 +263,23 @@ mod tests {
         types.register_array_name(array_name);
 
         assert_eq!(
-            TypeId::from_type(
+            ImplTypeId::from_type(
                 &LegacyType::Primitive(PrimitiveType::I64),
                 &types,
                 &entity_registry
             ),
-            Some(TypeId(i64_name))
+            Some(ImplTypeId(i64_name))
         );
         assert_eq!(
-            TypeId::from_type(
+            ImplTypeId::from_type(
                 &LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::I32))),
                 &types,
                 &entity_registry
             ),
-            Some(TypeId(array_name))
+            Some(ImplTypeId(array_name))
         );
         assert_eq!(
-            TypeId::from_type(&LegacyType::Void, &types, &entity_registry),
+            ImplTypeId::from_type(&LegacyType::Void, &types, &entity_registry),
             None
         );
     }
@@ -296,7 +298,7 @@ mod tests {
         let length_id = names.intern(builtin, &[length_sym], &interner);
         let to_upper_id = names.intern(builtin, &[to_upper_sym], &interner);
         types.register_primitive_name(PrimitiveTypeId::String, string_name);
-        let type_id = TypeId(string_name);
+        let type_id = ImplTypeId(string_name);
 
         registry.register_method(
             type_id,
@@ -354,7 +356,7 @@ mod tests {
         let length_id = names.intern(builtin, &[length_sym], &interner);
 
         registry1.register_method(
-            TypeId(i64_name),
+            ImplTypeId(i64_name),
             equals_id,
             MethodImpl {
                 trait_name: Some(sym(20)), // "Equatable"
@@ -370,7 +372,7 @@ mod tests {
 
         // Add different method to registry2
         registry2.register_method(
-            TypeId(string_name),
+            ImplTypeId(string_name),
             length_id,
             MethodImpl {
                 trait_name: None,
@@ -388,10 +390,10 @@ mod tests {
         registry1.merge(&registry2);
 
         // Both methods should be present
-        assert!(registry1.get_method(&TypeId(i64_name), equals_id).is_some());
+        assert!(registry1.get_method(&ImplTypeId(i64_name), equals_id).is_some());
         assert!(
             registry1
-                .get_method(&TypeId(string_name), length_id)
+                .get_method(&ImplTypeId(string_name), length_id)
                 .is_some()
         );
     }

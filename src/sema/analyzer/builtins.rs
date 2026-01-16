@@ -3,7 +3,7 @@
 use super::Analyzer;
 use crate::frontend::Interner;
 use crate::identity::Namer;
-use crate::sema::implement_registry::{ExternalMethodInfo, MethodImpl, PrimitiveTypeId, TypeId};
+use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId, MethodImpl, PrimitiveTypeId};
 use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
 impl Analyzer {
@@ -51,12 +51,12 @@ impl Analyzer {
             .entity_registry
             .type_table
             .array_name_id()
-            .map(TypeId::from_name_id);
+            .map(ImplTypeId::from_name_id);
         let string_id = self
             .entity_registry
             .type_table
             .primitive_name_id(PrimitiveTypeId::String)
-            .map(TypeId::from_name_id);
+            .map(ImplTypeId::from_name_id);
 
         if let Some(type_id) = array_id {
             register_builtin!(
@@ -115,7 +115,7 @@ impl Analyzer {
             .entity_registry
             .type_table
             .primitive_name_id(PrimitiveTypeId::Range)
-            .map(TypeId::from_name_id);
+            .map(ImplTypeId::from_name_id);
         if let Some(type_id) = range_id {
             register_builtin!(
                 type_id,

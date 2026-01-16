@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::sema::generic::{TypeParamInfo, TypeParamVariance};
-use crate::sema::types::{LegacyType, Type};
+use crate::sema::types::LegacyType;
 
 impl Analyzer {
     /// Analyze a lambda expression, optionally with an expected function type for inference
@@ -111,11 +111,10 @@ impl Analyzer {
             LambdaBody::Block(block) => {
                 // For blocks, set up return type context
                 let old_return = self.current_function_return.take();
-                // Convert LegacyType to Type for storage
+                // Convert LegacyType to ArenaTypeId for storage
                 let return_type = declared_return.clone().or(expected_return.clone());
                 self.current_function_return = return_type.map(|ty| {
-                    let type_id = self.type_arena.borrow_mut().from_type(&ty);
-                    Type(type_id)
+                    self.type_arena.borrow_mut().from_type(&ty)
                 });
 
                 let _ = self.check_block(block, interner);
@@ -124,7 +123,7 @@ impl Analyzer {
                 let ret = self
                     .current_function_return
                     .take()
-                    .map(|ty| self.type_arena.borrow().to_type(ty.0))
+                    .map(|ty| self.type_arena.borrow().to_type(ty))
                     .unwrap_or(LegacyType::Void);
                 self.current_function_return = old_return;
                 ret

@@ -21,7 +21,7 @@ use crate::commands::common::AnalyzedProgram;
 use crate::frontend::{LetStmt, Symbol};
 use crate::identity::{NameId, TypeDefId};
 use crate::runtime::NativeRegistry;
-use crate::sema::{ProgramQuery, TypeId};
+use crate::sema::{ImplTypeId, ProgramQuery};
 
 pub use state::{ControlFlowCtx, TestInfo};
 
@@ -40,8 +40,8 @@ pub struct Compiler<'a> {
     test_name_ids: Vec<NameId>,
     /// Class and record metadata: name -> TypeMetadata
     type_metadata: HashMap<Symbol, TypeMetadata>,
-    /// Implement block method info keyed by (TypeId, method)
-    impl_method_infos: HashMap<(TypeId, NameId), MethodInfo>,
+    /// Implement block method info keyed by (ImplTypeId, method)
+    impl_method_infos: HashMap<(ImplTypeId, NameId), MethodInfo>,
     /// Static method info keyed by (TypeDefId, method_name)
     static_method_infos: HashMap<(TypeDefId, NameId), MethodInfo>,
     /// Interface vtable registry for interface-typed values
@@ -132,9 +132,9 @@ impl<'a> Compiler<'a> {
         self.query().method_name_id(name)
     }
 
-    /// Get TypeId from a Type (wraps TypeId::from_type with entity_registry.type_table)
-    fn type_id_from_type(&self, ty: &crate::sema::LegacyType) -> Option<TypeId> {
-        TypeId::from_type(
+    /// Get ImplTypeId from a Type (wraps ImplTypeId::from_type with entity_registry.type_table)
+    fn impl_type_id_from_type(&self, ty: &crate::sema::LegacyType) -> Option<ImplTypeId> {
+        ImplTypeId::from_type(
             ty,
             &self.analyzed.entity_registry.type_table,
             &self.analyzed.entity_registry,

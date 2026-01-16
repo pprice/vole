@@ -19,7 +19,7 @@ use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, substitute_type};
-use crate::sema::implement_registry::TypeId as ImplTypeId;
+use crate::sema::implement_registry::ImplTypeId;
 use crate::sema::type_arena::{TypeArena, TypeId};
 use crate::sema::types::NominalType;
 use crate::sema::{EntityRegistry, FunctionType, LegacyType, PrimitiveType, TypeKey};
@@ -188,10 +188,10 @@ impl<'a> CompileCtx<'a> {
             && let Some(module_types) = self.analyzed.query().expr_data().module_types(module_path)
             && let Some(ty) = module_types.get(node_id)
         {
-            return Some(ty.0);
+            return Some(*ty);
         }
         // Fall back to main program expr_types via query interface
-        self.analyzed.query().type_of(*node_id).map(|t| t.0)
+        self.analyzed.query().type_of(*node_id)
     }
 
     /// Look up expression type, converting to LegacyType.
@@ -203,9 +203,9 @@ impl<'a> CompileCtx<'a> {
             && let Some(module_types) = self.analyzed.query().expr_data().module_types(module_path)
             && let Some(ty) = module_types.get(node_id)
         {
-            // Convert Type handle to LegacyType
+            // Convert TypeId handle to LegacyType
             let arena = self.analyzed.query().expr_data().type_arena();
-            return Some(arena.borrow().to_type(ty.0));
+            return Some(arena.borrow().to_type(*ty));
         }
         // Fall back to main program expr_types via query interface
         self.analyzed.query().type_of_legacy(*node_id)

@@ -5,7 +5,7 @@
 // This module replaces the old Type enum with an arena-based interning system:
 // - TypeId: u32 handle to an interned type (Copy, trivial Eq/Hash)
 // - TypeArena: per-compilation storage with automatic deduplication
-// - InternedType: internal storage using SmallVec for child types
+// - Type: internal storage using SmallVec for child types
 
 use hashbrown::HashMap;
 use smallvec::SmallVec;
@@ -83,12 +83,12 @@ pub struct ModuleMetadata {
     pub external_funcs: std::collections::HashSet<NameId>,
 }
 
-/// Internal representation of interned types.
+/// The canonical type representation in Vole.
 ///
-/// Note: Uses TypeId for children instead of recursive Type references,
-/// which allows SmallVec to work (no infinite-size type issue).
+/// This is an interned type stored in the TypeArena. Use TypeId handles
+/// for O(1) equality and pass-by-copy. Access the Type via arena.get(id).
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum InternedType {
+pub enum Type {
     // Primitives
     Primitive(PrimitiveType),
 
@@ -143,7 +143,7 @@ pub enum InternedType {
     TypeParamRef(TypeParamId),
 
     // Module type - exports are part of the type identity
-    // Note: Boxed to keep InternedType size small
+    // Note: Boxed to keep Type size small
     Module(Box<InternedModule>),
 
     // Fallible type: fallible(T, E) - result-like type
@@ -154,7 +154,7 @@ pub enum InternedType {
 
     // Structural type: duck typing constraint
     // e.g., { name: string, func greet() -> string }
-    // Note: Boxed to keep InternedType size small
+    // Note: Boxed to keep Type size small
     Structural(Box<InternedStructural>),
 
     // Placeholder for inference (if we decide to intern these)
@@ -193,9 +193,9 @@ pub struct PrimitiveTypes {
 /// Per-compilation type arena with automatic interning/deduplication.
 pub struct TypeArena {
     /// Interned types, indexed by TypeId
-    types: Vec<InternedType>,
+    types: Vec<Type>,
     /// Deduplication map - hashbrown for better perf
-    intern_map: HashMap<InternedType, TypeId>,
+    intern_map: HashMap<Type, TypeId>,
     /// Pre-interned primitives for O(1) access
     pub primitives: PrimitiveTypes,
     /// Module metadata (constants, external_funcs) keyed by ModuleId.
@@ -244,33 +244,33 @@ impl TypeArena {
 
         // Pre-intern all primitive types
         // Invalid must be first (index 0) for is_invalid() check
-        arena.primitives.invalid = arena.intern(InternedType::Invalid { kind: "invalid" });
+        arena.primitives.invalid = arena.intern(Type::Invalid { kind: "invalid" });
         debug_assert_eq!(arena.primitives.invalid.0, 0);
 
-        arena.primitives.i8 = arena.intern(InternedType::Primitive(PrimitiveType::I8));
-        arena.primitives.i16 = arena.intern(InternedType::Primitive(PrimitiveType::I16));
-        arena.primitives.i32 = arena.intern(InternedType::Primitive(PrimitiveType::I32));
-        arena.primitives.i64 = arena.intern(InternedType::Primitive(PrimitiveType::I64));
-        arena.primitives.i128 = arena.intern(InternedType::Primitive(PrimitiveType::I128));
-        arena.primitives.u8 = arena.intern(InternedType::Primitive(PrimitiveType::U8));
-        arena.primitives.u16 = arena.intern(InternedType::Primitive(PrimitiveType::U16));
-        arena.primitives.u32 = arena.intern(InternedType::Primitive(PrimitiveType::U32));
-        arena.primitives.u64 = arena.intern(InternedType::Primitive(PrimitiveType::U64));
-        arena.primitives.f32 = arena.intern(InternedType::Primitive(PrimitiveType::F32));
-        arena.primitives.f64 = arena.intern(InternedType::Primitive(PrimitiveType::F64));
-        arena.primitives.bool = arena.intern(InternedType::Primitive(PrimitiveType::Bool));
-        arena.primitives.string = arena.intern(InternedType::Primitive(PrimitiveType::String));
-        arena.primitives.void = arena.intern(InternedType::Void);
-        arena.primitives.nil = arena.intern(InternedType::Nil);
-        arena.primitives.done = arena.intern(InternedType::Done);
-        arena.primitives.range = arena.intern(InternedType::Range);
-        arena.primitives.metatype = arena.intern(InternedType::MetaType);
+        arena.primitives.i8 = arena.intern(Type::Primitive(PrimitiveType::I8));
+        arena.primitives.i16 = arena.intern(Type::Primitive(PrimitiveType::I16));
+        arena.primitives.i32 = arena.intern(Type::Primitive(PrimitiveType::I32));
+        arena.primitives.i64 = arena.intern(Type::Primitive(PrimitiveType::I64));
+        arena.primitives.i128 = arena.intern(Type::Primitive(PrimitiveType::I128));
+        arena.primitives.u8 = arena.intern(Type::Primitive(PrimitiveType::U8));
+        arena.primitives.u16 = arena.intern(Type::Primitive(PrimitiveType::U16));
+        arena.primitives.u32 = arena.intern(Type::Primitive(PrimitiveType::U32));
+        arena.primitives.u64 = arena.intern(Type::Primitive(PrimitiveType::U64));
+        arena.primitives.f32 = arena.intern(Type::Primitive(PrimitiveType::F32));
+        arena.primitives.f64 = arena.intern(Type::Primitive(PrimitiveType::F64));
+        arena.primitives.bool = arena.intern(Type::Primitive(PrimitiveType::Bool));
+        arena.primitives.string = arena.intern(Type::Primitive(PrimitiveType::String));
+        arena.primitives.void = arena.intern(Type::Void);
+        arena.primitives.nil = arena.intern(Type::Nil);
+        arena.primitives.done = arena.intern(Type::Done);
+        arena.primitives.range = arena.intern(Type::Range);
+        arena.primitives.metatype = arena.intern(Type::MetaType);
 
         arena
     }
 
     /// Intern a type, returning existing TypeId if already interned
-    fn intern(&mut self, ty: InternedType) -> TypeId {
+    fn intern(&mut self, ty: Type) -> TypeId {
         let next_id = TypeId(self.types.len() as u32);
         *self.intern_map.entry(ty.clone()).or_insert_with(|| {
             self.types.push(ty);
@@ -278,8 +278,8 @@ impl TypeArena {
         })
     }
 
-    /// Get the InternedType for a TypeId
-    pub fn get(&self, id: TypeId) -> &InternedType {
+    /// Get the Type for a TypeId
+    pub fn get(&self, id: TypeId) -> &Type {
         &self.types[id.0 as usize]
     }
 
@@ -380,7 +380,7 @@ impl TypeArena {
         if variants.iter().any(|&v| self.is_invalid(v)) {
             return self.invalid();
         }
-        self.intern(InternedType::Union(variants))
+        self.intern(Type::Union(variants))
     }
 
     /// Create a tuple type from elements
@@ -389,7 +389,7 @@ impl TypeArena {
         if elements.iter().any(|&e| self.is_invalid(e)) {
             return self.invalid();
         }
-        self.intern(InternedType::Tuple(elements))
+        self.intern(Type::Tuple(elements))
     }
 
     /// Create an array type
@@ -397,7 +397,7 @@ impl TypeArena {
         if self.is_invalid(element) {
             return self.invalid();
         }
-        self.intern(InternedType::Array(element))
+        self.intern(Type::Array(element))
     }
 
     /// Create a fixed-size array type
@@ -405,7 +405,7 @@ impl TypeArena {
         if self.is_invalid(element) {
             return self.invalid();
         }
-        self.intern(InternedType::FixedArray { element, size })
+        self.intern(Type::FixedArray { element, size })
     }
 
     /// Create a runtime iterator type
@@ -413,7 +413,7 @@ impl TypeArena {
         if self.is_invalid(element) {
             return self.invalid();
         }
-        self.intern(InternedType::RuntimeIterator(element))
+        self.intern(Type::RuntimeIterator(element))
     }
 
     /// Create a function type
@@ -427,7 +427,7 @@ impl TypeArena {
         if params.iter().any(|&p| self.is_invalid(p)) || self.is_invalid(ret) {
             return self.invalid();
         }
-        self.intern(InternedType::Function {
+        self.intern(Type::Function {
             params,
             ret,
             is_closure,
@@ -449,7 +449,7 @@ impl TypeArena {
         if type_args.iter().any(|&a| self.is_invalid(a)) {
             return self.invalid();
         }
-        self.intern(InternedType::Class {
+        self.intern(Type::Class {
             type_def_id,
             type_args,
         })
@@ -461,7 +461,7 @@ impl TypeArena {
         if type_args.iter().any(|&a| self.is_invalid(a)) {
             return self.invalid();
         }
-        self.intern(InternedType::Record {
+        self.intern(Type::Record {
             type_def_id,
             type_args,
         })
@@ -473,7 +473,7 @@ impl TypeArena {
         if type_args.iter().any(|&a| self.is_invalid(a)) {
             return self.invalid();
         }
-        self.intern(InternedType::Interface {
+        self.intern(Type::Interface {
             type_def_id,
             type_args,
         })
@@ -481,17 +481,17 @@ impl TypeArena {
 
     /// Create an error type
     pub fn error_type(&mut self, type_def_id: TypeDefId) -> TypeId {
-        self.intern(InternedType::Error { type_def_id })
+        self.intern(Type::Error { type_def_id })
     }
 
     /// Create a type parameter placeholder
     pub fn type_param(&mut self, name_id: NameId) -> TypeId {
-        self.intern(InternedType::TypeParam(name_id))
+        self.intern(Type::TypeParam(name_id))
     }
 
     /// Create a type parameter reference
     pub fn type_param_ref(&mut self, type_param_id: TypeParamId) -> TypeId {
-        self.intern(InternedType::TypeParamRef(type_param_id))
+        self.intern(Type::TypeParamRef(type_param_id))
     }
 
     /// Create a module type with its exports
@@ -500,7 +500,7 @@ impl TypeArena {
         module_id: ModuleId,
         exports: SmallVec<[(NameId, TypeId); 8]>,
     ) -> TypeId {
-        self.intern(InternedType::Module(Box::new(InternedModule {
+        self.intern(Type::Module(Box::new(InternedModule {
             module_id,
             exports,
         })))
@@ -521,7 +521,7 @@ impl TypeArena {
         if self.is_invalid(success) || self.is_invalid(error) {
             return self.invalid();
         }
-        self.intern(InternedType::Fallible { success, error })
+        self.intern(Type::Fallible { success, error })
     }
 
     /// Create a structural type (duck typing constraint)
@@ -540,7 +540,7 @@ impl TypeArena {
         {
             return self.invalid();
         }
-        self.intern(InternedType::Structural(Box::new(InternedStructural {
+        self.intern(Type::Structural(Box::new(InternedStructural {
             fields,
             methods,
         })))
@@ -548,7 +548,7 @@ impl TypeArena {
 
     /// Create a placeholder type (for inference)
     pub fn placeholder(&mut self, kind: PlaceholderKind) -> TypeId {
-        self.intern(InternedType::Placeholder(kind))
+        self.intern(Type::Placeholder(kind))
     }
 
     // ========================================================================
@@ -558,7 +558,7 @@ impl TypeArena {
     /// Check if this is a numeric type (can do arithmetic)
     pub fn is_numeric(&self, id: TypeId) -> bool {
         match self.get(id) {
-            InternedType::Primitive(p) => p.is_numeric(),
+            Type::Primitive(p) => p.is_numeric(),
             _ => false,
         }
     }
@@ -566,7 +566,7 @@ impl TypeArena {
     /// Check if this is an integer type
     pub fn is_integer(&self, id: TypeId) -> bool {
         match self.get(id) {
-            InternedType::Primitive(p) => p.is_integer(),
+            Type::Primitive(p) => p.is_integer(),
             _ => false,
         }
     }
@@ -574,7 +574,7 @@ impl TypeArena {
     /// Check if this is a floating point type
     pub fn is_float(&self, id: TypeId) -> bool {
         match self.get(id) {
-            InternedType::Primitive(p) => p.is_float(),
+            Type::Primitive(p) => p.is_float(),
             _ => false,
         }
     }
@@ -582,7 +582,7 @@ impl TypeArena {
     /// Check if this is a signed integer type
     pub fn is_signed(&self, id: TypeId) -> bool {
         match self.get(id) {
-            InternedType::Primitive(p) => p.is_signed(),
+            Type::Primitive(p) => p.is_signed(),
             _ => false,
         }
     }
@@ -590,7 +590,7 @@ impl TypeArena {
     /// Check if this is an unsigned integer type
     pub fn is_unsigned(&self, id: TypeId) -> bool {
         match self.get(id) {
-            InternedType::Primitive(p) => p.is_unsigned(),
+            Type::Primitive(p) => p.is_unsigned(),
             _ => false,
         }
     }
@@ -598,7 +598,7 @@ impl TypeArena {
     /// Check if this is an optional type (union containing nil)
     pub fn is_optional(&self, id: TypeId) -> bool {
         match self.get(id) {
-            InternedType::Union(variants) => variants.contains(&self.nil()),
+            Type::Union(variants) => variants.contains(&self.nil()),
             _ => false,
         }
     }
@@ -606,7 +606,7 @@ impl TypeArena {
     /// Unwrap an array type, returning the element type
     pub fn unwrap_array(&self, id: TypeId) -> Option<TypeId> {
         match self.get(id) {
-            InternedType::Array(elem) => Some(*elem),
+            Type::Array(elem) => Some(*elem),
             _ => None,
         }
     }
@@ -614,7 +614,7 @@ impl TypeArena {
     /// Unwrap an optional type, returning the non-nil type
     pub fn unwrap_optional(&self, id: TypeId) -> Option<TypeId> {
         match self.get(id) {
-            InternedType::Union(variants) => {
+            Type::Union(variants) => {
                 let nil = self.nil();
                 let non_nil: TypeIdVec = variants.iter().copied().filter(|&v| v != nil).collect();
                 if non_nil.len() == 1 {
@@ -630,7 +630,7 @@ impl TypeArena {
     /// Unwrap a function type, returning (params, return_type, is_closure)
     pub fn unwrap_function(&self, id: TypeId) -> Option<(&TypeIdVec, TypeId, bool)> {
         match self.get(id) {
-            InternedType::Function {
+            Type::Function {
                 params,
                 ret,
                 is_closure,
@@ -642,7 +642,7 @@ impl TypeArena {
     /// Unwrap a tuple type, returning the element types
     pub fn unwrap_tuple(&self, id: TypeId) -> Option<&TypeIdVec> {
         match self.get(id) {
-            InternedType::Tuple(elements) => Some(elements),
+            Type::Tuple(elements) => Some(elements),
             _ => None,
         }
     }
@@ -650,7 +650,7 @@ impl TypeArena {
     /// Unwrap a fixed array type, returning (element, size)
     pub fn unwrap_fixed_array(&self, id: TypeId) -> Option<(TypeId, usize)> {
         match self.get(id) {
-            InternedType::FixedArray { element, size } => Some((*element, *size)),
+            Type::FixedArray { element, size } => Some((*element, *size)),
             _ => None,
         }
     }
@@ -658,10 +658,10 @@ impl TypeArena {
     /// Get TypeDefId for nominal types (class, record, interface, error)
     pub fn type_def_id(&self, id: TypeId) -> Option<TypeDefId> {
         match self.get(id) {
-            InternedType::Class { type_def_id, .. } => Some(*type_def_id),
-            InternedType::Record { type_def_id, .. } => Some(*type_def_id),
-            InternedType::Interface { type_def_id, .. } => Some(*type_def_id),
-            InternedType::Error { type_def_id } => Some(*type_def_id),
+            Type::Class { type_def_id, .. } => Some(*type_def_id),
+            Type::Record { type_def_id, .. } => Some(*type_def_id),
+            Type::Interface { type_def_id, .. } => Some(*type_def_id),
+            Type::Error { type_def_id } => Some(*type_def_id),
             _ => None,
         }
     }
@@ -669,9 +669,9 @@ impl TypeArena {
     /// Get type arguments for generic types
     pub fn type_args(&self, id: TypeId) -> &[TypeId] {
         match self.get(id) {
-            InternedType::Class { type_args, .. } => type_args,
-            InternedType::Record { type_args, .. } => type_args,
-            InternedType::Interface { type_args, .. } => type_args,
+            Type::Class { type_args, .. } => type_args,
+            Type::Record { type_args, .. } => type_args,
+            Type::Interface { type_args, .. } => type_args,
             _ => &[],
         }
     }
@@ -698,24 +698,24 @@ impl TypeArena {
 
     /// Check if this is an array type
     pub fn is_array(&self, id: TypeId) -> bool {
-        matches!(self.get(id), InternedType::Array(_))
+        matches!(self.get(id), Type::Array(_))
     }
 
     /// Check if this is a fixed array type
     pub fn is_fixed_array(&self, id: TypeId) -> bool {
-        matches!(self.get(id), InternedType::FixedArray { .. })
+        matches!(self.get(id), Type::FixedArray { .. })
     }
 
     /// Check if this is a function type
     pub fn is_function(&self, id: TypeId) -> bool {
-        matches!(self.get(id), InternedType::Function { .. })
+        matches!(self.get(id), Type::Function { .. })
     }
 
     /// Check if this is a closure (function with is_closure=true)
     pub fn is_closure(&self, id: TypeId) -> bool {
         matches!(
             self.get(id),
-            InternedType::Function {
+            Type::Function {
                 is_closure: true,
                 ..
             }
@@ -724,32 +724,32 @@ impl TypeArena {
 
     /// Check if this is a class type
     pub fn is_class(&self, id: TypeId) -> bool {
-        matches!(self.get(id), InternedType::Class { .. })
+        matches!(self.get(id), Type::Class { .. })
     }
 
     /// Check if this is a record type
     pub fn is_record(&self, id: TypeId) -> bool {
-        matches!(self.get(id), InternedType::Record { .. })
+        matches!(self.get(id), Type::Record { .. })
     }
 
     /// Check if this is an interface type
     pub fn is_interface(&self, id: TypeId) -> bool {
-        matches!(self.get(id), InternedType::Interface { .. })
+        matches!(self.get(id), Type::Interface { .. })
     }
 
     /// Check if this is an error type
     pub fn is_error(&self, id: TypeId) -> bool {
-        matches!(self.get(id), InternedType::Error { .. })
+        matches!(self.get(id), Type::Error { .. })
     }
 
     /// Check if this is a union type
     pub fn is_union(&self, id: TypeId) -> bool {
-        matches!(self.get(id), InternedType::Union(_))
+        matches!(self.get(id), Type::Union(_))
     }
 
     /// Check if this is a tuple type
     pub fn is_tuple(&self, id: TypeId) -> bool {
-        matches!(self.get(id), InternedType::Tuple(_))
+        matches!(self.get(id), Type::Tuple(_))
     }
 
     /// Check if this is the string primitive
@@ -769,12 +769,12 @@ impl TypeArena {
 
     /// Check if this is a runtime iterator type
     pub fn is_runtime_iterator(&self, id: TypeId) -> bool {
-        matches!(self.get(id), InternedType::RuntimeIterator(_))
+        matches!(self.get(id), Type::RuntimeIterator(_))
     }
 
     /// Check if this is a fallible type
     pub fn is_fallible(&self, id: TypeId) -> bool {
-        matches!(self.get(id), InternedType::Fallible { .. })
+        matches!(self.get(id), Type::Fallible { .. })
     }
 
     // =========================================================================
@@ -784,7 +784,7 @@ impl TypeArena {
     /// Unwrap a class type, returning (type_def_id, type_args)
     pub fn unwrap_class(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
         match self.get(id) {
-            InternedType::Class {
+            Type::Class {
                 type_def_id,
                 type_args,
             } => Some((*type_def_id, type_args)),
@@ -795,7 +795,7 @@ impl TypeArena {
     /// Unwrap a record type, returning (type_def_id, type_args)
     pub fn unwrap_record(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
         match self.get(id) {
-            InternedType::Record {
+            Type::Record {
                 type_def_id,
                 type_args,
             } => Some((*type_def_id, type_args)),
@@ -806,7 +806,7 @@ impl TypeArena {
     /// Unwrap an interface type, returning (type_def_id, type_args)
     pub fn unwrap_interface(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
         match self.get(id) {
-            InternedType::Interface {
+            Type::Interface {
                 type_def_id,
                 type_args,
             } => Some((*type_def_id, type_args)),
@@ -817,7 +817,7 @@ impl TypeArena {
     /// Unwrap an error type, returning type_def_id
     pub fn unwrap_error(&self, id: TypeId) -> Option<TypeDefId> {
         match self.get(id) {
-            InternedType::Error { type_def_id } => Some(*type_def_id),
+            Type::Error { type_def_id } => Some(*type_def_id),
             _ => None,
         }
     }
@@ -825,7 +825,7 @@ impl TypeArena {
     /// Unwrap a union type, returning the variants
     pub fn unwrap_union(&self, id: TypeId) -> Option<&TypeIdVec> {
         match self.get(id) {
-            InternedType::Union(variants) => Some(variants),
+            Type::Union(variants) => Some(variants),
             _ => None,
         }
     }
@@ -833,7 +833,7 @@ impl TypeArena {
     /// Unwrap a runtime iterator type, returning the element type
     pub fn unwrap_runtime_iterator(&self, id: TypeId) -> Option<TypeId> {
         match self.get(id) {
-            InternedType::RuntimeIterator(elem) => Some(*elem),
+            Type::RuntimeIterator(elem) => Some(*elem),
             _ => None,
         }
     }
@@ -841,7 +841,7 @@ impl TypeArena {
     /// Unwrap a fallible type, returning (success, error)
     pub fn unwrap_fallible(&self, id: TypeId) -> Option<(TypeId, TypeId)> {
         match self.get(id) {
-            InternedType::Fallible { success, error } => Some((*success, *error)),
+            Type::Fallible { success, error } => Some((*success, *error)),
             _ => None,
         }
     }
@@ -849,29 +849,29 @@ impl TypeArena {
     /// Display a type for error messages (basic version without name resolution)
     pub fn display_basic(&self, id: TypeId) -> String {
         match self.get(id) {
-            InternedType::Primitive(p) => p.name().to_string(),
-            InternedType::Void => "void".to_string(),
-            InternedType::Nil => "nil".to_string(),
-            InternedType::Done => "Done".to_string(),
-            InternedType::Range => "range".to_string(),
-            InternedType::MetaType => "type".to_string(),
-            InternedType::Invalid { kind } => format!("<invalid: {}>", kind),
-            InternedType::Union(variants) => {
+            Type::Primitive(p) => p.name().to_string(),
+            Type::Void => "void".to_string(),
+            Type::Nil => "nil".to_string(),
+            Type::Done => "Done".to_string(),
+            Type::Range => "range".to_string(),
+            Type::MetaType => "type".to_string(),
+            Type::Invalid { kind } => format!("<invalid: {}>", kind),
+            Type::Union(variants) => {
                 let parts: Vec<String> = variants.iter().map(|&v| self.display_basic(v)).collect();
                 parts.join(" | ")
             }
-            InternedType::Tuple(elements) => {
+            Type::Tuple(elements) => {
                 let parts: Vec<String> = elements.iter().map(|&e| self.display_basic(e)).collect();
                 format!("[{}]", parts.join(", "))
             }
-            InternedType::Array(elem) => format!("[{}]", self.display_basic(*elem)),
-            InternedType::FixedArray { element, size } => {
+            Type::Array(elem) => format!("[{}]", self.display_basic(*elem)),
+            Type::FixedArray { element, size } => {
                 format!("[{}; {}]", self.display_basic(*element), size)
             }
-            InternedType::RuntimeIterator(elem) => {
+            Type::RuntimeIterator(elem) => {
                 format!("Iterator<{}>", self.display_basic(*elem))
             }
-            InternedType::Function {
+            Type::Function {
                 params,
                 ret,
                 is_closure,
@@ -886,7 +886,7 @@ impl TypeArena {
                     self.display_basic(*ret)
                 )
             }
-            InternedType::Class {
+            Type::Class {
                 type_def_id,
                 type_args,
             } => {
@@ -898,7 +898,7 @@ impl TypeArena {
                     format!("class#{}<{}>", type_def_id.index(), args.join(", "))
                 }
             }
-            InternedType::Record {
+            Type::Record {
                 type_def_id,
                 type_args,
             } => {
@@ -910,7 +910,7 @@ impl TypeArena {
                     format!("record#{}<{}>", type_def_id.index(), args.join(", "))
                 }
             }
-            InternedType::Interface {
+            Type::Interface {
                 type_def_id,
                 type_args,
             } => {
@@ -922,18 +922,18 @@ impl TypeArena {
                     format!("interface#{}<{}>", type_def_id.index(), args.join(", "))
                 }
             }
-            InternedType::Error { type_def_id } => format!("error#{}", type_def_id.index()),
-            InternedType::TypeParam(name_id) => format!("TypeParam({:?})", name_id),
-            InternedType::TypeParamRef(id) => format!("TypeParamRef#{}", id.index()),
-            InternedType::Module(m) => format!("module#{}", m.module_id.index()),
-            InternedType::Fallible { success, error } => {
+            Type::Error { type_def_id } => format!("error#{}", type_def_id.index()),
+            Type::TypeParam(name_id) => format!("TypeParam({:?})", name_id),
+            Type::TypeParamRef(id) => format!("TypeParamRef#{}", id.index()),
+            Type::Module(m) => format!("module#{}", m.module_id.index()),
+            Type::Fallible { success, error } => {
                 format!(
                     "fallible({}, {})",
                     self.display_basic(*success),
                     self.display_basic(*error)
                 )
             }
-            InternedType::Structural(st) => {
+            Type::Structural(st) => {
                 let field_strs: Vec<String> = st
                     .fields
                     .iter()
@@ -959,7 +959,7 @@ impl TypeArena {
                     method_strs.join(", ")
                 )
             }
-            InternedType::Placeholder(kind) => format!("{}", kind),
+            Type::Placeholder(kind) => format!("{}", kind),
         }
     }
 
@@ -983,30 +983,30 @@ impl TypeArena {
         // Clone the interned type to release the borrow
         match self.get(ty).clone() {
             // Direct substitution for type parameters
-            InternedType::TypeParam(name_id) => subs.get(&name_id).copied().unwrap_or(ty),
+            Type::TypeParam(name_id) => subs.get(&name_id).copied().unwrap_or(ty),
 
             // TypeParamRef doesn't substitute based on NameId
-            InternedType::TypeParamRef(_) => ty,
+            Type::TypeParamRef(_) => ty,
 
             // Recursive substitution for compound types
-            InternedType::Array(elem) => {
+            Type::Array(elem) => {
                 let new_elem = self.substitute(elem, subs);
                 self.array(new_elem)
             }
 
-            InternedType::Union(variants) => {
+            Type::Union(variants) => {
                 let new_variants: TypeIdVec =
                     variants.iter().map(|&v| self.substitute(v, subs)).collect();
                 self.union(new_variants)
             }
 
-            InternedType::Tuple(elements) => {
+            Type::Tuple(elements) => {
                 let new_elements: TypeIdVec =
                     elements.iter().map(|&e| self.substitute(e, subs)).collect();
                 self.tuple(new_elements)
             }
 
-            InternedType::Function {
+            Type::Function {
                 params,
                 ret,
                 is_closure,
@@ -1017,7 +1017,7 @@ impl TypeArena {
                 self.function(new_params, new_ret, is_closure)
             }
 
-            InternedType::Class {
+            Type::Class {
                 type_def_id,
                 type_args,
             } => {
@@ -1028,7 +1028,7 @@ impl TypeArena {
                 self.class(type_def_id, new_args)
             }
 
-            InternedType::Record {
+            Type::Record {
                 type_def_id,
                 type_args,
             } => {
@@ -1039,7 +1039,7 @@ impl TypeArena {
                 self.record(type_def_id, new_args)
             }
 
-            InternedType::Interface {
+            Type::Interface {
                 type_def_id,
                 type_args,
             } => {
@@ -1050,23 +1050,23 @@ impl TypeArena {
                 self.interface(type_def_id, new_args)
             }
 
-            InternedType::RuntimeIterator(elem) => {
+            Type::RuntimeIterator(elem) => {
                 let new_elem = self.substitute(elem, subs);
                 self.runtime_iterator(new_elem)
             }
 
-            InternedType::FixedArray { element, size } => {
+            Type::FixedArray { element, size } => {
                 let new_elem = self.substitute(element, subs);
                 self.fixed_array(new_elem, size)
             }
 
-            InternedType::Fallible { success, error } => {
+            Type::Fallible { success, error } => {
                 let new_success = self.substitute(success, subs);
                 let new_error = self.substitute(error, subs);
                 self.fallible(new_success, new_error)
             }
 
-            InternedType::Structural(st) => {
+            Type::Structural(st) => {
                 let new_fields: SmallVec<[(NameId, TypeId); 4]> = st
                     .fields
                     .iter()
@@ -1085,16 +1085,16 @@ impl TypeArena {
             }
 
             // Types without nested type parameters - return unchanged
-            InternedType::Primitive(_)
-            | InternedType::Void
-            | InternedType::Nil
-            | InternedType::Done
-            | InternedType::Range
-            | InternedType::MetaType
-            | InternedType::Invalid { .. }
-            | InternedType::Error { .. }
-            | InternedType::Module(_)
-            | InternedType::Placeholder(_) => ty,
+            Type::Primitive(_)
+            | Type::Void
+            | Type::Nil
+            | Type::Done
+            | Type::Range
+            | Type::MetaType
+            | Type::Invalid { .. }
+            | Type::Error { .. }
+            | Type::Module(_)
+            | Type::Placeholder(_) => ty,
         }
     }
 
@@ -1230,36 +1230,36 @@ impl TypeArena {
         };
 
         match self.get(id) {
-            InternedType::Primitive(p) => LegacyType::Primitive(*p),
-            InternedType::Void => LegacyType::Void,
-            InternedType::Nil => LegacyType::Nil,
-            InternedType::Done => LegacyType::Done,
-            InternedType::Range => LegacyType::Range,
-            InternedType::MetaType => LegacyType::MetaType,
-            InternedType::Invalid { kind } => LegacyType::invalid(kind),
+            Type::Primitive(p) => LegacyType::Primitive(*p),
+            Type::Void => LegacyType::Void,
+            Type::Nil => LegacyType::Nil,
+            Type::Done => LegacyType::Done,
+            Type::Range => LegacyType::Range,
+            Type::MetaType => LegacyType::MetaType,
+            Type::Invalid { kind } => LegacyType::invalid(kind),
 
-            InternedType::Array(elem) => LegacyType::Array(Box::new(self.to_type(*elem))),
+            Type::Array(elem) => LegacyType::Array(Box::new(self.to_type(*elem))),
 
-            InternedType::Union(variants) => {
+            Type::Union(variants) => {
                 let types: Vec<LegacyType> = variants.iter().map(|&v| self.to_type(v)).collect();
                 LegacyType::Union(types.into())
             }
 
-            InternedType::Tuple(elements) => {
+            Type::Tuple(elements) => {
                 let types: Vec<LegacyType> = elements.iter().map(|&e| self.to_type(e)).collect();
                 LegacyType::Tuple(types.into())
             }
 
-            InternedType::FixedArray { element, size } => LegacyType::FixedArray {
+            Type::FixedArray { element, size } => LegacyType::FixedArray {
                 element: Box::new(self.to_type(*element)),
                 size: *size,
             },
 
-            InternedType::RuntimeIterator(elem) => {
+            Type::RuntimeIterator(elem) => {
                 LegacyType::RuntimeIterator(Box::new(self.to_type(*elem)))
             }
 
-            InternedType::Function {
+            Type::Function {
                 params,
                 ret,
                 is_closure,
@@ -1273,7 +1273,7 @@ impl TypeArena {
                 })
             }
 
-            InternedType::Class {
+            Type::Class {
                 type_def_id,
                 type_args,
             } => {
@@ -1284,7 +1284,7 @@ impl TypeArena {
                 }))
             }
 
-            InternedType::Record {
+            Type::Record {
                 type_def_id,
                 type_args,
             } => {
@@ -1295,7 +1295,7 @@ impl TypeArena {
                 }))
             }
 
-            InternedType::Interface {
+            Type::Interface {
                 type_def_id,
                 type_args,
             } => {
@@ -1311,7 +1311,7 @@ impl TypeArena {
                 }))
             }
 
-            InternedType::Error { type_def_id } => {
+            Type::Error { type_def_id } => {
                 // Note: We lose field info here - lookup from EntityRegistry if needed
                 LegacyType::Nominal(NominalType::Error(ErrorTypeInfo {
                     type_def_id: *type_def_id,
@@ -1319,11 +1319,11 @@ impl TypeArena {
                 }))
             }
 
-            InternedType::TypeParam(name_id) => LegacyType::TypeParam(*name_id),
+            Type::TypeParam(name_id) => LegacyType::TypeParam(*name_id),
 
-            InternedType::TypeParamRef(param_id) => LegacyType::TypeParamRef(*param_id),
+            Type::TypeParamRef(param_id) => LegacyType::TypeParamRef(*param_id),
 
-            InternedType::Module(m) => {
+            Type::Module(m) => {
                 // Reconstruct exports from interned types
                 let exports_map: std::collections::HashMap<NameId, LegacyType> = m
                     .exports
@@ -1349,7 +1349,7 @@ impl TypeArena {
                 })
             }
 
-            InternedType::Fallible { success, error } => {
+            Type::Fallible { success, error } => {
                 use crate::sema::types::FallibleType;
                 LegacyType::Fallible(FallibleType {
                     success_type: Box::new(self.to_type(*success)),
@@ -1357,7 +1357,7 @@ impl TypeArena {
                 })
             }
 
-            InternedType::Structural(st) => {
+            Type::Structural(st) => {
                 use crate::sema::types::{
                     StructuralFieldType, StructuralMethodType, StructuralType,
                 };
@@ -1382,7 +1382,7 @@ impl TypeArena {
                 })
             }
 
-            InternedType::Placeholder(kind) => LegacyType::Placeholder(kind.clone()),
+            Type::Placeholder(kind) => LegacyType::Placeholder(kind.clone()),
         }
     }
 }
@@ -1419,9 +1419,9 @@ mod tests {
 
     #[test]
     fn interned_type_size() {
-        // Verify InternedType is reasonably sized
-        let size = size_of::<InternedType>();
-        assert!(size <= 48, "InternedType is {} bytes, expected <= 48", size);
+        // Verify Type is reasonably sized
+        let size = size_of::<Type>();
+        assert!(size <= 48, "Type is {} bytes, expected <= 48", size);
     }
 
     #[test]
@@ -1474,7 +1474,7 @@ mod tests {
         let i32_id = arena.i32();
         let opt = arena.optional(i32_id);
         match arena.get(opt) {
-            InternedType::Union(variants) => {
+            Type::Union(variants) => {
                 assert_eq!(variants.len(), 2);
                 assert!(variants.contains(&arena.nil()));
                 assert!(variants.contains(&arena.i32()));
@@ -1496,7 +1496,7 @@ mod tests {
         let mut arena = TypeArena::new();
         let arr = arena.array(arena.i32());
         match arena.get(arr) {
-            InternedType::Array(elem) => {
+            Type::Array(elem) => {
                 assert_eq!(*elem, arena.i32());
             }
             _ => panic!("expected array type"),
@@ -1510,7 +1510,7 @@ mod tests {
         let string_id = arena.string();
         let func = arena.function(smallvec::smallvec![i32_id, string_id], arena.bool(), false);
         match arena.get(func) {
-            InternedType::Function {
+            Type::Function {
                 params,
                 ret,
                 is_closure,
@@ -1534,7 +1534,7 @@ mod tests {
             arena.bool()
         ]);
         match arena.get(tup) {
-            InternedType::Tuple(elements) => {
+            Type::Tuple(elements) => {
                 assert_eq!(elements.len(), 3);
             }
             _ => panic!("expected tuple type"),
@@ -1547,7 +1547,7 @@ mod tests {
         let type_def_id = TypeDefId::new(42);
         let cls = arena.class(type_def_id, smallvec::smallvec![arena.i32()]);
         match arena.get(cls) {
-            InternedType::Class {
+            Type::Class {
                 type_def_id: tid,
                 type_args,
             } => {

@@ -6,7 +6,7 @@ use crate::commands::common::AnalyzedProgram;
 use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::identity::{MethodId, NameId, TypeDefId};
-use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
+use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::types::NominalType;
 use crate::sema::{FunctionType, LegacyType, PrimitiveType};
@@ -48,7 +48,7 @@ pub(crate) enum MethodTarget {
 pub(crate) struct MethodResolutionInput<'a> {
     pub analyzed: &'a AnalyzedProgram,
     pub type_metadata: &'a HashMap<Symbol, crate::codegen::types::TypeMetadata>,
-    pub impl_method_infos: &'a HashMap<(TypeId, NameId), MethodInfo>,
+    pub impl_method_infos: &'a HashMap<(ImplTypeId, NameId), MethodInfo>,
     pub method_name_str: &'a str,
     pub object_type: &'a LegacyType,
     pub method_id: NameId,
@@ -74,7 +74,7 @@ pub(crate) fn resolve_method_target(
         })
     };
 
-    let lookup_impl_method = |type_id: TypeId| {
+    let lookup_impl_method = |type_id: ImplTypeId| {
         input
             .impl_method_infos
             .get(&(type_id, input.method_id))
@@ -157,7 +157,7 @@ pub(crate) fn resolve_method_target(
                         return_type: (*func_type.return_type).clone(),
                     });
                 }
-                let type_id = TypeId::from_type(
+                let type_id = ImplTypeId::from_type(
                     input.object_type,
                     &input.analyzed.entity_registry.type_table,
                     &input.analyzed.entity_registry,
@@ -269,7 +269,7 @@ pub(crate) fn resolve_method_target(
     {
         // Found method binding in EntityRegistry - now get the compiled MethodInfo
         // Try impl_method_infos first (uses TypeId key)
-        if let Some(type_id) = TypeId::from_type(
+        if let Some(type_id) = ImplTypeId::from_type(
             input.object_type,
             &input.analyzed.entity_registry.type_table,
             &input.analyzed.entity_registry,
@@ -285,7 +285,7 @@ pub(crate) fn resolve_method_target(
         }
 
         // Fallback: try looking up by method_name_id from EntityRegistry
-        if let Some(type_id) = TypeId::from_type(
+        if let Some(type_id) = ImplTypeId::from_type(
             input.object_type,
             &input.analyzed.entity_registry.type_table,
             &input.analyzed.entity_registry,
@@ -311,7 +311,7 @@ pub(crate) fn resolve_method_target(
     }
 
     // Fallback: try impl_method_infos directly (legacy path)
-    if let Some(type_id) = TypeId::from_type(
+    if let Some(type_id) = ImplTypeId::from_type(
         input.object_type,
         &input.analyzed.entity_registry.type_table,
         &input.analyzed.entity_registry,

@@ -14,13 +14,13 @@ use crate::frontend::Symbol;
 use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
-use crate::sema::implement_registry::{ExternalMethodInfo, TypeId};
+use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
 use crate::sema::types::NominalType;
 use crate::sema::{EntityRegistry, FunctionType, LegacyType};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 enum InterfaceConcreteType {
-    TypeId(TypeId),
+    ImplTypeId(ImplTypeId),
     Function { is_closure: bool },
 }
 
@@ -93,7 +93,7 @@ impl InterfaceVtableRegistry {
                 is_closure: func_type.is_closure,
             },
             _ => {
-                let type_id = TypeId::from_type(
+                let type_id = ImplTypeId::from_type(
                     concrete_type,
                     &ctx.analyzed.entity_registry.type_table,
                     &ctx.analyzed.entity_registry,
@@ -104,7 +104,7 @@ impl InterfaceVtableRegistry {
                         concrete_type
                     )
                 })?;
-                InterfaceConcreteType::TypeId(type_id)
+                InterfaceConcreteType::ImplTypeId(type_id)
             }
         };
         let key = InterfaceVtableKey {
@@ -152,7 +152,7 @@ impl InterfaceVtableRegistry {
         );
 
         let type_name = match concrete_key {
-            InterfaceConcreteType::TypeId(type_id) => {
+            InterfaceConcreteType::ImplTypeId(type_id) => {
                 ctx.analyzed.name_table.display(type_id.name_id())
             }
             InterfaceConcreteType::Function { is_closure } => {
@@ -233,7 +233,7 @@ impl InterfaceVtableRegistry {
                 is_closure: func_type.is_closure,
             },
             _ => {
-                let type_id = TypeId::from_type(
+                let type_id = ImplTypeId::from_type(
                     concrete_type,
                     &ctx.analyzed.entity_registry.type_table,
                     &ctx.analyzed.entity_registry,
@@ -244,7 +244,7 @@ impl InterfaceVtableRegistry {
                         concrete_type
                     )
                 })?;
-                InterfaceConcreteType::TypeId(type_id)
+                InterfaceConcreteType::ImplTypeId(type_id)
             }
         };
         let key = InterfaceVtableKey {
@@ -291,7 +291,7 @@ impl InterfaceVtableRegistry {
 
         // Build vtable name and declare data
         let type_name = match concrete_key {
-            InterfaceConcreteType::TypeId(type_id) => {
+            InterfaceConcreteType::ImplTypeId(type_id) => {
                 ctx.analyzed.name_table.display(type_id.name_id())
             }
             InterfaceConcreteType::Function { is_closure } => {
@@ -349,7 +349,7 @@ impl InterfaceVtableRegistry {
                 is_closure: func_type.is_closure,
             },
             _ => {
-                let type_id = TypeId::from_type(
+                let type_id = ImplTypeId::from_type(
                     concrete_type,
                     &ctx.analyzed.entity_registry.type_table,
                     &ctx.analyzed.entity_registry,
@@ -360,7 +360,7 @@ impl InterfaceVtableRegistry {
                         concrete_type
                     )
                 })?;
-                InterfaceConcreteType::TypeId(type_id)
+                InterfaceConcreteType::ImplTypeId(type_id)
             }
         };
         let key = InterfaceVtableKey {
@@ -978,7 +978,7 @@ fn resolve_vtable_target(
         });
     }
 
-    let type_id = TypeId::from_type(
+    let type_id = ImplTypeId::from_type(
         concrete_type,
         &ctx.analyzed.entity_registry.type_table,
         &ctx.analyzed.entity_registry,

@@ -24,12 +24,10 @@ use crate::sema::generic::{
     ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,
     TypeParamInfo, TypeParamScope, TypeParamScopeStack, TypeParamVariance, substitute_type,
 };
-use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry, MethodImpl, TypeId};
+use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId, ImplementRegistry, MethodImpl};
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
-use crate::sema::type_arena::TypeArena;
-use crate::sema::types::{
-    ConstantValue, LegacyType, ModuleType, NominalType, StructuralType, Type,
-};
+use crate::sema::type_arena::{TypeArena, TypeId as ArenaTypeId};
+use crate::sema::types::{ConstantValue, LegacyType, ModuleType, NominalType, StructuralType};
 use crate::sema::{
     ClassType, ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField,
     compatibility::TypeCompatibility,
@@ -137,9 +135,9 @@ pub struct AnalysisOutput {
 /// Saved state when entering a function/method check context.
 /// Used by enter_function_context/exit_function_context for uniform save/restore.
 struct FunctionCheckContext {
-    return_type: Option<Type>,
-    error_type: Option<Type>,
-    generator_element_type: Option<Type>,
+    return_type: Option<ArenaTypeId>,
+    error_type: Option<ArenaTypeId>,
+    generator_element_type: Option<ArenaTypeId>,
     static_method: Option<String>,
     /// How many scopes were on the stack when we entered this context
     type_param_stack_depth: usize,
@@ -150,20 +148,20 @@ pub struct Analyzer {
     functions: HashMap<Symbol, FunctionType>,
     /// Functions registered by string name (for prelude functions that cross interner boundaries)
     functions_by_name: FxHashMap<String, FunctionType>,
-    globals: HashMap<Symbol, Type>,
-    current_function_return: Option<Type>,
+    globals: HashMap<Symbol, ArenaTypeId>,
+    current_function_return: Option<ArenaTypeId>,
     /// Current function's error type (if fallible)
-    current_function_error_type: Option<Type>,
+    current_function_error_type: Option<ArenaTypeId>,
     /// Generator context: if inside a generator function, this holds the Iterator element type.
     /// None means we're not in a generator (or not in a function at all).
-    current_generator_element_type: Option<Type>,
+    current_generator_element_type: Option<ArenaTypeId>,
     /// If we're inside a static method, this holds the method name (for error reporting).
     /// None means we're not in a static method.
     current_static_method: Option<String>,
     errors: Vec<TypeError>,
     warnings: Vec<TypeWarning>,
     /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
-    type_overrides: HashMap<Symbol, Type>,
+    type_overrides: HashMap<Symbol, ArenaTypeId>,
     /// Stack of lambda scopes for capture analysis. Each entry is a HashMap
     /// mapping captured variable names to their capture info.
     lambda_captures: Vec<HashMap<Symbol, CaptureInfo>>,
@@ -175,7 +173,7 @@ pub struct Analyzer {
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their interned type handles for O(1) equality.
     /// Converted to LegacyType at boundaries when passed to codegen.
-    expr_types: HashMap<NodeId, Type>,
+    expr_types: HashMap<NodeId, ArenaTypeId>,
     /// Methods added via implement blocks
     pub implement_registry: ImplementRegistry,
     /// Resolved method calls for codegen
@@ -186,10 +184,10 @@ pub struct Analyzer {
     module_types: FxHashMap<String, ModuleType>,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     module_programs: FxHashMap<String, (Program, Interner)>,
-    /// Expression types for module programs (keyed by module path -> NodeId -> Type)
+    /// Expression types for module programs (keyed by module path -> NodeId -> ArenaTypeId)
     /// Stored separately since NodeIds are per-program and can't be merged into main expr_types.
-    /// Uses interned Type handles for O(1) equality during analysis.
-    pub module_expr_types: FxHashMap<String, HashMap<NodeId, Type>>,
+    /// Uses interned ArenaTypeId handles for O(1) equality during analysis.
+    pub module_expr_types: FxHashMap<String, HashMap<NodeId, ArenaTypeId>>,
     /// Method resolutions for module programs (keyed by module path -> NodeId -> ResolvedMethod)
     /// Stored separately since NodeIds are per-program and can't be merged into main method_resolutions
     pub module_method_resolutions: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
@@ -297,9 +295,9 @@ impl Analyzer {
     // Error/display helpers: errors.rs
     // Type inference: inference.rs
 
-    /// Get the resolved expression types as interned Type handles.
+    /// Get the resolved expression types as interned ArenaTypeId handles.
     /// Use type_arena.to_type() to convert back to LegacyType if needed.
-    pub fn expr_types(&self) -> &HashMap<NodeId, Type> {
+    pub fn expr_types(&self) -> &HashMap<NodeId, ArenaTypeId> {
         &self.expr_types
     }
 
@@ -312,7 +310,7 @@ impl Analyzer {
     }
 
     /// Take ownership of the expression types (consuming self)
-    pub fn into_expr_types(self) -> HashMap<NodeId, Type> {
+    pub fn into_expr_types(self) -> HashMap<NodeId, ArenaTypeId> {
         self.expr_types
     }
 
@@ -346,10 +344,10 @@ impl Analyzer {
     }
 
     /// Record the resolved type for an expression, returning the type for chaining.
-    /// Interns the LegacyType to a Type handle for O(1) storage and comparison.
+    /// Interns the LegacyType to an ArenaTypeId handle for O(1) storage and comparison.
     fn record_expr_type(&mut self, expr: &Expr, ty: LegacyType) -> LegacyType {
         let type_id = self.type_arena.borrow_mut().from_type(&ty);
-        self.expr_types.insert(expr.id, Type(type_id));
+        self.expr_types.insert(expr.id, type_id);
         ty
     }
 
@@ -503,7 +501,7 @@ impl Analyzer {
     fn get_variable_type(&self, sym: Symbol) -> Option<LegacyType> {
         // Check overrides first (for narrowed types inside if-blocks)
         if let Some(ty) = self.type_overrides.get(&sym) {
-            return Some(self.type_arena.borrow().to_type(ty.0));
+            return Some(self.type_arena.borrow().to_type(*ty));
         }
         // Then check scope
         self.scope.get(sym).map(|v| v.ty.clone())
@@ -694,7 +692,7 @@ impl Analyzer {
                         }
 
                         let var_type_id = self.type_arena.borrow_mut().from_type(&var_type);
-                        self.globals.insert(let_stmt.name, Type(var_type_id));
+                        self.globals.insert(let_stmt.name, var_type_id);
                         self.scope.define(
                             let_stmt.name,
                             Variable {
@@ -1169,7 +1167,7 @@ impl Analyzer {
         trait_name: Option<Symbol>,
         interner: &Interner,
     ) {
-        let type_id = match TypeId::from_type(
+        let type_id = match ImplTypeId::from_type(
             target_type,
             &self.entity_registry.type_table,
             &self.entity_registry,
@@ -1274,20 +1272,20 @@ impl Analyzer {
             type_param_stack_depth: self.type_param_stack.depth(),
         };
 
-        // Convert LegacyType to Type for storage
+        // Convert LegacyType to ArenaTypeId for storage
         let return_type_id = self.type_arena.borrow_mut().from_type(return_type);
-        self.current_function_return = Some(Type(return_type_id));
+        self.current_function_return = Some(return_type_id);
 
         // Set error type context if this is a fallible function
         if let LegacyType::Fallible(ft) = return_type {
             let error_type_id = self.type_arena.borrow_mut().from_type(&ft.error_type);
-            self.current_function_error_type = Some(Type(error_type_id));
+            self.current_function_error_type = Some(error_type_id);
         }
 
         // Set generator context if return type is Iterator<T>
         if let Some(element_type) = self.extract_iterator_element_type(return_type, interner) {
             let element_type_id = self.type_arena.borrow_mut().from_type(&element_type);
-            self.current_generator_element_type = Some(Type(element_type_id));
+            self.current_generator_element_type = Some(element_type_id);
         }
 
         saved

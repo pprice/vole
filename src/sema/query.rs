@@ -16,9 +16,9 @@ use crate::sema::generic::{
 };
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::sema::resolution::ResolvedMethod;
+use crate::sema::type_arena::TypeId;
 use crate::sema::type_table::TypeKey;
-use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::{LegacyType, Type};
+use crate::sema::types::LegacyType;
 
 /// Information about a call site, bundling all call-related data.
 #[derive(Debug, Clone)]
@@ -69,9 +69,9 @@ impl<'a> ProgramQuery<'a> {
     // Expression queries
     // =========================================================================
 
-    /// Get the type of an expression by its NodeId (returns interned Type handle).
+    /// Get the type of an expression by its NodeId (returns interned TypeId handle).
     #[must_use]
-    pub fn type_of(&self, node: NodeId) -> Option<Type> {
+    pub fn type_of(&self, node: NodeId) -> Option<TypeId> {
         self.expr_data.get_type(node)
     }
 
@@ -234,7 +234,7 @@ impl<'a> ProgramQuery<'a> {
     /// Resolve a type alias to its underlying type.
     /// Returns None if the type is not an alias or has no aliased_type.
     #[must_use]
-    pub fn resolve_alias(&self, type_id: TypeDefId) -> Option<ArenaTypeId> {
+    pub fn resolve_alias(&self, type_id: TypeDefId) -> Option<TypeId> {
         self.registry.get_type(type_id).aliased_type
     }
 

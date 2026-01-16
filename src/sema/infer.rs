@@ -9,8 +9,7 @@
 // - InferVarId: Identifier for an inference variable
 // - InferCtx: Context for managing variable bindings and unification
 
-use crate::sema::type_arena::TypeArena;
-use crate::sema::types::Type;
+use crate::sema::type_arena::{TypeArena, TypeId};
 
 /// Identifier for an inference variable.
 ///
@@ -42,7 +41,7 @@ impl InferVarId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InferType {
     /// A resolved concrete type (known).
-    Resolved(Type),
+    Resolved(TypeId),
     /// An inference variable (to be unified).
     Var(InferVarId),
 }
@@ -50,7 +49,7 @@ pub enum InferType {
 impl InferType {
     /// Create a resolved type.
     #[inline]
-    pub fn resolved(ty: Type) -> Self {
+    pub fn resolved(ty: TypeId) -> Self {
         InferType::Resolved(ty)
     }
 
@@ -74,7 +73,7 @@ impl InferType {
 
     /// Get the resolved type, if any.
     #[inline]
-    pub fn as_resolved(&self) -> Option<Type> {
+    pub fn as_resolved(&self) -> Option<TypeId> {
         match self {
             InferType::Resolved(ty) => Some(*ty),
             InferType::Var(_) => None,
@@ -91,8 +90,8 @@ impl InferType {
     }
 }
 
-impl From<Type> for InferType {
-    fn from(ty: Type) -> Self {
+impl From<TypeId> for InferType {
+    fn from(ty: TypeId) -> Self {
         InferType::Resolved(ty)
     }
 }
@@ -101,9 +100,9 @@ impl From<Type> for InferType {
 #[derive(Debug, Clone)]
 pub enum UnifyError {
     /// Types are incompatible and cannot be unified.
-    Mismatch { expected: Type, found: Type },
+    Mismatch { expected: TypeId, found: TypeId },
     /// Occurs check failed - infinite type detected.
-    OccursCheck { var: InferVarId, ty: Type },
+    OccursCheck { var: InferVarId, ty: TypeId },
 }
 
 /// Inference context for managing variable bindings.
@@ -113,7 +112,7 @@ pub enum UnifyError {
 pub struct InferCtx {
     /// Bindings from inference variable to resolved type.
     /// None means the variable is still unbound.
-    bindings: Vec<Option<Type>>,
+    bindings: Vec<Option<TypeId>>,
 }
 
 impl InferCtx {
@@ -132,14 +131,14 @@ impl InferCtx {
     }
 
     /// Get the binding for an inference variable, if any.
-    pub fn get(&self, var: InferVarId) -> Option<Type> {
+    pub fn get(&self, var: InferVarId) -> Option<TypeId> {
         self.bindings.get(var.raw() as usize).copied().flatten()
     }
 
     /// Bind an inference variable to a type.
     ///
     /// Returns error if the variable is already bound to a different type.
-    pub fn bind(&mut self, var: InferVarId, ty: Type) -> Result<(), UnifyError> {
+    pub fn bind(&mut self, var: InferVarId, ty: TypeId) -> Result<(), UnifyError> {
         let idx = var.raw() as usize;
         if idx >= self.bindings.len() {
             // Extend bindings if needed
@@ -162,7 +161,7 @@ impl InferCtx {
     /// Resolve an InferType to its concrete type, if fully resolved.
     ///
     /// Returns None if the type contains unbound inference variables.
-    pub fn resolve(&self, t: InferType) -> Option<Type> {
+    pub fn resolve(&self, t: InferType) -> Option<TypeId> {
         match t {
             InferType::Resolved(ty) => Some(ty),
             InferType::Var(var) => self.get(var),
@@ -273,12 +272,12 @@ mod tests {
         TypeArena::new()
     }
 
-    fn i32_type(arena: &TypeArena) -> Type {
-        Type(arena.primitive(PrimitiveType::I32))
+    fn i32_type(arena: &TypeArena) -> TypeId {
+        arena.primitive(PrimitiveType::I32)
     }
 
-    fn i64_type(arena: &TypeArena) -> Type {
-        Type(arena.primitive(PrimitiveType::I64))
+    fn i64_type(arena: &TypeArena) -> TypeId {
+        arena.primitive(PrimitiveType::I64)
     }
 
     #[test]

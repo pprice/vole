@@ -145,7 +145,7 @@ impl Analyzer {
         // For primitives/arrays, check implement registry
         if type_name_id.is_none() {
             if let Some(type_id) =
-                TypeId::from_type(ty, &self.entity_registry.type_table, &self.entity_registry)
+                ImplTypeId::from_type(ty, &self.entity_registry.type_table, &self.entity_registry)
                 && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             {
                 return self
@@ -173,7 +173,7 @@ impl Analyzer {
 
         // Check implement registry
         if let Some(type_id) =
-            TypeId::from_type(ty, &self.entity_registry.type_table, &self.entity_registry)
+            ImplTypeId::from_type(ty, &self.entity_registry.type_table, &self.entity_registry)
             && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             && self
                 .implement_registry
@@ -565,7 +565,7 @@ impl Analyzer {
 
             // Methods from implement blocks
             let name_id = self.entity_registry.get_type(type_def_id).name_id;
-            let type_id = TypeId::from_name_id(name_id);
+            let type_id = ImplTypeId::from_name_id(name_id);
             for (method_name, method_impl) in self.implement_registry.get_methods_for_type(&type_id)
             {
                 method_sigs.insert(method_name_str(method_name), method_impl.func_type.clone());
@@ -718,7 +718,7 @@ impl Analyzer {
         // For primitives/arrays, check implement registry
         if type_name_id.is_none() {
             if let Some(type_id) =
-                TypeId::from_type(ty, &self.entity_registry.type_table, &self.entity_registry)
+                ImplTypeId::from_type(ty, &self.entity_registry.type_table, &self.entity_registry)
                 && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
                 && let Some(method_impl) = self.implement_registry.get_method(&type_id, method_id)
             {
@@ -754,7 +754,7 @@ impl Analyzer {
 
         // Check implement registry
         if let Some(type_id) =
-            TypeId::from_type(ty, &self.entity_registry.type_table, &self.entity_registry)
+            ImplTypeId::from_type(ty, &self.entity_registry.type_table, &self.entity_registry)
             && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             && let Some(method_impl) = self.implement_registry.get_method(&type_id, method_id)
         {

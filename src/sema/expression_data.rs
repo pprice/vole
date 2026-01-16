@@ -12,14 +12,15 @@ use crate::frontend::NodeId;
 use crate::sema::TypeArena;
 use crate::sema::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::sema::resolution::ResolvedMethod;
-use crate::sema::types::{LegacyType, Type};
+use crate::sema::type_arena::TypeId;
+use crate::sema::types::LegacyType;
 
 /// Encapsulates all NodeId-keyed metadata from semantic analysis.
 /// This includes expression types, method resolutions, and generic instantiation info.
 #[derive(Debug, Clone)]
 pub struct ExpressionData {
-    /// Type of each expression node (stored as interned Type handles)
-    types: HashMap<NodeId, Type>,
+    /// Type of each expression node (stored as interned TypeId handles)
+    types: HashMap<NodeId, TypeId>,
     /// Resolved method information for method calls
     methods: HashMap<NodeId, ResolvedMethod>,
     /// Monomorphization key for generic function calls
@@ -29,10 +30,10 @@ pub struct ExpressionData {
     /// Monomorphization key for generic static method calls
     static_method_generics: HashMap<NodeId, StaticMethodMonomorphKey>,
     /// Per-module type mappings (for multi-module compilation)
-    module_types: FxHashMap<String, HashMap<NodeId, Type>>,
+    module_types: FxHashMap<String, HashMap<NodeId, TypeId>>,
     /// Per-module method resolutions (for multi-module compilation)
     module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
-    /// Shared type arena for converting Type handles back to LegacyType
+    /// Shared type arena for converting TypeId handles back to LegacyType
     type_arena: Rc<RefCell<TypeArena>>,
 }
 
@@ -60,12 +61,12 @@ impl ExpressionData {
     /// Create ExpressionData from analysis results
     #[allow(clippy::too_many_arguments)]
     pub fn from_analysis(
-        types: HashMap<NodeId, Type>,
+        types: HashMap<NodeId, TypeId>,
         methods: HashMap<NodeId, ResolvedMethod>,
         generics: HashMap<NodeId, MonomorphKey>,
         class_method_generics: HashMap<NodeId, ClassMethodMonomorphKey>,
         static_method_generics: HashMap<NodeId, StaticMethodMonomorphKey>,
-        module_types: FxHashMap<String, HashMap<NodeId, Type>>,
+        module_types: FxHashMap<String, HashMap<NodeId, TypeId>>,
         module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
         type_arena: Rc<RefCell<TypeArena>>,
     ) -> Self {
@@ -81,8 +82,8 @@ impl ExpressionData {
         }
     }
 
-    /// Get the type of an expression by its NodeId (returns interned Type handle).
-    pub fn get_type(&self, node: NodeId) -> Option<Type> {
+    /// Get the type of an expression by its NodeId (returns interned TypeId handle).
+    pub fn get_type(&self, node: NodeId) -> Option<TypeId> {
         self.types.get(&node).copied()
     }
 
@@ -91,17 +92,17 @@ impl ExpressionData {
     pub fn get_type_as_legacy(&self, node: NodeId) -> Option<LegacyType> {
         self.types
             .get(&node)
-            .map(|ty| self.type_arena.borrow().to_type(ty.0))
+            .map(|ty| self.type_arena.borrow().to_type(*ty))
     }
 
     /// Set the type of an expression (takes LegacyType, interns it)
     pub fn set_type(&mut self, node: NodeId, ty: LegacyType) {
         let type_id = self.type_arena.borrow_mut().from_type(&ty);
-        self.types.insert(node, Type(type_id));
+        self.types.insert(node, type_id);
     }
 
-    /// Set the type of an expression using a Type handle directly
-    pub fn set_type_handle(&mut self, node: NodeId, ty: Type) {
+    /// Set the type of an expression using a TypeId handle directly
+    pub fn set_type_handle(&mut self, node: NodeId, ty: TypeId) {
         self.types.insert(node, ty);
     }
 
@@ -154,13 +155,13 @@ impl ExpressionData {
         self.generics.insert(node, key);
     }
 
-    /// Get all expression types (as Type handles)
-    pub fn types(&self) -> &HashMap<NodeId, Type> {
+    /// Get all expression types (as TypeId handles)
+    pub fn types(&self) -> &HashMap<NodeId, TypeId> {
         &self.types
     }
 
     /// Get mutable access to expression types
-    pub fn types_mut(&mut self) -> &mut HashMap<NodeId, Type> {
+    pub fn types_mut(&mut self) -> &mut HashMap<NodeId, TypeId> {
         &mut self.types
     }
 
@@ -229,18 +230,18 @@ impl ExpressionData {
         &mut self.static_method_generics
     }
 
-    /// Get types for a specific module (as Type handles)
-    pub fn module_types(&self, module: &str) -> Option<&HashMap<NodeId, Type>> {
+    /// Get types for a specific module (as TypeId handles)
+    pub fn module_types(&self, module: &str) -> Option<&HashMap<NodeId, TypeId>> {
         self.module_types.get(module)
     }
 
     /// Set types for a specific module
-    pub fn set_module_types(&mut self, module: String, types: HashMap<NodeId, Type>) {
+    pub fn set_module_types(&mut self, module: String, types: HashMap<NodeId, TypeId>) {
         self.module_types.insert(module, types);
     }
 
     /// Get all module type mappings
-    pub fn all_module_types(&self) -> &FxHashMap<String, HashMap<NodeId, Type>> {
+    pub fn all_module_types(&self) -> &FxHashMap<String, HashMap<NodeId, TypeId>> {
         &self.module_types
     }
 
