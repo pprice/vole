@@ -1216,8 +1216,7 @@ pub(crate) fn convert_to_type(
 
     // Integer widening - use uextend for unsigned types, sextend for signed
     if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
-        let legacy = arena.borrow().to_type(val.type_id);
-        if legacy.is_unsigned() {
+        if arena.borrow().is_unsigned(val.type_id) {
             return builder.ins().uextend(target, val.value);
         } else {
             return builder.ins().sextend(target, val.value);
