@@ -19,7 +19,7 @@ use crate::sema::types::NominalType;
 use crate::sema::{LegacyType, PrimitiveType};
 
 use super::context::Cg;
-use super::structs::{convert_field_value, convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id};
+use super::structs::{convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
     array_element_tag_id, box_interface_value, box_interface_value_id, fallible_error_tag,
@@ -672,10 +672,10 @@ impl Cg<'_, '_, '_> {
 
             let raw_value =
                 self.call_runtime_cached(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
-            // Still need LegacyType for convert_field_value
-            let elem_type = self.to_legacy(element_id);
+            let arena = self.ctx.arena.borrow();
             let (result_value, result_ty) =
-                convert_field_value(self.builder, raw_value, &elem_type);
+                convert_field_value_id(self.builder, raw_value, element_id, &arena);
+            drop(arena);
 
             return Ok(CompiledValue {
                 value: result_value,
@@ -1739,8 +1739,9 @@ impl Cg<'_, '_, '_> {
 
             // Convert from i64 to the actual field type
             let field_ty_id = field_def.ty;
-            let field_ty = self.ctx.arena.borrow().to_type(field_ty_id);
-            let (result_val, cranelift_ty) = convert_field_value(self.builder, raw_value, &field_ty);
+            let arena = self.ctx.arena.borrow();
+            let (result_val, cranelift_ty) = convert_field_value_id(self.builder, raw_value, field_ty_id, &arena);
+            drop(arena);
             let var = self.builder.declare_var(cranelift_ty);
             self.builder.def_var(var, result_val);
             arm_variables.insert(field_pattern.binding, (var, field_ty_id));

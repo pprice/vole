@@ -86,51 +86,6 @@ pub(crate) fn get_type_name_id(
     }
 }
 
-pub(crate) fn convert_field_value(
-    builder: &mut FunctionBuilder,
-    raw_value: Value,
-    field_type: &LegacyType,
-) -> (Value, Type) {
-    match field_type {
-        LegacyType::Primitive(PrimitiveType::F64) => {
-            let fval = builder
-                .ins()
-                .bitcast(types::F64, MemFlags::new(), raw_value);
-            (fval, types::F64)
-        }
-        LegacyType::Primitive(PrimitiveType::F32) => {
-            // Truncate to i32 first, then bitcast
-            let i32_val = builder.ins().ireduce(types::I32, raw_value);
-            let fval = builder.ins().bitcast(types::F32, MemFlags::new(), i32_val);
-            (fval, types::F32)
-        }
-        LegacyType::Primitive(PrimitiveType::Bool) => {
-            let bval = builder.ins().ireduce(types::I8, raw_value);
-            (bval, types::I8)
-        }
-        LegacyType::Primitive(PrimitiveType::I8) | LegacyType::Primitive(PrimitiveType::U8) => {
-            let val = builder.ins().ireduce(types::I8, raw_value);
-            (val, types::I8)
-        }
-        LegacyType::Primitive(PrimitiveType::I16) | LegacyType::Primitive(PrimitiveType::U16) => {
-            let val = builder.ins().ireduce(types::I16, raw_value);
-            (val, types::I16)
-        }
-        LegacyType::Primitive(PrimitiveType::I32) | LegacyType::Primitive(PrimitiveType::U32) => {
-            let val = builder.ins().ireduce(types::I32, raw_value);
-            (val, types::I32)
-        }
-        LegacyType::Primitive(PrimitiveType::String)
-        | LegacyType::Array(_)
-        | LegacyType::Nominal(NominalType::Class(_))
-        | LegacyType::Nominal(NominalType::Record(_)) => {
-            // Pointers stay as i64
-            (raw_value, types::I64)
-        }
-        _ => (raw_value, types::I64),
-    }
-}
-
 /// Convert a raw i64 field value to the appropriate Cranelift type using TypeId (no LegacyType)
 pub(crate) fn convert_field_value_id(
     builder: &mut FunctionBuilder,
