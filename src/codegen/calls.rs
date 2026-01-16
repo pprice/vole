@@ -16,10 +16,12 @@ use crate::runtime::native_registry::{NativeFunction, NativeType};
 use crate::sema::types::NominalType;
 use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
+use crate::sema::type_arena::TypeId;
+
 use super::context::Cg;
 use super::types::{
     CompiledValue, box_interface_value, native_type_to_cranelift, resolve_type_expr,
-    type_to_cranelift,
+    type_id_to_cranelift, type_to_cranelift,
 };
 use super::{FunctionKey, FunctionRegistry, RuntimeFn};
 
@@ -121,9 +123,11 @@ impl Cg<'_, '_, '_> {
 
         // Handle optionals (unions with nil variant)
         if let Some(nil_idx) = self.find_nil_variant(val.type_id) {
-            let legacy = self.to_legacy(val.type_id);
-            if let LegacyType::Union(variants) = &legacy {
-                return self.optional_to_string(val.value, variants, nil_idx);
+            let arena = self.ctx.arena.borrow();
+            if let Some(variants) = arena.unwrap_union(val.type_id) {
+                let variants_vec: Vec<TypeId> = variants.to_vec();
+                drop(arena);
+                return self.optional_to_string_by_id(val.value, &variants_vec, nil_idx);
             }
         }
 
@@ -143,15 +147,13 @@ impl Cg<'_, '_, '_> {
         self.call_runtime(runtime, &[call_val])
     }
 
-    /// Convert an optional (union with nil) to string
-    fn optional_to_string(
+    /// Convert an optional (union with nil) to string using TypeId variants
+    fn optional_to_string_by_id(
         &mut self,
         ptr: Value,
-        variants: &[LegacyType],
+        variants: &[TypeId],
         nil_idx: usize,
     ) -> Result<Value, String> {
-        use crate::codegen::types::type_to_cranelift;
-
         // Load the tag from offset 0
         let tag = self.builder.ins().load(types::I8, MemFlags::new(), ptr, 0);
         let nil_tag = self.builder.ins().iconst(types::I8, nil_idx as i64);
@@ -177,13 +179,16 @@ impl Cg<'_, '_, '_> {
 
         // Some case: extract inner value and convert to string
         self.builder.switch_to_block(some_block);
-        // Find the non-nil variant
-        let inner_type = variants
+        // Find the non-nil variant using arena
+        let arena = self.ctx.arena.borrow();
+        let inner_type_id = variants
             .iter()
-            .find(|v| !matches!(v, LegacyType::Nil))
-            .cloned()
-            .unwrap_or(LegacyType::Nil);
-        let inner_cr_type = type_to_cranelift(&inner_type, self.ctx.pointer_type);
+            .find(|&&v| !arena.is_nil(v))
+            .copied()
+            .unwrap_or_else(|| self.nil_type());
+        let inner_cr_type = type_id_to_cranelift(inner_type_id, &arena, self.ctx.pointer_type);
+        drop(arena);
+
         let inner_val = self
             .builder
             .ins()
@@ -192,7 +197,7 @@ impl Cg<'_, '_, '_> {
         let inner_compiled = CompiledValue {
             value: inner_val,
             ty: inner_cr_type,
-            type_id: self.intern_type(&inner_type),
+            type_id: inner_type_id,
         };
         let some_str = self.value_to_string(inner_compiled)?;
         self.builder.ins().jump(merge_block, &[some_str.into()]);
@@ -902,8 +907,8 @@ impl Cg<'_, '_, '_> {
         } else {
             // Use the concrete return type from the monomorphized function type
             // Apply class type substitutions if available (for calls inside monomorphized methods)
-            let return_type = self.ctx.substitute_type(&func_type.return_type);
-            let type_id = self.intern_type(&return_type);
+            let type_id = self.intern_type(&func_type.return_type);
+            let type_id = self.ctx.substitute_type_id(type_id);
             let type_id = self.maybe_convert_iterator_return_type(type_id);
             Ok(CompiledValue {
                 value: results[0],
