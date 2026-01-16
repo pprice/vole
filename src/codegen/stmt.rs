@@ -381,14 +381,12 @@ impl Cg<'_, '_, '_> {
                 if let ExprKind::Range(range) = &for_stmt.iterable.kind {
                     self.for_range(for_stmt, range)
                 } else {
-                    // Check if iterable is an Iterator type or string type
-                    let iterable_type = self.ctx.get_expr_type_legacy(&for_stmt.iterable.id);
-                    let is_iterator = iterable_type
-                        .as_ref()
-                        .is_some_and(|ty| self.is_iterator_type(ty));
-                    let is_string = iterable_type.is_some_and(|ty| {
-                        matches!(ty, LegacyType::Primitive(PrimitiveType::String))
-                    });
+                    // Check if iterable is an Iterator type or string type using TypeId
+                    let iterable_type_id = self.ctx.analyzed.query().type_of(for_stmt.iterable.id);
+                    let is_iterator = iterable_type_id
+                        .is_some_and(|id| self.is_iterator_type_id(id));
+                    let is_string = iterable_type_id
+                        .is_some_and(|id| self.ctx.arena.borrow().is_string(id));
                     if is_iterator {
                         self.for_iterator(for_stmt)
                     } else if is_string {
@@ -546,16 +544,17 @@ impl Cg<'_, '_, '_> {
         Ok(false)
     }
 
-    /// Check if a type is an Iterator<T> type
-    fn is_iterator_type(&self, ty: &LegacyType) -> bool {
-        match ty {
-            LegacyType::Nominal(NominalType::Interface(iface)) => self
-                .ctx
+    /// Check if a type is an Iterator<T> type using TypeId
+    fn is_iterator_type_id(&self, ty: TypeId) -> bool {
+        let arena = self.ctx.arena.borrow();
+        if let Some((type_def_id, _)) = arena.unwrap_interface(ty) {
+            self.ctx
                 .analyzed
                 .name_table
                 .well_known
-                .is_iterator_type_def(iface.type_def_id),
-            _ => false,
+                .is_iterator_type_def(type_def_id)
+        } else {
+            false
         }
     }
 
