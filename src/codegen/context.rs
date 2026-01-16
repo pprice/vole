@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use cranelift::prelude::{AbiParam, FunctionBuilder, InstBuilder, Value, Variable, types};
+use cranelift::prelude::{AbiParam, FunctionBuilder, InstBuilder, Type, Value, Variable, types};
 use cranelift_module::{FuncId, Module};
 
 use crate::codegen::{FunctionKey, RuntimeFn};
@@ -256,6 +256,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get the LegacyType for a TypeId (for interop with existing code)
     pub fn to_legacy(&self, ty: TypeId) -> LegacyType {
         self.ctx.arena.borrow().to_type(ty)
+    }
+
+    /// Convert a TypeId to a Cranelift type
+    pub fn cranelift_type(&self, ty: TypeId) -> Type {
+        super::types::type_id_to_cranelift(ty, &self.ctx.arena.borrow(), self.ctx.pointer_type)
     }
 
     /// Unwrap a function type, returning the FunctionType if it is one

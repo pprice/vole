@@ -823,6 +823,11 @@ pub(crate) fn type_to_cranelift(ty: &LegacyType, pointer_type: Type) -> Type {
     }
 }
 
+/// Convert a TypeId to a Cranelift type (convenience wrapper for interned types)
+pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: Type) -> Type {
+    type_to_cranelift(&arena.to_type(ty), pointer_type)
+}
+
 /// Get the size in bytes for a Vole type (used for union layout)
 pub(crate) fn type_size(ty: &LegacyType, pointer_type: Type) -> u32 {
     match ty {

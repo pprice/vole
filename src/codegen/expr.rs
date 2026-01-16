@@ -927,8 +927,7 @@ impl Cg<'_, '_, '_> {
         let heap_ptr =
             self.call_runtime(RuntimeFn::ClosureGetCapture, &[closure_ptr, index_val])?;
 
-        let vole_type = self.to_legacy(binding.vole_type);
-        let cranelift_ty = type_to_cranelift(&vole_type, self.ctx.pointer_type);
+        let cranelift_ty = self.cranelift_type(binding.vole_type);
         let value = self
             .builder
             .ins()
@@ -956,8 +955,7 @@ impl Cg<'_, '_, '_> {
         let heap_ptr =
             self.call_runtime(RuntimeFn::ClosureGetCapture, &[closure_ptr, index_val])?;
 
-        let vole_type = self.to_legacy(binding.vole_type);
-        let cranelift_ty = type_to_cranelift(&vole_type, self.ctx.pointer_type);
+        let cranelift_ty = self.cranelift_type(binding.vole_type);
         self.builder
             .ins()
             .store(MemFlags::new(), value.value, heap_ptr, 0);
