@@ -22,8 +22,8 @@ use super::context::Cg;
 use super::structs::{convert_field_value, convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    array_element_tag_id, box_interface_value, fallible_error_tag, resolve_type_expr,
-    tuple_layout_id, type_id_to_cranelift, type_to_cranelift,
+    array_element_tag_id, box_interface_value, box_interface_value_id, fallible_error_tag,
+    resolve_type_expr, tuple_layout_id, type_id_to_cranelift, type_to_cranelift,
 };
 use crate::sema::type_arena::TypeId;
 
@@ -363,14 +363,12 @@ impl Cg<'_, '_, '_> {
                 let var_type_id = *var_type_id;
 
                 if self.is_interface(var_type_id) && !self.is_interface(value.type_id) {
-                    let var_type = self.to_legacy(var_type_id);
-                    value = box_interface_value(self.builder, self.ctx, value, &var_type)?;
+                    value = box_interface_value_id(self.builder, self.ctx, value, var_type_id)?;
                 }
 
                 let final_value =
                     if self.is_union(var_type_id) && !self.is_union(value.type_id) {
-                        let var_type = self.to_legacy(var_type_id);
-                        let wrapped = self.construct_union(value, &var_type)?;
+                        let wrapped = self.construct_union_id(value, var_type_id)?;
                         wrapped.value
                     } else {
                         value.value
