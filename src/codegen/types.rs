@@ -958,6 +958,17 @@ pub(crate) fn type_size(
     }
 }
 
+/// Get the size in bytes for a TypeId (convenience wrapper for interned types)
+#[allow(dead_code)]
+pub(crate) fn type_id_size(
+    ty: TypeId,
+    pointer_type: Type,
+    entity_registry: &EntityRegistry,
+    arena: &TypeArena,
+) -> u32 {
+    type_size(&arena.to_type(ty), pointer_type, entity_registry, arena)
+}
+
 /// Calculate layout for tuple elements.
 /// Returns (total_size, offsets) where offsets[i] is the byte offset for element i.
 /// Each element is aligned to 8 bytes for simplicity.
@@ -1229,6 +1240,21 @@ pub(crate) fn word_to_value(
         }
         _ => word,
     }
+}
+
+/// Convert a uniform word representation back into a typed value using TypeId.
+/// Convenience wrapper for when you have a TypeId instead of LegacyType.
+#[allow(dead_code)]
+pub(crate) fn word_to_value_type_id(
+    builder: &mut FunctionBuilder,
+    word: Value,
+    type_id: TypeId,
+    pointer_type: Type,
+    entity_registry: &EntityRegistry,
+    arena: &TypeArena,
+) -> Value {
+    let vole_type = arena.to_type(type_id);
+    word_to_value(builder, word, &vole_type, pointer_type, entity_registry, arena)
 }
 
 /// Get the runtime tag value for an array element type.
