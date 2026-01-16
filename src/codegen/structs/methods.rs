@@ -134,7 +134,8 @@ impl Cg<'_, '_, '_> {
                     if results.is_empty() {
                         return Ok(self.void_value());
                     } else {
-                        return Ok(self.typed_value(results[0], &return_type));
+                        let return_type_id = self.intern_type(&return_type);
+                        return Ok(self.typed_value_interned(results[0], return_type_id));
                     }
                 }
             } else {

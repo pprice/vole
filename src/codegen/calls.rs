@@ -855,7 +855,8 @@ impl Cg<'_, '_, '_> {
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            Ok(self.typed_value(results[0], func_type.return_type.as_ref()))
+            let return_type_id = self.intern_type(func_type.return_type.as_ref());
+            Ok(self.typed_value_interned(results[0], return_type_id))
         }
     }
 

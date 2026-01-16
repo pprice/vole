@@ -508,17 +508,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Create a CompiledValue with a dynamic Vole type (interns the type)
-    pub fn typed_value(&self, value: Value, vole_type: &LegacyType) -> CompiledValue {
-        CompiledValue {
-            value,
-            ty: type_to_cranelift(vole_type, self.ctx.pointer_type),
-            type_id: self.intern_type(vole_type),
-        }
-    }
-
-    /// Create a CompiledValue with an already-interned type
-    #[allow(dead_code)] // Reserved for task 5.5 arena migration
+    /// Create a CompiledValue from a value and TypeId
     pub fn typed_value_interned(&self, value: Value, type_id: TypeId) -> CompiledValue {
         // Use type_id_to_cranelift to avoid LegacyType conversion
         let arena = self.ctx.arena.borrow();

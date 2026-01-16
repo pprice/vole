@@ -570,9 +570,8 @@ impl Cg<'_, '_, '_> {
         let var = *var;
         let var_type_id = *var_type_id;
         let current_val = self.builder.use_var(var);
-        let var_type = self.to_legacy(var_type_id);
 
-        let current = self.typed_value(current_val, &var_type);
+        let current = self.typed_value_interned(current_val, var_type_id);
 
         let rhs = self.expr(&compound.value)?;
         let binary_op = compound.op.to_binary_op();
