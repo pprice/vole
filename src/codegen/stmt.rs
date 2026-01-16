@@ -19,7 +19,7 @@ use super::structs::{convert_field_value_id, convert_to_i64_for_storage, get_fie
 use super::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
     box_interface_value_id, fallible_error_tag, resolve_type_expr, tuple_layout_id, type_id_size,
-    type_id_to_cranelift, type_size, type_to_cranelift,
+    type_id_to_cranelift, type_size,
 };
 
 /// Compile a block of statements (wrapper for compatibility)
@@ -35,88 +35,6 @@ pub(super) fn compile_block(
     let mut cg = Cg::new(builder, variables, ctx, &mut cf);
     cg.block(block)
 }
-
-/// Wrap a value in a union representation (wrapper for compatibility)
-#[allow(dead_code)] // Used by compiler.rs during migration
-pub(super) fn construct_union(
-    builder: &mut FunctionBuilder,
-    value: CompiledValue,
-    union_type: &LegacyType,
-    pointer_type: Type,
-    arena: &std::rc::Rc<std::cell::RefCell<crate::sema::type_arena::TypeArena>>,
-    entity_registry: &crate::sema::EntityRegistry,
-) -> Result<CompiledValue, String> {
-    let LegacyType::Union(variants) = union_type else {
-        return Err(
-            CodegenError::type_mismatch("union construction", "union type", "non-union").into(),
-        );
-    };
-
-    // Convert value's type_id to legacy for comparison
-    let value_legacy_type = arena.borrow().to_type(value.type_id);
-
-    // If the value is already the same union type, just return it
-    if &value_legacy_type == union_type {
-        return Ok(value);
-    }
-
-    let (tag, actual_value, actual_type) = if let Some(pos) =
-        variants.iter().position(|v| v == &value_legacy_type)
-    {
-        (pos, value.value, value_legacy_type.clone())
-    } else {
-        let compatible = variants.iter().enumerate().find(|(_, v)| {
-            value_legacy_type.is_integer() && v.is_integer() && value_legacy_type.can_widen_to(v)
-                || v.is_integer() && value_legacy_type.is_integer()
-        });
-
-        match compatible {
-            Some((pos, variant_type)) => {
-                let target_ty = type_to_cranelift(variant_type, pointer_type);
-                let narrowed = if target_ty.bytes() < value.ty.bytes() {
-                    builder.ins().ireduce(target_ty, value.value)
-                } else if target_ty.bytes() > value.ty.bytes() {
-                    builder.ins().sextend(target_ty, value.value)
-                } else {
-                    value.value
-                };
-                (pos, narrowed, variant_type.clone())
-            }
-            None => {
-                return Err(CodegenError::type_mismatch(
-                    "union variant",
-                    format!("one of {:?}", variants),
-                    format!("{:?}", value_legacy_type),
-                )
-                .into());
-            }
-        }
-    };
-
-    let union_size = type_size(union_type, pointer_type, entity_registry, &arena.borrow());
-    let slot = builder.create_sized_stack_slot(StackSlotData::new(
-        StackSlotKind::ExplicitSlot,
-        union_size,
-        0,
-    ));
-
-    let tag_val = builder.ins().iconst(types::I8, tag as i64);
-    builder.ins().stack_store(tag_val, slot, 0);
-
-    if actual_type != LegacyType::Nil {
-        builder.ins().stack_store(actual_value, slot, 8);
-    }
-
-    let ptr = builder.ins().stack_addr(pointer_type, slot, 0);
-    // Intern the union type for the return value
-    let interned_union_type = arena.borrow_mut().from_type(union_type);
-    Ok(CompiledValue {
-        value: ptr,
-        ty: pointer_type,
-        type_id: interned_union_type,
-    })
-}
-
 impl Cg<'_, '_, '_> {
     /// Compile a block of statements. Returns true if terminated (return/break).
     pub fn block(&mut self, block: &frontend::Block) -> Result<bool, String> {
@@ -723,88 +641,6 @@ impl Cg<'_, '_, '_> {
         self.builder.seal_block(exit_block);
 
         Ok(false)
-    }
-
-    /// Wrap a value in a union representation (stack slot with tag + payload)
-    pub fn construct_union(
-        &mut self,
-        value: CompiledValue,
-        union_type: &LegacyType,
-    ) -> Result<CompiledValue, String> {
-        let LegacyType::Union(variants) = union_type else {
-            return Err(CodegenError::type_mismatch(
-                "union construction",
-                "union type",
-                "non-union",
-            )
-            .into());
-        };
-
-        // Convert value's vole_type to legacy for comparisons
-        let value_legacy_type = self.to_legacy(value.type_id);
-
-        // If the value is already the same union type, just return it
-        if &value_legacy_type == union_type {
-            return Ok(value);
-        }
-
-        let (tag, actual_value, actual_type) =
-            if let Some(pos) = variants.iter().position(|v| v == &value_legacy_type) {
-                (pos, value.value, value_legacy_type.clone())
-            } else {
-                let compatible = variants.iter().enumerate().find(|(_, v)| {
-                    value_legacy_type.is_integer()
-                        && v.is_integer()
-                        && value_legacy_type.can_widen_to(v)
-                        || v.is_integer() && value_legacy_type.is_integer()
-                });
-
-                match compatible {
-                    Some((pos, variant_type)) => {
-                        let target_ty = type_to_cranelift(variant_type, self.ctx.pointer_type);
-                        let narrowed = if target_ty.bytes() < value.ty.bytes() {
-                            self.builder.ins().ireduce(target_ty, value.value)
-                        } else if target_ty.bytes() > value.ty.bytes() {
-                            self.builder.ins().sextend(target_ty, value.value)
-                        } else {
-                            value.value
-                        };
-                        (pos, narrowed, variant_type.clone())
-                    }
-                    None => {
-                        return Err(CodegenError::type_mismatch(
-                            "union variant",
-                            format!("one of {:?}", variants),
-                            format!("{:?}", value_legacy_type),
-                        )
-                        .into());
-                    }
-                }
-            };
-
-        let union_size = type_size(union_type, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
-        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-            StackSlotKind::ExplicitSlot,
-            union_size,
-            0,
-        ));
-
-        let tag_val = self.builder.ins().iconst(types::I8, tag as i64);
-        self.builder.ins().stack_store(tag_val, slot, 0);
-
-        if actual_type != LegacyType::Nil {
-            self.builder.ins().stack_store(actual_value, slot, 8);
-        }
-
-        let ptr = self
-            .builder
-            .ins()
-            .stack_addr(self.ctx.pointer_type, slot, 0);
-        Ok(CompiledValue {
-            value: ptr,
-            ty: self.ctx.pointer_type,
-            type_id: self.intern_type(union_type),
-        })
     }
 
     /// Wrap a value in a union representation using TypeId (no LegacyType conversion)

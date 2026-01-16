@@ -13,14 +13,13 @@ use crate::errors::CodegenError;
 type ArgVec = SmallVec<[Value; 8]>;
 use crate::frontend::{CallExpr, ExprKind, LetInit, NodeId, StringPart};
 use crate::runtime::native_registry::{NativeFunction, NativeType};
-use crate::sema::types::NominalType;
 use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
 use crate::sema::type_arena::TypeId;
 
 use super::context::Cg;
 use super::types::{
-    CompiledValue, box_interface_value, native_type_to_cranelift, resolve_type_expr,
+    CompiledValue, box_interface_value_id, native_type_to_cranelift, resolve_type_expr,
     type_id_to_cranelift, type_to_cranelift,
 };
 use super::{FunctionKey, FunctionRegistry, RuntimeFn};
@@ -281,14 +280,18 @@ impl Cg<'_, '_, '_> {
             // Check if the global has a declared type (e.g., `let x: Predicate = ...`)
             if let Some(ref ty_expr) = global.ty {
                 let declared_type = resolve_type_expr(ty_expr, self.ctx);
+                let declared_type_id = self.intern_type(&declared_type);
 
                 // If declared as functional interface, call via vtable dispatch
-                if let LegacyType::Nominal(NominalType::Interface(iface)) = &declared_type
-                    && let Some(method_id) = self
-                        .ctx
-                        .analyzed
-                        .entity_registry
-                        .is_functional(iface.type_def_id)
+                let iface_info = {
+                    let arena = self.ctx.arena.borrow();
+                    arena
+                        .unwrap_interface(declared_type_id)
+                        .map(|(type_def_id, _type_args)| type_def_id)
+                };
+                if let Some(type_def_id) = iface_info
+                    && let Some(method_id) =
+                        self.ctx.analyzed.entity_registry.is_functional(type_def_id)
                 {
                     let method = self.ctx.analyzed.entity_registry.get_method(method_id);
                     let func_type = FunctionType {
@@ -299,11 +302,11 @@ impl Cg<'_, '_, '_> {
                     let method_name_id = method.name_id;
                     // Box the lambda value to create the interface representation
                     let boxed =
-                        box_interface_value(self.builder, self.ctx, lambda_val, &declared_type)?;
+                        box_interface_value_id(self.builder, self.ctx, lambda_val, declared_type_id)?;
                     return self.interface_dispatch_call_args_by_type_def_id(
                         &boxed,
                         &call.args,
-                        iface.type_def_id,
+                        type_def_id,
                         method_name_id,
                         func_type,
                     );
@@ -837,12 +840,16 @@ impl Cg<'_, '_, '_> {
         let mut args: ArgVec = smallvec![closure_ptr];
         for (arg, param_type) in call.args.iter().zip(func_type.params.iter()) {
             let compiled = self.expr(arg)?;
-            let compiled = if matches!(param_type, LegacyType::Nominal(NominalType::Interface(_))) {
-                box_interface_value(self.builder, self.ctx, compiled, param_type)?
-            } else if matches!(param_type, LegacyType::Union(_)) && !self.is_union(compiled.type_id)
-            {
+            // Intern param_type to use TypeId-based methods
+            let param_type_id = self.intern_type(param_type);
+            let is_param_interface = self.is_interface(param_type_id);
+            let is_param_union = self.is_union(param_type_id);
+
+            let compiled = if is_param_interface {
+                box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
+            } else if is_param_union && !self.is_union(compiled.type_id) {
                 // Box concrete type into union representation
-                self.construct_union(compiled, param_type)?
+                self.construct_union_id(compiled, param_type_id)?
             } else {
                 compiled
             };
