@@ -16,6 +16,7 @@ use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::substitute_type;
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
 use crate::sema::types::NominalType;
+use crate::sema::type_arena::TypeId;
 use crate::sema::{EntityRegistry, FunctionType, LegacyType};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -37,8 +38,8 @@ struct VtableBuildState {
     data_id: DataId,
     /// Interface name ID for method resolution
     interface_name_id: NameId,
-    /// Concrete type for wrapper compilation
-    concrete_type: LegacyType,
+    /// Concrete type for wrapper compilation (interned TypeId)
+    concrete_type: TypeId,
     /// Type substitutions for generic interfaces
     substitutions: HashMap<NameId, LegacyType>,
     /// Method IDs to compile wrappers for
@@ -320,12 +321,13 @@ impl InterfaceVtableRegistry {
         );
 
         // Store pending state
+        let concrete_type_id = ctx.arena.borrow_mut().from_type(concrete_type);
         self.pending.insert(
             key,
             VtableBuildState {
                 data_id,
                 interface_name_id,
-                concrete_type: concrete_type.clone(),
+                concrete_type: concrete_type_id,
                 substitutions,
                 method_ids,
             },
@@ -387,13 +389,16 @@ impl InterfaceVtableRegistry {
         data.define_zeroinit(word_bytes * state.method_ids.len());
         data.set_align(word_bytes as u64);
 
+        // Convert concrete_type back to LegacyType for wrapper compilation
+        let concrete_type = ctx.arena.borrow().to_type(state.concrete_type);
+
         for (index, &method_id) in state.method_ids.iter().enumerate() {
             let method = ctx.analyzed.entity_registry.get_method(method_id);
             let method_name_str = ctx.analyzed.name_table.display(method.name_id);
             let target = resolve_vtable_target(
                 ctx,
                 state.interface_name_id,
-                &state.concrete_type,
+                &concrete_type,
                 method_id,
                 &state.substitutions,
             )?;
@@ -401,7 +406,7 @@ impl InterfaceVtableRegistry {
                 ctx,
                 interface_name_str,
                 &method_name_str,
-                &state.concrete_type,
+                &concrete_type,
                 &target,
             )?;
             let func_ref = ctx.module.declare_func_in_data(wrapper_id, &mut data);
