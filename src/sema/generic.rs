@@ -492,43 +492,6 @@ impl TypeParamScopeStack {
     }
 }
 
-/// Information about a generic function definition
-#[derive(Debug, Clone)]
-pub struct GenericFuncDef {
-    /// The function's type parameters (e.g., T, U)
-    pub type_params: Vec<TypeParamInfo>,
-    /// Parameter types with TypeParam placeholders (e.g., [TypeParam(T), i64])
-    pub param_types: Vec<LegacyType>,
-    /// Return type with TypeParam placeholders
-    pub return_type: LegacyType,
-}
-
-/// Information about a generic record definition
-#[derive(Debug, Clone)]
-pub struct GenericRecordDef {
-    /// The record's NameId for cross-interner lookups
-    pub name_id: NameId,
-    /// The record's type parameters (e.g., T, K, V)
-    pub type_params: Vec<TypeParamInfo>,
-    /// Field names
-    pub field_names: Vec<Symbol>,
-    /// Field types with TypeParam placeholders (e.g., [TypeParam(T), i64])
-    pub field_types: Vec<LegacyType>,
-}
-
-/// Information about a generic class definition
-#[derive(Debug, Clone)]
-pub struct GenericClassDef {
-    /// The class's NameId for cross-interner lookups
-    pub name_id: NameId,
-    /// The class's type parameters (e.g., T, K, V)
-    pub type_params: Vec<TypeParamInfo>,
-    /// Field names
-    pub field_names: Vec<Symbol>,
-    /// Field types with TypeParam placeholders (e.g., [TypeParam(T), i64])
-    pub field_types: Vec<LegacyType>,
-}
-
 /// Key for looking up monomorphized function instances.
 /// Uses a string representation for hashability since Type doesn't implement Hash.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
