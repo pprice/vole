@@ -254,14 +254,17 @@ impl Cg<'_, '_, '_> {
                         return Ok(true);
                     }
 
-                    // Get legacy type for remaining checks (fallible, union)
-                    let return_type = return_type_id.map(|id| self.ctx.arena.borrow().to_type(id));
-
-                    // Check if the function has a fallible return type
-                    if let Some(LegacyType::Fallible(ft)) = &return_type {
+                    // Check if the function has a fallible return type using arena methods
+                    if let Some(ret_type_id) = return_type_id
+                        && self.ctx.arena.borrow().unwrap_fallible(ret_type_id).is_some()
+                    {
                         // For fallible functions, wrap the success value in a fallible struct
-                        let fallible_size =
-                            type_size(&LegacyType::Fallible(ft.clone()), self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
+                        let fallible_size = type_id_size(
+                            ret_type_id,
+                            self.ctx.pointer_type,
+                            &self.ctx.analyzed.entity_registry,
+                            &self.ctx.arena.borrow(),
+                        );
 
                         // Allocate stack slot for the fallible result
                         let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
@@ -290,11 +293,12 @@ impl Cg<'_, '_, '_> {
                                 .stack_addr(self.ctx.pointer_type, slot, 0);
 
                         self.builder.ins().return_(&[fallible_ptr]);
-                    } else if let Some(LegacyType::Union(variants)) =
-                        &return_type
+                    } else if let Some(ret_type_id) = return_type_id
+                        && self.ctx.arena.borrow().is_union(ret_type_id)
                     {
                         // For union return types, wrap the value in a union
-                        let union_type = LegacyType::Union(variants.clone());
+                        // construct_union still needs LegacyType
+                        let union_type = self.to_legacy(ret_type_id);
                         let wrapped = self.construct_union(compiled, &union_type)?;
                         self.builder.ins().return_(&[wrapped.value]);
                     } else {
