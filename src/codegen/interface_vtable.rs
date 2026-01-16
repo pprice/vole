@@ -40,8 +40,8 @@ struct VtableBuildState {
     interface_name_id: NameId,
     /// Concrete type for wrapper compilation (interned TypeId)
     concrete_type: TypeId,
-    /// Type substitutions for generic interfaces
-    substitutions: HashMap<NameId, LegacyType>,
+    /// Type substitutions for generic interfaces (interned TypeIds)
+    substitutions: HashMap<NameId, TypeId>,
     /// Method IDs to compile wrappers for
     method_ids: Vec<MethodId>,
 }
@@ -130,11 +130,13 @@ impl InterfaceVtableRegistry {
 
         // Build substitution map from interface type params to concrete type args
         let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_id);
-        let substitutions: HashMap<NameId, LegacyType> = interface_def
+        let substitutions: HashMap<NameId, TypeId> = interface_def
             .type_params
             .iter()
             .zip(interface_type_args.iter())
-            .map(|(param_name_id, arg)| (*param_name_id, arg.clone()))
+            .map(|(param_name_id, arg)| {
+                (*param_name_id, ctx.arena.borrow_mut().from_type(arg))
+            })
             .collect();
 
         // Collect methods via EntityRegistry
@@ -178,6 +180,12 @@ impl InterfaceVtableRegistry {
         data.define_zeroinit(word_bytes * method_ids.len());
         data.set_align(word_bytes as u64);
 
+        // Convert substitutions to LegacyType for resolve_vtable_target
+        let substitutions_legacy: HashMap<NameId, LegacyType> = substitutions
+            .iter()
+            .map(|(&k, &v)| (k, ctx.arena.borrow().to_type(v)))
+            .collect();
+
         for (index, &method_id) in method_ids.iter().enumerate() {
             let method = ctx.analyzed.entity_registry.get_method(method_id);
             let method_name_str = ctx.analyzed.name_table.display(method.name_id);
@@ -186,7 +194,7 @@ impl InterfaceVtableRegistry {
                 interface_name_id,
                 concrete_type,
                 method_id,
-                &substitutions,
+                &substitutions_legacy,
             )?;
             let wrapper_id = self.compile_wrapper(
                 ctx,
@@ -277,11 +285,13 @@ impl InterfaceVtableRegistry {
 
         // Build substitution map
         let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_id);
-        let substitutions: HashMap<NameId, LegacyType> = interface_def
+        let substitutions: HashMap<NameId, TypeId> = interface_def
             .type_params
             .iter()
             .zip(interface_type_args.iter())
-            .map(|(param_name_id, arg)| (*param_name_id, arg.clone()))
+            .map(|(param_name_id, arg)| {
+                (*param_name_id, ctx.arena.borrow_mut().from_type(arg))
+            })
             .collect();
 
         // Collect method IDs
@@ -392,6 +402,13 @@ impl InterfaceVtableRegistry {
         // Convert concrete_type back to LegacyType for wrapper compilation
         let concrete_type = ctx.arena.borrow().to_type(state.concrete_type);
 
+        // Convert substitutions to LegacyType for resolve_vtable_target
+        let substitutions_legacy: HashMap<NameId, LegacyType> = state
+            .substitutions
+            .iter()
+            .map(|(&k, &v)| (k, ctx.arena.borrow().to_type(v)))
+            .collect();
+
         for (index, &method_id) in state.method_ids.iter().enumerate() {
             let method = ctx.analyzed.entity_registry.get_method(method_id);
             let method_name_str = ctx.analyzed.name_table.display(method.name_id);
@@ -400,7 +417,7 @@ impl InterfaceVtableRegistry {
                 state.interface_name_id,
                 &concrete_type,
                 method_id,
-                &state.substitutions,
+                &substitutions_legacy,
             )?;
             let wrapper_id = self.compile_wrapper(
                 ctx,
