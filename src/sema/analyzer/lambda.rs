@@ -81,10 +81,11 @@ impl Analyzer {
 
         // Define parameters in scope and track as locals
         for (param, ty) in lambda.params.iter().zip(param_types.iter()) {
+            let ty_id = self.type_arena.borrow_mut().from_type(ty);
             self.scope.define(
                 param.name,
                 Variable {
-                    ty: ty.clone(),
+                    ty: ty_id,
                     mutable: false,
                 },
             );

@@ -186,10 +186,29 @@ pub struct InterfaceMethodType {
 }
 
 /// Error type definition (e.g., DivByZero, OutOfRange { value: i32 })
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// Note: Equality is based solely on type_def_id. Two error types with the same
+/// type_def_id are considered equal even if their cached fields differ. This is
+/// necessary because the type arena doesn't store field info, so reconstructed
+/// error types may have empty fields.
+#[derive(Debug, Clone)]
 pub struct ErrorTypeInfo {
     pub type_def_id: TypeDefId,
     pub fields: Vec<StructField>,
+}
+
+impl PartialEq for ErrorTypeInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.type_def_id == other.type_def_id
+    }
+}
+
+impl Eq for ErrorTypeInfo {}
+
+impl std::hash::Hash for ErrorTypeInfo {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.type_def_id.hash(state);
+    }
 }
 
 impl std::fmt::Display for NominalType {

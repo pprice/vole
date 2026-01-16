@@ -72,10 +72,11 @@ impl Analyzer {
                             self.register_type_alias(let_stmt.name, aliased_type, interner);
                         }
 
+                        let var_type_id = self.type_arena.borrow_mut().from_type(&var_type);
                         self.scope.define(
                             let_stmt.name,
                             Variable {
-                                ty: var_type,
+                                ty: var_type_id,
                                 mutable: let_stmt.mutable,
                             },
                         );
@@ -233,10 +234,11 @@ impl Analyzer {
 
                 let parent = std::mem::take(&mut self.scope);
                 self.scope = Scope::with_parent(parent);
+                let elem_ty_id = self.type_arena.borrow_mut().from_type(&elem_ty);
                 self.scope.define(
                     for_stmt.var_name,
                     Variable {
-                        ty: elem_ty,
+                        ty: elem_ty_id,
                         mutable: false,
                     },
                 );
@@ -317,10 +319,11 @@ impl Analyzer {
     ) {
         match pattern {
             Pattern::Identifier { name, .. } => {
+                let ty_id = self.type_arena.borrow_mut().from_type(ty);
                 self.scope.define(
                     *name,
                     Variable {
-                        ty: ty.clone(),
+                        ty: ty_id,
                         mutable,
                     },
                 );
@@ -654,12 +657,11 @@ impl Analyzer {
 
             if let Some((slot, _)) = found {
                 let field_type_id = generic_info.field_types[slot];
-                let field_type = self.type_arena.borrow().to_type(field_type_id);
                 // Bind the field to the binding name
                 self.scope.define(
                     field_pattern.binding,
                     Variable {
-                        ty: field_type,
+                        ty: field_type_id,
                         mutable,
                     },
                 );

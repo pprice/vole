@@ -13,7 +13,8 @@ impl Analyzer {
         let (target_ty, is_mutable, target_valid) = match &assign.target {
             AssignTarget::Variable(sym) => {
                 if let Some(var) = self.scope.get(*sym) {
-                    (var.ty.clone(), var.mutable, true)
+                    let var_ty = self.type_arena.borrow().to_type(var.ty);
+                    (var_ty, var.mutable, true)
                 } else {
                     let name = interner.resolve(*sym);
                     self.add_error(
@@ -218,7 +219,7 @@ impl Analyzer {
             AssignTarget::Variable(sym) => {
                 if let Some(var) = self.scope.get(*sym) {
                     let is_mutable = var.mutable;
-                    let var_ty = var.ty.clone();
+                    let var_ty = self.type_arena.borrow().to_type(var.ty);
 
                     // Check if this is a mutation of a captured variable
                     if self.in_lambda() && !self.is_lambda_local(*sym) {

@@ -504,7 +504,8 @@ impl Analyzer {
             return Some(self.type_arena.borrow().to_type(*ty));
         }
         // Then check scope
-        self.scope.get(sym).map(|v| v.ty.clone())
+        let arena = self.type_arena.borrow();
+        self.scope.get(sym).map(|v| arena.to_type(v.ty))
     }
 
     /// Get function type if the symbol refers to a top-level function.
@@ -696,7 +697,7 @@ impl Analyzer {
                         self.scope.define(
                             let_stmt.name,
                             Variable {
-                                ty: var_type,
+                                ty: var_type_id,
                                 mutable: let_stmt.mutable,
                             },
                         );
@@ -1327,10 +1328,11 @@ impl Analyzer {
         self.scope = Scope::with_parent(parent_scope);
 
         for (param, ty) in func.params.iter().zip(func_type.params.iter()) {
+            let ty_id = self.type_arena.borrow_mut().from_type(ty);
             self.scope.define(
                 param.name,
                 Variable {
-                    ty: ty.clone(),
+                    ty: ty_id,
                     mutable: false,
                 },
             );
@@ -1408,20 +1410,22 @@ impl Analyzer {
                 .unwrap_or_else(|| LegacyType::invalid("unwrap_failed")),
             _ => LegacyType::invalid("fallback"),
         };
+        let self_type_id = self.type_arena.borrow_mut().from_type(&self_type);
         self.scope.define(
             self_sym,
             Variable {
-                ty: self_type,
+                ty: self_type_id,
                 mutable: false,
             },
         );
 
         // Add parameters
         for (param, ty) in method.params.iter().zip(lookup.signature.params.iter()) {
+            let ty_id = self.type_arena.borrow_mut().from_type(ty);
             self.scope.define(
                 param.name,
                 Variable {
-                    ty: ty.clone(),
+                    ty: ty_id,
                     mutable: false,
                 },
             );
@@ -1493,10 +1497,11 @@ impl Analyzer {
 
         // Add parameters (no 'self' for static methods)
         for (param, ty) in method.params.iter().zip(method_type.params.iter()) {
+            let ty_id = self.type_arena.borrow_mut().from_type(ty);
             self.scope.define(
                 param.name,
                 Variable {
-                    ty: ty.clone(),
+                    ty: ty_id,
                     mutable: false,
                 },
             );

@@ -60,10 +60,11 @@ impl Analyzer {
                                 Some(pattern_type)
                             } else {
                                 // Regular identifier binding pattern (fallback)
+                                let ty_id = self.type_arena.borrow_mut().from_type(scrutinee_type);
                                 self.scope.define(
                                     *name,
                                     Variable {
-                                        ty: scrutinee_type.clone(),
+                                        ty: ty_id,
                                         mutable: false,
                                     },
                                 );
@@ -85,10 +86,11 @@ impl Analyzer {
                                 Some(pattern_type)
                             } else {
                                 // Regular identifier binding pattern (fallback)
+                                let ty_id = self.type_arena.borrow_mut().from_type(scrutinee_type);
                                 self.scope.define(
                                     *name,
                                     Variable {
-                                        ty: scrutinee_type.clone(),
+                                        ty: ty_id,
                                         mutable: false,
                                     },
                                 );
@@ -97,10 +99,11 @@ impl Analyzer {
                         }
                         _ => {
                             // Regular identifier binding pattern for other type kinds
+                            let ty_id = self.type_arena.borrow_mut().from_type(scrutinee_type);
                             self.scope.define(
                                 *name,
                                 Variable {
-                                    ty: scrutinee_type.clone(),
+                                    ty: ty_id,
                                     mutable: false,
                                 },
                             );
@@ -109,10 +112,11 @@ impl Analyzer {
                     }
                 } else {
                     // Regular identifier binding pattern
+                    let ty_id = self.type_arena.borrow_mut().from_type(scrutinee_type);
                     self.scope.define(
                         *name,
                         Variable {
-                            ty: scrutinee_type.clone(),
+                            ty: ty_id,
                             mutable: false,
                         },
                     );
@@ -132,7 +136,7 @@ impl Analyzer {
             Pattern::Val { name, span } => {
                 // Val pattern compares against existing variable's value
                 if let Some(var) = self.scope.get(*name) {
-                    let var_ty = var.ty.clone();
+                    let var_ty = self.type_arena.borrow().to_type(var.ty);
                     // Check type compatibility
                     if !self.types_compatible(&var_ty, scrutinee_type, interner)
                         && !self.types_compatible(scrutinee_type, &var_ty, interner)
@@ -340,10 +344,11 @@ impl Analyzer {
                                 if let Some(field) =
                                     type_fields.iter().find(|f| f.name == field_name_str)
                                 {
+                                    let ty_id = self.type_arena.borrow_mut().from_type(&field.ty);
                                     self.scope.define(
                                         field_pattern.binding,
                                         Variable {
-                                            ty: field.ty.clone(),
+                                            ty: ty_id,
                                             mutable: false,
                                         },
                                     );
@@ -433,10 +438,11 @@ impl Analyzer {
                             if let Some(field) =
                                 type_fields.iter().find(|f| f.name == field_name_str)
                             {
+                                let ty_id = self.type_arena.borrow_mut().from_type(&field.ty);
                                 self.scope.define(
                                     field_pattern.binding,
                                     Variable {
-                                        ty: field.ty.clone(),
+                                        ty: ty_id,
                                         mutable: false,
                                     },
                                 );

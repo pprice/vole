@@ -1,12 +1,12 @@
 // src/sema/scope.rs
 
 use crate::frontend::Symbol;
-use crate::sema::LegacyType;
+use crate::sema::type_arena::TypeId;
 use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Variable {
-    pub ty: LegacyType,
+    pub ty: TypeId,
     pub mutable: bool,
 }
 
