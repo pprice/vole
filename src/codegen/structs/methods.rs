@@ -333,6 +333,7 @@ impl Cg<'_, '_, '_> {
                         self.ctx.pointer_type,
                         None, // No heap alloc needed for primitive conversions
                         self.ctx.arena,
+                        &self.ctx.analyzed.entity_registry,
                     )?
                 } else {
                     compiled.value
@@ -350,6 +351,7 @@ impl Cg<'_, '_, '_> {
                         self.ctx.pointer_type,
                         None, // No heap alloc needed for primitive conversions
                         self.ctx.arena,
+                        &self.ctx.analyzed.entity_registry,
                     )?
                 } else {
                     compiled.value
@@ -377,6 +379,8 @@ impl Cg<'_, '_, '_> {
                     actual_result,
                     &return_type,
                     self.ctx.pointer_type,
+                    &self.ctx.analyzed.entity_registry,
+                    &self.ctx.arena.borrow(),
                 )
             } else {
                 actual_result
@@ -385,7 +389,7 @@ impl Cg<'_, '_, '_> {
             // For Union return types, the callee returns a pointer to its stack memory
             // which becomes invalid after the call. Copy the union to our own stack.
             let (final_value, final_type) = if matches!(&return_type, LegacyType::Union(_)) {
-                let union_size = type_size(&return_type, self.ctx.pointer_type);
+                let union_size = type_size(&return_type, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
                 let local_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     union_size,
@@ -809,6 +813,7 @@ impl Cg<'_, '_, '_> {
                 word_type,
                 Some(heap_alloc_ref),
                 self.ctx.arena,
+                &self.ctx.analyzed.entity_registry,
             )?;
             call_args.push(word);
         }
@@ -827,7 +832,7 @@ impl Cg<'_, '_, '_> {
             .first()
             .copied()
             .ok_or_else(|| "interface call missing return value".to_string())?;
-        let value = word_to_value(self.builder, word, &func_type.return_type, word_type);
+        let value = word_to_value(self.builder, word, &func_type.return_type, word_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
 
         // Convert Iterator return types to RuntimeIterator for interface dispatch
         // since external iterator methods return raw iterator pointers, not boxed interfaces

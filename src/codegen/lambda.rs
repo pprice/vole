@@ -487,7 +487,7 @@ fn compile_lambda_with_captures(
             .ok_or_else(|| format!("Captured variable not found: {:?}", capture.name))?;
         let current_value = builder.use_var(*var);
 
-        let size = type_size(vole_type, ctx.pointer_type);
+        let size = type_size(vole_type, ctx.pointer_type, &ctx.analyzed.entity_registry, &ctx.arena.borrow());
         let size_val = builder.ins().iconst(types::I64, size as i64);
 
         let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);

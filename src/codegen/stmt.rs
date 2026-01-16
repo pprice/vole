@@ -43,6 +43,7 @@ pub(super) fn construct_union(
     union_type: &LegacyType,
     pointer_type: Type,
     arena: &std::rc::Rc<std::cell::RefCell<crate::sema::type_arena::TypeArena>>,
+    entity_registry: &crate::sema::EntityRegistry,
 ) -> Result<CompiledValue, String> {
     let LegacyType::Union(variants) = union_type else {
         return Err(
@@ -91,7 +92,7 @@ pub(super) fn construct_union(
         }
     };
 
-    let union_size = type_size(union_type, pointer_type);
+    let union_size = type_size(union_type, pointer_type, entity_registry, &arena.borrow());
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
         union_size,
@@ -257,7 +258,7 @@ impl Cg<'_, '_, '_> {
                     if let Some(LegacyType::Fallible(ft)) = &return_type {
                         // For fallible functions, wrap the success value in a fallible struct
                         let fallible_size =
-                            type_size(&LegacyType::Fallible(ft.clone()), self.ctx.pointer_type);
+                            type_size(&LegacyType::Fallible(ft.clone()), self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
 
                         // Allocate stack slot for the fallible result
                         let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
@@ -769,7 +770,7 @@ impl Cg<'_, '_, '_> {
                 }
             };
 
-        let union_size = type_size(union_type, self.ctx.pointer_type);
+        let union_size = type_size(union_type, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
         let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
             StackSlotKind::ExplicitSlot,
             union_size,
@@ -813,7 +814,7 @@ impl Cg<'_, '_, '_> {
             }
             Pattern::Tuple { elements, .. } => match ty {
                 LegacyType::Tuple(elem_types) => {
-                    let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
+                    let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
                     for (i, elem_pattern) in elements.iter().enumerate() {
                         let offset = offsets[i];
                         let elem_type = &elem_types[i];
@@ -827,7 +828,7 @@ impl Cg<'_, '_, '_> {
                 }
                 LegacyType::FixedArray { element, .. } => {
                     let elem_cr_type = type_to_cranelift(element, self.ctx.pointer_type);
-                    let elem_size = type_size(element, self.ctx.pointer_type).div_ceil(8) * 8;
+                    let elem_size = type_size(element, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow()).div_ceil(8) * 8;
                     for (i, elem_pattern) in elements.iter().enumerate() {
                         let offset = (i as i32) * (elem_size as i32);
                         let elem_value =
@@ -903,7 +904,7 @@ impl Cg<'_, '_, '_> {
         })?;
 
         // Calculate the size of the fallible type
-        let fallible_size = type_size(return_type, self.ctx.pointer_type);
+        let fallible_size = type_size(return_type, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
 
         // Allocate stack slot for the fallible result
         let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
@@ -918,16 +919,16 @@ impl Cg<'_, '_, '_> {
             .ins()
             .stack_store(tag_val, slot, FALLIBLE_TAG_OFFSET);
 
-        // Get the error type info to know field order
+        // Get the error type_def_id to look up field order from EntityRegistry
         let raise_error_name = self.ctx.interner.resolve(raise_stmt.error_name);
-        let error_type_info = match fallible_type.error_type.as_ref() {
+        let error_type_def_id = match fallible_type.error_type.as_ref() {
             LegacyType::Nominal(NominalType::Error(info)) => {
                 let name =
                     self.ctx.analyzed.name_table.last_segment_str(
                         self.ctx.analyzed.entity_registry.name_id(info.type_def_id),
                     );
                 if name.as_deref() == Some(raise_error_name) {
-                    Some(info.clone())
+                    Some(info.type_def_id)
                 } else {
                     None
                 }
@@ -938,7 +939,7 @@ impl Cg<'_, '_, '_> {
                         self.ctx.analyzed.entity_registry.name_id(info.type_def_id),
                     );
                     if name.as_deref() == Some(raise_error_name) {
-                        return Some(info.clone());
+                        return Some(info.type_def_id);
                     }
                 }
                 None
@@ -952,15 +953,30 @@ impl Cg<'_, '_, '_> {
             )
         })?;
 
+        // Get fields from EntityRegistry
+        let error_fields: Vec<_> = self
+            .ctx
+            .analyzed
+            .entity_registry
+            .fields_on_type(error_type_def_id)
+            .map(|field_id| self.ctx.analyzed.entity_registry.get_field(field_id))
+            .collect();
+
         // Store each field value at the appropriate offset in the payload
         // Fields are stored sequentially at 8-byte intervals (i64 storage)
-        for (field_idx, field_def) in error_type_info.fields.iter().enumerate() {
+        for (field_idx, field_def) in error_fields.iter().enumerate() {
             // Find the matching field in the raise statement
+            let field_name = self
+                .ctx
+                .analyzed
+                .name_table
+                .last_segment_str(field_def.name_id)
+                .unwrap_or_default();
             let field_init = raise_stmt
                 .fields
                 .iter()
-                .find(|f| self.ctx.interner.resolve(f.name) == field_def.name)
-                .ok_or_else(|| format!("Missing field {} in raise statement", &field_def.name))?;
+                .find(|f| self.ctx.interner.resolve(f.name) == field_name)
+                .ok_or_else(|| format!("Missing field {} in raise statement", &field_name))?;
 
             // Compile the field value expression
             let field_value = self.expr(&field_init.value)?;

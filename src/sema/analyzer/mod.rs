@@ -928,7 +928,6 @@ impl Analyzer {
 
         let error_info = ErrorTypeInfo {
             type_def_id: entity_type_id,
-            fields: fields.clone(),
         };
 
         self.register_named_type(

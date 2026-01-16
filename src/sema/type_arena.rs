@@ -1312,10 +1312,8 @@ impl TypeArena {
             }
 
             Type::Error { type_def_id } => {
-                // Note: We lose field info here - lookup from EntityRegistry if needed
                 LegacyType::Nominal(NominalType::Error(ErrorTypeInfo {
                     type_def_id: *type_def_id,
-                    fields: vec![],
                 }))
             }
 

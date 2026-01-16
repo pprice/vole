@@ -538,6 +538,7 @@ impl InterfaceVtableRegistry {
                     ctx.pointer_type,
                     Some(heap_alloc_ref),
                     ctx.arena,
+                    &ctx.analyzed.entity_registry,
                 )?;
                 builder.ins().return_(&[word]);
             }
@@ -563,7 +564,7 @@ fn compile_function_wrapper(
     data_word: Value,
     params: &[Value],
 ) -> Result<Vec<Value>, String> {
-    let self_val = word_to_value(builder, data_word, concrete_type, ctx.pointer_type);
+    let self_val = word_to_value(builder, data_word, concrete_type, ctx.pointer_type, &ctx.analyzed.entity_registry, &ctx.arena.borrow());
     let mut args = Vec::with_capacity(func_type.params.len() + 1);
     for (param_word, param_ty) in params[1..].iter().zip(func_type.params.iter()) {
         args.push(word_to_value(
@@ -571,6 +572,8 @@ fn compile_function_wrapper(
             *param_word,
             param_ty,
             ctx.pointer_type,
+            &ctx.analyzed.entity_registry,
+            &ctx.arena.borrow(),
         ));
     }
 
@@ -643,7 +646,7 @@ fn compile_method_wrapper(
     params: &[Value],
     method_info: &MethodInfo,
 ) -> Result<Vec<Value>, String> {
-    let self_val = word_to_value(builder, data_word, concrete_type, ctx.pointer_type);
+    let self_val = word_to_value(builder, data_word, concrete_type, ctx.pointer_type, &ctx.analyzed.entity_registry, &ctx.arena.borrow());
     let mut call_args = Vec::with_capacity(1 + func_type.params.len());
     call_args.push(self_val);
     for (param_word, param_ty) in params[1..].iter().zip(func_type.params.iter()) {
@@ -652,6 +655,8 @@ fn compile_method_wrapper(
             *param_word,
             param_ty,
             ctx.pointer_type,
+            &ctx.analyzed.entity_registry,
+            &ctx.arena.borrow(),
         ));
     }
     let func_id = ctx
@@ -698,7 +703,7 @@ fn compile_external_wrapper(
             .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr]);
         builder.inst_results(iter_call)[0]
     } else {
-        word_to_value(builder, data_word, concrete_type, ctx.pointer_type)
+        word_to_value(builder, data_word, concrete_type, ctx.pointer_type, &ctx.analyzed.entity_registry, &ctx.arena.borrow())
     };
 
     let mut call_args = Vec::with_capacity(1 + func_type.params.len());
@@ -709,6 +714,8 @@ fn compile_external_wrapper(
             *param_word,
             param_ty,
             ctx.pointer_type,
+            &ctx.analyzed.entity_registry,
+            &ctx.arena.borrow(),
         ));
     }
 
@@ -916,6 +923,7 @@ pub(crate) fn box_interface_value(
         ctx.pointer_type,
         Some(heap_alloc_ref),
         ctx.arena,
+        &ctx.analyzed.entity_registry,
     )?;
 
     // Get the legacy type for vtable lookup (needs the full type for matching)

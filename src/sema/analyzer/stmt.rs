@@ -420,7 +420,7 @@ impl Analyzer {
         };
 
         let type_def = self.entity_registry.get_type(type_id);
-        let Some(error_info) = type_def.error_info.clone() else {
+        if type_def.error_info.is_none() {
             // Type exists but is not an error type
             self.add_error(
                 SemanticError::UndefinedError {
@@ -430,13 +430,29 @@ impl Analyzer {
                 stmt.span,
             );
             return self.ty_invalid();
-        };
+        }
 
         // Get the error type name for error messages
         let error_type_name = self
             .name_table
-            .last_segment_str(self.entity_registry.name_id(error_info.type_def_id))
+            .last_segment_str(self.entity_registry.name_id(type_id))
             .unwrap_or_else(|| "error".to_string());
+
+        // Build field info from EntityRegistry
+        let arena = self.type_arena.borrow();
+        let error_fields: Vec<StructField> = self
+            .entity_registry
+            .fields_on_type(type_id)
+            .filter_map(|field_id| {
+                let field = self.entity_registry.get_field(field_id);
+                Some(StructField {
+                    name: self.name_table.last_segment_str(field.name_id)?,
+                    ty: arena.to_type(field.ty),
+                    slot: field.slot,
+                })
+            })
+            .collect();
+        drop(arena);
 
         // Check for missing fields (fields in error type but not provided in raise)
         let provided_fields: HashSet<String> = stmt
@@ -444,7 +460,7 @@ impl Analyzer {
             .iter()
             .map(|f| interner.resolve(f.name).to_string())
             .collect();
-        for field in &error_info.fields {
+        for field in &error_fields {
             if !provided_fields.contains(&field.name) {
                 self.add_error(
                     SemanticError::MissingField {
@@ -464,7 +480,7 @@ impl Analyzer {
                 Err(_) => self.ty_invalid_traced("fallback"),
             };
             let field_init_name = interner.resolve(field_init.name);
-            if let Some(field) = error_info.fields.iter().find(|f| f.name == field_init_name) {
+            if let Some(field) = error_fields.iter().find(|f| f.name == field_init_name) {
                 // Known field - check type compatibility
                 if !value_type.is_compatible(&field.ty) {
                     self.add_type_mismatch(&field.ty, &value_type, field_init.span);
@@ -511,8 +527,9 @@ impl Analyzer {
 
         if !is_compatible {
             let declared_str = self.type_display(&error_type_legacy);
+            let raised_error_info = ErrorTypeInfo { type_def_id: type_id };
             let raised_str =
-                self.type_display(&LegacyType::Nominal(NominalType::Error(error_info)));
+                self.type_display(&LegacyType::Nominal(NominalType::Error(raised_error_info)));
 
             self.add_error(
                 SemanticError::IncompatibleRaiseError {

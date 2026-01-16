@@ -306,15 +306,25 @@ impl Analyzer {
                             }
                             TypeDefKind::ErrorType => {
                                 // Error type destructuring: error Overflow { value, max }
-                                if let Some(error_info) = type_def.error_info.clone() {
-                                    let fields_ref = error_info.fields.clone();
-                                    (
-                                        Some(LegacyType::Nominal(NominalType::Error(error_info))),
-                                        fields_ref,
-                                    )
-                                } else {
-                                    (None, vec![])
-                                }
+                                // Get fields from EntityRegistry (like classes/records)
+                                let arena = self.type_arena.borrow();
+                                let fields_ref: Vec<StructField> = self
+                                    .entity_registry
+                                    .fields_on_type(type_id)
+                                    .filter_map(|field_id| {
+                                        let field = self.entity_registry.get_field(field_id);
+                                        Some(StructField {
+                                            name: self.name_table.last_segment_str(field.name_id)?,
+                                            ty: arena.to_type(field.ty),
+                                            slot: field.slot,
+                                        })
+                                    })
+                                    .collect();
+                                let error_info = ErrorTypeInfo { type_def_id: type_id };
+                                (
+                                    Some(LegacyType::Nominal(NominalType::Error(error_info))),
+                                    fields_ref,
+                                )
                             }
                             _ => {
                                 self.add_error(

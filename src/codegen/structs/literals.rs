@@ -204,7 +204,7 @@ impl Cg<'_, '_, '_> {
         let heap_alloc_ref = self.func_ref(heap_alloc_key)?;
 
         // Allocate union storage on the heap
-        let union_size = type_size(union_type, self.ctx.pointer_type);
+        let union_size = type_size(union_type, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
         let size_val = self
             .builder
             .ins()

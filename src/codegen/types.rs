@@ -837,7 +837,13 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
 }
 
 /// Get the size in bytes for a Vole type (used for union layout)
-pub(crate) fn type_size(ty: &LegacyType, pointer_type: Type) -> u32 {
+/// The entity_registry and arena parameters are needed to look up error type fields.
+pub(crate) fn type_size(
+    ty: &LegacyType,
+    pointer_type: Type,
+    entity_registry: &EntityRegistry,
+    arena: &TypeArena,
+) -> u32 {
     match ty {
         LegacyType::Primitive(PrimitiveType::I8)
         | LegacyType::Primitive(PrimitiveType::U8)
@@ -858,7 +864,7 @@ pub(crate) fn type_size(ty: &LegacyType, pointer_type: Type) -> u32 {
             // Tag (1 byte) + padding + max payload size, aligned to 8
             let max_payload = variants
                 .iter()
-                .map(|t| type_size(t, pointer_type))
+                .map(|t| type_size(t, pointer_type, entity_registry, arena))
                 .max()
                 .unwrap_or(0);
             // Layout: [tag:1][padding:7][payload:max_payload] aligned to 8
@@ -866,25 +872,33 @@ pub(crate) fn type_size(ty: &LegacyType, pointer_type: Type) -> u32 {
         }
         LegacyType::Nominal(NominalType::Error(info)) => {
             // Error types are struct-like: sum of all field sizes, aligned to 8
-            let fields_size: u32 = info
-                .fields
-                .iter()
-                .map(|f| type_size(&f.ty, pointer_type))
+            // Look up fields from EntityRegistry
+            let fields_size: u32 = entity_registry
+                .fields_on_type(info.type_def_id)
+                .map(|field_id| {
+                    let field = entity_registry.get_field(field_id);
+                    let field_ty = arena.to_type(field.ty);
+                    type_size(&field_ty, pointer_type, entity_registry, arena)
+                })
                 .sum();
             fields_size.div_ceil(8) * 8
         }
         LegacyType::Fallible(ft) => {
             // Fallible layout: | tag (i64) | payload (max size of T or any E) |
             // Tag is always 8 bytes (i64)
-            let success_size = type_size(&ft.success_type, pointer_type);
+            let success_size = type_size(&ft.success_type, pointer_type, entity_registry, arena);
 
             // Compute max error payload size
             let error_size = match ft.error_type.as_ref() {
                 LegacyType::Nominal(NominalType::Error(info)) => {
-                    // Single error type
-                    info.fields
-                        .iter()
-                        .map(|f| type_size(&f.ty, pointer_type))
+                    // Single error type - look up fields from EntityRegistry
+                    entity_registry
+                        .fields_on_type(info.type_def_id)
+                        .map(|field_id| {
+                            let field = entity_registry.get_field(field_id);
+                            let field_ty = arena.to_type(field.ty);
+                            type_size(&field_ty, pointer_type, entity_registry, arena)
+                        })
                         .sum()
                 }
                 LegacyType::Union(variants) => {
@@ -892,12 +906,17 @@ pub(crate) fn type_size(ty: &LegacyType, pointer_type: Type) -> u32 {
                     variants
                         .iter()
                         .filter_map(|v| match v {
-                            LegacyType::Nominal(NominalType::Error(info)) => Some(
-                                info.fields
-                                    .iter()
-                                    .map(|f| type_size(&f.ty, pointer_type))
-                                    .sum(),
-                            ),
+                            LegacyType::Nominal(NominalType::Error(info)) => {
+                                let size: u32 = entity_registry
+                                    .fields_on_type(info.type_def_id)
+                                    .map(|field_id| {
+                                        let field = entity_registry.get_field(field_id);
+                                        let field_ty = arena.to_type(field.ty);
+                                        type_size(&field_ty, pointer_type, entity_registry, arena)
+                                    })
+                                    .sum();
+                                Some(size)
+                            }
                             _ => None,
                         })
                         .max()
@@ -914,12 +933,12 @@ pub(crate) fn type_size(ty: &LegacyType, pointer_type: Type) -> u32 {
             // Sum of element sizes, each aligned to 8 bytes
             elements
                 .iter()
-                .map(|t| type_size(t, pointer_type).div_ceil(8) * 8)
+                .map(|t| type_size(t, pointer_type, entity_registry, arena).div_ceil(8) * 8)
                 .sum()
         }
         LegacyType::FixedArray { element, size } => {
             // Element size * count, each element aligned to 8 bytes
-            let elem_size = type_size(element, pointer_type).div_ceil(8) * 8;
+            let elem_size = type_size(element, pointer_type, entity_registry, arena).div_ceil(8) * 8;
             elem_size * (*size as u32)
         }
         _ => 8, // default
@@ -929,13 +948,18 @@ pub(crate) fn type_size(ty: &LegacyType, pointer_type: Type) -> u32 {
 /// Calculate layout for tuple elements.
 /// Returns (total_size, offsets) where offsets[i] is the byte offset for element i.
 /// Each element is aligned to 8 bytes for simplicity.
-pub(crate) fn tuple_layout(elements: &[LegacyType], pointer_type: Type) -> (u32, Vec<i32>) {
+pub(crate) fn tuple_layout(
+    elements: &[LegacyType],
+    pointer_type: Type,
+    entity_registry: &EntityRegistry,
+    arena: &TypeArena,
+) -> (u32, Vec<i32>) {
     let mut offsets = Vec::with_capacity(elements.len());
     let mut offset = 0i32;
 
     for elem in elements {
         offsets.push(offset);
-        let elem_size = type_size(elem, pointer_type).div_ceil(8) * 8;
+        let elem_size = type_size(elem, pointer_type, entity_registry, arena).div_ceil(8) * 8;
         offset += elem_size as i32;
     }
 
@@ -1067,11 +1091,13 @@ pub(crate) fn value_to_word(
     pointer_type: Type,
     heap_alloc_ref: Option<FuncRef>,
     arena: &Rc<RefCell<TypeArena>>,
+    entity_registry: &EntityRegistry,
 ) -> Result<Value, String> {
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
-    let legacy_type = arena.borrow().to_type(value.type_id);
-    let needs_box = type_size(&legacy_type, pointer_type) > word_bytes;
+    let arena_ref = arena.borrow();
+    let legacy_type = arena_ref.to_type(value.type_id);
+    let needs_box = type_size(&legacy_type, pointer_type, entity_registry, &arena_ref) > word_bytes;
 
     if needs_box {
         // If the Cranelift type is already a pointer and the Vole type needs boxing,
@@ -1085,9 +1111,10 @@ pub(crate) fn value_to_word(
                 CodegenError::missing_resource("heap allocator for interface boxing").into(),
             );
         };
-        let size_val = builder
-            .ins()
-            .iconst(pointer_type, type_size(&legacy_type, pointer_type) as i64);
+        let size_val = builder.ins().iconst(
+            pointer_type,
+            type_size(&legacy_type, pointer_type, entity_registry, &arena_ref) as i64,
+        );
         let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
         let alloc_ptr = builder.inst_results(alloc_call)[0];
         builder
@@ -1141,10 +1168,12 @@ pub(crate) fn word_to_value(
     word: Value,
     vole_type: &LegacyType,
     pointer_type: Type,
+    entity_registry: &EntityRegistry,
+    arena: &TypeArena,
 ) -> Value {
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
-    let needs_unbox = type_size(vole_type, pointer_type) > word_bytes;
+    let needs_unbox = type_size(vole_type, pointer_type, entity_registry, arena) > word_bytes;
 
     if needs_unbox {
         // If the target Cranelift type is pointer_type (e.g., unions), the word is

@@ -445,7 +445,7 @@ impl Cg<'_, '_, '_> {
         elem_types: &[LegacyType],
     ) -> Result<CompiledValue, String> {
         // Calculate layout
-        let (total_size, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
+        let (total_size, offsets) = tuple_layout(elem_types, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
 
         // Create stack slot for the tuple
         let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
@@ -583,7 +583,7 @@ impl Cg<'_, '_, '_> {
                 // Tuple indexing - must be constant index (checked in sema)
                 if let ExprKind::IntLiteral(i) = &index.kind {
                     let i = *i as usize;
-                    let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
+                    let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
                     let offset = offsets[i];
                     let elem_type = &elem_types[i];
                     let elem_cr_type = type_to_cranelift(elem_type, self.ctx.pointer_type);
@@ -1106,7 +1106,7 @@ impl Cg<'_, '_, '_> {
                 Pattern::Tuple { elements, .. } => {
                     // Tuple destructuring in match - extract elements and bind
                     if let LegacyType::Tuple(elem_types) = &scrutinee_type {
-                        let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type);
+                        let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
                         for (i, pattern) in elements.iter().enumerate() {
                             if let Pattern::Identifier { name, .. } = pattern {
                                 let offset = offsets[i];
@@ -1626,21 +1626,21 @@ impl Cg<'_, '_, '_> {
         tag: Value,
         arm_variables: &mut HashMap<Symbol, (Variable, LegacyType)>,
     ) -> Result<Option<Value>, String> {
-        // Look up error_info via EntityRegistry
-        let error_info = self
+        // Look up error type_def_id via EntityRegistry
+        let error_type_id = self
             .ctx
             .resolver()
             .resolve_type(name, &self.ctx.analyzed.entity_registry)
             .and_then(|type_id| {
                 let type_def = self.ctx.analyzed.entity_registry.get_type(type_id);
-                if type_def.kind == TypeDefKind::ErrorType {
-                    type_def.error_info.clone()
+                if type_def.kind == TypeDefKind::ErrorType && type_def.error_info.is_some() {
+                    Some(type_id)
                 } else {
                     None
                 }
             });
 
-        let Some(error_info) = error_info else {
+        let Some(error_type_id) = error_type_id else {
             // Unknown error type
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
@@ -1663,17 +1663,32 @@ impl Cg<'_, '_, '_> {
 
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
 
+        // Get fields from EntityRegistry
+        let error_fields: Vec<_> = self
+            .ctx
+            .analyzed
+            .entity_registry
+            .fields_on_type(error_type_id)
+            .map(|field_id| self.ctx.analyzed.entity_registry.get_field(field_id))
+            .collect();
+
         // Error fields are stored inline in the fallible structure
         // Layout: tag at offset 0, fields at offset 8, 16, 24, ...
         for field_pattern in fields.iter() {
             let field_name = self.ctx.interner.resolve(field_pattern.field_name);
 
             // Find the field index and type in the error type
-            let Some((field_idx, field)) = error_info
-                .fields
+            let Some((field_idx, field_def)) = error_fields
                 .iter()
                 .enumerate()
-                .find(|(_, f)| f.name == field_name)
+                .find(|(_, f)| {
+                    self.ctx
+                        .analyzed
+                        .name_table
+                        .last_segment_str(f.name_id)
+                        .as_deref()
+                        == Some(field_name)
+                })
             else {
                 continue;
             };
@@ -1688,11 +1703,11 @@ impl Cg<'_, '_, '_> {
                     .load(types::I64, MemFlags::new(), scrutinee.value, field_offset);
 
             // Convert from i64 to the actual field type
-            let (result_val, cranelift_ty) =
-                convert_field_value(self.builder, raw_value, &field.ty);
+            let field_ty = self.ctx.arena.borrow().to_type(field_def.ty);
+            let (result_val, cranelift_ty) = convert_field_value(self.builder, raw_value, &field_ty);
             let var = self.builder.declare_var(cranelift_ty);
             self.builder.def_var(var, result_val);
-            arm_variables.insert(field_pattern.binding, (var, field.ty.clone()));
+            arm_variables.insert(field_pattern.binding, (var, field_ty));
         }
 
         Ok(Some(is_this_error))
