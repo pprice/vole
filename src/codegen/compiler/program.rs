@@ -1639,7 +1639,7 @@ impl Compiler<'_> {
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
-                type_substitutions: Some(&legacy_substitutions),
+                type_substitutions: Some(&instance.substitutions),
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1945,16 +1945,6 @@ impl Compiler<'_> {
                 format!("Internal error: static method {} has no body", mangled_name)
             })?;
 
-            // Convert TypeId substitutions to LegacyType for codegen
-            let legacy_substitutions: HashMap<NameId, LegacyType> = {
-                let arena = self.analyzed.type_arena.borrow();
-                instance
-                    .substitutions
-                    .iter()
-                    .map(|(k, v)| (*k, arena.to_type(*v)))
-                    .collect()
-            };
-
             let mut cf_ctx = ControlFlowCtx::default();
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
@@ -1974,7 +1964,7 @@ impl Compiler<'_> {
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
-                type_substitutions: Some(&legacy_substitutions),
+                type_substitutions: Some(&instance.substitutions),
             };
             let terminated =
                 compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;

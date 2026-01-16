@@ -158,8 +158,8 @@ pub(crate) struct CompileCtx<'a> {
     /// Cache of monomorphized function instances
     pub monomorph_cache: &'a MonomorphCache,
     /// Type substitutions for monomorphized class method compilation
-    /// Maps type param NameId -> concrete Type
-    pub type_substitutions: Option<&'a HashMap<NameId, LegacyType>>,
+    /// Maps type param NameId -> concrete TypeId (interned for O(1) equality)
+    pub type_substitutions: Option<&'a HashMap<NameId, TypeId>>,
 }
 
 impl<'a> CompileCtx<'a> {
@@ -167,7 +167,13 @@ impl<'a> CompileCtx<'a> {
     /// If no type_substitutions are set, returns the original type unchanged.
     pub fn substitute_type(&self, ty: &LegacyType) -> LegacyType {
         if let Some(substitutions) = self.type_substitutions {
-            ty.substitute(substitutions)
+            // Convert TypeId substitutions to LegacyType for substitution
+            let arena = self.arena.borrow();
+            let legacy_subs: HashMap<NameId, LegacyType> = substitutions
+                .iter()
+                .map(|(&k, &v)| (k, arena.to_type(v)))
+                .collect();
+            ty.substitute(&legacy_subs)
         } else {
             ty.clone()
         }
@@ -238,22 +244,28 @@ pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> LegacyType {
     // Apply type substitutions if compiling a monomorphized context
     // This allows lambda params like (a: T, b: T) to use concrete types
     if let Some(substitutions) = ctx.type_substitutions {
+        let arena = ctx.arena.borrow();
         // First handle Placeholder::TypeParam which has a string name
         // We need to find the matching NameId in substitutions
         if let LegacyType::Placeholder(crate::sema::types::PlaceholderKind::TypeParam(ref name)) =
             resolved
         {
             // Look for a substitution with matching name
-            for (name_id, concrete_type) in substitutions {
+            for (name_id, concrete_type_id) in substitutions {
                 if let Some(name_str) = ctx.analyzed.name_table.last_segment_str(*name_id)
                     && &name_str == name
                 {
-                    return concrete_type.clone();
+                    return arena.to_type(*concrete_type_id);
                 }
             }
         }
         // Then apply normal TypeParam substitution
-        substitute_type(&resolved, substitutions)
+        // Convert TypeId substitutions to LegacyType
+        let legacy_subs: HashMap<NameId, LegacyType> = substitutions
+            .iter()
+            .map(|(&k, &v)| (k, arena.to_type(v)))
+            .collect();
+        substitute_type(&resolved, &legacy_subs)
     } else {
         resolved
     }
