@@ -698,81 +698,83 @@ impl Cg<'_, '_, '_> {
     ) -> Result<CompiledValue, String> {
         let arr = self.expr(object)?;
         let val = self.expr(value)?;
-        let arr_type = self.to_legacy(arr.type_id);
 
-        match &arr_type {
-            LegacyType::FixedArray { size, .. } => {
-                // Fixed array assignment - store directly at offset
-                let elem_size = 8i32; // All elements aligned to 8 bytes
+        // Use arena methods instead of LegacyType pattern matching
+        let arena = self.ctx.arena.borrow();
+        let fixed_array_info = arena.unwrap_fixed_array(arr.type_id);
+        let is_dynamic_array = arena.is_array(arr.type_id);
+        drop(arena);
 
-                // Calculate offset
-                let offset = if let ExprKind::IntLiteral(i) = &index.kind {
-                    let i = *i as usize;
-                    if i >= *size {
-                        return Err(format!(
-                            "index {} out of bounds for fixed array of size {}",
-                            i, size
-                        ));
-                    }
-                    self.builder.ins().iconst(types::I64, (i as i64) * 8)
-                } else {
-                    // Runtime index - add bounds check
-                    let idx = self.expr(index)?;
-                    let size_val = self.builder.ins().iconst(types::I64, *size as i64);
+        if let Some((_elem_type_id, size)) = fixed_array_info {
+            // Fixed array assignment - store directly at offset
+            let elem_size = 8i32; // All elements aligned to 8 bytes
 
-                    // Check if index < 0 or index >= size
-                    let in_bounds =
-                        self.builder
-                            .ins()
-                            .icmp(IntCC::UnsignedLessThan, idx.value, size_val);
-
-                    // Trap if out of bounds
-                    self.builder
-                        .ins()
-                        .trapz(in_bounds, TrapCode::unwrap_user(2));
-
-                    let elem_size_val = self.builder.ins().iconst(types::I64, elem_size as i64);
-                    self.builder.ins().imul(idx.value, elem_size_val)
-                };
-
-                let elem_ptr = self.builder.ins().iadd(arr.value, offset);
-                self.builder
-                    .ins()
-                    .store(MemFlags::new(), val.value, elem_ptr, 0);
-
-                Ok(val)
-            }
-            LegacyType::Array(_) => {
-                // Dynamic array assignment (existing behavior)
+            // Calculate offset
+            let offset = if let ExprKind::IntLiteral(i) = &index.kind {
+                let i = *i as usize;
+                if i >= size {
+                    return Err(format!(
+                        "index {} out of bounds for fixed array of size {}",
+                        i, size
+                    ));
+                }
+                self.builder.ins().iconst(types::I64, (i as i64) * 8)
+            } else {
+                // Runtime index - add bounds check
                 let idx = self.expr(index)?;
+                let size_val = self.builder.ins().iconst(types::I64, size as i64);
 
-                let set_value_key = self
-                    .ctx
-                    .func_registry
-                    .runtime_key(RuntimeFn::ArraySet)
-                    .ok_or_else(|| "vole_array_set not found".to_string())?;
-                let set_value_ref = self.func_ref(set_value_key)?;
-                let arena = self.ctx.arena.borrow();
-                let tag_val = self
+                // Check if index < 0 or index >= size
+                let in_bounds = self
                     .builder
                     .ins()
-                    .iconst(types::I64, array_element_tag_id(val.type_id, &arena));
-                drop(arena);
-                let value_bits = convert_to_i64_for_storage(self.builder, &val);
+                    .icmp(IntCC::UnsignedLessThan, idx.value, size_val);
 
+                // Trap if out of bounds
                 self.builder
                     .ins()
-                    .call(set_value_ref, &[arr.value, idx.value, tag_val, value_bits]);
+                    .trapz(in_bounds, TrapCode::unwrap_user(2));
 
-                Ok(val)
-            }
-            _ => {
-                let arr_type = self.to_legacy(arr.type_id);
-                Err(format!(
-                    "cannot assign to index of type {}",
-                    arr_type.name()
-                ))
-            }
+                let elem_size_val = self.builder.ins().iconst(types::I64, elem_size as i64);
+                self.builder.ins().imul(idx.value, elem_size_val)
+            };
+
+            let elem_ptr = self.builder.ins().iadd(arr.value, offset);
+            self.builder
+                .ins()
+                .store(MemFlags::new(), val.value, elem_ptr, 0);
+
+            Ok(val)
+        } else if is_dynamic_array {
+            // Dynamic array assignment
+            let idx = self.expr(index)?;
+
+            let set_value_key = self
+                .ctx
+                .func_registry
+                .runtime_key(RuntimeFn::ArraySet)
+                .ok_or_else(|| "vole_array_set not found".to_string())?;
+            let set_value_ref = self.func_ref(set_value_key)?;
+            let arena = self.ctx.arena.borrow();
+            let tag_val = self
+                .builder
+                .ins()
+                .iconst(types::I64, array_element_tag_id(val.type_id, &arena));
+            drop(arena);
+            let value_bits = convert_to_i64_for_storage(self.builder, &val);
+
+            self.builder
+                .ins()
+                .call(set_value_ref, &[arr.value, idx.value, tag_val, value_bits]);
+
+            Ok(val)
+        } else {
+            // Error: not an indexable type
+            let arr_type = self.to_legacy(arr.type_id);
+            Err(format!(
+                "cannot assign to index of type {}",
+                arr_type.name()
+            ))
         }
     }
 
