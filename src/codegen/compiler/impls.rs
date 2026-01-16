@@ -866,7 +866,8 @@ impl Compiler<'_> {
                 {
                     let var = builder.declare_var(*ty);
                     builder.def_var(var, *val);
-                    variables.insert(*name, (var, vole_ty.clone()));
+                    let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
+                    variables.insert(*name, (var, vole_ty_id));
                 }
 
                 // Compile method body
@@ -1025,7 +1026,8 @@ impl Compiler<'_> {
             // Bind `self` as the first parameter (using correct type for primitives)
             let self_var = builder.declare_var(self_cranelift_type);
             builder.def_var(self_var, params[0]);
-            variables.insert(self_sym, (self_var, self_type));
+            let self_type_id = self.analyzed.type_arena.borrow_mut().from_type(&self_type);
+            variables.insert(self_sym, (self_var, self_type_id));
 
             // Bind remaining parameters
             for (((name, ty), vole_ty), val) in param_names
@@ -1036,7 +1038,8 @@ impl Compiler<'_> {
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty.clone()));
+                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
+                    variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile method body
@@ -1207,7 +1210,8 @@ impl Compiler<'_> {
             // Bind `self` as the first parameter (using correct type for primitives)
             let self_var = builder.declare_var(self_cranelift_type);
             builder.def_var(self_var, params[0]);
-            variables.insert(self_sym, (self_var, self_type));
+            let self_type_id = self.analyzed.type_arena.borrow_mut().from_type(&self_type);
+            variables.insert(self_sym, (self_var, self_type_id));
 
             // Bind remaining parameters
             for (((name, ty), vole_ty), val) in param_names
@@ -1218,7 +1222,8 @@ impl Compiler<'_> {
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty.clone()));
+                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
+                    variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile method body
@@ -1383,7 +1388,7 @@ impl Compiler<'_> {
             // Bind `self` as the first parameter
             let self_var = builder.declare_var(self.pointer_type);
             builder.def_var(self_var, params[0]);
-            variables.insert(self_sym, (self_var, self_vole_type));
+            variables.insert(self_sym, (self_var, metadata.vole_type));
 
             // Bind remaining parameters
             for (((name, ty), vole_ty), val) in param_names
@@ -1394,7 +1399,8 @@ impl Compiler<'_> {
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty.clone()));
+                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
+                    variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile method body
@@ -1556,7 +1562,7 @@ impl Compiler<'_> {
             // Bind `self` as the first parameter with the concrete type
             let self_var = builder.declare_var(self.pointer_type);
             builder.def_var(self_var, params[0]);
-            variables.insert(self_sym, (self_var, self_vole_type));
+            variables.insert(self_sym, (self_var, metadata.vole_type));
 
             // Bind remaining parameters
             for (((name, ty), vole_ty), val) in param_names
@@ -1567,7 +1573,8 @@ impl Compiler<'_> {
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty.clone()));
+                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
+                    variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile method body (must exist for default methods)
@@ -1720,7 +1727,8 @@ impl Compiler<'_> {
                 {
                     let var = builder.declare_var(*ty);
                     builder.def_var(var, *val);
-                    variables.insert(*name, (var, vole_ty.clone()));
+                    let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
+                    variables.insert(*name, (var, vole_ty_id));
                 }
 
                 // Compile method body
@@ -1864,8 +1872,6 @@ impl Compiler<'_> {
             let self_sym = module_interner
                 .lookup("self")
                 .expect("'self' should be interned in module");
-            let self_vole_type = self.analyzed.type_arena.borrow().to_type(metadata.vole_type);
-
             // Resolve return type
             let return_type = method
                 .return_type
@@ -1901,7 +1907,7 @@ impl Compiler<'_> {
                 // Bind `self` as the first parameter
                 let self_var = builder.declare_var(self.pointer_type);
                 builder.def_var(self_var, params[0]);
-                variables.insert(self_sym, (self_var, self_vole_type));
+                variables.insert(self_sym, (self_var, metadata.vole_type));
 
                 // Bind remaining parameters
                 for (((name, ty), vole_ty), val) in param_names
@@ -1912,7 +1918,8 @@ impl Compiler<'_> {
                 {
                     let var = builder.declare_var(*ty);
                     builder.def_var(var, *val);
-                    variables.insert(*name, (var, vole_ty.clone()));
+                    let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
+                    variables.insert(*name, (var, vole_ty_id));
                 }
 
                 // Compile method body
@@ -2069,7 +2076,8 @@ impl Compiler<'_> {
                     {
                         let var = builder.declare_var(*ty);
                         builder.def_var(var, *val);
-                        variables.insert(*name, (var, vole_ty.clone()));
+                        let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
+                    variables.insert(*name, (var, vole_ty_id));
                     }
 
                     // Compile method body

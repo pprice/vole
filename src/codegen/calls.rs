@@ -231,41 +231,42 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if it's a closure variable
-        if let Some((var, vole_type)) = self.vars.get(&callee_sym)
-            && let LegacyType::Function(func_type) = vole_type
-        {
-            return self.call_closure(*var, func_type.clone(), call);
+        if let Some((var, type_id)) = self.vars.get(&callee_sym) {
+            if let Some(func_type) = self.unwrap_function(*type_id) {
+                return self.call_closure(*var, func_type, call);
+            }
         }
 
         // Check if it's a functional interface variable
-        if let Some((var, vole_type)) = self.vars.get(&callee_sym)
-            && let LegacyType::Nominal(NominalType::Interface(iface)) = vole_type
-            && let Some(method_id) = self
-                .ctx
-                .analyzed
-                .entity_registry
-                .is_functional(iface.type_def_id)
-        {
-            let method = self.ctx.analyzed.entity_registry.get_method(method_id);
-            let func_type = FunctionType {
-                params: method.signature.params.clone(),
-                return_type: method.signature.return_type.clone(),
-                is_closure: false,
-            };
-            let method_name_id = method.name_id;
-            let value = self.builder.use_var(*var);
-            let obj = CompiledValue {
-                value,
-                ty: type_to_cranelift(vole_type, self.ctx.pointer_type),
-                type_id: self.intern_type(vole_type),
-            };
-            return self.interface_dispatch_call_args_by_type_def_id(
-                &obj,
-                &call.args,
-                iface.type_def_id,
-                method_name_id,
-                func_type,
-            );
+        if let Some((var, type_id)) = self.vars.get(&callee_sym) {
+            if let Some(iface_type_def_id) = self.interface_type_def_id(*type_id)
+                && let Some(method_id) = self
+                    .ctx
+                    .analyzed
+                    .entity_registry
+                    .is_functional(iface_type_def_id)
+            {
+                let method = self.ctx.analyzed.entity_registry.get_method(method_id);
+                let func_type = FunctionType {
+                    params: method.signature.params.clone(),
+                    return_type: method.signature.return_type.clone(),
+                    is_closure: false,
+                };
+                let method_name_id = method.name_id;
+                let value = self.builder.use_var(*var);
+                let obj = CompiledValue {
+                    value,
+                    ty: self.cranelift_type(*type_id),
+                    type_id: *type_id,
+                };
+                return self.interface_dispatch_call_args_by_type_def_id(
+                    &obj,
+                    &call.args,
+                    iface_type_def_id,
+                    method_name_id,
+                    func_type,
+                );
+            }
         }
 
         // Check if it's a global lambda or global functional interface
@@ -315,12 +316,12 @@ impl Cg<'_, '_, '_> {
             }
 
             // If it's an interface type (functional interface), call via vtable
-            if let Some(iface) = self.unwrap_interface_type(lambda_val.type_id)
+            if let Some(type_def_id) = self.interface_type_def_id(lambda_val.type_id)
                 && let Some(method_id) = self
                     .ctx
                     .analyzed
                     .entity_registry
-                    .is_functional(iface.type_def_id)
+                    .is_functional(type_def_id)
             {
                 let method = self.ctx.analyzed.entity_registry.get_method(method_id);
                 let func_type = FunctionType {
@@ -332,7 +333,7 @@ impl Cg<'_, '_, '_> {
                 return self.interface_dispatch_call_args_by_type_def_id(
                     &lambda_val,
                     &call.args,
-                    iface.type_def_id,
+                    type_def_id,
                     method_name_id,
                     func_type,
                 );

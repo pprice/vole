@@ -22,9 +22,10 @@ use super::context::Cg;
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    array_element_tag_id, box_interface_value, fallible_error_tag, resolve_type_expr, tuple_layout,
-    type_to_cranelift,
+    array_element_tag_id, box_interface_value, fallible_error_tag, resolve_type_expr,
+    tuple_layout_id, type_id_to_cranelift, type_to_cranelift,
 };
+use crate::sema::type_arena::TypeId;
 
 impl Cg<'_, '_, '_> {
     /// Compile an expression.
@@ -113,13 +114,13 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an identifier lookup
     fn identifier(&mut self, sym: Symbol, expr: &Expr) -> Result<CompiledValue, String> {
-        if let Some((var, vole_type)) = self.vars.get(&sym) {
+        if let Some((var, type_id)) = self.vars.get(&sym) {
             let val = self.builder.use_var(*var);
             let ty = self.builder.func.dfg.value_type(val);
 
             // Check for narrowed type from semantic analysis
             if let Some(ref narrowed_type) = self.ctx.get_expr_type_legacy(&expr.id)
-                && matches!(vole_type, LegacyType::Union(_))
+                && self.is_union(*type_id)
                 && !matches!(narrowed_type, LegacyType::Union(_))
             {
                 // Union layout: [tag:1][padding:7][payload]
@@ -135,7 +136,7 @@ impl Cg<'_, '_, '_> {
             Ok(CompiledValue {
                 value: val,
                 ty,
-                type_id: self.intern_type(vole_type),
+                type_id: *type_id,
             })
         } else if let Some(global) = self.ctx.globals.iter().find(|g| g.name == sym) {
             // Compile global's initializer inline (skip type aliases)
@@ -355,20 +356,20 @@ impl Cg<'_, '_, '_> {
                     return self.store_capture(&binding, value);
                 }
 
-                let (var, var_type) = self.vars.get(sym).ok_or_else(|| {
+                let (var, var_type_id) = self.vars.get(sym).ok_or_else(|| {
                     format!("undefined variable: {}", self.ctx.interner.resolve(*sym))
                 })?;
                 let var = *var;
-                let var_type = var_type.clone();
+                let var_type_id = *var_type_id;
 
-                if matches!(&var_type, LegacyType::Nominal(NominalType::Interface(_)))
-                    && !self.is_interface(value.type_id)
-                {
+                if self.is_interface(var_type_id) && !self.is_interface(value.type_id) {
+                    let var_type = self.to_legacy(var_type_id);
                     value = box_interface_value(self.builder, self.ctx, value, &var_type)?;
                 }
 
                 let final_value =
-                    if matches!(&var_type, LegacyType::Union(_)) && !self.is_union(value.type_id) {
+                    if self.is_union(var_type_id) && !self.is_union(value.type_id) {
+                        let var_type = self.to_legacy(var_type_id);
                         let wrapped = self.construct_union(value, &var_type)?;
                         wrapped.value
                     } else {
@@ -389,16 +390,14 @@ impl Cg<'_, '_, '_> {
     /// Compile an array or tuple literal
     fn array_literal(&mut self, elements: &[Expr], expr: &Expr) -> Result<CompiledValue, String> {
         // Check the inferred type from semantic analysis
-        let inferred_type = self
-            .ctx
-            .analyzed
-            .query()
-            .type_of_legacy(expr.id)
-            .unwrap_or(LegacyType::unknown());
+        let inferred_type_id = self.ctx.analyzed.query().type_of(expr.id);
 
         // If it's a tuple, use stack allocation
-        if let LegacyType::Tuple(ref elem_types) = inferred_type {
-            return self.tuple_literal(elements, elem_types);
+        if let Some(type_id) = inferred_type_id {
+            let elem_type_ids = self.ctx.arena.borrow().unwrap_tuple(type_id).cloned();
+            if let Some(elem_type_ids) = elem_type_ids {
+                return self.tuple_literal(elements, &elem_type_ids);
+            }
         }
 
         // Otherwise, create a dynamic array
@@ -410,13 +409,15 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| "vole_array_push not found".to_string())?;
         let array_push_ref = self.func_ref(array_push_key)?;
 
-        let mut elem_type = LegacyType::unknown();
+        // Track element type using TypeId (no LegacyType conversion)
+        // Use i64 as default - will be overwritten by first element if any
+        let mut elem_type_id = self.i64_type();
 
         for (i, elem) in elements.iter().enumerate() {
             let compiled = self.expr(elem)?;
 
             if i == 0 {
-                elem_type = self.to_legacy(compiled.type_id);
+                elem_type_id = compiled.type_id;
             }
 
             // Use TypeId-based tag lookup to avoid LegacyType conversion in hot loop
@@ -433,10 +434,12 @@ impl Cg<'_, '_, '_> {
                 .call(array_push_ref, &[arr_ptr, tag_val, value_bits]);
         }
 
+        // Create array type directly using TypeId
+        let array_type_id = self.ctx.arena.borrow_mut().array(elem_type_id);
         Ok(CompiledValue {
             value: arr_ptr,
             ty: self.ctx.pointer_type,
-            type_id: self.intern_type(&LegacyType::Array(Box::new(elem_type))),
+            type_id: array_type_id,
         })
     }
 
@@ -444,10 +447,10 @@ impl Cg<'_, '_, '_> {
     fn tuple_literal(
         &mut self,
         elements: &[Expr],
-        elem_types: &[LegacyType],
+        elem_type_ids: &[TypeId],
     ) -> Result<CompiledValue, String> {
-        // Calculate layout
-        let (total_size, offsets) = tuple_layout(elem_types, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
+        // Calculate layout using TypeId-based function
+        let (total_size, offsets) = tuple_layout_id(elem_type_ids, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
 
         // Create stack slot for the tuple
         let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
@@ -471,10 +474,13 @@ impl Cg<'_, '_, '_> {
             .ins()
             .stack_addr(self.ctx.pointer_type, slot, 0);
 
+        // Create tuple type directly in arena
+        let tuple_type_id = self.ctx.arena.borrow_mut().tuple(elem_type_ids.to_vec());
+
         Ok(CompiledValue {
             value: ptr,
             ty: self.ctx.pointer_type,
-            type_id: self.intern_type(&LegacyType::Tuple(elem_types.to_vec().into())),
+            type_id: tuple_type_id,
         })
     }
 
@@ -578,99 +584,111 @@ impl Cg<'_, '_, '_> {
     /// Compile an index expression
     fn index(&mut self, object: &Expr, index: &Expr) -> Result<CompiledValue, String> {
         let obj = self.expr(object)?;
-        let obj_legacy_type = self.to_legacy(obj.type_id);
 
-        match &obj_legacy_type {
-            LegacyType::Tuple(elem_types) => {
-                // Tuple indexing - must be constant index (checked in sema)
-                if let ExprKind::IntLiteral(i) = &index.kind {
-                    let i = *i as usize;
-                    let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
-                    let offset = offsets[i];
-                    let elem_type = &elem_types[i];
-                    let elem_cr_type = type_to_cranelift(elem_type, self.ctx.pointer_type);
+        // Check type using arena methods (no LegacyType allocation)
+        let arena = self.ctx.arena.borrow();
 
-                    let value =
-                        self.builder
-                            .ins()
-                            .load(elem_cr_type, MemFlags::new(), obj.value, offset);
+        // Try tuple first
+        if let Some(elem_type_ids) = arena.unwrap_tuple(obj.type_id).cloned() {
+            drop(arena);
+            // Tuple indexing - must be constant index (checked in sema)
+            if let ExprKind::IntLiteral(i) = &index.kind {
+                let i = *i as usize;
+                let (_, offsets) = tuple_layout_id(&elem_type_ids, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
+                let offset = offsets[i];
+                let elem_type_id = elem_type_ids[i];
+                let elem_cr_type = type_id_to_cranelift(elem_type_id, &self.ctx.arena.borrow(), self.ctx.pointer_type);
 
-                    Ok(CompiledValue {
-                        value,
-                        ty: elem_cr_type,
-                        type_id: self.intern_type(elem_type),
-                    })
-                } else {
-                    Err("tuple index must be a constant".to_string())
-                }
-            }
-            LegacyType::FixedArray { element, size } => {
-                // Fixed array indexing
-                let elem_size = 8i32; // All elements aligned to 8 bytes
-                let elem_cr_type = type_to_cranelift(element, self.ctx.pointer_type);
-
-                // Calculate offset: base + (index * elem_size)
-                let offset = if let ExprKind::IntLiteral(i) = &index.kind {
-                    // Constant index - bounds check at compile time already done in sema
-                    let i = *i as usize;
-                    if i >= *size {
-                        return Err(format!(
-                            "index {} out of bounds for fixed array of size {}",
-                            i, size
-                        ));
-                    }
-                    self.builder.ins().iconst(types::I64, (i as i64) * 8)
-                } else {
-                    // Runtime index - add bounds check
-                    let idx = self.expr(index)?;
-                    let size_val = self.builder.ins().iconst(types::I64, *size as i64);
-
-                    // Check if index < 0 or index >= size
-                    // We treat index as unsigned, so negative becomes very large
-                    let in_bounds =
-                        self.builder
-                            .ins()
-                            .icmp(IntCC::UnsignedLessThan, idx.value, size_val);
-
-                    // Trap if out of bounds
+                let value =
                     self.builder
                         .ins()
-                        .trapz(in_bounds, TrapCode::unwrap_user(2));
+                        .load(elem_cr_type, MemFlags::new(), obj.value, offset);
 
-                    let elem_size_val = self.builder.ins().iconst(types::I64, elem_size as i64);
-                    self.builder.ins().imul(idx.value, elem_size_val)
-                };
-
-                let elem_ptr = self.builder.ins().iadd(obj.value, offset);
-                let value = self
-                    .builder
-                    .ins()
-                    .load(elem_cr_type, MemFlags::new(), elem_ptr, 0);
-
-                Ok(CompiledValue {
+                return Ok(CompiledValue {
                     value,
                     ty: elem_cr_type,
-                    type_id: self.intern_type(element),
-                })
+                    type_id: elem_type_id,
+                });
+            } else {
+                return Err("tuple index must be a constant".to_string());
             }
-            LegacyType::Array(elem) => {
-                // Dynamic array indexing with CSE caching
-                let idx = self.expr(index)?;
-                let elem_type = elem.as_ref().clone();
-
-                let raw_value =
-                    self.call_runtime_cached(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
-                let (result_value, result_ty) =
-                    convert_field_value(self.builder, raw_value, &elem_type);
-
-                Ok(CompiledValue {
-                    value: result_value,
-                    ty: result_ty,
-                    type_id: self.intern_type(&elem_type),
-                })
-            }
-            _ => Err(format!("cannot index type {}", obj_legacy_type.name())),
         }
+
+        // Try fixed array
+        if let Some((element_id, size)) = arena.unwrap_fixed_array(obj.type_id) {
+            drop(arena);
+            // Fixed array indexing
+            let elem_size = 8i32; // All elements aligned to 8 bytes
+            let elem_cr_type = type_id_to_cranelift(element_id, &self.ctx.arena.borrow(), self.ctx.pointer_type);
+
+            // Calculate offset: base + (index * elem_size)
+            let offset = if let ExprKind::IntLiteral(i) = &index.kind {
+                // Constant index - bounds check at compile time already done in sema
+                let i = *i as usize;
+                if i >= size {
+                    return Err(format!(
+                        "index {} out of bounds for fixed array of size {}",
+                        i, size
+                    ));
+                }
+                self.builder.ins().iconst(types::I64, (i as i64) * 8)
+            } else {
+                // Runtime index - add bounds check
+                let idx = self.expr(index)?;
+                let size_val = self.builder.ins().iconst(types::I64, size as i64);
+
+                // Check if index < 0 or index >= size
+                // We treat index as unsigned, so negative becomes very large
+                let in_bounds =
+                    self.builder
+                        .ins()
+                        .icmp(IntCC::UnsignedLessThan, idx.value, size_val);
+
+                // Trap if out of bounds
+                self.builder
+                    .ins()
+                    .trapz(in_bounds, TrapCode::unwrap_user(2));
+
+                let elem_size_val = self.builder.ins().iconst(types::I64, elem_size as i64);
+                self.builder.ins().imul(idx.value, elem_size_val)
+            };
+
+            let elem_ptr = self.builder.ins().iadd(obj.value, offset);
+            let value = self
+                .builder
+                .ins()
+                .load(elem_cr_type, MemFlags::new(), elem_ptr, 0);
+
+            return Ok(CompiledValue {
+                value,
+                ty: elem_cr_type,
+                type_id: element_id,
+            });
+        }
+
+        // Try dynamic array
+        if let Some(element_id) = arena.unwrap_array(obj.type_id) {
+            drop(arena);
+            // Dynamic array indexing with CSE caching
+            let idx = self.expr(index)?;
+
+            let raw_value =
+                self.call_runtime_cached(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
+            // Still need LegacyType for convert_field_value
+            let elem_type = self.to_legacy(element_id);
+            let (result_value, result_ty) =
+                convert_field_value(self.builder, raw_value, &elem_type);
+
+            return Ok(CompiledValue {
+                value: result_value,
+                ty: result_ty,
+                type_id: element_id,
+            });
+        }
+
+        drop(arena);
+        let obj_legacy_type = self.to_legacy(obj.type_id);
+        Err(format!("cannot index type {}", obj_legacy_type.name()))
     }
 
     /// Compile an index assignment
@@ -979,7 +997,8 @@ impl Cg<'_, '_, '_> {
     #[tracing::instrument(skip(self, match_expr), fields(arms = match_expr.arms.len()))]
     pub fn match_expr(&mut self, match_expr: &MatchExpr) -> Result<CompiledValue, String> {
         let scrutinee = self.expr(&match_expr.scrutinee)?;
-        let scrutinee_type = self.to_legacy(scrutinee.type_id);
+        let scrutinee_type_id = scrutinee.type_id;
+        let scrutinee_type = self.to_legacy(scrutinee_type_id);
         tracing::trace!(scrutinee_type = ?scrutinee_type, "match scrutinee");
 
         let merge_block = self.builder.create_block();
@@ -1002,7 +1021,8 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().jump(merge_block, &[default_arg]);
         }
 
-        let mut result_vole_type = LegacyType::Void;
+        // Track result type using TypeId (no LegacyType conversion)
+        let mut result_type_id = self.void_type();
 
         for (i, arm) in match_expr.arms.iter().enumerate() {
             let arm_block = arm_blocks[i];
@@ -1027,7 +1047,7 @@ impl Cg<'_, '_, '_> {
                         // Regular identifier binding
                         let var = self.builder.declare_var(scrutinee.ty);
                         self.builder.def_var(var, scrutinee.value);
-                        arm_variables.insert(*name, (var, scrutinee_type.clone()));
+                        arm_variables.insert(*name, (var, scrutinee_type_id));
                         None
                     }
                 }
@@ -1051,11 +1071,12 @@ impl Cg<'_, '_, '_> {
                 }
                 Pattern::Val { name, .. } => {
                     // Val pattern - compare against existing variable's value
-                    let (var, var_type) = arm_variables
+                    let (var, var_type_id) = arm_variables
                         .get(name)
                         .ok_or_else(|| "undefined variable in val pattern".to_string())?
                         .clone();
                     let var_val = self.builder.use_var(var);
+                    let var_type = self.to_legacy(var_type_id);
 
                     let cmp = self.compile_equality_check(&var_type, scrutinee.value, var_val)?;
                     Some(cmp)
@@ -1090,7 +1111,8 @@ impl Cg<'_, '_, '_> {
                             if let Pattern::Identifier { name, .. } = inner_pat.as_ref() {
                                 let var = self.builder.declare_var(payload_ty);
                                 self.builder.def_var(var, payload);
-                                arm_variables.insert(*name, (var, success_type.clone()));
+                                let success_type_id = self.intern_type(success_type);
+                                arm_variables.insert(*name, (var, success_type_id));
                             }
                         }
                     }
@@ -1108,14 +1130,15 @@ impl Cg<'_, '_, '_> {
                 }
                 Pattern::Tuple { elements, .. } => {
                     // Tuple destructuring in match - extract elements and bind
-                    if let LegacyType::Tuple(elem_types) = &scrutinee_type {
-                        let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
+                    // Use arena methods for layout computation
+                    if let Some(elem_type_ids) = self.ctx.arena.borrow().unwrap_tuple(scrutinee.type_id).cloned() {
+                        let (_, offsets) = tuple_layout_id(&elem_type_ids, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
                         for (i, pattern) in elements.iter().enumerate() {
                             if let Pattern::Identifier { name, .. } = pattern {
                                 let offset = offsets[i];
-                                let elem_type = &elem_types[i];
+                                let elem_type_id = elem_type_ids[i];
                                 let elem_cr_type =
-                                    type_to_cranelift(elem_type, self.ctx.pointer_type);
+                                    type_id_to_cranelift(elem_type_id, &self.ctx.arena.borrow(), self.ctx.pointer_type);
                                 let value = self.builder.ins().load(
                                     elem_cr_type,
                                     MemFlags::new(),
@@ -1124,7 +1147,7 @@ impl Cg<'_, '_, '_> {
                                 );
                                 let var = self.builder.declare_var(elem_cr_type);
                                 self.builder.def_var(var, value);
-                                arm_variables.insert(*name, (var, elem_type.clone()));
+                                arm_variables.insert(*name, (var, elem_type_id));
                             }
                             // Other pattern types in tuple (like wildcards) are ignored
                         }
@@ -1201,7 +1224,8 @@ impl Cg<'_, '_, '_> {
                                 convert_field_value(self.builder, result_raw, &field_type);
                             let var = self.builder.declare_var(cranelift_ty);
                             self.builder.def_var(var, result_val);
-                            arm_variables.insert(field_pattern.binding, (var, field_type.clone()));
+                            let field_type_id = self.intern_type(&field_type);
+                            arm_variables.insert(field_pattern.binding, (var, field_type_id));
                         }
 
                         // extract_block continues to guard/body logic
@@ -1242,7 +1266,8 @@ impl Cg<'_, '_, '_> {
                                 convert_field_value(self.builder, result_raw, &field_type);
                             let var = self.builder.declare_var(cranelift_ty);
                             self.builder.def_var(var, result_val);
-                            arm_variables.insert(field_pattern.binding, (var, field_type.clone()));
+                            let field_type_id = self.intern_type(&field_type);
+                            arm_variables.insert(field_pattern.binding, (var, field_type_id));
                         }
 
                         pattern_check
@@ -1289,7 +1314,7 @@ impl Cg<'_, '_, '_> {
             let _ = std::mem::replace(&mut *self.vars, saved_vars);
 
             if i == 0 {
-                result_vole_type = self.to_legacy(body_val.type_id);
+                result_type_id = body_val.type_id;
             }
 
             let result_val = if body_val.ty != types::I64 {
@@ -1317,8 +1342,10 @@ impl Cg<'_, '_, '_> {
 
         let merged_value = self.builder.block_params(merge_block)[0];
 
-        // Reduce back to the correct type based on result_vole_type
-        let target_cty = type_to_cranelift(&result_vole_type, self.ctx.pointer_type);
+        // Reduce back to the correct type based on result_type_id
+        let arena = self.ctx.arena.borrow();
+        let target_cty = type_id_to_cranelift(result_type_id, &arena, self.ctx.pointer_type);
+        drop(arena);
         let (result, result_ty) = if target_cty != types::I64 && target_cty.is_int() {
             (
                 self.builder.ins().ireduce(target_cty, merged_value),
@@ -1331,7 +1358,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: result,
             ty: result_ty,
-            type_id: self.intern_type(&result_vole_type),
+            type_id: result_type_id,
         })
     }
 
@@ -1342,18 +1369,20 @@ impl Cg<'_, '_, '_> {
     fn try_propagate(&mut self, inner: &Expr) -> Result<CompiledValue, String> {
         // Compile the inner fallible expression
         let fallible = self.expr(inner)?;
-        let fallible_type = self.to_legacy(fallible.type_id);
 
-        // Get type info
-        let success_type = match &fallible_type {
-            LegacyType::Fallible(ft) => (*ft.success_type).clone(),
-            _ => {
-                return Err(CodegenError::type_mismatch(
-                    "try operator",
-                    "fallible type",
-                    "non-fallible",
-                )
-                .into());
+        // Get success type using arena method (no LegacyType conversion)
+        let success_type_id = {
+            let arena = self.ctx.arena.borrow();
+            match arena.unwrap_fallible(fallible.type_id) {
+                Some((success_id, _error_id)) => success_id,
+                None => {
+                    return Err(CodegenError::type_mismatch(
+                        "try operator",
+                        "fallible type",
+                        "non-fallible",
+                    )
+                    .into());
+                }
             }
         };
 
@@ -1376,8 +1405,10 @@ impl Cg<'_, '_, '_> {
         let error_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
 
-        // Get payload type for success
-        let payload_ty = type_to_cranelift(&success_type, self.ctx.pointer_type);
+        // Get payload type for success using TypeId
+        let arena = self.ctx.arena.borrow();
+        let payload_ty = type_id_to_cranelift(success_type_id, &arena, self.ctx.pointer_type);
+        drop(arena);
         self.builder.append_block_param(merge_block, payload_ty);
 
         // Branch based on tag
@@ -1410,7 +1441,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: result,
             ty: payload_ty,
-            type_id: self.intern_type(&success_type),
+            type_id: success_type_id,
         })
     }
 
@@ -1514,7 +1545,7 @@ impl Cg<'_, '_, '_> {
         inner: &Option<Box<Pattern>>,
         scrutinee: &CompiledValue,
         tag: Value,
-        arm_variables: &mut HashMap<Symbol, (Variable, LegacyType)>,
+        arm_variables: &mut HashMap<Symbol, (Variable, TypeId)>,
     ) -> Result<Option<Value>, String> {
         let Some(inner_pat) = inner else {
             // Bare error pattern: error => ...
@@ -1552,7 +1583,7 @@ impl Cg<'_, '_, '_> {
         name: Symbol,
         scrutinee: &CompiledValue,
         tag: Value,
-        arm_variables: &mut HashMap<Symbol, (Variable, LegacyType)>,
+        arm_variables: &mut HashMap<Symbol, (Variable, TypeId)>,
     ) -> Result<Option<Value>, String> {
         // Check if this is an error type name via EntityRegistry
         let is_error_type = self
@@ -1586,7 +1617,8 @@ impl Cg<'_, '_, '_> {
             );
             let var = self.builder.declare_var(payload_ty);
             self.builder.def_var(var, payload);
-            arm_variables.insert(name, (var, error_type.clone()));
+            let error_type_id = self.intern_type(error_type);
+            arm_variables.insert(name, (var, error_type_id));
         }
 
         Ok(Some(is_error))
@@ -1627,7 +1659,7 @@ impl Cg<'_, '_, '_> {
         fields: &[RecordFieldPattern],
         scrutinee: &CompiledValue,
         tag: Value,
-        arm_variables: &mut HashMap<Symbol, (Variable, LegacyType)>,
+        arm_variables: &mut HashMap<Symbol, (Variable, TypeId)>,
     ) -> Result<Option<Value>, String> {
         // Look up error type_def_id via EntityRegistry
         let error_type_id = self
@@ -1706,11 +1738,12 @@ impl Cg<'_, '_, '_> {
                     .load(types::I64, MemFlags::new(), scrutinee.value, field_offset);
 
             // Convert from i64 to the actual field type
-            let field_ty = self.ctx.arena.borrow().to_type(field_def.ty);
+            let field_ty_id = field_def.ty;
+            let field_ty = self.ctx.arena.borrow().to_type(field_ty_id);
             let (result_val, cranelift_ty) = convert_field_value(self.builder, raw_value, &field_ty);
             let var = self.builder.declare_var(cranelift_ty);
             self.builder.def_var(var, result_val);
-            arm_variables.insert(field_pattern.binding, (var, field_ty));
+            arm_variables.insert(field_pattern.binding, (var, field_ty_id));
         }
 
         Ok(Some(is_this_error))

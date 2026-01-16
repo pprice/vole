@@ -563,13 +563,14 @@ impl Cg<'_, '_, '_> {
         sym: crate::frontend::Symbol,
         compound: &CompoundAssignExpr,
     ) -> Result<CompiledValue, String> {
-        let (var, var_type) = self
+        let (var, var_type_id) = self
             .vars
             .get(&sym)
             .ok_or_else(|| format!("undefined variable: {}", self.ctx.interner.resolve(sym)))?;
         let var = *var;
-        let var_type = var_type.clone();
+        let var_type_id = *var_type_id;
         let current_val = self.builder.use_var(var);
+        let var_type = self.to_legacy(var_type_id);
 
         let current = self.typed_value(current_val, &var_type);
 

@@ -980,6 +980,102 @@ pub(crate) fn box_interface_value(
     })
 }
 
+/// Box a value as an interface type using TypeId (avoids LegacyType conversion at call site).
+#[tracing::instrument(skip(builder, ctx, value), fields(interface_type_id = ?interface_type_id))]
+pub(crate) fn box_interface_value_id(
+    builder: &mut FunctionBuilder,
+    ctx: &mut CompileCtx,
+    value: CompiledValue,
+    interface_type_id: TypeId,
+) -> Result<CompiledValue, String> {
+    // Extract interface info using arena
+    let (type_def_id, type_args_ids) = {
+        let arena = ctx.arena.borrow();
+        match arena.unwrap_interface(interface_type_id) {
+            Some((type_def_id, type_args)) => (type_def_id, type_args.to_vec()),
+            None => return Ok(value), // Not an interface type
+        }
+    };
+
+    // Look up the interface Symbol name via EntityRegistry
+    let interface_def = ctx.analyzed.entity_registry.get_type(type_def_id);
+    let interface_name_str = ctx
+        .analyzed
+        .name_table
+        .last_segment_str(interface_def.name_id)
+        .ok_or_else(|| format!("cannot get interface name string for {:?}", type_def_id))?;
+    let interface_name = ctx.interner.lookup(&interface_name_str).ok_or_else(|| {
+        format!("interface name '{}' not found in interner", interface_name_str)
+    })?;
+
+    // Check if value is already an interface
+    if ctx.arena.borrow().is_interface(value.type_id) {
+        tracing::debug!("already interface, skip boxing");
+        return Ok(value);
+    }
+
+    // Check if this is an external-only interface
+    if ctx.analyzed.entity_registry.is_external_only(type_def_id) {
+        tracing::debug!("external-only interface, skip boxing");
+        return Ok(CompiledValue {
+            value: value.value,
+            ty: ctx.pointer_type,
+            type_id: interface_type_id,
+        });
+    }
+
+    // For vtable operations, we need LegacyType - convert here
+    let arena = ctx.arena.borrow();
+    let interface_type_args: Vec<LegacyType> = type_args_ids
+        .iter()
+        .map(|id| arena.to_type(*id))
+        .collect();
+    let value_legacy_type = arena.to_type(value.type_id);
+    drop(arena);
+
+    let heap_alloc_ref = runtime_heap_alloc_ref(ctx, builder)?;
+    let data_word = value_to_word(
+        builder,
+        &value,
+        ctx.pointer_type,
+        Some(heap_alloc_ref),
+        ctx.arena,
+        &ctx.analyzed.entity_registry,
+    )?;
+
+    // Phase 1: Declare vtable
+    let vtable_id = ctx.interface_vtables.borrow_mut().get_or_declare(
+        ctx,
+        interface_name,
+        &interface_type_args,
+        &value_legacy_type,
+    )?;
+    // Phase 2+3: Compile wrappers and define vtable data
+    ctx.interface_vtables
+        .borrow_mut()
+        .ensure_compiled(ctx, interface_name, &value_legacy_type)?;
+    let vtable_gv = ctx.module.declare_data_in_func(vtable_id, builder.func);
+    let vtable_ptr = builder.ins().global_value(ctx.pointer_type, vtable_gv);
+
+    let word_bytes = ctx.pointer_type.bytes() as i64;
+    let size_val = builder.ins().iconst(ctx.pointer_type, word_bytes * 2);
+    let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
+    let iface_ptr = builder.inst_results(alloc_call)[0];
+
+    builder
+        .ins()
+        .store(MemFlags::new(), data_word, iface_ptr, 0);
+    builder
+        .ins()
+        .store(MemFlags::new(), vtable_ptr, iface_ptr, word_bytes as i32);
+
+    Ok(CompiledValue {
+        value: iface_ptr,
+        ty: ctx.pointer_type,
+        type_id: interface_type_id,
+    })
+}
+
 fn resolve_vtable_target(
     ctx: &CompileCtx,
     interface_name_id: NameId,

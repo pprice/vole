@@ -26,6 +26,7 @@ use crate::sema::{EntityRegistry, FunctionType, LegacyType, PrimitiveType, TypeK
 
 // Re-export box_interface_value for centralized access to all boxing helpers
 pub(crate) use super::interface_vtable::box_interface_value;
+pub(crate) use super::interface_vtable::box_interface_value_id;
 
 /// Compiled value with its type
 #[derive(Clone, Copy)]
@@ -1093,11 +1094,11 @@ pub(crate) fn type_id_size(
     }
 }
 
-/// Calculate layout for tuple elements.
+/// Calculate layout for tuple elements using TypeId.
 /// Returns (total_size, offsets) where offsets[i] is the byte offset for element i.
 /// Each element is aligned to 8 bytes for simplicity.
-pub(crate) fn tuple_layout(
-    elements: &[LegacyType],
+pub(crate) fn tuple_layout_id(
+    elements: &[TypeId],
     pointer_type: Type,
     entity_registry: &EntityRegistry,
     arena: &TypeArena,
@@ -1105,9 +1106,9 @@ pub(crate) fn tuple_layout(
     let mut offsets = Vec::with_capacity(elements.len());
     let mut offset = 0i32;
 
-    for elem in elements {
+    for &elem in elements {
         offsets.push(offset);
-        let elem_size = type_size(elem, pointer_type, entity_registry, arena).div_ceil(8) * 8;
+        let elem_size = type_id_size(elem, pointer_type, entity_registry, arena).div_ceil(8) * 8;
         offset += elem_size as i32;
     }
 
@@ -1384,21 +1385,6 @@ pub(crate) fn word_to_value_type_id(
 
 /// Get the runtime tag value for an array element type.
 /// These tags are used by the runtime to distinguish element types.
-pub(crate) fn array_element_tag(ty: &LegacyType) -> i64 {
-    match ty {
-        LegacyType::Primitive(PrimitiveType::String) => 1,
-        LegacyType::Primitive(PrimitiveType::I64)
-        | LegacyType::Primitive(PrimitiveType::I32)
-        | LegacyType::Primitive(PrimitiveType::I16)
-        | LegacyType::Primitive(PrimitiveType::I8) => 2,
-        LegacyType::Primitive(PrimitiveType::F64) | LegacyType::Primitive(PrimitiveType::F32) => 3,
-        LegacyType::Primitive(PrimitiveType::Bool) => 4,
-        LegacyType::Array(_) => 5,
-        _ => 2, // default to integer
-    }
-}
-
-/// Get the runtime tag value for an array element type using TypeId (no LegacyType conversion)
 pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
     use crate::sema::type_arena::Type as ArenaType;
     match arena.get(ty) {

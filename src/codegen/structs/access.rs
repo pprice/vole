@@ -1,15 +1,14 @@
 // src/codegen/structs/access.rs
 
-use super::helpers::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
+use super::helpers::{convert_field_value, convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type, get_field_slot_and_type_id};
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
 use crate::codegen::types::{
-    CompiledValue, box_interface_value, module_name_id, type_to_cranelift,
+    CompiledValue, box_interface_value_id, module_name_id, type_to_cranelift,
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
 use crate::sema::types::ConstantValue;
-use crate::sema::types::NominalType;
 use crate::sema::{LegacyType, PrimitiveType};
 use cranelift::prelude::*;
 
@@ -17,11 +16,16 @@ impl Cg<'_, '_, '_> {
     #[tracing::instrument(skip(self, fa), fields(field = %self.ctx.interner.resolve(fa.field)))]
     pub fn field_access(&mut self, fa: &FieldAccessExpr) -> Result<CompiledValue, String> {
         let obj = self.expr(&fa.object)?;
-        let obj_type = self.to_legacy(obj.type_id);
-        tracing::trace!(object_type = ?obj_type, "field access on");
 
-        // Handle module field access for constants (e.g., math.PI)
-        if let LegacyType::Module(ref module_type) = obj_type {
+        // Check for module type using arena method
+        let module_info = self.ctx.arena.borrow().unwrap_module(obj.type_id).map(|m| m.module_id);
+        if let Some(_module_id) = module_info {
+            // For module access, we need LegacyType to access constants
+            let obj_type = self.to_legacy(obj.type_id);
+            let LegacyType::Module(ref module_type) = obj_type else {
+                unreachable!("unwrap_module returned Some but to_legacy didn't return Module")
+            };
+            tracing::trace!(object_type = ?obj_type, "field access on module");
             let field_name = self.ctx.interner.resolve(fa.field);
             let module_path = self
                 .ctx
@@ -89,17 +93,20 @@ impl Cg<'_, '_, '_> {
             .into());
         }
 
+        // Non-module field access - use TypeId-based helpers
         let field_name = self.ctx.interner.resolve(fa.field);
-        let (slot, field_type) = get_field_slot_and_type(&obj_type, field_name, self.ctx)?;
+        let (slot, field_type_id) = get_field_slot_and_type_id(obj.type_id, field_name, self.ctx)?;
 
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
 
-        let (result_val, cranelift_ty) = convert_field_value(self.builder, result_raw, &field_type);
+        let arena = self.ctx.arena.borrow();
+        let (result_val, cranelift_ty) = convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
+        drop(arena);
 
         Ok(CompiledValue {
             value: result_val,
             ty: cranelift_ty,
-            type_id: self.intern_type(&field_type),
+            type_id: field_type_id,
         })
     }
 
@@ -221,13 +228,13 @@ impl Cg<'_, '_, '_> {
         value_expr: &Expr,
     ) -> Result<CompiledValue, String> {
         let obj = self.expr(object)?;
-        let obj_type = self.to_legacy(obj.type_id);
         let value = self.expr(value_expr)?;
 
         let field_name = self.ctx.interner.resolve(field);
-        let (slot, field_type) = get_field_slot_and_type(&obj_type, field_name, self.ctx)?;
-        let value = if matches!(field_type, LegacyType::Nominal(NominalType::Interface(_))) {
-            box_interface_value(self.builder, self.ctx, value, &field_type)?
+        // Use TypeId-based helper to avoid LegacyType conversion
+        let (slot, field_type_id) = get_field_slot_and_type_id(obj.type_id, field_name, self.ctx)?;
+        let value = if self.ctx.arena.borrow().is_interface(field_type_id) {
+            box_interface_value_id(self.builder, self.ctx, value, field_type_id)?
         } else {
             value
         };

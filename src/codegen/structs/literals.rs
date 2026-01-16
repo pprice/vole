@@ -5,11 +5,11 @@ use std::collections::HashMap;
 use super::helpers::convert_to_i64_for_storage;
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
-use crate::codegen::types::{CompiledValue, box_interface_value, type_size};
+use crate::codegen::types::{CompiledValue, box_interface_value_id, type_size};
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, StructLiteralExpr};
 use crate::sema::LegacyType;
-use crate::sema::types::NominalType;
+use crate::sema::type_arena::TypeId;
 use cranelift::prelude::*;
 
 impl Cg<'_, '_, '_> {
@@ -37,13 +37,12 @@ impl Cg<'_, '_, '_> {
         let type_id = metadata.type_id;
         let field_count = metadata.field_slots.len() as u32;
         // Prefer the type from semantic analysis (handles generic instantiation)
-        let result_type_legacy = self
+        let result_type_id = self
             .ctx
             .analyzed
             .query()
-            .type_of_legacy(expr.id)
-            .unwrap_or_else(|| self.to_legacy(metadata.vole_type));
-        let result_type_id = self.intern_type(&result_type_legacy);
+            .type_of(expr.id)
+            .unwrap_or(metadata.vole_type);
         let field_slots = metadata.field_slots.clone();
 
         let type_id_val = self.builder.ins().iconst(types::I32, type_id as i64);
@@ -62,12 +61,17 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
         let set_func_ref = self.func_ref(set_key)?;
 
-        // Get field types for wrapping optional values
-        let field_types: HashMap<String, LegacyType> = match &result_type_legacy {
-            LegacyType::Nominal(NominalType::Record(rt)) => {
-                let type_def = self.ctx.analyzed.entity_registry.get_type(rt.type_def_id);
+        // Get field types for wrapping optional values using arena methods
+        let field_types: HashMap<String, TypeId> = {
+            let arena = self.ctx.arena.borrow();
+            let type_def_id = arena
+                .unwrap_record(result_type_id)
+                .map(|(id, _)| id)
+                .or_else(|| arena.unwrap_class(result_type_id).map(|(id, _)| id));
+
+            if let Some(type_def_id) = type_def_id {
+                let type_def = self.ctx.analyzed.entity_registry.get_type(type_def_id);
                 if let Some(generic_info) = &type_def.generic_info {
-                    let arena = self.ctx.arena.borrow();
                     generic_info
                         .field_names
                         .iter()
@@ -79,38 +83,16 @@ impl Cg<'_, '_, '_> {
                                     .name_table
                                     .last_segment_str(*name_id)
                                     .unwrap_or_default(),
-                                arena.to_type(*ty_id),
+                                *ty_id,
                             )
                         })
                         .collect()
                 } else {
                     HashMap::new()
                 }
+            } else {
+                HashMap::new()
             }
-            LegacyType::Nominal(NominalType::Class(ct)) => {
-                let type_def = self.ctx.analyzed.entity_registry.get_type(ct.type_def_id);
-                if let Some(generic_info) = &type_def.generic_info {
-                    let arena = self.ctx.arena.borrow();
-                    generic_info
-                        .field_names
-                        .iter()
-                        .zip(generic_info.field_types.iter())
-                        .map(|(name_id, ty_id)| {
-                            (
-                                self.ctx
-                                    .analyzed
-                                    .name_table
-                                    .last_segment_str(*name_id)
-                                    .unwrap_or_default(),
-                                arena.to_type(*ty_id),
-                            )
-                        })
-                        .collect()
-                } else {
-                    HashMap::new()
-                }
-            }
-            _ => HashMap::new(),
         };
 
         for init in &sl.fields {
@@ -128,14 +110,20 @@ impl Cg<'_, '_, '_> {
             // If field type is optional (union) and value type is not a union, wrap it
             // Use heap allocation for unions stored in class/record fields since stack slots
             // don't persist beyond the current function's stack frame
-            let value_type_legacy = self.to_legacy(value.type_id);
-            let final_value = if let Some(field_type) = field_types.get(init_name) {
-                if matches!(field_type, LegacyType::Union(_))
-                    && !matches!(&value_type_legacy, LegacyType::Union(_))
-                {
-                    self.construct_union_heap(value, field_type)?
-                } else if matches!(field_type, LegacyType::Nominal(NominalType::Interface(_))) {
-                    box_interface_value(self.builder, self.ctx, value, field_type)?
+            // Use arena methods for type checks to avoid LegacyType allocation
+            let final_value = if let Some(&field_type_id) = field_types.get(init_name) {
+                let arena = self.ctx.arena.borrow();
+                let field_is_union = arena.is_union(field_type_id);
+                let field_is_interface = arena.is_interface(field_type_id);
+                let value_is_union = arena.is_union(value.type_id);
+                drop(arena);
+
+                if field_is_union && !value_is_union {
+                    // For union construction, we still need LegacyType
+                    let field_type_legacy = self.to_legacy(field_type_id);
+                    self.construct_union_heap(value, &field_type_legacy)?
+                } else if field_is_interface {
+                    box_interface_value_id(self.builder, self.ctx, value, field_type_id)?
                 } else {
                     value
                 }

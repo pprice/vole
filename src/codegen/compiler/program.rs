@@ -572,7 +572,8 @@ impl Compiler<'_> {
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty));
+                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_ty);
+                variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile function body with module's interner
@@ -715,7 +716,8 @@ impl Compiler<'_> {
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty));
+                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_ty);
+                variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile function body
@@ -1030,7 +1032,8 @@ impl Compiler<'_> {
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty));
+                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_ty);
+                variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile function body
@@ -1345,7 +1348,8 @@ impl Compiler<'_> {
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty));
+                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_ty);
+                variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile function body
@@ -1605,7 +1609,8 @@ impl Compiler<'_> {
             // Bind `self` as the first parameter
             let self_var = builder.declare_var(self.pointer_type);
             builder.def_var(self_var, block_params[0]);
-            variables.insert(self_sym, (self_var, self_vole_type));
+            let self_vole_type_id = self.analyzed.type_arena.borrow_mut().from_type(&self_vole_type);
+            variables.insert(self_sym, (self_var, self_vole_type_id));
 
             // Bind remaining parameters with concrete types
             for (((name, ty), vole_ty), val) in param_names
@@ -1616,7 +1621,8 @@ impl Compiler<'_> {
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty));
+                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_ty);
+                variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile method body
@@ -1937,7 +1943,8 @@ impl Compiler<'_> {
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                variables.insert(*name, (var, vole_ty));
+                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_ty);
+                variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile method body

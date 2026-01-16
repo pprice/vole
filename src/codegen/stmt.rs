@@ -9,6 +9,7 @@ use cranelift::prelude::*;
 use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
 use crate::frontend::{self, ExprKind, LetInit, Pattern, RaiseStmt, Stmt, Symbol};
+use crate::sema::type_arena::TypeId;
 use crate::sema::types::NominalType;
 use crate::sema::{LegacyType, PrimitiveType};
 
@@ -17,15 +18,15 @@ use super::context::{Cg, ControlFlow};
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
 use super::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    box_interface_value, fallible_error_tag, resolve_type_expr, tuple_layout, type_size,
-    type_to_cranelift,
+    box_interface_value, box_interface_value_id, fallible_error_tag, resolve_type_expr,
+    tuple_layout_id, type_id_size, type_id_to_cranelift, type_size, type_to_cranelift,
 };
 
 /// Compile a block of statements (wrapper for compatibility)
 pub(super) fn compile_block(
     builder: &mut FunctionBuilder,
     block: &frontend::Block,
-    variables: &mut HashMap<Symbol, (Variable, LegacyType)>,
+    variables: &mut HashMap<Symbol, (Variable, TypeId)>,
     _cf_ctx: &mut ControlFlowCtx,
     ctx: &mut CompileCtx,
 ) -> Result<bool, String> {
@@ -212,7 +213,8 @@ impl Cg<'_, '_, '_> {
                 let cranelift_ty = type_to_cranelift(&final_type, self.ctx.pointer_type);
                 let var = self.builder.declare_var(cranelift_ty);
                 self.builder.def_var(var, final_value);
-                self.vars.insert(let_stmt.name, (var, final_type));
+                let final_type_id = self.intern_type(&final_type);
+                self.vars.insert(let_stmt.name, (var, final_type_id));
                 Ok(false)
             }
 
@@ -236,23 +238,25 @@ impl Cg<'_, '_, '_> {
             }
 
             Stmt::Return(ret) => {
-                let return_type = self.ctx.current_function_return_type.map(|id| self.ctx.arena.borrow().to_type(id));
+                let return_type_id = self.ctx.current_function_return_type;
                 if let Some(value) = &ret.value {
                     let compiled = self.expr(value)?;
 
                     // Box concrete types to interface representation if needed
                     // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
-                    if let Some(LegacyType::Nominal(NominalType::Interface(_))) = &return_type
+                    if let Some(ret_type_id) = return_type_id
+                        && self.is_interface(ret_type_id)
                         && !self.is_interface(compiled.type_id)
                         && !self.is_runtime_iterator(compiled.type_id)
                     {
-                        let return_type =
-                            return_type.as_ref().expect("return type should be present");
                         let boxed =
-                            box_interface_value(self.builder, self.ctx, compiled, return_type)?;
+                            box_interface_value_id(self.builder, self.ctx, compiled, ret_type_id)?;
                         self.builder.ins().return_(&[boxed.value]);
                         return Ok(true);
                     }
+
+                    // Get legacy type for remaining checks (fallible, union)
+                    let return_type = return_type_id.map(|id| self.ctx.arena.borrow().to_type(id));
 
                     // Check if the function has a fallible return type
                     if let Some(LegacyType::Fallible(ft)) = &return_type {
@@ -427,10 +431,7 @@ impl Cg<'_, '_, '_> {
 
         let var = self.builder.declare_var(types::I64);
         self.builder.def_var(var, start_val.value);
-        self.vars.insert(
-            for_stmt.var_name,
-            (var, LegacyType::Primitive(PrimitiveType::I64)),
-        );
+        self.vars.insert(for_stmt.var_name, (var, self.i64_type()));
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
@@ -482,7 +483,11 @@ impl Cg<'_, '_, '_> {
     /// Compile a for loop over an array
     fn for_array(&mut self, for_stmt: &frontend::ForStmt) -> Result<bool, String> {
         let arr = self.expr(&for_stmt.iterable)?;
-        let arr_legacy_type = self.to_legacy(arr.type_id);
+
+        // Get element type using arena method
+        let elem_type_id = self.ctx.arena.borrow()
+            .unwrap_array(arr.type_id)
+            .unwrap_or_else(|| self.ctx.arena.borrow().i64());
 
         let len_val = self.call_runtime(RuntimeFn::ArrayLen, &[arr.value])?;
 
@@ -490,14 +495,9 @@ impl Cg<'_, '_, '_> {
         let zero = self.builder.ins().iconst(types::I64, 0);
         self.builder.def_var(idx_var, zero);
 
-        let elem_type = match &arr_legacy_type {
-            LegacyType::Array(elem) => elem.as_ref().clone(),
-            _ => LegacyType::Primitive(PrimitiveType::I64),
-        };
-
         let elem_var = self.builder.declare_var(types::I64);
         self.builder.def_var(elem_var, zero);
-        self.vars.insert(for_stmt.var_name, (elem_var, elem_type));
+        self.vars.insert(for_stmt.var_name, (elem_var, elem_type_id));
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
@@ -559,24 +559,21 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Extract element type from Iterator<T>
-    fn iterator_element_type(&self, ty: &LegacyType) -> LegacyType {
-        match ty {
-            LegacyType::Nominal(NominalType::Interface(iface)) => iface
-                .type_args
-                .first()
-                .cloned()
-                .unwrap_or(LegacyType::Primitive(PrimitiveType::I64)),
-            LegacyType::RuntimeIterator(elem) => (**elem).clone(),
-            _ => LegacyType::Primitive(PrimitiveType::I64),
-        }
-    }
-
     /// Compile a for loop over an iterator
     fn for_iterator(&mut self, for_stmt: &frontend::ForStmt) -> Result<bool, String> {
         let iter = self.expr(&for_stmt.iterable)?;
-        let iter_legacy_type = self.to_legacy(iter.type_id);
-        let elem_type = self.iterator_element_type(&iter_legacy_type);
+
+        // Get element type using arena methods
+        let elem_type_id = {
+            let arena = self.ctx.arena.borrow();
+            if let Some(elem_id) = arena.unwrap_runtime_iterator(iter.type_id) {
+                elem_id
+            } else if let Some((_, type_args)) = arena.unwrap_interface(iter.type_id) {
+                type_args.first().copied().unwrap_or_else(|| arena.i64())
+            } else {
+                arena.i64()
+            }
+        };
 
         // Create a stack slot for the out_value parameter
         let slot_data = self.builder.create_sized_stack_slot(StackSlotData::new(
@@ -593,7 +590,7 @@ impl Cg<'_, '_, '_> {
         let elem_var = self.builder.declare_var(types::I64);
         let zero = self.builder.ins().iconst(types::I64, 0);
         self.builder.def_var(elem_var, zero);
-        self.vars.insert(for_stmt.var_name, (elem_var, elem_type));
+        self.vars.insert(for_stmt.var_name, (elem_var, elem_type_id));
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
@@ -663,10 +660,7 @@ impl Cg<'_, '_, '_> {
         let elem_var = self.builder.declare_var(types::I64);
         let zero = self.builder.ins().iconst(types::I64, 0);
         self.builder.def_var(elem_var, zero);
-        self.vars.insert(
-            for_stmt.var_name,
-            (elem_var, LegacyType::Primitive(PrimitiveType::String)),
-        );
+        self.vars.insert(for_stmt.var_name, (elem_var, self.string_type()));
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
@@ -807,39 +801,52 @@ impl Cg<'_, '_, '_> {
                 let cr_type = type_to_cranelift(ty, self.ctx.pointer_type);
                 let var = self.builder.declare_var(cr_type);
                 self.builder.def_var(var, value);
-                self.vars.insert(*name, (var, ty.clone()));
+                let ty_id = self.intern_type(ty);
+                self.vars.insert(*name, (var, ty_id));
             }
             Pattern::Wildcard(_) => {
                 // Wildcard - nothing to bind
             }
-            Pattern::Tuple { elements, .. } => match ty {
-                LegacyType::Tuple(elem_types) => {
-                    let (_, offsets) = tuple_layout(elem_types, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
+            Pattern::Tuple { elements, .. } => {
+                // Intern the type to use arena methods for layout
+                let ty_id = self.intern_type(ty);
+                let arena = self.ctx.arena.borrow();
+
+                // Try tuple first
+                if let Some(elem_type_ids) = arena.unwrap_tuple(ty_id).cloned() {
+                    drop(arena);
+                    let (_, offsets) = tuple_layout_id(&elem_type_ids, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
                     for (i, elem_pattern) in elements.iter().enumerate() {
                         let offset = offsets[i];
-                        let elem_type = &elem_types[i];
-                        let elem_cr_type = type_to_cranelift(elem_type, self.ctx.pointer_type);
+                        let elem_type_id = elem_type_ids[i];
+                        let elem_cr_type = type_id_to_cranelift(elem_type_id, &self.ctx.arena.borrow(), self.ctx.pointer_type);
                         let elem_value =
                             self.builder
                                 .ins()
                                 .load(elem_cr_type, MemFlags::new(), value, offset);
-                        self.compile_destructure_pattern(elem_pattern, elem_value, elem_type)?;
+                        // Convert back to LegacyType for recursive call (to be migrated later)
+                        let elem_type = self.to_legacy(elem_type_id);
+                        self.compile_destructure_pattern(elem_pattern, elem_value, &elem_type)?;
                     }
-                }
-                LegacyType::FixedArray { element, .. } => {
-                    let elem_cr_type = type_to_cranelift(element, self.ctx.pointer_type);
-                    let elem_size = type_size(element, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow()).div_ceil(8) * 8;
+                // Try fixed array
+                } else if let Some((element_id, _)) = arena.unwrap_fixed_array(ty_id) {
+                    drop(arena);
+                    let elem_cr_type = type_id_to_cranelift(element_id, &self.ctx.arena.borrow(), self.ctx.pointer_type);
+                    let elem_size = type_id_size(element_id, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow()).div_ceil(8) * 8;
+                    // Convert element type once for all iterations
+                    let element = self.to_legacy(element_id);
                     for (i, elem_pattern) in elements.iter().enumerate() {
                         let offset = (i as i32) * (elem_size as i32);
                         let elem_value =
                             self.builder
                                 .ins()
                                 .load(elem_cr_type, MemFlags::new(), value, offset);
-                        self.compile_destructure_pattern(elem_pattern, elem_value, element)?;
+                        self.compile_destructure_pattern(elem_pattern, elem_value, &element)?;
                     }
+                } else {
+                    drop(arena);
                 }
-                _ => {}
-            },
+            }
             Pattern::Record { fields, .. } => {
                 // Record destructuring - extract fields via runtime
                 for field_pattern in fields {
@@ -852,8 +859,8 @@ impl Cg<'_, '_, '_> {
                         convert_field_value(self.builder, result_raw, &field_type);
                     let var = self.builder.declare_var(cranelift_ty);
                     self.builder.def_var(var, result_val);
-                    self.vars
-                        .insert(field_pattern.binding, (var, field_type.clone()));
+                    let field_type_id = self.intern_type(&field_type);
+                    self.vars.insert(field_pattern.binding, (var, field_type_id));
                 }
             }
             _ => {}

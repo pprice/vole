@@ -14,7 +14,6 @@ use crate::frontend::Symbol;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_arena::{Type as ArenaType, TypeId};
-use crate::sema::types::NominalType;
 use crate::sema::{LegacyType, PrimitiveType};
 use smallvec::SmallVec;
 
@@ -89,7 +88,7 @@ pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
 /// - structs.rs: struct_literal(), field_access(), method_call()
 pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub builder: &'a mut FunctionBuilder<'b>,
-    pub vars: &'a mut HashMap<Symbol, (Variable, LegacyType)>,
+    pub vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
     pub ctx: &'a mut CompileCtx<'ctx>,
     pub cf: &'a mut ControlFlow,
     pub captures: Option<Captures<'a>>,
@@ -103,7 +102,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a new codegen context
     pub fn new(
         builder: &'a mut FunctionBuilder<'b>,
-        vars: &'a mut HashMap<Symbol, (Variable, LegacyType)>,
+        vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
         ctx: &'a mut CompileCtx<'ctx>,
         cf: &'a mut ControlFlow,
     ) -> Self {
@@ -121,7 +120,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a codegen context with capture information for closures
     pub fn with_captures(
         builder: &'a mut FunctionBuilder<'b>,
-        vars: &'a mut HashMap<Symbol, (Variable, LegacyType)>,
+        vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
         ctx: &'a mut CompileCtx<'ctx>,
         cf: &'a mut ControlFlow,
         captures: Captures<'a>,
@@ -279,13 +278,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Unwrap an interface type, returning the InterfaceType if it is one
-    pub fn unwrap_interface_type(&self, ty: TypeId) -> Option<crate::sema::types::InterfaceType> {
-        if let LegacyType::Nominal(NominalType::Interface(it)) = self.to_legacy(ty) {
-            Some(it)
-        } else {
-            None
-        }
+    /// Unwrap an interface type, returning the TypeDefId if it is one
+    pub fn interface_type_def_id(&self, ty: TypeId) -> Option<crate::identity::TypeDefId> {
+        self.ctx.arena.borrow().unwrap_interface(ty).map(|(id, _)| id)
     }
 
     // ========== TypeCompatibility delegation helpers ==========

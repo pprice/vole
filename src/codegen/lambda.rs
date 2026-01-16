@@ -13,7 +13,7 @@ use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
 use super::RuntimeFn;
 use super::context::{Captures, Cg, ControlFlow};
-use super::types::{CompileCtx, CompiledValue, resolve_type_expr, type_size, type_to_cranelift};
+use super::types::{CompileCtx, CompiledValue, resolve_type_expr, type_id_size, type_to_cranelift};
 
 /// Information about a captured variable for lambda compilation
 #[derive(Clone, Copy)]
@@ -33,18 +33,17 @@ impl CaptureBinding {
 /// Build capture bindings from a list of captures and variable types
 pub(crate) fn build_capture_bindings(
     captures: &[crate::frontend::Capture],
-    variables: &HashMap<Symbol, (Variable, LegacyType)>,
+    variables: &HashMap<Symbol, (Variable, TypeId)>,
     arena: &mut TypeArena,
 ) -> HashMap<Symbol, CaptureBinding> {
     let mut bindings = HashMap::new();
-    let default_type = LegacyType::Primitive(PrimitiveType::I64);
+    let default_type_id = arena.from_type(&LegacyType::Primitive(PrimitiveType::I64));
     for (i, capture) in captures.iter().enumerate() {
-        let vole_type_legacy = variables
+        let vole_type_id = variables
             .get(&capture.name)
-            .map(|(_, ty)| ty)
-            .unwrap_or(&default_type);
-        let vole_type = arena.from_type(vole_type_legacy);
-        bindings.insert(capture.name, CaptureBinding::new(i, vole_type));
+            .map(|(_, ty)| *ty)
+            .unwrap_or(default_type_id);
+        bindings.insert(capture.name, CaptureBinding::new(i, vole_type_id));
     }
     bindings
 }
@@ -176,7 +175,7 @@ pub(crate) fn infer_expr_type(
 pub(super) fn compile_lambda(
     builder: &mut FunctionBuilder,
     lambda: &LambdaExpr,
-    variables: &HashMap<Symbol, (Variable, LegacyType)>,
+    variables: &HashMap<Symbol, (Variable, TypeId)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     let captures = lambda.captures.borrow();
@@ -271,13 +270,14 @@ fn compile_pure_lambda(
         lambda_builder.append_block_params_for_function_params(entry_block);
         lambda_builder.switch_to_block(entry_block);
 
-        let mut lambda_variables: HashMap<Symbol, (Variable, LegacyType)> = HashMap::new();
+        let mut lambda_variables: HashMap<Symbol, (Variable, TypeId)> = HashMap::new();
         let block_params = lambda_builder.block_params(entry_block).to_vec();
         // Skip block_params[0] which is the closure pointer (unused for pure lambdas)
         for (i, param) in lambda.params.iter().enumerate() {
             let var = lambda_builder.declare_var(param_types[i]);
             lambda_builder.def_var(var, block_params[i + 1]); // +1 to skip closure ptr
-            lambda_variables.insert(param.name, (var, param_vole_types[i].clone()));
+            let param_type_id = ctx.arena.borrow_mut().from_type(&param_vole_types[i]);
+            lambda_variables.insert(param.name, (var, param_type_id));
         }
 
         let capture_bindings: HashMap<Symbol, CaptureBinding> = HashMap::new();
@@ -336,7 +336,7 @@ fn compile_pure_lambda(
 fn compile_lambda_with_captures(
     builder: &mut FunctionBuilder,
     lambda: &LambdaExpr,
-    variables: &HashMap<Symbol, (Variable, LegacyType)>,
+    variables: &HashMap<Symbol, (Variable, TypeId)>,
     ctx: &mut CompileCtx,
 ) -> Result<CompiledValue, String> {
     let captures = lambda.captures.borrow();
@@ -416,11 +416,12 @@ fn compile_lambda_with_captures(
         let block_params = lambda_builder.block_params(entry_block).to_vec();
         let closure_ptr = block_params[0];
 
-        let mut lambda_variables: HashMap<Symbol, (Variable, LegacyType)> = HashMap::new();
+        let mut lambda_variables: HashMap<Symbol, (Variable, TypeId)> = HashMap::new();
         for (i, param) in lambda.params.iter().enumerate() {
             let var = lambda_builder.declare_var(param_types[i]);
             lambda_builder.def_var(var, block_params[i + 1]);
-            lambda_variables.insert(param.name, (var, param_vole_types[i].clone()));
+            let param_type_id = ctx.arena.borrow_mut().from_type(&param_vole_types[i]);
+            lambda_variables.insert(param.name, (var, param_type_id));
         }
 
         let closure_var = lambda_builder.declare_var(ctx.pointer_type);
@@ -482,12 +483,12 @@ fn compile_lambda_with_captures(
     let heap_alloc_ref = ctx.module.declare_func_in_func(heap_alloc_id, builder.func);
 
     for (i, capture) in captures.iter().enumerate() {
-        let (var, vole_type) = variables
+        let (var, vole_type_id) = variables
             .get(&capture.name)
             .ok_or_else(|| format!("Captured variable not found: {:?}", capture.name))?;
         let current_value = builder.use_var(*var);
 
-        let size = type_size(vole_type, ctx.pointer_type, &ctx.analyzed.entity_registry, &ctx.arena.borrow());
+        let size = type_id_size(*vole_type_id, ctx.pointer_type, &ctx.analyzed.entity_registry, &ctx.arena.borrow());
         let size_val = builder.ins().iconst(types::I64, size as i64);
 
         let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
@@ -519,7 +520,7 @@ fn compile_lambda_with_captures(
 fn compile_lambda_body(
     builder: &mut FunctionBuilder,
     body: &LambdaBody,
-    variables: &mut HashMap<Symbol, (Variable, LegacyType)>,
+    variables: &mut HashMap<Symbol, (Variable, TypeId)>,
     capture_bindings: &HashMap<Symbol, CaptureBinding>,
     closure_var: Option<Variable>,
     cf: &mut ControlFlow,
