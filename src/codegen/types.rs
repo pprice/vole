@@ -165,6 +165,7 @@ pub(crate) struct CompileCtx<'a> {
 impl<'a> CompileCtx<'a> {
     /// Substitute type parameters with concrete types using current context.
     /// If no type_substitutions are set, returns the original type unchanged.
+    /// DEPRECATED: Use substitute_type_id for better performance.
     pub fn substitute_type(&self, ty: &LegacyType) -> LegacyType {
         if let Some(substitutions) = self.type_substitutions {
             // Convert TypeId substitutions to LegacyType for substitution
@@ -176,6 +177,18 @@ impl<'a> CompileCtx<'a> {
             ty.substitute(&legacy_subs)
         } else {
             ty.clone()
+        }
+    }
+
+    /// Substitute type parameters with concrete types using TypeId directly.
+    /// Much faster than substitute_type - avoids LegacyType conversion overhead.
+    pub fn substitute_type_id(&self, ty: TypeId) -> TypeId {
+        if let Some(substitutions) = self.type_substitutions {
+            // Convert std HashMap to hashbrown HashMap for arena compatibility
+            let subs: hashbrown::HashMap<NameId, TypeId> = substitutions.iter().map(|(&k, &v)| (k, v)).collect();
+            self.arena.borrow_mut().substitute(ty, &subs)
+        } else {
+            ty
         }
     }
 
@@ -844,9 +857,38 @@ pub(crate) fn type_to_cranelift(ty: &LegacyType, pointer_type: Type) -> Type {
     }
 }
 
-/// Convert a TypeId to a Cranelift type (convenience wrapper for interned types)
+/// Convert a TypeId to a Cranelift type (no LegacyType conversion needed)
 pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: Type) -> Type {
-    type_to_cranelift(&arena.to_type(ty), pointer_type)
+    use crate::sema::type_arena::Type as ArenaType;
+    match arena.get(ty) {
+        ArenaType::Primitive(PrimitiveType::I8) | ArenaType::Primitive(PrimitiveType::U8) => {
+            types::I8
+        }
+        ArenaType::Primitive(PrimitiveType::I16) | ArenaType::Primitive(PrimitiveType::U16) => {
+            types::I16
+        }
+        ArenaType::Primitive(PrimitiveType::I32) | ArenaType::Primitive(PrimitiveType::U32) => {
+            types::I32
+        }
+        ArenaType::Primitive(PrimitiveType::I64) | ArenaType::Primitive(PrimitiveType::U64) => {
+            types::I64
+        }
+        ArenaType::Primitive(PrimitiveType::I128) => types::I128,
+        ArenaType::Primitive(PrimitiveType::F32) => types::F32,
+        ArenaType::Primitive(PrimitiveType::F64) => types::F64,
+        ArenaType::Primitive(PrimitiveType::Bool) => types::I8,
+        ArenaType::Primitive(PrimitiveType::String) => pointer_type,
+        ArenaType::Interface { .. } => pointer_type,
+        ArenaType::Nil => types::I8,
+        ArenaType::Done => types::I8,
+        ArenaType::Union(_) => pointer_type,
+        ArenaType::Fallible { .. } => pointer_type,
+        ArenaType::Function { .. } => pointer_type,
+        ArenaType::Range => pointer_type,
+        ArenaType::Tuple(_) => pointer_type,
+        ArenaType::FixedArray { .. } => pointer_type,
+        _ => types::I64,
+    }
 }
 
 /// Get the size in bytes for a Vole type (used for union layout)
