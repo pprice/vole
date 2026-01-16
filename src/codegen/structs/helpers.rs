@@ -5,91 +5,9 @@ use cranelift::prelude::*;
 use crate::codegen::types::CompileCtx;
 use crate::codegen::types::CompiledValue;
 use crate::errors::CodegenError;
-use crate::sema::generic::substitute_type;
 use crate::sema::type_arena::{Type as ArenaType, TypeArena, TypeId};
 use crate::sema::types::NominalType;
 use crate::sema::{LegacyType, PrimitiveType};
-
-pub(crate) fn get_field_slot_and_type(
-    vole_type: &LegacyType,
-    field_name: &str,
-    ctx: &CompileCtx,
-) -> Result<(usize, LegacyType), String> {
-    match vole_type {
-        LegacyType::Nominal(NominalType::Class(class_type)) => {
-            let type_def = ctx
-                .analyzed
-                .entity_registry
-                .get_type(class_type.type_def_id);
-            let generic_info = type_def
-                .generic_info
-                .as_ref()
-                .ok_or_else(|| CodegenError::not_found("generic_info", "class").to_string())?;
-
-            // Build substitution map if there are type args
-            let substitutions = ctx
-                .analyzed
-                .entity_registry
-                .substitution_map(class_type.type_def_id, &class_type.type_args);
-
-            for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
-                let name = ctx.analyzed.name_table.last_segment_str(*field_name_id);
-                if name.as_deref() == Some(field_name) {
-                    let base_type_id = generic_info.field_types[slot];
-                    let base_type = ctx.arena.borrow().to_type(base_type_id);
-                    // Apply type substitutions from type args, then from monomorphization context
-                    let field_type = if !substitutions.is_empty() {
-                        substitute_type(&base_type, &substitutions)
-                    } else {
-                        base_type
-                    };
-                    let field_type = ctx.substitute_type(&field_type);
-                    return Ok((slot, field_type));
-                }
-            }
-            Err(CodegenError::not_found("field", format!("{} in class", field_name)).into())
-        }
-        LegacyType::Nominal(NominalType::Record(record_type)) => {
-            let type_def = ctx
-                .analyzed
-                .entity_registry
-                .get_type(record_type.type_def_id);
-            let generic_info = type_def
-                .generic_info
-                .as_ref()
-                .ok_or_else(|| CodegenError::not_found("generic_info", "record").to_string())?;
-
-            // Build substitution map if there are type args
-            let substitutions = ctx
-                .analyzed
-                .entity_registry
-                .substitution_map(record_type.type_def_id, &record_type.type_args);
-
-            for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
-                let name = ctx.analyzed.name_table.last_segment_str(*field_name_id);
-                if name.as_deref() == Some(field_name) {
-                    let base_type_id = generic_info.field_types[slot];
-                    let base_type = ctx.arena.borrow().to_type(base_type_id);
-                    // Apply type substitutions from type args, then from monomorphization context
-                    let field_type = if !substitutions.is_empty() {
-                        substitute_type(&base_type, &substitutions)
-                    } else {
-                        base_type
-                    };
-                    let field_type = ctx.substitute_type(&field_type);
-                    return Ok((slot, field_type));
-                }
-            }
-            Err(CodegenError::not_found("field", format!("{} in record", field_name)).into())
-        }
-        _ => Err(CodegenError::type_mismatch(
-            "field access",
-            "class or record",
-            format!("{:?}", vole_type),
-        )
-        .into()),
-    }
-}
 
 /// Get field slot and type for a field access using TypeId (no LegacyType conversion)
 pub(crate) fn get_field_slot_and_type_id(

@@ -19,7 +19,7 @@ use crate::sema::types::NominalType;
 use crate::sema::{LegacyType, PrimitiveType};
 
 use super::context::Cg;
-use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
+use super::structs::{convert_field_value, convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
     array_element_tag_id, box_interface_value, fallible_error_tag, resolve_type_expr,
@@ -1158,13 +1158,13 @@ impl Cg<'_, '_, '_> {
                     type_name, fields, ..
                 } => {
                     // Record destructuring in match - TypeName { x, y } or { x, y }
-                    let (pattern_check, pattern_type) = if let Some(name) = type_name {
+                    let (pattern_check, pattern_type_id) = if let Some(name) = type_name {
                         // Typed record pattern - need to check type first
                         if let Some(type_meta) = self.ctx.type_metadata.get(name) {
                             let vole_type = self.to_legacy(type_meta.vole_type);
                             (
                                 self.compile_type_pattern_check(&scrutinee, &vole_type)?,
-                                Some(vole_type),
+                                Some(type_meta.vole_type),
                             )
                         } else {
                             // Unknown type name - never matches
@@ -1197,7 +1197,7 @@ impl Cg<'_, '_, '_> {
                         // Extract block: extract fields from union payload
                         self.builder.switch_to_block(extract_block);
 
-                        let (field_source, field_source_type) = if let Some(ref pt) = pattern_type {
+                        let (field_source, field_source_type_id) = if let Some(pt_id) = pattern_type_id {
                             // Extract payload from union at offset 8
                             let payload = self.builder.ins().load(
                                 types::I64,
@@ -1205,26 +1205,27 @@ impl Cg<'_, '_, '_> {
                                 scrutinee.value,
                                 8,
                             );
-                            (payload, pt.clone())
+                            (payload, pt_id)
                         } else {
-                            (scrutinee.value, scrutinee_type.clone())
+                            (scrutinee.value, scrutinee_type_id)
                         };
 
                         // Extract and bind fields
                         for field_pattern in fields {
                             let field_name = self.ctx.interner.resolve(field_pattern.field_name);
-                            let (slot, field_type) =
-                                get_field_slot_and_type(&field_source_type, field_name, self.ctx)?;
+                            let (slot, field_type_id) =
+                                get_field_slot_and_type_id(field_source_type_id, field_name, self.ctx)?;
                             let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
                             let result_raw = self.call_runtime(
                                 RuntimeFn::InstanceGetField,
                                 &[field_source, slot_val],
                             )?;
+                            let arena = self.ctx.arena.borrow();
                             let (result_val, cranelift_ty) =
-                                convert_field_value(self.builder, result_raw, &field_type);
+                                convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
+                            drop(arena);
                             let var = self.builder.declare_var(cranelift_ty);
                             self.builder.def_var(var, result_val);
-                            let field_type_id = self.intern_type(&field_type);
                             arm_variables.insert(field_pattern.binding, (var, field_type_id));
                         }
 
@@ -1235,38 +1236,39 @@ impl Cg<'_, '_, '_> {
                     } else {
                         // Non-conditional case: extract fields directly
                         // Determine the value to extract fields from
-                        let (field_source, field_source_type) =
+                        let (field_source, field_source_type_id) =
                             if let LegacyType::Union(_) = &scrutinee_type {
-                                if let Some(ref pt) = pattern_type {
+                                if let Some(pt_id) = pattern_type_id {
                                     let payload = self.builder.ins().load(
                                         types::I64,
                                         MemFlags::new(),
                                         scrutinee.value,
                                         8,
                                     );
-                                    (payload, pt.clone())
+                                    (payload, pt_id)
                                 } else {
-                                    (scrutinee.value, scrutinee_type.clone())
+                                    (scrutinee.value, scrutinee_type_id)
                                 }
                             } else {
-                                (scrutinee.value, scrutinee_type.clone())
+                                (scrutinee.value, scrutinee_type_id)
                             };
 
                         // Extract and bind fields
                         for field_pattern in fields {
                             let field_name = self.ctx.interner.resolve(field_pattern.field_name);
-                            let (slot, field_type) =
-                                get_field_slot_and_type(&field_source_type, field_name, self.ctx)?;
+                            let (slot, field_type_id) =
+                                get_field_slot_and_type_id(field_source_type_id, field_name, self.ctx)?;
                             let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
                             let result_raw = self.call_runtime(
                                 RuntimeFn::InstanceGetField,
                                 &[field_source, slot_val],
                             )?;
+                            let arena = self.ctx.arena.borrow();
                             let (result_val, cranelift_ty) =
-                                convert_field_value(self.builder, result_raw, &field_type);
+                                convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
+                            drop(arena);
                             let var = self.builder.declare_var(cranelift_ty);
                             self.builder.def_var(var, result_val);
-                            let field_type_id = self.intern_type(&field_type);
                             arm_variables.insert(field_pattern.binding, (var, field_type_id));
                         }
 

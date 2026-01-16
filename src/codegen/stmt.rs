@@ -15,7 +15,7 @@ use crate::sema::{LegacyType, PrimitiveType};
 
 use super::compiler::ControlFlowCtx;
 use super::context::{Cg, ControlFlow};
-use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
+use super::structs::{convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id};
 use super::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
     box_interface_value, box_interface_value_id, fallible_error_tag, resolve_type_expr,
@@ -221,13 +221,12 @@ impl Cg<'_, '_, '_> {
             Stmt::LetTuple(let_tuple) => {
                 // Compile the initializer - should be a tuple, fixed array, or record
                 let init = self.expr(&let_tuple.init)?;
-                let init_legacy_type = self.to_legacy(init.type_id);
 
                 // Recursively compile the destructuring pattern
                 self.compile_destructure_pattern(
                     &let_tuple.pattern,
                     init.value,
-                    &init_legacy_type,
+                    init.type_id,
                 )?;
                 Ok(false)
             }
@@ -793,22 +792,19 @@ impl Cg<'_, '_, '_> {
         &mut self,
         pattern: &Pattern,
         value: Value,
-        ty: &LegacyType,
+        ty_id: TypeId,
     ) -> Result<(), String> {
         match pattern {
             Pattern::Identifier { name, .. } => {
-                let cr_type = type_to_cranelift(ty, self.ctx.pointer_type);
+                let cr_type = type_id_to_cranelift(ty_id, &self.ctx.arena.borrow(), self.ctx.pointer_type);
                 let var = self.builder.declare_var(cr_type);
                 self.builder.def_var(var, value);
-                let ty_id = self.intern_type(ty);
                 self.vars.insert(*name, (var, ty_id));
             }
             Pattern::Wildcard(_) => {
                 // Wildcard - nothing to bind
             }
             Pattern::Tuple { elements, .. } => {
-                // Intern the type to use arena methods for layout
-                let ty_id = self.intern_type(ty);
                 let arena = self.ctx.arena.borrow();
 
                 // Try tuple first
@@ -823,24 +819,20 @@ impl Cg<'_, '_, '_> {
                             self.builder
                                 .ins()
                                 .load(elem_cr_type, MemFlags::new(), value, offset);
-                        // Convert back to LegacyType for recursive call (to be migrated later)
-                        let elem_type = self.to_legacy(elem_type_id);
-                        self.compile_destructure_pattern(elem_pattern, elem_value, &elem_type)?;
+                        self.compile_destructure_pattern(elem_pattern, elem_value, elem_type_id)?;
                     }
                 // Try fixed array
                 } else if let Some((element_id, _)) = arena.unwrap_fixed_array(ty_id) {
                     drop(arena);
                     let elem_cr_type = type_id_to_cranelift(element_id, &self.ctx.arena.borrow(), self.ctx.pointer_type);
                     let elem_size = type_id_size(element_id, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow()).div_ceil(8) * 8;
-                    // Convert element type once for all iterations
-                    let element = self.to_legacy(element_id);
                     for (i, elem_pattern) in elements.iter().enumerate() {
                         let offset = (i as i32) * (elem_size as i32);
                         let elem_value =
                             self.builder
                                 .ins()
                                 .load(elem_cr_type, MemFlags::new(), value, offset);
-                        self.compile_destructure_pattern(elem_pattern, elem_value, &element)?;
+                        self.compile_destructure_pattern(elem_pattern, elem_value, element_id)?;
                     }
                 } else {
                     drop(arena);
@@ -850,15 +842,16 @@ impl Cg<'_, '_, '_> {
                 // Record destructuring - extract fields via runtime
                 for field_pattern in fields {
                     let field_name = self.ctx.interner.resolve(field_pattern.field_name);
-                    let (slot, field_type) = get_field_slot_and_type(ty, field_name, self.ctx)?;
+                    let (slot, field_type_id) = get_field_slot_and_type_id(ty_id, field_name, self.ctx)?;
                     let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
                     let result_raw =
                         self.call_runtime(RuntimeFn::InstanceGetField, &[value, slot_val])?;
+                    let arena = self.ctx.arena.borrow();
                     let (result_val, cranelift_ty) =
-                        convert_field_value(self.builder, result_raw, &field_type);
+                        convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
+                    drop(arena);
                     let var = self.builder.declare_var(cranelift_ty);
                     self.builder.def_var(var, result_val);
-                    let field_type_id = self.intern_type(&field_type);
                     self.vars.insert(field_pattern.binding, (var, field_type_id));
                 }
             }
