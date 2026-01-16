@@ -13,13 +13,15 @@ use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::implement_registry::ExternalMethodInfo;
-use crate::sema::type_arena::TypeId;
+use crate::sema::type_arena::{Type as ArenaType, TypeId};
 use crate::sema::types::NominalType;
 use crate::sema::{LegacyType, PrimitiveType};
 use smallvec::SmallVec;
 
 use super::lambda::CaptureBinding;
-use super::types::{CompileCtx, CompiledValue, native_type_to_cranelift, type_to_cranelift};
+use super::types::{
+    CompileCtx, CompiledValue, native_type_to_cranelift, type_id_to_cranelift, type_to_cranelift,
+};
 
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
@@ -265,7 +267,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a TypeId to a Cranelift type
     pub fn cranelift_type(&self, ty: TypeId) -> Type {
-        super::types::type_id_to_cranelift(ty, &self.ctx.arena.borrow(), self.ctx.pointer_type)
+        type_id_to_cranelift(ty, &self.ctx.arena.borrow(), self.ctx.pointer_type)
     }
 
     /// Unwrap a function type, returning the FunctionType if it is one
@@ -467,13 +469,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Create a float constant with explicit type (for bidirectional inference)
     pub fn float_const(&mut self, n: f64, type_id: TypeId) -> CompiledValue {
-        let vole_type = self.to_legacy(type_id);
-        let (ty, value) = match vole_type {
-            LegacyType::Primitive(PrimitiveType::F32) => {
+        // Match directly on arena type to avoid LegacyType conversion
+        let arena = self.ctx.arena.borrow();
+        let (ty, value) = match arena.get(type_id) {
+            ArenaType::Primitive(PrimitiveType::F32) => {
+                drop(arena);
                 let v = self.builder.ins().f32const(n as f32);
                 (types::F32, v)
             }
             _ => {
+                drop(arena);
                 // Default to F64
                 let v = self.builder.ins().f64const(n);
                 (types::F64, v)
@@ -527,11 +532,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a CompiledValue with an already-interned type
     #[allow(dead_code)] // Reserved for task 5.5 arena migration
     pub fn typed_value_interned(&self, value: Value, type_id: TypeId) -> CompiledValue {
-        // For interned types we need to resolve back to get cranelift type
-        let legacy = self.to_legacy(type_id);
+        // Use type_id_to_cranelift to avoid LegacyType conversion
+        let arena = self.ctx.arena.borrow();
         CompiledValue {
             value,
-            ty: type_to_cranelift(&legacy, self.ctx.pointer_type),
+            ty: type_id_to_cranelift(type_id, &arena, self.ctx.pointer_type),
             type_id,
         }
     }
