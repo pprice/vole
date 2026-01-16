@@ -40,20 +40,20 @@ impl Cg<'_, '_, '_> {
         match &expr.kind {
             ExprKind::IntLiteral(n) => {
                 // Look up inferred type from semantic analysis for bidirectional type inference
-                // Uses get_expr_type_legacy helper to check module-specific expr_types when compiling prelude
-                let vole_type = self
+                // Uses get_expr_type helper to check module-specific expr_types when compiling prelude
+                let type_id = self
                     .ctx
-                    .get_expr_type_legacy(&expr.id)
-                    .unwrap_or(LegacyType::Primitive(PrimitiveType::I64));
-                Ok(self.int_const(*n, vole_type))
+                    .get_expr_type(&expr.id)
+                    .unwrap_or_else(|| self.i64_type());
+                Ok(self.int_const(*n, type_id))
             }
             ExprKind::FloatLiteral(n) => {
                 // Look up inferred type from semantic analysis for bidirectional type inference
-                let vole_type = self
+                let type_id = self
                     .ctx
-                    .get_expr_type_legacy(&expr.id)
-                    .unwrap_or(LegacyType::Primitive(PrimitiveType::F64));
-                Ok(self.float_const(*n, vole_type))
+                    .get_expr_type(&expr.id)
+                    .unwrap_or_else(|| self.f64_type());
+                Ok(self.float_const(*n, type_id))
             }
             ExprKind::BoolLiteral(b) => Ok(self.bool_const(*b)),
             ExprKind::Identifier(sym) => self.identifier(*sym, expr),

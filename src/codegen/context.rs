@@ -172,6 +172,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.ctx.arena.borrow().primitives.i64
     }
 
+    /// Get the interned f64 type
+    pub fn f64_type(&self) -> TypeId {
+        self.ctx.arena.borrow().primitives.f64
+    }
+
     /// Get the interned string type
     pub fn string_type(&self) -> TypeId {
         self.ctx.arena.borrow().primitives.string
@@ -450,18 +455,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Create an integer constant with a specific Vole type
-    pub fn int_const(&mut self, n: i64, vole_type: LegacyType) -> CompiledValue {
-        let ty = type_to_cranelift(&vole_type, self.ctx.pointer_type);
+    pub fn int_const(&mut self, n: i64, type_id: TypeId) -> CompiledValue {
+        let ty = self.cranelift_type(type_id);
         let value = self.builder.ins().iconst(ty, n);
         CompiledValue {
             value,
             ty,
-            type_id: self.intern_type(&vole_type),
+            type_id,
         }
     }
 
     /// Create a float constant with explicit type (for bidirectional inference)
-    pub fn float_const(&mut self, n: f64, vole_type: LegacyType) -> CompiledValue {
+    pub fn float_const(&mut self, n: f64, type_id: TypeId) -> CompiledValue {
+        let vole_type = self.to_legacy(type_id);
         let (ty, value) = match vole_type {
             LegacyType::Primitive(PrimitiveType::F32) => {
                 let v = self.builder.ins().f32const(n as f32);
@@ -476,7 +482,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty,
-            type_id: self.intern_type(&vole_type),
+            type_id,
         }
     }
 
