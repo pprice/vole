@@ -65,7 +65,7 @@ pub(crate) fn resolve_method_target(
             &input.analyzed.entity_registry,
         )
         .and_then(|meta| meta.method_infos.get(&input.method_id))
-        .cloned()
+        .copied()
         .ok_or_else(|| {
             format!(
                 "Method {} not found on type {:?}",
@@ -78,7 +78,7 @@ pub(crate) fn resolve_method_target(
         input
             .impl_method_infos
             .get(&(type_id, input.method_id))
-            .cloned()
+            .copied()
             .ok_or_else(|| {
                 format!(
                     "Unknown method {} on {}",
@@ -276,7 +276,7 @@ pub(crate) fn resolve_method_target(
         ) && let Some(method_info) = input
             .impl_method_infos
             .get(&(type_id, input.method_id))
-            .cloned()
+            .copied()
         {
             return Ok(MethodTarget::Implemented {
                 method_info,
@@ -292,7 +292,7 @@ pub(crate) fn resolve_method_target(
         ) && let Some(method_info) = input
             .impl_method_infos
             .get(&(type_id, method_name_id))
-            .cloned()
+            .copied()
         {
             return Ok(MethodTarget::Implemented {
                 method_info,
@@ -317,7 +317,11 @@ pub(crate) fn resolve_method_target(
         &input.analyzed.entity_registry,
     ) && let Ok(method_info) = lookup_impl_method(type_id)
     {
-        let return_type = method_info.return_type.clone();
+        let return_type = input
+            .analyzed
+            .type_arena
+            .borrow()
+            .to_type(method_info.return_type);
         return Ok(MethodTarget::Implemented {
             method_info,
             return_type,
@@ -329,7 +333,11 @@ pub(crate) fn resolve_method_target(
     if let Ok(type_name_id) = get_type_name_id(input.object_type, &input.analyzed.entity_registry)
         && let Ok(method_info) = lookup_direct_method(type_name_id)
     {
-        let return_type = method_info.return_type.clone();
+        let return_type = input
+            .analyzed
+            .type_arena
+            .borrow()
+            .to_type(method_info.return_type);
         return Ok(MethodTarget::Direct {
             method_info,
             return_type,

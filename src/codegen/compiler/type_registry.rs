@@ -164,11 +164,16 @@ impl Compiler<'_> {
         let func_module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
         for method in &class.methods {
-            let return_type = method
+            let return_type_legacy = method
                 .return_type
                 .as_ref()
                 .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(LegacyType::Void);
+            let return_type = self
+                .analyzed
+                .type_arena
+                .borrow_mut()
+                .from_type(&return_type_legacy);
             let sig = self.build_signature(
                 &method.params,
                 method.return_type.as_ref(),
@@ -220,11 +225,16 @@ impl Compiler<'_> {
             if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
                 for method in &interface_decl.methods {
                     if method.body.is_some() && !direct_methods.contains(&method.name) {
-                        let return_type = method
+                        let return_type_legacy = method
                             .return_type
                             .as_ref()
                             .map(|t| self.resolve_type_with_metadata(t))
                             .unwrap_or(LegacyType::Void);
+                        let return_type = self
+                            .analyzed
+                            .type_arena
+                            .borrow_mut()
+                            .from_type(&return_type_legacy);
                         let sig = self.build_signature(
                             &method.params,
                             method.return_type.as_ref(),
@@ -348,11 +358,16 @@ impl Compiler<'_> {
         let func_module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
         for method in &record.methods {
-            let return_type = method
+            let return_type_legacy = method
                 .return_type
                 .as_ref()
                 .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(LegacyType::Void);
+            let return_type = self
+                .analyzed
+                .type_arena
+                .borrow_mut()
+                .from_type(&return_type_legacy);
             let sig = self.build_signature(
                 &method.params,
                 method.return_type.as_ref(),
@@ -404,11 +419,16 @@ impl Compiler<'_> {
             if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
                 for method in &interface_decl.methods {
                     if method.body.is_some() && !direct_methods.contains(&method.name) {
-                        let return_type = method
+                        let return_type_legacy = method
                             .return_type
                             .as_ref()
                             .map(|t| self.resolve_type_with_metadata(t))
                             .unwrap_or(LegacyType::Void);
+                        let return_type = self
+                            .analyzed
+                            .type_arena
+                            .borrow_mut()
+                            .from_type(&return_type_legacy);
                         let sig = self.build_signature(
                             &method.params,
                             method.return_type.as_ref(),
@@ -469,11 +489,16 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let return_type = method
+            let return_type_legacy = method
                 .return_type
                 .as_ref()
                 .map(|t| self.resolve_type_with_metadata(t))
                 .unwrap_or(LegacyType::Void);
+            let return_type = self
+                .analyzed
+                .type_arena
+                .borrow_mut()
+                .from_type(&return_type_legacy);
 
             // Create signature without self parameter
             let sig = self.build_signature(
@@ -573,11 +598,16 @@ impl Compiler<'_> {
             let method_name_str = module_interner.resolve(method.name);
             tracing::debug!(type_name = %type_name_str, method_name = %method_name_str, "Processing instance method");
 
-            let return_type = method
+            let return_type_legacy = method
                 .return_type
                 .as_ref()
                 .map(|t| self.resolve_type_with_interner(t, module_interner))
                 .unwrap_or(LegacyType::Void);
+            let return_type = self
+                .analyzed
+                .type_arena
+                .borrow_mut()
+                .from_type(&return_type_legacy);
 
             let sig = self.build_signature(
                 &method.params,
@@ -646,11 +676,16 @@ impl Compiler<'_> {
                     continue;
                 }
 
-                let return_type = method
+                let return_type_legacy = method
                     .return_type
                     .as_ref()
                     .map(|t| self.resolve_type_with_interner(t, module_interner))
                     .unwrap_or(LegacyType::Void);
+                let return_type = self
+                    .analyzed
+                    .type_arena
+                    .borrow_mut()
+                    .from_type(&return_type_legacy);
 
                 let sig = self.build_signature(
                     &method.params,

@@ -1009,7 +1009,7 @@ fn resolve_vtable_target(
         let method_info = ctx
             .impl_method_infos
             .get(&(type_id, method_name_id))
-            .cloned()
+            .copied()
             .ok_or_else(|| "implement method info not found".to_string())?;
         return Ok(VtableMethod {
             func_type: impl_.func_type.clone(),
@@ -1033,7 +1033,7 @@ fn resolve_vtable_target(
             type_name_id,
             &ctx.analyzed.entity_registry,
         )
-        && let Some(method_info) = meta.method_infos.get(&method_name_id).cloned()
+        && let Some(method_info) = meta.method_infos.get(&method_name_id).copied()
     {
         // Look up method type via EntityRegistry
         let func_type = ctx

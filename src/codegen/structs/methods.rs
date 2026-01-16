@@ -893,7 +893,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Look up the static method info (for non-generic classes)
-        let method_info = self
+        let method_info = *self
             .ctx
             .static_method_infos
             .get(&(type_def_id, method_name_id))
@@ -916,8 +916,7 @@ impl Cg<'_, '_, '_> {
                     "Static method not found: {}::{} (type_def_id={:?}, method_name_id={:?}). Registered: {:?}",
                     type_name, method_name, type_def_id, method_name_id, registered_keys
                 )
-            })?
-            .clone();
+            })?;
 
         // Compile arguments (no receiver for static methods)
         let mut args = Vec::new();

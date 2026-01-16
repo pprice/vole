@@ -67,10 +67,10 @@ pub(crate) struct TypeMetadata {
 }
 
 /// Metadata for a compiled method (opaque function key + return type)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct MethodInfo {
     pub func_key: crate::codegen::FunctionKey,
-    pub return_type: LegacyType,
+    pub return_type: TypeId,
 }
 
 /// Look up TypeMetadata by NameId (cross-interner safe)

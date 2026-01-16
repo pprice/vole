@@ -230,7 +230,7 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let return_type = method
+            let return_type_legacy = method
                 .return_type
                 .as_ref()
                 .map(|t| {
@@ -245,6 +245,11 @@ impl Compiler<'_> {
                     )
                 })
                 .unwrap_or(LegacyType::Void);
+            let return_type = self
+                .analyzed
+                .type_arena
+                .borrow_mut()
+                .from_type(&return_type_legacy);
 
             // Create signature without self parameter
             let sig = self.build_signature(
@@ -324,7 +329,7 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let return_type = method
+            let return_type_legacy = method
                 .return_type
                 .as_ref()
                 .map(|t| {
@@ -339,6 +344,11 @@ impl Compiler<'_> {
                     )
                 })
                 .unwrap_or(LegacyType::Void);
+            let return_type = self
+                .analyzed
+                .type_arena
+                .borrow_mut()
+                .from_type(&return_type_legacy);
 
             // Create signature without self parameter
             let sig = self.build_signature(
@@ -422,7 +432,7 @@ impl Compiler<'_> {
 
         // Declare methods as functions: TypeName::methodName (implement block convention)
         for method in &impl_block.methods {
-            let return_type = method
+            let return_type_legacy = method
                 .return_type
                 .as_ref()
                 .map(|t| {
@@ -437,6 +447,11 @@ impl Compiler<'_> {
                     )
                 })
                 .unwrap_or(LegacyType::Void);
+            let return_type = self
+                .analyzed
+                .type_arena
+                .borrow_mut()
+                .from_type(&return_type_legacy);
             let sig = self.build_signature(
                 &method.params,
                 method.return_type.as_ref(),
@@ -495,7 +510,7 @@ impl Compiler<'_> {
                     continue;
                 }
 
-                let return_type = method
+                let return_type_legacy = method
                     .return_type
                     .as_ref()
                     .map(|t| {
@@ -510,6 +525,11 @@ impl Compiler<'_> {
                         )
                     })
                     .unwrap_or(LegacyType::Void);
+                let return_type = self
+                    .analyzed
+                    .type_arena
+                    .borrow_mut()
+                    .from_type(&return_type_legacy);
 
                 // Create signature without self parameter
                 let sig = self.build_signature(
@@ -596,7 +616,7 @@ impl Compiler<'_> {
                 .impl_type_id_from_type(&self_vole_type)
                 .and_then(|type_id| {
                     let method_id = self.method_name_id(method.name);
-                    self.impl_method_infos.get(&(type_id, method_id)).cloned()
+                    self.impl_method_infos.get(&(type_id, method_id)).copied()
                 });
             self.compile_implement_method(
                 method,
@@ -710,7 +730,7 @@ impl Compiler<'_> {
                 .and_then(|type_id| {
                     let method_id =
                         method_name_id_with_interner(self.analyzed, interner, method.name)?;
-                    self.impl_method_infos.get(&(type_id, method_id)).cloned()
+                    self.impl_method_infos.get(&(type_id, method_id)).copied()
                 });
             self.compile_implement_method_with_interner(
                 method,
