@@ -256,8 +256,8 @@ fn compile_pure_lambda(
         .map_err(|e| e.to_string())?;
 
     ctx.func_registry.set_func_id(func_key, func_id);
-    ctx.func_registry
-        .set_return_type(func_key, return_vole_type.clone());
+    let return_type_id = ctx.arena.borrow_mut().from_type(&return_vole_type);
+    ctx.func_registry.set_return_type(func_key, return_type_id);
 
     let mut lambda_ctx = ctx.module.make_context();
     lambda_ctx.func.signature = sig.clone();
@@ -395,8 +395,8 @@ fn compile_lambda_with_captures(
         .map_err(|e| e.to_string())?;
 
     ctx.func_registry.set_func_id(func_key, func_id);
-    ctx.func_registry
-        .set_return_type(func_key, return_vole_type.clone());
+    let return_type_id = ctx.arena.borrow_mut().from_type(&return_vole_type);
+    ctx.func_registry.set_return_type(func_key, return_type_id);
 
     let capture_bindings =
         build_capture_bindings(&captures, variables, &mut ctx.arena.borrow_mut());

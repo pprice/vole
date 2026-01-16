@@ -232,9 +232,14 @@ impl Cg<'_, '_, '_> {
         self.ctx
             .func_registry
             .set_func_id(wrapper_func_key, wrapper_func_id);
+        let return_type_id = self
+            .ctx
+            .arena
+            .borrow_mut()
+            .from_type(&func_type.return_type);
         self.ctx
             .func_registry
-            .set_return_type(wrapper_func_key, (*func_type.return_type).clone());
+            .set_return_type(wrapper_func_key, return_type_id);
 
         // Build the wrapper function body
         let mut wrapper_ctx = self.ctx.module.make_context();

@@ -8,7 +8,6 @@ use cranelift_module::FuncId;
 
 use crate::frontend::{Interner, Symbol};
 use crate::identity::{ModuleId, NameId, NameTable};
-use crate::sema::LegacyType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FunctionKey(u32);
@@ -102,11 +101,13 @@ enum FunctionName {
     Runtime(RuntimeFn),
 }
 
+use crate::sema::type_arena::TypeId;
+
 #[derive(Debug, Clone)]
 struct FunctionEntry {
     name: FunctionName,
     func_id: Option<FuncId>,
-    return_type: Option<LegacyType>,
+    return_type: Option<TypeId>,
 }
 
 pub struct FunctionRegistry {
@@ -215,14 +216,14 @@ impl FunctionRegistry {
         self.entries.get(key.0 as usize)?.func_id
     }
 
-    pub fn set_return_type(&mut self, key: FunctionKey, ty: LegacyType) {
+    pub fn set_return_type(&mut self, key: FunctionKey, ty: TypeId) {
         if let Some(entry) = self.entries.get_mut(key.0 as usize) {
             entry.return_type = Some(ty);
         }
     }
 
-    pub fn return_type(&self, key: FunctionKey) -> Option<&LegacyType> {
-        self.entries.get(key.0 as usize)?.return_type.as_ref()
+    pub fn return_type(&self, key: FunctionKey) -> Option<TypeId> {
+        self.entries.get(key.0 as usize)?.return_type
     }
 
     pub fn display(&self, key: FunctionKey) -> String {

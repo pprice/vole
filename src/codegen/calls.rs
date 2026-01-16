@@ -626,7 +626,7 @@ impl Cg<'_, '_, '_> {
             .ctx
             .func_registry
             .return_type(func_key)
-            .cloned()
+            .map(|ty| self.to_legacy(ty))
             .unwrap_or(LegacyType::Void);
 
         if results.is_empty() {

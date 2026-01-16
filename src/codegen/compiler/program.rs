@@ -145,17 +145,18 @@ impl Compiler<'_> {
                         .as_ref()
                         .map(|t| self.resolve_type_with_metadata(t))
                         .unwrap_or(LegacyType::Void);
-                    self.func_registry.set_return_type(func_key, return_type);
+                    let return_type_id = self.analyzed.type_arena.borrow_mut().from_type(&return_type);
+                    self.func_registry.set_return_type(func_key, return_type_id);
                 }
                 Decl::Tests(tests_decl) => {
                     // Declare each test with a generated name and signature () -> i64
+                    let i64_type_id = self.analyzed.type_arena.borrow().primitives.i64;
                     for _ in &tests_decl.tests {
                         let (name_id, func_key) = self.test_function_key(test_count);
                         let func_name = self.test_display_name(name_id);
                         let sig = self.jit.create_signature(&[], Some(types::I64));
                         let func_id = self.jit.declare_function(&func_name, &sig);
-                        self.func_registry
-                            .set_return_type(func_key, LegacyType::Primitive(PrimitiveType::I64));
+                        self.func_registry.set_return_type(func_key, i64_type_id);
                         self.func_registry.set_func_id(func_key, func_id);
                         test_count += 1;
                     }
@@ -304,7 +305,8 @@ impl Compiler<'_> {
                             )
                         })
                         .unwrap_or(LegacyType::Void);
-                    self.func_registry.set_return_type(func_key, return_type);
+                    let return_type_id = self.analyzed.type_arena.borrow_mut().from_type(&return_type);
+                    self.func_registry.set_return_type(func_key, return_type_id);
                 }
             }
 
@@ -426,7 +428,8 @@ impl Compiler<'_> {
                             )
                         })
                         .unwrap_or(LegacyType::Void);
-                    self.func_registry.set_return_type(func_key, return_type);
+                    let return_type_id = self.analyzed.type_arena.borrow_mut().from_type(&return_type);
+                    self.func_registry.set_return_type(func_key, return_type_id);
                 }
             }
 
@@ -893,16 +896,17 @@ impl Compiler<'_> {
                             )
                         })
                         .unwrap_or(LegacyType::Void);
-                    self.func_registry.set_return_type(func_key, return_type);
+                    let return_type_id = self.analyzed.type_arena.borrow_mut().from_type(&return_type);
+                    self.func_registry.set_return_type(func_key, return_type_id);
                 }
                 Decl::Tests(tests_decl) if include_tests => {
+                    let i64_type_id = self.analyzed.type_arena.borrow().primitives.i64;
                     for _ in &tests_decl.tests {
                         let (name_id, func_key) = self.test_function_key(test_count);
                         let func_name = self.test_display_name(name_id);
                         let sig = self.jit.create_signature(&[], Some(types::I64));
                         let func_id = self.jit.declare_function(&func_name, &sig);
-                        self.func_registry
-                            .set_return_type(func_key, LegacyType::Primitive(PrimitiveType::I64));
+                        self.func_registry.set_return_type(func_key, i64_type_id);
                         self.func_registry.set_func_id(func_key, func_id);
                         test_count += 1;
                     }
@@ -1173,8 +1177,12 @@ impl Compiler<'_> {
         self.func_registry.set_func_id(func_key, func_id);
 
         // Record return type for call expressions
-        self.func_registry
-            .set_return_type(func_key, (*func_type.return_type).clone());
+        let return_type_id = self
+            .analyzed
+            .type_arena
+            .borrow_mut()
+            .from_type(&func_type.return_type);
+        self.func_registry.set_return_type(func_key, return_type_id);
     }
 
     /// Declare all monomorphized function instances
