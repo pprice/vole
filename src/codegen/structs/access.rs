@@ -178,12 +178,10 @@ impl Cg<'_, '_, '_> {
             .brif(is_nil, nil_block, &[], not_nil_block, &[]);
 
         // Nil block: return nil wrapped in the optional type
-        // construct_union still needs LegacyType - convert for now
         self.builder.switch_to_block(nil_block);
         self.builder.seal_block(nil_block);
         let nil_val = self.nil_value();
-        let result_vole_type = self.to_legacy(result_type_id);
-        let nil_union = self.construct_union(nil_val, &result_vole_type)?;
+        let nil_union = self.construct_union_id(nil_val, result_type_id)?;
         self.builder
             .ins()
             .jump(merge_block, &[nil_union.value.into()]);
@@ -210,7 +208,7 @@ impl Cg<'_, '_, '_> {
             convert_field_value_id(self.builder, field_raw, field_type_id, &arena)
         };
 
-        // Wrap the field value in an optional (using construct_union)
+        // Wrap the field value in an optional (using construct_union_id)
         // But if field type is already optional, it's already a union - just use it directly
         let field_compiled = CompiledValue {
             value: field_val,
@@ -222,7 +220,7 @@ impl Cg<'_, '_, '_> {
             field_compiled
         } else {
             // Wrap non-optional field in optional
-            self.construct_union(field_compiled, &result_vole_type)?
+            self.construct_union_id(field_compiled, result_type_id)?
         };
         self.builder
             .ins()

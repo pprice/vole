@@ -297,9 +297,7 @@ impl Cg<'_, '_, '_> {
                         && self.ctx.arena.borrow().is_union(ret_type_id)
                     {
                         // For union return types, wrap the value in a union
-                        // construct_union still needs LegacyType
-                        let union_type = self.to_legacy(ret_type_id);
-                        let wrapped = self.construct_union(compiled, &union_type)?;
+                        let wrapped = self.construct_union_id(compiled, ret_type_id)?;
                         self.builder.ins().return_(&[wrapped.value]);
                     } else {
                         // Non-fallible function, return value directly
@@ -788,6 +786,98 @@ impl Cg<'_, '_, '_> {
             value: ptr,
             ty: self.ctx.pointer_type,
             type_id: self.intern_type(union_type),
+        })
+    }
+
+    /// Wrap a value in a union representation using TypeId (no LegacyType conversion)
+    pub fn construct_union_id(
+        &mut self,
+        value: CompiledValue,
+        union_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
+        let arena = self.ctx.arena.borrow();
+        let variants = arena.unwrap_union(union_type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("union construction", "union type", "non-union").to_string()
+        })?;
+        let variants = variants.clone();
+        let nil_id = arena.nil();
+        drop(arena);
+
+        // If the value is already the same union type, just return it
+        if value.type_id == union_type_id {
+            return Ok(value);
+        }
+
+        // Find the position of value's type in variants
+        let (tag, actual_value, actual_type_id) =
+            if let Some(pos) = variants.iter().position(|&v| v == value.type_id) {
+                (pos, value.value, value.type_id)
+            } else {
+                // Try to find a compatible integer type for widening/narrowing
+                let arena = self.ctx.arena.borrow();
+                let value_is_integer = arena.is_integer(value.type_id);
+
+                let compatible = if value_is_integer {
+                    variants.iter().enumerate().find(|(_, v)| {
+                        arena.is_integer(**v)
+                    }).map(|(pos, v)| (pos, *v))
+                } else {
+                    None
+                };
+                drop(arena);
+
+                match compatible {
+                    Some((pos, variant_type_id)) => {
+                        let arena = self.ctx.arena.borrow();
+                        let target_ty = type_id_to_cranelift(variant_type_id, &arena, self.ctx.pointer_type);
+                        drop(arena);
+                        let actual = if target_ty.bytes() < value.ty.bytes() {
+                            self.builder.ins().ireduce(target_ty, value.value)
+                        } else if target_ty.bytes() > value.ty.bytes() {
+                            self.builder.ins().sextend(target_ty, value.value)
+                        } else {
+                            value.value
+                        };
+                        (pos, actual, variant_type_id)
+                    }
+                    None => {
+                        return Err(CodegenError::type_mismatch(
+                            "union variant",
+                            "compatible type",
+                            "incompatible type",
+                        )
+                        .into());
+                    }
+                }
+            };
+
+        let union_size = type_id_size(
+            union_type_id,
+            self.ctx.pointer_type,
+            &self.ctx.analyzed.entity_registry,
+            &self.ctx.arena.borrow(),
+        );
+        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            union_size,
+            0,
+        ));
+
+        let tag_val = self.builder.ins().iconst(types::I8, tag as i64);
+        self.builder.ins().stack_store(tag_val, slot, 0);
+
+        if actual_type_id != nil_id {
+            self.builder.ins().stack_store(actual_value, slot, 8);
+        }
+
+        let ptr = self
+            .builder
+            .ins()
+            .stack_addr(self.ctx.pointer_type, slot, 0);
+        Ok(CompiledValue {
+            value: ptr,
+            ty: self.ctx.pointer_type,
+            type_id: union_type_id,
         })
     }
 
