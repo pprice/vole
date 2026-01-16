@@ -8,6 +8,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use crate::frontend::{BinaryOp, Expr, ExprKind, LambdaBody, LambdaExpr, Symbol};
+use crate::sema::type_arena::{TypeArena, TypeId};
 use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
 use super::RuntimeFn;
@@ -15,16 +16,16 @@ use super::context::{Captures, Cg, ControlFlow};
 use super::types::{CompileCtx, CompiledValue, resolve_type_expr, type_size, type_to_cranelift};
 
 /// Information about a captured variable for lambda compilation
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct CaptureBinding {
     /// Index in the closure's captures array
     pub index: usize,
-    /// Vole type of the captured variable
-    pub vole_type: LegacyType,
+    /// Vole type of the captured variable (interned TypeId)
+    pub vole_type: TypeId,
 }
 
 impl CaptureBinding {
-    pub fn new(index: usize, vole_type: LegacyType) -> Self {
+    pub fn new(index: usize, vole_type: TypeId) -> Self {
         Self { index, vole_type }
     }
 }
@@ -33,13 +34,16 @@ impl CaptureBinding {
 pub(crate) fn build_capture_bindings(
     captures: &[crate::frontend::Capture],
     variables: &HashMap<Symbol, (Variable, LegacyType)>,
+    arena: &mut TypeArena,
 ) -> HashMap<Symbol, CaptureBinding> {
     let mut bindings = HashMap::new();
+    let default_type = LegacyType::Primitive(PrimitiveType::I64);
     for (i, capture) in captures.iter().enumerate() {
-        let vole_type = variables
+        let vole_type_legacy = variables
             .get(&capture.name)
-            .map(|(_, ty)| ty.clone())
-            .unwrap_or(LegacyType::Primitive(PrimitiveType::I64));
+            .map(|(_, ty)| ty)
+            .unwrap_or(&default_type);
+        let vole_type = arena.from_type(vole_type_legacy);
         bindings.insert(capture.name, CaptureBinding::new(i, vole_type));
     }
     bindings
@@ -394,7 +398,8 @@ fn compile_lambda_with_captures(
     ctx.func_registry
         .set_return_type(func_key, return_vole_type.clone());
 
-    let capture_bindings = build_capture_bindings(&captures, variables);
+    let capture_bindings =
+        build_capture_bindings(&captures, variables, &mut ctx.arena.borrow_mut());
 
     let mut lambda_ctx = ctx.module.make_context();
     lambda_ctx.func.signature = sig.clone();

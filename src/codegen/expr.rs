@@ -32,7 +32,7 @@ impl Cg<'_, '_, '_> {
         // Check for captures first if in closure context
         if self.has_captures()
             && let ExprKind::Identifier(sym) = &expr.kind
-            && let Some(binding) = self.get_capture(sym).cloned()
+            && let Some(binding) = self.get_capture(sym).copied()
         {
             return self.load_capture(&binding);
         }
@@ -346,7 +346,7 @@ impl Cg<'_, '_, '_> {
                 let mut value = self.expr(&assign.value)?;
 
                 // Check for captured variable assignment
-                if let Some(binding) = self.get_capture(sym).cloned() {
+                if let Some(binding) = self.get_capture(sym).copied() {
                     return self.store_capture(&binding, value);
                 }
 
@@ -927,7 +927,8 @@ impl Cg<'_, '_, '_> {
         let heap_ptr =
             self.call_runtime(RuntimeFn::ClosureGetCapture, &[closure_ptr, index_val])?;
 
-        let cranelift_ty = type_to_cranelift(&binding.vole_type, self.ctx.pointer_type);
+        let vole_type = self.to_legacy(binding.vole_type);
+        let cranelift_ty = type_to_cranelift(&vole_type, self.ctx.pointer_type);
         let value = self
             .builder
             .ins()
@@ -936,7 +937,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value,
             ty: cranelift_ty,
-            type_id: self.intern_type(&binding.vole_type),
+            type_id: binding.vole_type,
         })
     }
 
@@ -955,7 +956,8 @@ impl Cg<'_, '_, '_> {
         let heap_ptr =
             self.call_runtime(RuntimeFn::ClosureGetCapture, &[closure_ptr, index_val])?;
 
-        let cranelift_ty = type_to_cranelift(&binding.vole_type, self.ctx.pointer_type);
+        let vole_type = self.to_legacy(binding.vole_type);
+        let cranelift_ty = type_to_cranelift(&vole_type, self.ctx.pointer_type);
         self.builder
             .ins()
             .store(MemFlags::new(), value.value, heap_ptr, 0);
@@ -963,7 +965,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: value.value,
             ty: cranelift_ty,
-            type_id: self.intern_type(&binding.vole_type),
+            type_id: binding.vole_type,
         })
     }
 
