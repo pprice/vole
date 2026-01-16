@@ -479,14 +479,15 @@ impl Cg<'_, '_, '_> {
                         });
                     // Convert Iterator<T> to RuntimeIterator(T) since external functions
                     // return raw iterator pointers, not boxed interface values
-                    let vole_type = self.maybe_convert_iterator_return_type(vole_type);
+                    let type_id = self.intern_type(&vole_type);
+                    let type_id = self.maybe_convert_iterator_return_type(type_id);
                     return Ok(CompiledValue {
                         value: results[0],
                         ty: native_type_to_cranelift(
                             &native_func.signature.return_type,
                             self.ctx.pointer_type,
                         ),
-                        type_id: self.intern_type(&vole_type),
+                        type_id,
                     });
                 }
             }
@@ -560,14 +561,15 @@ impl Cg<'_, '_, '_> {
                     });
                 // Convert Iterator<T> to RuntimeIterator(T) since external functions
                 // return raw iterator pointers, not boxed interface values
-                let vole_type = self.maybe_convert_iterator_return_type(vole_type);
+                let type_id = self.intern_type(&vole_type);
+                let type_id = self.maybe_convert_iterator_return_type(type_id);
                 return Ok(CompiledValue {
                     value: results[0],
                     ty: native_type_to_cranelift(
                         &native_func.signature.return_type,
                         self.ctx.pointer_type,
                     ),
-                    type_id: self.intern_type(&vole_type),
+                    type_id,
                 });
             }
         }
@@ -901,14 +903,15 @@ impl Cg<'_, '_, '_> {
             // Use the concrete return type from the monomorphized function type
             // Apply class type substitutions if available (for calls inside monomorphized methods)
             let return_type = self.ctx.substitute_type(&func_type.return_type);
-            let return_type = self.maybe_convert_iterator_return_type(return_type);
+            let type_id = self.intern_type(&return_type);
+            let type_id = self.maybe_convert_iterator_return_type(type_id);
             Ok(CompiledValue {
                 value: results[0],
                 ty: native_type_to_cranelift(
                     &native_func.signature.return_type,
                     self.ctx.pointer_type,
                 ),
-                type_id: self.intern_type(&return_type),
+                type_id,
             })
         }
     }

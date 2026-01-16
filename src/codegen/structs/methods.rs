@@ -23,6 +23,7 @@ use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::generic::substitute_type;
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::types::NominalType;
+use crate::sema::type_arena::TypeId;
 use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
 impl Cg<'_, '_, '_> {
@@ -244,9 +245,8 @@ impl Cg<'_, '_, '_> {
                     }
                 }
                 // Convert Iterator return types to RuntimeIterator for external methods
+                let return_type = self.maybe_convert_iterator_return_type(return_type);
                 let return_type_legacy = self.to_legacy(return_type);
-                let return_type_legacy =
-                    self.maybe_convert_iterator_return_type(return_type_legacy);
                 return self.call_external(&external_info, &args, &return_type_legacy);
             }
             MethodTarget::InterfaceDispatch {
@@ -561,11 +561,13 @@ impl Cg<'_, '_, '_> {
             .iter()
             .map(|param| (*param, elem_ty.clone()))
             .collect();
-        let return_type = substitute_type(&method.signature.return_type, &substitutions);
+        let return_type_legacy = substitute_type(&method.signature.return_type, &substitutions);
 
         // Convert Iterator<T> return types to RuntimeIterator(T) since the runtime
         // functions return raw iterator pointers, not boxed interface values
-        let return_type = self.convert_iterator_return_type(return_type, iter_type_id);
+        let return_type_id = self.intern_type(&return_type_legacy);
+        let return_type_id = self.convert_iterator_return_type(return_type_id, iter_type_id);
+        let return_type = self.to_legacy(return_type_id);
 
         // Build args: self (iterator ptr) + method args
         let mut args: ArgVec = smallvec![obj.value];
@@ -585,14 +587,15 @@ impl Cg<'_, '_, '_> {
     /// for Iterator to RuntimeIterator so that subsequent method calls use direct dispatch.
     fn convert_iterator_return_type(
         &self,
-        ty: LegacyType,
+        ty: TypeId,
         iterator_type_id: TypeDefId,
-    ) -> LegacyType {
+    ) -> TypeId {
         self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
     }
 
     /// Convert Iterator<T> return types to RuntimeIterator(T), looking up Iterator interface by name
-    pub(crate) fn maybe_convert_iterator_return_type(&self, ty: LegacyType) -> LegacyType {
+    /// Takes and returns TypeId for O(1) equality; converts internally for matching
+    pub(crate) fn maybe_convert_iterator_return_type(&self, ty: TypeId) -> TypeId {
         // Look up the Iterator interface via Resolver
         let iterator_type_id = self
             .ctx
@@ -606,18 +609,23 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Core implementation of iterator return type conversion
+    /// Takes TypeId and converts to LegacyType internally for pattern matching
     fn convert_iterator_return_type_by_type_def_id(
         &self,
-        ty: LegacyType,
+        ty: TypeId,
         iterator_type_id: TypeDefId,
-    ) -> LegacyType {
-        match &ty {
+    ) -> TypeId {
+        let arena = self.ctx.arena.borrow();
+        let legacy_ty = arena.to_type(ty);
+        match &legacy_ty {
             // Handle Iterator<T> stored as Interface
             LegacyType::Nominal(NominalType::Interface(iface))
                 if iface.type_def_id == iterator_type_id =>
             {
                 if let Some(elem_ty) = iface.type_args.first() {
-                    LegacyType::RuntimeIterator(Box::new(elem_ty.clone()))
+                    let result = LegacyType::RuntimeIterator(Box::new(elem_ty.clone()));
+                    drop(arena);
+                    self.ctx.arena.borrow_mut().from_type(&result)
                 } else {
                     ty
                 }
@@ -836,12 +844,14 @@ impl Cg<'_, '_, '_> {
 
         // Convert Iterator return types to RuntimeIterator for interface dispatch
         // since external iterator methods return raw iterator pointers, not boxed interfaces
-        let return_type = self.maybe_convert_iterator_return_type((*func_type.return_type).clone());
+        let return_type_id = self.intern_type(&func_type.return_type);
+        let return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
+        let return_type = self.to_legacy(return_type_id);
 
         Ok(CompiledValue {
             value,
             ty: type_to_cranelift(&return_type, word_type),
-            type_id: self.intern_type(&return_type),
+            type_id: return_type_id,
         })
     }
 
