@@ -1244,8 +1244,9 @@ pub(crate) fn value_to_word(
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
     let arena_ref = arena.borrow();
-    let legacy_type = arena_ref.to_type(value.type_id);
-    let needs_box = type_size(&legacy_type, pointer_type, entity_registry, &arena_ref) > word_bytes;
+    // Use type_id_size to avoid LegacyType conversion for size calculation
+    let value_size = type_id_size(value.type_id, pointer_type, entity_registry, &arena_ref);
+    let needs_box = value_size > word_bytes;
 
     if needs_box {
         // If the Cranelift type is already a pointer and the Vole type needs boxing,
@@ -1261,7 +1262,7 @@ pub(crate) fn value_to_word(
         };
         let size_val = builder.ins().iconst(
             pointer_type,
-            type_size(&legacy_type, pointer_type, entity_registry, &arena_ref) as i64,
+            value_size as i64,
         );
         let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
         let alloc_ptr = builder.inst_results(alloc_call)[0];
@@ -1271,32 +1272,33 @@ pub(crate) fn value_to_word(
         return Ok(alloc_ptr);
     }
 
-    let word = match legacy_type {
-        LegacyType::Primitive(PrimitiveType::F64) => {
+    use crate::sema::type_arena::Type as ArenaType;
+    let word = match arena_ref.get(value.type_id) {
+        ArenaType::Primitive(PrimitiveType::F64) => {
             builder
                 .ins()
                 .bitcast(types::I64, MemFlags::new(), value.value)
         }
-        LegacyType::Primitive(PrimitiveType::F32) => {
+        ArenaType::Primitive(PrimitiveType::F32) => {
             let i32_val = builder
                 .ins()
                 .bitcast(types::I32, MemFlags::new(), value.value);
             builder.ins().uextend(word_type, i32_val)
         }
-        LegacyType::Primitive(PrimitiveType::Bool) => builder.ins().uextend(word_type, value.value),
-        LegacyType::Primitive(PrimitiveType::I8) | LegacyType::Primitive(PrimitiveType::U8) => {
+        ArenaType::Primitive(PrimitiveType::Bool) => builder.ins().uextend(word_type, value.value),
+        ArenaType::Primitive(PrimitiveType::I8) | ArenaType::Primitive(PrimitiveType::U8) => {
             builder.ins().uextend(word_type, value.value)
         }
-        LegacyType::Primitive(PrimitiveType::I16) | LegacyType::Primitive(PrimitiveType::U16) => {
+        ArenaType::Primitive(PrimitiveType::I16) | ArenaType::Primitive(PrimitiveType::U16) => {
             builder.ins().uextend(word_type, value.value)
         }
-        LegacyType::Primitive(PrimitiveType::I32) | LegacyType::Primitive(PrimitiveType::U32) => {
+        ArenaType::Primitive(PrimitiveType::I32) | ArenaType::Primitive(PrimitiveType::U32) => {
             builder.ins().uextend(word_type, value.value)
         }
-        LegacyType::Primitive(PrimitiveType::I64) | LegacyType::Primitive(PrimitiveType::U64) => {
+        ArenaType::Primitive(PrimitiveType::I64) | ArenaType::Primitive(PrimitiveType::U64) => {
             value.value
         }
-        LegacyType::Primitive(PrimitiveType::I128) => {
+        ArenaType::Primitive(PrimitiveType::I128) => {
             let low = builder.ins().ireduce(types::I64, value.value);
             if word_type == types::I64 {
                 low
