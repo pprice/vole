@@ -612,4 +612,69 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             })
         }
     }
+
+    /// Call an external native function using TypeId for return type (no LegacyType conversion).
+    pub fn call_external_id(
+        &mut self,
+        external_info: &ExternalMethodInfo,
+        args: &[Value],
+        return_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
+        // Look up the native function in the registry
+        let native_func = self
+            .ctx
+            .native_registry
+            .lookup(&external_info.module_path, &external_info.native_name)
+            .ok_or_else(|| {
+                format!(
+                    "Native function {}::{} not found in registry",
+                    external_info.module_path, external_info.native_name
+                )
+            })?;
+
+        // Build the Cranelift signature from NativeSignature
+        let mut sig = self.ctx.module.make_signature();
+        for param_type in &native_func.signature.params {
+            sig.params.push(AbiParam::new(native_type_to_cranelift(
+                param_type,
+                self.ctx.pointer_type,
+            )));
+        }
+        if native_func.signature.return_type != NativeType::Nil {
+            sig.returns.push(AbiParam::new(native_type_to_cranelift(
+                &native_func.signature.return_type,
+                self.ctx.pointer_type,
+            )));
+        }
+
+        // Import the signature and emit an indirect call
+        let sig_ref = self.builder.import_signature(sig);
+        let func_ptr = native_func.ptr;
+
+        // Load the function pointer as a constant
+        let func_ptr_val = self
+            .builder
+            .ins()
+            .iconst(self.ctx.pointer_type, func_ptr as i64);
+
+        // Emit the indirect call
+        let call_inst = self
+            .builder
+            .ins()
+            .call_indirect(sig_ref, func_ptr_val, args);
+        let results = self.builder.inst_results(call_inst);
+
+        if results.is_empty() {
+            Ok(self.void_value())
+        } else {
+            let arena = self.ctx.arena.borrow();
+            let cranelift_ty = type_id_to_cranelift(return_type_id, &arena, self.ctx.pointer_type);
+            drop(arena);
+            Ok(CompiledValue {
+                value: results[0],
+                ty: cranelift_ty,
+                type_id: return_type_id,
+            })
+        }
+    }
 }

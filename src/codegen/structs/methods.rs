@@ -13,7 +13,7 @@ use crate::codegen::method_resolution::{
     MethodResolutionInput, MethodTarget, resolve_method_target,
 };
 use crate::codegen::types::{
-    CompiledValue, box_interface_value, module_name_id, type_size, type_to_cranelift,
+    CompiledValue, box_interface_value, module_name_id, type_id_to_cranelift, type_size, type_to_cranelift,
     value_to_word, word_to_value,
 };
 use crate::errors::CodegenError;
@@ -191,7 +191,7 @@ impl Cg<'_, '_, '_> {
             resolution,
         })?;
 
-        let (method_info, return_type) = match target {
+        let (method_info, return_type_id, return_type) = match target {
             MethodTarget::FunctionalInterface { func_type } => {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
                 if let LegacyType::Nominal(NominalType::Interface(interface_type)) =
@@ -245,9 +245,8 @@ impl Cg<'_, '_, '_> {
                     }
                 }
                 // Convert Iterator return types to RuntimeIterator for external methods
-                let return_type = self.maybe_convert_iterator_return_type(return_type);
-                let return_type_legacy = self.to_legacy(return_type);
-                return self.call_external(&external_info, &args, &return_type_legacy);
+                let return_type_id = self.maybe_convert_iterator_return_type(return_type);
+                return self.call_external_id(&external_info, &args, return_type_id);
             }
             MethodTarget::InterfaceDispatch {
                 interface_type_id,
@@ -279,8 +278,9 @@ impl Cg<'_, '_, '_> {
                 method_info,
                 return_type,
             } => {
-                let return_type = self.to_legacy(return_type);
-                (method_info, return_type)
+                // Keep TypeId for final CompiledValue, convert to LegacyType for union check
+                let return_type_legacy = self.to_legacy(return_type);
+                (method_info, return_type, return_type_legacy)
             }
         };
 
@@ -421,7 +421,7 @@ impl Cg<'_, '_, '_> {
             Ok(CompiledValue {
                 value: final_value,
                 ty: final_type,
-                type_id: self.intern_type(&return_type),
+                type_id: return_type_id,
             })
         }
     }
@@ -457,39 +457,56 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         method_name: &str,
     ) -> Result<Option<CompiledValue>, String> {
-        let obj_type = self.to_legacy(obj.type_id);
-        match (&obj_type, method_name) {
-            (LegacyType::Array(_), "length") => {
-                let result = self.call_runtime(RuntimeFn::ArrayLen, &[obj.value])?;
-                Ok(Some(self.i64_value(result)))
-            }
-            (LegacyType::Array(elem_ty), "iter") => {
-                let result = self.call_runtime(RuntimeFn::ArrayIter, &[obj.value])?;
-                // Return RuntimeIterator - a concrete type for builtin iterators
-                // This avoids interface boxing while still being compatible with Iterator<T>
-                let iter_type = LegacyType::RuntimeIterator(elem_ty.clone());
-                Ok(Some(CompiledValue {
-                    value: result,
-                    ty: self.ctx.pointer_type,
-                    type_id: self.intern_type(&iter_type),
-                }))
-            }
-            (LegacyType::Primitive(PrimitiveType::String), "length") => {
-                let result = self.call_runtime(RuntimeFn::StringLen, &[obj.value])?;
-                Ok(Some(self.i64_value(result)))
-            }
-            (LegacyType::Primitive(PrimitiveType::String), "iter") => {
-                let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
-                let iter_type = LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(
-                    PrimitiveType::String,
-                )));
-                Ok(Some(CompiledValue {
-                    value: result,
-                    ty: self.ctx.pointer_type,
-                    type_id: self.intern_type(&iter_type),
-                }))
-            }
-            (LegacyType::Range, "iter") => {
+        let arena = self.ctx.arena.borrow();
+
+        // Array methods
+        if let Some(elem_type_id) = arena.unwrap_array(obj.type_id) {
+            drop(arena);
+            return match method_name {
+                "length" => {
+                    let result = self.call_runtime(RuntimeFn::ArrayLen, &[obj.value])?;
+                    Ok(Some(self.i64_value(result)))
+                }
+                "iter" => {
+                    let result = self.call_runtime(RuntimeFn::ArrayIter, &[obj.value])?;
+                    // Return RuntimeIterator - a concrete type for builtin iterators
+                    let iter_type_id = self.ctx.arena.borrow_mut().runtime_iterator(elem_type_id);
+                    Ok(Some(CompiledValue {
+                        value: result,
+                        ty: self.ctx.pointer_type,
+                        type_id: iter_type_id,
+                    }))
+                }
+                _ => Ok(None),
+            };
+        }
+
+        // String methods
+        if arena.is_string(obj.type_id) {
+            drop(arena);
+            return match method_name {
+                "length" => {
+                    let result = self.call_runtime(RuntimeFn::StringLen, &[obj.value])?;
+                    Ok(Some(self.i64_value(result)))
+                }
+                "iter" => {
+                    let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
+                    let string_id = self.ctx.arena.borrow().string();
+                    let iter_type_id = self.ctx.arena.borrow_mut().runtime_iterator(string_id);
+                    Ok(Some(CompiledValue {
+                        value: result,
+                        ty: self.ctx.pointer_type,
+                        type_id: iter_type_id,
+                    }))
+                }
+                _ => Ok(None),
+            };
+        }
+
+        // Range methods
+        if matches!(arena.get(obj.type_id), crate::sema::type_arena::Type::Range) {
+            drop(arena);
+            if method_name == "iter" {
                 // Load start and end from the range struct (pointer to [start, end])
                 let start = self
                     .builder
@@ -500,17 +517,19 @@ impl Cg<'_, '_, '_> {
                     .ins()
                     .load(types::I64, MemFlags::new(), obj.value, 8);
                 let result = self.call_runtime(RuntimeFn::RangeIter, &[start, end])?;
-                let iter_type = LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(
-                    PrimitiveType::I64,
-                )));
-                Ok(Some(CompiledValue {
+                let i64_id = self.ctx.arena.borrow().i64();
+                let iter_type_id = self.ctx.arena.borrow_mut().runtime_iterator(i64_id);
+                return Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
-                    type_id: self.intern_type(&iter_type),
-                }))
+                    type_id: iter_type_id,
+                }));
             }
-            _ => Ok(None),
+            return Ok(None);
         }
+
+        drop(arena);
+        Ok(None)
     }
 
     /// Handle method calls on RuntimeIterator - calls external Iterator functions directly
@@ -567,7 +586,6 @@ impl Cg<'_, '_, '_> {
         // Convert Iterator<T> return types to RuntimeIterator(T) since the runtime
         // functions return raw iterator pointers, not boxed interface values
         let return_type_id = self.convert_iterator_return_type(return_type_id, iter_type_id);
-        let return_type = self.to_legacy(return_type_id);
 
         // Build args: self (iterator ptr) + method args
         let mut args: ArgVec = smallvec![obj.value];
@@ -577,7 +595,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Call the external function directly
-        self.call_external(&external_info, &args, &return_type)
+        self.call_external_id(&external_info, &args, return_type_id)
     }
 
     /// Convert Iterator<T> return types to RuntimeIterator(T)
@@ -846,11 +864,14 @@ impl Cg<'_, '_, '_> {
         // since external iterator methods return raw iterator pointers, not boxed interfaces
         let return_type_id = self.intern_type(&func_type.return_type);
         let return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
-        let return_type = self.to_legacy(return_type_id);
+
+        let arena = self.ctx.arena.borrow();
+        let cranelift_ty = type_id_to_cranelift(return_type_id, &arena, word_type);
+        drop(arena);
 
         Ok(CompiledValue {
             value,
-            ty: type_to_cranelift(&return_type, word_type),
+            ty: cranelift_ty,
             type_id: return_type_id,
         })
     }
