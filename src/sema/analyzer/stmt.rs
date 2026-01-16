@@ -320,13 +320,7 @@ impl Analyzer {
         match pattern {
             Pattern::Identifier { name, .. } => {
                 let ty_id = self.type_arena.borrow_mut().from_type(ty);
-                self.scope.define(
-                    *name,
-                    Variable {
-                        ty: ty_id,
-                        mutable,
-                    },
-                );
+                self.scope.define(*name, Variable { ty: ty_id, mutable });
                 self.add_lambda_local(*name);
             }
             Pattern::Wildcard(_) => {

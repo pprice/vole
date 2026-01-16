@@ -24,7 +24,9 @@ use crate::sema::generic::{
     ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,
     TypeParamInfo, TypeParamScope, TypeParamScopeStack, TypeParamVariance, substitute_type,
 };
-use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId, ImplementRegistry, MethodImpl};
+use crate::sema::implement_registry::{
+    ExternalMethodInfo, ImplTypeId, ImplementRegistry, MethodImpl,
+};
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::type_arena::{TypeArena, TypeId as ArenaTypeId};
 use crate::sema::types::{ConstantValue, LegacyType, ModuleType, NominalType, StructuralType};

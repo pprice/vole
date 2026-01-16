@@ -83,7 +83,9 @@ impl ImplTypeId {
                 };
                 types.primitive_name_id(prim_id).map(ImplTypeId)
             }
-            LegacyType::Range => types.primitive_name_id(PrimitiveTypeId::Range).map(ImplTypeId),
+            LegacyType::Range => types
+                .primitive_name_id(PrimitiveTypeId::Range)
+                .map(ImplTypeId),
             LegacyType::Array(_) => types.array_name_id().map(ImplTypeId),
             LegacyType::Nominal(NominalType::Class(c)) => {
                 Some(ImplTypeId(entity_registry.class_name_id(c)))
@@ -390,7 +392,11 @@ mod tests {
         registry1.merge(&registry2);
 
         // Both methods should be present
-        assert!(registry1.get_method(&ImplTypeId(i64_name), equals_id).is_some());
+        assert!(
+            registry1
+                .get_method(&ImplTypeId(i64_name), equals_id)
+                .is_some()
+        );
         assert!(
             registry1
                 .get_method(&ImplTypeId(string_name), length_id)

@@ -3,7 +3,9 @@
 use super::Analyzer;
 use crate::frontend::Interner;
 use crate::identity::Namer;
-use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId, MethodImpl, PrimitiveTypeId};
+use crate::sema::implement_registry::{
+    ExternalMethodInfo, ImplTypeId, MethodImpl, PrimitiveTypeId,
+};
 use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
 impl Analyzer {

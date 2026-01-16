@@ -860,8 +860,7 @@ impl Analyzer {
                 .iter()
                 .map(|p| substitute_type(p, &legacy_substitutions))
                 .collect();
-            let substituted_return =
-                substitute_type(&func_type.return_type, &legacy_substitutions);
+            let substituted_return = substitute_type(&func_type.return_type, &legacy_substitutions);
             let substituted_func_type = FunctionType {
                 params: substituted_params.into(),
                 return_type: Box::new(substituted_return),

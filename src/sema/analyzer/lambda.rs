@@ -114,9 +114,8 @@ impl Analyzer {
                 let old_return = self.current_function_return.take();
                 // Convert LegacyType to ArenaTypeId for storage
                 let return_type = declared_return.clone().or(expected_return.clone());
-                self.current_function_return = return_type.map(|ty| {
-                    self.type_arena.borrow_mut().from_type(&ty)
-                });
+                self.current_function_return =
+                    return_type.map(|ty| self.type_arena.borrow_mut().from_type(&ty));
 
                 let _ = self.check_block(block, interner);
 

@@ -113,10 +113,7 @@ impl Analyzer {
                 // Convert TypeId to LegacyType for substitution
                 let field_type_id = generic_info.field_types[i];
                 let field_type = self.type_arena.borrow().to_type(field_type_id);
-                let field_ty = crate::sema::generic::substitute_type(
-                    &field_type,
-                    &substitutions,
-                );
+                let field_ty = crate::sema::generic::substitute_type(&field_type, &substitutions);
                 return self.types_compatible(&field_ty, expected_type, interner);
             }
         }
@@ -684,10 +681,7 @@ impl Analyzer {
                 // Convert TypeId to LegacyType for substitution
                 let field_type_id = generic_info.field_types[i];
                 let field_type = self.type_arena.borrow().to_type(field_type_id);
-                let field_ty = crate::sema::generic::substitute_type(
-                    &field_type,
-                    &substitutions,
-                );
+                let field_ty = crate::sema::generic::substitute_type(&field_type, &substitutions);
                 return self.types_compatible(&field_ty, expected_type, interner);
             }
         }

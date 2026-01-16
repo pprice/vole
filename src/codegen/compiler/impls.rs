@@ -592,10 +592,12 @@ impl Compiler<'_> {
         };
 
         for method in &impl_block.methods {
-            let method_key = self.impl_type_id_from_type(&self_vole_type).and_then(|type_id| {
-                let method_id = self.method_name_id(method.name);
-                self.impl_method_infos.get(&(type_id, method_id)).cloned()
-            });
+            let method_key = self
+                .impl_type_id_from_type(&self_vole_type)
+                .and_then(|type_id| {
+                    let method_id = self.method_name_id(method.name);
+                    self.impl_method_infos.get(&(type_id, method_id)).cloned()
+                });
             self.compile_implement_method(
                 method,
                 &type_name,
@@ -703,10 +705,13 @@ impl Compiler<'_> {
         };
 
         for method in &impl_block.methods {
-            let method_key = self.impl_type_id_from_type(&self_vole_type).and_then(|type_id| {
-                let method_id = method_name_id_with_interner(self.analyzed, interner, method.name)?;
-                self.impl_method_infos.get(&(type_id, method_id)).cloned()
-            });
+            let method_key = self
+                .impl_type_id_from_type(&self_vole_type)
+                .and_then(|type_id| {
+                    let method_id =
+                        method_name_id_with_interner(self.analyzed, interner, method.name)?;
+                    self.impl_method_infos.get(&(type_id, method_id)).cloned()
+                });
             self.compile_implement_method_with_interner(
                 method,
                 &type_name,

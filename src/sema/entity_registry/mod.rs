@@ -585,13 +585,8 @@ mod tests {
         let mut arena = crate::sema::type_arena::TypeArena::new();
         let field_type_id = arena.from_type(&LegacyType::Primitive(PrimitiveType::I32));
 
-        let field_id = registry.register_field(
-            type_id,
-            field_name,
-            full_field_name,
-            field_type_id,
-            0,
-        );
+        let field_id =
+            registry.register_field(type_id, field_name, full_field_name, field_type_id, 0);
 
         assert_eq!(
             registry.find_field_on_type(type_id, field_name),

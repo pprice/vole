@@ -104,11 +104,8 @@ impl Analyzer {
                 let return_type = self.type_arena.borrow().to_type(generic_def.return_type);
 
                 // Infer type parameters from argument types
-                let inferred = self.infer_type_params(
-                    &generic_def.type_params,
-                    &param_types,
-                    &arg_types,
-                );
+                let inferred =
+                    self.infer_type_params(&generic_def.type_params, &param_types, &arg_types);
                 self.check_type_param_constraints(
                     &generic_def.type_params,
                     &inferred,

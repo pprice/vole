@@ -20,17 +20,6 @@ use crate::sema::type_arena::TypeId;
 use crate::sema::type_table::TypeKey;
 use crate::sema::types::LegacyType;
 
-/// Information about a call site, bundling all call-related data.
-#[derive(Debug, Clone)]
-pub struct CallInfo<'a> {
-    /// The type of the call expression (owned, converted from interned Type)
-    pub result_type: Option<LegacyType>,
-    /// Resolved method (for method calls)
-    pub method: Option<&'a ResolvedMethod>,
-    /// Monomorphization key (for generic function calls)
-    pub monomorph: Option<&'a MonomorphKey>,
-}
-
 /// Query interface for accessing analyzed program data.
 ///
 /// Provides a unified API for type queries, method resolution lookups,
@@ -108,16 +97,6 @@ impl<'a> ProgramQuery<'a> {
     #[must_use]
     pub fn static_method_generic_at(&self, node: NodeId) -> Option<&'a StaticMethodMonomorphKey> {
         self.expr_data.get_static_method_generic(node)
-    }
-
-    /// Get bundled information about a call site
-    #[must_use]
-    pub fn call_info(&self, node: NodeId) -> CallInfo<'a> {
-        CallInfo {
-            result_type: self.type_of_legacy(node),
-            method: self.method_at(node),
-            monomorph: self.monomorph_for(node),
-        }
     }
 
     // =========================================================================

@@ -4,10 +4,10 @@
 //! The corresponding ID types (TypeDefId, etc.) are indices into vectors of these.
 
 use crate::identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
+use crate::sema::FunctionType;
 use crate::sema::generic::TypeParamInfo;
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_arena::TypeId;
-use crate::sema::FunctionType;
 
 /// What kind of type definition this is
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

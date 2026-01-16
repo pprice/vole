@@ -22,9 +22,11 @@ pub use analyzer::{AnalysisOutput, Analyzer, TypeError, TypeWarning};
 pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 pub use entity_registry::EntityRegistry;
 pub use expression_data::ExpressionData;
-pub use implement_registry::{ImplTypeId, ImplementRegistry, MethodImpl, MethodKey, PrimitiveTypeId};
+pub use implement_registry::{
+    ImplTypeId, ImplementRegistry, MethodImpl, MethodKey, PrimitiveTypeId,
+};
 pub use infer::{InferCtx, InferType, InferVarId, UnifyError};
-pub use query::{CallInfo, ProgramQuery};
+pub use query::ProgramQuery;
 pub use resolution::{MethodResolutions, ResolvedMethod};
 pub use type_table::{TypeInfo, TypeKey, TypeTable};
 pub use types::{

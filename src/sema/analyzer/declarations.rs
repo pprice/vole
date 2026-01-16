@@ -1123,7 +1123,7 @@ impl Analyzer {
             );
 
             // Convert self type to TypeId once for all method resolutions
-            let self_type_legacy = LegacyType::Nominal(NominalType::Record(record_type.clone()));
+            let self_type_legacy = LegacyType::Nominal(NominalType::Record(record_type));
             let self_type_id = self.type_arena.borrow_mut().from_type(&self_type_legacy);
 
             for method in &record.methods {
@@ -1351,8 +1351,11 @@ impl Analyzer {
                 .iter()
                 .map(|t| self.type_arena.borrow_mut().from_type(t))
                 .collect();
-            self.entity_registry
-                .add_implementation(entity_type_id, interface_type_id, type_arg_ids);
+            self.entity_registry.add_implementation(
+                entity_type_id,
+                interface_type_id,
+                type_arg_ids,
+            );
         }
     }
 
