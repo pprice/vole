@@ -107,6 +107,7 @@ impl Compiler<'_> {
             type_def_id,
             type_args: vec![].into(),
         }));
+        let vole_type_id = self.analyzed.type_arena.borrow_mut().from_type(&placeholder_type);
 
         self.type_metadata.insert(
             class.name,
@@ -115,7 +116,7 @@ impl Compiler<'_> {
                 type_key,
                 field_slots: HashMap::new(),
                 is_class: true,
-                vole_type: placeholder_type,
+                vole_type: vole_type_id,
                 method_infos: HashMap::new(),
             },
         );
@@ -265,6 +266,7 @@ impl Compiler<'_> {
 
         let query = self.query();
         let name_id = query.name_id(module_id, &[class.name]);
+        let vole_type_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_type);
         self.type_metadata.insert(
             class.name,
             TypeMetadata {
@@ -272,7 +274,7 @@ impl Compiler<'_> {
                 type_key: query.type_key_by_name(name_id),
                 field_slots,
                 is_class: true,
-                vole_type,
+                vole_type: vole_type_id,
                 method_infos,
             },
         );
@@ -301,6 +303,7 @@ impl Compiler<'_> {
             type_def_id,
             type_args: vec![].into(),
         }));
+        let vole_type_id = self.analyzed.type_arena.borrow_mut().from_type(&placeholder_type);
 
         self.type_metadata.insert(
             record.name,
@@ -309,7 +312,7 @@ impl Compiler<'_> {
                 type_key,
                 field_slots: HashMap::new(),
                 is_class: false,
-                vole_type: placeholder_type,
+                vole_type: vole_type_id,
                 method_infos: HashMap::new(),
             },
         );
@@ -460,6 +463,7 @@ impl Compiler<'_> {
 
         let query = self.query();
         let name_id = query.name_id(module_id, &[record.name]);
+        let vole_type_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_type);
         self.type_metadata.insert(
             record.name,
             TypeMetadata {
@@ -467,7 +471,7 @@ impl Compiler<'_> {
                 type_key: query.type_key_by_name(name_id),
                 field_slots,
                 is_class: false,
-                vole_type,
+                vole_type: vole_type_id,
                 method_infos,
             },
         );
@@ -551,7 +555,8 @@ impl Compiler<'_> {
 
         // Skip if already registered - check by type name string to avoid Symbol collisions across interners
         let already_registered = self.type_metadata.values().any(|meta| {
-            if let LegacyType::Nominal(NominalType::Class(class_type)) = &meta.vole_type {
+            let vole_type = self.analyzed.type_arena.borrow().to_type(meta.vole_type);
+            if let LegacyType::Nominal(NominalType::Class(class_type)) = &vole_type {
                 self.analyzed
                     .name_table
                     .last_segment_str(self.analyzed.entity_registry.class_name_id(class_type))
@@ -657,6 +662,7 @@ impl Compiler<'_> {
             .lookup(type_name_str)
             .unwrap_or(class.name);
         tracing::debug!(type_name = %type_name_str, ?class.name, ?main_class_symbol, "Inserting type_metadata");
+        let vole_type_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_type);
         self.type_metadata.insert(
             main_class_symbol,
             TypeMetadata {
@@ -664,7 +670,7 @@ impl Compiler<'_> {
                 type_key,
                 field_slots,
                 is_class: true,
-                vole_type,
+                vole_type: vole_type_id,
                 method_infos,
             },
         );

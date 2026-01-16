@@ -60,8 +60,8 @@ pub(crate) struct TypeMetadata {
     /// Whether this is a class (true) or record (false)
     #[allow(dead_code)]
     pub is_class: bool,
-    /// The Vole type (Class or Record)
-    pub vole_type: LegacyType,
+    /// The Vole type (Class or Record) - interned TypeId handle
+    pub vole_type: TypeId,
     /// Method info: method name -> method info
     pub method_infos: HashMap<NameId, MethodInfo>,
 }
@@ -79,27 +79,34 @@ pub(crate) fn type_metadata_by_name_id<'a>(
     type_metadata: &'a HashMap<Symbol, TypeMetadata>,
     name_id: NameId,
     entity_registry: &EntityRegistry,
+    arena: &TypeArena,
 ) -> Option<&'a TypeMetadata> {
     tracing::trace!(
         ?name_id,
         count = type_metadata.len(),
         "type_metadata_by_name_id lookup"
     );
-    let result = type_metadata.values().find(|meta| match &meta.vole_type {
-        LegacyType::Nominal(NominalType::Class(c)) => {
-            let class_name_id = entity_registry.class_name_id(c);
-            tracing::trace!(target_name_id = ?name_id, class_name_id = ?class_name_id, "comparing class name_id");
-            class_name_id == name_id
+    let result = type_metadata.values().find(|meta| {
+        let vole_type = arena.to_type(meta.vole_type);
+        match &vole_type {
+            LegacyType::Nominal(NominalType::Class(c)) => {
+                let class_name_id = entity_registry.class_name_id(c);
+                tracing::trace!(target_name_id = ?name_id, class_name_id = ?class_name_id, "comparing class name_id");
+                class_name_id == name_id
+            }
+            LegacyType::Nominal(NominalType::Record(r)) => {
+                entity_registry.record_name_id(r) == name_id
+            }
+            _ => false,
         }
-        LegacyType::Nominal(NominalType::Record(r)) => entity_registry.record_name_id(r) == name_id,
-        _ => false,
     });
     if result.is_none() {
         // Log all class name_ids for debugging
         let class_name_ids: Vec<_> = type_metadata
             .values()
             .filter_map(|meta| {
-                if let LegacyType::Nominal(NominalType::Class(c)) = &meta.vole_type {
+                let vole_type = arena.to_type(meta.vole_type);
+                if let LegacyType::Nominal(NominalType::Class(c)) = &vole_type {
                     Some(entity_registry.class_name_id(c))
                 } else {
                     None
@@ -469,7 +476,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         // between different interners (module vs main)
                         if let Some(metadata) = type_metadata.get(sym) {
                             // Verify this is the right type by comparing type_def_ids
-                            let matches = match &metadata.vole_type {
+                            let vole_type = arena.to_type(metadata.vole_type);
+                            let matches = match &vole_type {
                                 LegacyType::Nominal(NominalType::Record(r)) => {
                                     r.type_def_id == type_def_id
                                 }
@@ -479,7 +487,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                                 _ => false,
                             };
                             if matches {
-                                return metadata.vole_type.clone();
+                                return vole_type;
                             }
                             // Symbol collision - fall through to build from entity registry
                         }
@@ -505,7 +513,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     _ => {
                         // Primitive or unknown - check type metadata
                         if let Some(metadata) = type_metadata.get(sym) {
-                            metadata.vole_type.clone()
+                            arena.to_type(metadata.vole_type)
                         } else {
                             panic!(
                                 "INTERNAL ERROR: unknown type kind with no metadata\n\
@@ -516,7 +524,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     }
                 }
             } else if let Some(metadata) = type_metadata.get(sym) {
-                metadata.vole_type.clone()
+                arena.to_type(metadata.vole_type)
             } else {
                 // This is a type parameter (e.g., T in Box<T>).
                 // Type parameters are resolved when the generic is instantiated.

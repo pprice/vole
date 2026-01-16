@@ -1018,7 +1018,8 @@ impl Cg<'_, '_, '_> {
                     // Check if this identifier is a type name (class/record)
                     if let Some(type_meta) = self.ctx.type_metadata.get(name) {
                         // Type pattern - compare against union variant tag
-                        self.compile_type_pattern_check(&scrutinee, &type_meta.vole_type)?
+                        let vole_type = self.to_legacy(type_meta.vole_type);
+                        self.compile_type_pattern_check(&scrutinee, &vole_type)?
                     } else {
                         // Regular identifier binding
                         let var = self.builder.declare_var(scrutinee.ty);
@@ -1134,9 +1135,10 @@ impl Cg<'_, '_, '_> {
                     let (pattern_check, pattern_type) = if let Some(name) = type_name {
                         // Typed record pattern - need to check type first
                         if let Some(type_meta) = self.ctx.type_metadata.get(name) {
+                            let vole_type = self.to_legacy(type_meta.vole_type);
                             (
-                                self.compile_type_pattern_check(&scrutinee, &type_meta.vole_type)?,
-                                Some(type_meta.vole_type.clone()),
+                                self.compile_type_pattern_check(&scrutinee, &vole_type)?,
+                                Some(vole_type),
                             )
                         } else {
                             // Unknown type name - never matches

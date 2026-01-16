@@ -1032,6 +1032,7 @@ fn resolve_vtable_target(
             ctx.type_metadata,
             type_name_id,
             &ctx.analyzed.entity_registry,
+            &ctx.arena.borrow(),
         )
         && let Some(method_info) = meta.method_infos.get(&method_name_id).copied()
     {

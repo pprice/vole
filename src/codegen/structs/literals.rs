@@ -42,7 +42,7 @@ impl Cg<'_, '_, '_> {
             .analyzed
             .query()
             .type_of_legacy(expr.id)
-            .unwrap_or_else(|| metadata.vole_type.clone());
+            .unwrap_or_else(|| self.to_legacy(metadata.vole_type));
         let result_type_id = self.intern_type(&result_type_legacy);
         let field_slots = metadata.field_slots.clone();
 

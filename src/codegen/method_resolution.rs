@@ -64,6 +64,7 @@ pub(crate) fn resolve_method_target(
             input.type_metadata,
             type_name_id,
             &input.analyzed.entity_registry,
+            &input.analyzed.type_arena.borrow(),
         )
         .and_then(|meta| meta.method_infos.get(&input.method_id))
         .copied()

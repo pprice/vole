@@ -1738,7 +1738,8 @@ impl Compiler<'_> {
 
         // Fallback: use type_metadata (for non-generic types)
         if let Some(metadata) = self.type_metadata.get(&type_name) {
-            substitute_type(&metadata.vole_type, substitutions)
+            let vole_type = self.analyzed.type_arena.borrow().to_type(metadata.vole_type);
+            substitute_type(&vole_type, substitutions)
         } else {
             // Final fallback
             LegacyType::Primitive(PrimitiveType::I64)

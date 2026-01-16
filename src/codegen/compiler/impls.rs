@@ -409,7 +409,7 @@ impl Compiler<'_> {
             TypeExpr::Named(sym) => self
                 .type_metadata
                 .get(sym)
-                .map(|m| m.vole_type.clone())
+                .map(|m| self.analyzed.type_arena.borrow().to_type(m.vole_type))
                 .unwrap_or_else(|| {
                     panic!(
                         "INTERNAL ERROR: implement block target type not in type_metadata\n\
@@ -583,7 +583,7 @@ impl Compiler<'_> {
             TypeExpr::Named(sym) => self
                 .type_metadata
                 .get(sym)
-                .map(|m| m.vole_type.clone())
+                .map(|m| self.analyzed.type_arena.borrow().to_type(m.vole_type))
                 .unwrap_or_else(|| {
                     panic!(
                         "INTERNAL ERROR: implement block self type not in type_metadata\n\
@@ -701,7 +701,7 @@ impl Compiler<'_> {
             TypeExpr::Named(sym) => self
                 .type_metadata
                 .get(sym)
-                .map(|m| m.vole_type.clone())
+                .map(|m| self.analyzed.type_arena.borrow().to_type(m.vole_type))
                 .unwrap_or_else(|| {
                     resolve_type_expr_with_metadata(
                         &impl_block.target_type,
@@ -1306,7 +1306,7 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Clone metadata for the closure (needs to be before resolve_param_type closure)
-        let self_vole_type = metadata.vole_type.clone();
+        let self_vole_type = self.analyzed.type_arena.borrow().to_type(metadata.vole_type);
 
         // Helper to resolve param type, substituting Self with the concrete type
         let query = self.query();
@@ -1346,7 +1346,7 @@ impl Compiler<'_> {
         // Resolve return type for proper union/fallible wrapping
         let method_return_type = method.return_type.as_ref().map(|t| {
             if matches!(t, TypeExpr::SelfType) {
-                metadata.vole_type.clone()
+                self_vole_type.clone()
             } else {
                 resolve_type_expr_with_metadata(
                     t,
@@ -1479,7 +1479,7 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Clone metadata for the closure - self has the concrete type!
-        let self_vole_type = metadata.vole_type.clone();
+        let self_vole_type = self.analyzed.type_arena.borrow().to_type(metadata.vole_type);
 
         // Helper to resolve param type, substituting Self with the concrete type
         let query = self.query();
@@ -1519,7 +1519,7 @@ impl Compiler<'_> {
         // Resolve return type for proper union/fallible wrapping
         let method_return_type = method.return_type.as_ref().map(|t| {
             if matches!(t, TypeExpr::SelfType) {
-                metadata.vole_type.clone()
+                self_vole_type.clone()
             } else {
                 resolve_type_expr_with_metadata(
                     t,
@@ -1781,7 +1781,8 @@ impl Compiler<'_> {
             .type_metadata
             .values()
             .find(|meta| {
-                if let LegacyType::Nominal(NominalType::Class(class_type)) = &meta.vole_type {
+                let vole_type = self.analyzed.type_arena.borrow().to_type(meta.vole_type);
+                if let LegacyType::Nominal(NominalType::Class(class_type)) = &vole_type {
                     let name_id = self.analyzed.entity_registry.class_name_id(class_type);
                     self.analyzed
                         .name_table
@@ -1863,7 +1864,7 @@ impl Compiler<'_> {
             let self_sym = module_interner
                 .lookup("self")
                 .expect("'self' should be interned in module");
-            let self_vole_type = metadata.vole_type.clone();
+            let self_vole_type = self.analyzed.type_arena.borrow().to_type(metadata.vole_type);
 
             // Resolve return type
             let return_type = method
