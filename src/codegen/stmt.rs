@@ -11,15 +11,15 @@ use crate::errors::CodegenError;
 use crate::frontend::{self, ExprKind, LetInit, Pattern, RaiseStmt, Stmt, Symbol};
 use crate::sema::type_arena::TypeId;
 use crate::sema::types::NominalType;
-use crate::sema::{LegacyType, PrimitiveType};
+use crate::sema::LegacyType;
 
 use super::compiler::ControlFlowCtx;
 use super::context::{Cg, ControlFlow};
 use super::structs::{convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id};
 use super::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    box_interface_value, box_interface_value_id, fallible_error_tag, resolve_type_expr,
-    tuple_layout_id, type_id_size, type_id_to_cranelift, type_size, type_to_cranelift,
+    box_interface_value_id, fallible_error_tag, resolve_type_expr, tuple_layout_id, type_id_size,
+    type_id_to_cranelift, type_size, type_to_cranelift,
 };
 
 /// Compile a block of statements (wrapper for compatibility)
@@ -141,79 +141,97 @@ impl Cg<'_, '_, '_> {
                 };
                 let init = self.expr(init_expr)?;
 
-                let mut declared_type_opt = None;
-                // final_type is LegacyType during computation, converted to VoleType at the end
-                let (mut final_value, mut final_type) = if let Some(ty_expr) = &let_stmt.ty {
+                // Track type as TypeId throughout to avoid LegacyType conversions
+                let mut declared_type_id_opt = None;
+                let (mut final_value, mut final_type_id) = if let Some(ty_expr) = &let_stmt.ty {
                     let declared_type = resolve_type_expr(ty_expr, self.ctx);
-                    declared_type_opt = Some(declared_type.clone());
+                    let declared_type_id = self.intern_type(&declared_type);
+                    declared_type_id_opt = Some(declared_type_id);
 
-                    if matches!(&declared_type, LegacyType::Union(_))
-                        && !self.is_union(init.type_id)
-                    {
-                        let wrapped = self.construct_union(init, &declared_type)?;
-                        (wrapped.value, self.to_legacy(wrapped.type_id))
-                    } else if declared_type.is_integer() && self.type_is_integer(init.type_id) {
-                        let declared_cty = type_to_cranelift(&declared_type, self.ctx.pointer_type);
+                    let arena = self.ctx.arena.borrow();
+                    let is_declared_union = arena.is_union(declared_type_id);
+                    let is_declared_integer = arena.is_integer(declared_type_id);
+                    let is_declared_f32 = declared_type_id == arena.f32();
+                    let is_declared_f64 = declared_type_id == arena.f64();
+                    let is_declared_interface = arena.is_interface(declared_type_id);
+                    drop(arena);
+
+                    if is_declared_union && !self.is_union(init.type_id) {
+                        let wrapped = self.construct_union_id(init, declared_type_id)?;
+                        (wrapped.value, wrapped.type_id)
+                    } else if is_declared_integer && self.type_is_integer(init.type_id) {
+                        let arena = self.ctx.arena.borrow();
+                        let declared_cty =
+                            type_id_to_cranelift(declared_type_id, &arena, self.ctx.pointer_type);
+                        drop(arena);
                         let init_cty = init.ty;
                         if declared_cty.bits() < init_cty.bits() {
                             let narrowed = self.builder.ins().ireduce(declared_cty, init.value);
-                            (narrowed, declared_type)
+                            (narrowed, declared_type_id)
                         } else if declared_cty.bits() > init_cty.bits() {
                             let widened = self.builder.ins().sextend(declared_cty, init.value);
-                            (widened, declared_type)
+                            (widened, declared_type_id)
                         } else {
-                            (init.value, declared_type)
+                            (init.value, declared_type_id)
                         }
-                    } else if declared_type == LegacyType::Primitive(PrimitiveType::F32)
+                    } else if is_declared_f32
                         && self.type_is_float(init.type_id)
                         && init.ty == types::F64
                     {
                         // f64 -> f32: demote to narrower float
                         let narrowed = self.builder.ins().fdemote(types::F32, init.value);
-                        (narrowed, declared_type)
-                    } else if declared_type == LegacyType::Primitive(PrimitiveType::F64)
+                        (narrowed, declared_type_id)
+                    } else if is_declared_f64
                         && self.type_is_float(init.type_id)
                         && init.ty == types::F32
                     {
                         // f32 -> f64: promote to wider float
                         let widened = self.builder.ins().fpromote(types::F64, init.value);
-                        (widened, declared_type)
-                    } else if let LegacyType::Nominal(NominalType::Interface(_)) = &declared_type {
+                        (widened, declared_type_id)
+                    } else if is_declared_interface {
                         // For functional interfaces, keep the actual function type from the lambda
                         // This preserves the is_closure flag for proper calling convention
-                        (init.value, self.to_legacy(init.type_id))
+                        (init.value, init.type_id)
                     } else {
-                        (init.value, declared_type)
+                        (init.value, declared_type_id)
                     }
                 } else {
-                    (init.value, self.to_legacy(init.type_id))
+                    (init.value, init.type_id)
                 };
 
-                if let Some(declared_type) = declared_type_opt
-                    && matches!(
-                        declared_type,
-                        LegacyType::Nominal(NominalType::Interface(_))
-                    )
-                    && !matches!(final_type, LegacyType::Nominal(NominalType::Interface(_)))
-                {
-                    let boxed = box_interface_value(
-                        self.builder,
-                        self.ctx,
-                        CompiledValue {
-                            value: final_value,
-                            ty: type_to_cranelift(&final_type, self.ctx.pointer_type),
-                            type_id: self.intern_type(&final_type),
-                        },
-                        &declared_type,
-                    )?;
-                    final_value = boxed.value;
-                    final_type = self.to_legacy(boxed.type_id);
+                // Box value if assigning to interface type
+                if let Some(declared_type_id) = declared_type_id_opt {
+                    let arena = self.ctx.arena.borrow();
+                    let is_declared_interface = arena.is_interface(declared_type_id);
+                    let is_final_interface = arena.is_interface(final_type_id);
+                    drop(arena);
+
+                    if is_declared_interface && !is_final_interface {
+                        let arena = self.ctx.arena.borrow();
+                        let cranelift_ty =
+                            type_id_to_cranelift(final_type_id, &arena, self.ctx.pointer_type);
+                        drop(arena);
+                        let boxed = box_interface_value_id(
+                            self.builder,
+                            self.ctx,
+                            CompiledValue {
+                                value: final_value,
+                                ty: cranelift_ty,
+                                type_id: final_type_id,
+                            },
+                            declared_type_id,
+                        )?;
+                        final_value = boxed.value;
+                        final_type_id = boxed.type_id;
+                    }
                 }
 
-                let cranelift_ty = type_to_cranelift(&final_type, self.ctx.pointer_type);
+                let arena = self.ctx.arena.borrow();
+                let cranelift_ty =
+                    type_id_to_cranelift(final_type_id, &arena, self.ctx.pointer_type);
+                drop(arena);
                 let var = self.builder.declare_var(cranelift_ty);
                 self.builder.def_var(var, final_value);
-                let final_type_id = self.intern_type(&final_type);
                 self.vars.insert(let_stmt.name, (var, final_type_id));
                 Ok(false)
             }
