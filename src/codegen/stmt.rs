@@ -236,7 +236,7 @@ impl Cg<'_, '_, '_> {
             }
 
             Stmt::Return(ret) => {
-                let return_type = self.ctx.current_function_return_type.clone();
+                let return_type = self.ctx.current_function_return_type.map(|id| self.ctx.arena.borrow().to_type(id));
                 if let Some(value) = &ret.value {
                     let compiled = self.expr(value)?;
 
@@ -288,7 +288,7 @@ impl Cg<'_, '_, '_> {
 
                         self.builder.ins().return_(&[fallible_ptr]);
                     } else if let Some(LegacyType::Union(variants)) =
-                        &self.ctx.current_function_return_type
+                        &return_type
                     {
                         // For union return types, wrap the value in a union
                         let union_type = LegacyType::Union(variants.clone());
@@ -870,14 +870,14 @@ impl Cg<'_, '_, '_> {
     /// Then returns from the function with the fallible pointer.
     fn raise_stmt(&mut self, raise_stmt: &RaiseStmt) -> Result<bool, String> {
         // Get the current function's return type - must be Fallible
-        let return_type = self
+        let return_type_id = self
             .ctx
             .current_function_return_type
-            .as_ref()
             .ok_or("raise statement used outside of a function with declared return type")?;
+        let return_type = self.ctx.arena.borrow().to_type(return_type_id);
 
-        let fallible_type = match return_type {
-            LegacyType::Fallible(ft) => ft,
+        let fallible_type = match &return_type {
+            LegacyType::Fallible(ft) => ft.clone(),
             _ => {
                 return Err(CodegenError::type_mismatch(
                     "raise statement",
@@ -890,7 +890,7 @@ impl Cg<'_, '_, '_> {
 
         // Get the error tag for this error type
         let error_tag = fallible_error_tag(
-            fallible_type,
+            &fallible_type,
             raise_stmt.error_name,
             self.ctx.interner,
             &self.ctx.analyzed.name_table,
@@ -904,7 +904,7 @@ impl Cg<'_, '_, '_> {
         })?;
 
         // Calculate the size of the fallible type
-        let fallible_size = type_size(return_type, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
+        let fallible_size = type_size(&return_type, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
 
         // Allocate stack slot for the fallible result
         let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
