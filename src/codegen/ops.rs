@@ -11,8 +11,8 @@ use crate::sema::implement_registry::ImplTypeId;
 use crate::sema::{LegacyType, PrimitiveType};
 
 use super::context::Cg;
-use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
-use super::types::{CompiledValue, array_element_tag, convert_to_type, type_id_to_cranelift};
+use super::structs::{convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id};
+use super::types::{CompiledValue, array_element_tag_id, convert_to_type, type_id_to_cranelift};
 
 impl Cg<'_, '_, '_> {
     /// Compile a binary expression
@@ -591,20 +591,20 @@ impl Cg<'_, '_, '_> {
         let arr = self.expr(object)?;
         let idx = self.expr(index)?;
 
-        let arr_legacy = self.to_legacy(arr.type_id);
-        let elem_type = match &arr_legacy {
-            LegacyType::Array(elem) => elem.as_ref().clone(),
-            _ => LegacyType::Primitive(PrimitiveType::I64),
-        };
+        let arena = self.ctx.arena.borrow();
+        let elem_type_id = arena
+            .unwrap_array(arr.type_id)
+            .unwrap_or_else(|| arena.i64());
 
         // Load current element
         let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, idx.value])?;
-        let (current_val, current_ty) = convert_field_value(self.builder, raw_value, &elem_type);
+        let (current_val, current_ty) = convert_field_value_id(self.builder, raw_value, elem_type_id, &arena);
+        drop(arena);
 
         let current = CompiledValue {
             value: current_val,
             ty: current_ty,
-            type_id: self.intern_type(&elem_type),
+            type_id: elem_type_id,
         };
 
         let rhs = self.expr(&compound.value)?;
@@ -622,7 +622,7 @@ impl Cg<'_, '_, '_> {
         let tag_val = self
             .builder
             .ins()
-            .iconst(types::I64, array_element_tag(&elem_type));
+            .iconst(types::I64, array_element_tag_id(elem_type_id, &self.ctx.arena.borrow()));
 
         self.builder
             .ins()
@@ -641,20 +641,21 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(object)?;
 
         let field_name = self.ctx.interner.resolve(field);
-        let obj_legacy = self.to_legacy(obj.type_id);
-        let (slot, field_type) = get_field_slot_and_type(&obj_legacy, field_name, self.ctx)?;
+        let (slot, field_type_id) = get_field_slot_and_type_id(obj.type_id, field_name, self.ctx)?;
 
         // Load current field
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
         let current_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[obj.value, slot_val])?;
 
+        let arena = self.ctx.arena.borrow();
         let (current_val, cranelift_ty) =
-            convert_field_value(self.builder, current_raw, &field_type);
+            convert_field_value_id(self.builder, current_raw, field_type_id, &arena);
+        drop(arena);
 
         let current = CompiledValue {
             value: current_val,
             ty: cranelift_ty,
-            type_id: self.intern_type(&field_type),
+            type_id: field_type_id,
         };
 
         let rhs = self.expr(&compound.value)?;
