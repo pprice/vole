@@ -9,7 +9,6 @@ use crate::codegen::types::{
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
 use crate::sema::types::ConstantValue;
-use crate::sema::{LegacyType, PrimitiveType};
 use cranelift::prelude::*;
 
 impl Cg<'_, '_, '_> {
@@ -17,61 +16,70 @@ impl Cg<'_, '_, '_> {
     pub fn field_access(&mut self, fa: &FieldAccessExpr) -> Result<CompiledValue, String> {
         let obj = self.expr(&fa.object)?;
 
-        // Check for module type using arena method
-        let module_info = self.ctx.arena.borrow().unwrap_module(obj.type_id).map(|m| m.module_id);
-        if let Some(_module_id) = module_info {
-            // For module access, we need LegacyType to access constants
-            let obj_type = self.to_legacy(obj.type_id);
-            let LegacyType::Module(ref module_type) = obj_type else {
-                unreachable!("unwrap_module returned Some but to_legacy didn't return Module")
-            };
-            tracing::trace!(object_type = ?obj_type, "field access on module");
+        // Check for module type using arena methods (no LegacyType conversion)
+        let module_info = {
+            let arena = self.ctx.arena.borrow();
+            arena.unwrap_module(obj.type_id).map(|m| {
+                let exports = m.exports.clone();
+                (m.module_id, exports)
+            })
+        };
+        if let Some((module_id, exports)) = module_info {
+            tracing::trace!(?module_id, "field access on module");
             let field_name = self.ctx.interner.resolve(fa.field);
-            let module_path = self
-                .ctx
-                .analyzed
-                .name_table
-                .module_path(module_type.module_id);
-            let name_id = module_name_id(self.ctx.analyzed, module_type.module_id, field_name);
+            let module_path = self.ctx.analyzed.name_table.module_path(module_id);
+            let name_id = module_name_id(self.ctx.analyzed, module_id, field_name);
 
-            // Look up constant value in module
-            if let Some(name_id) = name_id
-                && let Some(const_val) = module_type.constants.get(&name_id)
-            {
+            // Look up constant value in module metadata
+            let const_val = {
+                let arena = self.ctx.arena.borrow();
+                name_id.and_then(|nid| {
+                    arena
+                        .module_metadata(module_id)
+                        .and_then(|meta| meta.constants.get(&nid).cloned())
+                })
+            };
+            if let Some(const_val) = const_val {
+                let arena = self.ctx.arena.borrow();
                 return match const_val {
                     ConstantValue::F64(v) => {
-                        let val = self.builder.ins().f64const(*v);
+                        let val = self.builder.ins().f64const(v);
                         Ok(CompiledValue {
                             value: val,
                             ty: types::F64,
-                            type_id: self.intern_type(&LegacyType::Primitive(PrimitiveType::F64)),
+                            type_id: arena.f64(),
                         })
                     }
                     ConstantValue::I64(v) => {
-                        let val = self.builder.ins().iconst(types::I64, *v);
+                        let val = self.builder.ins().iconst(types::I64, v);
                         Ok(CompiledValue {
                             value: val,
                             ty: types::I64,
-                            type_id: self.intern_type(&LegacyType::Primitive(PrimitiveType::I64)),
+                            type_id: arena.i64(),
                         })
                     }
                     ConstantValue::Bool(v) => {
-                        let val = self.builder.ins().iconst(types::I8, if *v { 1 } else { 0 });
+                        let val = self.builder.ins().iconst(types::I8, if v { 1 } else { 0 });
                         Ok(CompiledValue {
                             value: val,
                             ty: types::I8,
-                            type_id: self.intern_type(&LegacyType::Primitive(PrimitiveType::Bool)),
+                            type_id: arena.bool(),
                         })
                     }
-                    ConstantValue::String(s) => self.string_literal(s),
+                    ConstantValue::String(s) => {
+                        drop(arena);
+                        self.string_literal(&s)
+                    }
                 };
             }
 
-            // Check if it's a function export
-            if let Some(name_id) = name_id
-                && let Some(export_type) = module_type.exports.get(&name_id)
-            {
-                if matches!(export_type, LegacyType::Function(_)) {
+            // Check if it's an export (function or other)
+            let export_type_id = name_id.and_then(|nid| {
+                exports.iter().find(|(n, _)| *n == nid).map(|(_, tid)| *tid)
+            });
+            if let Some(export_type_id) = export_type_id {
+                let is_function = self.ctx.arena.borrow().is_function(export_type_id);
+                if is_function {
                     return Err(CodegenError::unsupported_with_context(
                         "function as field value",
                         format!("use {}() to call the function", field_name),
