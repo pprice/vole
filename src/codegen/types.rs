@@ -1398,6 +1398,22 @@ pub(crate) fn array_element_tag(ty: &LegacyType) -> i64 {
     }
 }
 
+/// Get the runtime tag value for an array element type using TypeId (no LegacyType conversion)
+pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
+    use crate::sema::type_arena::Type as ArenaType;
+    match arena.get(ty) {
+        ArenaType::Primitive(PrimitiveType::String) => 1,
+        ArenaType::Primitive(PrimitiveType::I64)
+        | ArenaType::Primitive(PrimitiveType::I32)
+        | ArenaType::Primitive(PrimitiveType::I16)
+        | ArenaType::Primitive(PrimitiveType::I8) => 2,
+        ArenaType::Primitive(PrimitiveType::F64) | ArenaType::Primitive(PrimitiveType::F32) => 3,
+        ArenaType::Primitive(PrimitiveType::Bool) => 4,
+        ArenaType::Array(_) => 5,
+        _ => 2, // default to integer
+    }
+}
+
 /// Convert NativeType to Cranelift type.
 /// Shared utility for external function calls in both compiler.rs and context.rs.
 pub(crate) fn native_type_to_cranelift(nt: &NativeType, pointer_type: Type) -> Type {

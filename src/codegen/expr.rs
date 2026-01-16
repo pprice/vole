@@ -22,7 +22,7 @@ use super::context::Cg;
 use super::structs::{convert_field_value, convert_to_i64_for_storage, get_field_slot_and_type};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    array_element_tag, box_interface_value, fallible_error_tag, resolve_type_expr, tuple_layout,
+    array_element_tag_id, box_interface_value, fallible_error_tag, resolve_type_expr, tuple_layout,
     type_to_cranelift,
 };
 
@@ -414,16 +414,18 @@ impl Cg<'_, '_, '_> {
 
         for (i, elem) in elements.iter().enumerate() {
             let compiled = self.expr(elem)?;
-            let compiled_legacy_type = self.to_legacy(compiled.type_id);
 
             if i == 0 {
-                elem_type = compiled_legacy_type.clone();
+                elem_type = self.to_legacy(compiled.type_id);
             }
 
+            // Use TypeId-based tag lookup to avoid LegacyType conversion in hot loop
+            let arena = self.ctx.arena.borrow();
             let tag_val = self
                 .builder
                 .ins()
-                .iconst(types::I64, array_element_tag(&compiled_legacy_type));
+                .iconst(types::I64, array_element_tag_id(compiled.type_id, &arena));
+            drop(arena);
             let value_bits = convert_to_i64_for_storage(self.builder, &compiled);
 
             self.builder
@@ -734,11 +736,12 @@ impl Cg<'_, '_, '_> {
                     .runtime_key(RuntimeFn::ArraySet)
                     .ok_or_else(|| "vole_array_set not found".to_string())?;
                 let set_value_ref = self.func_ref(set_value_key)?;
-                let val_type = self.to_legacy(val.type_id);
+                let arena = self.ctx.arena.borrow();
                 let tag_val = self
                     .builder
                     .ins()
-                    .iconst(types::I64, array_element_tag(&val_type));
+                    .iconst(types::I64, array_element_tag_id(val.type_id, &arena));
+                drop(arena);
                 let value_bits = convert_to_i64_for_storage(self.builder, &val);
 
                 self.builder
