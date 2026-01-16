@@ -244,8 +244,10 @@ impl Cg<'_, '_, '_> {
                     }
                 }
                 // Convert Iterator return types to RuntimeIterator for external methods
-                let return_type = self.maybe_convert_iterator_return_type(return_type);
-                return self.call_external(&external_info, &args, &return_type);
+                let return_type_legacy = self.to_legacy(return_type);
+                let return_type_legacy =
+                    self.maybe_convert_iterator_return_type(return_type_legacy);
+                return self.call_external(&external_info, &args, &return_type_legacy);
             }
             MethodTarget::InterfaceDispatch {
                 interface_type_id,
@@ -276,7 +278,10 @@ impl Cg<'_, '_, '_> {
             | MethodTarget::Default {
                 method_info,
                 return_type,
-            } => (method_info, return_type),
+            } => {
+                let return_type = self.to_legacy(return_type);
+                (method_info, return_type)
+            }
         };
 
         // Check if this is a monomorphized class method call

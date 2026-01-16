@@ -8,6 +8,7 @@ use crate::frontend::Symbol;
 use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
 use crate::sema::resolution::ResolvedMethod;
+use crate::sema::type_arena::TypeId;
 use crate::sema::types::NominalType;
 use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
@@ -15,22 +16,22 @@ use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 pub(crate) enum MethodTarget {
     Direct {
         method_info: MethodInfo,
-        return_type: LegacyType,
+        return_type: TypeId,
     },
     Implemented {
         method_info: MethodInfo,
-        return_type: LegacyType,
+        return_type: TypeId,
     },
     Default {
         method_info: MethodInfo,
-        return_type: LegacyType,
+        return_type: TypeId,
     },
     FunctionalInterface {
         func_type: FunctionType,
     },
     External {
         external_info: ExternalMethodInfo,
-        return_type: LegacyType,
+        return_type: TypeId,
     },
     InterfaceDispatch {
         interface_type_id: TypeDefId,
@@ -109,9 +110,14 @@ pub(crate) fn resolve_method_target(
                 let type_name_id =
                     get_type_name_id(input.object_type, &input.analyzed.entity_registry)?;
                 let method_info = lookup_direct_method(type_name_id)?;
+                let return_type = input
+                    .analyzed
+                    .type_arena
+                    .borrow_mut()
+                    .from_type(&func_type.return_type);
                 Ok(MethodTarget::Direct {
                     method_info,
-                    return_type: (*func_type.return_type).clone(),
+                    return_type,
                 })
             }
             ResolvedMethod::Implemented {
@@ -152,9 +158,14 @@ pub(crate) fn resolve_method_target(
 
                 if let Some(ext_info) = external_info {
                     // For concrete types with external implementation, call external directly
+                    let return_type = input
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&func_type.return_type);
                     return Ok(MethodTarget::External {
                         external_info: ext_info.clone(),
-                        return_type: (*func_type.return_type).clone(),
+                        return_type,
                     });
                 }
                 let type_id = ImplTypeId::from_type(
@@ -178,9 +189,14 @@ pub(crate) fn resolve_method_target(
                     .to_string()
                 })?;
                 let method_info = lookup_impl_method(type_id)?;
+                let return_type = input
+                    .analyzed
+                    .type_arena
+                    .borrow_mut()
+                    .from_type(&func_type.return_type);
                 Ok(MethodTarget::Implemented {
                     method_info,
-                    return_type: (*func_type.return_type).clone(),
+                    return_type,
                 })
             }
             ResolvedMethod::FunctionalInterface { func_type } => {
@@ -195,18 +211,28 @@ pub(crate) fn resolve_method_target(
             } => {
                 // If the default method is an external (like Iterator methods), call external
                 if let Some(ext_info) = external_info {
+                    let return_type = input
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&func_type.return_type);
                     return Ok(MethodTarget::External {
                         external_info: ext_info.clone(),
-                        return_type: (*func_type.return_type).clone(),
+                        return_type,
                     });
                 }
                 // Otherwise, get the name_id from the object type since DefaultMethod is called on a class/record
                 let type_name_id =
                     get_type_name_id(input.object_type, &input.analyzed.entity_registry)?;
                 let method_info = lookup_direct_method(type_name_id)?;
+                let return_type = input
+                    .analyzed
+                    .type_arena
+                    .borrow_mut()
+                    .from_type(&func_type.return_type);
                 Ok(MethodTarget::Default {
                     method_info,
-                    return_type: (*func_type.return_type).clone(),
+                    return_type,
                 })
             }
             ResolvedMethod::InterfaceMethod {
@@ -278,9 +304,14 @@ pub(crate) fn resolve_method_target(
             .get(&(type_id, input.method_id))
             .copied()
         {
+            let return_type = input
+                .analyzed
+                .type_arena
+                .borrow_mut()
+                .from_type(&binding.func_type.return_type);
             return Ok(MethodTarget::Implemented {
                 method_info,
-                return_type: (*binding.func_type.return_type).clone(),
+                return_type,
             });
         }
 
@@ -294,18 +325,28 @@ pub(crate) fn resolve_method_target(
             .get(&(type_id, method_name_id))
             .copied()
         {
+            let return_type = input
+                .analyzed
+                .type_arena
+                .borrow_mut()
+                .from_type(&binding.func_type.return_type);
             return Ok(MethodTarget::Implemented {
                 method_info,
-                return_type: (*binding.func_type.return_type).clone(),
+                return_type,
             });
         }
 
         // If binding has external_info, use that directly
         // This handles external methods from prelude that aren't in impl_method_infos
         if let Some(external_info) = &binding.external_info {
+            let return_type = input
+                .analyzed
+                .type_arena
+                .borrow_mut()
+                .from_type(&binding.func_type.return_type);
             return Ok(MethodTarget::External {
                 external_info: external_info.clone(),
-                return_type: (*binding.func_type.return_type).clone(),
+                return_type,
             });
         }
     }
@@ -317,14 +358,10 @@ pub(crate) fn resolve_method_target(
         &input.analyzed.entity_registry,
     ) && let Ok(method_info) = lookup_impl_method(type_id)
     {
-        let return_type = input
-            .analyzed
-            .type_arena
-            .borrow()
-            .to_type(method_info.return_type);
+        // Use method_info's return_type directly (already a TypeId)
         return Ok(MethodTarget::Implemented {
             method_info,
-            return_type,
+            return_type: method_info.return_type,
         });
     }
 
@@ -333,14 +370,10 @@ pub(crate) fn resolve_method_target(
     if let Ok(type_name_id) = get_type_name_id(input.object_type, &input.analyzed.entity_registry)
         && let Ok(method_info) = lookup_direct_method(type_name_id)
     {
-        let return_type = input
-            .analyzed
-            .type_arena
-            .borrow()
-            .to_type(method_info.return_type);
+        // Use method_info's return_type directly (already a TypeId)
         return Ok(MethodTarget::Direct {
             method_info,
-            return_type,
+            return_type: method_info.return_type,
         });
     }
 
