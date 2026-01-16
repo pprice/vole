@@ -629,17 +629,17 @@ impl Cg<'_, '_, '_> {
         let call_inst = self.builder.ins().call(func_ref, &args);
         let results = self.builder.inst_results(call_inst);
 
-        let return_type = self
+        // Use TypeId directly to avoid LegacyType conversion
+        let return_type_id = self
             .ctx
             .func_registry
             .return_type(func_key)
-            .map(|ty| self.to_legacy(ty))
-            .unwrap_or(LegacyType::Void);
+            .unwrap_or_else(|| self.ctx.arena.borrow().void());
 
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            Ok(self.typed_value(results[0], &return_type))
+            Ok(self.typed_value_interned(results[0], return_type_id))
         }
     }
 
