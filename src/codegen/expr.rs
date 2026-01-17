@@ -157,11 +157,11 @@ impl Cg<'_, '_, '_> {
                 }
             }
             Ok(value)
-        } else if let Some(LegacyType::Function(func_type)) =
-            self.ctx.get_expr_type_legacy(&expr.id)
+        } else if let Some(func_type_id) = self.ctx.get_expr_type(&expr.id)
+            && self.ctx.arena.borrow().is_function(func_type_id)
         {
             // Identifier refers to a named function - create a closure wrapper
-            self.function_reference(sym, func_type)
+            self.function_reference(sym, func_type_id)
         } else {
             Err(CodegenError::not_found("variable", self.ctx.interner.resolve(sym)).into())
         }
@@ -172,7 +172,7 @@ impl Cg<'_, '_, '_> {
     fn function_reference(
         &mut self,
         sym: Symbol,
-        func_type: crate::sema::FunctionType,
+        func_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
         use cranelift::prelude::FunctionBuilderContext;
 
@@ -190,19 +190,30 @@ impl Cg<'_, '_, '_> {
                     .to_string()
             })?;
 
+        // Unwrap function type to get params and return type
+        let (param_ids, return_type_id) = {
+            let arena = self.ctx.arena.borrow();
+            let (params, ret, _is_closure) = arena
+                .unwrap_function(func_type_id)
+                .ok_or_else(|| "Expected function type".to_string())?;
+            (params.clone(), ret)
+        };
+
         // Create a wrapper function that adapts the original function to closure calling convention.
         // The wrapper takes (closure_ptr, params...) and calls the original function with just (params...).
         *self.ctx.lambda_counter += 1;
         let wrapper_index = *self.ctx.lambda_counter;
 
         // Build wrapper signature: (closure_ptr, params...) -> return_type
-        let param_types: Vec<Type> = func_type
-            .params
+        let arena = self.ctx.arena.borrow();
+        let param_types: Vec<Type> = param_ids
             .iter()
-            .map(|t| type_to_cranelift(t, self.ctx.pointer_type))
+            .map(|&t| type_id_to_cranelift(t, &arena, self.ctx.pointer_type))
             .collect();
 
-        let return_cr_type = type_to_cranelift(&func_type.return_type, self.ctx.pointer_type);
+        let return_cr_type = type_id_to_cranelift(return_type_id, &arena, self.ctx.pointer_type);
+        let is_void_return = arena.is_void(return_type_id);
+        drop(arena);
 
         let mut wrapper_sig = self.ctx.module.make_signature();
         wrapper_sig
@@ -211,7 +222,7 @@ impl Cg<'_, '_, '_> {
         for &param_ty in &param_types {
             wrapper_sig.params.push(AbiParam::new(param_ty));
         }
-        if *func_type.return_type != LegacyType::Void {
+        if !is_void_return {
             wrapper_sig.returns.push(AbiParam::new(return_cr_type));
         }
 
@@ -232,11 +243,6 @@ impl Cg<'_, '_, '_> {
         self.ctx
             .func_registry
             .set_func_id(wrapper_func_key, wrapper_func_id);
-        let return_type_id = self
-            .ctx
-            .arena
-            .borrow_mut()
-            .from_type(&func_type.return_type);
         self.ctx
             .func_registry
             .set_return_type(wrapper_func_key, return_type_id);
@@ -311,16 +317,16 @@ impl Cg<'_, '_, '_> {
             .call(alloc_ref, &[wrapper_func_addr, zero_captures]);
         let closure_ptr = self.builder.inst_results(alloc_call)[0];
 
-        let closure_vole_type =
-            self.intern_type(&LegacyType::Function(crate::sema::FunctionType {
-                params: func_type.params,
-                return_type: func_type.return_type,
-                is_closure: true, // Now wrapped as a closure struct
-            }));
+        // Create closure type directly using arena (is_closure: true)
+        let closure_type_id = self
+            .ctx
+            .arena
+            .borrow_mut()
+            .function(param_ids, return_type_id, true);
         Ok(CompiledValue {
             value: closure_ptr,
             ty: self.ctx.pointer_type,
-            type_id: closure_vole_type,
+            type_id: closure_type_id,
         })
     }
 

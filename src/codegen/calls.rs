@@ -13,7 +13,7 @@ use crate::errors::CodegenError;
 type ArgVec = SmallVec<[Value; 8]>;
 use crate::frontend::{CallExpr, ExprKind, LetInit, NodeId, StringPart};
 use crate::runtime::native_registry::{NativeFunction, NativeType};
-use crate::sema::{FunctionType, LegacyType, PrimitiveType};
+use crate::sema::{LegacyType, PrimitiveType};
 
 use crate::sema::type_arena::TypeId;
 
@@ -246,10 +246,17 @@ impl Cg<'_, '_, '_> {
                 .is_functional(iface_type_def_id)
         {
             let method = self.ctx.analyzed.entity_registry.get_method(method_id);
-            let func_type = FunctionType {
-                params: method.signature.params.clone(),
-                return_type: method.signature.return_type.clone(),
-                is_closure: false,
+            // Create function TypeId directly from method signature
+            let func_type_id = {
+                let mut arena = self.ctx.arena.borrow_mut();
+                let param_ids: crate::sema::type_arena::TypeIdVec = method
+                    .signature
+                    .params
+                    .iter()
+                    .map(|p| arena.from_type(p))
+                    .collect();
+                let ret_id = arena.from_type(&method.signature.return_type);
+                arena.function(param_ids, ret_id, false)
             };
             let method_name_id = method.name_id;
             let value = self.builder.use_var(*var);
@@ -263,7 +270,7 @@ impl Cg<'_, '_, '_> {
                 &call.args,
                 iface_type_def_id,
                 method_name_id,
-                func_type,
+                func_type_id,
             );
         }
 
@@ -292,10 +299,17 @@ impl Cg<'_, '_, '_> {
                         self.ctx.analyzed.entity_registry.is_functional(type_def_id)
                 {
                     let method = self.ctx.analyzed.entity_registry.get_method(method_id);
-                    let func_type = FunctionType {
-                        params: method.signature.params.clone(),
-                        return_type: method.signature.return_type.clone(),
-                        is_closure: false,
+                    // Create function TypeId directly from method signature
+                    let func_type_id = {
+                        let mut arena = self.ctx.arena.borrow_mut();
+                        let param_ids: crate::sema::type_arena::TypeIdVec = method
+                            .signature
+                            .params
+                            .iter()
+                            .map(|p| arena.from_type(p))
+                            .collect();
+                        let ret_id = arena.from_type(&method.signature.return_type);
+                        arena.function(param_ids, ret_id, false)
                     };
                     let method_name_id = method.name_id;
                     // Box the lambda value to create the interface representation
@@ -310,7 +324,7 @@ impl Cg<'_, '_, '_> {
                         &call.args,
                         type_def_id,
                         method_name_id,
-                        func_type,
+                        func_type_id,
                     );
                 }
             }
@@ -326,10 +340,17 @@ impl Cg<'_, '_, '_> {
                     self.ctx.analyzed.entity_registry.is_functional(type_def_id)
             {
                 let method = self.ctx.analyzed.entity_registry.get_method(method_id);
-                let func_type = FunctionType {
-                    params: method.signature.params.clone(),
-                    return_type: method.signature.return_type.clone(),
-                    is_closure: false,
+                // Create function TypeId directly from method signature
+                let func_type_id = {
+                    let mut arena = self.ctx.arena.borrow_mut();
+                    let param_ids: crate::sema::type_arena::TypeIdVec = method
+                        .signature
+                        .params
+                        .iter()
+                        .map(|p| arena.from_type(p))
+                        .collect();
+                    let ret_id = arena.from_type(&method.signature.return_type);
+                    arena.function(param_ids, ret_id, false)
                 };
                 let method_name_id = method.name_id;
                 return self.interface_dispatch_call_args_by_type_def_id(
@@ -337,7 +358,7 @@ impl Cg<'_, '_, '_> {
                     &call.args,
                     type_def_id,
                     method_name_id,
-                    func_type,
+                    func_type_id,
                 );
             }
         }
@@ -380,19 +401,9 @@ impl Cg<'_, '_, '_> {
                 // The func_type from the monomorph instance may have TypeParams that weren't
                 // inferred from arguments (like return type params). Apply class type
                 // substitutions to fully resolve the type.
-                let func_type = FunctionType {
-                    params: instance
-                        .func_type
-                        .params
-                        .iter()
-                        .map(|p| self.ctx.substitute_type(p))
-                        .collect(),
-                    return_type: Box::new(
-                        self.ctx.substitute_type(&instance.func_type.return_type),
-                    ),
-                    is_closure: instance.func_type.is_closure,
-                };
-                return self.compile_native_call_with_types(native_func, call, &func_type);
+                let return_type = self.ctx.substitute_type(&instance.func_type.return_type);
+                let return_type_id = self.ctx.arena.borrow_mut().from_type(&return_type);
+                return self.compile_native_call_with_types(native_func, call, return_type_id);
             }
         }
 
@@ -883,7 +894,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         native_func: &NativeFunction,
         call: &CallExpr,
-        func_type: &FunctionType,
+        return_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
         // Compile arguments
         let mut args = Vec::new();
@@ -923,10 +934,8 @@ impl Cg<'_, '_, '_> {
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            // Use the concrete return type from the monomorphized function type
             // Apply class type substitutions if available (for calls inside monomorphized methods)
-            let type_id = self.intern_type(&func_type.return_type);
-            let type_id = self.ctx.substitute_type_id(type_id);
+            let type_id = self.ctx.substitute_type_id(return_type_id);
             let type_id = self.maybe_convert_iterator_return_type(type_id);
             Ok(CompiledValue {
                 value: results[0],

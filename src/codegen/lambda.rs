@@ -320,15 +320,20 @@ fn compile_pure_lambda(
     let alloc_call = builder.ins().call(alloc_ref, &[func_addr, zero_captures]);
     let closure_ptr = builder.inst_results(alloc_call)[0];
 
-    let func_type = LegacyType::Function(FunctionType {
-        params: param_vole_types.into(),
-        return_type: Box::new(return_vole_type),
-        is_closure: true, // Now always a closure struct
-    });
+    // Create TypeId directly from components
+    let func_type_id = {
+        let mut arena = ctx.arena.borrow_mut();
+        let param_ids: crate::sema::type_arena::TypeIdVec = param_vole_types
+            .iter()
+            .map(|p| arena.from_type(p))
+            .collect();
+        let return_type_id = arena.from_type(&return_vole_type);
+        arena.function(param_ids, return_type_id, true) // is_closure=true
+    };
     Ok(CompiledValue {
         value: closure_ptr,
         ty: ctx.pointer_type,
-        type_id: ctx.arena.borrow_mut().from_type(&func_type),
+        type_id: func_type_id,
     })
 }
 
@@ -509,15 +514,20 @@ fn compile_lambda_with_captures(
             .call(set_capture_ref, &[closure_ptr, index_val, heap_ptr]);
     }
 
-    let func_type = LegacyType::Function(FunctionType {
-        params: param_vole_types.into(),
-        return_type: Box::new(return_vole_type),
-        is_closure: true,
-    });
+    // Create TypeId directly from components
+    let func_type_id = {
+        let mut arena = ctx.arena.borrow_mut();
+        let param_ids: crate::sema::type_arena::TypeIdVec = param_vole_types
+            .iter()
+            .map(|p| arena.from_type(p))
+            .collect();
+        let return_type_id = arena.from_type(&return_vole_type);
+        arena.function(param_ids, return_type_id, true) // is_closure=true
+    };
     Ok(CompiledValue {
         value: closure_ptr,
         ty: ctx.pointer_type,
-        type_id: ctx.arena.borrow_mut().from_type(&func_type),
+        type_id: func_type_id,
     })
 }
 

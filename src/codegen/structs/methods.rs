@@ -14,7 +14,7 @@ use crate::codegen::method_resolution::{
 };
 use crate::codegen::types::{
     CompiledValue, box_interface_value, module_name_id, type_id_size, type_id_to_cranelift,
-    type_to_cranelift, value_to_word, word_to_value, word_to_value_type_id,
+    type_to_cranelift, value_to_word, word_to_value_type_id,
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
@@ -194,7 +194,7 @@ impl Cg<'_, '_, '_> {
         })?;
 
         let (method_info, return_type_id) = match target {
-            MethodTarget::FunctionalInterface { func_type } => {
+            MethodTarget::FunctionalInterface { func_type_id } => {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
                 if let LegacyType::Nominal(NominalType::Interface(interface_type)) =
                     &obj_legacy_type
@@ -205,22 +205,23 @@ impl Cg<'_, '_, '_> {
                         &mc.args,
                         interface_type.type_def_id,
                         method_name_id,
-                        func_type,
+                        func_type_id,
                     );
                 }
                 // For functional interfaces, the object holds the function ptr or closure
                 // The actual is_closure status depends on the lambda's compilation.
+                // Get is_closure from the object's type if available, otherwise from func_type_id
                 let is_closure = if let LegacyType::Function(ft) = &obj_legacy_type {
                     ft.is_closure
                 } else {
-                    func_type.is_closure
+                    self.ctx
+                        .arena
+                        .borrow()
+                        .unwrap_function(func_type_id)
+                        .map(|(_, _, is_closure)| is_closure)
+                        .unwrap_or(true)
                 };
-                let actual_func_type = FunctionType {
-                    params: func_type.params.clone(),
-                    return_type: Box::new((*func_type.return_type).clone()),
-                    is_closure,
-                };
-                return self.functional_interface_call(obj.value, actual_func_type, mc);
+                return self.functional_interface_call(obj.value, func_type_id, is_closure, mc);
             }
             MethodTarget::External {
                 external_info,
@@ -253,14 +254,14 @@ impl Cg<'_, '_, '_> {
             MethodTarget::InterfaceDispatch {
                 interface_type_id,
                 method_name_id,
-                func_type,
+                func_type_id,
             } => {
                 return self.interface_dispatch_call_args_by_type_def_id(
                     &obj,
                     &mc.args,
                     interface_type_id,
                     method_name_id,
-                    func_type,
+                    func_type_id,
                 );
             }
             MethodTarget::StaticMethod { .. } => {
@@ -652,26 +653,23 @@ impl Cg<'_, '_, '_> {
     fn functional_interface_call(
         &mut self,
         func_ptr_or_closure: Value,
-        func_type: FunctionType,
+        func_type_id: TypeId,
+        is_closure: bool,
         mc: &MethodCallExpr,
     ) -> Result<CompiledValue, String> {
+        // Extract function type components from the arena
+        let (param_ids, return_type_id) = {
+            let arena = self.ctx.arena.borrow();
+            let (params, ret, _) = arena
+                .unwrap_function(func_type_id)
+                .ok_or_else(|| "Expected function type for functional interface call".to_string())?;
+            (params.clone(), ret)
+        };
+
         // Check if this is actually a closure or a pure function
-        // The FunctionType passed in has is_closure set from the analyzer,
-        // but we need to handle both cases since the underlying lambda
-        // might be pure (no captures) or a closure (has captures).
-        //
-        // The actual calling convention is determined by whether the
-        // lambda had captures, which we track via the FunctionType.
-        // Since functional interfaces can hold either, we need to check
-        // both cases at runtime... BUT for now, since we're compiling
-        // statically, we trust the func_type.is_closure flag.
-        //
-        // Note: The issue is that functional interfaces always mark is_closure: true
-        // in the analyzer, but the actual lambda might be pure. We need to
-        // check the object's actual type to determine this.
-        //
-        // For now, trust that pure functions (is_closure=false) are called directly.
-        if func_type.is_closure {
+        // The is_closure flag is determined by the caller based on the actual
+        // lambda's compilation, not the interface's generic signature.
+        if is_closure {
             // It's a closure - extract function pointer and pass closure
             let func_ptr = self.call_runtime(RuntimeFn::ClosureGetFunc, &[func_ptr_or_closure])?;
 
@@ -679,15 +677,18 @@ impl Cg<'_, '_, '_> {
             // First param is the closure pointer, then the user params
             let mut sig = self.ctx.module.make_signature();
             sig.params.push(AbiParam::new(self.ctx.pointer_type)); // Closure pointer
-            for param_type in func_type.params.iter() {
-                sig.params.push(AbiParam::new(type_to_cranelift(
-                    param_type,
+            for param_id in param_ids.iter() {
+                sig.params.push(AbiParam::new(type_id_to_cranelift(
+                    *param_id,
+                    &self.ctx.arena.borrow(),
                     self.ctx.pointer_type,
                 )));
             }
-            if func_type.return_type.as_ref() != &LegacyType::Void {
-                sig.returns.push(AbiParam::new(type_to_cranelift(
-                    &func_type.return_type,
+            let is_void_return = self.ctx.arena.borrow().is_void(return_type_id);
+            if !is_void_return {
+                sig.returns.push(AbiParam::new(type_id_to_cranelift(
+                    return_type_id,
+                    &self.ctx.arena.borrow(),
                     self.ctx.pointer_type,
                 )));
             }
@@ -708,25 +709,31 @@ impl Cg<'_, '_, '_> {
             if results.is_empty() {
                 Ok(self.void_value())
             } else {
-                let return_type = (*func_type.return_type).clone();
                 Ok(CompiledValue {
                     value: results[0],
-                    ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
-                    type_id: self.intern_type(&return_type),
+                    ty: type_id_to_cranelift(
+                        return_type_id,
+                        &self.ctx.arena.borrow(),
+                        self.ctx.pointer_type,
+                    ),
+                    type_id: return_type_id,
                 })
             }
         } else {
             // It's a pure function - call directly
             let mut sig = self.ctx.module.make_signature();
-            for param_type in func_type.params.iter() {
-                sig.params.push(AbiParam::new(type_to_cranelift(
-                    param_type,
+            for param_id in param_ids.iter() {
+                sig.params.push(AbiParam::new(type_id_to_cranelift(
+                    *param_id,
+                    &self.ctx.arena.borrow(),
                     self.ctx.pointer_type,
                 )));
             }
-            if func_type.return_type.as_ref() != &LegacyType::Void {
-                sig.returns.push(AbiParam::new(type_to_cranelift(
-                    &func_type.return_type,
+            let is_void_return = self.ctx.arena.borrow().is_void(return_type_id);
+            if !is_void_return {
+                sig.returns.push(AbiParam::new(type_id_to_cranelift(
+                    return_type_id,
+                    &self.ctx.arena.borrow(),
                     self.ctx.pointer_type,
                 )));
             }
@@ -748,11 +755,14 @@ impl Cg<'_, '_, '_> {
             if results.is_empty() {
                 Ok(self.void_value())
             } else {
-                let return_type = (*func_type.return_type).clone();
                 Ok(CompiledValue {
                     value: results[0],
-                    ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
-                    type_id: self.intern_type(&return_type),
+                    ty: type_id_to_cranelift(
+                        return_type_id,
+                        &self.ctx.arena.borrow(),
+                        self.ctx.pointer_type,
+                    ),
+                    type_id: return_type_id,
                 })
             }
         }
@@ -765,14 +775,14 @@ impl Cg<'_, '_, '_> {
         args: &[Expr],
         interface_type_id: TypeDefId,
         method_name_id: NameId,
-        func_type: FunctionType,
+        func_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
         let slot = crate::codegen::interface_vtable::interface_method_slot_by_type_def_id(
             interface_type_id,
             method_name_id,
             &self.ctx.analyzed.entity_registry,
         )?;
-        self.interface_dispatch_call_args_inner(obj, args, slot, func_type)
+        self.interface_dispatch_call_args_inner(obj, args, slot, func_type_id)
     }
 
     fn interface_dispatch_call_args_inner(
@@ -780,10 +790,19 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         args: &[Expr],
         slot: usize,
-        func_type: FunctionType,
+        func_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
         let word_type = self.ctx.pointer_type;
         let word_bytes = word_type.bytes() as i32;
+
+        // Unwrap function type to get params and return type
+        let (param_count, return_type_id, is_void_return) = {
+            let arena = self.ctx.arena.borrow();
+            let (params, ret_id, _is_closure) = arena
+                .unwrap_function(func_type_id)
+                .ok_or_else(|| "Expected function type for interface dispatch".to_string())?;
+            (params.len(), ret_id, arena.is_void(ret_id))
+        };
 
         // Load data pointer from boxed interface (first word)
         // Currently unused but kept for interface dispatch debugging
@@ -806,10 +825,10 @@ impl Cg<'_, '_, '_> {
 
         let mut sig = self.ctx.module.make_signature();
         sig.params.push(AbiParam::new(word_type));
-        for _ in func_type.params.iter() {
+        for _ in 0..param_count {
             sig.params.push(AbiParam::new(word_type));
         }
-        if func_type.return_type.as_ref() != &LegacyType::Void {
+        if !is_void_return {
             sig.returns.push(AbiParam::new(word_type));
         }
         let sig_ref = self.builder.import_signature(sig);
@@ -846,7 +865,7 @@ impl Cg<'_, '_, '_> {
             .call_indirect(sig_ref, func_ptr, &call_args);
         let results = self.builder.inst_results(call);
 
-        if func_type.return_type.as_ref() == &LegacyType::Void {
+        if is_void_return {
             return Ok(self.void_value());
         }
 
@@ -854,10 +873,10 @@ impl Cg<'_, '_, '_> {
             .first()
             .copied()
             .ok_or_else(|| "interface call missing return value".to_string())?;
-        let value = word_to_value(
+        let value = word_to_value_type_id(
             self.builder,
             word,
-            &func_type.return_type,
+            return_type_id,
             word_type,
             &self.ctx.analyzed.entity_registry,
             &self.ctx.arena.borrow(),
@@ -865,7 +884,6 @@ impl Cg<'_, '_, '_> {
 
         // Convert Iterator return types to RuntimeIterator for interface dispatch
         // since external iterator methods return raw iterator pointers, not boxed interfaces
-        let return_type_id = self.intern_type(&func_type.return_type);
         let return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
 
         let arena = self.ctx.arena.borrow();

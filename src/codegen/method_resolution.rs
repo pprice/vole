@@ -10,7 +10,7 @@ use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_arena::TypeId;
 use crate::sema::types::NominalType;
-use crate::sema::{FunctionType, LegacyType, PrimitiveType};
+use crate::sema::{LegacyType, PrimitiveType};
 
 #[derive(Debug)]
 pub(crate) enum MethodTarget {
@@ -27,7 +27,7 @@ pub(crate) enum MethodTarget {
         return_type: TypeId,
     },
     FunctionalInterface {
-        func_type: FunctionType,
+        func_type_id: TypeId,
     },
     External {
         external_info: ExternalMethodInfo,
@@ -36,13 +36,13 @@ pub(crate) enum MethodTarget {
     InterfaceDispatch {
         interface_type_id: TypeDefId,
         method_name_id: NameId,
-        func_type: FunctionType,
+        func_type_id: TypeId,
     },
     #[allow(dead_code)] // Handled earlier via ResolvedMethod::Static
     StaticMethod {
         type_def_id: TypeDefId,
         method_id: MethodId,
-        func_type: FunctionType,
+        func_type_id: TypeId,
     },
 }
 
@@ -150,10 +150,15 @@ pub(crate) fn resolve_method_target(
                     .ok_or_else(|| {
                         format!("method name {} not found as NameId", input.method_name_str)
                     })?;
+                    let func_type_id = input
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&LegacyType::Function(func_type.clone()));
                     return Ok(MethodTarget::InterfaceDispatch {
                         interface_type_id,
                         method_name_id,
-                        func_type: func_type.clone(),
+                        func_type_id,
                     });
                 }
 
@@ -201,9 +206,12 @@ pub(crate) fn resolve_method_target(
                 })
             }
             ResolvedMethod::FunctionalInterface { func_type } => {
-                Ok(MethodTarget::FunctionalInterface {
-                    func_type: func_type.clone(),
-                })
+                let func_type_id = input
+                    .analyzed
+                    .type_arena
+                    .borrow_mut()
+                    .from_type(&LegacyType::Function(func_type.clone()));
+                Ok(MethodTarget::FunctionalInterface { func_type_id })
             }
             ResolvedMethod::DefaultMethod {
                 func_type,
@@ -255,10 +263,15 @@ pub(crate) fn resolve_method_target(
                 .ok_or_else(|| {
                     format!("method name {} not found as NameId", input.method_name_str)
                 })?;
+                let func_type_id = input
+                    .analyzed
+                    .type_arena
+                    .borrow_mut()
+                    .from_type(&LegacyType::Function(func_type.clone()));
                 Ok(MethodTarget::InterfaceDispatch {
                     interface_type_id: interface_type.type_def_id,
                     method_name_id,
-                    func_type: func_type.clone(),
+                    func_type_id,
                 })
             }
             ResolvedMethod::Static {
@@ -268,10 +281,15 @@ pub(crate) fn resolve_method_target(
             } => {
                 // Static method call - will be compiled similarly to direct methods
                 // but without an implicit self parameter
+                let func_type_id = input
+                    .analyzed
+                    .type_arena
+                    .borrow_mut()
+                    .from_type(&LegacyType::Function(func_type.clone()));
                 Ok(MethodTarget::StaticMethod {
                     type_def_id: *type_def_id,
                     method_id: *method_id,
-                    func_type: func_type.clone(),
+                    func_type_id,
                 })
             }
         };
