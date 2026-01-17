@@ -281,8 +281,11 @@ impl Analyzer {
                     .expect("field was validated in type check phase");
                 let expected_ty = &concrete_field_types[idx];
 
-                if !self.types_compatible(actual_ty, expected_ty, interner) {
-                    self.add_type_mismatch(expected_ty, actual_ty, field_init.value.span);
+                // Convert to TypeId for compatibility check (Phase 2 migration)
+                let actual_ty_id = self.type_to_id(actual_ty);
+                let expected_ty_id = self.type_to_id(expected_ty);
+                if !self.types_compatible_id(actual_ty_id, expected_ty_id, interner) {
+                    self.add_type_mismatch_id(expected_ty_id, actual_ty_id, field_init.value.span);
                 }
             } else {
                 self.add_error(
@@ -414,8 +417,11 @@ impl Analyzer {
                     .expect("field was validated in type check phase");
                 let expected_ty = &concrete_field_types[idx];
 
-                if !self.types_compatible(actual_ty, expected_ty, interner) {
-                    self.add_type_mismatch(expected_ty, actual_ty, field_init.value.span);
+                // Convert to TypeId for compatibility check (Phase 2 migration)
+                let actual_ty_id = self.type_to_id(actual_ty);
+                let expected_ty_id = self.type_to_id(expected_ty);
+                if !self.types_compatible_id(actual_ty_id, expected_ty_id, interner) {
+                    self.add_type_mismatch_id(expected_ty_id, actual_ty_id, field_init.value.span);
                 }
             } else {
                 self.add_error(

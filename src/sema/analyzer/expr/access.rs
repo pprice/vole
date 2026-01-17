@@ -345,8 +345,11 @@ impl Analyzer {
                     // Check argument types
                     for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                         let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
-                        if !self.types_compatible(&arg_ty, param_ty, interner) {
-                            self.add_type_mismatch(param_ty, &arg_ty, arg.span);
+                        // Convert to TypeId for compatibility check (Phase 2 migration)
+                        let arg_ty_id = self.type_to_id(&arg_ty);
+                        let param_ty_id = self.type_to_id(param_ty);
+                        if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                            self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
                         }
                     }
 
@@ -443,8 +446,11 @@ impl Analyzer {
             // Check argument types
             for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                 let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
-                if !self.types_compatible(&arg_ty, param_ty, interner) {
-                    self.add_type_mismatch(param_ty, &arg_ty, arg.span);
+                // Convert to TypeId for compatibility check (Phase 2 migration)
+                let arg_ty_id = self.type_to_id(&arg_ty);
+                let param_ty_id = self.type_to_id(param_ty);
+                if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
                 }
             }
 
@@ -643,8 +649,11 @@ impl Analyzer {
             for (arg, (arg_ty, param_ty)) in
                 args.iter().zip(arg_types.iter().zip(final_params.iter()))
             {
-                if !self.types_compatible(arg_ty, param_ty, interner) {
-                    self.add_type_mismatch(param_ty, arg_ty, arg.span);
+                // Convert to TypeId for compatibility check (Phase 2 migration)
+                let arg_ty_id = self.type_to_id(arg_ty);
+                let param_ty_id = self.type_to_id(param_ty);
+                if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
                 }
             }
 

@@ -261,6 +261,29 @@ pub fn types_compatible_core_id(from: TypeId, to: TypeId, arena: &TypeArena) -> 
         return types_compatible_core_id(*from_elem, *to_elem, arena);
     }
 
+    // Function type compatibility: same params and return type (ignore is_closure)
+    if let (
+        SemaType::Function {
+            params: from_params,
+            ret: from_ret,
+            ..
+        },
+        SemaType::Function {
+            params: to_params,
+            ret: to_ret,
+            ..
+        },
+    ) = (from_ty, to_ty)
+        && from_params.len() == to_params.len()
+        && from_params
+            .iter()
+            .zip(to_params.iter())
+            .all(|(&f, &t)| types_compatible_core_id(f, t, arena))
+        && types_compatible_core_id(*from_ret, *to_ret, arena)
+    {
+        return true;
+    }
+
     false
 }
 

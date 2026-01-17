@@ -44,8 +44,11 @@ impl Analyzer {
                 self.check_expr(arg, interner)?
             };
 
-            if !self.types_compatible(&arg_ty, param_ty, interner) {
-                self.add_type_mismatch(param_ty, &arg_ty, arg.span);
+            // Convert to TypeId for compatibility check (Phase 2 migration)
+            let arg_ty_id = self.type_to_id(&arg_ty);
+            let param_ty_id = self.type_to_id(param_ty);
+            if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
             }
         }
 

@@ -192,8 +192,13 @@ impl Analyzer {
         }
 
         // Check type compatibility (for non-literal types that couldn't be inferred)
-        if target_valid && !self.types_compatible(&value_ty, &target_ty, interner) {
-            self.add_type_mismatch(&target_ty, &value_ty, assign.value.span);
+        // Convert to TypeId for compatibility check (Phase 2 migration)
+        if target_valid {
+            let value_ty_id = self.type_to_id(&value_ty);
+            let target_ty_id = self.type_to_id(&target_ty);
+            if !self.types_compatible_id(value_ty_id, target_ty_id, interner) {
+                self.add_type_mismatch_id(target_ty_id, value_ty_id, assign.value.span);
+            }
         }
 
         Ok(target_ty)
