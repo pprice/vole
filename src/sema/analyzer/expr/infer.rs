@@ -400,8 +400,8 @@ impl Analyzer {
             }
 
             ExprKind::Try(inner) => {
-                let ty = self.analyze_try(inner, interner)?;
-                Ok(self.type_to_id(&ty))
+                // analyze_try now returns TypeId directly
+                self.analyze_try(inner, interner)
             }
 
             ExprKind::Import(path) => {

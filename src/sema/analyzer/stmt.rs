@@ -545,43 +545,40 @@ impl Analyzer {
     pub(crate) fn analyze_try(
         &mut self,
         inner_expr: &Expr,
-        interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
+        _interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // Check the inner expression - must be fallible
-        let inner_type_id = self.check_expr(inner_expr, interner)?;
-        let inner_type = self.id_to_type(inner_type_id);
+        let inner_type_id = self.check_expr(inner_expr, _interner)?;
 
-        let (success_type, error_type) = match &inner_type {
-            LegacyType::Fallible(ft) => ((*ft.success_type).clone(), (*ft.error_type).clone()),
-            _ => {
-                let found = self.type_display(&inner_type);
-                self.add_error(
-                    SemanticError::TryOnNonFallible {
-                        found,
-                        span: inner_expr.span.into(),
-                    },
-                    inner_expr.span,
-                );
-                return Ok(self.ty_invalid());
-            }
+        // Use arena.unwrap_fallible to check if fallible (avoids LegacyType)
+        let fallible_info = self.type_arena.borrow().unwrap_fallible(inner_type_id);
+        let Some((success_type_id, error_type_id)) = fallible_info else {
+            let found = self.type_display_id(inner_type_id);
+            self.add_error(
+                SemanticError::TryOnNonFallible {
+                    found,
+                    span: inner_expr.span.into(),
+                },
+                inner_expr.span,
+            );
+            return Ok(ArenaTypeId::INVALID);
         };
 
         // Check that we're in a fallible function context
-        let Some(ref current_error) = self.current_function_error_type else {
+        let Some(current_error_id) = self.current_function_error_type else {
             self.add_error(
                 SemanticError::TryOutsideFallible {
                     span: inner_expr.span.into(),
                 },
                 inner_expr.span,
             );
-            return Ok(success_type);
+            return Ok(success_type_id);
         };
-        let current_error_legacy = self.type_arena.borrow().to_type(*current_error);
 
-        // Check that the error type is compatible with the function's error type
-        if !self.error_type_compatible(&error_type, &current_error_legacy) {
-            let try_error = self.type_display(&error_type);
-            let func_error = self.type_display(&current_error_legacy);
+        // Check that the error type is compatible with the function's error type (TypeId version)
+        if !self.error_type_compatible_id(error_type_id, current_error_id) {
+            let try_error = self.type_display_id(error_type_id);
+            let func_error = self.type_display_id(current_error_id);
             self.add_error(
                 SemanticError::IncompatibleTryError {
                     try_error,
@@ -593,24 +590,25 @@ impl Analyzer {
         }
 
         // try unwraps - returns the success type
-        Ok(success_type)
+        Ok(success_type_id)
     }
 
-    /// Check if error type is compatible with function's declared error type
-    fn error_type_compatible(&self, error_type: &LegacyType, func_error: &LegacyType) -> bool {
-        // Same type
-        if error_type == func_error {
+    /// Check if error type is compatible with function's declared error type (TypeId version)
+    fn error_type_compatible_id(&self, error_type_id: ArenaTypeId, func_error_id: ArenaTypeId) -> bool {
+        // Same type (O(1) via TypeId equality)
+        if error_type_id == func_error_id {
             return true;
         }
 
-        // error_type is a member of func_error union
-        if let LegacyType::Union(variants) = func_error {
-            if variants.contains(error_type) {
+        // Check if func_error is a union and error_type is a member
+        let arena = self.type_arena.borrow();
+        if let Some(func_variants) = arena.unwrap_union(func_error_id) {
+            if func_variants.contains(&error_type_id) {
                 return true;
             }
             // Also check if error_type is a union whose members are all in func_error
-            if let LegacyType::Union(error_variants) = error_type {
-                return error_variants.iter().all(|ev| variants.contains(ev));
+            if let Some(error_variants) = arena.unwrap_union(error_type_id) {
+                return error_variants.iter().all(|ev| func_variants.contains(ev));
             }
         }
 
