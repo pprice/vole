@@ -23,7 +23,7 @@ use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_arena::TypeId;
 use crate::sema::types::NominalType;
-use crate::sema::{FunctionType, LegacyType, PrimitiveType};
+use crate::sema::{LegacyType, PrimitiveType};
 
 impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
@@ -54,13 +54,12 @@ impl Cg<'_, '_, '_> {
             .query()
             .method_at_in_module(expr_id, self.ctx.current_module)
         {
-            return self.static_method_call(
-                *type_def_id,
-                *method_id,
-                func_type.clone(),
-                mc,
-                expr_id,
-            );
+            let func_type_id = self
+                .ctx
+                .arena
+                .borrow_mut()
+                .from_type(&LegacyType::Function(func_type.clone()));
+            return self.static_method_call(*type_def_id, *method_id, func_type_id, mc, expr_id);
         }
 
         // Handle range.iter() specially since range expressions can't be compiled to values directly
@@ -903,7 +902,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         type_def_id: TypeDefId,
         method_id: MethodId,
-        func_type: FunctionType,
+        func_type_id: TypeId,
         mc: &MethodCallExpr,
         expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
@@ -980,13 +979,23 @@ impl Cg<'_, '_, '_> {
                 )
             })?;
 
+        // Get param types and return type from arena
+        let (param_ids, return_type_id) = {
+            let arena = self.ctx.arena.borrow();
+            let (params, ret, _) = arena
+                .unwrap_function(func_type_id)
+                .ok_or_else(|| "Expected function type for static method call".to_string())?;
+            (params.clone(), ret)
+        };
+
         // Compile arguments (no receiver for static methods)
         let mut args = Vec::new();
-        for (arg, param_ty) in mc.args.iter().zip(func_type.params.iter()) {
+        for (arg, param_id) in mc.args.iter().zip(param_ids.iter()) {
             let compiled = self.expr(arg)?;
             // Box interface values if needed
+            let param_ty = self.ctx.arena.borrow().to_type(*param_id);
             let compiled = if matches!(param_ty, LegacyType::Nominal(NominalType::Interface(_))) {
-                box_interface_value(self.builder, self.ctx, compiled, param_ty)?
+                box_interface_value(self.builder, self.ctx, compiled, &param_ty)?
             } else {
                 compiled
             };
@@ -998,14 +1007,17 @@ impl Cg<'_, '_, '_> {
         let call = self.builder.ins().call(func_ref, &args);
         let results = self.builder.inst_results(call);
 
-        let return_type = (*func_type.return_type).clone();
         if results.is_empty() {
             Ok(self.void_value())
         } else {
             Ok(CompiledValue {
                 value: results[0],
-                ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
-                type_id: self.intern_type(&return_type),
+                ty: type_id_to_cranelift(
+                    return_type_id,
+                    &self.ctx.arena.borrow(),
+                    self.ctx.pointer_type,
+                ),
+                type_id: return_type_id,
             })
         }
     }
