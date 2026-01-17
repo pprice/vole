@@ -62,9 +62,9 @@ impl Analyzer {
 
     /// Get the type name and list of field names for a struct-like type (for error messages)
     fn get_struct_info(&self, ty: &LegacyType) -> Option<(String, Vec<String>)> {
-        let (type_def_id, _type_args) = match ty {
-            LegacyType::Nominal(NominalType::Class(c)) => (c.type_def_id, &c.type_args),
-            LegacyType::Nominal(NominalType::Record(r)) => (r.type_def_id, &r.type_args),
+        let type_def_id = match ty {
+            LegacyType::Nominal(NominalType::Class(c)) => c.type_def_id,
+            LegacyType::Nominal(NominalType::Record(r)) => r.type_def_id,
             _ => return None,
         };
 
