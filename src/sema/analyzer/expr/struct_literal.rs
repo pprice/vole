@@ -308,10 +308,16 @@ impl Analyzer {
             .filter_map(|tp| inferred.get(&tp.name_id).cloned())
             .collect();
 
+        // Convert type args to TypeIds for canonical representation
+        let type_args_id: TypeIdVec = type_args
+            .iter()
+            .map(|t| self.type_arena.borrow_mut().from_type(t))
+            .collect();
+
         let concrete_record = RecordType {
             type_def_id,
             type_args: type_args.into(),
-            type_args_id: TypeIdVec::new(),
+            type_args_id,
         };
         Ok(LegacyType::Nominal(NominalType::Record(concrete_record)))
     }
@@ -467,10 +473,16 @@ impl Analyzer {
             })
             .collect();
 
+        // Convert type args to TypeIds for canonical representation
+        let type_args_id: TypeIdVec = type_args
+            .iter()
+            .map(|t| self.type_arena.borrow_mut().from_type(t))
+            .collect();
+
         let concrete_class = ClassType {
             type_def_id,
             type_args: type_args.into(),
-            type_args_id: TypeIdVec::new(),
+            type_args_id,
         };
         Ok(LegacyType::Nominal(NominalType::Class(concrete_class)))
     }
