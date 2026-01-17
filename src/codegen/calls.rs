@@ -401,8 +401,12 @@ impl Cg<'_, '_, '_> {
                 // The func_type from the monomorph instance may have TypeParams that weren't
                 // inferred from arguments (like return type params). Apply class type
                 // substitutions to fully resolve the type.
-                let return_type = self.ctx.substitute_type(&instance.func_type.return_type);
-                let return_type_id = self.ctx.arena.borrow_mut().from_type(&return_type);
+                let return_type_id = self
+                    .ctx
+                    .arena
+                    .borrow_mut()
+                    .from_type(&instance.func_type.return_type);
+                let return_type_id = self.ctx.substitute_type_id(return_type_id);
                 return self.compile_native_call_with_types(native_func, call, return_type_id);
             }
         }
@@ -486,19 +490,23 @@ impl Cg<'_, '_, '_> {
                         .analyzed
                         .implement_registry
                         .get_external_func(callee_name);
-                    let vole_type = self
+                    let type_id = self
                         .ctx
-                        .get_expr_type_legacy(&call_expr_id)
+                        .get_expr_type(&call_expr_id)
                         .or_else(|| {
-                            ext_info
-                                .and_then(|info| info.return_type.as_ref().map(|t| (**t).clone()))
+                            ext_info.and_then(|info| {
+                                info.return_type
+                                    .as_ref()
+                                    .map(|t| self.ctx.arena.borrow_mut().from_type(t))
+                            })
                         })
                         .unwrap_or_else(|| {
-                            native_type_to_vole_type(&native_func.signature.return_type)
+                            let vole_type =
+                                native_type_to_vole_type(&native_func.signature.return_type);
+                            self.ctx.arena.borrow_mut().from_type(&vole_type)
                         });
                     // Convert Iterator<T> to RuntimeIterator(T) since external functions
                     // return raw iterator pointers, not boxed interface values
-                    let type_id = self.intern_type(&vole_type);
                     let type_id = self.maybe_convert_iterator_return_type(type_id);
                     return Ok(CompiledValue {
                         value: results[0],
@@ -569,18 +577,23 @@ impl Cg<'_, '_, '_> {
                 // For generic external functions, the sema analyzer stores the inferred
                 // concrete return type in expr_types. Use that first.
                 // Fall back to declared type for non-generic externals.
-                let vole_type = self
+                let type_id = self
                     .ctx
-                    .get_expr_type_legacy(&call_expr_id)
+                    .get_expr_type(&call_expr_id)
                     .or_else(|| {
-                        ext_info.and_then(|info| info.return_type.as_ref().map(|t| (**t).clone()))
+                        ext_info.and_then(|info| {
+                            info.return_type
+                                .as_ref()
+                                .map(|t| self.ctx.arena.borrow_mut().from_type(t))
+                        })
                     })
                     .unwrap_or_else(|| {
-                        native_type_to_vole_type(&native_func.signature.return_type)
+                        let vole_type =
+                            native_type_to_vole_type(&native_func.signature.return_type);
+                        self.ctx.arena.borrow_mut().from_type(&vole_type)
                     });
                 // Convert Iterator<T> to RuntimeIterator(T) since external functions
                 // return raw iterator pointers, not boxed interface values
-                let type_id = self.intern_type(&vole_type);
                 let type_id = self.maybe_convert_iterator_return_type(type_id);
                 return Ok(CompiledValue {
                     value: results[0],

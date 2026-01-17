@@ -13,7 +13,7 @@ use crate::sema::{LegacyType, PrimitiveType};
 
 use super::RuntimeFn;
 use super::context::{Captures, Cg, ControlFlow};
-use super::types::{CompileCtx, CompiledValue, resolve_type_expr, type_id_size, type_to_cranelift};
+use super::types::{CompileCtx, CompiledValue, resolve_type_expr_id, type_id_size, type_id_to_cranelift};
 
 /// Information about a captured variable for lambda compilation
 #[derive(Clone, Copy)]
@@ -87,8 +87,7 @@ pub(crate) fn infer_expr_type(
                 if global.name == *sym
                     && let Some(type_expr) = &global.ty
                 {
-                    let legacy_ty = resolve_type_expr(type_expr, ctx);
-                    return ctx.arena.borrow_mut().from_type(&legacy_ty);
+                    return resolve_type_expr_id(type_expr, ctx);
                 }
             }
             primitives.i64
@@ -148,30 +147,24 @@ pub(crate) fn infer_expr_type(
         }
 
         ExprKind::Lambda(lambda) => {
-            // First resolve all types without holding arena borrow
-            let param_legacy_types: Vec<LegacyType> = lambda
+            let primitives = ctx.arena.borrow().primitives;
+            // Resolve param types directly to TypeIds
+            let lambda_param_ids: crate::sema::type_arena::TypeIdVec = lambda
                 .params
                 .iter()
                 .map(|p| {
                     p.ty.as_ref()
-                        .map(|t| resolve_type_expr(t, ctx))
-                        .unwrap_or(LegacyType::Primitive(PrimitiveType::I64))
+                        .map(|t| resolve_type_expr_id(t, ctx))
+                        .unwrap_or(primitives.i64)
                 })
                 .collect();
-            let return_legacy = lambda
+            let return_ty_id = lambda
                 .return_type
                 .as_ref()
-                .map(|t| resolve_type_expr(t, ctx))
-                .unwrap_or(LegacyType::Primitive(PrimitiveType::I64));
+                .map(|t| resolve_type_expr_id(t, ctx))
+                .unwrap_or(primitives.i64);
 
-            // Now convert to TypeIds
-            let mut arena = ctx.arena.borrow_mut();
-            let lambda_param_ids: crate::sema::type_arena::TypeIdVec = param_legacy_types
-                .iter()
-                .map(|ty| arena.from_type(ty))
-                .collect();
-            let return_ty_id = arena.from_type(&return_legacy);
-            arena.function(
+            ctx.arena.borrow_mut().function(
                 lambda_param_ids,
                 return_ty_id,
                 !lambda.captures.borrow().is_empty(),
@@ -214,47 +207,43 @@ fn compile_pure_lambda(
 ) -> Result<CompiledValue, String> {
     *ctx.lambda_counter += 1;
 
-    let param_types: Vec<Type> = lambda
+    let primitives = ctx.arena.borrow().primitives;
+
+    // Build param type ids directly
+    let param_type_ids: Vec<TypeId> = lambda
         .params
         .iter()
         .map(|p| {
             p.ty.as_ref()
-                .map(|t| type_to_cranelift(&resolve_type_expr(t, ctx), ctx.pointer_type))
-                .unwrap_or(types::I64)
+                .map(|t| resolve_type_expr_id(t, ctx))
+                .unwrap_or(primitives.i64)
         })
         .collect();
 
-    let param_vole_types: Vec<LegacyType> = lambda
-        .params
-        .iter()
-        .map(|p| {
-            p.ty.as_ref()
-                .map(|t| resolve_type_expr(t, ctx))
-                .unwrap_or(LegacyType::Primitive(PrimitiveType::I64))
-        })
-        .collect();
-
-    // Build param context with TypeId for infer_lambda_return_type
-    let param_context_ids: Vec<(Symbol, TypeId)> = {
-        let mut arena = ctx.arena.borrow_mut();
-        lambda
-            .params
+    // Convert to Cranelift types
+    let param_types: Vec<Type> = {
+        let arena = ctx.arena.borrow();
+        param_type_ids
             .iter()
-            .zip(param_vole_types.iter())
-            .map(|(p, ty)| (p.name, arena.from_type(ty)))
+            .map(|&ty| type_id_to_cranelift(ty, &arena, ctx.pointer_type))
             .collect()
     };
 
-    let return_vole_type = lambda
+    // Build param context with TypeId for infer_lambda_return_type
+    let param_context_ids: Vec<(Symbol, TypeId)> = lambda
+        .params
+        .iter()
+        .zip(param_type_ids.iter())
+        .map(|(p, &ty)| (p.name, ty))
+        .collect();
+
+    let return_type_id = lambda
         .return_type
         .as_ref()
-        .map(|t| resolve_type_expr(t, ctx))
-        .unwrap_or_else(|| {
-            let return_type_id = infer_lambda_return_type(&lambda.body, &param_context_ids, ctx);
-            ctx.arena.borrow().to_type(return_type_id)
-        });
+        .map(|t| resolve_type_expr_id(t, ctx))
+        .unwrap_or_else(|| infer_lambda_return_type(&lambda.body, &param_context_ids, ctx));
 
-    let return_type = type_to_cranelift(&return_vole_type, ctx.pointer_type);
+    let return_type = type_id_to_cranelift(return_type_id, &ctx.arena.borrow(), ctx.pointer_type);
 
     // Always use closure calling convention for consistency with how all lambdas
     // are now wrapped in Closure structs. First param is the closure pointer.
@@ -273,7 +262,6 @@ fn compile_pure_lambda(
         .map_err(|e| e.to_string())?;
 
     ctx.func_registry.set_func_id(func_key, func_id);
-    let return_type_id = ctx.arena.borrow_mut().from_type(&return_vole_type);
     ctx.func_registry.set_return_type(func_key, return_type_id);
 
     let mut lambda_ctx = ctx.module.make_context();
@@ -294,8 +282,7 @@ fn compile_pure_lambda(
         for (i, param) in lambda.params.iter().enumerate() {
             let var = lambda_builder.declare_var(param_types[i]);
             lambda_builder.def_var(var, block_params[i + 1]); // +1 to skip closure ptr
-            let param_type_id = ctx.arena.borrow_mut().from_type(&param_vole_types[i]);
-            lambda_variables.insert(param.name, (var, param_type_id));
+            lambda_variables.insert(param.name, (var, param_type_ids[i]));
         }
 
         let capture_bindings: HashMap<Symbol, CaptureBinding> = HashMap::new();
@@ -341,11 +328,7 @@ fn compile_pure_lambda(
     // Create TypeId directly from components
     let func_type_id = {
         let mut arena = ctx.arena.borrow_mut();
-        let param_ids: crate::sema::type_arena::TypeIdVec = param_vole_types
-            .iter()
-            .map(|p| arena.from_type(p))
-            .collect();
-        let return_type_id = arena.from_type(&return_vole_type);
+        let param_ids: crate::sema::type_arena::TypeIdVec = param_type_ids.iter().copied().collect();
         arena.function(param_ids, return_type_id, true) // is_closure=true
     };
     Ok(CompiledValue {
@@ -367,47 +350,43 @@ fn compile_lambda_with_captures(
 
     *ctx.lambda_counter += 1;
 
-    let param_types: Vec<Type> = lambda
+    let primitives = ctx.arena.borrow().primitives;
+
+    // Build param type ids directly
+    let param_type_ids: Vec<TypeId> = lambda
         .params
         .iter()
         .map(|p| {
             p.ty.as_ref()
-                .map(|t| type_to_cranelift(&resolve_type_expr(t, ctx), ctx.pointer_type))
-                .unwrap_or(types::I64)
+                .map(|t| resolve_type_expr_id(t, ctx))
+                .unwrap_or(primitives.i64)
         })
         .collect();
 
-    let param_vole_types: Vec<LegacyType> = lambda
-        .params
-        .iter()
-        .map(|p| {
-            p.ty.as_ref()
-                .map(|t| resolve_type_expr(t, ctx))
-                .unwrap_or(LegacyType::Primitive(PrimitiveType::I64))
-        })
-        .collect();
-
-    // Build param context with TypeId for infer_lambda_return_type
-    let param_context_ids: Vec<(Symbol, TypeId)> = {
-        let mut arena = ctx.arena.borrow_mut();
-        lambda
-            .params
+    // Convert to Cranelift types
+    let param_types: Vec<Type> = {
+        let arena = ctx.arena.borrow();
+        param_type_ids
             .iter()
-            .zip(param_vole_types.iter())
-            .map(|(p, ty)| (p.name, arena.from_type(ty)))
+            .map(|&ty| type_id_to_cranelift(ty, &arena, ctx.pointer_type))
             .collect()
     };
 
-    let return_vole_type = lambda
+    // Build param context with TypeId for infer_lambda_return_type
+    let param_context_ids: Vec<(Symbol, TypeId)> = lambda
+        .params
+        .iter()
+        .zip(param_type_ids.iter())
+        .map(|(p, &ty)| (p.name, ty))
+        .collect();
+
+    let return_type_id = lambda
         .return_type
         .as_ref()
-        .map(|t| resolve_type_expr(t, ctx))
-        .unwrap_or_else(|| {
-            let return_type_id = infer_lambda_return_type(&lambda.body, &param_context_ids, ctx);
-            ctx.arena.borrow().to_type(return_type_id)
-        });
+        .map(|t| resolve_type_expr_id(t, ctx))
+        .unwrap_or_else(|| infer_lambda_return_type(&lambda.body, &param_context_ids, ctx));
 
-    let return_type = type_to_cranelift(&return_vole_type, ctx.pointer_type);
+    let return_type = type_id_to_cranelift(return_type_id, &ctx.arena.borrow(), ctx.pointer_type);
 
     // First param is the closure pointer
     let mut sig = ctx.module.make_signature();
@@ -425,7 +404,6 @@ fn compile_lambda_with_captures(
         .map_err(|e| e.to_string())?;
 
     ctx.func_registry.set_func_id(func_key, func_id);
-    let return_type_id = ctx.arena.borrow_mut().from_type(&return_vole_type);
     ctx.func_registry.set_return_type(func_key, return_type_id);
 
     let capture_bindings =
@@ -450,8 +428,7 @@ fn compile_lambda_with_captures(
         for (i, param) in lambda.params.iter().enumerate() {
             let var = lambda_builder.declare_var(param_types[i]);
             lambda_builder.def_var(var, block_params[i + 1]);
-            let param_type_id = ctx.arena.borrow_mut().from_type(&param_vole_types[i]);
-            lambda_variables.insert(param.name, (var, param_type_id));
+            lambda_variables.insert(param.name, (var, param_type_ids[i]));
         }
 
         let closure_var = lambda_builder.declare_var(ctx.pointer_type);
@@ -542,11 +519,7 @@ fn compile_lambda_with_captures(
     // Create TypeId directly from components
     let func_type_id = {
         let mut arena = ctx.arena.borrow_mut();
-        let param_ids: crate::sema::type_arena::TypeIdVec = param_vole_types
-            .iter()
-            .map(|p| arena.from_type(p))
-            .collect();
-        let return_type_id = arena.from_type(&return_vole_type);
+        let param_ids: crate::sema::type_arena::TypeIdVec = param_type_ids.iter().copied().collect();
         arena.function(param_ids, return_type_id, true) // is_closure=true
     };
     Ok(CompiledValue {

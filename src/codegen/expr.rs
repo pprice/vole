@@ -120,17 +120,21 @@ impl Cg<'_, '_, '_> {
             let ty = self.builder.func.dfg.value_type(val);
 
             // Check for narrowed type from semantic analysis
-            if let Some(ref narrowed_type) = self.ctx.get_expr_type_legacy(&expr.id)
+            if let Some(narrowed_type_id) = self.ctx.get_expr_type(&expr.id)
                 && self.is_union(*type_id)
-                && !matches!(narrowed_type, LegacyType::Union(_))
+                && !self.ctx.arena.borrow().is_union(narrowed_type_id)
             {
                 // Union layout: [tag:1][padding:7][payload]
-                let payload_ty = type_to_cranelift(narrowed_type, self.ctx.pointer_type);
+                let payload_ty = type_id_to_cranelift(
+                    narrowed_type_id,
+                    &self.ctx.arena.borrow(),
+                    self.ctx.pointer_type,
+                );
                 let payload = self.builder.ins().load(payload_ty, MemFlags::new(), val, 8);
                 return Ok(CompiledValue {
                     value: payload,
                     ty: payload_ty,
-                    type_id: self.intern_type(narrowed_type),
+                    type_id: narrowed_type_id,
                 });
             }
 

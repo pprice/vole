@@ -160,25 +160,7 @@ pub(crate) struct CompileCtx<'a> {
 }
 
 impl<'a> CompileCtx<'a> {
-    /// Substitute type parameters with concrete types using current context.
-    /// If no type_substitutions are set, returns the original type unchanged.
-    /// DEPRECATED: Use substitute_type_id for better performance.
-    pub fn substitute_type(&self, ty: &LegacyType) -> LegacyType {
-        if let Some(substitutions) = self.type_substitutions {
-            // Convert TypeId substitutions to LegacyType for substitution
-            let arena = self.arena.borrow();
-            let legacy_subs: HashMap<NameId, LegacyType> = substitutions
-                .iter()
-                .map(|(&k, &v)| (k, arena.to_type(v)))
-                .collect();
-            ty.substitute(&legacy_subs)
-        } else {
-            ty.clone()
-        }
-    }
-
     /// Substitute type parameters with concrete types using TypeId directly.
-    /// Much faster than substitute_type - avoids LegacyType conversion overhead.
     pub fn substitute_type_id(&self, ty: TypeId) -> TypeId {
         if let Some(substitutions) = self.type_substitutions {
             // Convert std HashMap to hashbrown HashMap for arena compatibility
@@ -217,68 +199,6 @@ impl<'a> CompileCtx<'a> {
         }
         // Fall back to main program expr_types via query interface
         self.analyzed.query().type_of(*node_id)
-    }
-
-    /// Look up expression type, converting to LegacyType.
-    /// Use this when you need the full recursive type structure.
-    pub fn get_expr_type_legacy(&self, node_id: &NodeId) -> Option<LegacyType> {
-        // When compiling module code, NodeIds are relative to that module's program
-        // Use module-specific expr_types if available
-        if let Some(module_path) = self.current_module
-            && let Some(module_types) = self.analyzed.query().expr_data().module_types(module_path)
-            && let Some(ty) = module_types.get(node_id)
-        {
-            // Convert TypeId handle to LegacyType
-            let arena = self.analyzed.query().expr_data().type_arena();
-            return Some(arena.borrow().to_type(*ty));
-        }
-        // Fall back to main program expr_types via query interface
-        self.analyzed.query().type_of_legacy(*node_id)
-    }
-}
-
-/// Resolve a type expression to a Vole Type (uses CompileCtx for full context)
-pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> LegacyType {
-    let module_id = ctx
-        .current_module
-        .and_then(|path| ctx.analyzed.name_table.module_id_if_known(path))
-        .unwrap_or_else(|| ctx.analyzed.name_table.main_module());
-    let resolved = resolve_type_expr_with_metadata(
-        ty,
-        &ctx.analyzed.entity_registry,
-        ctx.type_metadata,
-        ctx.interner,
-        &ctx.analyzed.name_table,
-        module_id,
-        ctx.arena,
-    );
-    // Apply type substitutions if compiling a monomorphized context
-    // This allows lambda params like (a: T, b: T) to use concrete types
-    if let Some(substitutions) = ctx.type_substitutions {
-        let arena = ctx.arena.borrow();
-        // First handle Placeholder::TypeParam which has a string name
-        // We need to find the matching NameId in substitutions
-        if let LegacyType::Placeholder(crate::sema::types::PlaceholderKind::TypeParam(ref name)) =
-            resolved
-        {
-            // Look for a substitution with matching name
-            for (name_id, concrete_type_id) in substitutions {
-                if let Some(name_str) = ctx.analyzed.name_table.last_segment_str(*name_id)
-                    && &name_str == name
-                {
-                    return arena.to_type(*concrete_type_id);
-                }
-            }
-        }
-        // Then apply normal TypeParam substitution
-        // Convert TypeId substitutions to LegacyType
-        let legacy_subs: HashMap<NameId, LegacyType> = substitutions
-            .iter()
-            .map(|(&k, &v)| (k, arena.to_type(v)))
-            .collect();
-        substitute_type(&resolved, &legacy_subs)
-    } else {
-        resolved
     }
 }
 
