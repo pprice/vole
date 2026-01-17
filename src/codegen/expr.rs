@@ -14,7 +14,6 @@ use crate::frontend::{
     AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, LetInit, MatchExpr, Pattern, RangeExpr,
     RecordFieldPattern, Symbol, UnaryOp,
 };
-use crate::sema::LegacyType;
 use crate::sema::entity_defs::TypeDefKind;
 
 use super::context::Cg;
@@ -24,7 +23,7 @@ use super::structs::{
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
     array_element_tag_id, box_interface_value_id, fallible_error_tag_by_id, resolve_type_expr_id,
-    tuple_layout_id, type_id_to_cranelift, type_to_cranelift,
+    tuple_layout_id, type_id_to_cranelift,
 };
 use crate::sema::type_arena::TypeId;
 
@@ -92,16 +91,14 @@ impl Cg<'_, '_, '_> {
                 // At runtime this is just a placeholder - actual function calls
                 // go through the method resolution mechanism
                 // We need to retrieve the actual Module type from semantic analysis
-                let vole_type = self
+                let type_id = self
                     .ctx
-                    .analyzed
-                    .query()
-                    .type_of_legacy(expr.id)
-                    .unwrap_or(LegacyType::unknown());
+                    .get_expr_type(&expr.id)
+                    .unwrap_or(self.ctx.arena.borrow().primitives.i64);
                 Ok(CompiledValue {
                     value: self.builder.ins().iconst(types::I64, 0),
                     ty: types::I64,
-                    type_id: self.intern_type(&vole_type),
+                    type_id,
                 })
             }
             ExprKind::Yield(_) => {
@@ -504,12 +501,10 @@ impl Cg<'_, '_, '_> {
         expr: &Expr,
     ) -> Result<CompiledValue, String> {
         // Get the element type from semantic analysis
-        let elem_type = self
+        let elem_type_id = self
             .ctx
-            .analyzed
-            .query()
-            .type_of_legacy(element.id)
-            .unwrap_or(LegacyType::unknown());
+            .get_expr_type(&element.id)
+            .unwrap_or(self.ctx.arena.borrow().primitives.i64);
 
         // Compile the element once
         let elem_value = self.expr(element)?;
@@ -539,18 +534,15 @@ impl Cg<'_, '_, '_> {
             .ins()
             .stack_addr(self.ctx.pointer_type, slot, 0);
 
-        // Get the full type from sema
-        let vole_type = self.ctx.get_expr_type(&expr.id).unwrap_or_else(|| {
-            self.intern_type(&LegacyType::FixedArray {
-                element: Box::new(elem_type),
-                size: count,
-            })
+        // Get the full type from sema, or create fixed array type from element type
+        let type_id = self.ctx.get_expr_type(&expr.id).unwrap_or_else(|| {
+            self.ctx.arena.borrow_mut().fixed_array(elem_type_id, count)
         });
 
         Ok(CompiledValue {
             value: ptr,
             ty: self.ctx.pointer_type,
-            type_id: vole_type,
+            type_id,
         })
     }
 
@@ -589,7 +581,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: ptr,
             ty: self.ctx.pointer_type,
-            type_id: self.intern_type(&LegacyType::Range),
+            type_id: self.ctx.arena.borrow().range(),
         })
     }
 
@@ -1532,14 +1524,14 @@ impl Cg<'_, '_, '_> {
         let condition = self.expr(&if_expr.condition)?;
 
         // Get the result type from semantic analysis
-        let result_type = self
+        let result_type_id = self
             .ctx
-            .analyzed
-            .query()
-            .type_of_legacy(if_expr.then_branch.id)
-            .unwrap_or(LegacyType::Void);
+            .get_expr_type(&if_expr.then_branch.id)
+            .unwrap_or(self.ctx.arena.borrow().primitives.void);
 
-        let result_cranelift_type = type_to_cranelift(&result_type, self.ctx.pointer_type);
+        let is_void = self.ctx.arena.borrow().is_void(result_type_id);
+        let result_cranelift_type =
+            type_id_to_cranelift(result_type_id, &self.ctx.arena.borrow(), self.ctx.pointer_type);
 
         // Create basic blocks
         let then_block = self.builder.create_block();
@@ -1547,7 +1539,7 @@ impl Cg<'_, '_, '_> {
         let merge_block = self.builder.create_block();
 
         // Add block parameter for the result
-        if result_type != LegacyType::Void {
+        if !is_void {
             self.builder
                 .append_block_param(merge_block, result_cranelift_type);
         }
@@ -1561,7 +1553,7 @@ impl Cg<'_, '_, '_> {
         self.builder.switch_to_block(then_block);
         self.builder.seal_block(then_block);
         let then_result = self.expr(&if_expr.then_branch)?;
-        if result_type != LegacyType::Void {
+        if !is_void {
             self.builder
                 .ins()
                 .jump(merge_block, &[then_result.value.into()]);
@@ -1578,7 +1570,7 @@ impl Cg<'_, '_, '_> {
             // No else branch - result is void/nil
             self.void_value()
         };
-        if result_type != LegacyType::Void {
+        if !is_void {
             self.builder
                 .ins()
                 .jump(merge_block, &[else_result.value.into()]);
@@ -1590,12 +1582,12 @@ impl Cg<'_, '_, '_> {
         self.builder.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);
 
-        if result_type != LegacyType::Void {
+        if !is_void {
             let result = self.builder.block_params(merge_block)[0];
             Ok(CompiledValue {
                 value: result,
                 ty: result_cranelift_type,
-                type_id: self.intern_type(&result_type),
+                type_id: result_type_id,
             })
         } else {
             Ok(self.void_value())
