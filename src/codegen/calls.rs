@@ -13,9 +13,7 @@ use crate::errors::CodegenError;
 type ArgVec = SmallVec<[Value; 8]>;
 use crate::frontend::{CallExpr, ExprKind, LetInit, NodeId, StringPart};
 use crate::runtime::native_registry::{NativeFunction, NativeType};
-use crate::sema::{LegacyType, PrimitiveType};
-
-use crate::sema::type_arena::TypeId;
+use crate::sema::type_arena::{TypeArena, TypeId};
 
 use super::context::Cg;
 use super::types::{
@@ -501,9 +499,10 @@ impl Cg<'_, '_, '_> {
                             })
                         })
                         .unwrap_or_else(|| {
-                            let vole_type =
-                                native_type_to_vole_type(&native_func.signature.return_type);
-                            self.ctx.arena.borrow_mut().from_type(&vole_type)
+                            native_type_to_type_id(
+                                &native_func.signature.return_type,
+                                &mut self.ctx.arena.borrow_mut(),
+                            )
                         });
                     // Convert Iterator<T> to RuntimeIterator(T) since external functions
                     // return raw iterator pointers, not boxed interface values
@@ -588,9 +587,10 @@ impl Cg<'_, '_, '_> {
                         })
                     })
                     .unwrap_or_else(|| {
-                        let vole_type =
-                            native_type_to_vole_type(&native_func.signature.return_type);
-                        self.ctx.arena.borrow_mut().from_type(&vole_type)
+                        native_type_to_type_id(
+                            &native_func.signature.return_type,
+                            &mut self.ctx.arena.borrow_mut(),
+                        )
                     });
                 // Convert Iterator<T> to RuntimeIterator(T) since external functions
                 // return raw iterator pointers, not boxed interface values
@@ -962,26 +962,30 @@ impl Cg<'_, '_, '_> {
     }
 }
 
-/// Convert NativeType to Vole Type
-fn native_type_to_vole_type(nt: &NativeType) -> LegacyType {
+/// Convert NativeType directly to TypeId (no LegacyType intermediate)
+fn native_type_to_type_id(nt: &NativeType, arena: &mut TypeArena) -> TypeId {
     match nt {
-        NativeType::I8 => LegacyType::Primitive(PrimitiveType::I8),
-        NativeType::I16 => LegacyType::Primitive(PrimitiveType::I16),
-        NativeType::I32 => LegacyType::Primitive(PrimitiveType::I32),
-        NativeType::I64 => LegacyType::Primitive(PrimitiveType::I64),
-        NativeType::I128 => LegacyType::Primitive(PrimitiveType::I128),
-        NativeType::U8 => LegacyType::Primitive(PrimitiveType::U8),
-        NativeType::U16 => LegacyType::Primitive(PrimitiveType::U16),
-        NativeType::U32 => LegacyType::Primitive(PrimitiveType::U32),
-        NativeType::U64 => LegacyType::Primitive(PrimitiveType::U64),
-        NativeType::F32 => LegacyType::Primitive(PrimitiveType::F32),
-        NativeType::F64 => LegacyType::Primitive(PrimitiveType::F64),
-        NativeType::Bool => LegacyType::Primitive(PrimitiveType::Bool),
-        NativeType::String => LegacyType::Primitive(PrimitiveType::String),
-        NativeType::Nil => LegacyType::Nil,
+        NativeType::I8 => arena.primitives.i8,
+        NativeType::I16 => arena.primitives.i16,
+        NativeType::I32 => arena.primitives.i32,
+        NativeType::I64 => arena.primitives.i64,
+        NativeType::I128 => arena.primitives.i128,
+        NativeType::U8 => arena.primitives.u8,
+        NativeType::U16 => arena.primitives.u16,
+        NativeType::U32 => arena.primitives.u32,
+        NativeType::U64 => arena.primitives.u64,
+        NativeType::F32 => arena.primitives.f32,
+        NativeType::F64 => arena.primitives.f64,
+        NativeType::Bool => arena.primitives.bool,
+        NativeType::String => arena.primitives.string,
+        NativeType::Nil => arena.primitives.nil,
         NativeType::Optional(inner) => {
-            LegacyType::Union(vec![native_type_to_vole_type(inner), LegacyType::Nil].into())
+            let inner_id = native_type_to_type_id(inner, arena);
+            arena.optional(inner_id)
         }
-        NativeType::Array(inner) => LegacyType::Array(Box::new(native_type_to_vole_type(inner))),
+        NativeType::Array(inner) => {
+            let inner_id = native_type_to_type_id(inner, arena);
+            arena.array(inner_id)
+        }
     }
 }

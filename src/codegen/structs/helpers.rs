@@ -86,6 +86,33 @@ pub(crate) fn get_type_name_id(
     }
 }
 
+/// Get the NameId for a class, record, interface, or generic instance type using TypeId
+#[allow(dead_code)] // Infrastructure for LegacyType migration
+pub(crate) fn get_type_name_id_from_type_id(
+    type_id: TypeId,
+    arena: &TypeArena,
+    entity_registry: &crate::sema::entity_registry::EntityRegistry,
+) -> Result<crate::identity::NameId, String> {
+    // Try class
+    if let Some((type_def_id, _)) = arena.unwrap_class(type_id) {
+        return Ok(entity_registry.name_id(type_def_id));
+    }
+    // Try record
+    if let Some((type_def_id, _)) = arena.unwrap_record(type_id) {
+        return Ok(entity_registry.name_id(type_def_id));
+    }
+    // Try interface
+    if let Some((type_def_id, _)) = arena.unwrap_interface(type_id) {
+        return Ok(entity_registry.name_id(type_def_id));
+    }
+    Err(CodegenError::type_mismatch(
+        "type name extraction",
+        "class, record, interface, or generic instance",
+        "other type",
+    )
+    .into())
+}
+
 /// Convert a raw i64 field value to the appropriate Cranelift type using TypeId (no LegacyType)
 pub(crate) fn convert_field_value_id(
     builder: &mut FunctionBuilder,
