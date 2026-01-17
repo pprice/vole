@@ -431,24 +431,24 @@ impl Analyzer {
             .entity_registry
             .substitution_map(type_def_id, &type_args);
 
-        // Build methods with substituted types
+        // Build methods with substituted types using arena
         let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
             .methods
             .iter()
             .map(|&method_id| {
                 let method = self.entity_registry.get_method(method_id);
+                let substituted = if let LegacyType::Function(ft) =
+                    LegacyType::Function(method.signature.clone())
+                        .substitute_with_arena(&substitutions, &mut self.type_arena.borrow_mut())
+                {
+                    ft
+                } else {
+                    unreachable!()
+                };
                 crate::sema::types::InterfaceMethodType {
                     name: method.name_id,
-                    params: method
-                        .signature
-                        .params
-                        .iter()
-                        .map(|t| substitute_type(t, &substitutions))
-                        .collect(),
-                    return_type: Box::new(substitute_type(
-                        &method.signature.return_type,
-                        &substitutions,
-                    )),
+                    params: substituted.params,
+                    return_type: substituted.return_type,
                     has_default: method.has_default,
                 }
             })

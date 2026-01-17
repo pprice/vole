@@ -2,7 +2,6 @@ use std::collections::HashMap as StdHashMap;
 
 use crate::identity::{NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
-use crate::sema::generic::substitute_type;
 use crate::sema::types::{LegacyType, NominalType, StructuralType};
 
 use super::super::*;
@@ -107,13 +106,19 @@ impl Analyzer {
             .map(|(tp, arg)| (tp.name_id, arg.clone()))
             .collect();
 
-        // Find field and check type compatibility
+        // Find field and check type compatibility using arena substitution
         for (i, name_id) in generic_info.field_names.iter().enumerate() {
             if self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name) {
-                // Convert TypeId to LegacyType for substitution
                 let field_type_id = generic_info.field_types[i];
-                let field_type = self.type_arena.borrow().to_type(field_type_id);
-                let field_ty = crate::sema::generic::substitute_type(&field_type, &substitutions);
+                let field_ty = {
+                    let mut arena = self.type_arena.borrow_mut();
+                    let subs_id: hashbrown::HashMap<_, _> = substitutions
+                        .iter()
+                        .map(|(&k, v)| (k, arena.from_type(v)))
+                        .collect();
+                    let substituted_id = arena.substitute(field_type_id, &subs_id);
+                    arena.to_type(substituted_id)
+                };
                 return self.types_compatible(&field_ty, expected_type, interner);
             }
         }
@@ -331,16 +336,15 @@ impl Analyzer {
                         .name_table
                         .last_segment_str(method.name_id)
                         .unwrap_or_default();
-                    // Apply type parameter substitution to signature
-                    let subst_params: Vec<LegacyType> = method
-                        .signature
-                        .params
-                        .iter()
-                        .map(|p| substitute_type(p, &substitutions))
-                        .collect();
-                    let subst_return =
-                        substitute_type(&method.signature.return_type, &substitutions);
-                    let subst_sig = FunctionType { params: subst_params.into(), return_type: Box::new(subst_return), is_closure: method.signature.is_closure, params_id: None, return_type_id: None };
+                    // Apply type parameter substitution to signature using arena
+                    let subst_sig = if let LegacyType::Function(ft) =
+                        LegacyType::Function(method.signature.clone())
+                            .substitute_with_arena(&substitutions, &mut self.type_arena.borrow_mut())
+                    {
+                        ft
+                    } else {
+                        unreachable!()
+                    };
                     (name, method.has_default, subst_sig)
                 })
                 .collect();
@@ -671,13 +675,19 @@ impl Analyzer {
             .map(|(tp, arg)| (tp.name_id, arg.clone()))
             .collect();
 
-        // Find field and check type compatibility
+        // Find field and check type compatibility using arena substitution
         for (i, name_id) in generic_info.field_names.iter().enumerate() {
             if self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name) {
-                // Convert TypeId to LegacyType for substitution
                 let field_type_id = generic_info.field_types[i];
-                let field_type = self.type_arena.borrow().to_type(field_type_id);
-                let field_ty = crate::sema::generic::substitute_type(&field_type, &substitutions);
+                let field_ty = {
+                    let mut arena = self.type_arena.borrow_mut();
+                    let subs_id: hashbrown::HashMap<_, _> = substitutions
+                        .iter()
+                        .map(|(&k, v)| (k, arena.from_type(v)))
+                        .collect();
+                    let substituted_id = arena.substitute(field_type_id, &subs_id);
+                    arena.to_type(substituted_id)
+                };
                 return self.types_compatible(&field_ty, expected_type, interner);
             }
         }

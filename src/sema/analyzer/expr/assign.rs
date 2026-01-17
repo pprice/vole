@@ -49,20 +49,20 @@ impl Analyzer {
                                 self.name_table.last_segment_str(*name_id).as_deref()
                                     == Some(field_name)
                             }) {
-                                // Convert TypeId to LegacyType for substitution
+                                // Substitute type args via arena if any
                                 let field_type_id = generic_info.field_types[idx];
-                                let field_type = self.type_arena.borrow().to_type(field_type_id);
-                                // Substitute type args if any
                                 let resolved_type = if c.type_args.is_empty() {
-                                    field_type
+                                    self.type_arena.borrow().to_type(field_type_id)
                                 } else {
-                                    let substitutions: HashMap<_, _> = generic_info
+                                    let mut arena = self.type_arena.borrow_mut();
+                                    let subs_id: hashbrown::HashMap<_, _> = generic_info
                                         .type_params
                                         .iter()
                                         .zip(c.type_args.iter())
-                                        .map(|(tp, arg)| (tp.name_id, arg.clone()))
+                                        .map(|(tp, arg)| (tp.name_id, arena.from_type(arg)))
                                         .collect();
-                                    substitute_type(&field_type, &substitutions)
+                                    let substituted_id = arena.substitute(field_type_id, &subs_id);
+                                    arena.to_type(substituted_id)
                                 };
                                 (resolved_type, true, true)
                             } else {
