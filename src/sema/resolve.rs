@@ -223,6 +223,12 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
     match ty {
         TypeExpr::Primitive(p) => LegacyType::from_primitive(*p),
         TypeExpr::Named(sym) => {
+            // Handle "void" as a special case - it's not a registered type but a language primitive
+            let name_str = ctx.interner.resolve(*sym);
+            if name_str == "void" {
+                return LegacyType::Void;
+            }
+
             // Check if it's a type parameter in scope first
             if let Some(type_params) = ctx.type_params
                 && let Some(tp_info) = type_params.get(*sym)
