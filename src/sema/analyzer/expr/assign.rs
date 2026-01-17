@@ -51,17 +51,17 @@ impl Analyzer {
                             }) {
                                 // Substitute type args via arena if any
                                 let field_type_id = generic_info.field_types[idx];
-                                let resolved_type_id = if c.type_args.is_empty() {
+                                let resolved_type_id = if c.type_args_id.is_empty() {
                                     field_type_id
                                 } else {
-                                    let mut arena = self.type_arena.borrow_mut();
+                                    // Use type_args_id directly (already TypeIds)
                                     let subs_id: hashbrown::HashMap<_, _> = generic_info
                                         .type_params
                                         .iter()
-                                        .zip(c.type_args.iter())
-                                        .map(|(tp, arg)| (tp.name_id, arena.from_type(arg)))
+                                        .zip(c.type_args_id.iter())
+                                        .map(|(tp, &type_id)| (tp.name_id, type_id))
                                         .collect();
-                                    arena.substitute(field_type_id, &subs_id)
+                                    self.type_arena.borrow_mut().substitute(field_type_id, &subs_id)
                                 };
                                 (resolved_type_id, true, true)
                             } else {
@@ -308,17 +308,17 @@ impl Analyzer {
                             }) {
                                 // Substitute type args via arena if any
                                 let field_type_id = generic_info.field_types[idx];
-                                if c.type_args.is_empty() {
+                                if c.type_args_id.is_empty() {
                                     field_type_id
                                 } else {
-                                    let mut arena = self.type_arena.borrow_mut();
+                                    // Use type_args_id directly (already TypeIds)
                                     let subs_id: hashbrown::HashMap<_, _> = generic_info
                                         .type_params
                                         .iter()
-                                        .zip(c.type_args.iter())
-                                        .map(|(tp, arg)| (tp.name_id, arena.from_type(arg)))
+                                        .zip(c.type_args_id.iter())
+                                        .map(|(tp, &type_id)| (tp.name_id, type_id))
                                         .collect();
-                                    arena.substitute(field_type_id, &subs_id)
+                                    self.type_arena.borrow_mut().substitute(field_type_id, &subs_id)
                                 }
                             } else {
                                 self.add_error(
