@@ -21,7 +21,7 @@ use super::structs::{
 use super::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
     box_interface_value_id, fallible_error_tag, resolve_type_expr_id, tuple_layout_id, type_id_size,
-    type_id_to_cranelift, type_size,
+    type_id_to_cranelift,
 };
 
 /// Compile a block of statements (wrapper for compatibility)
@@ -885,8 +885,8 @@ impl Cg<'_, '_, '_> {
         })?;
 
         // Calculate the size of the fallible type
-        let fallible_size = type_size(
-            &return_type,
+        let fallible_size = type_id_size(
+            return_type_id,
             self.ctx.pointer_type,
             &self.ctx.analyzed.entity_registry,
             &self.ctx.arena.borrow(),

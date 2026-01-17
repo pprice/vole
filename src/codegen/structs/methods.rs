@@ -13,7 +13,7 @@ use crate::codegen::method_resolution::{
     MethodResolutionInput, MethodTarget, resolve_method_target,
 };
 use crate::codegen::types::{
-    CompiledValue, box_interface_value, module_name_id, type_id_to_cranelift, type_size,
+    CompiledValue, box_interface_value, module_name_id, type_id_size, type_id_to_cranelift,
     type_to_cranelift, value_to_word, word_to_value,
 };
 use crate::errors::CodegenError;
@@ -390,9 +390,9 @@ impl Cg<'_, '_, '_> {
 
             // For Union return types, the callee returns a pointer to its stack memory
             // which becomes invalid after the call. Copy the union to our own stack.
-            let (final_value, final_type) = if matches!(&return_type, LegacyType::Union(_)) {
-                let union_size = type_size(
-                    &return_type,
+            let (final_value, final_type) = if self.ctx.arena.borrow().is_union(return_type_id) {
+                let union_size = type_id_size(
+                    return_type_id,
                     self.ctx.pointer_type,
                     &self.ctx.analyzed.entity_registry,
                     &self.ctx.arena.borrow(),

@@ -1032,7 +1032,6 @@ pub(crate) fn type_size(
 }
 
 /// Get the size in bytes for a TypeId (no LegacyType conversion)
-#[allow(dead_code)]
 pub(crate) fn type_id_size(
     ty: TypeId,
     pointer_type: Type,
