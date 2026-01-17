@@ -1315,7 +1315,7 @@ impl Analyzer {
     fn enter_function_context(
         &mut self,
         return_type: &LegacyType,
-        interner: &Interner,
+        _interner: &Interner,
     ) -> FunctionCheckContext {
         let saved = FunctionCheckContext {
             return_type: self.current_function_return.take(),
@@ -1336,8 +1336,7 @@ impl Analyzer {
         }
 
         // Set generator context if return type is Iterator<T>
-        if let Some(element_type) = self.extract_iterator_element_type(return_type, interner) {
-            let element_type_id = self.type_arena.borrow_mut().from_type(&element_type);
+        if let Some(element_type_id) = self.extract_iterator_element_type_id(return_type_id) {
             self.current_generator_element_type = Some(element_type_id);
         }
 
@@ -1402,27 +1401,21 @@ impl Analyzer {
         Ok(())
     }
 
-    /// Extract the element type from an Iterator<T> type, or None if not an iterator type
-    fn extract_iterator_element_type(
-        &self,
-        ty: &LegacyType,
-        _interner: &Interner,
-    ) -> Option<LegacyType> {
-        let LegacyType::Nominal(NominalType::Interface(interface_type)) = ty else {
-            return None;
+    /// Extract the element type from an Iterator<T> type using TypeId (avoids LegacyType)
+    fn extract_iterator_element_type_id(&self, ty_id: ArenaTypeId) -> Option<ArenaTypeId> {
+        let interface_info = {
+            let arena = self.type_arena.borrow();
+            arena.unwrap_interface(ty_id).map(|(id, args)| (id, args.first().copied()))
         };
+        let (type_def_id, first_arg) = interface_info?;
         if !self
             .name_table
             .well_known
-            .is_iterator_type_def(interface_type.type_def_id)
+            .is_iterator_type_def(type_def_id)
         {
             return None;
         }
-        // Get first type argument using TypeId and convert to LegacyType
-        interface_type
-            .type_args_id
-            .first()
-            .map(|&id| self.type_arena.borrow().to_type(id))
+        first_arg
     }
 
     fn check_method(

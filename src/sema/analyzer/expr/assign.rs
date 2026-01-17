@@ -1,6 +1,5 @@
 use super::super::*;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
     pub(super) fn check_assign_expr(
@@ -32,51 +31,60 @@ impl Analyzer {
                 field_span,
             } => {
                 let obj_ty_id = self.check_expr(object, interner)?;
-                let obj_ty = self.id_to_type(obj_ty_id);
                 let field_name = interner.resolve(*field);
 
-                match &obj_ty {
-                    LegacyType::Nominal(NominalType::Class(c)) => {
-                        // Look up field via EntityRegistry
-                        let type_def = self.entity_registry.get_type(c.type_def_id);
-                        let type_name = self
-                            .name_table
-                            .last_segment_str(type_def.name_id)
-                            .unwrap_or_else(|| "class".to_string());
+                // Use arena queries to check class/record types (avoids LegacyType)
+                let struct_info = {
+                    let arena = self.type_arena.borrow();
+                    if let Some((id, args)) = arena.unwrap_class(obj_ty_id) {
+                        Some((id, args.clone(), true)) // is_class = true
+                    } else if let Some((id, _)) = arena.unwrap_record(obj_ty_id) {
+                        Some((id, crate::sema::type_arena::TypeIdVec::new(), false))
+                    } else {
+                        None
+                    }
+                };
 
-                        if let Some(ref generic_info) = type_def.generic_info {
-                            if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
-                                self.name_table.last_segment_str(*name_id).as_deref()
-                                    == Some(field_name)
-                            }) {
-                                // Substitute type args via arena if any
-                                let field_type_id = generic_info.field_types[idx];
-                                let resolved_type_id = if c.type_args_id.is_empty() {
-                                    field_type_id
-                                } else {
-                                    // Use type_args_id directly (already TypeIds)
-                                    let subs_id: hashbrown::HashMap<_, _> = generic_info
-                                        .type_params
-                                        .iter()
-                                        .zip(c.type_args_id.iter())
-                                        .map(|(tp, &type_id)| (tp.name_id, type_id))
-                                        .collect();
-                                    self.type_arena
-                                        .borrow_mut()
-                                        .substitute(field_type_id, &subs_id)
-                                };
-                                (resolved_type_id, true, true)
+                if let Some((type_def_id, type_args_id, is_class)) = struct_info {
+                    let type_def = self.entity_registry.get_type(type_def_id);
+                    let type_name = self
+                        .name_table
+                        .last_segment_str(type_def.name_id)
+                        .unwrap_or_else(|| if is_class { "class" } else { "record" }.to_string());
+
+                    if !is_class {
+                        // Records are immutable - reject field assignment
+                        self.add_error(
+                            SemanticError::RecordFieldMutation {
+                                record: type_name,
+                                field: field_name.to_string(),
+                                span: (*field_span).into(),
+                            },
+                            *field_span,
+                        );
+                        (ArenaTypeId::INVALID, false, false)
+                    } else if let Some(ref generic_info) = type_def.generic_info {
+                        if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
+                            self.name_table.last_segment_str(*name_id).as_deref()
+                                == Some(field_name)
+                        }) {
+                            // Substitute type args via arena if any
+                            let field_type_id = generic_info.field_types[idx];
+                            let resolved_type_id = if type_args_id.is_empty() {
+                                field_type_id
                             } else {
-                                self.add_error(
-                                    SemanticError::UnknownField {
-                                        ty: type_name,
-                                        field: field_name.to_string(),
-                                        span: (*field_span).into(),
-                                    },
-                                    *field_span,
-                                );
-                                (ArenaTypeId::INVALID, false, false)
-                            }
+                                // Use type_args_id directly (already TypeIds)
+                                let subs_id: hashbrown::HashMap<_, _> = generic_info
+                                    .type_params
+                                    .iter()
+                                    .zip(type_args_id.iter())
+                                    .map(|(tp, &type_id)| (tp.name_id, type_id))
+                                    .collect();
+                                self.type_arena
+                                    .borrow_mut()
+                                    .substitute(field_type_id, &subs_id)
+                            };
+                            (resolved_type_id, true, true)
                         } else {
                             self.add_error(
                                 SemanticError::UnknownField {
@@ -88,37 +96,30 @@ impl Analyzer {
                             );
                             (ArenaTypeId::INVALID, false, false)
                         }
-                    }
-                    LegacyType::Nominal(NominalType::Record(r)) => {
-                        // Records are immutable - reject field assignment
-                        let type_def = self.entity_registry.get_type(r.type_def_id);
+                    } else {
                         self.add_error(
-                            SemanticError::RecordFieldMutation {
-                                record: self
-                                    .name_table
-                                    .last_segment_str(type_def.name_id)
-                                    .unwrap_or_else(|| "record".to_string()),
-                                field: interner.resolve(*field).to_string(),
+                            SemanticError::UnknownField {
+                                ty: type_name,
+                                field: field_name.to_string(),
                                 span: (*field_span).into(),
                             },
                             *field_span,
                         );
                         (ArenaTypeId::INVALID, false, false)
                     }
-                    _ => {
-                        if !obj_ty_id.is_invalid() {
-                            let ty = self.type_display(&obj_ty);
-                            self.add_error(
-                                SemanticError::UnknownField {
-                                    ty,
-                                    field: interner.resolve(*field).to_string(),
-                                    span: (*field_span).into(),
-                                },
-                                *field_span,
-                            );
-                        }
-                        (ArenaTypeId::INVALID, false, false)
+                } else {
+                    if !obj_ty_id.is_invalid() {
+                        let ty = self.type_display_id(obj_ty_id);
+                        self.add_error(
+                            SemanticError::UnknownField {
+                                ty,
+                                field: field_name.to_string(),
+                                span: (*field_span).into(),
+                            },
+                            *field_span,
+                        );
                     }
+                    (ArenaTypeId::INVALID, false, false)
                 }
             }
             AssignTarget::Index { object, index } => {
@@ -291,49 +292,58 @@ impl Analyzer {
                 field_span,
             } => {
                 let obj_ty_id = self.check_expr(object, interner)?;
-                let obj_ty = self.id_to_type(obj_ty_id);
                 let field_name = interner.resolve(*field);
 
-                match &obj_ty {
-                    LegacyType::Nominal(NominalType::Class(c)) => {
-                        // Look up field via EntityRegistry
-                        let type_def = self.entity_registry.get_type(c.type_def_id);
-                        let type_name = self
-                            .name_table
-                            .last_segment_str(type_def.name_id)
-                            .unwrap_or_else(|| "class".to_string());
+                // Use arena queries to check class/record types (avoids LegacyType)
+                let struct_info = {
+                    let arena = self.type_arena.borrow();
+                    if let Some((id, args)) = arena.unwrap_class(obj_ty_id) {
+                        Some((id, args.clone(), true)) // is_class = true
+                    } else if let Some((id, _)) = arena.unwrap_record(obj_ty_id) {
+                        Some((id, crate::sema::type_arena::TypeIdVec::new(), false))
+                    } else {
+                        None
+                    }
+                };
 
-                        if let Some(ref generic_info) = type_def.generic_info {
-                            if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
-                                self.name_table.last_segment_str(*name_id).as_deref()
-                                    == Some(field_name)
-                            }) {
-                                // Substitute type args via arena if any
-                                let field_type_id = generic_info.field_types[idx];
-                                if c.type_args_id.is_empty() {
-                                    field_type_id
-                                } else {
-                                    // Use type_args_id directly (already TypeIds)
-                                    let subs_id: hashbrown::HashMap<_, _> = generic_info
-                                        .type_params
-                                        .iter()
-                                        .zip(c.type_args_id.iter())
-                                        .map(|(tp, &type_id)| (tp.name_id, type_id))
-                                        .collect();
-                                    self.type_arena
-                                        .borrow_mut()
-                                        .substitute(field_type_id, &subs_id)
-                                }
+                if let Some((type_def_id, type_args_id, is_class)) = struct_info {
+                    let type_def = self.entity_registry.get_type(type_def_id);
+                    let type_name = self
+                        .name_table
+                        .last_segment_str(type_def.name_id)
+                        .unwrap_or_else(|| if is_class { "class" } else { "record" }.to_string());
+
+                    if !is_class {
+                        // Records are immutable - reject field assignment
+                        self.add_error(
+                            SemanticError::RecordFieldMutation {
+                                record: type_name,
+                                field: field_name.to_string(),
+                                span: (*field_span).into(),
+                            },
+                            *field_span,
+                        );
+                        ArenaTypeId::INVALID
+                    } else if let Some(ref generic_info) = type_def.generic_info {
+                        if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
+                            self.name_table.last_segment_str(*name_id).as_deref()
+                                == Some(field_name)
+                        }) {
+                            // Substitute type args via arena if any
+                            let field_type_id = generic_info.field_types[idx];
+                            if type_args_id.is_empty() {
+                                field_type_id
                             } else {
-                                self.add_error(
-                                    SemanticError::UnknownField {
-                                        ty: type_name,
-                                        field: field_name.to_string(),
-                                        span: (*field_span).into(),
-                                    },
-                                    *field_span,
-                                );
-                                ArenaTypeId::INVALID
+                                // Use type_args_id directly (already TypeIds)
+                                let subs_id: hashbrown::HashMap<_, _> = generic_info
+                                    .type_params
+                                    .iter()
+                                    .zip(type_args_id.iter())
+                                    .map(|(tp, &type_id)| (tp.name_id, type_id))
+                                    .collect();
+                                self.type_arena
+                                    .borrow_mut()
+                                    .substitute(field_type_id, &subs_id)
                             }
                         } else {
                             self.add_error(
@@ -346,16 +356,10 @@ impl Analyzer {
                             );
                             ArenaTypeId::INVALID
                         }
-                    }
-                    LegacyType::Nominal(NominalType::Record(r)) => {
-                        // Records are immutable - reject field assignment
-                        let type_def = self.entity_registry.get_type(r.type_def_id);
+                    } else {
                         self.add_error(
-                            SemanticError::RecordFieldMutation {
-                                record: self
-                                    .name_table
-                                    .last_segment_str(type_def.name_id)
-                                    .unwrap_or_else(|| "record".to_string()),
+                            SemanticError::UnknownField {
+                                ty: type_name,
                                 field: field_name.to_string(),
                                 span: (*field_span).into(),
                             },
@@ -363,20 +367,19 @@ impl Analyzer {
                         );
                         ArenaTypeId::INVALID
                     }
-                    _ => {
-                        if !obj_ty_id.is_invalid() {
-                            let ty = self.type_display(&obj_ty);
-                            self.add_error(
-                                SemanticError::UnknownField {
-                                    ty,
-                                    field: interner.resolve(*field).to_string(),
-                                    span: (*field_span).into(),
-                                },
-                                *field_span,
-                            );
-                        }
-                        ArenaTypeId::INVALID
+                } else {
+                    if !obj_ty_id.is_invalid() {
+                        let ty = self.type_display_id(obj_ty_id);
+                        self.add_error(
+                            SemanticError::UnknownField {
+                                ty,
+                                field: interner.resolve(*field).to_string(),
+                                span: (*field_span).into(),
+                            },
+                            *field_span,
+                        );
                     }
+                    ArenaTypeId::INVALID
                 }
             }
         };

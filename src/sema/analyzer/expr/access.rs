@@ -6,7 +6,7 @@ use crate::sema::generic::{
 };
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::{LegacyType, NominalType};
+use crate::sema::types::LegacyType;
 use std::collections::HashMap;
 
 impl Analyzer {
@@ -289,7 +289,7 @@ impl Analyzer {
             return Ok(self.ty_invalid_traced_id("method_on_optional"));
         }
 
-        if matches!(object_type, LegacyType::Union(_)) {
+        if self.type_arena.borrow().is_union(object_type_id) {
             let ty = self.type_display_id(object_type_id);
             self.add_error(
                 SemanticError::MethodOnUnion {
@@ -442,7 +442,7 @@ impl Analyzer {
             // Record class method monomorphization for generic classes/records
             self.record_class_method_monomorph(
                 expr,
-                &object_type,
+                object_type_id,
                 method_call.method,
                 &func_type,
                 external_info,
@@ -695,27 +695,37 @@ impl Analyzer {
     fn record_class_method_monomorph(
         &mut self,
         expr: &Expr,
-        object_type: &LegacyType,
+        object_type_id: ArenaTypeId,
         method_sym: Symbol,
         func_type: &FunctionType,
         external_info: Option<ExternalMethodInfo>,
         interner: &Interner,
     ) {
-        // Extract type_def_id and type_args_id
+        // Extract type_def_id and type_args_id using arena queries
         // Note: We only record monomorphs for concrete types (Class/Record) that have
         // method bodies to compile. Interface types use vtable dispatch and don't need monomorphs.
-        tracing::debug!(object_type = ?object_type, "record_class_method_monomorph called");
-        let (class_type_def_id, type_args_id) = match object_type {
-            LegacyType::Nominal(NominalType::Class(c)) if !c.type_args_id.is_empty() => {
-                (c.type_def_id, &c.type_args_id)
+        tracing::debug!(object_type_id = ?object_type_id, "record_class_method_monomorph called");
+        let generic_info = {
+            let arena = self.type_arena.borrow();
+            if let Some((id, args)) = arena.unwrap_class(object_type_id) {
+                if args.is_empty() {
+                    None
+                } else {
+                    Some((id, args.clone()))
+                }
+            } else if let Some((id, args)) = arena.unwrap_record(object_type_id) {
+                if args.is_empty() {
+                    None
+                } else {
+                    Some((id, args.clone()))
+                }
+            } else {
+                None
             }
-            LegacyType::Nominal(NominalType::Record(r)) if !r.type_args_id.is_empty() => {
-                (r.type_def_id, &r.type_args_id)
-            }
-            _ => {
-                tracing::debug!("returning early - not a generic class/record");
-                return; // Not a generic class/record, nothing to record
-            }
+        };
+        let Some((class_type_def_id, type_args_id)) = generic_info else {
+            tracing::debug!("returning early - not a generic class/record");
+            return;
         };
 
         let class_name_id = self.entity_registry.get_type(class_type_def_id).name_id;

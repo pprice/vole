@@ -208,25 +208,13 @@ impl Analyzer {
                     // Runtime iterators have their element type directly
                     elem_id
                 } else {
-                    // Check for interface implementing Iterator
-                    let iterable_ty = self.id_to_type(iterable_ty_id);
-                    if let LegacyType::Nominal(NominalType::Interface(_)) = &iterable_ty {
-                        if let Some(elem) =
-                            self.extract_iterator_element_type(&iterable_ty, interner)
-                        {
-                            self.type_to_id(&elem)
-                        } else {
-                            self.type_error(
-                                "iterable (range, array, string, or Iterator<T>)",
-                                &iterable_ty,
-                                for_stmt.iterable.span,
-                            );
-                            self.ty_invalid_id()
-                        }
+                    // Check for interface implementing Iterator (uses TypeId directly)
+                    if let Some(elem_id) = self.extract_iterator_element_type_id(iterable_ty_id) {
+                        elem_id
                     } else {
-                        self.type_error(
+                        self.type_error_id(
                             "iterable (range, array, string, or Iterator<T>)",
-                            &iterable_ty,
+                            iterable_ty_id,
                             for_stmt.iterable.span,
                         );
                         self.ty_invalid_id()
