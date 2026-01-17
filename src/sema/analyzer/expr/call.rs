@@ -95,13 +95,12 @@ impl Analyzer {
                     .map(|arg| self.check_expr(arg, interner))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                // Convert TypeIds to LegacyTypes for inference and substitution
+                // Convert TypeIds to LegacyTypes for inference
                 let param_types: Vec<LegacyType> = generic_def
                     .param_types
                     .iter()
                     .map(|&t| self.type_arena.borrow().to_type(t))
                     .collect();
-                let return_type = self.type_arena.borrow().to_type(generic_def.return_type);
 
                 // Infer type parameters from argument types
                 let inferred =
@@ -113,12 +112,26 @@ impl Analyzer {
                     interner,
                 );
 
-                // Create the concrete function type by substituting
-                let concrete_params: Vec<LegacyType> = param_types
-                    .iter()
-                    .map(|t| substitute_type(t, &inferred))
-                    .collect();
-                let concrete_return = substitute_type(&return_type, &inferred);
+                // Create the concrete function type by substituting via arena
+                let (concrete_params, concrete_return) = {
+                    let mut arena = self.type_arena.borrow_mut();
+                    // Convert substitutions to TypeId-based
+                    let subs_id: hashbrown::HashMap<_, _> = inferred
+                        .iter()
+                        .map(|(&k, v)| (k, arena.from_type(v)))
+                        .collect();
+                    // Substitute all types
+                    let param_ids: Vec<_> = generic_def
+                        .param_types
+                        .iter()
+                        .map(|&t| arena.substitute(t, &subs_id))
+                        .collect();
+                    let return_id = arena.substitute(generic_def.return_type, &subs_id);
+                    // Convert back to LegacyTypes
+                    let params: Vec<LegacyType> = param_ids.iter().map(|&t| arena.to_type(t)).collect();
+                    let ret = arena.to_type(return_id);
+                    (params, ret)
+                };
 
                 // Check arg count
                 if call.args.len() != concrete_params.len() {
