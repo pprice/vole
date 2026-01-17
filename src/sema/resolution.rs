@@ -121,11 +121,7 @@ mod tests {
 
     #[test]
     fn resolved_method_func_type() {
-        let ft = FunctionType {
-            params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
-            return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
-            is_closure: false,
-        };
+        let ft = FunctionType { params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)), is_closure: false, params_id: None, return_type_id: None };
 
         let direct = ResolvedMethod::Direct {
             func_type: ft.clone(),
@@ -149,11 +145,7 @@ mod tests {
         resolutions.insert(
             node_id,
             ResolvedMethod::Direct {
-                func_type: FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::Void),
-                    is_closure: false,
-                },
+                func_type: FunctionType { params: vec![].into(), return_type: Box::new(LegacyType::Void), is_closure: false, params_id: None, return_type_id: None },
             },
         );
 

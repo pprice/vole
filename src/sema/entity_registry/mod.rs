@@ -549,11 +549,7 @@ mod tests {
         let mut registry = EntityRegistry::new();
         let type_id = registry.register_type(type_name, TypeDefKind::Interface, main_mod);
 
-        let signature = FunctionType {
-            params: vec![].into(),
-            return_type: Box::new(LegacyType::Primitive(PrimitiveType::I32)),
-            is_closure: false,
-        };
+        let signature = FunctionType { params: vec![].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::I32)), is_closure: false, params_id: None, return_type_id: None };
 
         let method_id =
             registry.register_method(type_id, method_name, full_method_name, signature, false);
@@ -608,11 +604,7 @@ mod tests {
 
         let mut registry = EntityRegistry::new();
 
-        let signature = FunctionType {
-            params: vec![LegacyType::Primitive(PrimitiveType::F64)].into(),
-            return_type: Box::new(LegacyType::Primitive(PrimitiveType::F64)),
-            is_closure: false,
-        };
+        let signature = FunctionType { params: vec![LegacyType::Primitive(PrimitiveType::F64)].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::F64)), is_closure: false, params_id: None, return_type_id: None };
 
         let func_id = registry.register_function(
             func_name, func_name, // For simple functions, name_id == full_name_id
@@ -656,11 +648,7 @@ mod tests {
         let base_id = registry.register_type(base_name, TypeDefKind::Interface, main_mod);
         let derived_id = registry.register_type(derived_name, TypeDefKind::Interface, main_mod);
 
-        let signature = FunctionType {
-            params: vec![].into(),
-            return_type: Box::new(LegacyType::Void),
-            is_closure: false,
-        };
+        let signature = FunctionType { params: vec![].into(), return_type: Box::new(LegacyType::Void), is_closure: false, params_id: None, return_type_id: None };
 
         let method_id =
             registry.register_method(base_id, method_name, full_method_name, signature, false);

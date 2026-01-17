@@ -316,6 +316,8 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                 params: param_types.into(),
                 return_type: Box::new(ret),
                 is_closure: false, // Type annotations don't know if it's a closure
+                params_id: None,
+                return_type_id: None,
             })
         }
         TypeExpr::SelfType => {

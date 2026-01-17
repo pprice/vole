@@ -861,11 +861,7 @@ impl Analyzer {
                 .map(|p| substitute_type(p, &legacy_substitutions))
                 .collect();
             let substituted_return = substitute_type(&func_type.return_type, &legacy_substitutions);
-            let substituted_func_type = FunctionType {
-                params: substituted_params.into(),
-                return_type: Box::new(substituted_return),
-                is_closure: func_type.is_closure,
-            };
+            let substituted_func_type = FunctionType { params: substituted_params.into(), return_type: Box::new(substituted_return), is_closure: func_type.is_closure, params_id: None, return_type_id: None };
 
             // Convert substitutions to TypeId for storage
             let substitutions = {

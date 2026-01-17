@@ -262,11 +262,7 @@ mod tests {
             method_id,
             MethodImpl {
                 trait_name: Some(sym(2)), // "Sized"
-                func_type: FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
-                    is_closure: false,
-                },
+                func_type: FunctionType { params: vec![].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)), is_closure: false, params_id: None, return_type_id: None },
                 is_builtin: true,
                 external_info: None,
             },
@@ -348,11 +344,7 @@ mod tests {
             length_id,
             MethodImpl {
                 trait_name: None,
-                func_type: FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
-                    is_closure: false,
-                },
+                func_type: FunctionType { params: vec![].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)), is_closure: false, params_id: None, return_type_id: None },
                 is_builtin: true,
                 external_info: None,
             },
@@ -363,11 +355,7 @@ mod tests {
             to_upper_id,
             MethodImpl {
                 trait_name: None,
-                func_type: FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::String)),
-                    is_closure: false,
-                },
+                func_type: FunctionType { params: vec![].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::String)), is_closure: false, params_id: None, return_type_id: None },
                 is_builtin: true,
                 external_info: None,
             },
@@ -403,11 +391,7 @@ mod tests {
             equals_id,
             MethodImpl {
                 trait_name: Some(sym(20)), // "Equatable"
-                func_type: FunctionType {
-                    params: vec![LegacyType::Primitive(PrimitiveType::I64)].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
-                    is_closure: false,
-                },
+                func_type: FunctionType { params: vec![LegacyType::Primitive(PrimitiveType::I64)].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)), is_closure: false, params_id: None, return_type_id: None },
                 is_builtin: false,
                 external_info: None,
             },
@@ -419,11 +403,7 @@ mod tests {
             length_id,
             MethodImpl {
                 trait_name: None,
-                func_type: FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
-                    is_closure: false,
-                },
+                func_type: FunctionType { params: vec![].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)), is_closure: false, params_id: None, return_type_id: None },
                 is_builtin: false,
                 external_info: None,
             },

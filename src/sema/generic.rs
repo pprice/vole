@@ -696,6 +696,18 @@ pub fn substitute_type(ty: &LegacyType, substitutions: &HashMap<NameId, LegacyTy
     ty.substitute(substitutions)
 }
 
+/// Substitute concrete types for type parameters using arena-based substitution.
+///
+/// This is faster than `substitute_type` when the type has interned TypeIds,
+/// because it uses `arena.substitute()` which avoids deep cloning.
+pub fn substitute_type_with_arena(
+    ty: &LegacyType,
+    substitutions: &HashMap<NameId, LegacyType>,
+    arena: &mut crate::sema::type_arena::TypeArena,
+) -> LegacyType {
+    ty.substitute_with_arena(substitutions, arena)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -756,11 +768,7 @@ mod tests {
                 original_name: func_name,
                 mangled_name: names.intern_raw(names.main_module(), &["foo__mono_0"]),
                 instance_id: 0,
-                func_type: FunctionType {
-                    params: vec![LegacyType::Primitive(PrimitiveType::I64)].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
-                    is_closure: false,
-                },
+                func_type: FunctionType { params: vec![LegacyType::Primitive(PrimitiveType::I64)].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)), is_closure: false, params_id: None, return_type_id: None },
                 substitutions: HashMap::new(),
             },
         );

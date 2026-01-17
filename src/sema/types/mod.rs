@@ -22,6 +22,7 @@ use std::sync::Arc;
 use crate::frontend::PrimitiveType as AstPrimitiveType;
 use crate::frontend::Span;
 use crate::identity::{NameId, TypeDefId, TypeParamId};
+use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 
 // AnalysisError, PlaceholderKind, FallibleType, ModuleType, ConstantValue
 // are now defined in special.rs and re-exported above
@@ -123,6 +124,10 @@ pub struct FunctionType {
     /// to be called with the closure pointer as the first argument.
     /// The closure pointer is passed implicitly and is not included in `params`.
     pub is_closure: bool,
+    /// Interned parameter types (parallel to params, for efficient substitution)
+    pub params_id: Option<TypeIdVec>,
+    /// Interned return type (parallel to return_type, for efficient substitution)
+    pub return_type_id: Option<TypeId>,
 }
 
 /// Field information for a class/record
@@ -157,6 +162,40 @@ impl std::hash::Hash for FunctionType {
 }
 
 impl FunctionType {
+    /// Create a new FunctionType (without interned TypeIds - use intern_ids to add them)
+    pub fn new(params: impl Into<Arc<[LegacyType]>>, return_type: LegacyType, is_closure: bool) -> Self {
+        Self {
+            params: params.into(),
+            return_type: Box::new(return_type),
+            is_closure,
+            params_id: None,
+            return_type_id: None,
+        }
+    }
+
+    /// Intern the parameter and return types into the arena, populating params_id and return_type_id.
+    /// This enables efficient TypeId-based substitution instead of cloning the entire type tree.
+    pub fn intern_ids(&mut self, arena: &mut TypeArena) {
+        if self.params_id.is_none() {
+            let param_ids: TypeIdVec = self.params.iter().map(|p| arena.from_type(p)).collect();
+            self.params_id = Some(param_ids);
+        }
+        if self.return_type_id.is_none() {
+            self.return_type_id = Some(arena.from_type(&self.return_type));
+        }
+    }
+
+    /// Create a copy with interned TypeIds populated
+    pub fn with_interned_ids(mut self, arena: &mut TypeArena) -> Self {
+        self.intern_ids(arena);
+        self
+    }
+
+    /// Check if TypeId fields are populated for efficient substitution
+    pub fn has_interned_ids(&self) -> bool {
+        self.params_id.is_some() && self.return_type_id.is_some()
+    }
+
     /// Check if this function type is compatible with a functional interface signature.
     ///
     /// This is used when checking if a function/closure can be assigned to a functional
@@ -525,11 +564,7 @@ impl LegacyType {
                 if new_params.is_none() && !return_changed {
                     self.clone()
                 } else {
-                    LegacyType::Function(FunctionType {
-                        params: new_params.unwrap_or_else(|| ft.params.clone()),
-                        return_type: Box::new(new_return),
-                        is_closure: ft.is_closure,
-                    })
+                    LegacyType::Function(FunctionType { params: new_params.unwrap_or_else(|| ft.params.clone()), return_type: Box::new(new_return), is_closure: ft.is_closure, params_id: None, return_type_id: None })
                 }
             }
 
@@ -684,6 +719,62 @@ impl LegacyType {
             | LegacyType::Module(_)
             | LegacyType::Nominal(NominalType::Error(_)) => self.clone(),
         }
+    }
+}
+
+impl LegacyType {
+    /// Substitute with arena - uses TypeId-based substitution when FunctionType has interned IDs.
+    /// This can be faster than pure LegacyType substitution because arena.substitute avoids
+    /// deep cloning and may have cached results.
+    pub fn substitute_with_arena(
+        &self,
+        substitutions: &std::collections::HashMap<NameId, LegacyType>,
+        arena: &mut TypeArena,
+    ) -> LegacyType {
+        // For FunctionType with interned IDs, use arena-based substitution
+        if let LegacyType::Function(ft) = self {
+            if let (Some(params_id), Some(return_type_id)) = (&ft.params_id, &ft.return_type_id) {
+                // Convert substitutions to TypeId-based (use hashbrown to match arena)
+                let subs_id: hashbrown::HashMap<NameId, TypeId> = substitutions
+                    .iter()
+                    .map(|(&k, v)| (k, arena.from_type(v)))
+                    .collect();
+
+                // Use arena substitution
+                let new_params_id: TypeIdVec = params_id
+                    .iter()
+                    .map(|&p| arena.substitute(p, &subs_id))
+                    .collect();
+                let new_return_id = arena.substitute(*return_type_id, &subs_id);
+
+                // Check if anything changed
+                let params_changed = new_params_id.iter().zip(params_id.iter()).any(|(a, b)| a != b);
+                let return_changed = new_return_id != *return_type_id;
+
+                if !params_changed && !return_changed {
+                    return self.clone();
+                }
+
+                // Convert back to LegacyType (but keep TypeId fields populated!)
+                let new_params: Arc<[LegacyType]> = new_params_id
+                    .iter()
+                    .map(|&id| arena.to_type(id))
+                    .collect::<Vec<_>>()
+                    .into();
+                let new_return = arena.to_type(new_return_id);
+
+                return LegacyType::Function(FunctionType {
+                    params: new_params,
+                    return_type: Box::new(new_return),
+                    is_closure: ft.is_closure,
+                    params_id: Some(new_params_id),
+                    return_type_id: Some(new_return_id),
+                });
+            }
+        }
+
+        // Fall back to regular substitution for other types or FunctionType without interned IDs
+        self.substitute(substitutions)
     }
 }
 

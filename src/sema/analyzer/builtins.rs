@@ -68,6 +68,8 @@ impl Analyzer {
                     params: vec![].into(),
                     return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
                     is_closure: false,
+                    params_id: None,
+                    return_type_id: None,
                 }
             );
             register_builtin!(
@@ -77,6 +79,8 @@ impl Analyzer {
                     params: vec![].into(),
                     return_type: Box::new(LegacyType::unknown()),
                     is_closure: false,
+                    params_id: None,
+                    return_type_id: None,
                 },
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
@@ -94,6 +98,8 @@ impl Analyzer {
                     params: vec![].into(),
                     return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
                     is_closure: false,
+                    params_id: None,
+                    return_type_id: None,
                 }
             );
             register_builtin!(
@@ -103,6 +109,8 @@ impl Analyzer {
                     params: vec![].into(),
                     return_type: Box::new(LegacyType::unknown()), // Will be refined by check_builtin_method
                     is_closure: false,
+                    params_id: None,
+                    return_type_id: None,
                 },
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
@@ -126,6 +134,8 @@ impl Analyzer {
                     params: vec![].into(),
                     return_type: Box::new(LegacyType::unknown()), // Will be refined by check_builtin_method
                     is_closure: false,
+                    params_id: None,
+                    return_type_id: None,
                 },
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),

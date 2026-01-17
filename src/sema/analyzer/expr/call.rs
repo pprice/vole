@@ -179,11 +179,7 @@ impl Analyzer {
                             original_name: name_id,
                             mangled_name,
                             instance_id: id,
-                            func_type: FunctionType {
-                                params: concrete_params.into(),
-                                return_type: Box::new(concrete_return.clone()),
-                                is_closure: false,
-                            },
+                            func_type: FunctionType { params: concrete_params.into(), return_type: Box::new(concrete_return.clone()), is_closure: false, params_id: None, return_type_id: None },
                             substitutions,
                         },
                     );

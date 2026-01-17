@@ -169,15 +169,11 @@ impl Analyzer {
             return func_type.clone();
         }
 
-        FunctionType {
-            params: func_type
-                .params
-                .iter()
-                .map(|t| substitute_type(t, substitutions))
-                .collect(),
-            return_type: Box::new(substitute_type(&func_type.return_type, substitutions)),
-            is_closure: func_type.is_closure,
-        }
+        FunctionType { params: func_type
+            .params
+            .iter()
+            .map(|t| substitute_type(t, substitutions))
+            .collect(), return_type: Box::new(substitute_type(&func_type.return_type, substitutions)), is_closure: func_type.is_closure, params_id: None, return_type_id: None }
     }
 
     /// Get TypeDefId for a Type if it's registered in EntityRegistry
@@ -422,19 +418,15 @@ impl Analyzer {
 
                     // Compare by string since interface was registered with different interner
                     if method_name_from_id == method_name_str {
-                        let func_type = FunctionType {
-                            params: method
-                                .signature
-                                .params
-                                .iter()
-                                .map(|t| substitute_type(t, &substitutions))
-                                .collect(),
-                            return_type: Box::new(substitute_type(
-                                &method.signature.return_type,
-                                &substitutions,
-                            )),
-                            is_closure: false,
-                        };
+                        let func_type = FunctionType { params: method
+                            .signature
+                            .params
+                            .iter()
+                            .map(|t| substitute_type(t, &substitutions))
+                            .collect(), return_type: Box::new(substitute_type(
+                            &method.signature.return_type,
+                            &substitutions,
+                        )), is_closure: false, params_id: None, return_type_id: None };
                         // Check for external binding
                         if let Some(external_info) = self
                             .entity_registry
@@ -492,18 +484,14 @@ impl Analyzer {
                     let substitutions = self
                         .entity_registry
                         .substitution_map(type_def_id, type_args);
-                    let substituted_func_type = FunctionType {
-                        params: func_type
-                            .params
-                            .iter()
-                            .map(|t| substitute_type(t, &substitutions))
-                            .collect(),
-                        return_type: Box::new(substitute_type(
-                            &func_type.return_type,
-                            &substitutions,
-                        )),
-                        is_closure: func_type.is_closure,
-                    };
+                    let substituted_func_type = FunctionType { params: func_type
+                        .params
+                        .iter()
+                        .map(|t| substitute_type(t, &substitutions))
+                        .collect(), return_type: Box::new(substitute_type(
+                        &func_type.return_type,
+                        &substitutions,
+                    )), is_closure: func_type.is_closure, params_id: None, return_type_id: None };
                     return Some(ResolvedMethod::Direct {
                         func_type: substituted_func_type,
                     });
@@ -561,10 +549,6 @@ impl Analyzer {
     ) -> Option<FunctionType> {
         let method_id = self.entity_registry.is_functional(type_def_id)?;
         let method = self.entity_registry.get_method(method_id);
-        Some(FunctionType {
-            params: method.signature.params.clone(),
-            return_type: method.signature.return_type.clone(),
-            is_closure: true,
-        })
+        Some(FunctionType { params: method.signature.params.clone(), return_type: method.signature.return_type.clone(), is_closure: true, params_id: None, return_type_id: None })
     }
 }

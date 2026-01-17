@@ -355,38 +355,22 @@ mod tests {
 
     #[test]
     fn test_function_compatible_with_interface() {
-        let fn_type = FunctionType {
-            params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
-            return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
-            is_closure: false,
-        };
+        let fn_type = FunctionType { params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)), is_closure: false, params_id: None, return_type_id: None };
 
-        let iface_fn = FunctionType {
-            params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
-            return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
-            is_closure: true,
-        };
+        let iface_fn = FunctionType { params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)), is_closure: true, params_id: None, return_type_id: None };
 
         assert!(function_compatible_with_interface(&fn_type, &iface_fn));
 
         // Incompatible return type
-        let iface_fn_bad = FunctionType {
-            params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
-            return_type: Box::new(LegacyType::Primitive(PrimitiveType::String)),
-            is_closure: true,
-        };
+        let iface_fn_bad = FunctionType { params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::String)), is_closure: true, params_id: None, return_type_id: None };
         assert!(!function_compatible_with_interface(&fn_type, &iface_fn_bad));
 
         // Different param count
-        let iface_fn_wrong_params = FunctionType {
-            params: vec![
-                LegacyType::Primitive(PrimitiveType::I32),
-                LegacyType::Primitive(PrimitiveType::I32),
-            ]
-            .into(),
-            return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
-            is_closure: true,
-        };
+        let iface_fn_wrong_params = FunctionType { params: vec![
+            LegacyType::Primitive(PrimitiveType::I32),
+            LegacyType::Primitive(PrimitiveType::I32),
+        ]
+        .into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)), is_closure: true, params_id: None, return_type_id: None };
         assert!(!function_compatible_with_interface(
             &fn_type,
             &iface_fn_wrong_params

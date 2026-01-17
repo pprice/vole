@@ -340,11 +340,7 @@ impl Analyzer {
                         .collect();
                     let subst_return =
                         substitute_type(&method.signature.return_type, &substitutions);
-                    let subst_sig = FunctionType {
-                        params: subst_params.into(),
-                        return_type: Box::new(subst_return),
-                        is_closure: method.signature.is_closure,
-                    };
+                    let subst_sig = FunctionType { params: subst_params.into(), return_type: Box::new(subst_return), is_closure: method.signature.is_closure, params_id: None, return_type_id: None };
                     (name, method.has_default, subst_sig)
                 })
                 .collect();
