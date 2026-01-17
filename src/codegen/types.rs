@@ -282,6 +282,38 @@ pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> LegacyType {
     }
 }
 
+/// Resolve a type expression to a TypeId (uses CompileCtx for full context)
+/// This is the TypeId-based version that avoids intermediate LegacyType allocation
+/// when callers only need a TypeId.
+pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
+    let module_id = ctx
+        .current_module
+        .and_then(|path| ctx.analyzed.name_table.module_id_if_known(path))
+        .unwrap_or_else(|| ctx.analyzed.name_table.main_module());
+    let resolved = resolve_type_expr_with_metadata(
+        ty,
+        &ctx.analyzed.entity_registry,
+        ctx.type_metadata,
+        ctx.interner,
+        &ctx.analyzed.name_table,
+        module_id,
+        &ctx.arena.borrow(),
+    );
+
+    // Convert to TypeId
+    let type_id = ctx.arena.borrow_mut().from_type(&resolved);
+
+    // Apply type substitutions if compiling a monomorphized context
+    if let Some(substitutions) = ctx.type_substitutions {
+        // Convert std::collections::HashMap to hashbrown::HashMap for arena.substitute
+        let subs: hashbrown::HashMap<NameId, TypeId> =
+            substitutions.iter().map(|(&k, &v)| (k, v)).collect();
+        ctx.arena.borrow_mut().substitute(type_id, &subs)
+    } else {
+        type_id
+    }
+}
+
 pub(crate) fn module_name_id(
     analyzed: &AnalyzedProgram,
     module_id: ModuleId,

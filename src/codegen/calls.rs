@@ -19,7 +19,7 @@ use crate::sema::type_arena::TypeId;
 
 use super::context::Cg;
 use super::types::{
-    CompiledValue, box_interface_value_id, native_type_to_cranelift, resolve_type_expr,
+    CompiledValue, box_interface_value_id, native_type_to_cranelift, resolve_type_expr_id,
     type_id_to_cranelift,
 };
 use super::{FunctionKey, FunctionRegistry, RuntimeFn};
@@ -278,8 +278,7 @@ impl Cg<'_, '_, '_> {
 
             // Check if the global has a declared type (e.g., `let x: Predicate = ...`)
             if let Some(ref ty_expr) = global.ty {
-                let declared_type = resolve_type_expr(ty_expr, self.ctx);
-                let declared_type_id = self.intern_type(&declared_type);
+                let declared_type_id = resolve_type_expr_id(ty_expr, self.ctx);
 
                 // If declared as functional interface, call via vtable dispatch
                 let iface_info = {

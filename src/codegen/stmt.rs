@@ -20,7 +20,7 @@ use super::structs::{
 };
 use super::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    box_interface_value_id, fallible_error_tag, resolve_type_expr, tuple_layout_id, type_id_size,
+    box_interface_value_id, fallible_error_tag, resolve_type_expr_id, tuple_layout_id, type_id_size,
     type_id_to_cranelift, type_size,
 };
 
@@ -64,8 +64,7 @@ impl Cg<'_, '_, '_> {
                 // Track type as TypeId throughout to avoid LegacyType conversions
                 let mut declared_type_id_opt = None;
                 let (mut final_value, mut final_type_id) = if let Some(ty_expr) = &let_stmt.ty {
-                    let declared_type = resolve_type_expr(ty_expr, self.ctx);
-                    let declared_type_id = self.intern_type(&declared_type);
+                    let declared_type_id = resolve_type_expr_id(ty_expr, self.ctx);
                     declared_type_id_opt = Some(declared_type_id);
 
                     let arena = self.ctx.arena.borrow();

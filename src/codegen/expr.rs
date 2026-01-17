@@ -15,7 +15,6 @@ use crate::frontend::{
     RecordFieldPattern, Symbol, UnaryOp,
 };
 use crate::sema::entity_defs::TypeDefKind;
-use crate::sema::types::NominalType;
 use crate::sema::LegacyType;
 
 use super::context::Cg;
@@ -24,8 +23,8 @@ use super::structs::{
 };
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    array_element_tag_id, box_interface_value, box_interface_value_id, fallible_error_tag_by_id,
-    resolve_type_expr, tuple_layout_id, type_id_to_cranelift, type_to_cranelift,
+    array_element_tag_id, box_interface_value_id, fallible_error_tag_by_id, resolve_type_expr_id,
+    tuple_layout_id, type_id_to_cranelift, type_to_cranelift,
 };
 use crate::sema::type_arena::TypeId;
 
@@ -150,13 +149,11 @@ impl Cg<'_, '_, '_> {
 
             // If the global has a declared interface type, box the value
             if let Some(ref ty_expr) = global.ty {
-                let declared_type = resolve_type_expr(ty_expr, self.ctx);
-                if matches!(
-                    &declared_type,
-                    LegacyType::Nominal(NominalType::Interface(_))
-                ) && !self.is_interface(value.type_id)
+                let declared_type_id = resolve_type_expr_id(ty_expr, self.ctx);
+                if self.ctx.arena.borrow().is_interface(declared_type_id)
+                    && !self.is_interface(value.type_id)
                 {
-                    value = box_interface_value(self.builder, self.ctx, value, &declared_type)?;
+                    value = box_interface_value_id(self.builder, self.ctx, value, declared_type_id)?;
                 }
             }
             Ok(value)
@@ -794,8 +791,7 @@ impl Cg<'_, '_, '_> {
     /// Compile an `is` type check expression
     fn is_expr(&mut self, is_expr: &crate::frontend::IsExpr) -> Result<CompiledValue, String> {
         let value = self.expr(&is_expr.value)?;
-        let tested_type = resolve_type_expr(&is_expr.type_expr, self.ctx);
-        let tested_type_id = self.ctx.arena.borrow_mut().from_type(&tested_type);
+        let tested_type_id = resolve_type_expr_id(&is_expr.type_expr, self.ctx);
 
         let arena = self.ctx.arena.borrow();
         if let Some(variants) = arena.unwrap_union(value.type_id) {
@@ -1080,8 +1076,7 @@ impl Cg<'_, '_, '_> {
                     }
                 }
                 Pattern::Type { type_expr, .. } => {
-                    let pattern_type = resolve_type_expr(type_expr, self.ctx);
-                    let pattern_type_id = self.ctx.arena.borrow_mut().from_type(&pattern_type);
+                    let pattern_type_id = resolve_type_expr_id(type_expr, self.ctx);
                     self.compile_type_pattern_check(&scrutinee, pattern_type_id)?
                 }
                 Pattern::Literal(lit_expr) => {
