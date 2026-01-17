@@ -107,7 +107,11 @@ impl Compiler<'_> {
             type_def_id,
             type_args: vec![].into(),
         }));
-        let vole_type_id = self.analyzed.type_arena.borrow_mut().from_type(&placeholder_type);
+        let vole_type_id = self
+            .analyzed
+            .type_arena
+            .borrow_mut()
+            .from_type(&placeholder_type);
 
         self.type_metadata.insert(
             class.name,
@@ -303,7 +307,11 @@ impl Compiler<'_> {
             type_def_id,
             type_args: vec![].into(),
         }));
-        let vole_type_id = self.analyzed.type_arena.borrow_mut().from_type(&placeholder_type);
+        let vole_type_id = self
+            .analyzed
+            .type_arena
+            .borrow_mut()
+            .from_type(&placeholder_type);
 
         self.type_metadata.insert(
             record.name,

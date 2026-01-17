@@ -527,7 +527,9 @@ impl Analyzer {
 
         if !is_compatible {
             let declared_str = self.type_display(&error_type_legacy);
-            let raised_error_info = ErrorTypeInfo { type_def_id: type_id };
+            let raised_error_info = ErrorTypeInfo {
+                type_def_id: type_id,
+            };
             let raised_str =
                 self.type_display(&LegacyType::Nominal(NominalType::Error(raised_error_info)));
 

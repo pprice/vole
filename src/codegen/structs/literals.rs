@@ -169,11 +169,7 @@ impl Cg<'_, '_, '_> {
             .iter()
             .position(|&v| v == value.type_id)
             .ok_or_else(|| {
-                CodegenError::type_mismatch(
-                    "union variant",
-                    "compatible type",
-                    "incompatible type",
-                )
+                CodegenError::type_mismatch("union variant", "compatible type", "incompatible type")
             })?;
 
         // Get heap_alloc function ref

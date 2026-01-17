@@ -314,13 +314,17 @@ impl Analyzer {
                                     .filter_map(|field_id| {
                                         let field = self.entity_registry.get_field(field_id);
                                         Some(StructField {
-                                            name: self.name_table.last_segment_str(field.name_id)?,
+                                            name: self
+                                                .name_table
+                                                .last_segment_str(field.name_id)?,
                                             ty: arena.to_type(field.ty),
                                             slot: field.slot,
                                         })
                                     })
                                     .collect();
-                                let error_info = ErrorTypeInfo { type_def_id: type_id };
+                                let error_info = ErrorTypeInfo {
+                                    type_def_id: type_id,
+                                };
                                 (
                                     Some(LegacyType::Nominal(NominalType::Error(error_info))),
                                     fields_ref,

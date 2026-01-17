@@ -20,7 +20,7 @@ use crate::sema::type_arena::TypeId;
 use super::context::Cg;
 use super::types::{
     CompiledValue, box_interface_value_id, native_type_to_cranelift, resolve_type_expr,
-    type_id_to_cranelift, type_to_cranelift,
+    type_id_to_cranelift,
 };
 use super::{FunctionKey, FunctionRegistry, RuntimeFn};
 
@@ -230,42 +230,41 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if it's a closure variable
-        if let Some((var, type_id)) = self.vars.get(&callee_sym) {
-            if let Some(func_type) = self.unwrap_function(*type_id) {
-                return self.call_closure(*var, func_type, call);
-            }
+        if let Some((var, type_id)) = self.vars.get(&callee_sym)
+            && self.is_function(*type_id)
+        {
+            return self.call_closure(*var, *type_id, call);
         }
 
         // Check if it's a functional interface variable
-        if let Some((var, type_id)) = self.vars.get(&callee_sym) {
-            if let Some(iface_type_def_id) = self.interface_type_def_id(*type_id)
-                && let Some(method_id) = self
-                    .ctx
-                    .analyzed
-                    .entity_registry
-                    .is_functional(iface_type_def_id)
-            {
-                let method = self.ctx.analyzed.entity_registry.get_method(method_id);
-                let func_type = FunctionType {
-                    params: method.signature.params.clone(),
-                    return_type: method.signature.return_type.clone(),
-                    is_closure: false,
-                };
-                let method_name_id = method.name_id;
-                let value = self.builder.use_var(*var);
-                let obj = CompiledValue {
-                    value,
-                    ty: self.cranelift_type(*type_id),
-                    type_id: *type_id,
-                };
-                return self.interface_dispatch_call_args_by_type_def_id(
-                    &obj,
-                    &call.args,
-                    iface_type_def_id,
-                    method_name_id,
-                    func_type,
-                );
-            }
+        if let Some((var, type_id)) = self.vars.get(&callee_sym)
+            && let Some(iface_type_def_id) = self.interface_type_def_id(*type_id)
+            && let Some(method_id) = self
+                .ctx
+                .analyzed
+                .entity_registry
+                .is_functional(iface_type_def_id)
+        {
+            let method = self.ctx.analyzed.entity_registry.get_method(method_id);
+            let func_type = FunctionType {
+                params: method.signature.params.clone(),
+                return_type: method.signature.return_type.clone(),
+                is_closure: false,
+            };
+            let method_name_id = method.name_id;
+            let value = self.builder.use_var(*var);
+            let obj = CompiledValue {
+                value,
+                ty: self.cranelift_type(*type_id),
+                type_id: *type_id,
+            };
+            return self.interface_dispatch_call_args_by_type_def_id(
+                &obj,
+                &call.args,
+                iface_type_def_id,
+                method_name_id,
+                func_type,
+            );
         }
 
         // Check if it's a global lambda or global functional interface
@@ -301,8 +300,12 @@ impl Cg<'_, '_, '_> {
                     };
                     let method_name_id = method.name_id;
                     // Box the lambda value to create the interface representation
-                    let boxed =
-                        box_interface_value_id(self.builder, self.ctx, lambda_val, declared_type_id)?;
+                    let boxed = box_interface_value_id(
+                        self.builder,
+                        self.ctx,
+                        lambda_val,
+                        declared_type_id,
+                    )?;
                     return self.interface_dispatch_call_args_by_type_def_id(
                         &boxed,
                         &call.args,
@@ -314,17 +317,14 @@ impl Cg<'_, '_, '_> {
             }
 
             // If it's a function type, call as closure
-            if let Some(func_type) = self.unwrap_function(lambda_val.type_id) {
-                return self.call_closure_value(lambda_val.value, func_type, call);
+            if self.is_function(lambda_val.type_id) {
+                return self.call_closure_value(lambda_val.value, lambda_val.type_id, call);
             }
 
             // If it's an interface type (functional interface), call via vtable
             if let Some(type_def_id) = self.interface_type_def_id(lambda_val.type_id)
-                && let Some(method_id) = self
-                    .ctx
-                    .analyzed
-                    .entity_registry
-                    .is_functional(type_def_id)
+                && let Some(method_id) =
+                    self.ctx.analyzed.entity_registry.is_functional(type_def_id)
             {
                 let method = self.ctx.analyzed.entity_registry.get_method(method_id);
                 let func_type = FunctionType {
@@ -651,8 +651,8 @@ impl Cg<'_, '_, '_> {
     fn indirect_call(&mut self, call: &CallExpr) -> Result<CompiledValue, String> {
         let callee = self.expr(&call.callee)?;
 
-        if let Some(func_type) = self.unwrap_function(callee.type_id) {
-            return self.call_closure_value(callee.value, func_type, call);
+        if self.is_function(callee.type_id) {
+            return self.call_closure_value(callee.value, callee.type_id, call);
         }
 
         Err(CodegenError::type_mismatch("call expression", "function", "non-function").into())
@@ -789,11 +789,11 @@ impl Cg<'_, '_, '_> {
     fn call_closure(
         &mut self,
         func_var: Variable,
-        func_type: FunctionType,
+        func_type_id: TypeId,
         call: &CallExpr,
     ) -> Result<CompiledValue, String> {
         let func_ptr_or_closure = self.builder.use_var(func_var);
-        self.call_closure_value(func_ptr_or_closure, func_type, call)
+        self.call_closure_value(func_ptr_or_closure, func_type_id, call)
     }
 
     /// Call a function via value (always uses closure calling convention now that
@@ -801,47 +801,58 @@ impl Cg<'_, '_, '_> {
     fn call_closure_value(
         &mut self,
         func_ptr_or_closure: Value,
-        func_type: FunctionType,
+        func_type_id: TypeId,
         call: &CallExpr,
     ) -> Result<CompiledValue, String> {
         // Always use closure calling convention since all lambdas are now
         // wrapped in Closure structs for consistency with interface dispatch
-        self.call_actual_closure(func_ptr_or_closure, func_type, call)
+        self.call_actual_closure(func_ptr_or_closure, func_type_id, call)
     }
 
-    /// Call a pure function (no closure)
     /// Call an actual closure (with closure pointer)
     fn call_actual_closure(
         &mut self,
         closure_ptr: Value,
-        func_type: FunctionType,
+        func_type_id: TypeId,
         call: &CallExpr,
     ) -> Result<CompiledValue, String> {
         let func_ptr = self.call_runtime(RuntimeFn::ClosureGetFunc, &[closure_ptr])?;
 
+        // Get function components from arena
+        let (params, ret, _is_closure) = {
+            let arena = self.ctx.arena.borrow();
+            let (params, ret, is_closure) = arena
+                .unwrap_function(func_type_id)
+                .ok_or_else(|| "call_actual_closure called with non-function type".to_string())?;
+            (params.clone(), ret, is_closure)
+        };
+
         // Build signature (closure ptr + params)
         let mut sig = self.ctx.module.make_signature();
         sig.params.push(AbiParam::new(self.ctx.pointer_type)); // closure ptr
-        for param_type in func_type.params.iter() {
-            sig.params.push(AbiParam::new(type_to_cranelift(
-                param_type,
+        for &param_type_id in params.iter() {
+            let arena = self.ctx.arena.borrow();
+            sig.params.push(AbiParam::new(type_id_to_cranelift(
+                param_type_id,
+                &arena,
                 self.ctx.pointer_type,
             )));
         }
-        if func_type.return_type.as_ref() != &LegacyType::Void {
-            sig.returns.push(AbiParam::new(type_to_cranelift(
-                &func_type.return_type,
+        let arena = self.ctx.arena.borrow();
+        if ret != arena.void() {
+            sig.returns.push(AbiParam::new(type_id_to_cranelift(
+                ret,
+                &arena,
                 self.ctx.pointer_type,
             )));
         }
+        drop(arena);
 
         let sig_ref = self.builder.import_signature(sig);
 
         let mut args: ArgVec = smallvec![closure_ptr];
-        for (arg, param_type) in call.args.iter().zip(func_type.params.iter()) {
+        for (arg, &param_type_id) in call.args.iter().zip(params.iter()) {
             let compiled = self.expr(arg)?;
-            // Intern param_type to use TypeId-based methods
-            let param_type_id = self.intern_type(param_type);
             let is_param_interface = self.is_interface(param_type_id);
             let is_param_union = self.is_union(param_type_id);
 
@@ -862,8 +873,7 @@ impl Cg<'_, '_, '_> {
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            let return_type_id = self.intern_type(func_type.return_type.as_ref());
-            Ok(self.typed_value_interned(results[0], return_type_id))
+            Ok(self.typed_value_interned(results[0], ret))
         }
     }
 

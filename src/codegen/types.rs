@@ -88,30 +88,26 @@ pub(crate) fn type_metadata_by_name_id<'a>(
         "type_metadata_by_name_id lookup"
     );
     let result = type_metadata.values().find(|meta| {
-        let vole_type = arena.to_type(meta.vole_type);
-        match &vole_type {
-            LegacyType::Nominal(NominalType::Class(c)) => {
-                let class_name_id = entity_registry.class_name_id(c);
-                tracing::trace!(target_name_id = ?name_id, class_name_id = ?class_name_id, "comparing class name_id");
-                class_name_id == name_id
-            }
-            LegacyType::Nominal(NominalType::Record(r)) => {
-                entity_registry.record_name_id(r) == name_id
-            }
-            _ => false,
+        // Use arena queries to check if this is a class or record with matching name_id
+        if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
+            let class_name_id = entity_registry.get_type(type_def_id).name_id;
+            tracing::trace!(target_name_id = ?name_id, class_name_id = ?class_name_id, "comparing class name_id");
+            return class_name_id == name_id;
         }
+        if let Some((type_def_id, _)) = arena.unwrap_record(meta.vole_type) {
+            let record_name_id = entity_registry.get_type(type_def_id).name_id;
+            return record_name_id == name_id;
+        }
+        false
     });
     if result.is_none() {
         // Log all class name_ids for debugging
         let class_name_ids: Vec<_> = type_metadata
             .values()
             .filter_map(|meta| {
-                let vole_type = arena.to_type(meta.vole_type);
-                if let LegacyType::Nominal(NominalType::Class(c)) = &vole_type {
-                    Some(entity_registry.class_name_id(c))
-                } else {
-                    None
-                }
+                arena
+                    .unwrap_class(meta.vole_type)
+                    .map(|(type_def_id, _)| entity_registry.get_type(type_def_id).name_id)
             })
             .collect();
         tracing::debug!(
@@ -186,7 +182,8 @@ impl<'a> CompileCtx<'a> {
     pub fn substitute_type_id(&self, ty: TypeId) -> TypeId {
         if let Some(substitutions) = self.type_substitutions {
             // Convert std HashMap to hashbrown HashMap for arena compatibility
-            let subs: hashbrown::HashMap<NameId, TypeId> = substitutions.iter().map(|(&k, &v)| (k, v)).collect();
+            let subs: hashbrown::HashMap<NameId, TypeId> =
+                substitutions.iter().map(|(&k, &v)| (k, v)).collect();
             self.arena.borrow_mut().substitute(ty, &subs)
         } else {
             ty
@@ -994,7 +991,8 @@ pub(crate) fn type_size(
         }
         LegacyType::FixedArray { element, size } => {
             // Element size * count, each element aligned to 8 bytes
-            let elem_size = type_size(element, pointer_type, entity_registry, arena).div_ceil(8) * 8;
+            let elem_size =
+                type_size(element, pointer_type, entity_registry, arena).div_ceil(8) * 8;
             elem_size * (*size as u32)
         }
         _ => 8, // default
@@ -1047,47 +1045,42 @@ pub(crate) fn type_id_size(
         ArenaType::Fallible { success, error } => {
             let success_size = type_id_size(*success, pointer_type, entity_registry, arena);
             let error_size = match arena.get(*error) {
-                ArenaType::Error { type_def_id } => {
-                    entity_registry
-                        .fields_on_type(*type_def_id)
-                        .map(|field_id| {
-                            let field = entity_registry.get_field(field_id);
-                            type_id_size(field.ty, pointer_type, entity_registry, arena)
-                        })
-                        .sum()
-                }
-                ArenaType::Union(variants) => {
-                    variants
-                        .iter()
-                        .filter_map(|&v| match arena.get(v) {
-                            ArenaType::Error { type_def_id } => {
-                                let size: u32 = entity_registry
-                                    .fields_on_type(*type_def_id)
-                                    .map(|field_id| {
-                                        let field = entity_registry.get_field(field_id);
-                                        type_id_size(field.ty, pointer_type, entity_registry, arena)
-                                    })
-                                    .sum();
-                                Some(size)
-                            }
-                            _ => None,
-                        })
-                        .max()
-                        .unwrap_or(0)
-                }
+                ArenaType::Error { type_def_id } => entity_registry
+                    .fields_on_type(*type_def_id)
+                    .map(|field_id| {
+                        let field = entity_registry.get_field(field_id);
+                        type_id_size(field.ty, pointer_type, entity_registry, arena)
+                    })
+                    .sum(),
+                ArenaType::Union(variants) => variants
+                    .iter()
+                    .filter_map(|&v| match arena.get(v) {
+                        ArenaType::Error { type_def_id } => {
+                            let size: u32 = entity_registry
+                                .fields_on_type(*type_def_id)
+                                .map(|field_id| {
+                                    let field = entity_registry.get_field(field_id);
+                                    type_id_size(field.ty, pointer_type, entity_registry, arena)
+                                })
+                                .sum();
+                            Some(size)
+                        }
+                        _ => None,
+                    })
+                    .max()
+                    .unwrap_or(0),
                 _ => 0,
             };
             let max_payload = success_size.max(error_size);
             8 + max_payload.div_ceil(8) * 8
         }
-        ArenaType::Tuple(elements) => {
-            elements
-                .iter()
-                .map(|&t| type_id_size(t, pointer_type, entity_registry, arena).div_ceil(8) * 8)
-                .sum()
-        }
+        ArenaType::Tuple(elements) => elements
+            .iter()
+            .map(|&t| type_id_size(t, pointer_type, entity_registry, arena).div_ceil(8) * 8)
+            .sum(),
         ArenaType::FixedArray { element, size } => {
-            let elem_size = type_id_size(*element, pointer_type, entity_registry, arena).div_ceil(8) * 8;
+            let elem_size =
+                type_id_size(*element, pointer_type, entity_registry, arena).div_ceil(8) * 8;
             elem_size * (*size as u32)
         }
         _ => 8,
@@ -1260,10 +1253,7 @@ pub(crate) fn value_to_word(
                 CodegenError::missing_resource("heap allocator for interface boxing").into(),
             );
         };
-        let size_val = builder.ins().iconst(
-            pointer_type,
-            value_size as i64,
-        );
+        let size_val = builder.ins().iconst(pointer_type, value_size as i64);
         let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
         let alloc_ptr = builder.inst_results(alloc_call)[0];
         builder
@@ -1380,7 +1370,14 @@ pub(crate) fn word_to_value_type_id(
     arena: &TypeArena,
 ) -> Value {
     let vole_type = arena.to_type(type_id);
-    word_to_value(builder, word, &vole_type, pointer_type, entity_registry, arena)
+    word_to_value(
+        builder,
+        word,
+        &vole_type,
+        pointer_type,
+        entity_registry,
+        arena,
+    )
 }
 
 /// Get the runtime tag value for an array element type.

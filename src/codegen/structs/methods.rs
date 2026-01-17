@@ -13,16 +13,16 @@ use crate::codegen::method_resolution::{
     MethodResolutionInput, MethodTarget, resolve_method_target,
 };
 use crate::codegen::types::{
-    CompiledValue, box_interface_value, module_name_id, type_id_to_cranelift, type_size, type_to_cranelift,
-    value_to_word, word_to_value,
+    CompiledValue, box_interface_value, module_name_id, type_id_to_cranelift, type_size,
+    type_to_cranelift, value_to_word, word_to_value,
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use crate::identity::NamerLookup;
 use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::resolution::ResolvedMethod;
-use crate::sema::types::NominalType;
 use crate::sema::type_arena::TypeId;
+use crate::sema::types::NominalType;
 use crate::sema::{FunctionType, LegacyType, PrimitiveType};
 
 impl Cg<'_, '_, '_> {
@@ -77,13 +77,14 @@ impl Cg<'_, '_, '_> {
         // Handle module method calls (e.g., math.sqrt(16.0), math.lerp(...))
         // These go to either external native functions or pure Vole module functions
         // Extract module_id before the if-let to avoid holding arena borrow
-        let module_id_opt = self.ctx.arena.borrow().unwrap_module(obj.type_id).map(|m| m.module_id);
+        let module_id_opt = self
+            .ctx
+            .arena
+            .borrow()
+            .unwrap_module(obj.type_id)
+            .map(|m| m.module_id);
         if let Some(module_id) = module_id_opt {
-            let module_path = self
-                .ctx
-                .analyzed
-                .name_table
-                .module_path(module_id);
+            let module_path = self.ctx.analyzed.name_table.module_path(module_id);
             let name_id = module_name_id(self.ctx.analyzed, module_id, method_name_str);
             // Get the method resolution
             let resolution = self
@@ -390,7 +391,12 @@ impl Cg<'_, '_, '_> {
             // For Union return types, the callee returns a pointer to its stack memory
             // which becomes invalid after the call. Copy the union to our own stack.
             let (final_value, final_type) = if matches!(&return_type, LegacyType::Union(_)) {
-                let union_size = type_size(&return_type, self.ctx.pointer_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
+                let union_size = type_size(
+                    &return_type,
+                    self.ctx.pointer_type,
+                    &self.ctx.analyzed.entity_registry,
+                    &self.ctx.arena.borrow(),
+                );
                 let local_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     union_size,
@@ -582,7 +588,11 @@ impl Cg<'_, '_, '_> {
             .map(|param| (*param, elem_type_id))
             .collect();
         let method_return_id = self.intern_type(&method.signature.return_type);
-        let return_type_id = self.ctx.arena.borrow_mut().substitute(method_return_id, &substitutions);
+        let return_type_id = self
+            .ctx
+            .arena
+            .borrow_mut()
+            .substitute(method_return_id, &substitutions);
 
         // Convert Iterator<T> return types to RuntimeIterator(T) since the runtime
         // functions return raw iterator pointers, not boxed interface values
@@ -604,11 +614,7 @@ impl Cg<'_, '_, '_> {
     /// When calling external iterator methods, the runtime returns raw iterator pointers,
     /// not boxed interface values. This function converts Interface/GenericInstance types
     /// for Iterator to RuntimeIterator so that subsequent method calls use direct dispatch.
-    fn convert_iterator_return_type(
-        &self,
-        ty: TypeId,
-        iterator_type_id: TypeDefId,
-    ) -> TypeId {
+    fn convert_iterator_return_type(&self, ty: TypeId, iterator_type_id: TypeDefId) -> TypeId {
         self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
     }
 
@@ -636,13 +642,12 @@ impl Cg<'_, '_, '_> {
     ) -> TypeId {
         let arena = self.ctx.arena.borrow();
         // Check if this is an Interface type matching Iterator
-        if let Some((type_def_id, type_args)) = arena.unwrap_interface(ty) {
-            if type_def_id == iterator_type_id {
-                if let Some(&elem_type_id) = type_args.first() {
-                    drop(arena);
-                    return self.ctx.arena.borrow_mut().runtime_iterator(elem_type_id);
-                }
-            }
+        if let Some((type_def_id, type_args)) = arena.unwrap_interface(ty)
+            && type_def_id == iterator_type_id
+            && let Some(&elem_type_id) = type_args.first()
+        {
+            drop(arena);
+            return self.ctx.arena.borrow_mut().runtime_iterator(elem_type_id);
         }
         ty
     }
@@ -852,7 +857,14 @@ impl Cg<'_, '_, '_> {
             .first()
             .copied()
             .ok_or_else(|| "interface call missing return value".to_string())?;
-        let value = word_to_value(self.builder, word, &func_type.return_type, word_type, &self.ctx.analyzed.entity_registry, &self.ctx.arena.borrow());
+        let value = word_to_value(
+            self.builder,
+            word,
+            &func_type.return_type,
+            word_type,
+            &self.ctx.analyzed.entity_registry,
+            &self.ctx.arena.borrow(),
+        );
 
         // Convert Iterator return types to RuntimeIterator for interface dispatch
         // since external iterator methods return raw iterator pointers, not boxed interfaces

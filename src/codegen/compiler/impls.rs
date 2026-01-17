@@ -15,7 +15,6 @@ use crate::frontend::{
 };
 use crate::identity::ModuleId;
 use crate::sema::LegacyType;
-use crate::sema::types::NominalType;
 
 impl Compiler<'_> {
     /// Compile methods for a class
@@ -886,7 +885,12 @@ impl Compiler<'_> {
                     impl_method_infos: &self.impl_method_infos,
                     static_method_infos: &self.static_method_infos,
                     interface_vtables: &self.interface_vtables,
-                    current_function_return_type: Some(self.analyzed.type_arena.borrow_mut().from_type(&return_type)),
+                    current_function_return_type: Some(
+                        self.analyzed
+                            .type_arena
+                            .borrow_mut()
+                            .from_type(&return_type),
+                    ),
                     native_registry: &self.native_registry,
                     current_module: module_path,
                     monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -1039,7 +1043,7 @@ impl Compiler<'_> {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
                 let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
-                    variables.insert(*name, (var, vole_ty_id));
+                variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile method body
@@ -1058,7 +1062,8 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: method_return_type.map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: method_return_type
+                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -1223,7 +1228,7 @@ impl Compiler<'_> {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
                 let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
-                    variables.insert(*name, (var, vole_ty_id));
+                variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile method body
@@ -1242,7 +1247,8 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: method_return_type.map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: method_return_type
+                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -1311,7 +1317,11 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Clone metadata for the closure (needs to be before resolve_param_type closure)
-        let self_vole_type = self.analyzed.type_arena.borrow().to_type(metadata.vole_type);
+        let self_vole_type = self
+            .analyzed
+            .type_arena
+            .borrow()
+            .to_type(metadata.vole_type);
 
         // Helper to resolve param type, substituting Self with the concrete type
         let query = self.query();
@@ -1400,7 +1410,7 @@ impl Compiler<'_> {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
                 let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
-                    variables.insert(*name, (var, vole_ty_id));
+                variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile method body
@@ -1419,7 +1429,8 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: method_return_type.map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: method_return_type
+                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -1485,7 +1496,11 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Clone metadata for the closure - self has the concrete type!
-        let self_vole_type = self.analyzed.type_arena.borrow().to_type(metadata.vole_type);
+        let self_vole_type = self
+            .analyzed
+            .type_arena
+            .borrow()
+            .to_type(metadata.vole_type);
 
         // Helper to resolve param type, substituting Self with the concrete type
         let query = self.query();
@@ -1574,7 +1589,7 @@ impl Compiler<'_> {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
                 let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
-                    variables.insert(*name, (var, vole_ty_id));
+                variables.insert(*name, (var, vole_ty_id));
             }
 
             // Compile method body (must exist for default methods)
@@ -1600,7 +1615,8 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: method_return_type.map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: method_return_type
+                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -1789,9 +1805,9 @@ impl Compiler<'_> {
             .type_metadata
             .values()
             .find(|meta| {
-                let vole_type = self.analyzed.type_arena.borrow().to_type(meta.vole_type);
-                if let LegacyType::Nominal(NominalType::Class(class_type)) = &vole_type {
-                    let name_id = self.analyzed.entity_registry.class_name_id(class_type);
+                let arena = self.analyzed.type_arena.borrow();
+                if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
+                    let name_id = self.analyzed.entity_registry.get_type(type_def_id).name_id;
                     self.analyzed
                         .name_table
                         .last_segment_str(name_id)
@@ -1938,7 +1954,12 @@ impl Compiler<'_> {
                     impl_method_infos: &self.impl_method_infos,
                     static_method_infos: &self.static_method_infos,
                     interface_vtables: &self.interface_vtables,
-                    current_function_return_type: Some(self.analyzed.type_arena.borrow_mut().from_type(&return_type)),
+                    current_function_return_type: Some(
+                        self.analyzed
+                            .type_arena
+                            .borrow_mut()
+                            .from_type(&return_type),
+                    ),
                     native_registry: &self.native_registry,
                     current_module: Some(module_path),
                     monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -2077,7 +2098,7 @@ impl Compiler<'_> {
                         let var = builder.declare_var(*ty);
                         builder.def_var(var, *val);
                         let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(vole_ty);
-                    variables.insert(*name, (var, vole_ty_id));
+                        variables.insert(*name, (var, vole_ty_id));
                     }
 
                     // Compile method body
@@ -2096,7 +2117,12 @@ impl Compiler<'_> {
                         impl_method_infos: &self.impl_method_infos,
                         static_method_infos: &self.static_method_infos,
                         interface_vtables: &self.interface_vtables,
-                        current_function_return_type: Some(self.analyzed.type_arena.borrow_mut().from_type(&return_type)),
+                        current_function_return_type: Some(
+                            self.analyzed
+                                .type_arena
+                                .borrow_mut()
+                                .from_type(&return_type),
+                        ),
                         native_registry: &self.native_registry,
                         current_module: Some(module_path),
                         monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,

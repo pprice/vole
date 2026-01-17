@@ -1,11 +1,11 @@
 // src/codegen/structs/access.rs
 
-use super::helpers::{convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id};
+use super::helpers::{
+    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id,
+};
 use crate::codegen::RuntimeFn;
 use crate::codegen::context::Cg;
-use crate::codegen::types::{
-    CompiledValue, box_interface_value_id, module_name_id,
-};
+use crate::codegen::types::{CompiledValue, box_interface_value_id, module_name_id};
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
 use crate::sema::types::ConstantValue;
@@ -74,9 +74,8 @@ impl Cg<'_, '_, '_> {
             }
 
             // Check if it's an export (function or other)
-            let export_type_id = name_id.and_then(|nid| {
-                exports.iter().find(|(n, _)| *n == nid).map(|(_, tid)| *tid)
-            });
+            let export_type_id = name_id
+                .and_then(|nid| exports.iter().find(|(n, _)| *n == nid).map(|(_, tid)| *tid));
             if let Some(export_type_id) = export_type_id {
                 let is_function = self.ctx.arena.borrow().is_function(export_type_id);
                 if is_function {
@@ -108,7 +107,8 @@ impl Cg<'_, '_, '_> {
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
 
         let arena = self.ctx.arena.borrow();
-        let (result_val, cranelift_ty) = convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
+        let (result_val, cranelift_ty) =
+            convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
         drop(arena);
 
         Ok(CompiledValue {
@@ -160,7 +160,8 @@ impl Cg<'_, '_, '_> {
 
         // Get the field type from the inner type using TypeId-based helper
         let field_name = self.ctx.interner.resolve(oc.field);
-        let (slot, field_type_id) = get_field_slot_and_type_id(inner_type_id, field_name, self.ctx)?;
+        let (slot, field_type_id) =
+            get_field_slot_and_type_id(inner_type_id, field_name, self.ctx)?;
 
         // Result type is field_type | nil (optional)
         // But if field type is already optional, don't double-wrap
@@ -177,7 +178,11 @@ impl Cg<'_, '_, '_> {
 
         let cranelift_type = {
             let arena = self.ctx.arena.borrow();
-            crate::codegen::types::type_id_to_cranelift(result_type_id, &arena, self.ctx.pointer_type)
+            crate::codegen::types::type_id_to_cranelift(
+                result_type_id,
+                &arena,
+                self.ctx.pointer_type,
+            )
         };
         self.builder.append_block_param(merge_block, cranelift_type);
 
@@ -201,7 +206,11 @@ impl Cg<'_, '_, '_> {
         // Load the actual object from the union payload (offset 8)
         let inner_cranelift_type = {
             let arena = self.ctx.arena.borrow();
-            crate::codegen::types::type_id_to_cranelift(inner_type_id, &arena, self.ctx.pointer_type)
+            crate::codegen::types::type_id_to_cranelift(
+                inner_type_id,
+                &arena,
+                self.ctx.pointer_type,
+            )
         };
         let inner_obj =
             self.builder

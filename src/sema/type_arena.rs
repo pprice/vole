@@ -1319,11 +1319,9 @@ impl TypeArena {
                 }))
             }
 
-            Type::Error { type_def_id } => {
-                LegacyType::Nominal(NominalType::Error(ErrorTypeInfo {
-                    type_def_id: *type_def_id,
-                }))
-            }
+            Type::Error { type_def_id } => LegacyType::Nominal(NominalType::Error(ErrorTypeInfo {
+                type_def_id: *type_def_id,
+            })),
 
             Type::TypeParam(name_id) => LegacyType::TypeParam(*name_id),
 

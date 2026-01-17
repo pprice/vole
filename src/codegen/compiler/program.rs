@@ -145,7 +145,11 @@ impl Compiler<'_> {
                         .as_ref()
                         .map(|t| self.resolve_type_with_metadata(t))
                         .unwrap_or(LegacyType::Void);
-                    let return_type_id = self.analyzed.type_arena.borrow_mut().from_type(&return_type);
+                    let return_type_id = self
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&return_type);
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
                 Decl::Tests(tests_decl) => {
@@ -305,7 +309,11 @@ impl Compiler<'_> {
                             )
                         })
                         .unwrap_or(LegacyType::Void);
-                    let return_type_id = self.analyzed.type_arena.borrow_mut().from_type(&return_type);
+                    let return_type_id = self
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&return_type);
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
             }
@@ -428,7 +436,11 @@ impl Compiler<'_> {
                             )
                         })
                         .unwrap_or(LegacyType::Void);
-                    let return_type_id = self.analyzed.type_arena.borrow_mut().from_type(&return_type);
+                    let return_type_id = self
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&return_type);
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
             }
@@ -592,7 +604,8 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type.map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: return_type
+                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
                 native_registry: &self.native_registry,
                 current_module: Some(module_path), // We're compiling module code
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -736,7 +749,8 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type.map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: return_type
+                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -898,7 +912,11 @@ impl Compiler<'_> {
                             )
                         })
                         .unwrap_or(LegacyType::Void);
-                    let return_type_id = self.analyzed.type_arena.borrow_mut().from_type(&return_type);
+                    let return_type_id = self
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&return_type);
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
                 Decl::Tests(tests_decl) if include_tests => {
@@ -1053,7 +1071,8 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type.map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: return_type
+                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -1368,7 +1387,8 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type.map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: return_type
+                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -1609,7 +1629,11 @@ impl Compiler<'_> {
             // Bind `self` as the first parameter
             let self_var = builder.declare_var(self.pointer_type);
             builder.def_var(self_var, block_params[0]);
-            let self_vole_type_id = self.analyzed.type_arena.borrow_mut().from_type(&self_vole_type);
+            let self_vole_type_id = self
+                .analyzed
+                .type_arena
+                .borrow_mut()
+                .from_type(&self_vole_type);
             variables.insert(self_sym, (self_var, self_vole_type_id));
 
             // Bind remaining parameters with concrete types
@@ -1641,7 +1665,8 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type.map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: return_type
+                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -1744,7 +1769,11 @@ impl Compiler<'_> {
 
         // Fallback: use type_metadata (for non-generic types)
         if let Some(metadata) = self.type_metadata.get(&type_name) {
-            let vole_type = self.analyzed.type_arena.borrow().to_type(metadata.vole_type);
+            let vole_type = self
+                .analyzed
+                .type_arena
+                .borrow()
+                .to_type(metadata.vole_type);
             substitute_type(&vole_type, substitutions)
         } else {
             // Final fallback
@@ -1967,7 +1996,8 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type.map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: return_type
+                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,

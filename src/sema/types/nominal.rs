@@ -194,7 +194,6 @@ pub struct ErrorTypeInfo {
     pub type_def_id: TypeDefId,
 }
 
-
 impl std::fmt::Display for NominalType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name())

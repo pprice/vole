@@ -11,7 +11,9 @@ use crate::sema::implement_registry::ImplTypeId;
 use crate::sema::{LegacyType, PrimitiveType};
 
 use super::context::Cg;
-use super::structs::{convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id};
+use super::structs::{
+    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id,
+};
 use super::types::{CompiledValue, array_element_tag_id, convert_to_type, type_id_to_cranelift};
 
 impl Cg<'_, '_, '_> {
@@ -210,22 +212,20 @@ impl Cg<'_, '_, '_> {
             }
             // Check if left is optional and right is a compatible value type (using TypeId)
             let arena = self.ctx.arena.borrow();
-            if let Some(inner_type_id) = arena.unwrap_optional(left.type_id) {
-                if inner_type_id == right.type_id
-                    || (arena.is_integer(inner_type_id) && arena.is_integer(right.type_id))
-                {
-                    drop(arena);
-                    return self.optional_value_compare(left, right, op);
-                }
+            if let Some(inner_type_id) = arena.unwrap_optional(left.type_id)
+                && (inner_type_id == right.type_id
+                    || (arena.is_integer(inner_type_id) && arena.is_integer(right.type_id)))
+            {
+                drop(arena);
+                return self.optional_value_compare(left, right, op);
             }
             // Check if right is optional and left is a compatible value type (using TypeId)
-            if let Some(inner_type_id) = arena.unwrap_optional(right.type_id) {
-                if inner_type_id == left.type_id
-                    || (arena.is_integer(inner_type_id) && arena.is_integer(left.type_id))
-                {
-                    drop(arena);
-                    return self.optional_value_compare(right, left, op);
-                }
+            if let Some(inner_type_id) = arena.unwrap_optional(right.type_id)
+                && (inner_type_id == left.type_id
+                    || (arena.is_integer(inner_type_id) && arena.is_integer(left.type_id)))
+            {
+                drop(arena);
+                return self.optional_value_compare(right, left, op);
             }
             drop(arena);
         }
@@ -490,7 +490,8 @@ impl Cg<'_, '_, '_> {
         let inner_type_id = arena
             .unwrap_optional(optional.type_id)
             .unwrap_or_else(|| arena.i64());
-        let payload_cranelift_type = type_id_to_cranelift(inner_type_id, &arena, self.ctx.pointer_type);
+        let payload_cranelift_type =
+            type_id_to_cranelift(inner_type_id, &arena, self.ctx.pointer_type);
         drop(arena);
         let payload =
             self.builder
@@ -598,7 +599,8 @@ impl Cg<'_, '_, '_> {
 
         // Load current element
         let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, idx.value])?;
-        let (current_val, current_ty) = convert_field_value_id(self.builder, raw_value, elem_type_id, &arena);
+        let (current_val, current_ty) =
+            convert_field_value_id(self.builder, raw_value, elem_type_id, &arena);
         drop(arena);
 
         let current = CompiledValue {
@@ -619,10 +621,10 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| "vole_array_set not found".to_string())?;
         let array_set_ref = self.func_ref(array_set_key)?;
         let store_value = convert_to_i64_for_storage(self.builder, &result);
-        let tag_val = self
-            .builder
-            .ins()
-            .iconst(types::I64, array_element_tag_id(elem_type_id, &self.ctx.arena.borrow()));
+        let tag_val = self.builder.ins().iconst(
+            types::I64,
+            array_element_tag_id(elem_type_id, &self.ctx.arena.borrow()),
+        );
 
         self.builder
             .ins()

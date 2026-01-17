@@ -268,18 +268,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         type_id_to_cranelift(ty, &self.ctx.arena.borrow(), self.ctx.pointer_type)
     }
 
-    /// Unwrap a function type, returning the FunctionType if it is one
-    pub fn unwrap_function(&self, ty: TypeId) -> Option<crate::sema::FunctionType> {
-        if let LegacyType::Function(ft) = self.to_legacy(ty) {
-            Some(ft)
-        } else {
-            None
-        }
-    }
-
     /// Unwrap an interface type, returning the TypeDefId if it is one
     pub fn interface_type_def_id(&self, ty: TypeId) -> Option<crate::identity::TypeDefId> {
-        self.ctx.arena.borrow().unwrap_interface(ty).map(|(id, _)| id)
+        self.ctx
+            .arena
+            .borrow()
+            .unwrap_interface(ty)
+            .map(|(id, _)| id)
     }
 
     // ========== TypeCompatibility delegation helpers ==========
@@ -448,11 +443,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn int_const(&mut self, n: i64, type_id: TypeId) -> CompiledValue {
         let ty = self.cranelift_type(type_id);
         let value = self.builder.ins().iconst(ty, n);
-        CompiledValue {
-            value,
-            ty,
-            type_id,
-        }
+        CompiledValue { value, ty, type_id }
     }
 
     /// Create a float constant with explicit type (for bidirectional inference)
@@ -472,11 +463,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 (types::F64, v)
             }
         };
-        CompiledValue {
-            value,
-            ty,
-            type_id,
-        }
+        CompiledValue { value, ty, type_id }
     }
 
     /// Create a nil value
