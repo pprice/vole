@@ -41,24 +41,14 @@ impl NominalType {
         }
     }
 
-    /// Get type arguments for generic types.
-    /// Returns empty slice for non-generic types or error types.
-    pub fn type_args(&self) -> &[LegacyType] {
-        match self {
-            NominalType::Class(c) => &c.type_args,
-            NominalType::Record(r) => &r.type_args,
-            NominalType::Interface(i) => &i.type_args,
-            NominalType::Error(_) => &[],
-        }
-    }
-
     /// Get type arguments as TypeIds for arena-based substitution.
-    /// Returns empty slice for interfaces (which don't have TypeId args yet) and errors.
+    /// Returns empty slice for errors.
     pub fn type_args_id(&self) -> &[crate::sema::type_arena::TypeId] {
         match self {
             NominalType::Class(c) => &c.type_args_id,
             NominalType::Record(r) => &r.type_args_id,
-            NominalType::Interface(_) | NominalType::Error(_) => &[],
+            NominalType::Interface(i) => &i.type_args_id,
+            NominalType::Error(_) => &[],
         }
     }
 
@@ -135,10 +125,7 @@ impl NominalType {
 pub struct ClassType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
-    /// Type arguments for generic classes (empty for non-generic classes)
-    /// DEPRECATED: Use type_args_id instead. Will be removed in Phase 5.
-    pub type_args: Arc<[LegacyType]>,
-    /// Interned type arguments (canonical source of truth)
+    /// Interned type arguments (empty for non-generic classes)
     pub type_args_id: TypeIdVec,
 }
 
@@ -169,10 +156,7 @@ impl ClassType {
 pub struct RecordType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
-    /// Type arguments for generic records (empty for non-generic records)
-    /// DEPRECATED: Use type_args_id instead. Will be removed in Phase 5.
-    pub type_args: Arc<[LegacyType]>,
-    /// Interned type arguments (canonical source of truth)
+    /// Interned type arguments (empty for non-generic records)
     pub type_args_id: TypeIdVec,
 }
 
@@ -203,7 +187,8 @@ impl RecordType {
 pub struct InterfaceType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
-    pub type_args: Arc<[LegacyType]>,
+    /// Interned type arguments (empty for non-generic interfaces)
+    pub type_args_id: TypeIdVec,
     pub methods: Arc<[InterfaceMethodType]>,
     pub extends: ExtendsVec, // Parent interface TypeDefIds (inline for 0-2)
 }
@@ -213,27 +198,32 @@ impl std::fmt::Debug for InterfaceType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InterfaceType")
             .field("type_def_id", &self.type_def_id)
-            .field("type_args", &self.type_args)
+            .field("type_args_id", &self.type_args_id)
             .field("methods", &format_args!("[{} methods]", self.methods.len()))
             .field("extends", &self.extends)
             .finish()
     }
 }
 
-// Custom PartialEq to compare only type_def_id and type_args
-// This is needed because Symbol is interner-specific and methods can differ
-// when interfaces are loaded from different contexts
+// Custom PartialEq using type_args_id (TypeId) - the canonical source
 impl PartialEq for InterfaceType {
     fn eq(&self, other: &Self) -> bool {
-        self.type_def_id == other.type_def_id && self.type_args == other.type_args
+        self.type_def_id == other.type_def_id && self.type_args_id == other.type_args_id
     }
 }
 
-// Custom Hash to match PartialEq semantics - only hash type_def_id and type_args
+// Custom Hash using type_args_id (TypeId) - the canonical source
 impl std::hash::Hash for InterfaceType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.type_def_id.hash(state);
-        self.type_args.hash(state);
+        self.type_args_id.hash(state);
+    }
+}
+
+impl InterfaceType {
+    /// Get interned type argument IDs.
+    pub fn type_args_id(&self) -> &TypeIdVec {
+        &self.type_args_id
     }
 }
 
@@ -268,7 +258,6 @@ mod tests {
     fn make_class(id: u32) -> NominalType {
         NominalType::Class(ClassType {
             type_def_id: TypeDefId::new(id),
-            type_args: vec![].into(),
             type_args_id: TypeIdVec::new(),
         })
     }
@@ -276,7 +265,6 @@ mod tests {
     fn make_record(id: u32) -> NominalType {
         NominalType::Record(RecordType {
             type_def_id: TypeDefId::new(id),
-            type_args: vec![].into(),
             type_args_id: TypeIdVec::new(),
         })
     }
@@ -284,7 +272,7 @@ mod tests {
     fn make_interface(id: u32) -> NominalType {
         NominalType::Interface(InterfaceType {
             type_def_id: TypeDefId::new(id),
-            type_args: vec![].into(),
+            type_args_id: TypeIdVec::new(),
             methods: vec![].into(),
             extends: vec![].into(),
         })

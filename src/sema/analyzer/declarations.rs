@@ -190,12 +190,13 @@ impl Analyzer {
 
             // Resolve param types with type params in scope
             let module_id = self.current_module;
-            let mut ctx = TypeResolutionContext::with_type_params(
+            let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                 &self.entity_registry,
                 interner,
                 &mut self.name_table,
                 module_id,
                 &type_param_scope,
+                &self.type_arena,
             );
             let param_types: Vec<LegacyType> = func
                 .params
@@ -509,12 +510,13 @@ impl Analyzer {
 
             // Resolve field types with type params in scope
             let module_id = self.current_module;
-            let mut ctx = TypeResolutionContext::with_type_params(
+            let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                 &self.entity_registry,
                 interner,
                 &mut self.name_table,
                 module_id,
                 &type_param_scope,
+                &self.type_arena,
             );
 
             let field_types: Vec<LegacyType> = class
@@ -601,46 +603,40 @@ impl Analyzer {
                 );
 
                 // Resolve parameter types with type params and self in scope
-                let params: Vec<LegacyType> = {
-                    let arena = self.type_arena.borrow();
-                    method
-                        .params
-                        .iter()
-                        .map(|p| {
-                            let mut ctx = TypeResolutionContext {
-                                entity_registry: &self.entity_registry,
-                                interner,
-                                name_table: &mut self.name_table,
-                                module_id,
-                                type_params: Some(&type_param_scope),
-                                self_type: self_type_id,
-                                type_arena: Some(&*arena),
-                            };
-                            resolve_type(&p.ty, &mut ctx)
-                        })
-                        .collect()
-                };
+                let params: Vec<LegacyType> = method
+                    .params
+                    .iter()
+                    .map(|p| {
+                        let mut ctx = TypeResolutionContext {
+                            entity_registry: &self.entity_registry,
+                            interner,
+                            name_table: &mut self.name_table,
+                            module_id,
+                            type_params: Some(&type_param_scope),
+                            self_type: self_type_id,
+                            type_arena: Some(&*self.type_arena),
+                        };
+                        resolve_type(&p.ty, &mut ctx)
+                    })
+                    .collect();
 
                 // Resolve return type with type params and self in scope
-                let return_type = {
-                    let arena = self.type_arena.borrow();
-                    method
-                        .return_type
-                        .as_ref()
-                        .map(|t| {
-                            let mut ctx = TypeResolutionContext {
-                                entity_registry: &self.entity_registry,
-                                interner,
-                                name_table: &mut self.name_table,
-                                module_id,
-                                type_params: Some(&type_param_scope),
-                                self_type: self_type_id,
-                                type_arena: Some(&*arena),
-                            };
-                            resolve_type(t, &mut ctx)
-                        })
-                        .unwrap_or(LegacyType::Void)
-                };
+                let return_type = method
+                    .return_type
+                    .as_ref()
+                    .map(|t| {
+                        let mut ctx = TypeResolutionContext {
+                            entity_registry: &self.entity_registry,
+                            interner,
+                            name_table: &mut self.name_table,
+                            module_id,
+                            type_params: Some(&type_param_scope),
+                            self_type: self_type_id,
+                            type_arena: Some(&*self.type_arena),
+                        };
+                        resolve_type(t, &mut ctx)
+                    })
+                    .unwrap_or(LegacyType::Void);
 
                 let mut signature = FunctionType {
                     params: params.into(),
@@ -715,12 +711,13 @@ impl Analyzer {
                         .params
                         .iter()
                         .map(|p| {
-                            let mut ctx = TypeResolutionContext::with_type_params(
+                            let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                                 &self.entity_registry,
                                 interner,
                                 &mut self.name_table,
                                 module_id,
                                 &merged_scope,
+                                &self.type_arena,
                             );
                             resolve_type(&p.ty, &mut ctx)
                         })
@@ -731,12 +728,13 @@ impl Analyzer {
                         .return_type
                         .as_ref()
                         .map(|t| {
-                            let mut ctx = TypeResolutionContext::with_type_params(
+                            let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                                 &self.entity_registry,
                                 interner,
                                 &mut self.name_table,
                                 module_id,
                                 &merged_scope,
+                                &self.type_arena,
                             );
                             resolve_type(t, &mut ctx)
                         })
@@ -779,12 +777,13 @@ impl Analyzer {
                         .params
                         .iter()
                         .map(|p| {
-                            let mut ctx = TypeResolutionContext::with_type_params(
+                            let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                                 &self.entity_registry,
                                 interner,
                                 &mut self.name_table,
                                 module_id,
                                 &type_param_scope,
+                                &self.type_arena,
                             );
                             resolve_type(&p.ty, &mut ctx)
                         })
@@ -795,12 +794,13 @@ impl Analyzer {
                         .return_type
                         .as_ref()
                         .map(|t| {
-                            let mut ctx = TypeResolutionContext::with_type_params(
+                            let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                                 &self.entity_registry,
                                 interner,
                                 &mut self.name_table,
                                 module_id,
                                 &type_param_scope,
+                                &self.type_arena,
                             );
                             resolve_type(t, &mut ctx)
                         })
@@ -1053,12 +1053,13 @@ impl Analyzer {
 
             // Resolve field types with type params in scope
             let module_id = self.current_module;
-            let mut ctx = TypeResolutionContext::with_type_params(
+            let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                 &self.entity_registry,
                 interner,
                 &mut self.name_table,
                 module_id,
                 &type_param_scope,
+                &self.type_arena,
             );
 
             let field_types: Vec<LegacyType> = record
@@ -1083,12 +1084,13 @@ impl Analyzer {
                 .iter()
                 .enumerate()
                 .map(|(i, f)| {
-                    let mut ctx = TypeResolutionContext::with_type_params(
+                    let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                         &self.entity_registry,
                         interner,
                         &mut self.name_table,
                         module_id,
                         &type_param_scope,
+                        &self.type_arena,
                     );
                     StructField {
                         name: interner.resolve(f.name).to_string(),
@@ -1105,7 +1107,6 @@ impl Analyzer {
 
             let record_type = RecordType {
                 type_def_id: entity_type_id,
-                type_args: vec![].into(), // Generic record base has no type args yet
                 type_args_id: TypeIdVec::new(),
             };
             self.register_named_type(
@@ -1160,16 +1161,15 @@ impl Analyzer {
             for method in &record.methods {
                 // First resolve types, then intern names (to avoid borrow conflicts)
                 let params: Vec<LegacyType> = {
-                    let arena = self.type_arena.borrow();
-                    let mut ctx = TypeResolutionContext::with_type_params(
+                    let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                         &self.entity_registry,
                         interner,
                         &mut self.name_table,
                         module_id,
                         &type_param_scope,
+                        &self.type_arena,
                     );
                     ctx.self_type = Some(self_type_id);
-                    ctx.type_arena = Some(&*arena);
                     method
                         .params
                         .iter()
@@ -1177,16 +1177,15 @@ impl Analyzer {
                         .collect()
                 };
                 let return_type: LegacyType = {
-                    let arena = self.type_arena.borrow();
-                    let mut ctx = TypeResolutionContext::with_type_params(
+                    let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                         &self.entity_registry,
                         interner,
                         &mut self.name_table,
                         module_id,
                         &type_param_scope,
+                        &self.type_arena,
                     );
                     ctx.self_type = Some(self_type_id);
-                    ctx.type_arena = Some(&*arena);
                     method
                         .return_type
                         .as_ref()
@@ -1273,12 +1272,13 @@ impl Analyzer {
                         .params
                         .iter()
                         .map(|p| {
-                            let mut ctx = TypeResolutionContext::with_type_params(
+                            let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                                 &self.entity_registry,
                                 interner,
                                 &mut self.name_table,
                                 module_id,
                                 &merged_scope,
+                                &self.type_arena,
                             );
                             resolve_type(&p.ty, &mut ctx)
                         })
@@ -1289,12 +1289,13 @@ impl Analyzer {
                         .return_type
                         .as_ref()
                         .map(|t| {
-                            let mut ctx = TypeResolutionContext::with_type_params(
+                            let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                                 &self.entity_registry,
                                 interner,
                                 &mut self.name_table,
                                 module_id,
                                 &merged_scope,
+                                &self.type_arena,
                             );
                             resolve_type(t, &mut ctx)
                         })
@@ -1436,12 +1437,13 @@ impl Analyzer {
         }
 
         let module_id = self.current_module;
-        let mut type_ctx = TypeResolutionContext::with_type_params(
+        let mut type_ctx = TypeResolutionContext::with_type_params_and_arena(
             &self.entity_registry,
             interner,
             &mut self.name_table,
             module_id,
             &type_param_scope,
+            &self.type_arena,
         );
 
         // Resolve field types directly from AST (store for later registration)
@@ -1654,12 +1656,13 @@ impl Analyzer {
                     .intern_raw(self.current_module, &[&name_str, &method_name_str]);
 
                 // Create a fresh type context for each static method
-                let mut static_type_ctx = TypeResolutionContext::with_type_params(
+                let mut static_type_ctx = TypeResolutionContext::with_type_params_and_arena(
                     &self.entity_registry,
                     interner,
                     &mut self.name_table,
                     module_id,
                     &type_param_scope,
+                    &self.type_arena,
                 );
 
                 let params: Vec<LegacyType> = method
@@ -1721,7 +1724,7 @@ impl Analyzer {
             interface_decl.name,
             LegacyType::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
                 type_def_id: entity_type_id,
-                type_args: vec![].into(),
+                type_args_id: TypeIdVec::new(),
                 methods: interface_methods.into(),
                 extends: extends_type_ids.into(),
             })),
@@ -1998,12 +2001,13 @@ impl Analyzer {
 
                 // Resolve with type params in scope
                 let module_id = self.current_module;
-                let mut ctx = TypeResolutionContext::with_type_params(
+                let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                     &self.entity_registry,
                     interner,
                     &mut self.name_table,
                     module_id,
                     &type_param_scope,
+                    &self.type_arena,
                 );
                 let param_types: Vec<LegacyType> = func
                     .params

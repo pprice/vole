@@ -77,33 +77,23 @@ pub fn types_compatible_core(from: &LegacyType, to: &LegacyType) -> bool {
     }
 
     // Class compatibility: compare by type_def_id and type_args
+    // Class types are invariant, so compatibility = equality (now uses type_args_id)
     if let (
         LegacyType::Nominal(NominalType::Class(from_class)),
         LegacyType::Nominal(NominalType::Class(to_class)),
     ) = (from, to)
-        && from_class.type_def_id == to_class.type_def_id
-        && from_class.type_args.len() == to_class.type_args.len()
-        && from_class
-            .type_args
-            .iter()
-            .zip(to_class.type_args.iter())
-            .all(|(f, t)| types_compatible_core(f, t))
+        && from_class == to_class
     {
         return true;
     }
 
     // Record compatibility: compare by type_def_id and type_args
+    // Record types are invariant, so compatibility = equality (now uses type_args_id)
     if let (
         LegacyType::Nominal(NominalType::Record(from_rec)),
         LegacyType::Nominal(NominalType::Record(to_rec)),
     ) = (from, to)
-        && from_rec.type_def_id == to_rec.type_def_id
-        && from_rec.type_args.len() == to_rec.type_args.len()
-        && from_rec
-            .type_args
-            .iter()
-            .zip(to_rec.type_args.iter())
-            .all(|(f, t)| types_compatible_core(f, t))
+        && from_rec == to_rec
     {
         return true;
     }

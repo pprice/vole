@@ -316,7 +316,6 @@ impl Analyzer {
 
         let concrete_record = RecordType {
             type_def_id,
-            type_args: type_args.into(),
             type_args_id,
         };
         Ok(LegacyType::Nominal(NominalType::Record(concrete_record)))
@@ -481,7 +480,6 @@ impl Analyzer {
 
         let concrete_class = ClassType {
             type_def_id,
-            type_args: type_args.into(),
             type_args_id,
         };
         Ok(LegacyType::Nominal(NominalType::Class(concrete_class)))

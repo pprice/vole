@@ -1286,18 +1286,15 @@ impl TypeArena {
             }
 
             LegacyType::Nominal(NominalType::Class(c)) => {
-                let arg_ids: TypeIdVec = c.type_args.iter().map(|a| self.from_type(a)).collect();
-                self.class(c.type_def_id, arg_ids)
+                self.class(c.type_def_id, c.type_args_id.clone())
             }
 
             LegacyType::Nominal(NominalType::Record(r)) => {
-                let arg_ids: TypeIdVec = r.type_args.iter().map(|a| self.from_type(a)).collect();
-                self.record(r.type_def_id, arg_ids)
+                self.record(r.type_def_id, r.type_args_id.clone())
             }
 
             LegacyType::Nominal(NominalType::Interface(i)) => {
-                let arg_ids: TypeIdVec = i.type_args.iter().map(|a| self.from_type(a)).collect();
-                self.interface(i.type_def_id, arg_ids)
+                self.interface(i.type_def_id, i.type_args_id.clone())
             }
 
             LegacyType::Nominal(NominalType::Error(e)) => self.error_type(e.type_def_id),
@@ -1412,38 +1409,29 @@ impl TypeArena {
             SemaType::Class {
                 type_def_id,
                 type_args,
-            } => {
-                let args: Vec<LegacyType> = type_args.iter().map(|&a| self.to_type(a)).collect();
-                LegacyType::Nominal(NominalType::Class(ClassType {
-                    type_def_id: *type_def_id,
-                    type_args: args.into(),
-                    type_args_id: type_args.clone(),
-                }))
-            }
+            } => LegacyType::Nominal(NominalType::Class(ClassType {
+                type_def_id: *type_def_id,
+                type_args_id: type_args.clone(),
+            })),
 
             SemaType::Record {
                 type_def_id,
                 type_args,
-            } => {
-                let args: Vec<LegacyType> = type_args.iter().map(|&a| self.to_type(a)).collect();
-                LegacyType::Nominal(NominalType::Record(RecordType {
-                    type_def_id: *type_def_id,
-                    type_args: args.into(),
-                    type_args_id: type_args.clone(),
-                }))
-            }
+            } => LegacyType::Nominal(NominalType::Record(RecordType {
+                type_def_id: *type_def_id,
+                type_args_id: type_args.clone(),
+            })),
 
             SemaType::Interface {
                 type_def_id,
                 type_args,
             } => {
-                let args: Vec<LegacyType> = type_args.iter().map(|&a| self.to_type(a)).collect();
                 // Note: We lose methods/extends info here - this is a limitation of
                 // storing types by TypeDefId only. For full interface type, lookup
                 // from EntityRegistry is needed.
                 LegacyType::Nominal(NominalType::Interface(InterfaceType {
                     type_def_id: *type_def_id,
-                    type_args: args.into(),
+                    type_args_id: type_args.clone(),
                     methods: vec![].into(),
                     extends: vec![].into(),
                 }))
@@ -2113,20 +2101,17 @@ mod tests {
     #[test]
     fn bridge_roundtrip_class() {
         use crate::sema::types::{ClassType, NominalType, PrimitiveType};
-        use std::sync::Arc;
 
         let mut arena = TypeArena::new();
         let type_def_id = TypeDefId::new(42);
         // Create type args with consistent LegacyType and TypeId representations
-        let type_args_legacy: Arc<[LegacyType]> =
-            vec![LegacyType::Primitive(PrimitiveType::I32)].into();
+        let type_args_legacy = vec![LegacyType::Primitive(PrimitiveType::I32)];
         let type_args_id: TypeIdVec = type_args_legacy
             .iter()
             .map(|t| arena.from_type(t))
             .collect();
         let original = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
-            type_args: type_args_legacy,
             type_args_id,
         }));
         let id = arena.from_type(&original);
@@ -2137,23 +2122,20 @@ mod tests {
     #[test]
     fn bridge_roundtrip_record() {
         use crate::sema::types::{NominalType, PrimitiveType, RecordType};
-        use std::sync::Arc;
 
         let mut arena = TypeArena::new();
         let type_def_id = TypeDefId::new(123);
-        // Create type args with consistent LegacyType and TypeId representations
-        let type_args_legacy: Arc<[LegacyType]> = vec![
+        // Create type args
+        let type_args_legacy = vec![
             LegacyType::Primitive(PrimitiveType::String),
             LegacyType::Primitive(PrimitiveType::Bool),
-        ]
-        .into();
+        ];
         let type_args_id: TypeIdVec = type_args_legacy
             .iter()
             .map(|t| arena.from_type(t))
             .collect();
         let original = LegacyType::Nominal(NominalType::Record(RecordType {
             type_def_id,
-            type_args: type_args_legacy,
             type_args_id,
         }));
         let id = arena.from_type(&original);

@@ -98,12 +98,13 @@ impl Analyzer {
             return false;
         };
 
-        // Build type substitutions
-        let substitutions: StdHashMap<_, _> = generic_info
+        // Build type substitutions directly using TypeId
+        let type_args_id = n.type_args_id();
+        let substitutions: hashbrown::HashMap<_, _> = generic_info
             .type_params
             .iter()
-            .zip(n.type_args().iter())
-            .map(|(tp, arg)| (tp.name_id, arg.clone()))
+            .zip(type_args_id.iter())
+            .map(|(tp, &arg_id)| (tp.name_id, arg_id))
             .collect();
 
         // Find field and check type compatibility using arena substitution
@@ -112,11 +113,7 @@ impl Analyzer {
                 let field_type_id = generic_info.field_types[i];
                 let field_ty = {
                     let mut arena = self.type_arena.borrow_mut();
-                    let subs_id: hashbrown::HashMap<_, _> = substitutions
-                        .iter()
-                        .map(|(&k, v)| (k, arena.from_type(v)))
-                        .collect();
-                    let substituted_id = arena.substitute(field_type_id, &subs_id);
+                    let substituted_id = arena.substitute(field_type_id, &substitutions);
                     arena.to_type(substituted_id)
                 };
                 return self.types_compatible(&field_ty, expected_type, interner);
@@ -674,12 +671,13 @@ impl Analyzer {
             return false;
         };
 
-        // Build type substitutions
-        let substitutions: HashMap<_, _> = generic_info
+        // Build type substitutions directly using TypeId
+        let type_args_id = n.type_args_id();
+        let substitutions: hashbrown::HashMap<_, _> = generic_info
             .type_params
             .iter()
-            .zip(n.type_args().iter())
-            .map(|(tp, arg)| (tp.name_id, arg.clone()))
+            .zip(type_args_id.iter())
+            .map(|(tp, &arg_id)| (tp.name_id, arg_id))
             .collect();
 
         // Find field and check type compatibility using arena substitution
@@ -688,11 +686,7 @@ impl Analyzer {
                 let field_type_id = generic_info.field_types[i];
                 let field_ty = {
                     let mut arena = self.type_arena.borrow_mut();
-                    let subs_id: hashbrown::HashMap<_, _> = substitutions
-                        .iter()
-                        .map(|(&k, v)| (k, arena.from_type(v)))
-                        .collect();
-                    let substituted_id = arena.substitute(field_type_id, &subs_id);
+                    let substituted_id = arena.substitute(field_type_id, &substitutions);
                     arena.to_type(substituted_id)
                 };
                 return self.types_compatible(&field_ty, expected_type, interner);

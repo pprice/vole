@@ -1004,11 +1004,21 @@ pub(crate) fn box_interface_value(
     // Get the legacy type for vtable lookup (needs the full type for matching)
     let value_legacy_type = ctx.arena.borrow().to_type(value.type_id);
 
+    // Convert type_args_id to Vec<LegacyType> for vtable lookup
+    let interface_type_args: Vec<LegacyType> = {
+        let arena = ctx.arena.borrow();
+        interface
+            .type_args_id
+            .iter()
+            .map(|&id| arena.to_type(id))
+            .collect()
+    };
+
     // Phase 1: Declare vtable, getting DataId for forward reference
     let vtable_id = ctx.interface_vtables.borrow_mut().get_or_declare(
         ctx,
         interface_name,
-        &interface.type_args,
+        &interface_type_args,
         &value_legacy_type,
     )?;
     // Phase 2+3: Compile wrappers and define vtable data

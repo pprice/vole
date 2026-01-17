@@ -25,6 +25,13 @@ impl Analyzer {
         self.entity_registry.type_table.key_for_type(ty)
     }
 
+    #[allow(dead_code)]
+    pub(super) fn type_key_for_id(&mut self, id: ArenaTypeId) -> TypeKey {
+        self.entity_registry
+            .type_table
+            .key_for_type_id(id, &self.type_arena.borrow())
+    }
+
     pub(super) fn type_display(&self, ty: &LegacyType) -> String {
         self.entity_registry
             .type_table

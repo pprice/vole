@@ -1,11 +1,8 @@
 //! Field registration and lookup for EntityRegistry.
 
 use crate::identity::{FieldId, NameId, TypeDefId};
-use crate::sema::LegacyType;
 use crate::sema::entity_defs::FieldDef;
-use crate::sema::generic::substitute_type;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use std::collections::HashMap;
 
 use super::EntityRegistry;
 
@@ -70,35 +67,6 @@ impl EntityRegistry {
             .unwrap_or(&[])
     }
 
-    /// Build substitution map for a generic type instantiation
-    pub fn substitution_map(
-        &self,
-        type_def_id: TypeDefId,
-        type_args: &[LegacyType],
-    ) -> HashMap<NameId, LegacyType> {
-        let type_def = self.get_type(type_def_id);
-        type_def
-            .type_params
-            .iter()
-            .zip(type_args.iter())
-            .map(|(param, arg)| (*param, arg.clone()))
-            .collect()
-    }
-
-    /// Apply substitution to a type based on type_def's type params
-    pub fn substitute_type_with_args(
-        &self,
-        type_def_id: TypeDefId,
-        type_args: &[LegacyType],
-        ty: &LegacyType,
-    ) -> LegacyType {
-        if type_args.is_empty() {
-            return ty.clone();
-        }
-        let subs = self.substitution_map(type_def_id, type_args);
-        substitute_type(ty, &subs)
-    }
-
     /// Build substitution map using TypeId (for arena-based substitution)
     pub fn substitution_map_id(
         &self,
@@ -127,31 +95,6 @@ impl EntityRegistry {
         }
         let subs = self.substitution_map_id(type_def_id, type_args_id);
         arena.substitute(type_id, &subs)
-    }
-
-    /// Get field type with type argument substitution applied
-    /// Requires arena to convert stored TypeId to LegacyType for substitution
-    pub fn field_type(
-        &self,
-        type_def_id: TypeDefId,
-        type_args: &[LegacyType],
-        field_name_id: NameId,
-        arena: &crate::sema::type_arena::TypeArena,
-    ) -> Option<LegacyType> {
-        let type_def = self.get_type(type_def_id);
-        let generic_info = type_def.generic_info.as_ref()?;
-        let idx = generic_info
-            .field_names
-            .iter()
-            .position(|n| *n == field_name_id)?;
-        // Convert stored TypeId to LegacyType for substitution
-        let field_type = arena.to_type(generic_info.field_types[idx]);
-
-        if type_args.is_empty() {
-            Some(field_type)
-        } else {
-            Some(self.substitute_type_with_args(type_def_id, type_args, &field_type))
-        }
     }
 
     /// Get field index by NameId

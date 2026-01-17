@@ -2,7 +2,7 @@ use super::super::*;
 use crate::identity::{MethodId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::types::{LegacyType, NominalType};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 impl Analyzer {
     /// Resolve a method on a type using EntityRegistry (TypeDefId-based)
@@ -61,8 +61,8 @@ impl Analyzer {
                 let defining_type = self.entity_registry.get_type(method_def.defining_type);
 
                 // Build substitutions for generic interface types
-                let substitutions = self.build_interface_substitutions(object_type);
-                let func_type = self.apply_substitutions(&method_def.signature, &substitutions);
+                let substitutions = self.build_interface_substitutions_id(object_type);
+                let func_type = self.apply_substitutions_id(&method_def.signature, &substitutions);
 
                 // Determine the resolution type based on the defining type's kind
                 match defining_type.kind {
@@ -144,31 +144,46 @@ impl Analyzer {
         self.resolve_method(object_type, method_name, interner)
     }
 
-    /// Build substitution map for generic interface types
-    fn build_interface_substitutions(
+    /// Build substitution map for generic interface types using TypeId
+    fn build_interface_substitutions_id(
         &self,
         object_type: &LegacyType,
-    ) -> HashMap<NameId, LegacyType> {
+    ) -> hashbrown::HashMap<NameId, crate::sema::type_arena::TypeId> {
         // Extract type_def_id and type_args from nominal types
         if let LegacyType::Nominal(n) = object_type {
-            self.entity_registry
-                .substitution_map(n.type_def_id(), n.type_args())
+            // Use type_args_id for substitution
+            let type_args_id = n.type_args_id();
+            if !type_args_id.is_empty() {
+                self.build_substitutions_id(n.type_def_id(), type_args_id)
+            } else {
+                hashbrown::HashMap::new()
+            }
         } else {
-            HashMap::new()
+            hashbrown::HashMap::new()
         }
     }
 
-    /// Apply substitutions to a function type
-    fn apply_substitutions(
+    /// Build substitution map using TypeId for arena-based substitution
+    fn build_substitutions_id(
+        &self,
+        type_def_id: TypeDefId,
+        type_args_id: &[crate::sema::type_arena::TypeId],
+    ) -> hashbrown::HashMap<NameId, crate::sema::type_arena::TypeId> {
+        self.entity_registry
+            .substitution_map_id(type_def_id, type_args_id)
+    }
+
+    /// Apply TypeId substitutions to a function type using arena-based substitution
+    fn apply_substitutions_id(
         &self,
         func_type: &FunctionType,
-        substitutions: &HashMap<NameId, LegacyType>,
+        substitutions: &hashbrown::HashMap<NameId, crate::sema::type_arena::TypeId>,
     ) -> FunctionType {
         if substitutions.is_empty() {
             return func_type.clone();
         }
 
-        // Always use arena-based substitution - intern TypeIds first if needed
+        // Ensure func_type has interned IDs
         let func_with_ids = if func_type.has_interned_ids() {
             func_type.clone()
         } else {
@@ -177,14 +192,36 @@ impl Analyzer {
                 .with_interned_ids(&mut self.type_arena.borrow_mut())
         };
 
-        if let LegacyType::Function(result) = LegacyType::Function(func_with_ids)
-            .substitute_with_arena(substitutions, &mut self.type_arena.borrow_mut())
-        {
-            return result;
-        }
+        let Some(params_id) = &func_with_ids.params_id else {
+            return func_type.clone();
+        };
+        let Some(return_type_id) = func_with_ids.return_type_id else {
+            return func_type.clone();
+        };
 
-        // Should not reach here, but fall back just in case
-        func_type.clone()
+        // Substitute using arena
+        let mut arena = self.type_arena.borrow_mut();
+        let new_params_id: crate::sema::type_arena::TypeIdVec = params_id
+            .iter()
+            .map(|&p| arena.substitute(p, substitutions))
+            .collect();
+        let new_return_type_id = arena.substitute(return_type_id, substitutions);
+
+        // Convert back to LegacyType for the FunctionType
+        let new_params: std::sync::Arc<[LegacyType]> = new_params_id
+            .iter()
+            .map(|&id| arena.to_type(id))
+            .collect::<Vec<_>>()
+            .into();
+        let new_return_type = arena.to_type(new_return_type_id);
+
+        FunctionType {
+            params: new_params,
+            return_type: Box::new(new_return_type),
+            is_closure: func_with_ids.is_closure,
+            params_id: Some(new_params_id),
+            return_type_id: Some(new_return_type_id),
+        }
     }
 
     /// Get TypeDefId for a Type if it's registered in EntityRegistry
@@ -387,21 +424,17 @@ impl Analyzer {
         }
 
         // 2. Interface methods (vtable dispatch)
-        let (interface_type_def_id, type_args): (Option<TypeDefId>, &[LegacyType]) =
-            match object_type {
-                LegacyType::Nominal(NominalType::Interface(iface)) => {
-                    (Some(iface.type_def_id), &iface.type_args)
-                }
-                _ => (None, &[]),
-            };
+        let interface_type_def_id = match object_type {
+            LegacyType::Nominal(NominalType::Interface(iface)) => Some(iface.type_def_id),
+            _ => None,
+        };
         if let Some(type_def_id) = interface_type_def_id {
             let interface_def = self.entity_registry.get_type(type_def_id);
             let name_id = interface_def.name_id;
 
             // Build substitution map from type params to type args
-            let substitutions = self
-                .entity_registry
-                .substitution_map(type_def_id, type_args);
+            // InterfaceType doesn't have type_args_id yet, so we convert from type_args
+            let substitutions = self.build_interface_substitutions_id(object_type);
 
             // Get interface Symbol by looking up from name_id
             let interface_sym = self
@@ -429,7 +462,8 @@ impl Analyzer {
 
                     // Compare by string since interface was registered with different interner
                     if method_name_from_id == method_name_str {
-                        let func_type = self.apply_substitutions(&method.signature, &substitutions);
+                        let func_type =
+                            self.apply_substitutions_id(&method.signature, &substitutions);
                         // Check for external binding
                         if let Some(external_info) = self
                             .entity_registry
@@ -460,14 +494,14 @@ impl Analyzer {
         }
 
         // 3. Direct methods on class/record via EntityRegistry
-        let (type_def_id_opt, record_type_args) = match object_type {
+        let (type_def_id_opt, record_type_args_id) = match object_type {
             LegacyType::Nominal(NominalType::Class(c)) => (Some(c.type_def_id), None),
             LegacyType::Nominal(NominalType::Record(r)) => (
                 Some(r.type_def_id),
-                if r.type_args.is_empty() {
+                if r.type_args_id.is_empty() {
                     None
                 } else {
-                    Some(&*r.type_args)
+                    Some(&*r.type_args_id)
                 },
             ),
             _ => (None, None),
@@ -483,12 +517,10 @@ impl Analyzer {
                 let func_type = method_def.signature.clone();
 
                 // For generic records, substitute type args in the method signature
-                if let Some(type_args) = record_type_args {
-                    let substitutions = self
-                        .entity_registry
-                        .substitution_map(type_def_id, type_args);
+                if let Some(type_args_id) = record_type_args_id {
+                    let substitutions = self.build_substitutions_id(type_def_id, type_args_id);
                     let substituted_func_type =
-                        self.apply_substitutions(&func_type, &substitutions);
+                        self.apply_substitutions_id(&func_type, &substitutions);
                     return Some(ResolvedMethod::Direct {
                         func_type: substituted_func_type,
                     });

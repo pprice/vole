@@ -54,8 +54,18 @@ impl Analyzer {
                 LegacyType::Nominal(NominalType::Interface(p_iface)),
                 LegacyType::Nominal(NominalType::Interface(a_iface)),
             ) if p_iface.type_def_id == a_iface.type_def_id => {
-                for (p_arg, a_arg) in p_iface.type_args.iter().zip(a_iface.type_args.iter()) {
-                    self.unify_types(p_arg, a_arg, type_params, inferred);
+                // Convert all type args to LegacyType first to avoid borrow issues
+                let args: Vec<_> = {
+                    let arena = self.type_arena.borrow();
+                    p_iface
+                        .type_args_id
+                        .iter()
+                        .zip(a_iface.type_args_id.iter())
+                        .map(|(&p, &a)| (arena.to_type(p), arena.to_type(a)))
+                        .collect()
+                };
+                for (p_arg, a_arg) in args {
+                    self.unify_types(&p_arg, &a_arg, type_params, inferred);
                 }
             }
             // Union: try to match each pattern variant
@@ -76,8 +86,18 @@ impl Analyzer {
                 LegacyType::Nominal(NominalType::Class(p_class)),
                 LegacyType::Nominal(NominalType::Class(a_class)),
             ) if p_class.type_def_id == a_class.type_def_id => {
-                for (p, a) in p_class.type_args.iter().zip(a_class.type_args.iter()) {
-                    self.unify_types(p, a, type_params, inferred);
+                // Convert all type args to LegacyType first to avoid borrow issues
+                let args: Vec<_> = {
+                    let arena = self.type_arena.borrow();
+                    p_class
+                        .type_args_id
+                        .iter()
+                        .zip(a_class.type_args_id.iter())
+                        .map(|(&p, &a)| (arena.to_type(p), arena.to_type(a)))
+                        .collect()
+                };
+                for (p_arg, a_arg) in args {
+                    self.unify_types(&p_arg, &a_arg, type_params, inferred);
                 }
             }
             // Record: unify type args (for generic record parameters)
@@ -85,8 +105,18 @@ impl Analyzer {
                 LegacyType::Nominal(NominalType::Record(p_rec)),
                 LegacyType::Nominal(NominalType::Record(a_rec)),
             ) if p_rec.type_def_id == a_rec.type_def_id => {
-                for (p, a) in p_rec.type_args.iter().zip(a_rec.type_args.iter()) {
-                    self.unify_types(p, a, type_params, inferred);
+                // Convert all type args to LegacyType first to avoid borrow issues
+                let args: Vec<_> = {
+                    let arena = self.type_arena.borrow();
+                    p_rec
+                        .type_args_id
+                        .iter()
+                        .zip(a_rec.type_args_id.iter())
+                        .map(|(&p, &a)| (arena.to_type(p), arena.to_type(a)))
+                        .collect()
+                };
+                for (p_arg, a_arg) in args {
+                    self.unify_types(&p_arg, &a_arg, type_params, inferred);
                 }
             }
             // Everything else: no type params to extract

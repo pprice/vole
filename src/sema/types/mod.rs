@@ -248,15 +248,6 @@ impl LegacyType {
         }
     }
 
-    /// Get type arguments for generic types.
-    /// Returns empty slice for non-generic or primitive types.
-    pub fn type_args(&self) -> &[LegacyType] {
-        match self {
-            LegacyType::Nominal(n) => n.type_args(),
-            _ => &[],
-        }
-    }
-
     /// Check if this type is numeric (can do arithmetic)
     pub fn is_numeric(&self) -> bool {
         match self {
@@ -587,48 +578,29 @@ impl LegacyType {
                 }
             }
 
+            // Nominal types: type_args_id requires arena for substitution.
+            // Use arena.substitute() for proper TypeId-based substitution.
+            // Here we only substitute methods for interfaces.
             LegacyType::Nominal(NominalType::Interface(interface_type)) => {
-                let new_type_args = substitute_slice(&interface_type.type_args, substitutions);
                 let new_methods =
                     substitute_interface_methods(&interface_type.methods, substitutions);
-
-                if new_type_args.is_none() && new_methods.is_none() {
-                    self.clone()
-                } else {
+                if let Some(methods) = new_methods {
                     LegacyType::Nominal(NominalType::Interface(InterfaceType {
                         type_def_id: interface_type.type_def_id,
-                        type_args: new_type_args
-                            .unwrap_or_else(|| interface_type.type_args.clone()),
-                        methods: new_methods.unwrap_or_else(|| interface_type.methods.clone()),
+                        type_args_id: interface_type.type_args_id.clone(),
+                        methods,
                         extends: interface_type.extends.clone(),
                     }))
-                }
-            }
-
-            LegacyType::Nominal(NominalType::Record(record_type)) => {
-                let new_type_args = substitute_slice(&record_type.type_args, substitutions);
-                if let Some(args) = new_type_args {
-                    LegacyType::Nominal(NominalType::Record(RecordType {
-                        type_def_id: record_type.type_def_id,
-                        type_args: args,
-                        type_args_id: TypeIdVec::new(),
-                    }))
                 } else {
                     self.clone()
                 }
             }
 
-            LegacyType::Nominal(NominalType::Class(class_type)) => {
-                let new_type_args = substitute_slice(&class_type.type_args, substitutions);
-                if let Some(args) = new_type_args {
-                    LegacyType::Nominal(NominalType::Class(ClassType {
-                        type_def_id: class_type.type_def_id,
-                        type_args: args,
-                        type_args_id: TypeIdVec::new(),
-                    }))
-                } else {
-                    self.clone()
-                }
+            LegacyType::Nominal(NominalType::Record(_))
+            | LegacyType::Nominal(NominalType::Class(_)) => {
+                // Class/Record type_args_id requires arena for substitution.
+                // Use arena.substitute() for proper TypeId-based substitution.
+                self.clone()
             }
 
             LegacyType::RuntimeIterator(elem) => {
@@ -786,6 +758,54 @@ impl LegacyType {
                 params_id: Some(new_params_id),
                 return_type_id: Some(new_return_id),
             });
+        }
+
+        // Handle Class types - use arena.substitute on type_args_id
+        if let LegacyType::Nominal(NominalType::Class(class_type)) = self {
+            if class_type.type_args_id.is_empty() {
+                return self.clone();
+            }
+            // Build TypeId substitution map
+            let subs_id: hashbrown::HashMap<_, _> = substitutions
+                .iter()
+                .map(|(name_id, ty)| (*name_id, arena.from_type(ty)))
+                .collect();
+            let new_type_args_id: TypeIdVec = class_type
+                .type_args_id
+                .iter()
+                .map(|&id| arena.substitute(id, &subs_id))
+                .collect();
+            if new_type_args_id == class_type.type_args_id {
+                return self.clone();
+            }
+            return LegacyType::Nominal(NominalType::Class(ClassType {
+                type_def_id: class_type.type_def_id,
+                type_args_id: new_type_args_id,
+            }));
+        }
+
+        // Handle Record types - use arena.substitute on type_args_id
+        if let LegacyType::Nominal(NominalType::Record(record_type)) = self {
+            if record_type.type_args_id.is_empty() {
+                return self.clone();
+            }
+            // Build TypeId substitution map
+            let subs_id: hashbrown::HashMap<_, _> = substitutions
+                .iter()
+                .map(|(name_id, ty)| (*name_id, arena.from_type(ty)))
+                .collect();
+            let new_type_args_id: TypeIdVec = record_type
+                .type_args_id
+                .iter()
+                .map(|&id| arena.substitute(id, &subs_id))
+                .collect();
+            if new_type_args_id == record_type.type_args_id {
+                return self.clone();
+            }
+            return LegacyType::Nominal(NominalType::Record(RecordType {
+                type_def_id: record_type.type_def_id,
+                type_args_id: new_type_args_id,
+            }));
         }
 
         // Fall back to regular substitution for other types or FunctionType without interned IDs

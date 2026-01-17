@@ -288,46 +288,31 @@ pub(crate) fn display_type(
         LegacyType::Nominal(NominalType::Class(class_type)) => {
             let name_id = analyzed.entity_registry.class_name_id(class_type);
             let base = analyzed.name_table.display(name_id);
-            if class_type.type_args.is_empty() {
+            if class_type.type_args_id.is_empty() {
                 base
             } else {
-                let arg_list = class_type
-                    .type_args
-                    .iter()
-                    .map(|arg| display_type(analyzed, interner, arg))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}<{}>", base, arg_list)
+                // Type args require arena for display; show placeholder
+                format!("{}<{} args>", base, class_type.type_args_id.len())
             }
         }
         LegacyType::Nominal(NominalType::Record(record_type)) => {
             let name_id = analyzed.entity_registry.record_name_id(record_type);
             let base = analyzed.name_table.display(name_id);
-            if record_type.type_args.is_empty() {
+            if record_type.type_args_id.is_empty() {
                 base
             } else {
-                let arg_list = record_type
-                    .type_args
-                    .iter()
-                    .map(|arg| display_type(analyzed, interner, arg))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}<{}>", base, arg_list)
+                // Type args require arena for display; show placeholder
+                format!("{}<{} args>", base, record_type.type_args_id.len())
             }
         }
         LegacyType::Nominal(NominalType::Interface(interface_type)) => {
             let name_id = analyzed.entity_registry.name_id(interface_type.type_def_id);
             let base = analyzed.name_table.display(name_id);
-            if interface_type.type_args.is_empty() {
+            if interface_type.type_args_id.is_empty() {
                 base
             } else {
-                let arg_list = interface_type
-                    .type_args
-                    .iter()
-                    .map(|arg| display_type(analyzed, interner, arg))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}<{}>", base, arg_list)
+                // Type args require arena for display; show placeholder
+                format!("{}<{} args>", base, interface_type.type_args_id.len())
             }
         }
         LegacyType::Nominal(NominalType::Error(error_type)) => {
@@ -357,7 +342,6 @@ pub(crate) fn display_type(
 fn build_interface_type_from_entity(
     type_def_id: TypeDefId,
     entity_registry: &EntityRegistry,
-    type_args: Vec<LegacyType>,
 ) -> LegacyType {
     let type_def = entity_registry.get_type(type_def_id);
 
@@ -381,7 +365,8 @@ fn build_interface_type_from_entity(
 
     LegacyType::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
         type_def_id,
-        type_args: type_args.into(),
+        // Note: type_args_id not populated in codegen path - LegacyType is primary here
+        type_args_id: TypeIdVec::new(),
         methods: methods.into(),
         extends: extends.into(),
     }))
@@ -431,7 +416,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                                 type_def_id, type_def.name_id, type_def.type_params
                             );
                         }
-                        build_interface_type_from_entity(type_def_id, entity_registry, Vec::new())
+                        build_interface_type_from_entity(type_def_id, entity_registry)
                     }
                     TypeDefKind::ErrorType => {
                         // Error type - get info from EntityRegistry
@@ -646,20 +631,34 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 let type_def = entity_registry.get_type(type_def_id);
                 match type_def.kind {
                     TypeDefKind::Class => {
+                        // Convert resolved_args to TypeIdVec via arena
+                        let type_args_id: TypeIdVec = {
+                            let mut arena_mut = arena.borrow_mut();
+                            resolved_args
+                                .iter()
+                                .map(|t| arena_mut.from_type(t))
+                                .collect()
+                        };
                         return LegacyType::Nominal(NominalType::Class(
                             crate::sema::types::ClassType {
                                 type_def_id,
-                                type_args: resolved_args.into(),
-                                type_args_id: TypeIdVec::new(),
+                                type_args_id,
                             },
                         ));
                     }
                     TypeDefKind::Record => {
+                        // Convert resolved_args to TypeIdVec via arena
+                        let type_args_id: TypeIdVec = {
+                            let mut arena_mut = arena.borrow_mut();
+                            resolved_args
+                                .iter()
+                                .map(|t| arena_mut.from_type(t))
+                                .collect()
+                        };
                         return LegacyType::Nominal(NominalType::Record(
                             crate::sema::types::RecordType {
                                 type_def_id,
-                                type_args: resolved_args.into(),
-                                type_args_id: TypeIdVec::new(),
+                                type_args_id,
                             },
                         ));
                     }
@@ -711,10 +710,18 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         // Keep extends as TypeDefIds directly
                         let extends = type_def.extends.clone();
 
+                        // Convert resolved_args to TypeIdVec via arena
+                        let type_args_id: TypeIdVec = {
+                            let mut arena_mut = arena.borrow_mut();
+                            resolved_args
+                                .iter()
+                                .map(|t| arena_mut.from_type(t))
+                                .collect()
+                        };
                         return LegacyType::Nominal(NominalType::Interface(
                             crate::sema::types::InterfaceType {
                                 type_def_id,
-                                type_args: resolved_args.into(),
+                                type_args_id,
                                 methods: methods.into(),
                                 extends: extends.into(),
                             },

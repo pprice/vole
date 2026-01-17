@@ -2,6 +2,9 @@
 //
 // Type resolution: converts TypeExpr (AST representation) to Type (semantic representation)
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use crate::frontend::{Interner, Symbol, TypeExpr};
 use crate::identity::{ModuleId, NameTable, Resolver};
 use crate::sema::EntityRegistry;
@@ -12,7 +15,6 @@ use crate::sema::types::{
     ClassType, FallibleType, FunctionType, InterfaceMethodType, InterfaceType, LegacyType,
     NominalType, RecordType, StructuralFieldType, StructuralMethodType, StructuralType,
 };
-use std::collections::HashMap;
 
 /// Context needed for type resolution
 pub struct TypeResolutionContext<'a> {
@@ -24,8 +26,8 @@ pub struct TypeResolutionContext<'a> {
     pub type_params: Option<&'a TypeParamScope>,
     /// The concrete type that `Self` resolves to (for method signatures), as interned TypeId
     pub self_type: Option<TypeId>,
-    /// Type arena for converting TypeId to LegacyType
-    pub type_arena: Option<&'a TypeArena>,
+    /// Type arena for interning types (RefCell for interior mutability)
+    pub type_arena: Option<&'a RefCell<TypeArena>>,
 }
 
 fn interface_instance(
@@ -49,42 +51,105 @@ fn interface_instance(
         return Some(LegacyType::invalid("propagate"));
     }
 
-    // Build substitution map using type param NameIds
-    let mut substitutions = HashMap::new();
-    for (name_id, arg) in type_def.type_params.iter().zip(type_args.iter()) {
-        substitutions.insert(*name_id, arg.clone());
-    }
+    // Build methods with substituted types using TypeId-based substitution
+    let methods: Vec<InterfaceMethodType> = if let Some(arena_ref) = ctx.type_arena {
+        // Use TypeId-based substitution (preferred)
+        let mut arena = arena_ref.borrow_mut();
+        let substitutions: hashbrown::HashMap<_, _> = type_def
+            .type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(name_id, arg)| (*name_id, arena.from_type(arg)))
+            .collect();
 
-    // Build methods with substituted types
-    let methods: Vec<InterfaceMethodType> = type_def
-        .methods
-        .iter()
-        .map(|&method_id| {
-            let method = ctx.entity_registry.get_method(method_id);
-            InterfaceMethodType {
-                name: method.name_id,
-                params: method
-                    .signature
-                    .params
-                    .iter()
-                    .map(|t| substitute_type(t, &substitutions))
-                    .collect::<Vec<_>>()
-                    .into(),
-                return_type: Box::new(substitute_type(
-                    &method.signature.return_type,
-                    &substitutions,
-                )),
-                has_default: method.has_default,
-            }
-        })
-        .collect();
+        type_def
+            .methods
+            .iter()
+            .map(|&method_id| {
+                let method = ctx.entity_registry.get_method(method_id);
+                // Get or create interned signature
+                let sig = if method.signature.has_interned_ids() {
+                    method.signature.clone()
+                } else {
+                    method.signature.clone().with_interned_ids(&mut arena)
+                };
+
+                // Substitute using TypeId
+                let new_params: Vec<LegacyType> = sig
+                    .params_id
+                    .as_ref()
+                    .map(|ids| {
+                        ids.iter()
+                            .map(|&p| {
+                                let substituted = arena.substitute(p, &substitutions);
+                                arena.to_type(substituted)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_else(|| method.signature.params.to_vec());
+                let new_return = sig
+                    .return_type_id
+                    .map(|r| {
+                        let substituted = arena.substitute(r, &substitutions);
+                        arena.to_type(substituted)
+                    })
+                    .unwrap_or_else(|| (*method.signature.return_type).clone());
+
+                InterfaceMethodType {
+                    name: method.name_id,
+                    params: new_params.into(),
+                    return_type: Box::new(new_return),
+                    has_default: method.has_default,
+                }
+            })
+            .collect()
+    } else {
+        // Fallback to LegacyType substitution when no arena
+        let substitutions: HashMap<_, _> = type_def
+            .type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(name_id, arg)| (*name_id, arg.clone()))
+            .collect();
+
+        type_def
+            .methods
+            .iter()
+            .map(|&method_id| {
+                let method = ctx.entity_registry.get_method(method_id);
+                InterfaceMethodType {
+                    name: method.name_id,
+                    params: method
+                        .signature
+                        .params
+                        .iter()
+                        .map(|t| substitute_type(t, &substitutions))
+                        .collect::<Vec<_>>()
+                        .into(),
+                    return_type: Box::new(substitute_type(
+                        &method.signature.return_type,
+                        &substitutions,
+                    )),
+                    has_default: method.has_default,
+                }
+            })
+            .collect()
+    };
 
     // Keep extends as TypeDefIds directly
     let extends = type_def.extends.to_vec();
 
+    // Convert type_args to TypeIds if arena is available
+    let type_args_id = if let Some(arena_ref) = ctx.type_arena {
+        let mut arena = arena_ref.borrow_mut();
+        type_args.iter().map(|t| arena.from_type(t)).collect()
+    } else {
+        TypeIdVec::new()
+    };
+
     Some(LegacyType::Nominal(NominalType::Interface(InterfaceType {
         type_def_id,
-        type_args: type_args.into(),
+        type_args_id,
         methods: methods.into(),
         extends: extends.into(),
     })))
@@ -124,6 +189,26 @@ impl<'a> TypeResolutionContext<'a> {
             type_params: Some(type_params),
             self_type: None,
             type_arena: None,
+        }
+    }
+
+    /// Create a context with type parameters and arena in scope
+    pub fn with_type_params_and_arena(
+        entity_registry: &'a EntityRegistry,
+        interner: &'a Interner,
+        name_table: &'a mut NameTable,
+        module_id: ModuleId,
+        type_params: &'a TypeParamScope,
+        type_arena: &'a RefCell<TypeArena>,
+    ) -> Self {
+        Self {
+            entity_registry,
+            interner,
+            name_table,
+            module_id,
+            type_params: Some(type_params),
+            self_type: None,
+            type_arena: Some(type_arena),
         }
     }
 
@@ -275,7 +360,7 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                     TypeDefKind::Alias => {
                         if let Some(aliased_type_id) = type_def.aliased_type {
                             if let Some(arena) = ctx.type_arena {
-                                arena.to_type(aliased_type_id)
+                                arena.borrow().to_type(aliased_type_id)
                             } else {
                                 // Fallback when arena not available
                                 LegacyType::invalid("resolve_no_arena")
@@ -325,7 +410,7 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
             if let Some(self_type_id) = ctx.self_type {
                 // Convert TypeId to LegacyType using arena
                 if let Some(arena) = ctx.type_arena {
-                    arena.to_type(self_type_id)
+                    arena.borrow().to_type(self_type_id)
                 } else {
                     LegacyType::invalid("resolve_no_arena")
                 }
@@ -362,17 +447,33 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                 let type_def = ctx.entity_registry.get_type(type_id);
                 match type_def.kind {
                     TypeDefKind::Class => {
+                        // Convert type args to TypeIds for canonical representation
+                        let type_args_id: TypeIdVec = if let Some(arena) = ctx.type_arena {
+                            resolved_args
+                                .iter()
+                                .map(|t| arena.borrow_mut().from_type(t))
+                                .collect()
+                        } else {
+                            TypeIdVec::new()
+                        };
                         return LegacyType::Nominal(NominalType::Class(ClassType {
                             type_def_id: type_id,
-                            type_args: resolved_args.into(),
-                            type_args_id: TypeIdVec::new(),
+                            type_args_id,
                         }));
                     }
                     TypeDefKind::Record => {
+                        // Convert type args to TypeIds for canonical representation
+                        let type_args_id: TypeIdVec = if let Some(arena) = ctx.type_arena {
+                            resolved_args
+                                .iter()
+                                .map(|t| arena.borrow_mut().from_type(t))
+                                .collect()
+                        } else {
+                            TypeIdVec::new()
+                        };
                         return LegacyType::Nominal(NominalType::Record(RecordType {
                             type_def_id: type_id,
-                            type_args: resolved_args.into(),
-                            type_args_id: TypeIdVec::new(),
+                            type_args_id,
                         }));
                     }
                     TypeDefKind::Interface => {

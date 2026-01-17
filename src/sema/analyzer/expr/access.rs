@@ -15,7 +15,6 @@ impl Analyzer {
     fn get_field_type(
         &self,
         type_def_id: TypeDefId,
-        type_args: &[LegacyType],
         type_args_id: &[crate::sema::type_arena::TypeId],
         field_name: &str,
     ) -> Option<(String, LegacyType)> {
@@ -28,26 +27,14 @@ impl Analyzer {
             if name.as_deref() == Some(field_name) {
                 let field_type_id = generic_info.field_types[i];
 
-                // Prefer arena-based substitution when type_args_id is available
-                let substituted = if !type_args_id.is_empty() {
-                    let subst_id = self.entity_registry.substitute_type_id_with_args(
-                        type_def_id,
-                        type_args_id,
-                        field_type_id,
-                        &mut self.type_arena.borrow_mut(),
-                    );
-                    self.type_arena.borrow().to_type(subst_id)
-                } else if type_args.is_empty() {
-                    self.type_arena.borrow().to_type(field_type_id)
-                } else {
-                    // Fall back to LegacyType substitution
-                    let field_type = self.type_arena.borrow().to_type(field_type_id);
-                    self.entity_registry.substitute_type_with_args(
-                        type_def_id,
-                        type_args,
-                        &field_type,
-                    )
-                };
+                // Use arena-based substitution
+                let substituted_id = self.entity_registry.substitute_type_id_with_args(
+                    type_def_id,
+                    type_args_id,
+                    field_type_id,
+                    &mut self.type_arena.borrow_mut(),
+                );
+                let substituted = self.type_arena.borrow().to_type(substituted_id);
 
                 let type_name = self
                     .name_table
@@ -137,12 +124,11 @@ impl Analyzer {
             self.type_error_id("class or record", object_type_id, field_access.object.span);
             return Ok(self.ty_invalid_traced_id("field_access_non_struct"));
         }
-        let (type_def_id, type_args, type_args_id) =
-            (n.type_def_id(), n.type_args(), n.type_args_id());
+        let (type_def_id, type_args_id) = (n.type_def_id(), n.type_args_id());
 
         // Try to find the field
         if let Some((_type_name, field_type)) =
-            self.get_field_type(type_def_id, type_args, type_args_id, field_name)
+            self.get_field_type(type_def_id, type_args_id, field_name)
         {
             return Ok(self.type_to_id(&field_type));
         }
@@ -223,13 +209,12 @@ impl Analyzer {
             );
             return Ok(self.ty_invalid_traced_id("optional_chain_non_struct"));
         }
-        let (type_def_id, type_args, type_args_id) =
-            (n.type_def_id(), n.type_args(), n.type_args_id());
+        let (type_def_id, type_args_id) = (n.type_def_id(), n.type_args_id());
 
         // Find the field
         let field_name = interner.resolve(opt_chain.field);
         if let Some((_type_name, field_type)) =
-            self.get_field_type(type_def_id, type_args, type_args_id, field_name)
+            self.get_field_type(type_def_id, type_args_id, field_name)
         {
             let field_type_id = self.type_to_id(&field_type);
             // Result is always optional (field_type | nil)
@@ -716,16 +701,16 @@ impl Analyzer {
         external_info: Option<ExternalMethodInfo>,
         interner: &Interner,
     ) {
-        // Extract type_def_id and type_args
+        // Extract type_def_id and type_args_id
         // Note: We only record monomorphs for concrete types (Class/Record) that have
         // method bodies to compile. Interface types use vtable dispatch and don't need monomorphs.
         tracing::debug!(object_type = ?object_type, "record_class_method_monomorph called");
-        let (class_type_def_id, type_args) = match object_type {
-            LegacyType::Nominal(NominalType::Class(c)) if !c.type_args.is_empty() => {
-                (c.type_def_id, &c.type_args)
+        let (class_type_def_id, type_args_id) = match object_type {
+            LegacyType::Nominal(NominalType::Class(c)) if !c.type_args_id.is_empty() => {
+                (c.type_def_id, &c.type_args_id)
             }
-            LegacyType::Nominal(NominalType::Record(r)) if !r.type_args.is_empty() => {
-                (r.type_def_id, &r.type_args)
+            LegacyType::Nominal(NominalType::Record(r)) if !r.type_args_id.is_empty() => {
+                (r.type_def_id, &r.type_args_id)
             }
             _ => {
                 tracing::debug!("returning early - not a generic class/record");
@@ -736,17 +721,21 @@ impl Analyzer {
         let class_name_id = self.entity_registry.get_type(class_type_def_id).name_id;
         tracing::debug!(
             class_name_id = ?class_name_id,
-            type_args = ?type_args,
+            type_args_id = ?type_args_id,
             "extracted generic type info"
         );
 
         // Get the method name_id
         let method_name_id = self.method_name_id(method_sym, interner);
 
-        // Create type keys for the type arguments
-        let type_keys: Vec<_> = type_args
+        // Create type keys for the type arguments using TypeId
+        let type_keys: Vec<_> = type_args_id
             .iter()
-            .map(|t| self.entity_registry.type_table.key_for_type(t))
+            .map(|&id| {
+                self.entity_registry
+                    .type_table
+                    .key_for_type_id(id, &self.type_arena.borrow())
+            })
             .collect();
 
         // Create the monomorph key
@@ -762,9 +751,8 @@ impl Analyzer {
             let type_def = self.entity_registry.get_type(class_type_def_id);
             let substitutions = if let Some(generic_info) = &type_def.generic_info {
                 let mut subs = HashMap::new();
-                let mut arena = self.type_arena.borrow_mut();
-                for (param, arg) in generic_info.type_params.iter().zip(type_args.iter()) {
-                    subs.insert(param.name_id, arena.from_type(arg));
+                for (param, &arg_id) in generic_info.type_params.iter().zip(type_args_id.iter()) {
+                    subs.insert(param.name_id, arg_id);
                 }
                 subs
             } else {

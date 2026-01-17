@@ -432,29 +432,62 @@ impl Analyzer {
             return Some(LegacyType::invalid("propagate"));
         }
 
-        // Build substitution map using type param NameIds
+        // Convert type_args to TypeId for arena-based substitution
+        let type_args_id: crate::sema::type_arena::TypeIdVec = type_args
+            .iter()
+            .map(|t| self.type_arena.borrow_mut().from_type(t))
+            .collect();
+
+        // Build substitution map using TypeId
         let substitutions = self
             .entity_registry
-            .substitution_map(type_def_id, &type_args);
+            .substitution_map_id(type_def_id, &type_args_id);
 
-        // Build methods with substituted types using arena
+        // Build methods with substituted types using arena-based substitution
         let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
             .methods
             .iter()
             .map(|&method_id| {
                 let method = self.entity_registry.get_method(method_id);
-                let substituted = if let LegacyType::Function(ft) =
-                    LegacyType::Function(method.signature.clone())
-                        .substitute_with_arena(&substitutions, &mut self.type_arena.borrow_mut())
-                {
-                    ft
+
+                // Ensure signature has interned IDs
+                let sig = if method.signature.has_interned_ids() {
+                    method.signature.clone()
                 } else {
-                    unreachable!()
+                    method
+                        .signature
+                        .clone()
+                        .with_interned_ids(&mut self.type_arena.borrow_mut())
                 };
+
+                // Substitute using arena
+                let mut arena = self.type_arena.borrow_mut();
+                let new_params_id: crate::sema::type_arena::TypeIdVec = sig
+                    .params_id
+                    .as_ref()
+                    .map(|ids| {
+                        ids.iter()
+                            .map(|&p| arena.substitute(p, &substitutions))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let new_return_id = sig
+                    .return_type_id
+                    .map(|r| arena.substitute(r, &substitutions))
+                    .unwrap_or_else(|| arena.void());
+
+                // Convert back to LegacyType for InterfaceMethodType
+                let new_params: std::sync::Arc<[LegacyType]> = new_params_id
+                    .iter()
+                    .map(|&id| arena.to_type(id))
+                    .collect::<Vec<_>>()
+                    .into();
+                let new_return = arena.to_type(new_return_id);
+
                 crate::sema::types::InterfaceMethodType {
                     name: method.name_id,
-                    params: substituted.params,
-                    return_type: substituted.return_type,
+                    params: new_params,
+                    return_type: Box::new(new_return),
                     has_default: method.has_default,
                 }
             })
@@ -463,7 +496,7 @@ impl Analyzer {
         Some(LegacyType::Nominal(NominalType::Interface(
             crate::sema::types::InterfaceType {
                 type_def_id,
-                type_args: type_args.into(),
+                type_args_id,
                 methods: methods.into(),
                 extends: type_def.extends.clone().into(),
             },
@@ -596,7 +629,6 @@ impl Analyzer {
         let self_type_id = self_type
             .as_ref()
             .map(|t| self.type_arena.borrow_mut().from_type(t));
-        let arena = self.type_arena.borrow();
         let mut ctx = TypeResolutionContext {
             entity_registry: &self.entity_registry,
             interner,
@@ -605,7 +637,7 @@ impl Analyzer {
             // Propagate type param scope to nested contexts (lambdas, etc.)
             type_params: self.type_param_stack.current(),
             self_type: self_type_id,
-            type_arena: Some(&*arena),
+            type_arena: Some(&*self.type_arena),
         };
         resolve_type(ty, &mut ctx)
     }
@@ -912,7 +944,6 @@ impl Analyzer {
 
         for (slot, field) in decl.fields.iter().enumerate() {
             let module_id = self.current_module;
-            let arena = self.type_arena.borrow();
             let mut ctx = TypeResolutionContext {
                 entity_registry: &self.entity_registry,
                 interner,
@@ -920,7 +951,7 @@ impl Analyzer {
                 module_id,
                 type_params: None,
                 self_type: None,
-                type_arena: Some(&*arena),
+                type_arena: Some(&*self.type_arena),
             };
             let ty = resolve_type(&field.ty, &mut ctx);
 
@@ -1042,24 +1073,26 @@ impl Analyzer {
             }
             TypeConstraint::Union(types) => {
                 let module_id = self.current_module;
-                let mut ctx = TypeResolutionContext::with_type_params(
+                let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                     &self.entity_registry,
                     interner,
                     &mut self.name_table,
                     module_id,
                     type_param_scope,
+                    &self.type_arena,
                 );
                 let resolved = types.iter().map(|ty| resolve_type(ty, &mut ctx)).collect();
                 Some(crate::sema::generic::TypeConstraint::Union(resolved))
             }
             TypeConstraint::Structural { fields, methods } => {
                 let module_id = self.current_module;
-                let mut ctx = TypeResolutionContext::with_type_params(
+                let mut ctx = TypeResolutionContext::with_type_params_and_arena(
                     &self.entity_registry,
                     interner,
                     &mut self.name_table,
                     module_id,
                     type_param_scope,
+                    &self.type_arena,
                 );
                 // Convert AST structural to sema structural
                 let resolved_fields = fields
@@ -1385,7 +1418,11 @@ impl Analyzer {
         {
             return None;
         }
-        interface_type.type_args.first().cloned()
+        // Get first type argument using TypeId and convert to LegacyType
+        interface_type
+            .type_args_id
+            .first()
+            .map(|&id| self.type_arena.borrow().to_type(id))
     }
 
     fn check_method(
@@ -1632,7 +1669,6 @@ impl Analyzer {
                 Decl::Function(f) => {
                     // Build function type from signature
                     let (params, return_type) = {
-                        let arena = self.type_arena.borrow();
                         let mut ctx = TypeResolutionContext {
                             entity_registry: &self.entity_registry,
                             interner: &module_interner,
@@ -1640,7 +1676,7 @@ impl Analyzer {
                             module_id,
                             type_params: None,
                             self_type: None,
-                            type_arena: Some(&*arena),
+                            type_arena: Some(&*self.type_arena),
                         };
                         let params: Vec<LegacyType> = f
                             .params
@@ -1707,7 +1743,6 @@ impl Analyzer {
                     // External block functions become exports and are marked as external
                     for func in &ext.functions {
                         let (params, return_type) = {
-                            let arena = self.type_arena.borrow();
                             let mut ctx = TypeResolutionContext {
                                 entity_registry: &self.entity_registry,
                                 interner: &module_interner,
@@ -1715,7 +1750,7 @@ impl Analyzer {
                                 module_id,
                                 type_params: None,
                                 self_type: None,
-                                type_arena: Some(&*arena),
+                                type_arena: Some(&*self.type_arena),
                             };
                             let params: Vec<LegacyType> = func
                                 .params

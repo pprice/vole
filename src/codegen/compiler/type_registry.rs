@@ -106,7 +106,6 @@ impl Compiler<'_> {
         // Create a placeholder vole_type (will be replaced in finalize_class)
         let placeholder_type = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
-            type_args: vec![].into(),
             type_args_id: TypeIdVec::new(),
         }));
         let vole_type_id = self
@@ -164,7 +163,6 @@ impl Compiler<'_> {
         // Create the Vole type
         let vole_type = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
-            type_args: vec![].into(),
             type_args_id: TypeIdVec::new(),
         }));
 
@@ -308,7 +306,6 @@ impl Compiler<'_> {
         // Create a placeholder vole_type (will be replaced in finalize_record)
         let placeholder_type = LegacyType::Nominal(NominalType::Record(RecordType {
             type_def_id,
-            type_args: vec![].into(),
             type_args_id: TypeIdVec::new(),
         }));
         let vole_type_id = self
@@ -366,7 +363,6 @@ impl Compiler<'_> {
         // Create the Vole type
         let vole_type = LegacyType::Nominal(NominalType::Record(RecordType {
             type_def_id,
-            type_args: vec![].into(),
             type_args_id: TypeIdVec::new(),
         }));
 
@@ -605,7 +601,6 @@ impl Compiler<'_> {
         // Create the Vole type
         let vole_type = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
-            type_args: vec![].into(),
             type_args_id: TypeIdVec::new(),
         }));
 

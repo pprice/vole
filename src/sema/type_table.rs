@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use crate::identity::{NameId, NameTable, TypeDefId};
 use crate::sema::implement_registry::PrimitiveTypeId;
+use crate::sema::type_arena::{TypeArena, TypeId as ArenaTypeId};
 use crate::sema::types::{LegacyType, NominalType, PrimitiveType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -20,6 +21,7 @@ impl TypeKey {
 #[derive(Debug, Clone)]
 pub struct TypeInfo {
     pub ty: LegacyType,
+    pub type_id: Option<ArenaTypeId>,
     pub name_id: Option<NameId>,
 }
 
@@ -29,6 +31,7 @@ pub struct TypeTable {
     name_lookup: HashMap<NameId, TypeKey>,
     type_def_lookup: HashMap<TypeDefId, TypeKey>,
     type_lookup: HashMap<LegacyType, TypeKey>,
+    type_id_lookup: HashMap<ArenaTypeId, TypeKey>,
     primitive_names: HashMap<PrimitiveTypeId, NameId>,
     array_name: Option<NameId>,
 }
@@ -40,6 +43,7 @@ impl TypeTable {
             name_lookup: HashMap::new(),
             type_def_lookup: HashMap::new(),
             type_lookup: HashMap::new(),
+            type_id_lookup: HashMap::new(),
             primitive_names: HashMap::new(),
             array_name: None,
         }
@@ -87,6 +91,7 @@ impl TypeTable {
     pub fn insert_named(&mut self, ty: LegacyType, name_id: NameId) -> TypeKey {
         let id = self.insert(TypeInfo {
             ty,
+            type_id: None,
             name_id: Some(name_id),
         });
         self.name_lookup.insert(name_id, id);
@@ -94,7 +99,11 @@ impl TypeTable {
     }
 
     pub fn insert_anonymous(&mut self, ty: LegacyType) -> TypeKey {
-        self.insert(TypeInfo { ty, name_id: None })
+        self.insert(TypeInfo {
+            ty,
+            type_id: None,
+            name_id: None,
+        })
     }
 
     pub fn by_name(&self, name_id: NameId) -> Option<TypeKey> {
@@ -120,6 +129,35 @@ impl TypeTable {
         entity_registry: &crate::sema::entity_registry::EntityRegistry,
     ) -> String {
         self.display_type_inner(ty, names, entity_registry)
+    }
+
+    /// Display a TypeId by converting it to LegacyType via the arena
+    pub fn display_type_id(
+        &self,
+        type_id: ArenaTypeId,
+        arena: &TypeArena,
+        names: &NameTable,
+        entity_registry: &crate::sema::entity_registry::EntityRegistry,
+    ) -> String {
+        let ty = arena.to_type(type_id);
+        self.display_type_inner(&ty, names, entity_registry)
+    }
+
+    /// Get a TypeKey for a TypeId (arena-based type).
+    /// Since TypeArena already deduplicates, this is a simple lookup/insert.
+    pub fn key_for_type_id(&mut self, type_id: ArenaTypeId, arena: &TypeArena) -> TypeKey {
+        if let Some(key) = self.type_id_lookup.get(&type_id) {
+            return *key;
+        }
+        // Convert to LegacyType for storage (transitional)
+        let ty = arena.to_type(type_id);
+        let key = self.insert(TypeInfo {
+            ty,
+            type_id: Some(type_id),
+            name_id: None,
+        });
+        self.type_id_lookup.insert(type_id, key);
+        key
     }
 
     pub fn key_for_type(&mut self, ty: &LegacyType) -> TypeKey {
@@ -152,7 +190,7 @@ impl TypeTable {
             }
             LegacyType::Nominal(NominalType::Interface(interface_type)) => {
                 // Non-generic interfaces use type_def_lookup, generic use type_lookup
-                if interface_type.type_args.is_empty() {
+                if interface_type.type_args_id.is_empty() {
                     self.intern_type_def(ty.clone(), interface_type.type_def_id)
                 } else {
                     self.intern_type(ty.clone())
@@ -236,46 +274,31 @@ impl TypeTable {
             LegacyType::Nominal(NominalType::Class(class_type)) => {
                 let type_def = entity_registry.get_type(class_type.type_def_id);
                 let base = names.display(type_def.name_id);
-                if class_type.type_args.is_empty() {
+                if class_type.type_args_id.is_empty() {
                     base
                 } else {
-                    let arg_list = class_type
-                        .type_args
-                        .iter()
-                        .map(|arg| self.display_type_inner(arg, names, entity_registry))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!("{}<{}>", base, arg_list)
+                    // Type args require arena for display; show placeholder
+                    format!("{}<{} args>", base, class_type.type_args_id.len())
                 }
             }
             LegacyType::Nominal(NominalType::Record(record_type)) => {
                 let type_def = entity_registry.get_type(record_type.type_def_id);
                 let base = names.display(type_def.name_id);
-                if record_type.type_args.is_empty() {
+                if record_type.type_args_id.is_empty() {
                     base
                 } else {
-                    let arg_list = record_type
-                        .type_args
-                        .iter()
-                        .map(|arg| self.display_type_inner(arg, names, entity_registry))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!("{}<{}>", base, arg_list)
+                    // Type args require arena for display; show placeholder
+                    format!("{}<{} args>", base, record_type.type_args_id.len())
                 }
             }
             LegacyType::Nominal(NominalType::Interface(interface_type)) => {
                 let name_id = entity_registry.name_id(interface_type.type_def_id);
                 let base = names.display(name_id);
-                if interface_type.type_args.is_empty() {
+                if interface_type.type_args_id.is_empty() {
                     base
                 } else {
-                    let arg_list = interface_type
-                        .type_args
-                        .iter()
-                        .map(|arg| self.display_type_inner(arg, names, entity_registry))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!("{}<{}>", base, arg_list)
+                    // Type args require arena for display; show placeholder
+                    format!("{}<{} args>", base, interface_type.type_args_id.len())
                 }
             }
             LegacyType::Nominal(NominalType::Error(error_type)) => {
@@ -342,7 +365,6 @@ mod tests {
         let key = types.insert_named(
             LegacyType::Nominal(NominalType::Class(crate::sema::ClassType {
                 type_def_id,
-                type_args: vec![].into(),
                 type_args_id: TypeIdVec::new(),
             })),
             name_id,

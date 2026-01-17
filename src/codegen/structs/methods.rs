@@ -307,7 +307,7 @@ impl Cg<'_, '_, '_> {
             }
         } else {
             // Not a monomorphized class method, use regular dispatch
-            let is_generic_class = matches!(&obj_legacy_type, LegacyType::Nominal(NominalType::Class(c)) if !c.type_args.is_empty());
+            let is_generic_class = matches!(&obj_legacy_type, LegacyType::Nominal(NominalType::Class(c)) if !c.type_args_id.is_empty());
             (self.func_ref(method_info.func_key)?, is_generic_class)
         };
 

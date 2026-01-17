@@ -1744,26 +1744,29 @@ impl Compiler<'_> {
                         })
                         .collect();
 
+                    // Convert to TypeIdVec
+                    let type_args_id: TypeIdVec = type_args
+                        .iter()
+                        .map(|t| self.analyzed.type_arena.borrow_mut().from_type(t))
+                        .collect();
+
                     // Determine if it's a class or record based on TypeDefKind
                     return match &type_def.kind {
                         TypeDefKind::Record => {
                             LegacyType::Nominal(NominalType::Record(RecordType {
                                 type_def_id,
-                                type_args: type_args.into(),
-                                type_args_id: TypeIdVec::new(),
+                                type_args_id,
                             }))
                         }
                         TypeDefKind::Class => LegacyType::Nominal(NominalType::Class(ClassType {
                             type_def_id,
-                            type_args: type_args.into(),
-                            type_args_id: TypeIdVec::new(),
+                            type_args_id,
                         })),
                         _ => {
                             // Fallback for other kinds
                             LegacyType::Nominal(NominalType::Record(RecordType {
                                 type_def_id,
-                                type_args: type_args.into(),
-                                type_args_id: TypeIdVec::new(),
+                                type_args_id,
                             }))
                         }
                     };
