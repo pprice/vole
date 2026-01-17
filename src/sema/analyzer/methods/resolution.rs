@@ -169,11 +169,27 @@ impl Analyzer {
             return func_type.clone();
         }
 
-        FunctionType { params: func_type
-            .params
-            .iter()
-            .map(|t| substitute_type(t, substitutions))
-            .collect(), return_type: Box::new(substitute_type(&func_type.return_type, substitutions)), is_closure: func_type.is_closure, params_id: None, return_type_id: None }
+        // Use arena-based substitution when FunctionType has interned TypeIds
+        if func_type.has_interned_ids() {
+            if let LegacyType::Function(result) = LegacyType::Function(func_type.clone())
+                .substitute_with_arena(substitutions, &mut self.type_arena.borrow_mut())
+            {
+                return result;
+            }
+        }
+
+        // Fall back to LegacyType-based substitution
+        FunctionType {
+            params: func_type
+                .params
+                .iter()
+                .map(|t| substitute_type(t, substitutions))
+                .collect(),
+            return_type: Box::new(substitute_type(&func_type.return_type, substitutions)),
+            is_closure: func_type.is_closure,
+            params_id: None,
+            return_type_id: None,
+        }
     }
 
     /// Get TypeDefId for a Type if it's registered in EntityRegistry

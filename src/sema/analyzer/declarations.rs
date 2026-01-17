@@ -130,7 +130,8 @@ impl Analyzer {
                 .map(|t| self.resolve_type(t, interner))
                 .unwrap_or(LegacyType::Void);
 
-            let signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+            let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+            signature.intern_ids(&mut self.type_arena.borrow_mut());
 
             self.functions.insert(func.name, signature.clone());
 
@@ -202,7 +203,8 @@ impl Analyzer {
                 .unwrap_or(LegacyType::Void);
 
             // Create a FunctionType with TypeParam placeholders for the signature
-            let signature = FunctionType { params: param_types.clone().into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+            let mut signature = FunctionType { params: param_types.clone().into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+            signature.intern_ids(&mut self.type_arena.borrow_mut());
 
             // Register in EntityRegistry
             let func_id = self.entity_registry.register_function(
@@ -335,7 +337,8 @@ impl Analyzer {
                         self.resolve_type_with_self(t, interner, self_type_for_methods.clone())
                     })
                     .unwrap_or(LegacyType::Void);
-                let signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                signature.intern_ids(&mut self.type_arena.borrow_mut());
                 self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
@@ -366,7 +369,8 @@ impl Analyzer {
                         .as_ref()
                         .map(|t| self.resolve_type(t, interner))
                         .unwrap_or(LegacyType::Void);
-                    let signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                    let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                    signature.intern_ids(&mut self.type_arena.borrow_mut());
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
                         entity_type_id,
@@ -399,7 +403,8 @@ impl Analyzer {
                         .as_ref()
                         .map(|t| self.resolve_type(t, interner))
                         .unwrap_or(LegacyType::Void);
-                    let signature = FunctionType { params: params.into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+                    let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+                    signature.intern_ids(&mut self.type_arena.borrow_mut());
                     let native_name = func
                         .native_name
                         .clone()
@@ -607,7 +612,8 @@ impl Analyzer {
                         .unwrap_or(LegacyType::Void)
                 };
 
-                let signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                signature.intern_ids(&mut self.type_arena.borrow_mut());
                 self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
@@ -700,7 +706,8 @@ impl Analyzer {
                         })
                         .unwrap_or(LegacyType::Void);
 
-                    let signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                    let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                    signature.intern_ids(&mut self.type_arena.borrow_mut());
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
                         entity_type_id,
@@ -757,7 +764,8 @@ impl Analyzer {
                         })
                         .unwrap_or(LegacyType::Void);
 
-                    let signature = FunctionType { params: params.into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+                    let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+                    signature.intern_ids(&mut self.type_arena.borrow_mut());
                     let native_name = func
                         .native_name
                         .clone()
@@ -884,7 +892,8 @@ impl Analyzer {
                         self.resolve_type_with_self(t, interner, self_type_for_methods.clone())
                     })
                     .unwrap_or(LegacyType::Void);
-                let signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                signature.intern_ids(&mut self.type_arena.borrow_mut());
                 self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
@@ -915,7 +924,8 @@ impl Analyzer {
                         .as_ref()
                         .map(|t| self.resolve_type(t, interner))
                         .unwrap_or(LegacyType::Void);
-                    let signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                    let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                    signature.intern_ids(&mut self.type_arena.borrow_mut());
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
                         entity_type_id,
@@ -1129,7 +1139,8 @@ impl Analyzer {
                     self.current_module,
                     &[interner.resolve(record.name), method_name_str],
                 );
-                let signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                signature.intern_ids(&mut self.type_arena.borrow_mut());
                 self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
@@ -1222,7 +1233,8 @@ impl Analyzer {
                         })
                         .unwrap_or(LegacyType::Void);
 
-                    let signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                    let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                    signature.intern_ids(&mut self.type_arena.borrow_mut());
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
                         entity_type_id,
@@ -1509,7 +1521,8 @@ impl Analyzer {
             let full_method_name_id = self
                 .name_table
                 .intern_raw(self.current_module, &[&name_str, method_name_str]);
-            let signature = FunctionType { params: params.clone().into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+            let mut signature = FunctionType { params: params.clone().into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+            signature.intern_ids(&mut self.type_arena.borrow_mut());
             // Look up external binding for this method
             let external_binding = external_methods.get(method_name_str).cloned();
             self.entity_registry.register_method_with_binding(
@@ -1584,7 +1597,8 @@ impl Analyzer {
                     || method.body.is_some()
                     || default_static_external_methods.contains(&method.name);
 
-                let signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                signature.intern_ids(&mut self.type_arena.borrow_mut());
 
                 let external_binding = static_external_methods.get(&method_name_str).cloned();
                 self.entity_registry.register_static_method_with_binding(
@@ -1781,7 +1795,8 @@ impl Analyzer {
                             .map(|t| self.resolve_type(t, interner))
                             .unwrap_or(LegacyType::Void);
 
-                        let signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                        let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+                        signature.intern_ids(&mut self.type_arena.borrow_mut());
 
                         self.entity_registry.register_static_method(
                             entity_type_id,
@@ -1816,7 +1831,8 @@ impl Analyzer {
                                 .map(|t| self.resolve_type(t, interner))
                                 .unwrap_or(LegacyType::Void);
 
-                            let signature = FunctionType { params: params.into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+                            let mut signature = FunctionType { params: params.into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+                            signature.intern_ids(&mut self.type_arena.borrow_mut());
 
                             let native_name = func
                                 .native_name
@@ -1898,7 +1914,8 @@ impl Analyzer {
                     .unwrap_or(LegacyType::Void);
 
                 // Create signature with TypeParam placeholders
-                let signature = FunctionType { params: param_types.clone().into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+                let mut signature = FunctionType { params: param_types.clone().into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+                signature.intern_ids(&mut self.type_arena.borrow_mut());
 
                 // Register in EntityRegistry (like regular generic functions)
                 let func_id = self.entity_registry.register_function(
@@ -1952,7 +1969,8 @@ impl Analyzer {
                     .map(|t| self.resolve_type(t, interner))
                     .unwrap_or(LegacyType::Void);
 
-                let func_type = FunctionType { params: params.into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+                let mut func_type = FunctionType { params: params.into(), return_type: Box::new(return_type.clone()), is_closure: false, params_id: None, return_type_id: None };
+                func_type.intern_ids(&mut self.type_arena.borrow_mut());
 
                 // Register the function with its Vole name (Symbol)
                 self.functions.insert(func.vole_name, func_type.clone());
