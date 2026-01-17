@@ -291,25 +291,25 @@ impl Analyzer {
 
         // Non-identifier callee (e.g., a lambda expression being called directly)
         let callee_ty_id = self.check_expr(&call.callee, interner)?;
-        let callee_ty = self.id_to_type(callee_ty_id);
-        if let LegacyType::Function(func_type) = callee_ty {
+
+        // Use arena.unwrap_function to check if callable (avoids LegacyType)
+        let func_info = self
+            .type_arena
+            .borrow()
+            .unwrap_function(callee_ty_id)
+            .map(|(params, ret, _is_closure)| (params.clone(), ret));
+
+        if let Some((param_ids, return_id)) = func_info {
             // Calling a function-typed expression - conservatively mark side effects
             if self.in_lambda() {
                 self.mark_lambda_has_side_effects();
             }
-            self.check_call_args(
-                &call.args,
-                &func_type.params,
-                expr.span,
-                false, // without inference (callee was just an expression)
-                interner,
-            )?;
-            return Ok(self.type_to_id(&func_type.return_type));
+            return self.check_call_args_id(&call.args, &param_ids, return_id, expr.span, interner);
         }
 
         // Non-callable type
         if !callee_ty_id.is_invalid() {
-            let ty = self.type_display(&callee_ty);
+            let ty = self.type_display_id(callee_ty_id);
             self.add_error(
                 SemanticError::NotCallable {
                     ty,

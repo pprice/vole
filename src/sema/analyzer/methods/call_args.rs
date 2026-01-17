@@ -1,7 +1,36 @@
 use super::super::*;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::LegacyType;
 
 impl Analyzer {
+    /// Check call arguments against expected parameter types (TypeId version).
+    ///
+    /// This version takes TypeIds directly and avoids LegacyType conversion.
+    /// Use this for simple call checking without type inference.
+    pub(crate) fn check_call_args_id(
+        &mut self,
+        args: &[Expr],
+        param_type_ids: &[ArenaTypeId],
+        return_type_id: ArenaTypeId,
+        call_span: Span,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        // Check argument count
+        if args.len() != param_type_ids.len() {
+            self.add_wrong_arg_count(param_type_ids.len(), args.len(), call_span);
+        }
+
+        // Check each argument against its expected parameter type
+        for (arg, &param_ty_id) in args.iter().zip(param_type_ids.iter()) {
+            let arg_ty_id = self.check_expr(arg, interner)?;
+            if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
+            }
+        }
+
+        Ok(return_type_id)
+    }
+
     /// Check call arguments against expected parameter types.
     ///
     /// This helper unifies the argument checking logic used for:
