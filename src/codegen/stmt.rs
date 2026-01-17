@@ -9,9 +9,7 @@ use cranelift::prelude::*;
 use crate::codegen::RuntimeFn;
 use crate::errors::CodegenError;
 use crate::frontend::{self, ExprKind, LetInit, Pattern, RaiseStmt, Stmt, Symbol};
-use crate::sema::LegacyType;
 use crate::sema::type_arena::TypeId;
-use crate::sema::types::NominalType;
 
 use super::compiler::ControlFlowCtx;
 use super::context::{Cg, ControlFlow};
@@ -20,7 +18,7 @@ use super::structs::{
 };
 use super::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    box_interface_value_id, fallible_error_tag, resolve_type_expr_id, tuple_layout_id,
+    box_interface_value_id, fallible_error_tag_by_id, resolve_type_expr_id, tuple_layout_id,
     type_id_size, type_id_to_cranelift,
 };
 
@@ -855,24 +853,26 @@ impl Cg<'_, '_, '_> {
             .ctx
             .current_function_return_type
             .ok_or("raise statement used outside of a function with declared return type")?;
-        let return_type = self.ctx.arena.borrow().to_type(return_type_id);
 
-        let fallible_type = match &return_type {
-            LegacyType::Fallible(ft) => ft.clone(),
-            _ => {
-                return Err(CodegenError::type_mismatch(
+        // Extract the error type from the fallible return type
+        let (_success_type_id, error_type_id) = self
+            .ctx
+            .arena
+            .borrow()
+            .unwrap_fallible(return_type_id)
+            .ok_or_else(|| {
+                CodegenError::type_mismatch(
                     "raise statement",
                     "fallible return type",
-                    format!("{:?}", return_type),
+                    "non-fallible type",
                 )
-                .into());
-            }
-        };
+            })?;
 
         // Get the error tag for this error type
-        let error_tag = fallible_error_tag(
-            &fallible_type,
+        let error_tag = fallible_error_tag_by_id(
+            error_type_id,
             raise_stmt.error_name,
+            &self.ctx.arena.borrow(),
             self.ctx.interner,
             &self.ctx.analyzed.name_table,
             &self.ctx.analyzed.entity_registry,
@@ -907,30 +907,34 @@ impl Cg<'_, '_, '_> {
 
         // Get the error type_def_id to look up field order from EntityRegistry
         let raise_error_name = self.ctx.interner.resolve(raise_stmt.error_name);
-        let error_type_def_id = match fallible_type.error_type.as_ref() {
-            LegacyType::Nominal(NominalType::Error(info)) => {
-                let name =
-                    self.ctx.analyzed.name_table.last_segment_str(
-                        self.ctx.analyzed.entity_registry.name_id(info.type_def_id),
-                    );
-                if name.as_deref() == Some(raise_error_name) {
-                    Some(info.type_def_id)
-                } else {
-                    None
-                }
+        let arena = self.ctx.arena.borrow();
+        let error_type_def_id = if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
+            // Single error type
+            let name = self
+                .ctx
+                .analyzed
+                .name_table
+                .last_segment_str(self.ctx.analyzed.entity_registry.name_id(type_def_id));
+            if name.as_deref() == Some(raise_error_name) {
+                Some(type_def_id)
+            } else {
+                None
             }
-            LegacyType::Union(variants) => variants.iter().find_map(|v| {
-                if let LegacyType::Nominal(NominalType::Error(info)) = v {
+        } else if let Some(variants) = arena.unwrap_union(error_type_id) {
+            // Union of error types
+            variants.iter().find_map(|&v| {
+                if let Some(type_def_id) = arena.unwrap_error(v) {
                     let name = self.ctx.analyzed.name_table.last_segment_str(
-                        self.ctx.analyzed.entity_registry.name_id(info.type_def_id),
+                        self.ctx.analyzed.entity_registry.name_id(type_def_id),
                     );
                     if name.as_deref() == Some(raise_error_name) {
-                        return Some(info.type_def_id);
+                        return Some(type_def_id);
                     }
                 }
                 None
-            }),
-            _ => None,
+            })
+        } else {
+            None
         }
         .ok_or_else(|| {
             format!(
@@ -938,6 +942,7 @@ impl Cg<'_, '_, '_> {
                 self.ctx.interner.resolve(raise_stmt.error_name)
             )
         })?;
+        drop(arena);
 
         // Get fields from EntityRegistry
         let error_fields: Vec<_> = self

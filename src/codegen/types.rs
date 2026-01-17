@@ -1081,45 +1081,6 @@ pub(crate) const FALLIBLE_TAG_SIZE: u32 = 8;
 /// Get the error tag for a specific error type within a fallible type.
 /// Returns the 1-based index (tag 0 is reserved for success).
 ///
-/// Uses string comparison via the NameTable/EntityRegistry to look up error type names
-/// and compares with the resolved error_name Symbol.
-pub(crate) fn fallible_error_tag(
-    fallible: &crate::sema::types::FallibleType,
-    error_name: Symbol,
-    interner: &Interner,
-    name_table: &NameTable,
-    entity_registry: &EntityRegistry,
-) -> Option<i64> {
-    let error_name_str = interner.resolve(error_name);
-    match fallible.error_type.as_ref() {
-        LegacyType::Nominal(NominalType::Error(info)) => {
-            let info_name = name_table.last_segment_str(entity_registry.name_id(info.type_def_id));
-            if info_name.as_deref() == Some(error_name_str) {
-                Some(1) // Single error type always gets tag 1
-            } else {
-                None
-            }
-        }
-        LegacyType::Union(variants) => {
-            // Find the 1-based index of the error type in the union
-            for (idx, variant) in variants.iter().enumerate() {
-                if let LegacyType::Nominal(NominalType::Error(info)) = variant {
-                    let info_name =
-                        name_table.last_segment_str(entity_registry.name_id(info.type_def_id));
-                    if info_name.as_deref() == Some(error_name_str) {
-                        return Some((idx + 1) as i64);
-                    }
-                }
-            }
-            None
-        }
-        _ => None,
-    }
-}
-
-/// Get the error tag for a specific error type within a fallible type (TypeId version).
-/// Returns the 1-based index (tag 0 is reserved for success).
-///
 /// Takes the error part of a fallible type as a TypeId and uses arena queries
 /// to determine the tag for the given error_name.
 pub(crate) fn fallible_error_tag_by_id(

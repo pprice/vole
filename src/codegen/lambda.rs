@@ -8,8 +8,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use crate::frontend::{BinaryOp, Expr, ExprKind, LambdaBody, LambdaExpr, Symbol};
-use crate::sema::type_arena::{TypeArena, TypeId};
-use crate::sema::{LegacyType, PrimitiveType};
+use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 
 use super::RuntimeFn;
 use super::context::{Captures, Cg, ControlFlow};
@@ -37,7 +36,7 @@ pub(crate) fn build_capture_bindings(
     arena: &mut TypeArena,
 ) -> HashMap<Symbol, CaptureBinding> {
     let mut bindings = HashMap::new();
-    let default_type_id = arena.from_type(&LegacyType::Primitive(PrimitiveType::I64));
+    let default_type_id = arena.primitives.i64;
     for (i, capture) in captures.iter().enumerate() {
         let vole_type_id = variables
             .get(&capture.name)
@@ -110,19 +109,14 @@ pub(crate) fn infer_expr_type(
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                     if left_ty == right_ty {
                         left_ty
+                    } else if left_ty == primitives.i64 || right_ty == primitives.i64 {
+                        primitives.i64
+                    } else if left_ty == primitives.f64 || right_ty == primitives.f64 {
+                        primitives.f64
+                    } else if left_ty == primitives.i32 || right_ty == primitives.i32 {
+                        primitives.i32
                     } else {
-                        let arena = ctx.arena.borrow();
-                        let left_legacy = arena.to_type(left_ty);
-                        let right_legacy = arena.to_type(right_ty);
-                        match (&left_legacy, &right_legacy) {
-                            (LegacyType::Primitive(PrimitiveType::I64), _)
-                            | (_, LegacyType::Primitive(PrimitiveType::I64)) => primitives.i64,
-                            (LegacyType::Primitive(PrimitiveType::F64), _)
-                            | (_, LegacyType::Primitive(PrimitiveType::F64)) => primitives.f64,
-                            (LegacyType::Primitive(PrimitiveType::I32), _)
-                            | (_, LegacyType::Primitive(PrimitiveType::I32)) => primitives.i32,
-                            _ => left_ty,
-                        }
+                        left_ty
                     }
                 }
 
@@ -149,7 +143,7 @@ pub(crate) fn infer_expr_type(
         ExprKind::Lambda(lambda) => {
             let primitives = ctx.arena.borrow().primitives;
             // Resolve param types directly to TypeIds
-            let lambda_param_ids: crate::sema::type_arena::TypeIdVec = lambda
+            let lambda_param_ids: TypeIdVec = lambda
                 .params
                 .iter()
                 .map(|p| {
@@ -328,7 +322,7 @@ fn compile_pure_lambda(
     // Create TypeId directly from components
     let func_type_id = {
         let mut arena = ctx.arena.borrow_mut();
-        let param_ids: crate::sema::type_arena::TypeIdVec = param_type_ids.iter().copied().collect();
+        let param_ids: TypeIdVec = param_type_ids.iter().copied().collect();
         arena.function(param_ids, return_type_id, true) // is_closure=true
     };
     Ok(CompiledValue {
@@ -519,7 +513,7 @@ fn compile_lambda_with_captures(
     // Create TypeId directly from components
     let func_type_id = {
         let mut arena = ctx.arena.borrow_mut();
-        let param_ids: crate::sema::type_arena::TypeIdVec = param_type_ids.iter().copied().collect();
+        let param_ids: TypeIdVec = param_type_ids.iter().copied().collect();
         arena.function(param_ids, return_type_id, true) // is_closure=true
     };
     Ok(CompiledValue {
@@ -570,11 +564,10 @@ fn compile_lambda_body(
                 Ok(None)
             } else {
                 let zero = builder.ins().iconst(types::I64, 0);
-                let i64_type = LegacyType::Primitive(PrimitiveType::I64);
                 Ok(Some(CompiledValue {
                     value: zero,
                     ty: types::I64,
-                    type_id: ctx.arena.borrow_mut().from_type(&i64_type),
+                    type_id: ctx.arena.borrow().primitives.i64,
                 }))
             }
         }
