@@ -768,7 +768,13 @@ mod tests {
                 original_name: func_name,
                 mangled_name: names.intern_raw(names.main_module(), &["foo__mono_0"]),
                 instance_id: 0,
-                func_type: FunctionType { params: vec![LegacyType::Primitive(PrimitiveType::I64)].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)), is_closure: false, params_id: None, return_type_id: None },
+                func_type: FunctionType {
+                    params: vec![LegacyType::Primitive(PrimitiveType::I64)].into(),
+                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
+                    is_closure: false,
+                    params_id: None,
+                    return_type_id: None,
+                },
                 substitutions: HashMap::new(),
             },
         );

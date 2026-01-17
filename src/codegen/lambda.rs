@@ -12,7 +12,9 @@ use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 
 use super::RuntimeFn;
 use super::context::{Captures, Cg, ControlFlow};
-use super::types::{CompileCtx, CompiledValue, resolve_type_expr_id, type_id_size, type_id_to_cranelift};
+use super::types::{
+    CompileCtx, CompiledValue, resolve_type_expr_id, type_id_size, type_id_to_cranelift,
+};
 
 /// Information about a captured variable for lambda compilation
 #[derive(Clone, Copy)]

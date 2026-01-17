@@ -230,26 +230,26 @@ impl Analyzer {
                     // Empty array needs type annotation or we use unknown placeholder
                     Ok(LegacyType::Array(Box::new(LegacyType::unknown())))
                 } else {
-                    // Infer types for all elements
-                    let elem_types: Vec<LegacyType> = elements
+                    // Infer types for all elements (TypeId-based)
+                    let elem_type_ids: Vec<ArenaTypeId> = elements
                         .iter()
-                        .map(|e| self.check_expr(e, interner))
+                        .map(|e| self.check_expr_id(e, interner))
                         .collect::<Result<Vec<_>, _>>()?;
 
                     // Check if all elements have compatible types (homogeneous → Array)
                     // or different types (heterogeneous → Tuple)
-                    let first_ty = &elem_types[0];
-                    let is_homogeneous = elem_types
+                    let first_ty_id = elem_type_ids[0];
+                    let is_homogeneous = elem_type_ids
                         .iter()
                         .skip(1)
-                        .all(|ty| self.types_compatible(ty, first_ty, interner));
+                        .all(|&ty_id| self.types_compatible_id(ty_id, first_ty_id, interner));
 
                     if is_homogeneous {
                         // All same type → dynamic array
-                        Ok(LegacyType::Array(Box::new(first_ty.clone())))
+                        Ok(self.id_to_type(self.ty_array_id(first_ty_id)))
                     } else {
                         // Different types → tuple
-                        Ok(LegacyType::Tuple(elem_types.into()))
+                        Ok(self.id_to_type(self.ty_tuple_id(elem_type_ids)))
                     }
                 }
             }
@@ -449,18 +449,14 @@ impl Analyzer {
                     return Ok(self.ty_void());
                 };
 
-                // Type check the yield expression against the Iterator element type
-                let element_type_legacy = self.type_arena.borrow().to_type(element_type);
-                let yield_type = self.check_expr_expecting(
-                    &yield_expr.value,
-                    Some(&element_type_legacy),
-                    interner,
-                )?;
+                // Type check the yield expression against the Iterator element type (TypeId-based)
+                let yield_type_id =
+                    self.check_expr_expecting_id(&yield_expr.value, Some(element_type), interner)?;
 
                 // Check type compatibility
-                if !self.types_compatible(&yield_type, &element_type_legacy, interner) {
-                    let expected = self.type_display(&element_type_legacy);
-                    let found = self.type_display(&yield_type);
+                if !self.types_compatible_id(yield_type_id, element_type, interner) {
+                    let expected = self.type_display_id(element_type);
+                    let found = self.type_display_id(yield_type_id);
                     self.add_error(
                         SemanticError::YieldTypeMismatch {
                             expected,
@@ -498,8 +494,8 @@ impl Analyzer {
                     self.type_error("bool", &cond_ty, if_expr.condition.span);
                 }
 
-                // Type check then branch
-                let then_ty = self.check_expr(&if_expr.then_branch, interner)?;
+                // Type check then branch (TypeId-based)
+                let then_ty_id = self.check_expr_id(&if_expr.then_branch, interner)?;
 
                 // If expression requires else branch
                 let Some(else_branch) = &if_expr.else_branch else {
@@ -512,14 +508,14 @@ impl Analyzer {
                     return Ok(self.ty_invalid());
                 };
 
-                let else_ty = self.check_expr(else_branch, interner)?;
+                let else_ty_id = self.check_expr_id(else_branch, interner)?;
 
                 // Both branches must have compatible types
-                if !self.types_compatible(&then_ty, &else_ty, interner) {
-                    self.add_type_mismatch(&then_ty, &else_ty, else_branch.span);
+                if !self.types_compatible_id(then_ty_id, else_ty_id, interner) {
+                    self.add_type_mismatch_id(then_ty_id, else_ty_id, else_branch.span);
                     Ok(self.ty_invalid())
                 } else {
-                    Ok(then_ty)
+                    Ok(self.id_to_type(then_ty_id))
                 }
             }
         }

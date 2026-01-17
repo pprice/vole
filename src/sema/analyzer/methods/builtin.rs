@@ -12,7 +12,13 @@ impl Analyzer {
         args: &[Expr],
         interner: &Interner,
     ) -> Option<FunctionType> {
-        let method_type = |params: Vec<LegacyType>, return_type: LegacyType| FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+        let method_type = |params: Vec<LegacyType>, return_type: LegacyType| FunctionType {
+            params: params.into(),
+            return_type: Box::new(return_type),
+            is_closure: false,
+            params_id: None,
+            return_type_id: None,
+        };
 
         match (object_type, method_name) {
             // Array.length() -> i64

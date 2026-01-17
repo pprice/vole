@@ -1,6 +1,6 @@
 use super::super::*;
 use crate::identity::TypeDefId;
-use crate::sema::compatibility::{types_compatible_core_id, TypeCompatibility};
+use crate::sema::compatibility::{TypeCompatibility, types_compatible_core_id};
 use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType};
 use std::collections::HashSet;

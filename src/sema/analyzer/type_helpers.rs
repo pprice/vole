@@ -162,72 +162,89 @@ impl Analyzer {
     //
     // Phase 2: These return TypeId directly, avoiding LegacyType materialization.
     // Callers should prefer these over the ty_* variants.
+    //
+    // For primitives and special types, we use the reserved TypeId constants
+    // which require no arena access at all.
 
-    /// Create a primitive TypeId
+    /// Create a primitive TypeId (uses reserved constants - no arena access)
     #[inline]
     #[allow(unused)] // Phase 2 infrastructure
     pub(crate) fn ty_prim_id(&self, p: PrimitiveType) -> ArenaTypeId {
-        self.type_arena.borrow_mut().primitive(p)
+        match p {
+            PrimitiveType::I8 => ArenaTypeId::I8,
+            PrimitiveType::I16 => ArenaTypeId::I16,
+            PrimitiveType::I32 => ArenaTypeId::I32,
+            PrimitiveType::I64 => ArenaTypeId::I64,
+            PrimitiveType::I128 => ArenaTypeId::I128,
+            PrimitiveType::U8 => ArenaTypeId::U8,
+            PrimitiveType::U16 => ArenaTypeId::U16,
+            PrimitiveType::U32 => ArenaTypeId::U32,
+            PrimitiveType::U64 => ArenaTypeId::U64,
+            PrimitiveType::F32 => ArenaTypeId::F32,
+            PrimitiveType::F64 => ArenaTypeId::F64,
+            PrimitiveType::Bool => ArenaTypeId::BOOL,
+            PrimitiveType::String => ArenaTypeId::STRING,
+        }
     }
 
-    /// Create i64 TypeId
+    /// Create i64 TypeId (no arena access)
     #[inline]
     pub(crate) fn ty_i64_id(&self) -> ArenaTypeId {
-        self.ty_prim_id(PrimitiveType::I64)
+        ArenaTypeId::I64
     }
 
-    /// Create i32 TypeId
+    /// Create i32 TypeId (no arena access)
     #[inline]
     pub(crate) fn ty_i32_id(&self) -> ArenaTypeId {
-        self.ty_prim_id(PrimitiveType::I32)
+        ArenaTypeId::I32
     }
 
-    /// Create f64 TypeId
+    /// Create f64 TypeId (no arena access)
     #[inline]
     pub(crate) fn ty_f64_id(&self) -> ArenaTypeId {
-        self.ty_prim_id(PrimitiveType::F64)
+        ArenaTypeId::F64
     }
 
-    /// Create bool TypeId
+    /// Create bool TypeId (no arena access)
     #[inline]
     pub(crate) fn ty_bool_id(&self) -> ArenaTypeId {
-        self.ty_prim_id(PrimitiveType::Bool)
+        ArenaTypeId::BOOL
     }
 
-    /// Create string TypeId
+    /// Create string TypeId (no arena access)
     #[inline]
     pub(crate) fn ty_string_id(&self) -> ArenaTypeId {
-        self.ty_prim_id(PrimitiveType::String)
+        ArenaTypeId::STRING
     }
 
-    /// Create void TypeId
+    /// Create void TypeId (no arena access)
     #[inline]
     pub(crate) fn ty_void_id(&self) -> ArenaTypeId {
-        self.type_arena.borrow_mut().void()
+        ArenaTypeId::VOID
     }
 
-    /// Create nil TypeId
+    /// Create nil TypeId (no arena access)
     #[inline]
     pub(crate) fn ty_nil_id(&self) -> ArenaTypeId {
-        self.type_arena.borrow_mut().nil()
+        ArenaTypeId::NIL
     }
 
-    /// Create done TypeId
+    /// Create done TypeId (no arena access)
     #[inline]
     pub(crate) fn ty_done_id(&self) -> ArenaTypeId {
-        self.type_arena.borrow_mut().done()
+        ArenaTypeId::DONE
     }
 
-    /// Create range TypeId
+    /// Create range TypeId (no arena access)
     #[inline]
     pub(crate) fn ty_range_id(&self) -> ArenaTypeId {
-        self.type_arena.borrow_mut().range()
+        ArenaTypeId::RANGE
     }
 
-    /// Create metatype TypeId
+    /// Create metatype TypeId (no arena access)
     #[inline]
     pub(crate) fn ty_type_id(&self) -> ArenaTypeId {
-        self.type_arena.borrow_mut().metatype()
+        ArenaTypeId::METATYPE
     }
 
     /// Create an array TypeId
@@ -248,96 +265,88 @@ impl Analyzer {
         self.type_arena.borrow_mut().optional(inner_id)
     }
 
-    /// Create an invalid/error TypeId
+    /// Create an invalid/error TypeId (no arena access)
     #[inline]
     pub(crate) fn ty_invalid_id(&self) -> ArenaTypeId {
-        self.type_arena.borrow_mut().invalid()
+        ArenaTypeId::INVALID
     }
 
     /// Create an invalid/error TypeId with tracing
     #[inline]
     pub(crate) fn ty_invalid_traced_id(&self, reason: &str) -> ArenaTypeId {
         tracing::warn!(reason, "creating invalid type");
-        self.type_arena.borrow_mut().invalid()
+        ArenaTypeId::INVALID
     }
 
     // ========== TypeId comparison helpers ==========
     //
     // These check if a TypeId matches a well-known type.
-    // Useful for migrating code like `ty == LegacyType::Void` to TypeId.
+    // With reserved TypeIds, these are simple constant comparisons - no arena access needed.
 
-    /// Check if TypeId is void
+    /// Check if TypeId is void (no arena access)
     #[inline]
     pub(crate) fn is_void_id(&self, id: ArenaTypeId) -> bool {
-        id == self.type_arena.borrow().void()
+        id == ArenaTypeId::VOID
     }
 
-    /// Check if TypeId is nil
+    /// Check if TypeId is nil (no arena access)
     #[inline]
     pub(crate) fn is_nil_id(&self, id: ArenaTypeId) -> bool {
-        id == self.type_arena.borrow().nil()
+        id == ArenaTypeId::NIL
     }
 
-    /// Check if TypeId is bool
+    /// Check if TypeId is bool (no arena access)
     #[inline]
     pub(crate) fn is_bool_id(&self, id: ArenaTypeId) -> bool {
-        id == self.type_arena.borrow().bool()
+        id == ArenaTypeId::BOOL
     }
 
-    /// Check if TypeId is metatype
+    /// Check if TypeId is metatype (no arena access)
     #[inline]
     pub(crate) fn is_metatype_id(&self, id: ArenaTypeId) -> bool {
-        id == self.type_arena.borrow().metatype()
+        id == ArenaTypeId::METATYPE
     }
 
-    /// Check if TypeId is invalid
+    /// Check if TypeId is invalid (no arena access)
     #[inline]
     pub(crate) fn is_invalid_id(&self, id: ArenaTypeId) -> bool {
-        id == self.type_arena.borrow().invalid()
+        id == ArenaTypeId::INVALID
     }
 
-    /// Check if TypeId is a numeric type (integer or float)
+    /// Check if TypeId is a numeric type (no arena access)
     #[inline]
     pub(crate) fn is_numeric_id(&self, id: ArenaTypeId) -> bool {
-        use crate::sema::type_arena::SemaType;
-        match self.type_arena.borrow().get(id) {
-            SemaType::Primitive(p) => p.is_numeric(),
-            _ => false,
-        }
+        id.is_numeric()
     }
 
-    /// Check if TypeId is string type
+    /// Check if TypeId is string type (no arena access)
     #[inline]
     pub(crate) fn is_string_id(&self, id: ArenaTypeId) -> bool {
-        id == self.type_arena.borrow().string()
+        id == ArenaTypeId::STRING
     }
 
-    /// Check if TypeId is f64 type
+    /// Check if TypeId is f64 type (no arena access)
     #[inline]
     pub(crate) fn is_f64_id(&self, id: ArenaTypeId) -> bool {
-        id == self.type_arena.borrow().f64()
+        id == ArenaTypeId::F64
     }
 
-    /// Check if TypeId is i64 type
+    /// Check if TypeId is i64 type (no arena access)
     #[inline]
     pub(crate) fn is_i64_id(&self, id: ArenaTypeId) -> bool {
-        id == self.type_arena.borrow().i64()
+        id == ArenaTypeId::I64
     }
 
-    /// Check if TypeId is an integer type (any size)
+    /// Check if TypeId is an integer type (any size, no arena access)
     #[inline]
     pub(crate) fn is_integer_id(&self, id: ArenaTypeId) -> bool {
-        use crate::sema::type_arena::SemaType;
-        match self.type_arena.borrow().get(id) {
-            SemaType::Primitive(p) => p.is_integer(),
-            _ => false,
-        }
+        id.is_integer()
     }
 
-    /// Check if TypeId is a range type
+    /// Check if TypeId is a range type (no arena access)
     #[inline]
     pub(crate) fn is_range_id(&self, id: ArenaTypeId) -> bool {
-        id == self.type_arena.borrow().range()
+        id == ArenaTypeId::RANGE
     }
 
     /// Check if TypeId is an array type
@@ -384,6 +393,9 @@ impl Analyzer {
     /// Check if TypeId is a runtime iterator type
     #[inline]
     pub(crate) fn is_runtime_iterator_id(&self, id: ArenaTypeId) -> bool {
-        self.type_arena.borrow().unwrap_runtime_iterator(id).is_some()
+        self.type_arena
+            .borrow()
+            .unwrap_runtime_iterator(id)
+            .is_some()
     }
 }

@@ -127,7 +127,8 @@ impl Analyzer {
                         .collect();
                     let return_id = arena.substitute(generic_def.return_type, &subs_id);
                     // Convert back to LegacyTypes
-                    let params: Vec<LegacyType> = param_ids.iter().map(|&t| arena.to_type(t)).collect();
+                    let params: Vec<LegacyType> =
+                        param_ids.iter().map(|&t| arena.to_type(t)).collect();
                     let ret = arena.to_type(return_id);
                     (params, ret)
                 };
@@ -191,7 +192,13 @@ impl Analyzer {
                             original_name: name_id,
                             mangled_name,
                             instance_id: id,
-                            func_type: FunctionType { params: concrete_params.into(), return_type: Box::new(concrete_return.clone()), is_closure: false, params_id: None, return_type_id: None },
+                            func_type: FunctionType {
+                                params: concrete_params.into(),
+                                return_type: Box::new(concrete_return.clone()),
+                                is_closure: false,
+                                params_id: None,
+                                return_type_id: None,
+                            },
                             substitutions,
                         },
                     );

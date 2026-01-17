@@ -924,9 +924,10 @@ impl Cg<'_, '_, '_> {
             // Union of error types
             variants.iter().find_map(|&v| {
                 if let Some(type_def_id) = arena.unwrap_error(v) {
-                    let name = self.ctx.analyzed.name_table.last_segment_str(
-                        self.ctx.analyzed.entity_registry.name_id(type_def_id),
-                    );
+                    let name =
+                        self.ctx.analyzed.name_table.last_segment_str(
+                            self.ctx.analyzed.entity_registry.name_id(type_def_id),
+                        );
                     if name.as_deref() == Some(raise_error_name) {
                         return Some(type_def_id);
                     }

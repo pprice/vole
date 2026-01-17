@@ -337,9 +337,10 @@ impl Analyzer {
                         .last_segment_str(method.name_id)
                         .unwrap_or_default();
                     // Apply type parameter substitution to signature using arena
-                    let subst_sig = if let LegacyType::Function(ft) =
-                        LegacyType::Function(method.signature.clone())
-                            .substitute_with_arena(&substitutions, &mut self.type_arena.borrow_mut())
+                    let subst_sig = if let LegacyType::Function(ft) = LegacyType::Function(
+                        method.signature.clone(),
+                    )
+                    .substitute_with_arena(&substitutions, &mut self.type_arena.borrow_mut())
                     {
                         ft
                     } else {

@@ -20,10 +20,10 @@ use crate::errors::CodegenError;
 use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use crate::identity::NamerLookup;
 use crate::identity::{MethodId, NameId, TypeDefId};
+use crate::sema::LegacyType;
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_arena::TypeId;
 use crate::sema::types::NominalType;
-use crate::sema::LegacyType;
 
 impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
@@ -511,7 +511,10 @@ impl Cg<'_, '_, '_> {
         }
 
         // Range methods
-        if matches!(arena.get(obj.type_id), crate::sema::type_arena::SemaType::Range) {
+        if matches!(
+            arena.get(obj.type_id),
+            crate::sema::type_arena::SemaType::Range
+        ) {
             drop(arena);
             if method_name == "iter" {
                 // Load start and end from the range struct (pointer to [start, end])

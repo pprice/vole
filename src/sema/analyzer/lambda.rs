@@ -164,6 +164,12 @@ impl Analyzer {
         // Determine final return type
         let return_type = declared_return.or(expected_return).unwrap_or(body_type);
 
-        LegacyType::Function(FunctionType { params: param_types.into(), return_type: Box::new(return_type), is_closure: has_captures, params_id: None, return_type_id: None })
+        LegacyType::Function(FunctionType {
+            params: param_types.into(),
+            return_type: Box::new(return_type),
+            is_closure: has_captures,
+            params_id: None,
+            return_type_id: None,
+        })
     }
 }

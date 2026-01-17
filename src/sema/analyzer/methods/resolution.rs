@@ -172,7 +172,9 @@ impl Analyzer {
         let func_with_ids = if func_type.has_interned_ids() {
             func_type.clone()
         } else {
-            func_type.clone().with_interned_ids(&mut self.type_arena.borrow_mut())
+            func_type
+                .clone()
+                .with_interned_ids(&mut self.type_arena.borrow_mut())
         };
 
         if let LegacyType::Function(result) = LegacyType::Function(func_with_ids)
@@ -485,7 +487,8 @@ impl Analyzer {
                     let substitutions = self
                         .entity_registry
                         .substitution_map(type_def_id, type_args);
-                    let substituted_func_type = self.apply_substitutions(&func_type, &substitutions);
+                    let substituted_func_type =
+                        self.apply_substitutions(&func_type, &substitutions);
                     return Some(ResolvedMethod::Direct {
                         func_type: substituted_func_type,
                     });
@@ -543,6 +546,12 @@ impl Analyzer {
     ) -> Option<FunctionType> {
         let method_id = self.entity_registry.is_functional(type_def_id)?;
         let method = self.entity_registry.get_method(method_id);
-        Some(FunctionType { params: method.signature.params.clone(), return_type: method.signature.return_type.clone(), is_closure: true, params_id: None, return_type_id: None })
+        Some(FunctionType {
+            params: method.signature.params.clone(),
+            return_type: method.signature.return_type.clone(),
+            is_closure: true,
+            params_id: None,
+            return_type_id: None,
+        })
     }
 }

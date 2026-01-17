@@ -1207,7 +1207,13 @@ impl Analyzer {
                 None => LegacyType::Void,
             };
 
-            let func_type = FunctionType { params: param_types.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None };
+            let func_type = FunctionType {
+                params: param_types.into(),
+                return_type: Box::new(return_type),
+                is_closure: false,
+                params_id: None,
+                return_type_id: None,
+            };
 
             // Determine native name: explicit or default to vole_name
             let native_name = func
@@ -1633,7 +1639,13 @@ impl Analyzer {
                         (params, return_type)
                     };
 
-                    let func_type = LegacyType::Function(FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None });
+                    let func_type = LegacyType::Function(FunctionType {
+                        params: params.into(),
+                        return_type: Box::new(return_type),
+                        is_closure: false,
+                        params_id: None,
+                        return_type_id: None,
+                    });
 
                     // Store export by name string
                     let name_id = self
@@ -1702,7 +1714,13 @@ impl Analyzer {
                             (params, return_type)
                         };
 
-                        let func_type = LegacyType::Function(FunctionType { params: params.into(), return_type: Box::new(return_type), is_closure: false, params_id: None, return_type_id: None });
+                        let func_type = LegacyType::Function(FunctionType {
+                            params: params.into(),
+                            return_type: Box::new(return_type),
+                            is_closure: false,
+                            params_id: None,
+                            return_type_id: None,
+                        });
 
                         let name_id =
                             self.name_table

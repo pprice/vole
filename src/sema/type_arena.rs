@@ -24,9 +24,112 @@ use crate::sema::types::{ConstantValue, LegacyType, PlaceholderKind, PrimitiveTy
 pub struct TypeId(u32);
 
 impl TypeId {
+    // ========================================================================
+    // Reserved TypeIds for primitives and special types
+    // These are guaranteed to be interned at these indices by TypeArena::new()
+    // ========================================================================
+
+    // Invalid type (must be 0 for is_invalid() check)
+    pub const INVALID: TypeId = TypeId(0);
+
+    // Signed integers
+    pub const I8: TypeId = TypeId(1);
+    pub const I16: TypeId = TypeId(2);
+    pub const I32: TypeId = TypeId(3);
+    pub const I64: TypeId = TypeId(4);
+    pub const I128: TypeId = TypeId(5);
+
+    // Unsigned integers
+    pub const U8: TypeId = TypeId(6);
+    pub const U16: TypeId = TypeId(7);
+    pub const U32: TypeId = TypeId(8);
+    pub const U64: TypeId = TypeId(9);
+
+    // Floating point
+    pub const F32: TypeId = TypeId(10);
+    pub const F64: TypeId = TypeId(11);
+
+    // Other primitives
+    pub const BOOL: TypeId = TypeId(12);
+    pub const STRING: TypeId = TypeId(13);
+
+    // Special types
+    pub const VOID: TypeId = TypeId(14);
+    pub const NIL: TypeId = TypeId(15);
+    pub const DONE: TypeId = TypeId(16);
+    pub const RANGE: TypeId = TypeId(17);
+    pub const METATYPE: TypeId = TypeId(18);
+
+    /// First non-reserved TypeId index (for dynamic types)
+    pub const FIRST_DYNAMIC: u32 = 19;
+
     /// Get the raw index (for debugging/serialization)
     pub fn index(self) -> u32 {
         self.0
+    }
+
+    /// Check if this is a reserved (primitive/special) TypeId
+    #[inline]
+    pub fn is_reserved(self) -> bool {
+        self.0 < Self::FIRST_DYNAMIC
+    }
+
+    /// Check if this is the invalid type (no arena needed)
+    #[inline]
+    pub fn is_invalid(self) -> bool {
+        self == Self::INVALID
+    }
+
+    /// Check if this is nil (no arena needed)
+    #[inline]
+    pub fn is_nil(self) -> bool {
+        self == Self::NIL
+    }
+
+    /// Check if this is void (no arena needed)
+    #[inline]
+    pub fn is_void(self) -> bool {
+        self == Self::VOID
+    }
+
+    /// Check if this is a signed integer type (no arena needed)
+    #[inline]
+    pub fn is_signed_int(self) -> bool {
+        matches!(
+            self,
+            Self::I8 | Self::I16 | Self::I32 | Self::I64 | Self::I128
+        )
+    }
+
+    /// Check if this is an unsigned integer type (no arena needed)
+    #[inline]
+    pub fn is_unsigned_int(self) -> bool {
+        matches!(self, Self::U8 | Self::U16 | Self::U32 | Self::U64)
+    }
+
+    /// Check if this is any integer type (no arena needed)
+    #[inline]
+    pub fn is_integer(self) -> bool {
+        self.is_signed_int() || self.is_unsigned_int()
+    }
+
+    /// Check if this is a floating point type (no arena needed)
+    #[inline]
+    pub fn is_float(self) -> bool {
+        matches!(self, Self::F32 | Self::F64)
+    }
+
+    /// Check if this is a numeric type (no arena needed)
+    #[inline]
+    pub fn is_numeric(self) -> bool {
+        self.is_integer() || self.is_float()
+    }
+
+    /// Check if this is a primitive type (no arena needed)
+    #[inline]
+    pub fn is_primitive(self) -> bool {
+        // Primitives are indices 1-13 (i8 through string)
+        self.0 >= Self::I8.0 && self.0 <= Self::STRING.0
     }
 }
 
@@ -242,29 +345,51 @@ impl TypeArena {
             },
         };
 
-        // Pre-intern all primitive types
-        // Invalid must be first (index 0) for is_invalid() check
+        // Pre-intern all primitive types in the order defined by TypeId constants.
+        // The debug_asserts verify the constants match the actual interned indices.
         arena.primitives.invalid = arena.intern(SemaType::Invalid { kind: "invalid" });
-        debug_assert_eq!(arena.primitives.invalid.0, 0);
+        debug_assert_eq!(arena.primitives.invalid, TypeId::INVALID);
 
         arena.primitives.i8 = arena.intern(SemaType::Primitive(PrimitiveType::I8));
+        debug_assert_eq!(arena.primitives.i8, TypeId::I8);
         arena.primitives.i16 = arena.intern(SemaType::Primitive(PrimitiveType::I16));
+        debug_assert_eq!(arena.primitives.i16, TypeId::I16);
         arena.primitives.i32 = arena.intern(SemaType::Primitive(PrimitiveType::I32));
+        debug_assert_eq!(arena.primitives.i32, TypeId::I32);
         arena.primitives.i64 = arena.intern(SemaType::Primitive(PrimitiveType::I64));
+        debug_assert_eq!(arena.primitives.i64, TypeId::I64);
         arena.primitives.i128 = arena.intern(SemaType::Primitive(PrimitiveType::I128));
+        debug_assert_eq!(arena.primitives.i128, TypeId::I128);
+
         arena.primitives.u8 = arena.intern(SemaType::Primitive(PrimitiveType::U8));
+        debug_assert_eq!(arena.primitives.u8, TypeId::U8);
         arena.primitives.u16 = arena.intern(SemaType::Primitive(PrimitiveType::U16));
+        debug_assert_eq!(arena.primitives.u16, TypeId::U16);
         arena.primitives.u32 = arena.intern(SemaType::Primitive(PrimitiveType::U32));
+        debug_assert_eq!(arena.primitives.u32, TypeId::U32);
         arena.primitives.u64 = arena.intern(SemaType::Primitive(PrimitiveType::U64));
+        debug_assert_eq!(arena.primitives.u64, TypeId::U64);
+
         arena.primitives.f32 = arena.intern(SemaType::Primitive(PrimitiveType::F32));
+        debug_assert_eq!(arena.primitives.f32, TypeId::F32);
         arena.primitives.f64 = arena.intern(SemaType::Primitive(PrimitiveType::F64));
+        debug_assert_eq!(arena.primitives.f64, TypeId::F64);
+
         arena.primitives.bool = arena.intern(SemaType::Primitive(PrimitiveType::Bool));
+        debug_assert_eq!(arena.primitives.bool, TypeId::BOOL);
         arena.primitives.string = arena.intern(SemaType::Primitive(PrimitiveType::String));
+        debug_assert_eq!(arena.primitives.string, TypeId::STRING);
+
         arena.primitives.void = arena.intern(SemaType::Void);
+        debug_assert_eq!(arena.primitives.void, TypeId::VOID);
         arena.primitives.nil = arena.intern(SemaType::Nil);
+        debug_assert_eq!(arena.primitives.nil, TypeId::NIL);
         arena.primitives.done = arena.intern(SemaType::Done);
+        debug_assert_eq!(arena.primitives.done, TypeId::DONE);
         arena.primitives.range = arena.intern(SemaType::Range);
+        debug_assert_eq!(arena.primitives.range, TypeId::RANGE);
         arena.primitives.metatype = arena.intern(SemaType::MetaType);
+        debug_assert_eq!(arena.primitives.metatype, TypeId::METATYPE);
 
         arena
     }
@@ -284,8 +409,9 @@ impl TypeArena {
     }
 
     /// Check if a TypeId is the invalid type
+    #[inline]
     pub fn is_invalid(&self, id: TypeId) -> bool {
-        id.0 == 0 // Invalid is always at index 0
+        id == TypeId::INVALID
     }
 
     // ========================================================================
@@ -1274,7 +1400,13 @@ impl TypeArena {
             } => {
                 let param_types: Vec<LegacyType> =
                     params.iter().map(|&p| self.to_type(p)).collect();
-                LegacyType::Function(FunctionType { params: param_types.into(), return_type: Box::new(self.to_type(*ret)), is_closure: *is_closure, params_id: None, return_type_id: None })
+                LegacyType::Function(FunctionType {
+                    params: param_types.into(),
+                    return_type: Box::new(self.to_type(*ret)),
+                    is_closure: *is_closure,
+                    params_id: None,
+                    return_type_id: None,
+                })
             }
 
             SemaType::Class {
@@ -1317,9 +1449,11 @@ impl TypeArena {
                 }))
             }
 
-            SemaType::Error { type_def_id } => LegacyType::Nominal(NominalType::Error(ErrorTypeInfo {
-                type_def_id: *type_def_id,
-            })),
+            SemaType::Error { type_def_id } => {
+                LegacyType::Nominal(NominalType::Error(ErrorTypeInfo {
+                    type_def_id: *type_def_id,
+                }))
+            }
 
             SemaType::TypeParam(name_id) => LegacyType::TypeParam(*name_id),
 
@@ -1952,13 +2086,25 @@ mod tests {
         use crate::sema::types::{FunctionType, PrimitiveType};
 
         let mut arena = TypeArena::new();
-        let original = LegacyType::Function(FunctionType { params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::String)), is_closure: false, params_id: None, return_type_id: None });
+        let original = LegacyType::Function(FunctionType {
+            params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
+            return_type: Box::new(LegacyType::Primitive(PrimitiveType::String)),
+            is_closure: false,
+            params_id: None,
+            return_type_id: None,
+        });
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
         assert_eq!(original, back);
 
         // Test with closure flag
-        let closure = LegacyType::Function(FunctionType { params: vec![].into(), return_type: Box::new(LegacyType::Void), is_closure: true, params_id: None, return_type_id: None });
+        let closure = LegacyType::Function(FunctionType {
+            params: vec![].into(),
+            return_type: Box::new(LegacyType::Void),
+            is_closure: true,
+            params_id: None,
+            return_type_id: None,
+        });
         let closure_id = arena.from_type(&closure);
         let closure_back = arena.to_type(closure_id);
         assert_eq!(closure, closure_back);
@@ -2058,11 +2204,17 @@ mod tests {
         let mut arena = TypeArena::new();
 
         // Array<(i32, string) -> bool>
-        let func = LegacyType::Function(FunctionType { params: vec![
-            LegacyType::Primitive(PrimitiveType::I32),
-            LegacyType::Primitive(PrimitiveType::String),
-        ]
-        .into(), return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)), is_closure: false, params_id: None, return_type_id: None });
+        let func = LegacyType::Function(FunctionType {
+            params: vec![
+                LegacyType::Primitive(PrimitiveType::I32),
+                LegacyType::Primitive(PrimitiveType::String),
+            ]
+            .into(),
+            return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
+            is_closure: false,
+            params_id: None,
+            return_type_id: None,
+        });
         let original = LegacyType::Array(Box::new(func));
 
         let id = arena.from_type(&original);

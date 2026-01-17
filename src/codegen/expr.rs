@@ -535,9 +535,10 @@ impl Cg<'_, '_, '_> {
             .stack_addr(self.ctx.pointer_type, slot, 0);
 
         // Get the full type from sema, or create fixed array type from element type
-        let type_id = self.ctx.get_expr_type(&expr.id).unwrap_or_else(|| {
-            self.ctx.arena.borrow_mut().fixed_array(elem_type_id, count)
-        });
+        let type_id = self
+            .ctx
+            .get_expr_type(&expr.id)
+            .unwrap_or_else(|| self.ctx.arena.borrow_mut().fixed_array(elem_type_id, count));
 
         Ok(CompiledValue {
             value: ptr,
@@ -1530,8 +1531,11 @@ impl Cg<'_, '_, '_> {
             .unwrap_or(self.ctx.arena.borrow().primitives.void);
 
         let is_void = self.ctx.arena.borrow().is_void(result_type_id);
-        let result_cranelift_type =
-            type_id_to_cranelift(result_type_id, &self.ctx.arena.borrow(), self.ctx.pointer_type);
+        let result_cranelift_type = type_id_to_cranelift(
+            result_type_id,
+            &self.ctx.arena.borrow(),
+            self.ctx.pointer_type,
+        );
 
         // Create basic blocks
         let then_block = self.builder.create_block();

@@ -163,7 +163,11 @@ impl std::hash::Hash for FunctionType {
 
 impl FunctionType {
     /// Create a new FunctionType (without interned TypeIds - use intern_ids to add them)
-    pub fn new(params: impl Into<Arc<[LegacyType]>>, return_type: LegacyType, is_closure: bool) -> Self {
+    pub fn new(
+        params: impl Into<Arc<[LegacyType]>>,
+        return_type: LegacyType,
+        is_closure: bool,
+    ) -> Self {
         Self {
             params: params.into(),
             return_type: Box::new(return_type),
@@ -564,7 +568,13 @@ impl LegacyType {
                 if new_params.is_none() && !return_changed {
                     self.clone()
                 } else {
-                    LegacyType::Function(FunctionType { params: new_params.unwrap_or_else(|| ft.params.clone()), return_type: Box::new(new_return), is_closure: ft.is_closure, params_id: None, return_type_id: None })
+                    LegacyType::Function(FunctionType {
+                        params: new_params.unwrap_or_else(|| ft.params.clone()),
+                        return_type: Box::new(new_return),
+                        is_closure: ft.is_closure,
+                        params_id: None,
+                        return_type_id: None,
+                    })
                 }
             }
 
@@ -734,45 +744,48 @@ impl LegacyType {
         arena: &mut TypeArena,
     ) -> LegacyType {
         // For FunctionType with interned IDs, use arena-based substitution
-        if let LegacyType::Function(ft) = self {
-            if let (Some(params_id), Some(return_type_id)) = (&ft.params_id, &ft.return_type_id) {
-                // Convert substitutions to TypeId-based (use hashbrown to match arena)
-                let subs_id: hashbrown::HashMap<NameId, TypeId> = substitutions
-                    .iter()
-                    .map(|(&k, v)| (k, arena.from_type(v)))
-                    .collect();
+        if let LegacyType::Function(ft) = self
+            && let (Some(params_id), Some(return_type_id)) = (&ft.params_id, &ft.return_type_id)
+        {
+            // Convert substitutions to TypeId-based (use hashbrown to match arena)
+            let subs_id: hashbrown::HashMap<NameId, TypeId> = substitutions
+                .iter()
+                .map(|(&k, v)| (k, arena.from_type(v)))
+                .collect();
 
-                // Use arena substitution
-                let new_params_id: TypeIdVec = params_id
-                    .iter()
-                    .map(|&p| arena.substitute(p, &subs_id))
-                    .collect();
-                let new_return_id = arena.substitute(*return_type_id, &subs_id);
+            // Use arena substitution
+            let new_params_id: TypeIdVec = params_id
+                .iter()
+                .map(|&p| arena.substitute(p, &subs_id))
+                .collect();
+            let new_return_id = arena.substitute(*return_type_id, &subs_id);
 
-                // Check if anything changed
-                let params_changed = new_params_id.iter().zip(params_id.iter()).any(|(a, b)| a != b);
-                let return_changed = new_return_id != *return_type_id;
+            // Check if anything changed
+            let params_changed = new_params_id
+                .iter()
+                .zip(params_id.iter())
+                .any(|(a, b)| a != b);
+            let return_changed = new_return_id != *return_type_id;
 
-                if !params_changed && !return_changed {
-                    return self.clone();
-                }
-
-                // Convert back to LegacyType (but keep TypeId fields populated!)
-                let new_params: Arc<[LegacyType]> = new_params_id
-                    .iter()
-                    .map(|&id| arena.to_type(id))
-                    .collect::<Vec<_>>()
-                    .into();
-                let new_return = arena.to_type(new_return_id);
-
-                return LegacyType::Function(FunctionType {
-                    params: new_params,
-                    return_type: Box::new(new_return),
-                    is_closure: ft.is_closure,
-                    params_id: Some(new_params_id),
-                    return_type_id: Some(new_return_id),
-                });
+            if !params_changed && !return_changed {
+                return self.clone();
             }
+
+            // Convert back to LegacyType (but keep TypeId fields populated!)
+            let new_params: Arc<[LegacyType]> = new_params_id
+                .iter()
+                .map(|&id| arena.to_type(id))
+                .collect::<Vec<_>>()
+                .into();
+            let new_return = arena.to_type(new_return_id);
+
+            return LegacyType::Function(FunctionType {
+                params: new_params,
+                return_type: Box::new(new_return),
+                is_closure: ft.is_closure,
+                params_id: Some(new_params_id),
+                return_type_id: Some(new_return_id),
+            });
         }
 
         // Fall back to regular substitution for other types or FunctionType without interned IDs

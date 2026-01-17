@@ -256,28 +256,30 @@ impl Analyzer {
                 // Could validate we're in a loop, skip for now
             }
             Stmt::Return(ret) => {
-                // Determine expected type for bidirectional type checking
-                let expected_value_type = self.current_function_return.as_ref().map(|expected| {
+                // Determine expected type for bidirectional type checking (TypeId-based)
+                let expected_value_type_id = self.current_function_return.map(|expected| {
                     // If expected is fallible, extract success type for comparison
                     // A `return value` statement returns the success type, not the full fallible type
-                    let expected_legacy = self.type_arena.borrow().to_type(*expected);
-                    match expected_legacy {
-                        LegacyType::Fallible(ft) => (*ft.success_type).clone(),
-                        other => other,
+                    if let Some((success, _error)) =
+                        self.type_arena.borrow().unwrap_fallible(expected)
+                    {
+                        success
+                    } else {
+                        expected
                     }
                 });
 
-                let ret_type = if let Some(value) = &ret.value {
-                    self.check_expr_expecting(value, expected_value_type.as_ref(), interner)?
+                let ret_type_id = if let Some(value) = &ret.value {
+                    self.check_expr_expecting_id(value, expected_value_type_id, interner)?
                 } else {
-                    self.ty_void()
+                    self.ty_void_id()
                 };
 
-                if let Some(expected) = &expected_value_type
-                    && !self.types_compatible(&ret_type, expected, interner)
+                if let Some(expected_id) = expected_value_type_id
+                    && !self.types_compatible_id(ret_type_id, expected_id, interner)
                 {
-                    let expected_str = self.type_display(expected);
-                    let found = self.type_display(&ret_type);
+                    let expected_str = self.type_display_id(expected_id);
+                    let found = self.type_display_id(ret_type_id);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: expected_str,

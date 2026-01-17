@@ -136,6 +136,25 @@ impl Analyzer {
         );
     }
 
+    /// Helper to add a type mismatch error with TypeId arguments (Phase 2)
+    pub(crate) fn add_type_mismatch_id(
+        &mut self,
+        expected: ArenaTypeId,
+        found: ArenaTypeId,
+        span: Span,
+    ) {
+        let expected_str = self.type_display_id(expected);
+        let found_str = self.type_display_id(found);
+        self.add_error(
+            SemanticError::TypeMismatch {
+                expected: expected_str,
+                found: found_str,
+                span: span.into(),
+            },
+            span,
+        );
+    }
+
     /// Helper to add a wrong argument count error
     pub(crate) fn add_wrong_arg_count(&mut self, expected: usize, found: usize, span: Span) {
         self.add_error(
