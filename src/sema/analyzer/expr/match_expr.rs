@@ -1,5 +1,4 @@
 use super::super::*;
-use crate::sema::PrimitiveType;
 use crate::sema::types::LegacyType;
 
 impl Analyzer {
@@ -116,13 +115,11 @@ impl Analyzer {
                 self.type_overrides.insert(sym, narrow_ty_id);
             }
 
-            // Check guard if present (must be bool)
+            // Check guard if present (must be bool) using TypeId
             if let Some(guard) = &arm.guard {
-                let guard_type = self.check_expr(guard, interner)?;
-                if guard_type != LegacyType::Primitive(PrimitiveType::Bool)
-                    && !guard_type.is_numeric()
-                {
-                    let found = self.type_display(&guard_type);
+                let guard_type_id = self.check_expr_id(guard, interner)?;
+                if !self.is_bool_id(guard_type_id) && !self.is_numeric_id(guard_type_id) {
+                    let found = self.type_display_id(guard_type_id);
                     self.add_error(
                         SemanticError::MatchGuardNotBool {
                             found,
