@@ -20,9 +20,9 @@ use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{MonomorphCache, substitute_type};
 use crate::sema::implement_registry::ImplTypeId;
-use crate::sema::type_arena::{TypeArena, TypeId};
+use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use crate::sema::types::NominalType;
-use crate::sema::{EntityRegistry, FunctionType, LegacyType, PrimitiveType, TypeKey};
+use crate::sema::{EntityRegistry, LegacyType, PrimitiveType, TypeKey};
 
 // Re-export box_interface_value for centralized access to all boxing helpers
 pub(crate) use super::interface_vtable::box_interface_value;
@@ -250,7 +250,7 @@ pub(crate) fn resolve_type_expr(ty: &TypeExpr, ctx: &CompileCtx) -> LegacyType {
         ctx.interner,
         &ctx.analyzed.name_table,
         module_id,
-        &ctx.arena.borrow(),
+        ctx.arena,
     );
     // Apply type substitutions if compiling a monomorphized context
     // This allows lambda params like (a: T, b: T) to use concrete types
@@ -297,7 +297,7 @@ pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
         ctx.interner,
         &ctx.analyzed.name_table,
         module_id,
-        &ctx.arena.borrow(),
+        ctx.arena,
     );
 
     // Convert to TypeId
@@ -477,7 +477,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
     interner: &Interner,
     name_table: &NameTable,
     module_id: ModuleId,
-    arena: &TypeArena,
+    arena: &RefCell<TypeArena>,
 ) -> LegacyType {
     // Create resolver for name lookups
     let resolver = Resolver::new(interner, name_table, module_id, &[]);
@@ -494,7 +494,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     TypeDefKind::Alias => {
                         // Type alias - return the aliased type
                         if let Some(aliased_id) = type_def.aliased_type {
-                            return arena.to_type(aliased_id);
+                            return arena.borrow().to_type(aliased_id);
                         }
                         panic!(
                             "INTERNAL ERROR: type alias has no aliased_type\n\
@@ -532,7 +532,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                         // between different interners (module vs main)
                         if let Some(metadata) = type_metadata.get(sym) {
                             // Verify this is the right type by comparing type_def_ids
-                            let vole_type = arena.to_type(metadata.vole_type);
+                            let vole_type = arena.borrow().to_type(metadata.vole_type);
                             let matches = match &vole_type {
                                 LegacyType::Nominal(NominalType::Record(r)) => {
                                     r.type_def_id == type_def_id
@@ -569,7 +569,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     _ => {
                         // Primitive or unknown - check type metadata
                         if let Some(metadata) = type_metadata.get(sym) {
-                            arena.to_type(metadata.vole_type)
+                            arena.borrow().to_type(metadata.vole_type)
                         } else {
                             panic!(
                                 "INTERNAL ERROR: unknown type kind with no metadata\n\
@@ -580,7 +580,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                     }
                 }
             } else if let Some(metadata) = type_metadata.get(sym) {
-                arena.to_type(metadata.vole_type)
+                arena.borrow().to_type(metadata.vole_type)
             } else {
                 // This is a type parameter (e.g., T in Box<T>).
                 // Type parameters are resolved when the generic is instantiated.
@@ -638,6 +638,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
             params,
             return_type,
         } => {
+            // Resolve param and return types first
             let param_types: Vec<LegacyType> = params
                 .iter()
                 .map(|p| {
@@ -661,11 +662,12 @@ pub(crate) fn resolve_type_expr_with_metadata(
                 module_id,
                 arena,
             );
-            LegacyType::Function(FunctionType {
-                params: param_types.into(),
-                return_type: Box::new(ret_type),
-                is_closure: false, // Type expressions don't know if closure
-            })
+            // Build function TypeId via arena (avoids direct FunctionType construction)
+            let mut arena_mut = arena.borrow_mut();
+            let param_ids: TypeIdVec = param_types.iter().map(|t| arena_mut.from_type(t)).collect();
+            let ret_id = arena_mut.from_type(&ret_type);
+            let func_type_id = arena_mut.function(param_ids, ret_id, false);
+            arena_mut.to_type(func_type_id)
         }
         TypeExpr::SelfType => {
             // Self type in interface signatures is resolved when the interface is implemented.

@@ -14,8 +14,8 @@ use crate::frontend::{
     AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, LetInit, MatchExpr, Pattern, RangeExpr,
     RecordFieldPattern, Symbol, UnaryOp,
 };
-use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::LegacyType;
+use crate::sema::entity_defs::TypeDefKind;
 
 use super::context::Cg;
 use super::structs::{
@@ -153,7 +153,8 @@ impl Cg<'_, '_, '_> {
                 if self.ctx.arena.borrow().is_interface(declared_type_id)
                     && !self.is_interface(value.type_id)
                 {
-                    value = box_interface_value_id(self.builder, self.ctx, value, declared_type_id)?;
+                    value =
+                        box_interface_value_id(self.builder, self.ctx, value, declared_type_id)?;
                 }
             }
             Ok(value)
@@ -1092,8 +1093,11 @@ impl Cg<'_, '_, '_> {
                     arm_variables = std::mem::replace(&mut *self.vars, saved_vars);
 
                     // Use Vole type (not Cranelift type) to determine comparison method
-                    let cmp =
-                        self.compile_equality_check(scrutinee_type_id, scrutinee.value, lit_val.value)?;
+                    let cmp = self.compile_equality_check(
+                        scrutinee_type_id,
+                        scrutinee.value,
+                        lit_val.value,
+                    )?;
                     Some(cmp)
                 }
                 Pattern::Val { name, .. } => {
@@ -1219,8 +1223,8 @@ impl Cg<'_, '_, '_> {
 
                     // For typed patterns on union types, we must defer field extraction
                     // until after the pattern check passes to avoid accessing invalid memory
-                    let is_conditional_extract =
-                        pattern_check.is_some() && self.ctx.arena.borrow().is_union(scrutinee_type_id);
+                    let is_conditional_extract = pattern_check.is_some()
+                        && self.ctx.arena.borrow().is_union(scrutinee_type_id);
 
                     if is_conditional_extract {
                         // Create an extraction block that only runs if pattern matches

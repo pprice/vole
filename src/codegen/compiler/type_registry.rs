@@ -62,7 +62,7 @@ impl Compiler<'_> {
             query.interner(),
             query.name_table(),
             module_id,
-            &self.analyzed.type_arena.borrow(),
+            &self.analyzed.type_arena,
         )
     }
 
@@ -80,7 +80,7 @@ impl Compiler<'_> {
             interner,
             &self.analyzed.name_table,
             self.func_registry.main_module(),
-            &self.analyzed.type_arena.borrow(),
+            &self.analyzed.type_arena,
         )
     }
 

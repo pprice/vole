@@ -240,7 +240,7 @@ impl Compiler<'_> {
                         interner,
                         &self.analyzed.name_table,
                         module_id,
-                        &self.analyzed.type_arena.borrow(),
+                        &self.analyzed.type_arena,
                     )
                 })
                 .unwrap_or(LegacyType::Void);
@@ -339,7 +339,7 @@ impl Compiler<'_> {
                         interner,
                         &self.analyzed.name_table,
                         module_id,
-                        &self.analyzed.type_arena.borrow(),
+                        &self.analyzed.type_arena,
                     )
                 })
                 .unwrap_or(LegacyType::Void);
@@ -423,7 +423,7 @@ impl Compiler<'_> {
                 interner,
                 &self.analyzed.name_table,
                 module_id,
-                &self.analyzed.type_arena.borrow(),
+                &self.analyzed.type_arena,
             ),
         };
 
@@ -442,7 +442,7 @@ impl Compiler<'_> {
                         interner,
                         &self.analyzed.name_table,
                         module_id,
-                        &self.analyzed.type_arena.borrow(),
+                        &self.analyzed.type_arena,
                     )
                 })
                 .unwrap_or(LegacyType::Void);
@@ -520,7 +520,7 @@ impl Compiler<'_> {
                             interner,
                             &self.analyzed.name_table,
                             module_id,
-                            &self.analyzed.type_arena.borrow(),
+                            &self.analyzed.type_arena,
                         )
                     })
                     .unwrap_or(LegacyType::Void);
@@ -599,7 +599,7 @@ impl Compiler<'_> {
                     query.interner(),
                     query.name_table(),
                     module_id,
-                    &self.analyzed.type_arena.borrow(),
+                    &self.analyzed.type_arena,
                 )
             }
         };
@@ -709,7 +709,7 @@ impl Compiler<'_> {
                         interner,
                         &self.analyzed.name_table,
                         module_id,
-                        &self.analyzed.type_arena.borrow(),
+                        &self.analyzed.type_arena,
                     )
                 }),
             _ => resolve_type_expr_with_metadata(
@@ -719,7 +719,7 @@ impl Compiler<'_> {
                 interner,
                 &self.analyzed.name_table,
                 module_id,
-                &self.analyzed.type_arena.borrow(),
+                &self.analyzed.type_arena,
             ),
         };
 
@@ -788,7 +788,7 @@ impl Compiler<'_> {
                         interner,
                         &self.analyzed.name_table,
                         module_id,
-                        &self.analyzed.type_arena.borrow(),
+                        &self.analyzed.type_arena,
                     )
                 })
                 .unwrap_or(LegacyType::Void);
@@ -815,7 +815,7 @@ impl Compiler<'_> {
                             interner,
                             &self.analyzed.name_table,
                             module_id,
-                            &self.analyzed.type_arena.borrow(),
+                            &self.analyzed.type_arena,
                         ),
                         self.pointer_type,
                     )
@@ -832,7 +832,7 @@ impl Compiler<'_> {
                         interner,
                         &self.analyzed.name_table,
                         module_id,
-                        &self.analyzed.type_arena.borrow(),
+                        &self.analyzed.type_arena,
                     )
                 })
                 .collect();
@@ -963,7 +963,8 @@ impl Compiler<'_> {
         let registry = query.registry();
         let interner = query.interner();
         let name_table = query.name_table();
-        let arena = self.analyzed.type_arena.borrow();
+        let type_metadata = &self.type_metadata;
+        let arena = &self.analyzed.type_arena;
         let resolve_param_type = |ty: &TypeExpr| -> LegacyType {
             if matches!(ty, TypeExpr::SelfType) {
                 self_type.clone()
@@ -971,11 +972,11 @@ impl Compiler<'_> {
                 resolve_type_expr_with_metadata(
                     ty,
                     registry,
-                    &self.type_metadata,
+                    type_metadata,
                     interner,
                     name_table,
                     module_id,
-                    &arena,
+                    arena,
                 )
             }
         };
@@ -991,7 +992,6 @@ impl Compiler<'_> {
             .iter()
             .map(|p| resolve_param_type(&p.ty))
             .collect();
-        drop(arena); // Release borrow before compile_block which needs mutable access
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
         // Get source file pointer and self symbol before borrowing ctx.func
@@ -1008,7 +1008,7 @@ impl Compiler<'_> {
                 query.interner(),
                 query.name_table(),
                 module_id,
-                &self.analyzed.type_arena.borrow(),
+                &self.analyzed.type_arena,
             )
         });
 
@@ -1149,7 +1149,7 @@ impl Compiler<'_> {
         let registry = &self.analyzed.entity_registry;
         let name_table = &self.analyzed.name_table;
         let type_metadata = &self.type_metadata;
-        let arena = self.analyzed.type_arena.borrow();
+        let arena = &self.analyzed.type_arena;
         let resolve_param_type = |ty: &TypeExpr| -> LegacyType {
             if matches!(ty, TypeExpr::SelfType) {
                 self_type.clone()
@@ -1161,7 +1161,7 @@ impl Compiler<'_> {
                     interner,
                     name_table,
                     module_id,
-                    &arena,
+                    arena,
                 )
             }
         };
@@ -1177,7 +1177,6 @@ impl Compiler<'_> {
             .iter()
             .map(|p| resolve_param_type(&p.ty))
             .collect();
-        drop(arena); // Release borrow before compile_block which needs mutable access
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
         // Get source file pointer and self symbol before borrowing ctx.func
@@ -1193,7 +1192,7 @@ impl Compiler<'_> {
                 interner,
                 &self.analyzed.name_table,
                 module_id,
-                &self.analyzed.type_arena.borrow(),
+                &self.analyzed.type_arena,
             )
         });
 
@@ -1328,7 +1327,8 @@ impl Compiler<'_> {
         let registry = query.registry();
         let interner = query.interner();
         let name_table = query.name_table();
-        let arena = self.analyzed.type_arena.borrow();
+        let type_metadata = &self.type_metadata;
+        let arena = &self.analyzed.type_arena;
         let resolve_param_type = |ty: &TypeExpr| -> LegacyType {
             if matches!(ty, TypeExpr::SelfType) {
                 self_vole_type.clone()
@@ -1336,11 +1336,11 @@ impl Compiler<'_> {
                 resolve_type_expr_with_metadata(
                     ty,
                     registry,
-                    &self.type_metadata,
+                    type_metadata,
                     interner,
                     name_table,
                     module_id,
-                    &arena,
+                    arena,
                 )
             }
         };
@@ -1366,15 +1366,14 @@ impl Compiler<'_> {
                 resolve_type_expr_with_metadata(
                     t,
                     registry,
-                    &self.type_metadata,
+                    type_metadata,
                     interner,
                     name_table,
                     module_id,
-                    &arena,
+                    arena,
                 )
             }
         });
-        drop(arena); // Release borrow before compile_block which needs mutable access
 
         // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -1507,7 +1506,8 @@ impl Compiler<'_> {
         let registry = query.registry();
         let interner = query.interner();
         let name_table = query.name_table();
-        let arena = self.analyzed.type_arena.borrow();
+        let type_metadata = &self.type_metadata;
+        let arena = &self.analyzed.type_arena;
         let resolve_param_type = |ty: &TypeExpr| -> LegacyType {
             if matches!(ty, TypeExpr::SelfType) {
                 self_vole_type.clone()
@@ -1515,11 +1515,11 @@ impl Compiler<'_> {
                 resolve_type_expr_with_metadata(
                     ty,
                     registry,
-                    &self.type_metadata,
+                    type_metadata,
                     interner,
                     name_table,
                     module_id,
-                    &arena,
+                    arena,
                 )
             }
         };
@@ -1545,15 +1545,14 @@ impl Compiler<'_> {
                 resolve_type_expr_with_metadata(
                     t,
                     registry,
-                    &self.type_metadata,
+                    type_metadata,
                     interner,
                     name_table,
                     module_id,
-                    &arena,
+                    arena,
                 )
             }
         });
-        drop(arena); // Release borrow before compile_block which needs mutable access
 
         // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -1679,7 +1678,8 @@ impl Compiler<'_> {
 
             // Collect param types
             let query = self.query();
-            let arena = self.analyzed.type_arena.borrow();
+            let type_metadata = &self.type_metadata;
+            let arena = &self.analyzed.type_arena;
             let param_types: Vec<types::Type> = method
                 .params
                 .iter()
@@ -1688,11 +1688,11 @@ impl Compiler<'_> {
                         &resolve_type_expr_with_metadata(
                             &p.ty,
                             query.registry(),
-                            &self.type_metadata,
+                            type_metadata,
                             query.interner(),
                             query.name_table(),
                             module_id,
-                            &arena,
+                            arena,
                         ),
                         self.pointer_type,
                     )
@@ -1705,15 +1705,14 @@ impl Compiler<'_> {
                     resolve_type_expr_with_metadata(
                         &p.ty,
                         query.registry(),
-                        &self.type_metadata,
+                        type_metadata,
                         query.interner(),
                         query.name_table(),
                         module_id,
-                        &arena,
+                        arena,
                     )
                 })
                 .collect();
-            drop(arena); // Release borrow before compile_block which needs mutable access
             let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
             // Get source file pointer before borrowing ctx.func
@@ -1846,7 +1845,8 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             // Resolve param types
-            let arena = self.analyzed.type_arena.borrow();
+            let type_metadata = &self.type_metadata;
+            let arena = &self.analyzed.type_arena;
             let param_types: Vec<types::Type> = method
                 .params
                 .iter()
@@ -1855,11 +1855,11 @@ impl Compiler<'_> {
                         &resolve_type_expr_with_metadata(
                             &p.ty,
                             &self.analyzed.entity_registry,
-                            &self.type_metadata,
+                            type_metadata,
                             module_interner,
                             &self.analyzed.name_table,
                             module_id,
-                            &arena,
+                            arena,
                         ),
                         self.pointer_type,
                     )
@@ -1872,15 +1872,14 @@ impl Compiler<'_> {
                     resolve_type_expr_with_metadata(
                         &p.ty,
                         &self.analyzed.entity_registry,
-                        &self.type_metadata,
+                        type_metadata,
                         module_interner,
                         &self.analyzed.name_table,
                         module_id,
-                        &arena,
+                        arena,
                     )
                 })
                 .collect();
-            drop(arena);
             let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
             // Get source file pointer and self symbol (use module interner for method body)
@@ -1900,7 +1899,7 @@ impl Compiler<'_> {
                         module_interner,
                         &self.analyzed.name_table,
                         module_id,
-                        &self.analyzed.type_arena.borrow(),
+                        &self.analyzed.type_arena,
                     )
                 })
                 .unwrap_or(LegacyType::Void);
@@ -2017,7 +2016,7 @@ impl Compiler<'_> {
                             module_interner,
                             &self.analyzed.name_table,
                             module_id,
-                            &self.analyzed.type_arena.borrow(),
+                            &self.analyzed.type_arena,
                         )
                     })
                     .unwrap_or(LegacyType::Void);
@@ -2032,7 +2031,8 @@ impl Compiler<'_> {
                 self.jit.ctx.func.signature = sig;
 
                 // Resolve param types
-                let arena = self.analyzed.type_arena.borrow();
+                let type_metadata = &self.type_metadata;
+                let arena = &self.analyzed.type_arena;
                 let param_types: Vec<types::Type> = method
                     .params
                     .iter()
@@ -2041,11 +2041,11 @@ impl Compiler<'_> {
                             &resolve_type_expr_with_metadata(
                                 &p.ty,
                                 &self.analyzed.entity_registry,
-                                &self.type_metadata,
+                                type_metadata,
                                 module_interner,
                                 &self.analyzed.name_table,
                                 module_id,
-                                &arena,
+                                arena,
                             ),
                             self.pointer_type,
                         )
@@ -2058,15 +2058,14 @@ impl Compiler<'_> {
                         resolve_type_expr_with_metadata(
                             &p.ty,
                             &self.analyzed.entity_registry,
-                            &self.type_metadata,
+                            type_metadata,
                             module_interner,
                             &self.analyzed.name_table,
                             module_id,
-                            &arena,
+                            arena,
                         )
                     })
                     .collect();
-                drop(arena); // Release borrow before compile_block which needs mutable access
                 let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
                 // Get source file pointer

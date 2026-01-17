@@ -279,7 +279,7 @@ impl Cg<'_, '_, '_> {
             | MethodTarget::Default {
                 method_info,
                 return_type,
-            } => (method_info, return_type)
+            } => (method_info, return_type),
         };
 
         // Check if this is a monomorphized class method call
@@ -366,8 +366,11 @@ impl Cg<'_, '_, '_> {
         } else {
             // Generic methods are compiled with TypeParam -> i64, but we may need
             // a different type (f64, bool, etc). Convert using word_to_value.
-            let expected_ty =
-                type_id_to_cranelift(return_type_id, &self.ctx.arena.borrow(), self.ctx.pointer_type);
+            let expected_ty = type_id_to_cranelift(
+                return_type_id,
+                &self.ctx.arena.borrow(),
+                self.ctx.pointer_type,
+            );
             let actual_result = results[0];
             let actual_ty = self.builder.func.dfg.value_type(actual_result);
 
@@ -659,9 +662,9 @@ impl Cg<'_, '_, '_> {
         // Extract function type components from the arena
         let (param_ids, return_type_id) = {
             let arena = self.ctx.arena.borrow();
-            let (params, ret, _) = arena
-                .unwrap_function(func_type_id)
-                .ok_or_else(|| "Expected function type for functional interface call".to_string())?;
+            let (params, ret, _) = arena.unwrap_function(func_type_id).ok_or_else(|| {
+                "Expected function type for functional interface call".to_string()
+            })?;
             (params.clone(), ret)
         };
 

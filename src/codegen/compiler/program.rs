@@ -305,7 +305,7 @@ impl Compiler<'_> {
                                 query.interner(),
                                 query.name_table(),
                                 module_id,
-                                &self.analyzed.type_arena.borrow(),
+                                &self.analyzed.type_arena,
                             )
                         })
                         .unwrap_or(LegacyType::Void);
@@ -432,7 +432,7 @@ impl Compiler<'_> {
                                 query.interner(),
                                 query.name_table(),
                                 module_id,
-                                &self.analyzed.type_arena.borrow(),
+                                &self.analyzed.type_arena,
                             )
                         })
                         .unwrap_or(LegacyType::Void);
@@ -509,7 +509,8 @@ impl Compiler<'_> {
 
         // Collect param types
         let query = self.query();
-        let arena = self.analyzed.type_arena.borrow();
+        let type_metadata = &self.type_metadata;
+        let arena = &self.analyzed.type_arena;
         let param_types: Vec<types::Type> = func
             .params
             .iter()
@@ -518,11 +519,11 @@ impl Compiler<'_> {
                     &resolve_type_expr_with_metadata(
                         &p.ty,
                         query.registry(),
-                        &self.type_metadata,
+                        type_metadata,
                         query.interner(),
                         query.name_table(),
                         module_id,
-                        &arena,
+                        arena,
                     ),
                     self.pointer_type,
                 )
@@ -535,15 +536,14 @@ impl Compiler<'_> {
                 resolve_type_expr_with_metadata(
                     &p.ty,
                     query.registry(),
-                    &self.type_metadata,
+                    type_metadata,
                     query.interner(),
                     query.name_table(),
                     module_id,
-                    &arena,
+                    arena,
                 )
             })
             .collect();
-        drop(arena);
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type
@@ -555,7 +555,7 @@ impl Compiler<'_> {
                 query.interner(),
                 query.name_table(),
                 module_id,
-                &self.analyzed.type_arena.borrow(),
+                &self.analyzed.type_arena,
             )
         });
 
@@ -654,7 +654,8 @@ impl Compiler<'_> {
 
         // Collect param types before borrowing ctx.func
         let query = self.query();
-        let arena = self.analyzed.type_arena.borrow();
+        let type_metadata = &self.type_metadata;
+        let arena = &self.analyzed.type_arena;
         let param_types: Vec<types::Type> = func
             .params
             .iter()
@@ -663,11 +664,11 @@ impl Compiler<'_> {
                     &resolve_type_expr_with_metadata(
                         &p.ty,
                         query.registry(),
-                        &self.type_metadata,
+                        type_metadata,
                         query.interner(),
                         query.name_table(),
                         module_id,
-                        &arena,
+                        arena,
                     ),
                     self.pointer_type,
                 )
@@ -680,15 +681,14 @@ impl Compiler<'_> {
                 resolve_type_expr_with_metadata(
                     &p.ty,
                     query.registry(),
-                    &self.type_metadata,
+                    type_metadata,
                     query.interner(),
                     query.name_table(),
                     module_id,
-                    &arena,
+                    arena,
                 )
             })
             .collect();
-        drop(arena);
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type (needed for raise statements in fallible functions)
@@ -700,7 +700,7 @@ impl Compiler<'_> {
                 query.interner(),
                 query.name_table(),
                 module_id,
-                &self.analyzed.type_arena.borrow(),
+                &self.analyzed.type_arena,
             )
         });
 
@@ -908,7 +908,7 @@ impl Compiler<'_> {
                                 query.interner(),
                                 query.name_table(),
                                 module_id,
-                                &self.analyzed.type_arena.borrow(),
+                                &self.analyzed.type_arena,
                             )
                         })
                         .unwrap_or(LegacyType::Void);
@@ -975,7 +975,8 @@ impl Compiler<'_> {
 
         // Collect param types before borrowing ctx.func
         let query = self.query();
-        let arena = self.analyzed.type_arena.borrow();
+        let type_metadata = &self.type_metadata;
+        let arena = &self.analyzed.type_arena;
         let param_types: Vec<types::Type> = func
             .params
             .iter()
@@ -984,11 +985,11 @@ impl Compiler<'_> {
                     &resolve_type_expr_with_metadata(
                         &p.ty,
                         query.registry(),
-                        &self.type_metadata,
+                        type_metadata,
                         query.interner(),
                         query.name_table(),
                         module_id,
-                        &arena,
+                        arena,
                     ),
                     self.pointer_type,
                 )
@@ -1001,15 +1002,14 @@ impl Compiler<'_> {
                 resolve_type_expr_with_metadata(
                     &p.ty,
                     query.registry(),
-                    &self.type_metadata,
+                    type_metadata,
                     query.interner(),
                     query.name_table(),
                     module_id,
-                    &arena,
+                    arena,
                 )
             })
             .collect();
-        drop(arena);
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type (needed for raise statements in fallible functions)
@@ -1021,7 +1021,7 @@ impl Compiler<'_> {
                 query.interner(),
                 query.name_table(),
                 module_id,
-                &self.analyzed.type_arena.borrow(),
+                &self.analyzed.type_arena,
             )
         });
 
