@@ -16,7 +16,7 @@ use crate::frontend::{
 };
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::types::NominalType;
-use crate::sema::{LegacyType, PrimitiveType};
+use crate::sema::LegacyType;
 
 use super::context::Cg;
 use super::structs::{
@@ -24,7 +24,7 @@ use super::structs::{
 };
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    array_element_tag_id, box_interface_value, box_interface_value_id, fallible_error_tag,
+    array_element_tag_id, box_interface_value, box_interface_value_id, fallible_error_tag_by_id,
     resolve_type_expr, tuple_layout_id, type_id_to_cranelift, type_to_cranelift,
 };
 use crate::sema::type_arena::TypeId;
@@ -795,13 +795,15 @@ impl Cg<'_, '_, '_> {
     fn is_expr(&mut self, is_expr: &crate::frontend::IsExpr) -> Result<CompiledValue, String> {
         let value = self.expr(&is_expr.value)?;
         let tested_type = resolve_type_expr(&is_expr.type_expr, self.ctx);
-        let value_legacy_type = self.to_legacy(value.type_id);
+        let tested_type_id = self.ctx.arena.borrow_mut().from_type(&tested_type);
 
-        if let LegacyType::Union(variants) = &value_legacy_type {
+        let arena = self.ctx.arena.borrow();
+        if let Some(variants) = arena.unwrap_union(value.type_id) {
             let expected_tag = variants
                 .iter()
-                .position(|v| v == &tested_type)
+                .position(|&v| v == tested_type_id)
                 .unwrap_or(usize::MAX);
+            drop(arena);
 
             let tag = self
                 .builder
@@ -812,7 +814,9 @@ impl Cg<'_, '_, '_> {
 
             Ok(self.bool_value(result))
         } else {
-            Ok(self.bool_const(value_legacy_type == tested_type))
+            drop(arena);
+            // O(1) type comparison with TypeId
+            Ok(self.bool_const(value.type_id == tested_type_id))
         }
     }
 
@@ -821,14 +825,15 @@ impl Cg<'_, '_, '_> {
     fn compile_type_pattern_check(
         &mut self,
         scrutinee: &CompiledValue,
-        pattern_type: &LegacyType,
+        pattern_type_id: TypeId,
     ) -> Result<Option<Value>, String> {
-        let scrutinee_type = self.to_legacy(scrutinee.type_id);
-        if let LegacyType::Union(variants) = &scrutinee_type {
+        let arena = self.ctx.arena.borrow();
+        if let Some(variants) = arena.unwrap_union(scrutinee.type_id) {
             let expected_tag = variants
                 .iter()
-                .position(|v| v == pattern_type)
+                .position(|&v| v == pattern_type_id)
                 .unwrap_or(usize::MAX);
+            drop(arena);
 
             if expected_tag == usize::MAX {
                 // Pattern type not in union - will never match
@@ -845,8 +850,9 @@ impl Cg<'_, '_, '_> {
 
             Ok(Some(result))
         } else {
-            // Non-union scrutinee - pattern matches if types are equal
-            if scrutinee_type == *pattern_type {
+            drop(arena);
+            // Non-union scrutinee - pattern matches if types are equal (O(1) with TypeId)
+            if scrutinee.type_id == pattern_type_id {
                 Ok(None) // Always matches
             } else {
                 // Never matches
@@ -860,22 +866,24 @@ impl Cg<'_, '_, '_> {
     /// Handles string comparison via runtime function, f64 via fcmp, and integers via icmp.
     fn compile_equality_check(
         &mut self,
-        ty: &LegacyType,
+        type_id: TypeId,
         left: Value,
         right: Value,
     ) -> Result<Value, String> {
-        Ok(match ty {
-            LegacyType::Primitive(PrimitiveType::String) => {
-                if self.ctx.func_registry.has_runtime(RuntimeFn::StringEq) {
-                    self.call_runtime(RuntimeFn::StringEq, &[left, right])?
-                } else {
-                    self.builder.ins().icmp(IntCC::Equal, left, right)
-                }
+        let arena = self.ctx.arena.borrow();
+        Ok(if arena.is_string(type_id) {
+            drop(arena);
+            if self.ctx.func_registry.has_runtime(RuntimeFn::StringEq) {
+                self.call_runtime(RuntimeFn::StringEq, &[left, right])?
+            } else {
+                self.builder.ins().icmp(IntCC::Equal, left, right)
             }
-            LegacyType::Primitive(PrimitiveType::F64) => {
-                self.builder.ins().fcmp(FloatCC::Equal, left, right)
-            }
-            _ => self.builder.ins().icmp(IntCC::Equal, left, right),
+        } else if type_id == arena.f64() {
+            drop(arena);
+            self.builder.ins().fcmp(FloatCC::Equal, left, right)
+        } else {
+            drop(arena);
+            self.builder.ins().icmp(IntCC::Equal, left, right)
         })
     }
 
@@ -1019,8 +1027,8 @@ impl Cg<'_, '_, '_> {
     pub fn match_expr(&mut self, match_expr: &MatchExpr) -> Result<CompiledValue, String> {
         let scrutinee = self.expr(&match_expr.scrutinee)?;
         let scrutinee_type_id = scrutinee.type_id;
-        let scrutinee_type = self.to_legacy(scrutinee_type_id);
-        tracing::trace!(scrutinee_type = ?scrutinee_type, "match scrutinee");
+        let scrutinee_type_str = self.ctx.arena.borrow().display_basic(scrutinee_type_id);
+        tracing::trace!(scrutinee_type = %scrutinee_type_str, "match scrutinee");
 
         let merge_block = self.builder.create_block();
         self.builder.append_block_param(merge_block, types::I64);
@@ -1062,8 +1070,7 @@ impl Cg<'_, '_, '_> {
                     // Check if this identifier is a type name (class/record)
                     if let Some(type_meta) = self.ctx.type_metadata.get(name) {
                         // Type pattern - compare against union variant tag
-                        let vole_type = self.to_legacy(type_meta.vole_type);
-                        self.compile_type_pattern_check(&scrutinee, &vole_type)?
+                        self.compile_type_pattern_check(&scrutinee, type_meta.vole_type)?
                     } else {
                         // Regular identifier binding
                         let var = self.builder.declare_var(scrutinee.ty);
@@ -1074,7 +1081,8 @@ impl Cg<'_, '_, '_> {
                 }
                 Pattern::Type { type_expr, .. } => {
                     let pattern_type = resolve_type_expr(type_expr, self.ctx);
-                    self.compile_type_pattern_check(&scrutinee, &pattern_type)?
+                    let pattern_type_id = self.ctx.arena.borrow_mut().from_type(&pattern_type);
+                    self.compile_type_pattern_check(&scrutinee, pattern_type_id)?
                 }
                 Pattern::Literal(lit_expr) => {
                     // Save and restore vars for pattern matching
@@ -1083,11 +1091,8 @@ impl Cg<'_, '_, '_> {
                     arm_variables = std::mem::replace(&mut *self.vars, saved_vars);
 
                     // Use Vole type (not Cranelift type) to determine comparison method
-                    let cmp = self.compile_equality_check(
-                        &scrutinee_type,
-                        scrutinee.value,
-                        lit_val.value,
-                    )?;
+                    let cmp =
+                        self.compile_equality_check(scrutinee_type_id, scrutinee.value, lit_val.value)?;
                     Some(cmp)
                 }
                 Pattern::Val { name, .. } => {
@@ -1096,9 +1101,8 @@ impl Cg<'_, '_, '_> {
                         .get(name)
                         .ok_or_else(|| "undefined variable in val pattern".to_string())?;
                     let var_val = self.builder.use_var(var);
-                    let var_type = self.to_legacy(var_type_id);
 
-                    let cmp = self.compile_equality_check(&var_type, scrutinee.value, var_val)?;
+                    let cmp = self.compile_equality_check(var_type_id, scrutinee.value, var_val)?;
                     Some(cmp)
                 }
                 Pattern::Success { inner, .. } => {
@@ -1117,9 +1121,14 @@ impl Cg<'_, '_, '_> {
                     // If there's an inner pattern, we need to extract payload and bind it
                     if let Some(inner_pat) = inner {
                         // Extract the success type from scrutinee's vole_type
-                        if let LegacyType::Fallible(ft) = &scrutinee_type {
-                            let success_type = &*ft.success_type;
-                            let payload_ty = type_to_cranelift(success_type, self.ctx.pointer_type);
+                        if let Some((success_type_id, _error_type_id)) =
+                            self.ctx.arena.borrow().unwrap_fallible(scrutinee_type_id)
+                        {
+                            let payload_ty = type_id_to_cranelift(
+                                success_type_id,
+                                &self.ctx.arena.borrow(),
+                                self.ctx.pointer_type,
+                            );
                             let payload = self.builder.ins().load(
                                 payload_ty,
                                 MemFlags::new(),
@@ -1131,7 +1140,6 @@ impl Cg<'_, '_, '_> {
                             if let Pattern::Identifier { name, .. } = inner_pat.as_ref() {
                                 let var = self.builder.declare_var(payload_ty);
                                 self.builder.def_var(var, payload);
-                                let success_type_id = self.intern_type(success_type);
                                 arm_variables.insert(*name, (var, success_type_id));
                             }
                         }
@@ -1195,9 +1203,8 @@ impl Cg<'_, '_, '_> {
                     let (pattern_check, pattern_type_id) = if let Some(name) = type_name {
                         // Typed record pattern - need to check type first
                         if let Some(type_meta) = self.ctx.type_metadata.get(name) {
-                            let vole_type = self.to_legacy(type_meta.vole_type);
                             (
-                                self.compile_type_pattern_check(&scrutinee, &vole_type)?,
+                                self.compile_type_pattern_check(&scrutinee, type_meta.vole_type)?,
                                 Some(type_meta.vole_type),
                             )
                         } else {
@@ -1212,7 +1219,7 @@ impl Cg<'_, '_, '_> {
                     // For typed patterns on union types, we must defer field extraction
                     // until after the pattern check passes to avoid accessing invalid memory
                     let is_conditional_extract =
-                        pattern_check.is_some() && matches!(&scrutinee_type, LegacyType::Union(_));
+                        pattern_check.is_some() && self.ctx.arena.borrow().is_union(scrutinee_type_id);
 
                     if is_conditional_extract {
                         // Create an extraction block that only runs if pattern matches
@@ -1279,7 +1286,7 @@ impl Cg<'_, '_, '_> {
                         // Non-conditional case: extract fields directly
                         // Determine the value to extract fields from
                         let (field_source, field_source_type_id) =
-                            if let LegacyType::Union(_) = &scrutinee_type {
+                            if self.ctx.arena.borrow().is_union(scrutinee_type_id) {
                                 if let Some(pt_id) = pattern_type_id {
                                     let payload = self.builder.ins().load(
                                         types::I64,
@@ -1684,22 +1691,27 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         tag: Value,
     ) -> Result<Option<Value>, String> {
-        let scrutinee_type = self.to_legacy(scrutinee.type_id);
-        let LegacyType::Fallible(ft) = &scrutinee_type else {
+        let arena = self.ctx.arena.borrow();
+        let Some((_success_type_id, error_type_id)) = arena.unwrap_fallible(scrutinee.type_id)
+        else {
             // Not matching on a fallible type
+            drop(arena);
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
-        let Some(error_tag) = fallible_error_tag(
-            ft,
+        let Some(error_tag) = fallible_error_tag_by_id(
+            error_type_id,
             name,
+            &arena,
             self.ctx.interner,
             &self.ctx.analyzed.name_table,
             &self.ctx.analyzed.entity_registry,
         ) else {
             // Error type not found in fallible - will never match
+            drop(arena);
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
+        drop(arena);
 
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
         Ok(Some(is_this_error))
@@ -1728,26 +1740,32 @@ impl Cg<'_, '_, '_> {
                 }
             });
 
-        let Some(error_type_id) = error_type_id else {
+        let Some(error_type_def_id) = error_type_id else {
             // Unknown error type
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
-        let scrutinee_type = self.to_legacy(scrutinee.type_id);
-        let LegacyType::Fallible(ft) = &scrutinee_type else {
+        let arena = self.ctx.arena.borrow();
+        let Some((_success_type_id, fallible_error_type_id)) =
+            arena.unwrap_fallible(scrutinee.type_id)
+        else {
+            drop(arena);
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
-        let Some(error_tag) = fallible_error_tag(
-            ft,
+        let Some(error_tag) = fallible_error_tag_by_id(
+            fallible_error_type_id,
             name,
+            &arena,
             self.ctx.interner,
             &self.ctx.analyzed.name_table,
             &self.ctx.analyzed.entity_registry,
         ) else {
             // Error type not found in fallible
+            drop(arena);
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
+        drop(arena);
 
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
 
@@ -1756,7 +1774,7 @@ impl Cg<'_, '_, '_> {
             .ctx
             .analyzed
             .entity_registry
-            .fields_on_type(error_type_id)
+            .fields_on_type(error_type_def_id)
             .map(|field_id| self.ctx.analyzed.entity_registry.get_field(field_id))
             .collect();
 

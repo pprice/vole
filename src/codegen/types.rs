@@ -1164,6 +1164,46 @@ pub(crate) fn fallible_error_tag(
     }
 }
 
+/// Get the error tag for a specific error type within a fallible type (TypeId version).
+/// Returns the 1-based index (tag 0 is reserved for success).
+///
+/// Takes the error part of a fallible type as a TypeId and uses arena queries
+/// to determine the tag for the given error_name.
+pub(crate) fn fallible_error_tag_by_id(
+    error_type_id: TypeId,
+    error_name: Symbol,
+    arena: &TypeArena,
+    interner: &Interner,
+    name_table: &NameTable,
+    entity_registry: &EntityRegistry,
+) -> Option<i64> {
+    let error_name_str = interner.resolve(error_name);
+
+    // Check if error_type_id is a single Error type
+    if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
+        let info_name = name_table.last_segment_str(entity_registry.name_id(type_def_id));
+        if info_name.as_deref() == Some(error_name_str) {
+            return Some(1); // Single error type always gets tag 1
+        }
+        return None;
+    }
+
+    // Check if error_type_id is a Union of error types
+    if let Some(variants) = arena.unwrap_union(error_type_id) {
+        for (idx, &variant) in variants.iter().enumerate() {
+            if let Some(type_def_id) = arena.unwrap_error(variant) {
+                let info_name = name_table.last_segment_str(entity_registry.name_id(type_def_id));
+                if info_name.as_deref() == Some(error_name_str) {
+                    return Some((idx + 1) as i64);
+                }
+            }
+        }
+        return None;
+    }
+
+    None
+}
+
 /// Convert a Cranelift type back to a Vole type (for return value inference)
 #[allow(dead_code)] // Used by compiler.rs during migration
 pub(crate) fn cranelift_to_vole_type(ty: Type) -> LegacyType {
