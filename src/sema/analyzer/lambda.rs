@@ -105,7 +105,7 @@ impl Analyzer {
             LambdaBody::Expr(expr) => {
                 // For expression body, analyze and use as return type
                 match self.check_expr(expr, interner) {
-                    Ok(ty) => ty,
+                    Ok(ty_id) => self.id_to_type(ty_id),
                     Err(_) => self.ty_invalid_traced("fallback"),
                 }
             }

@@ -41,7 +41,8 @@ impl Analyzer {
                     self.check_expr_expecting(arg, Some(param_ty), interner)?
                 }
             } else {
-                self.check_expr(arg, interner)?
+                let ty_id = self.check_expr(arg, interner)?;
+                self.id_to_type(ty_id)
             };
 
             // Convert to TypeId for compatibility check (Phase 2 migration)

@@ -45,6 +45,14 @@ impl Analyzer {
         )
     }
 
+    pub(super) fn type_display_pair_id(&self, left: ArenaTypeId, right: ArenaTypeId) -> String {
+        format!(
+            "{} and {}",
+            self.type_display_id(left),
+            self.type_display_id(right)
+        )
+    }
+
     /// Format a structural type for warning messages
     #[allow(dead_code)] // Infrastructure for future warnings
     pub(super) fn format_structural_type(&mut self, structural: &StructuralType) -> String {
@@ -98,6 +106,19 @@ impl Analyzer {
         );
     }
 
+    /// Helper to add a type mismatch error with TypeId
+    pub(crate) fn type_error_id(&mut self, expected: &str, found: ArenaTypeId, span: Span) {
+        let found_str = self.type_display_id(found);
+        self.add_error(
+            SemanticError::TypeMismatch {
+                expected: expected.to_string(),
+                found: found_str,
+                span: span.into(),
+            },
+            span,
+        );
+    }
+
     /// Helper to add a type mismatch error for binary operations
     pub(crate) fn type_error_pair(
         &mut self,
@@ -107,6 +128,25 @@ impl Analyzer {
         span: Span,
     ) {
         let found = self.type_display_pair(left, right);
+        self.add_error(
+            SemanticError::TypeMismatch {
+                expected: expected.to_string(),
+                found,
+                span: span.into(),
+            },
+            span,
+        );
+    }
+
+    /// Helper to add a type mismatch error for binary operations with TypeId
+    pub(crate) fn type_error_pair_id(
+        &mut self,
+        expected: &str,
+        left: ArenaTypeId,
+        right: ArenaTypeId,
+        span: Span,
+    ) {
+        let found = self.type_display_pair_id(left, right);
         self.add_error(
             SemanticError::TypeMismatch {
                 expected: expected.to_string(),

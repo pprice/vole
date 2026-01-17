@@ -242,6 +242,12 @@ impl Analyzer {
         false
     }
 
+    /// Check if a type implements Stringable (TypeId version)
+    pub fn satisfies_stringable_id(&self, ty_id: ArenaTypeId, interner: &Interner) -> bool {
+        let ty = self.id_to_type(ty_id);
+        self.satisfies_stringable(&ty, interner)
+    }
+
     /// Check if a type structurally satisfies an interface
     ///
     /// This implements duck typing: a type satisfies an interface if it has

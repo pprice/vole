@@ -353,6 +353,12 @@ impl Analyzer {
         ty
     }
 
+    /// Record the resolved type for an expression using TypeId directly.
+    fn record_expr_type_id(&mut self, expr: &Expr, type_id: ArenaTypeId) -> ArenaTypeId {
+        self.expr_types.insert(expr.id, type_id);
+        type_id
+    }
+
     /// Check if we're currently inside a lambda
     fn in_lambda(&self) -> bool {
         !self.lambda_captures.is_empty()
@@ -508,6 +514,16 @@ impl Analyzer {
         // Then check scope
         let arena = self.type_arena.borrow();
         self.scope.get(sym).map(|v| arena.to_type(v.ty))
+    }
+
+    /// Get variable type as TypeId with flow-sensitive overrides
+    fn get_variable_type_id(&self, sym: Symbol) -> Option<ArenaTypeId> {
+        // Check overrides first (for narrowed types inside if-blocks)
+        if let Some(ty) = self.type_overrides.get(&sym) {
+            return Some(*ty);
+        }
+        // Then check scope
+        self.scope.get(sym).map(|v| v.ty)
     }
 
     /// Get function type if the symbol refers to a top-level function.

@@ -1,6 +1,7 @@
 use super::super::*;
 use crate::identity::Namer;
 use crate::sema::compatibility::TypeCompatibility;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
@@ -9,7 +10,7 @@ impl Analyzer {
         expr: &Expr,
         call: &CallExpr,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // Handle assert specially
         if self.is_assert_call(&call.callee, interner) {
             // Assert is an impure builtin - mark side effects if inside lambda
@@ -26,11 +27,11 @@ impl Analyzer {
                     },
                     expr.span,
                 );
-                return Ok(self.ty_void());
+                return Ok(ArenaTypeId::VOID);
             }
 
-            let arg_ty_id = self.check_expr_id(&call.args[0], interner)?;
-            if !self.is_bool_id(arg_ty_id) && !self.is_invalid_id(arg_ty_id) {
+            let arg_ty_id = self.check_expr(&call.args[0], interner)?;
+            if !self.is_bool_id(arg_ty_id) && !arg_ty_id.is_invalid() {
                 let found = self.type_display_id(arg_ty_id);
                 self.add_error(
                     SemanticError::TypeMismatch {
@@ -42,7 +43,7 @@ impl Analyzer {
                 );
             }
 
-            return Ok(self.ty_void());
+            return Ok(ArenaTypeId::VOID);
         }
 
         if let ExprKind::Identifier(sym) = &call.callee.kind {
@@ -64,7 +65,7 @@ impl Analyzer {
                     true, // with_inference
                     interner,
                 )?;
-                return Ok(*func_type.return_type);
+                return Ok(self.type_to_id(&func_type.return_type));
             }
 
             // Check if it's a generic function via EntityRegistry
@@ -87,12 +88,16 @@ impl Analyzer {
                     self.mark_lambda_has_side_effects();
                 }
 
-                // First, type-check the arguments to get their types
-                let arg_types: Vec<LegacyType> = call
+                // First, type-check the arguments to get their types (as TypeId)
+                let arg_type_ids: Vec<ArenaTypeId> = call
                     .args
                     .iter()
                     .map(|arg| self.check_expr(arg, interner))
                     .collect::<Result<Vec<_>, _>>()?;
+
+                // Convert to LegacyTypes for inference (inference still uses LegacyType)
+                let arg_types: Vec<LegacyType> =
+                    arg_type_ids.iter().map(|&id| self.id_to_type(id)).collect();
 
                 // Convert TypeIds to LegacyTypes for inference
                 let param_types: Vec<LegacyType> = generic_def
@@ -136,7 +141,7 @@ impl Analyzer {
                 // Check arg count
                 if call.args.len() != concrete_params.len() {
                     self.add_wrong_arg_count(concrete_params.len(), call.args.len(), expr.span);
-                    return Ok(self.ty_invalid());
+                    return Ok(ArenaTypeId::INVALID);
                 }
 
                 // Type check arguments against concrete params
@@ -207,7 +212,7 @@ impl Analyzer {
                 // Record the call -> monomorph key mapping for codegen
                 self.generic_calls.insert(expr.id, key);
 
-                return Ok(concrete_return);
+                return Ok(self.type_to_id(&concrete_return));
             }
 
             // Check if it's a variable with a function type
@@ -223,7 +228,7 @@ impl Analyzer {
                     true, // with_inference
                     interner,
                 )?;
-                return Ok(*func_type.return_type);
+                return Ok(self.type_to_id(&func_type.return_type));
             }
 
             // Check if it's a variable with a functional interface type
@@ -243,7 +248,7 @@ impl Analyzer {
                     true, // with_inference
                     interner,
                 )?;
-                return Ok(*func_type.return_type);
+                return Ok(self.type_to_id(&func_type.return_type));
             }
 
             // Check if it's a known builtin function
@@ -256,7 +261,7 @@ impl Analyzer {
                 for arg in &call.args {
                     self.check_expr(arg, interner)?;
                 }
-                return Ok(self.ty_void());
+                return Ok(ArenaTypeId::VOID);
             }
 
             // Check if it's a variable with a non-function type
@@ -273,7 +278,7 @@ impl Analyzer {
                 for arg in &call.args {
                     self.check_expr(arg, interner)?;
                 }
-                return Ok(self.ty_invalid());
+                return Ok(ArenaTypeId::INVALID);
             }
 
             // Unknown identifier - might be an undefined function
@@ -281,11 +286,12 @@ impl Analyzer {
             for arg in &call.args {
                 self.check_expr(arg, interner)?;
             }
-            return Ok(self.ty_void());
+            return Ok(ArenaTypeId::VOID);
         }
 
         // Non-identifier callee (e.g., a lambda expression being called directly)
-        let callee_ty = self.check_expr(&call.callee, interner)?;
+        let callee_ty_id = self.check_expr(&call.callee, interner)?;
+        let callee_ty = self.id_to_type(callee_ty_id);
         if let LegacyType::Function(func_type) = callee_ty {
             // Calling a function-typed expression - conservatively mark side effects
             if self.in_lambda() {
@@ -298,11 +304,11 @@ impl Analyzer {
                 false, // without inference (callee was just an expression)
                 interner,
             )?;
-            return Ok(*func_type.return_type);
+            return Ok(self.type_to_id(&func_type.return_type));
         }
 
         // Non-callable type
-        if !callee_ty.is_invalid() {
+        if !callee_ty_id.is_invalid() {
             let ty = self.type_display(&callee_ty);
             self.add_error(
                 SemanticError::NotCallable {
@@ -312,6 +318,6 @@ impl Analyzer {
                 call.callee.span,
             );
         }
-        Ok(self.ty_invalid())
+        Ok(ArenaTypeId::INVALID)
     }
 }

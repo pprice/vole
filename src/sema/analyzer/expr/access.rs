@@ -5,6 +5,7 @@ use crate::sema::generic::{
     StaticMethodMonomorphKey, TypeParamInfo, merge_type_params,
 };
 use crate::sema::implement_registry::ExternalMethodInfo;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType};
 use std::collections::HashMap;
 
@@ -91,8 +92,9 @@ impl Analyzer {
         &mut self,
         field_access: &FieldAccessExpr,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
-        let object_type = self.check_expr(&field_access.object, interner)?;
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        let object_type_id = self.check_expr(&field_access.object, interner)?;
+        let object_type = self.id_to_type(object_type_id);
 
         // Handle module field access
         if let LegacyType::Module(ref module_type) = object_type {
@@ -100,7 +102,7 @@ impl Analyzer {
             if let Some(name_id) = self.module_name_id(module_type.module_id, field_name)
                 && let Some(export_type) = module_type.exports.get(&name_id)
             {
-                return Ok(export_type.clone());
+                return Ok(self.type_to_id(export_type));
             } else {
                 let module_path = self
                     .name_table
@@ -114,20 +116,13 @@ impl Analyzer {
                     },
                     field_access.field_span,
                 );
-                return Ok(self.ty_invalid_traced("module_no_export"));
+                return Ok(self.ty_invalid_traced_id("module_no_export"));
             }
         }
 
-        // Handle Invalid type early - propagate with context
-        if object_type.is_invalid() {
-            return Ok(LegacyType::propagate_invalid(
-                &object_type,
-                format!(
-                    "checking field access '.{}'",
-                    interner.resolve(field_access.field)
-                ),
-                Some(field_access.field_span),
-            ));
+        // Handle Invalid type early - propagate
+        if object_type_id.is_invalid() {
+            return Ok(ArenaTypeId::INVALID);
         }
 
         // Get fields from object type (Class or Record)
@@ -135,12 +130,12 @@ impl Analyzer {
 
         // Extract type_def_id and type_args from the object type
         let LegacyType::Nominal(n) = &object_type else {
-            self.type_error("class or record", &object_type, field_access.object.span);
-            return Ok(self.ty_invalid_traced("field_access_non_struct"));
+            self.type_error_id("class or record", object_type_id, field_access.object.span);
+            return Ok(self.ty_invalid_traced_id("field_access_non_struct"));
         };
         if !n.is_struct_like() {
-            self.type_error("class or record", &object_type, field_access.object.span);
-            return Ok(self.ty_invalid_traced("field_access_non_struct"));
+            self.type_error_id("class or record", object_type_id, field_access.object.span);
+            return Ok(self.ty_invalid_traced_id("field_access_non_struct"));
         }
         let (type_def_id, type_args, type_args_id) =
             (n.type_def_id(), n.type_args(), n.type_args_id());
@@ -149,7 +144,7 @@ impl Analyzer {
         if let Some((_type_name, field_type)) =
             self.get_field_type(type_def_id, type_args, type_args_id, field_name)
         {
-            return Ok(field_type);
+            return Ok(self.type_to_id(&field_type));
         }
 
         // Field not found - get struct info for error message
@@ -180,53 +175,53 @@ impl Analyzer {
                 available_fields.join(", ")
             }
         );
-        Ok(self.ty_invalid_traced(&context))
+        Ok(self.ty_invalid_traced_id(&context))
     }
 
     pub(super) fn check_optional_chain_expr(
         &mut self,
         opt_chain: &OptionalChainExpr,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
-        let object_type = self.check_expr(&opt_chain.object, interner)?;
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        let object_type_id = self.check_expr(&opt_chain.object, interner)?;
 
         // Handle errors early
-        if object_type.is_invalid() {
-            return Ok(self.ty_invalid());
+        if object_type_id.is_invalid() {
+            return Ok(ArenaTypeId::INVALID);
         }
 
         // The object must be an optional type (union with nil)
-        let inner_type = if object_type.is_optional() {
-            object_type
-                .unwrap_optional()
-                .unwrap_or_else(|| self.ty_invalid_traced("unwrap_optional_failed"))
+        // Check via arena if it's optional and unwrap
+        let inner_type_id = if let Some(inner_id) = self.unwrap_optional_id(object_type_id) {
+            inner_id
         } else {
             // If not optional, treat it as regular field access wrapped in optional
             // This allows `obj?.field` where obj is not optional (returns T?)
-            object_type.clone()
+            object_type_id
         };
 
-        // Handle LegacyType::Error early
-        if inner_type.is_invalid() {
-            return Ok(self.ty_invalid());
+        // Handle Invalid early
+        if inner_type_id.is_invalid() {
+            return Ok(ArenaTypeId::INVALID);
         }
 
         // Get type_def_id and type_args from inner type
+        let inner_type = self.id_to_type(inner_type_id);
         let LegacyType::Nominal(n) = &inner_type else {
-            self.type_error(
+            self.type_error_id(
                 "optional class or record",
-                &object_type,
+                object_type_id,
                 opt_chain.object.span,
             );
-            return Ok(self.ty_invalid_traced("optional_chain_non_struct"));
+            return Ok(self.ty_invalid_traced_id("optional_chain_non_struct"));
         };
         if !n.is_struct_like() {
-            self.type_error(
+            self.type_error_id(
                 "optional class or record",
-                &object_type,
+                object_type_id,
                 opt_chain.object.span,
             );
-            return Ok(self.ty_invalid_traced("optional_chain_non_struct"));
+            return Ok(self.ty_invalid_traced_id("optional_chain_non_struct"));
         }
         let (type_def_id, type_args, type_args_id) =
             (n.type_def_id(), n.type_args(), n.type_args_id());
@@ -236,12 +231,13 @@ impl Analyzer {
         if let Some((_type_name, field_type)) =
             self.get_field_type(type_def_id, type_args, type_args_id, field_name)
         {
+            let field_type_id = self.type_to_id(&field_type);
             // Result is always optional (field_type | nil)
             // But if field type is already optional, don't double-wrap
-            if field_type.is_optional() {
-                Ok(field_type)
+            if self.unwrap_optional_id(field_type_id).is_some() {
+                Ok(field_type_id)
             } else {
-                Ok(LegacyType::optional(field_type))
+                Ok(self.ty_optional_id(field_type_id))
             }
         } else {
             let (type_name, _) = self
@@ -255,7 +251,7 @@ impl Analyzer {
                 },
                 opt_chain.field_span,
             );
-            Ok(self.ty_invalid_traced("unknown_optional_field"))
+            Ok(self.ty_invalid_traced_id("unknown_optional_field"))
         }
     }
 
@@ -264,7 +260,7 @@ impl Analyzer {
         expr: &Expr,
         method_call: &MethodCallExpr,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // Check for static method call: TypeName.method()
         // Handle both identifier types (Point.create) and primitive keywords (i32.default_value)
         if let Some((type_def_id, type_name_str)) =
@@ -282,17 +278,18 @@ impl Analyzer {
             );
         }
 
-        let object_type = self.check_expr(&method_call.object, interner)?;
+        let object_type_id = self.check_expr(&method_call.object, interner)?;
+        let object_type = self.id_to_type(object_type_id);
         let method_name = interner.resolve(method_call.method);
 
-        // Handle LegacyType::Error early
-        if object_type.is_invalid() {
-            return Ok(self.ty_invalid());
+        // Handle Invalid early
+        if object_type_id.is_invalid() {
+            return Ok(ArenaTypeId::INVALID);
         }
 
         // Optional/union method calls require explicit narrowing.
-        if object_type.is_optional() {
-            let ty = self.type_display(&object_type);
+        if self.is_optional_id(object_type_id) {
+            let ty = self.type_display_id(object_type_id);
             self.add_error(
                 SemanticError::MethodOnOptional {
                     ty,
@@ -304,11 +301,11 @@ impl Analyzer {
             for arg in &method_call.args {
                 self.check_expr(arg, interner)?;
             }
-            return Ok(self.ty_invalid_traced("method_on_optional"));
+            return Ok(self.ty_invalid_traced_id("method_on_optional"));
         }
 
         if matches!(object_type, LegacyType::Union(_)) {
-            let ty = self.type_display(&object_type);
+            let ty = self.type_display_id(object_type_id);
             self.add_error(
                 SemanticError::MethodOnUnion {
                     ty,
@@ -320,7 +317,7 @@ impl Analyzer {
             for arg in &method_call.args {
                 self.check_expr(arg, interner)?;
             }
-            return Ok(self.ty_invalid_traced("method_on_union"));
+            return Ok(self.ty_invalid_traced_id("method_on_union"));
         }
 
         // Handle module method calls (e.g., math.sqrt(16.0))
@@ -345,7 +342,6 @@ impl Analyzer {
                     // Check argument types
                     for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                         let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
-                        // Convert to TypeId for compatibility check (Phase 2 migration)
                         let arg_ty_id = self.type_to_id(&arg_ty);
                         let param_ty_id = self.type_to_id(param_ty);
                         if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
@@ -378,10 +374,10 @@ impl Analyzer {
                         },
                     );
 
-                    return Ok(*func_type.return_type.clone());
+                    return Ok(self.type_to_id(&func_type.return_type));
                 } else {
                     self.type_error("function", export_type, method_call.method_span);
-                    return Ok(self.ty_invalid());
+                    return Ok(ArenaTypeId::INVALID);
                 }
             } else {
                 self.add_error(
@@ -395,12 +391,12 @@ impl Analyzer {
                     },
                     method_call.method_span,
                 );
-                return Ok(self.ty_invalid());
+                return Ok(ArenaTypeId::INVALID);
             }
         }
 
         // Get a descriptive type name for error messages
-        let type_name = self.type_display(&object_type);
+        let type_name = self.type_display_id(object_type_id);
 
         if let Some(resolved) =
             self.resolve_method_via_entity_registry(&object_type, method_call.method, interner)
@@ -428,7 +424,7 @@ impl Analyzer {
                     other => other,
                 };
                 self.method_resolutions.insert(expr.id, updated);
-                return Ok(*func_type.return_type);
+                return Ok(self.type_to_id(&func_type.return_type));
             }
 
             let func_type = resolved.func_type().clone();
@@ -446,7 +442,6 @@ impl Analyzer {
             // Check argument types
             for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
                 let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
-                // Convert to TypeId for compatibility check (Phase 2 migration)
                 let arg_ty_id = self.type_to_id(&arg_ty);
                 let param_ty_id = self.type_to_id(param_ty);
                 if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
@@ -469,7 +464,7 @@ impl Analyzer {
                 interner,
             );
 
-            return Ok(*func_type.return_type);
+            return Ok(self.type_to_id(&func_type.return_type));
         }
 
         // No method found - report error
@@ -485,7 +480,7 @@ impl Analyzer {
         for arg in &method_call.args {
             self.check_expr(arg, interner)?;
         }
-        Ok(self.ty_invalid())
+        Ok(ArenaTypeId::INVALID)
     }
 
     /// Try to resolve a static method call target from an expression.
@@ -540,7 +535,7 @@ impl Analyzer {
         args: &[Expr],
         method_span: Span,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         let method_name_str = interner.resolve(method_sym);
         let method_name_id = self.method_name_id(method_sym, interner);
 
@@ -562,12 +557,15 @@ impl Analyzer {
             let type_def = self.entity_registry.get_type(type_def_id);
             let generic_info = type_def.generic_info.clone();
 
-            // First pass: type-check arguments to get their types
-            let mut arg_types = Vec::new();
+            // First pass: type-check arguments to get their types (as TypeId, then convert to LegacyType for inference)
+            let mut arg_type_ids = Vec::new();
             for arg in args {
-                let arg_ty = self.check_expr(arg, interner)?;
-                arg_types.push(arg_ty);
+                let arg_ty_id = self.check_expr(arg, interner)?;
+                arg_type_ids.push(arg_ty_id);
             }
+            // Convert to LegacyType for type inference (still uses LegacyType)
+            let arg_types: Vec<LegacyType> =
+                arg_type_ids.iter().map(|&id| self.id_to_type(id)).collect();
 
             // Get class-level type params (if any)
             let class_type_params: Vec<TypeParamInfo> = generic_info
@@ -579,7 +577,7 @@ impl Analyzer {
             let all_type_params = merge_type_params(&class_type_params, &method_type_params);
 
             // Infer type params if there are any (class-level or method-level)
-            let (final_params, final_return, maybe_inferred) = if !all_type_params.is_empty() {
+            let (final_params, final_return_id, maybe_inferred) = if !all_type_params.is_empty() {
                 // Build substitution map from explicit type args if provided
                 let inferred = if !explicit_type_args.is_empty() {
                     // Resolve explicit type args and map to class type params
@@ -636,24 +634,27 @@ impl Analyzer {
                     );
                 }
 
-                (substituted_params, substituted_return, Some(inferred))
+                (
+                    substituted_params,
+                    self.type_to_id(&substituted_return),
+                    Some(inferred),
+                )
             } else {
                 (
                     func_type.params.to_vec(),
-                    (*func_type.return_type).clone(),
+                    self.type_to_id(&func_type.return_type),
                     None,
                 )
             };
 
             // Second pass: check argument types against (potentially substituted) param types
-            for (arg, (arg_ty, param_ty)) in
-                args.iter().zip(arg_types.iter().zip(final_params.iter()))
+            for (arg, (arg_ty_id, param_ty)) in args
+                .iter()
+                .zip(arg_type_ids.iter().zip(final_params.iter()))
             {
-                // Convert to TypeId for compatibility check (Phase 2 migration)
-                let arg_ty_id = self.type_to_id(arg_ty);
                 let param_ty_id = self.type_to_id(param_ty);
-                if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
-                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
+                if !self.types_compatible_id(*arg_ty_id, param_ty_id, interner) {
+                    self.add_type_mismatch_id(param_ty_id, *arg_ty_id, arg.span);
                 }
             }
 
@@ -683,7 +684,7 @@ impl Analyzer {
                 );
             }
 
-            return Ok(final_return);
+            return Ok(final_return_id);
         }
 
         // No static method found - report error
@@ -701,7 +702,7 @@ impl Analyzer {
             self.check_expr(arg, interner)?;
         }
 
-        Ok(self.ty_invalid())
+        Ok(ArenaTypeId::INVALID)
     }
 
     /// Record a class method monomorphization for generic class/record method calls.

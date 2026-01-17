@@ -35,20 +35,22 @@ impl Analyzer {
             }
             Pattern::Literal(expr) => {
                 // Check literal type matches scrutinee type
-                if let Ok(lit_type) = self.check_expr(expr, interner)
-                    && !self.types_compatible(&lit_type, scrutinee_type, interner)
-                    && !self.types_compatible(scrutinee_type, &lit_type, interner)
-                {
-                    let expected = self.type_display(scrutinee_type);
-                    let found = self.type_display(&lit_type);
-                    self.add_error(
-                        SemanticError::PatternTypeMismatch {
-                            expected,
-                            found,
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
+                if let Ok(lit_type_id) = self.check_expr(expr, interner) {
+                    let lit_type = self.id_to_type(lit_type_id);
+                    if !self.types_compatible(&lit_type, scrutinee_type, interner)
+                        && !self.types_compatible(scrutinee_type, &lit_type, interner)
+                    {
+                        let expected = self.type_display(scrutinee_type);
+                        let found = self.type_display(&lit_type);
+                        self.add_error(
+                            SemanticError::PatternTypeMismatch {
+                                expected,
+                                found,
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
                 }
                 None
             }

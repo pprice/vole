@@ -193,7 +193,8 @@ impl Analyzer {
         // Use string keys since Symbols may be from different interners
         let mut field_value_types: HashMap<String, LegacyType> = HashMap::new();
         for field_init in &struct_lit.fields {
-            let field_ty = self.check_expr(&field_init.value, interner)?;
+            let field_ty_id = self.check_expr(&field_init.value, interner)?;
+            let field_ty = self.id_to_type(field_ty_id);
             field_value_types.insert(interner.resolve(field_init.name).to_string(), field_ty);
         }
 
@@ -329,7 +330,8 @@ impl Analyzer {
         // Use string keys since Symbols may be from different interners
         let mut field_value_types: HashMap<String, LegacyType> = HashMap::new();
         for field_init in &struct_lit.fields {
-            let field_ty = self.check_expr(&field_init.value, interner)?;
+            let field_ty_id = self.check_expr(&field_init.value, interner)?;
+            let field_ty = self.id_to_type(field_ty_id);
             field_value_types.insert(interner.resolve(field_init.name).to_string(), field_ty);
         }
 

@@ -5,44 +5,44 @@ use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::LegacyType;
 
 impl Analyzer {
-    /// Check expression and return TypeId directly.
-    /// This is the Phase 2 entry point - callers should migrate to this.
-    #[allow(unused)] // Phase 2 infrastructure
+    /// Check expression and return TypeId.
+    /// This is THE entry point for expression type checking.
+    pub(crate) fn check_expr(
+        &mut self,
+        expr: &Expr,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        let type_id = self.check_expr_inner(expr, interner)?;
+        tracing::trace!(
+            line = expr.span.line,
+            inferred_type = %self.type_display_id(type_id),
+            "type inferred"
+        );
+        Ok(self.record_expr_type_id(expr, type_id))
+    }
+
+    /// Compatibility alias during migration
+    #[inline]
     pub(crate) fn check_expr_id(
         &mut self,
         expr: &Expr,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        let ty = self.check_expr(expr, interner)?;
-        Ok(self.type_to_id(&ty))
-    }
-
-    pub(crate) fn check_expr(
-        &mut self,
-        expr: &Expr,
-        interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
-        let ty = self.check_expr_inner(expr, interner)?;
-        tracing::trace!(
-            line = expr.span.line,
-            inferred_type = %self.type_display(&ty),
-            "type inferred"
-        );
-        Ok(self.record_expr_type(expr, ty))
+        self.check_expr(expr, interner)
     }
 
     fn check_expr_inner(
         &mut self,
         expr: &Expr,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         match &expr.kind {
-            ExprKind::IntLiteral(_) => Ok(self.ty_i64()), // Default to i64 for now
-            ExprKind::FloatLiteral(_) => Ok(self.ty_f64()),
-            ExprKind::BoolLiteral(_) => Ok(self.ty_bool()),
-            ExprKind::StringLiteral(_) => Ok(self.ty_string()),
-            ExprKind::InterpolatedString(_) => Ok(self.ty_string()),
-            ExprKind::TypeLiteral(_) => Ok(self.ty_type()), // Type values have metatype `type`
+            ExprKind::IntLiteral(_) => Ok(ArenaTypeId::I64), // Default to i64 for now
+            ExprKind::FloatLiteral(_) => Ok(ArenaTypeId::F64),
+            ExprKind::BoolLiteral(_) => Ok(ArenaTypeId::BOOL),
+            ExprKind::StringLiteral(_) => Ok(ArenaTypeId::STRING),
+            ExprKind::InterpolatedString(_) => Ok(ArenaTypeId::STRING),
+            ExprKind::TypeLiteral(_) => Ok(ArenaTypeId::METATYPE), // Type values have metatype `type`
 
             ExprKind::Identifier(sym) => {
                 // Check for 'self' usage in static method
@@ -57,11 +57,11 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    return Ok(LegacyType::invalid("propagate"));
+                    return Ok(ArenaTypeId::INVALID);
                 }
 
                 // Use get_variable_type to respect flow-sensitive narrowing
-                if let Some(ty) = self.get_variable_type(*sym) {
+                if let Some(ty_id) = self.get_variable_type_id(*sym) {
                     // Check if this is a capture (inside lambda, not a local)
                     if self.in_lambda() && !self.is_lambda_local(*sym) {
                         // Look up variable info to get mutability
@@ -69,10 +69,10 @@ impl Analyzer {
                             self.record_capture(*sym, var.mutable);
                         }
                     }
-                    Ok(ty)
+                    Ok(ty_id)
                 } else if let Some(func_type) = self.get_function_type(*sym, interner) {
                     // Identifier refers to a function - treat it as a function value
-                    Ok(LegacyType::Function(func_type))
+                    Ok(self.type_to_id(&LegacyType::Function(func_type)))
                 } else {
                     let name = interner.resolve(*sym);
                     self.add_error(
@@ -82,7 +82,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    Ok(LegacyType::invalid("propagate"))
+                    Ok(ArenaTypeId::INVALID)
                 }
             }
 
@@ -93,59 +93,51 @@ impl Analyzer {
                 match bin.op {
                     BinaryOp::Add => {
                         // Handle string concatenation: string + Stringable
-                        if matches!(left_ty, LegacyType::Primitive(PrimitiveType::String)) {
+                        if left_ty == ArenaTypeId::STRING {
                             // Left is string - check if right implements Stringable
-                            if matches!(right_ty, LegacyType::Primitive(PrimitiveType::String)) {
+                            if right_ty == ArenaTypeId::STRING {
                                 // string + string is always valid
-                                Ok(self.ty_string())
-                            } else if self.satisfies_stringable(&right_ty, interner) {
+                                Ok(ArenaTypeId::STRING)
+                            } else if self.satisfies_stringable_id(right_ty, interner) {
                                 // Right implements Stringable, so string + X is valid
-                                Ok(self.ty_string())
+                                Ok(ArenaTypeId::STRING)
                             } else {
                                 // Right doesn't implement Stringable
-                                self.type_error("Stringable", &right_ty, bin.right.span);
-                                Ok(self.ty_invalid())
+                                self.type_error_id("Stringable", right_ty, bin.right.span);
+                                Ok(ArenaTypeId::INVALID)
                             }
                         } else if left_ty.is_numeric() && right_ty.is_numeric() {
                             // Numeric addition
-                            if left_ty == LegacyType::Primitive(PrimitiveType::F64)
-                                || right_ty == LegacyType::Primitive(PrimitiveType::F64)
-                            {
-                                Ok(self.ty_f64())
-                            } else if left_ty == LegacyType::Primitive(PrimitiveType::I64)
-                                || right_ty == LegacyType::Primitive(PrimitiveType::I64)
-                            {
-                                Ok(self.ty_i64())
+                            if left_ty == ArenaTypeId::F64 || right_ty == ArenaTypeId::F64 {
+                                Ok(ArenaTypeId::F64)
+                            } else if left_ty == ArenaTypeId::I64 || right_ty == ArenaTypeId::I64 {
+                                Ok(ArenaTypeId::I64)
                             } else {
-                                Ok(self.ty_i32())
+                                Ok(ArenaTypeId::I32)
                             }
                         } else {
-                            self.type_error_pair(
+                            self.type_error_pair_id(
                                 "numeric or string",
-                                &left_ty,
-                                &right_ty,
+                                left_ty,
+                                right_ty,
                                 expr.span,
                             );
-                            Ok(self.ty_invalid())
+                            Ok(ArenaTypeId::INVALID)
                         }
                     }
                     BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                         if left_ty.is_numeric() && right_ty.is_numeric() {
                             // Return wider type
-                            if left_ty == LegacyType::Primitive(PrimitiveType::F64)
-                                || right_ty == LegacyType::Primitive(PrimitiveType::F64)
-                            {
-                                Ok(self.ty_f64())
-                            } else if left_ty == LegacyType::Primitive(PrimitiveType::I64)
-                                || right_ty == LegacyType::Primitive(PrimitiveType::I64)
-                            {
-                                Ok(self.ty_i64())
+                            if left_ty == ArenaTypeId::F64 || right_ty == ArenaTypeId::F64 {
+                                Ok(ArenaTypeId::F64)
+                            } else if left_ty == ArenaTypeId::I64 || right_ty == ArenaTypeId::I64 {
+                                Ok(ArenaTypeId::I64)
                             } else {
-                                Ok(self.ty_i32())
+                                Ok(ArenaTypeId::I32)
                             }
                         } else {
-                            self.type_error_pair("numeric", &left_ty, &right_ty, expr.span);
-                            Ok(self.ty_invalid())
+                            self.type_error_pair_id("numeric", left_ty, right_ty, expr.span);
+                            Ok(ArenaTypeId::INVALID)
                         }
                     }
                     BinaryOp::Eq
@@ -153,15 +145,13 @@ impl Analyzer {
                     | BinaryOp::Lt
                     | BinaryOp::Gt
                     | BinaryOp::Le
-                    | BinaryOp::Ge => Ok(self.ty_bool()),
+                    | BinaryOp::Ge => Ok(ArenaTypeId::BOOL),
                     BinaryOp::And | BinaryOp::Or => {
-                        if left_ty == LegacyType::Primitive(PrimitiveType::Bool)
-                            && right_ty == LegacyType::Primitive(PrimitiveType::Bool)
-                        {
-                            Ok(self.ty_bool())
+                        if left_ty == ArenaTypeId::BOOL && right_ty == ArenaTypeId::BOOL {
+                            Ok(ArenaTypeId::BOOL)
                         } else {
-                            self.type_error_pair("bool", &left_ty, &right_ty, expr.span);
-                            Ok(self.ty_invalid())
+                            self.type_error_pair_id("bool", left_ty, right_ty, expr.span);
+                            Ok(ArenaTypeId::INVALID)
                         }
                     }
                     BinaryOp::BitAnd
@@ -170,16 +160,14 @@ impl Analyzer {
                     | BinaryOp::Shl
                     | BinaryOp::Shr => {
                         if left_ty.is_integer() && right_ty.is_integer() {
-                            if left_ty == LegacyType::Primitive(PrimitiveType::I64)
-                                || right_ty == LegacyType::Primitive(PrimitiveType::I64)
-                            {
-                                Ok(self.ty_i64())
+                            if left_ty == ArenaTypeId::I64 || right_ty == ArenaTypeId::I64 {
+                                Ok(ArenaTypeId::I64)
                             } else {
-                                Ok(self.ty_i32())
+                                Ok(ArenaTypeId::I32)
                             }
                         } else {
-                            self.type_error_pair("integer", &left_ty, &right_ty, expr.span);
-                            Ok(self.ty_invalid())
+                            self.type_error_pair_id("integer", left_ty, right_ty, expr.span);
+                            Ok(ArenaTypeId::INVALID)
                         }
                     }
                 }
@@ -192,24 +180,24 @@ impl Analyzer {
                         if operand_ty.is_numeric() {
                             Ok(operand_ty)
                         } else {
-                            self.type_error("numeric", &operand_ty, expr.span);
-                            Ok(self.ty_invalid())
+                            self.type_error_id("numeric", operand_ty, expr.span);
+                            Ok(ArenaTypeId::INVALID)
                         }
                     }
                     UnaryOp::Not => {
-                        if operand_ty == LegacyType::Primitive(PrimitiveType::Bool) {
-                            Ok(self.ty_bool())
+                        if operand_ty == ArenaTypeId::BOOL {
+                            Ok(ArenaTypeId::BOOL)
                         } else {
-                            self.type_error("bool", &operand_ty, expr.span);
-                            Ok(self.ty_invalid())
+                            self.type_error_id("bool", operand_ty, expr.span);
+                            Ok(ArenaTypeId::INVALID)
                         }
                     }
                     UnaryOp::BitNot => {
                         if operand_ty.is_integer() {
                             Ok(operand_ty)
                         } else {
-                            self.type_error("integer", &operand_ty, expr.span);
-                            Ok(self.ty_invalid())
+                            self.type_error_id("integer", operand_ty, expr.span);
+                            Ok(ArenaTypeId::INVALID)
                         }
                     }
                 }
@@ -228,12 +216,13 @@ impl Analyzer {
             ExprKind::ArrayLiteral(elements) => {
                 if elements.is_empty() {
                     // Empty array needs type annotation or we use unknown placeholder
-                    Ok(LegacyType::Array(Box::new(LegacyType::unknown())))
+                    let unknown_id = self.type_to_id(&LegacyType::unknown());
+                    Ok(self.ty_array_id(unknown_id))
                 } else {
                     // Infer types for all elements (TypeId-based)
                     let elem_type_ids: Vec<ArenaTypeId> = elements
                         .iter()
-                        .map(|e| self.check_expr_id(e, interner))
+                        .map(|e| self.check_expr(e, interner))
                         .collect::<Result<Vec<_>, _>>()?;
 
                     // Check if all elements have compatible types (homogeneous → Array)
@@ -246,94 +235,86 @@ impl Analyzer {
 
                     if is_homogeneous {
                         // All same type → dynamic array
-                        Ok(self.id_to_type(self.ty_array_id(first_ty_id)))
+                        Ok(self.ty_array_id(first_ty_id))
                     } else {
                         // Different types → tuple
-                        Ok(self.id_to_type(self.ty_tuple_id(elem_type_ids)))
+                        Ok(self.ty_tuple_id(elem_type_ids))
                     }
                 }
             }
 
             ExprKind::RepeatLiteral { element, count } => {
                 // [expr; N] creates a fixed-size array
-                let elem_ty = self.check_expr(element, interner)?;
-                Ok(LegacyType::FixedArray {
-                    element: Box::new(elem_ty),
-                    size: *count,
-                })
+                let elem_ty_id = self.check_expr(element, interner)?;
+                Ok(self.ty_fixed_array_id(elem_ty_id, *count))
             }
 
             ExprKind::Index(idx) => {
-                let obj_ty = self.check_expr(&idx.object, interner)?;
-                let index_ty_id = self.check_expr_id(&idx.index, interner)?;
+                let obj_ty_id = self.check_expr(&idx.object, interner)?;
+                let index_ty_id = self.check_expr(&idx.index, interner)?;
 
                 // Index must be integer (using TypeId check)
                 if !self.is_integer_id(index_ty_id) {
-                    let index_ty = self.id_to_type(index_ty_id);
-                    self.type_error("integer", &index_ty, idx.index.span);
+                    self.type_error_id("integer", index_ty_id, idx.index.span);
                 }
 
                 // Object must be array, tuple, or fixed array
-                match obj_ty {
-                    LegacyType::Array(elem_ty) => Ok(*elem_ty),
-                    LegacyType::Tuple(ref elements) => {
-                        // For tuples, try to get element type from constant index
-                        if let ExprKind::IntLiteral(i) = &idx.index.kind {
-                            let i = *i as usize;
-                            if i < elements.len() {
-                                Ok(elements[i].clone())
-                            } else {
-                                self.add_error(
-                                    SemanticError::IndexOutOfBounds {
-                                        index: i,
-                                        len: elements.len(),
-                                        span: idx.index.span.into(),
-                                    },
-                                    idx.index.span,
-                                );
-                                Ok(self.ty_invalid())
-                            }
+                // Use arena to inspect the TypeId
+                if let Some(elem_id) = self.unwrap_array_id(obj_ty_id) {
+                    Ok(elem_id)
+                } else if let Some((elem_id, _)) = self.unwrap_fixed_array_id(obj_ty_id) {
+                    Ok(elem_id)
+                } else if let Some(elem_ids) = self.unwrap_tuple_id(obj_ty_id) {
+                    // For tuples, try to get element type from constant index
+                    if let ExprKind::IntLiteral(i) = &idx.index.kind {
+                        let i = *i as usize;
+                        if i < elem_ids.len() {
+                            Ok(elem_ids[i])
                         } else {
-                            // Non-constant index - return union of all element types
-                            // For now, just return first element type (common case: 2-tuples)
-                            Ok(elements
-                                .first()
-                                .cloned()
-                                .unwrap_or_else(LegacyType::unknown))
+                            self.add_error(
+                                SemanticError::IndexOutOfBounds {
+                                    index: i,
+                                    len: elem_ids.len(),
+                                    span: idx.index.span.into(),
+                                },
+                                idx.index.span,
+                            );
+                            Ok(ArenaTypeId::INVALID)
                         }
+                    } else {
+                        // Non-constant index - return first element type (common case: 2-tuples)
+                        Ok(elem_ids.first().copied().unwrap_or(ArenaTypeId::INVALID))
                     }
-                    LegacyType::FixedArray { element, .. } => Ok(*element),
-                    _ => {
-                        self.type_error("array", &obj_ty, idx.object.span);
-                        Ok(self.ty_invalid())
+                } else {
+                    if !obj_ty_id.is_invalid() {
+                        self.type_error_id("array", obj_ty_id, idx.object.span);
                     }
+                    Ok(ArenaTypeId::INVALID)
                 }
             }
 
             ExprKind::Range(range) => {
-                let start_ty_id = self.check_expr_id(&range.start, interner)?;
-                let end_ty_id = self.check_expr_id(&range.end, interner)?;
+                let start_ty_id = self.check_expr(&range.start, interner)?;
+                let end_ty_id = self.check_expr(&range.end, interner)?;
 
                 if !self.is_integer_id(start_ty_id) || !self.is_integer_id(end_ty_id) {
-                    let start_ty = self.id_to_type(start_ty_id);
-                    let end_ty = self.id_to_type(end_ty_id);
-                    self.type_error_pair("integer", &start_ty, &end_ty, expr.span);
+                    self.type_error_pair_id("integer", start_ty_id, end_ty_id, expr.span);
                 }
-                Ok(self.ty_range())
+                Ok(ArenaTypeId::RANGE)
             }
 
             ExprKind::Match(match_expr) => self.check_match_expr(match_expr, interner),
 
-            ExprKind::Nil => Ok(self.ty_nil()),
+            ExprKind::Nil => Ok(ArenaTypeId::NIL),
 
-            ExprKind::Done => Ok(self.ty_done()),
+            ExprKind::Done => Ok(ArenaTypeId::DONE),
 
             ExprKind::NullCoalesce(nc) => {
-                let value_type = self.check_expr(&nc.value, interner)?;
+                let value_type_id = self.check_expr(&nc.value, interner)?;
 
                 // Value must be an optional (union containing Nil)
-                if !value_type.is_optional() {
-                    let found = self.type_display(&value_type);
+                if !self.is_optional_id(value_type_id) {
+                    let found = self.type_display_id(value_type_id);
                     self.add_error(
                         SemanticError::NullCoalesceNotOptional {
                             found,
@@ -341,20 +322,21 @@ impl Analyzer {
                         },
                         nc.value.span,
                     );
-                    return Ok(self.ty_invalid());
+                    return Ok(ArenaTypeId::INVALID);
                 }
 
                 // Get the non-nil type
-                let unwrapped = value_type
-                    .unwrap_optional()
-                    .unwrap_or_else(|| self.ty_invalid_traced("unwrap_failed"));
+                let unwrapped_id = self
+                    .unwrap_optional_id(value_type_id)
+                    .unwrap_or(ArenaTypeId::INVALID);
 
                 // Default must match the unwrapped type
+                let unwrapped = self.id_to_type(unwrapped_id);
                 let _default_type =
                     self.check_expr_expecting(&nc.default, Some(&unwrapped), interner)?;
 
                 // Result is the non-nil type
-                Ok(unwrapped)
+                Ok(unwrapped_id)
             }
 
             ExprKind::Is(is_expr) => {
@@ -362,16 +344,18 @@ impl Analyzer {
 
                 // For literals, use bidirectional type inference so `42 is i32` works
                 // For non-literals, just check normally (no type coercion)
-                let value_type = if is_expr.value.is_literal() {
+                let value_type_id = if is_expr.value.is_literal() {
                     // Try to infer literal's type from tested type (won't error on mismatch)
                     let inferred = self.infer_literal_type(&is_expr.value, &tested_type, interner);
                     // Record the inferred type so codegen uses it
-                    self.record_expr_type(&is_expr.value, inferred)
+                    self.record_expr_type(&is_expr.value, inferred.clone());
+                    self.type_to_id(&inferred)
                 } else {
                     self.check_expr(&is_expr.value, interner)?
                 };
 
                 // Warn/error if tested type is not a variant of value's union
+                let value_type = self.id_to_type(value_type_id);
                 if let LegacyType::Union(variants) = &value_type
                     && !variants.contains(&tested_type)
                 {
@@ -388,17 +372,19 @@ impl Analyzer {
                 }
 
                 // Result is always bool
-                Ok(self.ty_bool())
+                Ok(ArenaTypeId::BOOL)
             }
 
             ExprKind::Lambda(lambda) => {
                 // For now, analyze without expected type context
                 // (Context will be passed when we have assignment/call context)
-                Ok(self.analyze_lambda(lambda, None, interner))
+                let ty = self.analyze_lambda(lambda, None, interner);
+                Ok(self.type_to_id(&ty))
             }
 
             ExprKind::StructLiteral(struct_lit) => {
-                self.check_struct_literal_expr(expr, struct_lit, interner)
+                let ty = self.check_struct_literal_expr(expr, struct_lit, interner)?;
+                Ok(self.type_to_id(&ty))
             }
 
             ExprKind::FieldAccess(field_access) => {
@@ -413,11 +399,17 @@ impl Analyzer {
                 self.check_method_call_expr(expr, method_call, interner)
             }
 
-            ExprKind::Try(inner) => self.analyze_try(inner, interner),
+            ExprKind::Try(inner) => {
+                let ty = self.analyze_try(inner, interner)?;
+                Ok(self.type_to_id(&ty))
+            }
 
-            ExprKind::Import(path) => self
-                .analyze_module(path, expr.span, interner)
-                .map_err(|_| self.errors.clone()),
+            ExprKind::Import(path) => {
+                let ty = self
+                    .analyze_module(path, expr.span, interner)
+                    .map_err(|_| self.errors.clone())?;
+                Ok(self.type_to_id(&ty))
+            }
 
             ExprKind::Yield(yield_expr) => {
                 // Check if we're inside a function at all
@@ -428,7 +420,7 @@ impl Analyzer {
                         },
                         yield_expr.span,
                     );
-                    return Ok(self.ty_void());
+                    return Ok(ArenaTypeId::VOID);
                 }
 
                 // Check if we're inside a generator function (Iterator<T> return type)
@@ -437,8 +429,7 @@ impl Analyzer {
                     let return_type = self
                         .current_function_return
                         .expect("yield only valid inside function");
-                    let return_type_legacy = self.type_arena.borrow().to_type(return_type);
-                    let found = self.type_display(&return_type_legacy);
+                    let found = self.type_display_id(return_type);
                     self.add_error(
                         SemanticError::YieldInNonGenerator {
                             found,
@@ -446,7 +437,7 @@ impl Analyzer {
                         },
                         yield_expr.span,
                     );
-                    return Ok(self.ty_void());
+                    return Ok(ArenaTypeId::VOID);
                 };
 
                 // Type check the yield expression against the Iterator element type (TypeId-based)
@@ -469,7 +460,7 @@ impl Analyzer {
 
                 // yield expression returns Void (its value is the yielded element, but
                 // the expression itself doesn't produce a value in the control flow)
-                Ok(self.ty_void())
+                Ok(ArenaTypeId::VOID)
             }
 
             ExprKind::Block(block) => {
@@ -482,20 +473,19 @@ impl Analyzer {
                 if let Some(trailing) = &block.trailing_expr {
                     self.check_expr(trailing, interner)
                 } else {
-                    Ok(self.ty_void())
+                    Ok(ArenaTypeId::VOID)
                 }
             }
 
             ExprKind::If(if_expr) => {
                 // Type check the condition (must be bool) using TypeId
-                let cond_ty_id = self.check_expr_id(&if_expr.condition, interner)?;
+                let cond_ty_id = self.check_expr(&if_expr.condition, interner)?;
                 if !self.is_bool_id(cond_ty_id) {
-                    let cond_ty = self.id_to_type(cond_ty_id);
-                    self.type_error("bool", &cond_ty, if_expr.condition.span);
+                    self.type_error_id("bool", cond_ty_id, if_expr.condition.span);
                 }
 
                 // Type check then branch (TypeId-based)
-                let then_ty_id = self.check_expr_id(&if_expr.then_branch, interner)?;
+                let then_ty_id = self.check_expr(&if_expr.then_branch, interner)?;
 
                 // If expression requires else branch
                 let Some(else_branch) = &if_expr.else_branch else {
@@ -505,17 +495,17 @@ impl Analyzer {
                         },
                         if_expr.span,
                     );
-                    return Ok(self.ty_invalid());
+                    return Ok(ArenaTypeId::INVALID);
                 };
 
-                let else_ty_id = self.check_expr_id(else_branch, interner)?;
+                let else_ty_id = self.check_expr(else_branch, interner)?;
 
                 // Both branches must have compatible types
                 if !self.types_compatible_id(then_ty_id, else_ty_id, interner) {
                     self.add_type_mismatch_id(then_ty_id, else_ty_id, else_branch.span);
-                    Ok(self.ty_invalid())
+                    Ok(ArenaTypeId::INVALID)
                 } else {
-                    Ok(self.id_to_type(then_ty_id))
+                    Ok(then_ty_id)
                 }
             }
         }

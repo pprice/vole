@@ -295,7 +295,8 @@ impl Analyzer {
             }
             Stmt::LetTuple(let_tuple) => {
                 // Check the initializer
-                let init_type = self.check_expr(&let_tuple.init, interner)?;
+                let init_type_id = self.check_expr(&let_tuple.init, interner)?;
+                let init_type = self.id_to_type(init_type_id);
 
                 // Recursively check the destructuring pattern
                 self.check_destructure_pattern(
@@ -478,7 +479,7 @@ impl Analyzer {
         // Type check field initializers and check for unknown fields
         for field_init in &stmt.fields {
             let value_type = match self.check_expr(&field_init.value, interner) {
-                Ok(ty) => ty,
+                Ok(ty_id) => self.id_to_type(ty_id),
                 Err(_) => self.ty_invalid_traced("fallback"),
             };
             let field_init_name = interner.resolve(field_init.name);
@@ -559,7 +560,8 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<LegacyType, Vec<TypeError>> {
         // Check the inner expression - must be fallible
-        let inner_type = self.check_expr(inner_expr, interner)?;
+        let inner_type_id = self.check_expr(inner_expr, interner)?;
+        let inner_type = self.id_to_type(inner_type_id);
 
         let (success_type, error_type) = match &inner_type {
             LegacyType::Fallible(ft) => ((*ft.success_type).clone(), (*ft.error_type).clone()),

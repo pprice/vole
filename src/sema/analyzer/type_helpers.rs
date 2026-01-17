@@ -253,6 +253,12 @@ impl Analyzer {
         self.type_arena.borrow_mut().array(element_id)
     }
 
+    /// Create a fixed-size array TypeId
+    #[inline]
+    pub(crate) fn ty_fixed_array_id(&self, element_id: ArenaTypeId, size: usize) -> ArenaTypeId {
+        self.type_arena.borrow_mut().fixed_array(element_id, size)
+    }
+
     /// Create a tuple TypeId
     #[inline]
     pub(crate) fn ty_tuple_id(&self, element_ids: Vec<ArenaTypeId>) -> ArenaTypeId {
@@ -372,10 +378,31 @@ impl Analyzer {
         self.type_arena.borrow().unwrap_fixed_array(id)
     }
 
+    /// Get tuple element types if this is a tuple
+    #[inline]
+    pub(crate) fn unwrap_tuple_id(&self, id: ArenaTypeId) -> Option<Vec<ArenaTypeId>> {
+        self.type_arena
+            .borrow()
+            .unwrap_tuple(id)
+            .map(|v| v.to_vec())
+    }
+
     /// Get runtime iterator element type if this is a runtime iterator
     #[inline]
     pub(crate) fn unwrap_runtime_iterator_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {
         self.type_arena.borrow().unwrap_runtime_iterator(id)
+    }
+
+    /// Get inner type if this is an optional type (T | nil)
+    #[inline]
+    pub(crate) fn unwrap_optional_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {
+        self.type_arena.borrow().unwrap_optional(id)
+    }
+
+    /// Check if TypeId is an optional type (T | nil)
+    #[inline]
+    pub(crate) fn is_optional_id(&self, id: ArenaTypeId) -> bool {
+        self.type_arena.borrow().unwrap_optional(id).is_some()
     }
 
     /// Get fallible (success, error) types if this is a fallible type

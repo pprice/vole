@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
@@ -7,13 +8,12 @@ impl Analyzer {
         expr: &Expr,
         assign: &AssignExpr,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // First, determine the expected type from the target (bidirectional type checking)
-        let (target_ty, is_mutable, target_valid) = match &assign.target {
+        let (target_ty_id, is_mutable, target_valid) = match &assign.target {
             AssignTarget::Variable(sym) => {
                 if let Some(var) = self.scope.get(*sym) {
-                    let var_ty = self.type_arena.borrow().to_type(var.ty);
-                    (var_ty, var.mutable, true)
+                    (var.ty, var.mutable, true)
                 } else {
                     let name = interner.resolve(*sym);
                     self.add_error(
@@ -23,7 +23,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    (LegacyType::invalid("propagate"), false, false)
+                    (ArenaTypeId::INVALID, false, false)
                 }
             }
             AssignTarget::Field {
@@ -31,7 +31,8 @@ impl Analyzer {
                 field,
                 field_span,
             } => {
-                let obj_ty = self.check_expr(object, interner)?;
+                let obj_ty_id = self.check_expr(object, interner)?;
+                let obj_ty = self.id_to_type(obj_ty_id);
                 let field_name = interner.resolve(*field);
 
                 match &obj_ty {
@@ -50,8 +51,8 @@ impl Analyzer {
                             }) {
                                 // Substitute type args via arena if any
                                 let field_type_id = generic_info.field_types[idx];
-                                let resolved_type = if c.type_args.is_empty() {
-                                    self.type_arena.borrow().to_type(field_type_id)
+                                let resolved_type_id = if c.type_args.is_empty() {
+                                    field_type_id
                                 } else {
                                     let mut arena = self.type_arena.borrow_mut();
                                     let subs_id: hashbrown::HashMap<_, _> = generic_info
@@ -60,10 +61,9 @@ impl Analyzer {
                                         .zip(c.type_args.iter())
                                         .map(|(tp, arg)| (tp.name_id, arena.from_type(arg)))
                                         .collect();
-                                    let substituted_id = arena.substitute(field_type_id, &subs_id);
-                                    arena.to_type(substituted_id)
+                                    arena.substitute(field_type_id, &subs_id)
                                 };
-                                (resolved_type, true, true)
+                                (resolved_type_id, true, true)
                             } else {
                                 self.add_error(
                                     SemanticError::UnknownField {
@@ -73,7 +73,7 @@ impl Analyzer {
                                     },
                                     *field_span,
                                 );
-                                (LegacyType::invalid("propagate"), false, false)
+                                (ArenaTypeId::INVALID, false, false)
                             }
                         } else {
                             self.add_error(
@@ -84,7 +84,7 @@ impl Analyzer {
                                 },
                                 *field_span,
                             );
-                            (LegacyType::invalid("propagate"), false, false)
+                            (ArenaTypeId::INVALID, false, false)
                         }
                     }
                     LegacyType::Nominal(NominalType::Record(r)) => {
@@ -101,10 +101,10 @@ impl Analyzer {
                             },
                             *field_span,
                         );
-                        (LegacyType::invalid("propagate"), false, false)
+                        (ArenaTypeId::INVALID, false, false)
                     }
                     _ => {
-                        if !obj_ty.is_invalid() {
+                        if !obj_ty_id.is_invalid() {
                             let ty = self.type_display(&obj_ty);
                             self.add_error(
                                 SemanticError::UnknownField {
@@ -115,14 +115,14 @@ impl Analyzer {
                                 *field_span,
                             );
                         }
-                        (LegacyType::invalid("propagate"), false, false)
+                        (ArenaTypeId::INVALID, false, false)
                     }
                 }
             }
             AssignTarget::Index { object, index } => {
                 // Type-check object as array
-                let obj_type_id = self.check_expr_id(object, interner)?;
-                let idx_type_id = self.check_expr_id(index, interner)?;
+                let obj_type_id = self.check_expr(object, interner)?;
+                let idx_type_id = self.check_expr(index, interner)?;
 
                 // Check index is integer using TypeId
                 if !self.is_integer_id(idx_type_id) {
@@ -139,11 +139,11 @@ impl Analyzer {
 
                 // Get element type using TypeId
                 if let Some(elem_id) = self.unwrap_array_id(obj_type_id) {
-                    (self.id_to_type(elem_id), true, true)
+                    (elem_id, true, true)
                 } else if let Some((elem_id, _)) = self.unwrap_fixed_array_id(obj_type_id) {
-                    (self.id_to_type(elem_id), true, true)
+                    (elem_id, true, true)
                 } else {
-                    if !self.is_invalid_id(obj_type_id) {
+                    if !obj_type_id.is_invalid() {
                         let found = self.type_display_id(obj_type_id);
                         self.add_error(
                             SemanticError::TypeMismatch {
@@ -154,18 +154,18 @@ impl Analyzer {
                             object.span,
                         );
                     }
-                    (LegacyType::invalid("propagate"), false, false)
+                    (ArenaTypeId::INVALID, false, false)
                 }
             }
         };
 
         // Now check the value expression with expected type context
-        let expected_ty = if target_valid && !target_ty.is_invalid() {
-            Some(&target_ty)
+        let expected_ty = if target_valid && !target_ty_id.is_invalid() {
+            Some(self.id_to_type(target_ty_id))
         } else {
             None
         };
-        let value_ty = self.check_expr_expecting(&assign.value, expected_ty, interner)?;
+        let value_ty = self.check_expr_expecting(&assign.value, expected_ty.as_ref(), interner)?;
 
         // Handle mutability and capture checks for variable targets
         if let AssignTarget::Variable(sym) = &assign.target
@@ -191,17 +191,15 @@ impl Analyzer {
             }
         }
 
-        // Check type compatibility (for non-literal types that couldn't be inferred)
-        // Convert to TypeId for compatibility check (Phase 2 migration)
+        // Check type compatibility
         if target_valid {
             let value_ty_id = self.type_to_id(&value_ty);
-            let target_ty_id = self.type_to_id(&target_ty);
             if !self.types_compatible_id(value_ty_id, target_ty_id, interner) {
                 self.add_type_mismatch_id(target_ty_id, value_ty_id, assign.value.span);
             }
         }
 
-        Ok(target_ty)
+        Ok(target_ty_id)
     }
 
     pub(super) fn check_compound_assign_expr(
@@ -209,13 +207,13 @@ impl Analyzer {
         expr: &Expr,
         compound: &CompoundAssignExpr,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // Get target type and check mutability
-        let target_type = match &compound.target {
+        let target_type_id = match &compound.target {
             AssignTarget::Variable(sym) => {
                 if let Some(var) = self.scope.get(*sym) {
                     let is_mutable = var.mutable;
-                    let var_ty = self.type_arena.borrow().to_type(var.ty);
+                    let var_ty = var.ty;
 
                     // Check if this is a mutation of a captured variable
                     if self.in_lambda() && !self.is_lambda_local(*sym) {
@@ -244,13 +242,13 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    return Ok(self.ty_invalid());
+                    return Ok(ArenaTypeId::INVALID);
                 }
             }
             AssignTarget::Index { object, index } => {
                 // Type-check object as array using TypeId
-                let obj_type_id = self.check_expr_id(object, interner)?;
-                let idx_type_id = self.check_expr_id(index, interner)?;
+                let obj_type_id = self.check_expr(object, interner)?;
+                let idx_type_id = self.check_expr(index, interner)?;
 
                 // Check index is integer using TypeId
                 if !self.is_integer_id(idx_type_id) {
@@ -267,11 +265,11 @@ impl Analyzer {
 
                 // Get element type using TypeId
                 if let Some(elem_id) = self.unwrap_array_id(obj_type_id) {
-                    self.id_to_type(elem_id)
+                    elem_id
                 } else if let Some((elem_id, _)) = self.unwrap_fixed_array_id(obj_type_id) {
-                    self.id_to_type(elem_id)
+                    elem_id
                 } else {
-                    if !self.is_invalid_id(obj_type_id) {
+                    if !obj_type_id.is_invalid() {
                         let found = self.type_display_id(obj_type_id);
                         self.add_error(
                             SemanticError::TypeMismatch {
@@ -282,7 +280,7 @@ impl Analyzer {
                             object.span,
                         );
                     }
-                    LegacyType::invalid("propagate")
+                    ArenaTypeId::INVALID
                 }
             }
             AssignTarget::Field {
@@ -290,7 +288,8 @@ impl Analyzer {
                 field,
                 field_span,
             } => {
-                let obj_ty = self.check_expr(object, interner)?;
+                let obj_ty_id = self.check_expr(object, interner)?;
+                let obj_ty = self.id_to_type(obj_ty_id);
                 let field_name = interner.resolve(*field);
 
                 match &obj_ty {
@@ -310,7 +309,7 @@ impl Analyzer {
                                 // Substitute type args via arena if any
                                 let field_type_id = generic_info.field_types[idx];
                                 if c.type_args.is_empty() {
-                                    self.type_arena.borrow().to_type(field_type_id)
+                                    field_type_id
                                 } else {
                                     let mut arena = self.type_arena.borrow_mut();
                                     let subs_id: hashbrown::HashMap<_, _> = generic_info
@@ -319,8 +318,7 @@ impl Analyzer {
                                         .zip(c.type_args.iter())
                                         .map(|(tp, arg)| (tp.name_id, arena.from_type(arg)))
                                         .collect();
-                                    let substituted_id = arena.substitute(field_type_id, &subs_id);
-                                    arena.to_type(substituted_id)
+                                    arena.substitute(field_type_id, &subs_id)
                                 }
                             } else {
                                 self.add_error(
@@ -331,7 +329,7 @@ impl Analyzer {
                                     },
                                     *field_span,
                                 );
-                                LegacyType::invalid("propagate")
+                                ArenaTypeId::INVALID
                             }
                         } else {
                             self.add_error(
@@ -342,7 +340,7 @@ impl Analyzer {
                                 },
                                 *field_span,
                             );
-                            LegacyType::invalid("propagate")
+                            ArenaTypeId::INVALID
                         }
                     }
                     LegacyType::Nominal(NominalType::Record(r)) => {
@@ -359,10 +357,10 @@ impl Analyzer {
                             },
                             *field_span,
                         );
-                        LegacyType::invalid("propagate")
+                        ArenaTypeId::INVALID
                     }
                     _ => {
-                        if !obj_ty.is_invalid() {
+                        if !obj_ty_id.is_invalid() {
                             let ty = self.type_display(&obj_ty);
                             self.add_error(
                                 SemanticError::UnknownField {
@@ -373,27 +371,28 @@ impl Analyzer {
                                 *field_span,
                             );
                         }
-                        LegacyType::invalid("propagate")
+                        ArenaTypeId::INVALID
                     }
                 }
             }
         };
 
         // Type-check the value expression with expected type context
-        let expected = if !target_type.is_invalid() {
-            Some(&target_type)
+        let expected = if !target_type_id.is_invalid() {
+            Some(self.id_to_type(target_type_id))
         } else {
             None
         };
-        let value_type = self.check_expr_expecting(&compound.value, expected, interner)?;
+        let value_type = self.check_expr_expecting(&compound.value, expected.as_ref(), interner)?;
+        let value_type_id = self.type_to_id(&value_type);
 
         // Check operator compatibility - compound assignment operators are arithmetic
         // For +=, -=, *=, /=, %= both operands must be numeric
-        if !target_type.is_invalid()
-            && !value_type.is_invalid()
-            && (!target_type.is_numeric() || !value_type.is_numeric())
+        if !target_type_id.is_invalid()
+            && !value_type_id.is_invalid()
+            && (!target_type_id.is_numeric() || !value_type_id.is_numeric())
         {
-            let found = self.type_display_pair(&target_type, &value_type);
+            let found = self.type_display_pair_id(target_type_id, value_type_id);
             self.add_error(
                 SemanticError::TypeMismatch {
                     expected: "numeric".to_string(),
@@ -404,6 +403,6 @@ impl Analyzer {
             );
         }
 
-        Ok(target_type)
+        Ok(target_type_id)
     }
 }

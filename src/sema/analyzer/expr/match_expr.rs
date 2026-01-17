@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::LegacyType;
 
 impl Analyzer {
@@ -19,9 +20,10 @@ impl Analyzer {
         &mut self,
         match_expr: &MatchExpr,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // Check scrutinee type
-        let scrutinee_type = self.check_expr(&match_expr.scrutinee, interner)?;
+        let scrutinee_type_id = self.check_expr(&match_expr.scrutinee, interner)?;
+        let scrutinee_type = self.id_to_type(scrutinee_type_id);
 
         // Get scrutinee symbol if it's an identifier (for type narrowing)
         let scrutinee_sym = if let ExprKind::Identifier(sym) = &match_expr.scrutinee.kind {
@@ -117,7 +119,7 @@ impl Analyzer {
 
             // Check guard if present (must be bool) using TypeId
             if let Some(guard) = &arm.guard {
-                let guard_type_id = self.check_expr_id(guard, interner)?;
+                let guard_type_id = self.check_expr(guard, interner)?;
                 if !self.is_bool_id(guard_type_id) && !self.is_numeric_id(guard_type_id) {
                     let found = self.type_display_id(guard_type_id);
                     self.add_error(
@@ -166,6 +168,6 @@ impl Analyzer {
             }
         }
 
-        Ok(result_type.unwrap_or(LegacyType::Void))
+        Ok(self.type_to_id(&result_type.unwrap_or(LegacyType::Void)))
     }
 }

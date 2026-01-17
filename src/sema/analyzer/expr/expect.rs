@@ -351,7 +351,8 @@ impl Analyzer {
             }
             ExprKind::Index(_) => {
                 // Index expressions just delegate to check_expr
-                self.check_expr(expr, interner)
+                let ty_id = self.check_expr(expr, interner)?;
+                Ok(self.id_to_type(ty_id))
             }
             ExprKind::Lambda(lambda) => {
                 // Extract expected function type if available
@@ -370,7 +371,8 @@ impl Analyzer {
             }
             // All other cases: infer type, then check compatibility
             _ => {
-                let inferred = self.check_expr(expr, interner)?;
+                let inferred_id = self.check_expr(expr, interner)?;
+                let inferred = self.id_to_type(inferred_id);
                 if let Some(expected_ty) = expected
                     && !self.types_compatible(&inferred, expected_ty, interner)
                 {
