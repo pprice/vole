@@ -323,6 +323,7 @@ mod tests {
     use crate::frontend::Interner;
     use crate::sema::entity_defs::TypeDefKind;
     use crate::sema::entity_registry::EntityRegistry;
+    use crate::sema::type_arena::TypeIdVec;
 
     #[test]
     fn type_table_uses_name_when_available() {
@@ -342,7 +343,7 @@ mod tests {
             LegacyType::Nominal(NominalType::Class(crate::sema::ClassType {
                 type_def_id,
                 type_args: vec![].into(),
-                type_args_id: None,
+                type_args_id: TypeIdVec::new(),
             })),
             name_id,
         );

@@ -18,6 +18,7 @@ use crate::sema::generic::{
     ClassMethodMonomorphInstance, MonomorphInstance, MonomorphInstanceTrait,
     StaticMethodMonomorphInstance, substitute_type,
 };
+use crate::sema::type_arena::TypeIdVec;
 use crate::sema::types::{ClassType, NominalType, RecordType};
 use crate::sema::{LegacyType, PrimitiveType};
 
@@ -1749,20 +1750,20 @@ impl Compiler<'_> {
                             LegacyType::Nominal(NominalType::Record(RecordType {
                                 type_def_id,
                                 type_args: type_args.into(),
-                                type_args_id: None,
+                                type_args_id: TypeIdVec::new(),
                             }))
                         }
                         TypeDefKind::Class => LegacyType::Nominal(NominalType::Class(ClassType {
                             type_def_id,
                             type_args: type_args.into(),
-                            type_args_id: None,
+                            type_args_id: TypeIdVec::new(),
                         })),
                         _ => {
                             // Fallback for other kinds
                             LegacyType::Nominal(NominalType::Record(RecordType {
                                 type_def_id,
                                 type_args: type_args.into(),
-                                type_args_id: None,
+                                type_args_id: TypeIdVec::new(),
                             }))
                         }
                     };

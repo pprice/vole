@@ -19,6 +19,7 @@ use std::collections::{HashMap, HashSet};
 use crate::identity::{FieldId, FunctionId, MethodId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 use crate::sema::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
+use crate::sema::type_arena::TypeIdVec;
 use crate::sema::type_table::{TypeKey, TypeTable};
 use crate::sema::types::{LegacyType, NominalType};
 
@@ -268,7 +269,7 @@ impl EntityRegistry {
         Some(ClassType {
             type_def_id: type_id,
             type_args: vec![].into(),
-            type_args_id: None,
+            type_args_id: TypeIdVec::new(),
         })
     }
 
@@ -284,7 +285,7 @@ impl EntityRegistry {
         Some(RecordType {
             type_def_id: type_id,
             type_args: Vec::new().into(),
-            type_args_id: None,
+            type_args_id: TypeIdVec::new(),
         })
     }
 

@@ -611,7 +611,7 @@ impl LegacyType {
                     LegacyType::Nominal(NominalType::Record(RecordType {
                         type_def_id: record_type.type_def_id,
                         type_args: args,
-                        type_args_id: None,
+                        type_args_id: TypeIdVec::new(),
                     }))
                 } else {
                     self.clone()
@@ -624,7 +624,7 @@ impl LegacyType {
                     LegacyType::Nominal(NominalType::Class(ClassType {
                         type_def_id: class_type.type_def_id,
                         type_args: args,
-                        type_args_id: None,
+                        type_args_id: TypeIdVec::new(),
                     }))
                 } else {
                     self.clone()

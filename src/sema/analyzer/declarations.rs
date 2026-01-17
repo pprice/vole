@@ -4,7 +4,7 @@
 use super::*;
 use crate::frontend::ast::{ExprKind, LetInit, TypeExpr};
 use crate::sema::entity_defs::{GenericFuncInfo, GenericTypeInfo, TypeDefKind};
-use crate::sema::type_arena::TypeId as ArenaTypeId;
+use crate::sema::type_arena::{TypeId as ArenaTypeId, TypeIdVec};
 use crate::sema::types::{LegacyType, NominalType};
 
 /// Extract the base interface name from a TypeExpr.
@@ -1106,7 +1106,7 @@ impl Analyzer {
             let record_type = RecordType {
                 type_def_id: entity_type_id,
                 type_args: vec![].into(), // Generic record base has no type args yet
-                type_args_id: None,
+                type_args_id: TypeIdVec::new(),
             };
             self.register_named_type(
                 record.name,

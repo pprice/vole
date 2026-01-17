@@ -8,6 +8,7 @@ use crate::frontend::{
     ClassDecl, Decl, InterfaceDecl, Interner, Program, RecordDecl, StaticsBlock, Symbol, TypeExpr,
 };
 use crate::runtime::type_registry::{FieldTypeTag, register_instance_type};
+use crate::sema::type_arena::TypeIdVec;
 use crate::sema::types::NominalType;
 use crate::sema::{ClassType, LegacyType, PrimitiveType, RecordType};
 
@@ -106,7 +107,7 @@ impl Compiler<'_> {
         let placeholder_type = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![].into(),
-            type_args_id: None,
+            type_args_id: TypeIdVec::new(),
         }));
         let vole_type_id = self
             .analyzed
@@ -164,7 +165,7 @@ impl Compiler<'_> {
         let vole_type = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![].into(),
-            type_args_id: None,
+            type_args_id: TypeIdVec::new(),
         }));
 
         // Collect method return types
@@ -308,7 +309,7 @@ impl Compiler<'_> {
         let placeholder_type = LegacyType::Nominal(NominalType::Record(RecordType {
             type_def_id,
             type_args: vec![].into(),
-            type_args_id: None,
+            type_args_id: TypeIdVec::new(),
         }));
         let vole_type_id = self
             .analyzed
@@ -366,7 +367,7 @@ impl Compiler<'_> {
         let vole_type = LegacyType::Nominal(NominalType::Record(RecordType {
             type_def_id,
             type_args: vec![].into(),
-            type_args_id: None,
+            type_args_id: TypeIdVec::new(),
         }));
 
         // Collect method return types
@@ -605,7 +606,7 @@ impl Compiler<'_> {
         let vole_type = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![].into(),
-            type_args_id: None,
+            type_args_id: TypeIdVec::new(),
         }));
 
         // Collect method info and declare methods

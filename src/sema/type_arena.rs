@@ -1417,7 +1417,7 @@ impl TypeArena {
                 LegacyType::Nominal(NominalType::Class(ClassType {
                     type_def_id: *type_def_id,
                     type_args: args.into(),
-                    type_args_id: Some(type_args.clone()),
+                    type_args_id: type_args.clone(),
                 }))
             }
 
@@ -1429,7 +1429,7 @@ impl TypeArena {
                 LegacyType::Nominal(NominalType::Record(RecordType {
                     type_def_id: *type_def_id,
                     type_args: args.into(),
-                    type_args_id: Some(type_args.clone()),
+                    type_args_id: type_args.clone(),
                 }))
             }
 
@@ -2119,7 +2119,7 @@ mod tests {
         let original = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
-            type_args_id: None,
+            type_args_id: TypeIdVec::new(),
         }));
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
@@ -2139,7 +2139,7 @@ mod tests {
                 LegacyType::Primitive(PrimitiveType::Bool),
             ]
             .into(),
-            type_args_id: None,
+            type_args_id: TypeIdVec::new(),
         }));
         let id = arena.from_type(&original);
         let back = arena.to_type(id);

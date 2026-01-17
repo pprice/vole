@@ -650,7 +650,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                             crate::sema::types::ClassType {
                                 type_def_id,
                                 type_args: resolved_args.into(),
-                                type_args_id: None,
+                                type_args_id: TypeIdVec::new(),
                             },
                         ));
                     }
@@ -659,7 +659,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                             crate::sema::types::RecordType {
                                 type_def_id,
                                 type_args: resolved_args.into(),
-                                type_args_id: None,
+                                type_args_id: TypeIdVec::new(),
                             },
                         ));
                     }

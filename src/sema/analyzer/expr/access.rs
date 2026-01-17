@@ -16,7 +16,7 @@ impl Analyzer {
         &self,
         type_def_id: TypeDefId,
         type_args: &[LegacyType],
-        type_args_id: Option<&crate::sema::type_arena::TypeIdVec>,
+        type_args_id: &[crate::sema::type_arena::TypeId],
         field_name: &str,
     ) -> Option<(String, LegacyType)> {
         let type_def = self.entity_registry.get_type(type_def_id);
@@ -29,10 +29,10 @@ impl Analyzer {
                 let field_type_id = generic_info.field_types[i];
 
                 // Prefer arena-based substitution when type_args_id is available
-                let substituted = if let Some(args_id) = type_args_id {
+                let substituted = if !type_args_id.is_empty() {
                     let subst_id = self.entity_registry.substitute_type_id_with_args(
                         type_def_id,
-                        args_id,
+                        type_args_id,
                         field_type_id,
                         &mut self.type_arena.borrow_mut(),
                     );

@@ -52,12 +52,13 @@ impl NominalType {
         }
     }
 
-    /// Get type arguments as TypeIds (if available) for arena-based substitution.
-    pub fn type_args_id(&self) -> Option<&TypeIdVec> {
+    /// Get type arguments as TypeIds for arena-based substitution.
+    /// Returns empty slice for interfaces (which don't have TypeId args yet) and errors.
+    pub fn type_args_id(&self) -> &[crate::sema::type_arena::TypeId] {
         match self {
-            NominalType::Class(c) => c.type_args_id.as_ref(),
-            NominalType::Record(r) => r.type_args_id.as_ref(),
-            NominalType::Interface(_) | NominalType::Error(_) => None,
+            NominalType::Class(c) => &c.type_args_id,
+            NominalType::Record(r) => &r.type_args_id,
+            NominalType::Interface(_) | NominalType::Error(_) => &[],
         }
     }
 
@@ -135,9 +136,10 @@ pub struct ClassType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
     /// Type arguments for generic classes (empty for non-generic classes)
+    /// DEPRECATED: Use type_args_id instead. Will be removed in Phase 5.
     pub type_args: Arc<[LegacyType]>,
-    /// Interned type arguments (parallel to type_args, for efficient operations)
-    pub type_args_id: Option<TypeIdVec>,
+    /// Interned type arguments (canonical source of truth)
+    pub type_args_id: TypeIdVec,
 }
 
 impl PartialEq for ClassType {
@@ -154,14 +156,9 @@ impl std::hash::Hash for ClassType {
 }
 
 impl ClassType {
-    /// Check if interned type argument IDs are available.
-    pub fn has_interned_ids(&self) -> bool {
-        self.type_args_id.is_some()
-    }
-
-    /// Get interned type argument IDs if available.
-    pub fn type_args_id(&self) -> Option<&TypeIdVec> {
-        self.type_args_id.as_ref()
+    /// Get interned type argument IDs.
+    pub fn type_args_id(&self) -> &TypeIdVec {
+        &self.type_args_id
     }
 }
 
@@ -171,9 +168,10 @@ pub struct RecordType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
     /// Type arguments for generic records (empty for non-generic records)
+    /// DEPRECATED: Use type_args_id instead. Will be removed in Phase 5.
     pub type_args: Arc<[LegacyType]>,
-    /// Interned type arguments (parallel to type_args, for efficient operations)
-    pub type_args_id: Option<TypeIdVec>,
+    /// Interned type arguments (canonical source of truth)
+    pub type_args_id: TypeIdVec,
 }
 
 impl PartialEq for RecordType {
@@ -190,14 +188,9 @@ impl std::hash::Hash for RecordType {
 }
 
 impl RecordType {
-    /// Check if interned type argument IDs are available.
-    pub fn has_interned_ids(&self) -> bool {
-        self.type_args_id.is_some()
-    }
-
-    /// Get interned type argument IDs if available.
-    pub fn type_args_id(&self) -> Option<&TypeIdVec> {
-        self.type_args_id.as_ref()
+    /// Get interned type argument IDs.
+    pub fn type_args_id(&self) -> &TypeIdVec {
+        &self.type_args_id
     }
 }
 
@@ -272,7 +265,7 @@ mod tests {
         NominalType::Class(ClassType {
             type_def_id: TypeDefId::new(id),
             type_args: vec![].into(),
-            type_args_id: None,
+            type_args_id: TypeIdVec::new(),
         })
     }
 
@@ -280,7 +273,7 @@ mod tests {
         NominalType::Record(RecordType {
             type_def_id: TypeDefId::new(id),
             type_args: vec![].into(),
-            type_args_id: None,
+            type_args_id: TypeIdVec::new(),
         })
     }
 
