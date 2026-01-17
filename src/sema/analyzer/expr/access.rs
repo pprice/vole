@@ -2,7 +2,7 @@ use super::super::*;
 use crate::identity::{NameId, TypeDefId};
 use crate::sema::generic::{
     ClassMethodMonomorphInstance, ClassMethodMonomorphKey, StaticMethodMonomorphInstance,
-    StaticMethodMonomorphKey, TypeParamInfo, merge_type_params, substitute_type,
+    StaticMethodMonomorphKey, TypeParamInfo, merge_type_params,
 };
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::types::{LegacyType, NominalType};
@@ -582,14 +582,15 @@ impl Analyzer {
                     self.infer_type_params(&all_type_params, &func_type.params, &arg_types)
                 };
 
-                // Substitute inferred types into param types and return type
-                let substituted_params: Vec<LegacyType> = func_type
-                    .params
-                    .iter()
-                    .map(|p| crate::sema::generic::substitute_type(p, &inferred))
-                    .collect();
-                let substituted_return =
-                    crate::sema::generic::substitute_type(&func_type.return_type, &inferred);
+                // Substitute inferred types into param types and return type using arena
+                let (substituted_params, substituted_return) = if let LegacyType::Function(ft) =
+                    LegacyType::Function(func_type.clone())
+                        .substitute_with_arena(&inferred, &mut self.type_arena.borrow_mut())
+                {
+                    (ft.params.to_vec(), (*ft.return_type).clone())
+                } else {
+                    unreachable!("substitute_with_arena on Function returns Function")
+                };
 
                 // Check type parameter constraints for class type params
                 if !class_type_params.is_empty() {
@@ -854,14 +855,15 @@ impl Analyzer {
                 .name_table
                 .intern_raw(self.current_module, &[&mangled_name_str]);
 
-            // Create the substituted function type
-            let substituted_params: Vec<LegacyType> = func_type
-                .params
-                .iter()
-                .map(|p| substitute_type(p, &legacy_substitutions))
-                .collect();
-            let substituted_return = substitute_type(&func_type.return_type, &legacy_substitutions);
-            let substituted_func_type = FunctionType { params: substituted_params.into(), return_type: Box::new(substituted_return), is_closure: func_type.is_closure, params_id: None, return_type_id: None };
+            // Create the substituted function type using arena
+            let substituted_func_type = if let LegacyType::Function(ft) =
+                LegacyType::Function(func_type.clone())
+                    .substitute_with_arena(&legacy_substitutions, &mut self.type_arena.borrow_mut())
+            {
+                ft
+            } else {
+                unreachable!("substitute_with_arena on Function returns Function")
+            };
 
             // Convert substitutions to TypeId for storage
             let substitutions = {
