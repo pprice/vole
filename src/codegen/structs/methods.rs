@@ -14,7 +14,7 @@ use crate::codegen::method_resolution::{
 };
 use crate::codegen::types::{
     CompiledValue, box_interface_value, module_name_id, type_id_size, type_id_to_cranelift,
-    type_to_cranelift, value_to_word, word_to_value,
+    type_to_cranelift, value_to_word, word_to_value, word_to_value_type_id,
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
@@ -193,7 +193,7 @@ impl Cg<'_, '_, '_> {
             resolution,
         })?;
 
-        let (method_info, return_type_id, return_type) = match target {
+        let (method_info, return_type_id) = match target {
             MethodTarget::FunctionalInterface { func_type } => {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
                 if let LegacyType::Nominal(NominalType::Interface(interface_type)) =
@@ -279,11 +279,7 @@ impl Cg<'_, '_, '_> {
             | MethodTarget::Default {
                 method_info,
                 return_type,
-            } => {
-                // Keep TypeId for final CompiledValue, convert to LegacyType for union check
-                let return_type_legacy = self.to_legacy(return_type);
-                (method_info, return_type, return_type_legacy)
-            }
+            } => (method_info, return_type)
         };
 
         // Check if this is a monomorphized class method call
@@ -370,16 +366,17 @@ impl Cg<'_, '_, '_> {
         } else {
             // Generic methods are compiled with TypeParam -> i64, but we may need
             // a different type (f64, bool, etc). Convert using word_to_value.
-            let expected_ty = type_to_cranelift(&return_type, self.ctx.pointer_type);
+            let expected_ty =
+                type_id_to_cranelift(return_type_id, &self.ctx.arena.borrow(), self.ctx.pointer_type);
             let actual_result = results[0];
             let actual_ty = self.builder.func.dfg.value_type(actual_result);
 
             let result_value = if actual_ty != expected_ty && actual_ty == types::I64 {
                 // Method returned i64 (TypeParam) but we expect a different type
-                word_to_value(
+                word_to_value_type_id(
                     self.builder,
                     actual_result,
-                    &return_type,
+                    return_type_id,
                     self.ctx.pointer_type,
                     &self.ctx.analyzed.entity_registry,
                     &self.ctx.arena.borrow(),

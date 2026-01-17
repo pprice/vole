@@ -1431,7 +1431,6 @@ pub(crate) fn word_to_value(
 
 /// Convert a uniform word representation back into a typed value using TypeId.
 /// Convenience wrapper for when you have a TypeId instead of LegacyType.
-#[allow(dead_code)]
 pub(crate) fn word_to_value_type_id(
     builder: &mut FunctionBuilder,
     word: Value,
