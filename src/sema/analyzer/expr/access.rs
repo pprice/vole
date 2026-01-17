@@ -47,34 +47,6 @@ impl Analyzer {
         None
     }
 
-    /// Get the type name and list of field names for a struct-like type (for error messages)
-    fn get_struct_info(&self, ty: &LegacyType) -> Option<(String, Vec<String>)> {
-        let type_def_id = match ty {
-            LegacyType::Nominal(NominalType::Class(c)) => c.type_def_id,
-            LegacyType::Nominal(NominalType::Record(r)) => r.type_def_id,
-            _ => return None,
-        };
-
-        let type_def = self.entity_registry.get_type(type_def_id);
-        let type_name = self
-            .name_table
-            .last_segment_str(type_def.name_id)
-            .unwrap_or_else(|| "struct".to_string());
-
-        let field_names: Vec<String> = type_def
-            .generic_info
-            .as_ref()
-            .map(|gi| {
-                gi.field_names
-                    .iter()
-                    .filter_map(|name_id| self.name_table.last_segment_str(*name_id))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        Some((type_name, field_names))
-    }
-
     pub(super) fn check_field_access_expr(
         &mut self,
         field_access: &FieldAccessExpr,
@@ -119,9 +91,6 @@ impl Analyzer {
             return Ok(self.ty_invalid_traced_id("module_no_export"));
         }
 
-        // Get object_type for nominal type checking (still needs LegacyType for now)
-        let object_type = self.id_to_type(object_type_id);
-
         // Handle Invalid type early - propagate
         if object_type_id.is_invalid() {
             return Ok(ArenaTypeId::INVALID);
@@ -130,28 +99,45 @@ impl Analyzer {
         // Get fields from object type (Class or Record)
         let field_name = interner.resolve(field_access.field);
 
-        // Extract type_def_id and type_args from the object type
-        let LegacyType::Nominal(n) = &object_type else {
+        // Extract type_def_id and type_args using arena queries (avoids LegacyType)
+        let struct_info = {
+            let arena = self.type_arena.borrow();
+            if let Some((id, args)) = arena.unwrap_class(object_type_id) {
+                Some((id, args.clone(), true)) // is_class = true
+            } else if let Some((id, args)) = arena.unwrap_record(object_type_id) {
+                Some((id, args.clone(), false)) // is_class = false
+            } else {
+                None
+            }
+        };
+        let Some((type_def_id, type_args_id, is_class)) = struct_info else {
             self.type_error_id("class or record", object_type_id, field_access.object.span);
             return Ok(self.ty_invalid_traced_id("field_access_non_struct"));
         };
-        if !n.is_struct_like() {
-            self.type_error_id("class or record", object_type_id, field_access.object.span);
-            return Ok(self.ty_invalid_traced_id("field_access_non_struct"));
-        }
-        let (type_def_id, type_args_id) = (n.type_def_id(), n.type_args_id());
 
         // Try to find the field
         if let Some((_type_name, field_type)) =
-            self.get_field_type(type_def_id, type_args_id, field_name)
+            self.get_field_type(type_def_id, &type_args_id, field_name)
         {
             return Ok(self.type_to_id(&field_type));
         }
 
-        // Field not found - get struct info for error message
-        let (type_name, available_fields) = self
-            .get_struct_info(&object_type)
-            .unwrap_or_else(|| ("unknown".to_string(), vec![]));
+        // Field not found - get struct info for error message using type_def_id
+        let type_def = self.entity_registry.get_type(type_def_id);
+        let type_name = self
+            .name_table
+            .last_segment_str(type_def.name_id)
+            .unwrap_or_else(|| "struct".to_string());
+        let available_fields: Vec<String> = type_def
+            .generic_info
+            .as_ref()
+            .map(|gi| {
+                gi.field_names
+                    .iter()
+                    .filter_map(|name_id| self.name_table.last_segment_str(*name_id))
+                    .collect()
+            })
+            .unwrap_or_default();
 
         self.add_error(
             SemanticError::UnknownField {
@@ -164,11 +150,7 @@ impl Analyzer {
         let context = format!(
             "field '{}' not found on {} '{}' (available: {})",
             field_name,
-            if matches!(&object_type, LegacyType::Nominal(NominalType::Class(_))) {
-                "class"
-            } else {
-                "record"
-            },
+            if is_class { "class" } else { "record" },
             type_name,
             if available_fields.is_empty() {
                 "none".to_string()
@@ -206,9 +188,18 @@ impl Analyzer {
             return Ok(ArenaTypeId::INVALID);
         }
 
-        // Get type_def_id and type_args from inner type
-        let inner_type = self.id_to_type(inner_type_id);
-        let LegacyType::Nominal(n) = &inner_type else {
+        // Get type_def_id and type_args from inner type using arena queries
+        let struct_info = {
+            let arena = self.type_arena.borrow();
+            if let Some((id, args)) = arena.unwrap_class(inner_type_id) {
+                Some((id, args.clone()))
+            } else if let Some((id, args)) = arena.unwrap_record(inner_type_id) {
+                Some((id, args.clone()))
+            } else {
+                None
+            }
+        };
+        let Some((type_def_id, type_args_id)) = struct_info else {
             self.type_error_id(
                 "optional class or record",
                 object_type_id,
@@ -216,20 +207,11 @@ impl Analyzer {
             );
             return Ok(self.ty_invalid_traced_id("optional_chain_non_struct"));
         };
-        if !n.is_struct_like() {
-            self.type_error_id(
-                "optional class or record",
-                object_type_id,
-                opt_chain.object.span,
-            );
-            return Ok(self.ty_invalid_traced_id("optional_chain_non_struct"));
-        }
-        let (type_def_id, type_args_id) = (n.type_def_id(), n.type_args_id());
 
         // Find the field
         let field_name = interner.resolve(opt_chain.field);
         if let Some((_type_name, field_type)) =
-            self.get_field_type(type_def_id, type_args_id, field_name)
+            self.get_field_type(type_def_id, &type_args_id, field_name)
         {
             let field_type_id = self.type_to_id(&field_type);
             // Result is always optional (field_type | nil)
@@ -240,9 +222,12 @@ impl Analyzer {
                 Ok(self.ty_optional_id(field_type_id))
             }
         } else {
-            let (type_name, _) = self
-                .get_struct_info(&inner_type)
-                .unwrap_or_else(|| ("unknown".to_string(), vec![]));
+            // Get type name for error message using type_def_id
+            let type_def = self.entity_registry.get_type(type_def_id);
+            let type_name = self
+                .name_table
+                .last_segment_str(type_def.name_id)
+                .unwrap_or_else(|| "struct".to_string());
             self.add_error(
                 SemanticError::UnknownField {
                     ty: type_name,
