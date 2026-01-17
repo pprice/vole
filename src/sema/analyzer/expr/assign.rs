@@ -1,5 +1,4 @@
 use super::super::*;
-use crate::sema::PrimitiveType;
 use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
@@ -122,20 +121,12 @@ impl Analyzer {
             }
             AssignTarget::Index { object, index } => {
                 // Type-check object as array
-                let obj_type = self.check_expr(object, interner)?;
-                let idx_type = self.check_expr(index, interner)?;
+                let obj_type_id = self.check_expr_id(object, interner)?;
+                let idx_type_id = self.check_expr_id(index, interner)?;
 
-                // Check index is integer
-                if !matches!(
-                    idx_type,
-                    LegacyType::Primitive(PrimitiveType::I32)
-                        | LegacyType::Primitive(PrimitiveType::I64)
-                        | LegacyType::Primitive(PrimitiveType::U8)
-                        | LegacyType::Primitive(PrimitiveType::U16)
-                        | LegacyType::Primitive(PrimitiveType::U32)
-                        | LegacyType::Primitive(PrimitiveType::U64)
-                ) {
-                    let found = self.type_display(&idx_type);
+                // Check index is integer using TypeId
+                if !self.is_integer_id(idx_type_id) {
+                    let found = self.type_display_id(idx_type_id);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "integer".to_string(),
@@ -146,24 +137,24 @@ impl Analyzer {
                     );
                 }
 
-                // Get element type
-                match obj_type {
-                    LegacyType::Array(elem_ty) => (*elem_ty, true, true),
-                    LegacyType::FixedArray { element, .. } => (*element, true, true),
-                    _ => {
-                        if !obj_type.is_invalid() {
-                            let found = self.type_display(&obj_type);
-                            self.add_error(
-                                SemanticError::TypeMismatch {
-                                    expected: "array".to_string(),
-                                    found,
-                                    span: object.span.into(),
-                                },
-                                object.span,
-                            );
-                        }
-                        (LegacyType::invalid("propagate"), false, false)
+                // Get element type using TypeId
+                if let Some(elem_id) = self.unwrap_array_id(obj_type_id) {
+                    (self.id_to_type(elem_id), true, true)
+                } else if let Some((elem_id, _)) = self.unwrap_fixed_array_id(obj_type_id) {
+                    (self.id_to_type(elem_id), true, true)
+                } else {
+                    if !self.is_invalid_id(obj_type_id) {
+                        let found = self.type_display_id(obj_type_id);
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "array".to_string(),
+                                found,
+                                span: object.span.into(),
+                            },
+                            object.span,
+                        );
                     }
+                    (LegacyType::invalid("propagate"), false, false)
                 }
             }
         };
@@ -252,21 +243,13 @@ impl Analyzer {
                 }
             }
             AssignTarget::Index { object, index } => {
-                // Type-check object as array
-                let obj_type = self.check_expr(object, interner)?;
-                let idx_type = self.check_expr(index, interner)?;
+                // Type-check object as array using TypeId
+                let obj_type_id = self.check_expr_id(object, interner)?;
+                let idx_type_id = self.check_expr_id(index, interner)?;
 
-                // Check index is integer
-                if !matches!(
-                    idx_type,
-                    LegacyType::Primitive(PrimitiveType::I32)
-                        | LegacyType::Primitive(PrimitiveType::I64)
-                        | LegacyType::Primitive(PrimitiveType::U8)
-                        | LegacyType::Primitive(PrimitiveType::U16)
-                        | LegacyType::Primitive(PrimitiveType::U32)
-                        | LegacyType::Primitive(PrimitiveType::U64)
-                ) {
-                    let found = self.type_display(&idx_type);
+                // Check index is integer using TypeId
+                if !self.is_integer_id(idx_type_id) {
+                    let found = self.type_display_id(idx_type_id);
                     self.add_error(
                         SemanticError::TypeMismatch {
                             expected: "integer".to_string(),
@@ -277,24 +260,24 @@ impl Analyzer {
                     );
                 }
 
-                // Get element type
-                match obj_type {
-                    LegacyType::Array(elem_ty) => *elem_ty,
-                    LegacyType::FixedArray { element, .. } => *element,
-                    _ => {
-                        if !obj_type.is_invalid() {
-                            let found = self.type_display(&obj_type);
-                            self.add_error(
-                                SemanticError::TypeMismatch {
-                                    expected: "array".to_string(),
-                                    found,
-                                    span: object.span.into(),
-                                },
-                                object.span,
-                            );
-                        }
-                        LegacyType::invalid("propagate")
+                // Get element type using TypeId
+                if let Some(elem_id) = self.unwrap_array_id(obj_type_id) {
+                    self.id_to_type(elem_id)
+                } else if let Some((elem_id, _)) = self.unwrap_fixed_array_id(obj_type_id) {
+                    self.id_to_type(elem_id)
+                } else {
+                    if !self.is_invalid_id(obj_type_id) {
+                        let found = self.type_display_id(obj_type_id);
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "array".to_string(),
+                                found,
+                                span: object.span.into(),
+                            },
+                            object.span,
+                        );
                     }
+                    LegacyType::invalid("propagate")
                 }
             }
             AssignTarget::Field {

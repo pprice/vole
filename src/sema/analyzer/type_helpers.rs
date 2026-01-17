@@ -357,6 +357,12 @@ impl Analyzer {
         self.type_arena.borrow().unwrap_array(id)
     }
 
+    /// Get fixed array element type and size if this is a fixed array
+    #[inline]
+    pub(crate) fn unwrap_fixed_array_id(&self, id: ArenaTypeId) -> Option<(ArenaTypeId, usize)> {
+        self.type_arena.borrow().unwrap_fixed_array(id)
+    }
+
     /// Get runtime iterator element type if this is a runtime iterator
     #[inline]
     pub(crate) fn unwrap_runtime_iterator_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {

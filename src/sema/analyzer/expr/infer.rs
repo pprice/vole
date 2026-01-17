@@ -265,10 +265,11 @@ impl Analyzer {
 
             ExprKind::Index(idx) => {
                 let obj_ty = self.check_expr(&idx.object, interner)?;
-                let index_ty = self.check_expr(&idx.index, interner)?;
+                let index_ty_id = self.check_expr_id(&idx.index, interner)?;
 
-                // Index must be integer
-                if !index_ty.is_integer() {
+                // Index must be integer (using TypeId check)
+                if !self.is_integer_id(index_ty_id) {
+                    let index_ty = self.id_to_type(index_ty_id);
                     self.type_error("integer", &index_ty, idx.index.span);
                 }
 
@@ -310,10 +311,12 @@ impl Analyzer {
             }
 
             ExprKind::Range(range) => {
-                let start_ty = self.check_expr(&range.start, interner)?;
-                let end_ty = self.check_expr(&range.end, interner)?;
+                let start_ty_id = self.check_expr_id(&range.start, interner)?;
+                let end_ty_id = self.check_expr_id(&range.end, interner)?;
 
-                if !start_ty.is_integer() || !end_ty.is_integer() {
+                if !self.is_integer_id(start_ty_id) || !self.is_integer_id(end_ty_id) {
+                    let start_ty = self.id_to_type(start_ty_id);
+                    let end_ty = self.id_to_type(end_ty_id);
                     self.type_error_pair("integer", &start_ty, &end_ty, expr.span);
                 }
                 Ok(self.ty_range())
@@ -488,9 +491,10 @@ impl Analyzer {
             }
 
             ExprKind::If(if_expr) => {
-                // Type check the condition (must be bool)
-                let cond_ty = self.check_expr(&if_expr.condition, interner)?;
-                if cond_ty != LegacyType::Primitive(PrimitiveType::Bool) {
+                // Type check the condition (must be bool) using TypeId
+                let cond_ty_id = self.check_expr_id(&if_expr.condition, interner)?;
+                if !self.is_bool_id(cond_ty_id) {
+                    let cond_ty = self.id_to_type(cond_ty_id);
                     self.type_error("bool", &cond_ty, if_expr.condition.span);
                 }
 

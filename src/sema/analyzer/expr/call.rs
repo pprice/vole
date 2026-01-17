@@ -1,6 +1,5 @@
 use super::super::*;
 use crate::identity::Namer;
-use crate::sema::PrimitiveType;
 use crate::sema::compatibility::TypeCompatibility;
 use crate::sema::types::{LegacyType, NominalType};
 
@@ -30,9 +29,9 @@ impl Analyzer {
                 return Ok(self.ty_void());
             }
 
-            let arg_ty = self.check_expr(&call.args[0], interner)?;
-            if arg_ty != LegacyType::Primitive(PrimitiveType::Bool) && !arg_ty.is_invalid() {
-                let found = self.type_display(&arg_ty);
+            let arg_ty_id = self.check_expr_id(&call.args[0], interner)?;
+            if !self.is_bool_id(arg_ty_id) && !self.is_invalid_id(arg_ty_id) {
+                let found = self.type_display_id(arg_ty_id);
                 self.add_error(
                     SemanticError::TypeMismatch {
                         expected: "bool".to_string(),
