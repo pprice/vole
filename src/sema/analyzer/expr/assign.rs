@@ -61,7 +61,9 @@ impl Analyzer {
                                         .zip(c.type_args_id.iter())
                                         .map(|(tp, &type_id)| (tp.name_id, type_id))
                                         .collect();
-                                    self.type_arena.borrow_mut().substitute(field_type_id, &subs_id)
+                                    self.type_arena
+                                        .borrow_mut()
+                                        .substitute(field_type_id, &subs_id)
                                 };
                                 (resolved_type_id, true, true)
                             } else {
@@ -318,7 +320,9 @@ impl Analyzer {
                                         .zip(c.type_args_id.iter())
                                         .map(|(tp, &type_id)| (tp.name_id, type_id))
                                         .collect();
-                                    self.type_arena.borrow_mut().substitute(field_type_id, &subs_id)
+                                    self.type_arena
+                                        .borrow_mut()
+                                        .substitute(field_type_id, &subs_id)
                                 }
                             } else {
                                 self.add_error(

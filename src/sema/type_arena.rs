@@ -2113,13 +2113,21 @@ mod tests {
     #[test]
     fn bridge_roundtrip_class() {
         use crate::sema::types::{ClassType, NominalType, PrimitiveType};
+        use std::sync::Arc;
 
         let mut arena = TypeArena::new();
         let type_def_id = TypeDefId::new(42);
+        // Create type args with consistent LegacyType and TypeId representations
+        let type_args_legacy: Arc<[LegacyType]> =
+            vec![LegacyType::Primitive(PrimitiveType::I32)].into();
+        let type_args_id: TypeIdVec = type_args_legacy
+            .iter()
+            .map(|t| arena.from_type(t))
+            .collect();
         let original = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
-            type_args: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
-            type_args_id: TypeIdVec::new(),
+            type_args: type_args_legacy,
+            type_args_id,
         }));
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
@@ -2129,17 +2137,24 @@ mod tests {
     #[test]
     fn bridge_roundtrip_record() {
         use crate::sema::types::{NominalType, PrimitiveType, RecordType};
+        use std::sync::Arc;
 
         let mut arena = TypeArena::new();
         let type_def_id = TypeDefId::new(123);
+        // Create type args with consistent LegacyType and TypeId representations
+        let type_args_legacy: Arc<[LegacyType]> = vec![
+            LegacyType::Primitive(PrimitiveType::String),
+            LegacyType::Primitive(PrimitiveType::Bool),
+        ]
+        .into();
+        let type_args_id: TypeIdVec = type_args_legacy
+            .iter()
+            .map(|t| arena.from_type(t))
+            .collect();
         let original = LegacyType::Nominal(NominalType::Record(RecordType {
             type_def_id,
-            type_args: vec![
-                LegacyType::Primitive(PrimitiveType::String),
-                LegacyType::Primitive(PrimitiveType::Bool),
-            ]
-            .into(),
-            type_args_id: TypeIdVec::new(),
+            type_args: type_args_legacy,
+            type_args_id,
         }));
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
