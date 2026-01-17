@@ -1749,17 +1749,20 @@ impl Compiler<'_> {
                             LegacyType::Nominal(NominalType::Record(RecordType {
                                 type_def_id,
                                 type_args: type_args.into(),
+                                type_args_id: None,
                             }))
                         }
                         TypeDefKind::Class => LegacyType::Nominal(NominalType::Class(ClassType {
                             type_def_id,
                             type_args: type_args.into(),
+                            type_args_id: None,
                         })),
                         _ => {
                             // Fallback for other kinds
                             LegacyType::Nominal(NominalType::Record(RecordType {
                                 type_def_id,
                                 type_args: type_args.into(),
+                                type_args_id: None,
                             }))
                         }
                     };

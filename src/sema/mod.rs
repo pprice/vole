@@ -35,6 +35,7 @@ pub use types::{
 };
 pub use well_known::{WellKnownMethods, WellKnownTypes};
 
-// TypeArena for interned type representation (Phase 1 of TypeArena refactor)
+// TypeArena for interned type representation
+// SemaType is the canonical type representation - use TypeId handles for O(1) equality
 // Note: type_arena::TypeId is accessed via module path to avoid conflict with implement_registry::TypeId
-pub use type_arena::TypeArena;
+pub use type_arena::{SemaType, TypeArena};

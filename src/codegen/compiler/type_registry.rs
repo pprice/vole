@@ -106,6 +106,7 @@ impl Compiler<'_> {
         let placeholder_type = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![].into(),
+            type_args_id: None,
         }));
         let vole_type_id = self
             .analyzed
@@ -163,6 +164,7 @@ impl Compiler<'_> {
         let vole_type = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![].into(),
+            type_args_id: None,
         }));
 
         // Collect method return types
@@ -306,6 +308,7 @@ impl Compiler<'_> {
         let placeholder_type = LegacyType::Nominal(NominalType::Record(RecordType {
             type_def_id,
             type_args: vec![].into(),
+            type_args_id: None,
         }));
         let vole_type_id = self
             .analyzed
@@ -363,6 +366,7 @@ impl Compiler<'_> {
         let vole_type = LegacyType::Nominal(NominalType::Record(RecordType {
             type_def_id,
             type_args: vec![].into(),
+            type_args_id: None,
         }));
 
         // Collect method return types
@@ -601,6 +605,7 @@ impl Compiler<'_> {
         let vole_type = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![].into(),
+            type_args_id: None,
         }));
 
         // Collect method info and declare methods

@@ -2,10 +2,10 @@
 //
 // Interned type system using TypeId handles for O(1) equality and minimal allocations.
 //
-// This module replaces the old Type enum with an arena-based interning system:
+// This module provides the canonical type representation for Vole's semantic analysis:
 // - TypeId: u32 handle to an interned type (Copy, trivial Eq/Hash)
 // - TypeArena: per-compilation storage with automatic deduplication
-// - Type: internal storage using SmallVec for child types
+// - SemaType: the canonical type representation using TypeId for child types
 
 use hashbrown::HashMap;
 use smallvec::SmallVec;
@@ -86,9 +86,9 @@ pub struct ModuleMetadata {
 /// The canonical type representation in Vole.
 ///
 /// This is an interned type stored in the TypeArena. Use TypeId handles
-/// for O(1) equality and pass-by-copy. Access the Type via arena.get(id).
+/// for O(1) equality and pass-by-copy. Access the SemaType via arena.get(id).
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Type {
+pub enum SemaType {
     // Primitives
     Primitive(PrimitiveType),
 
@@ -143,7 +143,7 @@ pub enum Type {
     TypeParamRef(TypeParamId),
 
     // Module type - exports are part of the type identity
-    // Note: Boxed to keep Type size small
+    // Note: Boxed to keep SemaType size small
     Module(Box<InternedModule>),
 
     // Fallible type: fallible(T, E) - result-like type
@@ -154,7 +154,7 @@ pub enum Type {
 
     // Structural type: duck typing constraint
     // e.g., { name: string, func greet() -> string }
-    // Note: Boxed to keep Type size small
+    // Note: Boxed to keep SemaType size small
     Structural(Box<InternedStructural>),
 
     // Placeholder for inference (if we decide to intern these)
@@ -193,9 +193,9 @@ pub struct PrimitiveTypes {
 /// Per-compilation type arena with automatic interning/deduplication.
 pub struct TypeArena {
     /// Interned types, indexed by TypeId
-    types: Vec<Type>,
+    types: Vec<SemaType>,
     /// Deduplication map - hashbrown for better perf
-    intern_map: HashMap<Type, TypeId>,
+    intern_map: HashMap<SemaType, TypeId>,
     /// Pre-interned primitives for O(1) access
     pub primitives: PrimitiveTypes,
     /// Module metadata (constants, external_funcs) keyed by ModuleId.
@@ -244,33 +244,33 @@ impl TypeArena {
 
         // Pre-intern all primitive types
         // Invalid must be first (index 0) for is_invalid() check
-        arena.primitives.invalid = arena.intern(Type::Invalid { kind: "invalid" });
+        arena.primitives.invalid = arena.intern(SemaType::Invalid { kind: "invalid" });
         debug_assert_eq!(arena.primitives.invalid.0, 0);
 
-        arena.primitives.i8 = arena.intern(Type::Primitive(PrimitiveType::I8));
-        arena.primitives.i16 = arena.intern(Type::Primitive(PrimitiveType::I16));
-        arena.primitives.i32 = arena.intern(Type::Primitive(PrimitiveType::I32));
-        arena.primitives.i64 = arena.intern(Type::Primitive(PrimitiveType::I64));
-        arena.primitives.i128 = arena.intern(Type::Primitive(PrimitiveType::I128));
-        arena.primitives.u8 = arena.intern(Type::Primitive(PrimitiveType::U8));
-        arena.primitives.u16 = arena.intern(Type::Primitive(PrimitiveType::U16));
-        arena.primitives.u32 = arena.intern(Type::Primitive(PrimitiveType::U32));
-        arena.primitives.u64 = arena.intern(Type::Primitive(PrimitiveType::U64));
-        arena.primitives.f32 = arena.intern(Type::Primitive(PrimitiveType::F32));
-        arena.primitives.f64 = arena.intern(Type::Primitive(PrimitiveType::F64));
-        arena.primitives.bool = arena.intern(Type::Primitive(PrimitiveType::Bool));
-        arena.primitives.string = arena.intern(Type::Primitive(PrimitiveType::String));
-        arena.primitives.void = arena.intern(Type::Void);
-        arena.primitives.nil = arena.intern(Type::Nil);
-        arena.primitives.done = arena.intern(Type::Done);
-        arena.primitives.range = arena.intern(Type::Range);
-        arena.primitives.metatype = arena.intern(Type::MetaType);
+        arena.primitives.i8 = arena.intern(SemaType::Primitive(PrimitiveType::I8));
+        arena.primitives.i16 = arena.intern(SemaType::Primitive(PrimitiveType::I16));
+        arena.primitives.i32 = arena.intern(SemaType::Primitive(PrimitiveType::I32));
+        arena.primitives.i64 = arena.intern(SemaType::Primitive(PrimitiveType::I64));
+        arena.primitives.i128 = arena.intern(SemaType::Primitive(PrimitiveType::I128));
+        arena.primitives.u8 = arena.intern(SemaType::Primitive(PrimitiveType::U8));
+        arena.primitives.u16 = arena.intern(SemaType::Primitive(PrimitiveType::U16));
+        arena.primitives.u32 = arena.intern(SemaType::Primitive(PrimitiveType::U32));
+        arena.primitives.u64 = arena.intern(SemaType::Primitive(PrimitiveType::U64));
+        arena.primitives.f32 = arena.intern(SemaType::Primitive(PrimitiveType::F32));
+        arena.primitives.f64 = arena.intern(SemaType::Primitive(PrimitiveType::F64));
+        arena.primitives.bool = arena.intern(SemaType::Primitive(PrimitiveType::Bool));
+        arena.primitives.string = arena.intern(SemaType::Primitive(PrimitiveType::String));
+        arena.primitives.void = arena.intern(SemaType::Void);
+        arena.primitives.nil = arena.intern(SemaType::Nil);
+        arena.primitives.done = arena.intern(SemaType::Done);
+        arena.primitives.range = arena.intern(SemaType::Range);
+        arena.primitives.metatype = arena.intern(SemaType::MetaType);
 
         arena
     }
 
     /// Intern a type, returning existing TypeId if already interned
-    fn intern(&mut self, ty: Type) -> TypeId {
+    fn intern(&mut self, ty: SemaType) -> TypeId {
         let next_id = TypeId(self.types.len() as u32);
         *self.intern_map.entry(ty.clone()).or_insert_with(|| {
             self.types.push(ty);
@@ -278,8 +278,8 @@ impl TypeArena {
         })
     }
 
-    /// Get the Type for a TypeId
-    pub fn get(&self, id: TypeId) -> &Type {
+    /// Get the SemaType for a TypeId
+    pub fn get(&self, id: TypeId) -> &SemaType {
         &self.types[id.0 as usize]
     }
 
@@ -380,7 +380,7 @@ impl TypeArena {
         if variants.iter().any(|&v| self.is_invalid(v)) {
             return self.invalid();
         }
-        self.intern(Type::Union(variants))
+        self.intern(SemaType::Union(variants))
     }
 
     /// Create a tuple type from elements
@@ -389,7 +389,7 @@ impl TypeArena {
         if elements.iter().any(|&e| self.is_invalid(e)) {
             return self.invalid();
         }
-        self.intern(Type::Tuple(elements))
+        self.intern(SemaType::Tuple(elements))
     }
 
     /// Create an array type
@@ -397,7 +397,7 @@ impl TypeArena {
         if self.is_invalid(element) {
             return self.invalid();
         }
-        self.intern(Type::Array(element))
+        self.intern(SemaType::Array(element))
     }
 
     /// Create a fixed-size array type
@@ -405,7 +405,7 @@ impl TypeArena {
         if self.is_invalid(element) {
             return self.invalid();
         }
-        self.intern(Type::FixedArray { element, size })
+        self.intern(SemaType::FixedArray { element, size })
     }
 
     /// Create a runtime iterator type
@@ -413,7 +413,7 @@ impl TypeArena {
         if self.is_invalid(element) {
             return self.invalid();
         }
-        self.intern(Type::RuntimeIterator(element))
+        self.intern(SemaType::RuntimeIterator(element))
     }
 
     /// Create a function type
@@ -427,7 +427,7 @@ impl TypeArena {
         if params.iter().any(|&p| self.is_invalid(p)) || self.is_invalid(ret) {
             return self.invalid();
         }
-        self.intern(Type::Function {
+        self.intern(SemaType::Function {
             params,
             ret,
             is_closure,
@@ -449,7 +449,7 @@ impl TypeArena {
         if type_args.iter().any(|&a| self.is_invalid(a)) {
             return self.invalid();
         }
-        self.intern(Type::Class {
+        self.intern(SemaType::Class {
             type_def_id,
             type_args,
         })
@@ -461,7 +461,7 @@ impl TypeArena {
         if type_args.iter().any(|&a| self.is_invalid(a)) {
             return self.invalid();
         }
-        self.intern(Type::Record {
+        self.intern(SemaType::Record {
             type_def_id,
             type_args,
         })
@@ -473,7 +473,7 @@ impl TypeArena {
         if type_args.iter().any(|&a| self.is_invalid(a)) {
             return self.invalid();
         }
-        self.intern(Type::Interface {
+        self.intern(SemaType::Interface {
             type_def_id,
             type_args,
         })
@@ -481,17 +481,17 @@ impl TypeArena {
 
     /// Create an error type
     pub fn error_type(&mut self, type_def_id: TypeDefId) -> TypeId {
-        self.intern(Type::Error { type_def_id })
+        self.intern(SemaType::Error { type_def_id })
     }
 
     /// Create a type parameter placeholder
     pub fn type_param(&mut self, name_id: NameId) -> TypeId {
-        self.intern(Type::TypeParam(name_id))
+        self.intern(SemaType::TypeParam(name_id))
     }
 
     /// Create a type parameter reference
     pub fn type_param_ref(&mut self, type_param_id: TypeParamId) -> TypeId {
-        self.intern(Type::TypeParamRef(type_param_id))
+        self.intern(SemaType::TypeParamRef(type_param_id))
     }
 
     /// Create a module type with its exports
@@ -500,7 +500,7 @@ impl TypeArena {
         module_id: ModuleId,
         exports: SmallVec<[(NameId, TypeId); 8]>,
     ) -> TypeId {
-        self.intern(Type::Module(Box::new(InternedModule {
+        self.intern(SemaType::Module(Box::new(InternedModule {
             module_id,
             exports,
         })))
@@ -521,7 +521,7 @@ impl TypeArena {
         if self.is_invalid(success) || self.is_invalid(error) {
             return self.invalid();
         }
-        self.intern(Type::Fallible { success, error })
+        self.intern(SemaType::Fallible { success, error })
     }
 
     /// Create a structural type (duck typing constraint)
@@ -540,7 +540,7 @@ impl TypeArena {
         {
             return self.invalid();
         }
-        self.intern(Type::Structural(Box::new(InternedStructural {
+        self.intern(SemaType::Structural(Box::new(InternedStructural {
             fields,
             methods,
         })))
@@ -548,7 +548,7 @@ impl TypeArena {
 
     /// Create a placeholder type (for inference)
     pub fn placeholder(&mut self, kind: PlaceholderKind) -> TypeId {
-        self.intern(Type::Placeholder(kind))
+        self.intern(SemaType::Placeholder(kind))
     }
 
     // ========================================================================
@@ -558,7 +558,7 @@ impl TypeArena {
     /// Check if this is a numeric type (can do arithmetic)
     pub fn is_numeric(&self, id: TypeId) -> bool {
         match self.get(id) {
-            Type::Primitive(p) => p.is_numeric(),
+            SemaType::Primitive(p) => p.is_numeric(),
             _ => false,
         }
     }
@@ -566,7 +566,7 @@ impl TypeArena {
     /// Check if this is an integer type
     pub fn is_integer(&self, id: TypeId) -> bool {
         match self.get(id) {
-            Type::Primitive(p) => p.is_integer(),
+            SemaType::Primitive(p) => p.is_integer(),
             _ => false,
         }
     }
@@ -574,7 +574,7 @@ impl TypeArena {
     /// Check if this is a floating point type
     pub fn is_float(&self, id: TypeId) -> bool {
         match self.get(id) {
-            Type::Primitive(p) => p.is_float(),
+            SemaType::Primitive(p) => p.is_float(),
             _ => false,
         }
     }
@@ -582,7 +582,7 @@ impl TypeArena {
     /// Check if this is a signed integer type
     pub fn is_signed(&self, id: TypeId) -> bool {
         match self.get(id) {
-            Type::Primitive(p) => p.is_signed(),
+            SemaType::Primitive(p) => p.is_signed(),
             _ => false,
         }
     }
@@ -590,7 +590,7 @@ impl TypeArena {
     /// Check if this is an unsigned integer type
     pub fn is_unsigned(&self, id: TypeId) -> bool {
         match self.get(id) {
-            Type::Primitive(p) => p.is_unsigned(),
+            SemaType::Primitive(p) => p.is_unsigned(),
             _ => false,
         }
     }
@@ -598,7 +598,7 @@ impl TypeArena {
     /// Check if this is an optional type (union containing nil)
     pub fn is_optional(&self, id: TypeId) -> bool {
         match self.get(id) {
-            Type::Union(variants) => variants.contains(&self.nil()),
+            SemaType::Union(variants) => variants.contains(&self.nil()),
             _ => false,
         }
     }
@@ -606,7 +606,7 @@ impl TypeArena {
     /// Unwrap an array type, returning the element type
     pub fn unwrap_array(&self, id: TypeId) -> Option<TypeId> {
         match self.get(id) {
-            Type::Array(elem) => Some(*elem),
+            SemaType::Array(elem) => Some(*elem),
             _ => None,
         }
     }
@@ -614,7 +614,7 @@ impl TypeArena {
     /// Unwrap an optional type, returning the non-nil type
     pub fn unwrap_optional(&self, id: TypeId) -> Option<TypeId> {
         match self.get(id) {
-            Type::Union(variants) => {
+            SemaType::Union(variants) => {
                 let nil = self.nil();
                 let non_nil: TypeIdVec = variants.iter().copied().filter(|&v| v != nil).collect();
                 if non_nil.len() == 1 {
@@ -630,7 +630,7 @@ impl TypeArena {
     /// Unwrap a function type, returning (params, return_type, is_closure)
     pub fn unwrap_function(&self, id: TypeId) -> Option<(&TypeIdVec, TypeId, bool)> {
         match self.get(id) {
-            Type::Function {
+            SemaType::Function {
                 params,
                 ret,
                 is_closure,
@@ -642,7 +642,7 @@ impl TypeArena {
     /// Unwrap a tuple type, returning the element types
     pub fn unwrap_tuple(&self, id: TypeId) -> Option<&TypeIdVec> {
         match self.get(id) {
-            Type::Tuple(elements) => Some(elements),
+            SemaType::Tuple(elements) => Some(elements),
             _ => None,
         }
     }
@@ -650,7 +650,7 @@ impl TypeArena {
     /// Unwrap a fixed array type, returning (element, size)
     pub fn unwrap_fixed_array(&self, id: TypeId) -> Option<(TypeId, usize)> {
         match self.get(id) {
-            Type::FixedArray { element, size } => Some((*element, *size)),
+            SemaType::FixedArray { element, size } => Some((*element, *size)),
             _ => None,
         }
     }
@@ -658,10 +658,10 @@ impl TypeArena {
     /// Get TypeDefId for nominal types (class, record, interface, error)
     pub fn type_def_id(&self, id: TypeId) -> Option<TypeDefId> {
         match self.get(id) {
-            Type::Class { type_def_id, .. } => Some(*type_def_id),
-            Type::Record { type_def_id, .. } => Some(*type_def_id),
-            Type::Interface { type_def_id, .. } => Some(*type_def_id),
-            Type::Error { type_def_id } => Some(*type_def_id),
+            SemaType::Class { type_def_id, .. } => Some(*type_def_id),
+            SemaType::Record { type_def_id, .. } => Some(*type_def_id),
+            SemaType::Interface { type_def_id, .. } => Some(*type_def_id),
+            SemaType::Error { type_def_id } => Some(*type_def_id),
             _ => None,
         }
     }
@@ -669,9 +669,9 @@ impl TypeArena {
     /// Get type arguments for generic types
     pub fn type_args(&self, id: TypeId) -> &[TypeId] {
         match self.get(id) {
-            Type::Class { type_args, .. } => type_args,
-            Type::Record { type_args, .. } => type_args,
-            Type::Interface { type_args, .. } => type_args,
+            SemaType::Class { type_args, .. } => type_args,
+            SemaType::Record { type_args, .. } => type_args,
+            SemaType::Interface { type_args, .. } => type_args,
             _ => &[],
         }
     }
@@ -698,24 +698,24 @@ impl TypeArena {
 
     /// Check if this is an array type
     pub fn is_array(&self, id: TypeId) -> bool {
-        matches!(self.get(id), Type::Array(_))
+        matches!(self.get(id), SemaType::Array(_))
     }
 
     /// Check if this is a fixed array type
     pub fn is_fixed_array(&self, id: TypeId) -> bool {
-        matches!(self.get(id), Type::FixedArray { .. })
+        matches!(self.get(id), SemaType::FixedArray { .. })
     }
 
     /// Check if this is a function type
     pub fn is_function(&self, id: TypeId) -> bool {
-        matches!(self.get(id), Type::Function { .. })
+        matches!(self.get(id), SemaType::Function { .. })
     }
 
     /// Check if this is a closure (function with is_closure=true)
     pub fn is_closure(&self, id: TypeId) -> bool {
         matches!(
             self.get(id),
-            Type::Function {
+            SemaType::Function {
                 is_closure: true,
                 ..
             }
@@ -724,32 +724,32 @@ impl TypeArena {
 
     /// Check if this is a class type
     pub fn is_class(&self, id: TypeId) -> bool {
-        matches!(self.get(id), Type::Class { .. })
+        matches!(self.get(id), SemaType::Class { .. })
     }
 
     /// Check if this is a record type
     pub fn is_record(&self, id: TypeId) -> bool {
-        matches!(self.get(id), Type::Record { .. })
+        matches!(self.get(id), SemaType::Record { .. })
     }
 
     /// Check if this is an interface type
     pub fn is_interface(&self, id: TypeId) -> bool {
-        matches!(self.get(id), Type::Interface { .. })
+        matches!(self.get(id), SemaType::Interface { .. })
     }
 
     /// Check if this is an error type
     pub fn is_error(&self, id: TypeId) -> bool {
-        matches!(self.get(id), Type::Error { .. })
+        matches!(self.get(id), SemaType::Error { .. })
     }
 
     /// Check if this is a union type
     pub fn is_union(&self, id: TypeId) -> bool {
-        matches!(self.get(id), Type::Union(_))
+        matches!(self.get(id), SemaType::Union(_))
     }
 
     /// Check if this is a tuple type
     pub fn is_tuple(&self, id: TypeId) -> bool {
-        matches!(self.get(id), Type::Tuple(_))
+        matches!(self.get(id), SemaType::Tuple(_))
     }
 
     /// Check if this is the string primitive
@@ -769,12 +769,12 @@ impl TypeArena {
 
     /// Check if this is a runtime iterator type
     pub fn is_runtime_iterator(&self, id: TypeId) -> bool {
-        matches!(self.get(id), Type::RuntimeIterator(_))
+        matches!(self.get(id), SemaType::RuntimeIterator(_))
     }
 
     /// Check if this is a fallible type
     pub fn is_fallible(&self, id: TypeId) -> bool {
-        matches!(self.get(id), Type::Fallible { .. })
+        matches!(self.get(id), SemaType::Fallible { .. })
     }
 
     // =========================================================================
@@ -784,7 +784,7 @@ impl TypeArena {
     /// Unwrap a class type, returning (type_def_id, type_args)
     pub fn unwrap_class(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
         match self.get(id) {
-            Type::Class {
+            SemaType::Class {
                 type_def_id,
                 type_args,
             } => Some((*type_def_id, type_args)),
@@ -795,7 +795,7 @@ impl TypeArena {
     /// Unwrap a record type, returning (type_def_id, type_args)
     pub fn unwrap_record(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
         match self.get(id) {
-            Type::Record {
+            SemaType::Record {
                 type_def_id,
                 type_args,
             } => Some((*type_def_id, type_args)),
@@ -806,7 +806,7 @@ impl TypeArena {
     /// Unwrap an interface type, returning (type_def_id, type_args)
     pub fn unwrap_interface(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
         match self.get(id) {
-            Type::Interface {
+            SemaType::Interface {
                 type_def_id,
                 type_args,
             } => Some((*type_def_id, type_args)),
@@ -817,7 +817,7 @@ impl TypeArena {
     /// Unwrap an error type, returning type_def_id
     pub fn unwrap_error(&self, id: TypeId) -> Option<TypeDefId> {
         match self.get(id) {
-            Type::Error { type_def_id } => Some(*type_def_id),
+            SemaType::Error { type_def_id } => Some(*type_def_id),
             _ => None,
         }
     }
@@ -825,7 +825,7 @@ impl TypeArena {
     /// Unwrap a union type, returning the variants
     pub fn unwrap_union(&self, id: TypeId) -> Option<&TypeIdVec> {
         match self.get(id) {
-            Type::Union(variants) => Some(variants),
+            SemaType::Union(variants) => Some(variants),
             _ => None,
         }
     }
@@ -833,7 +833,7 @@ impl TypeArena {
     /// Unwrap a runtime iterator type, returning the element type
     pub fn unwrap_runtime_iterator(&self, id: TypeId) -> Option<TypeId> {
         match self.get(id) {
-            Type::RuntimeIterator(elem) => Some(*elem),
+            SemaType::RuntimeIterator(elem) => Some(*elem),
             _ => None,
         }
     }
@@ -841,7 +841,7 @@ impl TypeArena {
     /// Unwrap a fallible type, returning (success, error)
     pub fn unwrap_fallible(&self, id: TypeId) -> Option<(TypeId, TypeId)> {
         match self.get(id) {
-            Type::Fallible { success, error } => Some((*success, *error)),
+            SemaType::Fallible { success, error } => Some((*success, *error)),
             _ => None,
         }
     }
@@ -849,7 +849,7 @@ impl TypeArena {
     /// Unwrap a module type, returning the InternedModule
     pub fn unwrap_module(&self, id: TypeId) -> Option<&InternedModule> {
         match self.get(id) {
-            Type::Module(m) => Some(m.as_ref()),
+            SemaType::Module(m) => Some(m.as_ref()),
             _ => None,
         }
     }
@@ -857,29 +857,29 @@ impl TypeArena {
     /// Display a type for error messages (basic version without name resolution)
     pub fn display_basic(&self, id: TypeId) -> String {
         match self.get(id) {
-            Type::Primitive(p) => p.name().to_string(),
-            Type::Void => "void".to_string(),
-            Type::Nil => "nil".to_string(),
-            Type::Done => "Done".to_string(),
-            Type::Range => "range".to_string(),
-            Type::MetaType => "type".to_string(),
-            Type::Invalid { kind } => format!("<invalid: {}>", kind),
-            Type::Union(variants) => {
+            SemaType::Primitive(p) => p.name().to_string(),
+            SemaType::Void => "void".to_string(),
+            SemaType::Nil => "nil".to_string(),
+            SemaType::Done => "Done".to_string(),
+            SemaType::Range => "range".to_string(),
+            SemaType::MetaType => "type".to_string(),
+            SemaType::Invalid { kind } => format!("<invalid: {}>", kind),
+            SemaType::Union(variants) => {
                 let parts: Vec<String> = variants.iter().map(|&v| self.display_basic(v)).collect();
                 parts.join(" | ")
             }
-            Type::Tuple(elements) => {
+            SemaType::Tuple(elements) => {
                 let parts: Vec<String> = elements.iter().map(|&e| self.display_basic(e)).collect();
                 format!("[{}]", parts.join(", "))
             }
-            Type::Array(elem) => format!("[{}]", self.display_basic(*elem)),
-            Type::FixedArray { element, size } => {
+            SemaType::Array(elem) => format!("[{}]", self.display_basic(*elem)),
+            SemaType::FixedArray { element, size } => {
                 format!("[{}; {}]", self.display_basic(*element), size)
             }
-            Type::RuntimeIterator(elem) => {
+            SemaType::RuntimeIterator(elem) => {
                 format!("Iterator<{}>", self.display_basic(*elem))
             }
-            Type::Function {
+            SemaType::Function {
                 params,
                 ret,
                 is_closure,
@@ -894,7 +894,7 @@ impl TypeArena {
                     self.display_basic(*ret)
                 )
             }
-            Type::Class {
+            SemaType::Class {
                 type_def_id,
                 type_args,
             } => {
@@ -906,7 +906,7 @@ impl TypeArena {
                     format!("class#{}<{}>", type_def_id.index(), args.join(", "))
                 }
             }
-            Type::Record {
+            SemaType::Record {
                 type_def_id,
                 type_args,
             } => {
@@ -918,7 +918,7 @@ impl TypeArena {
                     format!("record#{}<{}>", type_def_id.index(), args.join(", "))
                 }
             }
-            Type::Interface {
+            SemaType::Interface {
                 type_def_id,
                 type_args,
             } => {
@@ -930,18 +930,18 @@ impl TypeArena {
                     format!("interface#{}<{}>", type_def_id.index(), args.join(", "))
                 }
             }
-            Type::Error { type_def_id } => format!("error#{}", type_def_id.index()),
-            Type::TypeParam(name_id) => format!("TypeParam({:?})", name_id),
-            Type::TypeParamRef(id) => format!("TypeParamRef#{}", id.index()),
-            Type::Module(m) => format!("module#{}", m.module_id.index()),
-            Type::Fallible { success, error } => {
+            SemaType::Error { type_def_id } => format!("error#{}", type_def_id.index()),
+            SemaType::TypeParam(name_id) => format!("TypeParam({:?})", name_id),
+            SemaType::TypeParamRef(id) => format!("TypeParamRef#{}", id.index()),
+            SemaType::Module(m) => format!("module#{}", m.module_id.index()),
+            SemaType::Fallible { success, error } => {
                 format!(
                     "fallible({}, {})",
                     self.display_basic(*success),
                     self.display_basic(*error)
                 )
             }
-            Type::Structural(st) => {
+            SemaType::Structural(st) => {
                 let field_strs: Vec<String> = st
                     .fields
                     .iter()
@@ -967,7 +967,7 @@ impl TypeArena {
                     method_strs.join(", ")
                 )
             }
-            Type::Placeholder(kind) => format!("{}", kind),
+            SemaType::Placeholder(kind) => format!("{}", kind),
         }
     }
 
@@ -991,30 +991,30 @@ impl TypeArena {
         // Clone the interned type to release the borrow
         match self.get(ty).clone() {
             // Direct substitution for type parameters
-            Type::TypeParam(name_id) => subs.get(&name_id).copied().unwrap_or(ty),
+            SemaType::TypeParam(name_id) => subs.get(&name_id).copied().unwrap_or(ty),
 
             // TypeParamRef doesn't substitute based on NameId
-            Type::TypeParamRef(_) => ty,
+            SemaType::TypeParamRef(_) => ty,
 
             // Recursive substitution for compound types
-            Type::Array(elem) => {
+            SemaType::Array(elem) => {
                 let new_elem = self.substitute(elem, subs);
                 self.array(new_elem)
             }
 
-            Type::Union(variants) => {
+            SemaType::Union(variants) => {
                 let new_variants: TypeIdVec =
                     variants.iter().map(|&v| self.substitute(v, subs)).collect();
                 self.union(new_variants)
             }
 
-            Type::Tuple(elements) => {
+            SemaType::Tuple(elements) => {
                 let new_elements: TypeIdVec =
                     elements.iter().map(|&e| self.substitute(e, subs)).collect();
                 self.tuple(new_elements)
             }
 
-            Type::Function {
+            SemaType::Function {
                 params,
                 ret,
                 is_closure,
@@ -1025,7 +1025,7 @@ impl TypeArena {
                 self.function(new_params, new_ret, is_closure)
             }
 
-            Type::Class {
+            SemaType::Class {
                 type_def_id,
                 type_args,
             } => {
@@ -1036,7 +1036,7 @@ impl TypeArena {
                 self.class(type_def_id, new_args)
             }
 
-            Type::Record {
+            SemaType::Record {
                 type_def_id,
                 type_args,
             } => {
@@ -1047,7 +1047,7 @@ impl TypeArena {
                 self.record(type_def_id, new_args)
             }
 
-            Type::Interface {
+            SemaType::Interface {
                 type_def_id,
                 type_args,
             } => {
@@ -1058,23 +1058,23 @@ impl TypeArena {
                 self.interface(type_def_id, new_args)
             }
 
-            Type::RuntimeIterator(elem) => {
+            SemaType::RuntimeIterator(elem) => {
                 let new_elem = self.substitute(elem, subs);
                 self.runtime_iterator(new_elem)
             }
 
-            Type::FixedArray { element, size } => {
+            SemaType::FixedArray { element, size } => {
                 let new_elem = self.substitute(element, subs);
                 self.fixed_array(new_elem, size)
             }
 
-            Type::Fallible { success, error } => {
+            SemaType::Fallible { success, error } => {
                 let new_success = self.substitute(success, subs);
                 let new_error = self.substitute(error, subs);
                 self.fallible(new_success, new_error)
             }
 
-            Type::Structural(st) => {
+            SemaType::Structural(st) => {
                 let new_fields: SmallVec<[(NameId, TypeId); 4]> = st
                     .fields
                     .iter()
@@ -1093,16 +1093,16 @@ impl TypeArena {
             }
 
             // Types without nested type parameters - return unchanged
-            Type::Primitive(_)
-            | Type::Void
-            | Type::Nil
-            | Type::Done
-            | Type::Range
-            | Type::MetaType
-            | Type::Invalid { .. }
-            | Type::Error { .. }
-            | Type::Module(_)
-            | Type::Placeholder(_) => ty,
+            SemaType::Primitive(_)
+            | SemaType::Void
+            | SemaType::Nil
+            | SemaType::Done
+            | SemaType::Range
+            | SemaType::MetaType
+            | SemaType::Invalid { .. }
+            | SemaType::Error { .. }
+            | SemaType::Module(_)
+            | SemaType::Placeholder(_) => ty,
         }
     }
 
@@ -1114,7 +1114,7 @@ impl TypeArena {
     /// Convert a legacy Type to a TypeId.
     ///
     /// TEMPORARY: For migration only, delete in Phase 5.
-    /// This allows existing code to continue using Type while we incrementally
+    /// This allows existing code to continue using LegacyType while we incrementally
     /// migrate to TypeId throughout the codebase.
     pub fn from_type(&mut self, ty: &LegacyType) -> TypeId {
         use crate::sema::types::NominalType;
@@ -1229,7 +1229,7 @@ impl TypeArena {
     /// Convert a TypeId back to a legacy Type.
     ///
     /// TEMPORARY: For migration only, delete in Phase 5.
-    /// This allows existing code to continue using Type while we incrementally
+    /// This allows existing code to continue using LegacyType while we incrementally
     /// migrate to TypeId throughout the codebase.
     pub fn to_type(&self, id: TypeId) -> LegacyType {
         use crate::sema::types::{
@@ -1238,36 +1238,36 @@ impl TypeArena {
         };
 
         match self.get(id) {
-            Type::Primitive(p) => LegacyType::Primitive(*p),
-            Type::Void => LegacyType::Void,
-            Type::Nil => LegacyType::Nil,
-            Type::Done => LegacyType::Done,
-            Type::Range => LegacyType::Range,
-            Type::MetaType => LegacyType::MetaType,
-            Type::Invalid { kind } => LegacyType::invalid(kind),
+            SemaType::Primitive(p) => LegacyType::Primitive(*p),
+            SemaType::Void => LegacyType::Void,
+            SemaType::Nil => LegacyType::Nil,
+            SemaType::Done => LegacyType::Done,
+            SemaType::Range => LegacyType::Range,
+            SemaType::MetaType => LegacyType::MetaType,
+            SemaType::Invalid { kind } => LegacyType::invalid(kind),
 
-            Type::Array(elem) => LegacyType::Array(Box::new(self.to_type(*elem))),
+            SemaType::Array(elem) => LegacyType::Array(Box::new(self.to_type(*elem))),
 
-            Type::Union(variants) => {
+            SemaType::Union(variants) => {
                 let types: Vec<LegacyType> = variants.iter().map(|&v| self.to_type(v)).collect();
                 LegacyType::Union(types.into())
             }
 
-            Type::Tuple(elements) => {
+            SemaType::Tuple(elements) => {
                 let types: Vec<LegacyType> = elements.iter().map(|&e| self.to_type(e)).collect();
                 LegacyType::Tuple(types.into())
             }
 
-            Type::FixedArray { element, size } => LegacyType::FixedArray {
+            SemaType::FixedArray { element, size } => LegacyType::FixedArray {
                 element: Box::new(self.to_type(*element)),
                 size: *size,
             },
 
-            Type::RuntimeIterator(elem) => {
+            SemaType::RuntimeIterator(elem) => {
                 LegacyType::RuntimeIterator(Box::new(self.to_type(*elem)))
             }
 
-            Type::Function {
+            SemaType::Function {
                 params,
                 ret,
                 is_closure,
@@ -1277,7 +1277,7 @@ impl TypeArena {
                 LegacyType::Function(FunctionType { params: param_types.into(), return_type: Box::new(self.to_type(*ret)), is_closure: *is_closure, params_id: None, return_type_id: None })
             }
 
-            Type::Class {
+            SemaType::Class {
                 type_def_id,
                 type_args,
             } => {
@@ -1285,10 +1285,11 @@ impl TypeArena {
                 LegacyType::Nominal(NominalType::Class(ClassType {
                     type_def_id: *type_def_id,
                     type_args: args.into(),
+                    type_args_id: Some(type_args.clone()),
                 }))
             }
 
-            Type::Record {
+            SemaType::Record {
                 type_def_id,
                 type_args,
             } => {
@@ -1296,10 +1297,11 @@ impl TypeArena {
                 LegacyType::Nominal(NominalType::Record(RecordType {
                     type_def_id: *type_def_id,
                     type_args: args.into(),
+                    type_args_id: Some(type_args.clone()),
                 }))
             }
 
-            Type::Interface {
+            SemaType::Interface {
                 type_def_id,
                 type_args,
             } => {
@@ -1315,15 +1317,15 @@ impl TypeArena {
                 }))
             }
 
-            Type::Error { type_def_id } => LegacyType::Nominal(NominalType::Error(ErrorTypeInfo {
+            SemaType::Error { type_def_id } => LegacyType::Nominal(NominalType::Error(ErrorTypeInfo {
                 type_def_id: *type_def_id,
             })),
 
-            Type::TypeParam(name_id) => LegacyType::TypeParam(*name_id),
+            SemaType::TypeParam(name_id) => LegacyType::TypeParam(*name_id),
 
-            Type::TypeParamRef(param_id) => LegacyType::TypeParamRef(*param_id),
+            SemaType::TypeParamRef(param_id) => LegacyType::TypeParamRef(*param_id),
 
-            Type::Module(m) => {
+            SemaType::Module(m) => {
                 // Reconstruct exports from interned types
                 let exports_map: std::collections::HashMap<NameId, LegacyType> = m
                     .exports
@@ -1349,7 +1351,7 @@ impl TypeArena {
                 })
             }
 
-            Type::Fallible { success, error } => {
+            SemaType::Fallible { success, error } => {
                 use crate::sema::types::FallibleType;
                 LegacyType::Fallible(FallibleType {
                     success_type: Box::new(self.to_type(*success)),
@@ -1357,7 +1359,7 @@ impl TypeArena {
                 })
             }
 
-            Type::Structural(st) => {
+            SemaType::Structural(st) => {
                 use crate::sema::types::{
                     StructuralFieldType, StructuralMethodType, StructuralType,
                 };
@@ -1382,7 +1384,7 @@ impl TypeArena {
                 })
             }
 
-            Type::Placeholder(kind) => LegacyType::Placeholder(kind.clone()),
+            SemaType::Placeholder(kind) => LegacyType::Placeholder(kind.clone()),
         }
     }
 }
@@ -1419,9 +1421,9 @@ mod tests {
 
     #[test]
     fn interned_type_size() {
-        // Verify Type is reasonably sized
-        let size = size_of::<Type>();
-        assert!(size <= 48, "Type is {} bytes, expected <= 48", size);
+        // Verify SemaType is reasonably sized
+        let size = size_of::<SemaType>();
+        assert!(size <= 48, "SemaType is {} bytes, expected <= 48", size);
     }
 
     #[test]
@@ -1474,7 +1476,7 @@ mod tests {
         let i32_id = arena.i32();
         let opt = arena.optional(i32_id);
         match arena.get(opt) {
-            Type::Union(variants) => {
+            SemaType::Union(variants) => {
                 assert_eq!(variants.len(), 2);
                 assert!(variants.contains(&arena.nil()));
                 assert!(variants.contains(&arena.i32()));
@@ -1496,7 +1498,7 @@ mod tests {
         let mut arena = TypeArena::new();
         let arr = arena.array(arena.i32());
         match arena.get(arr) {
-            Type::Array(elem) => {
+            SemaType::Array(elem) => {
                 assert_eq!(*elem, arena.i32());
             }
             _ => panic!("expected array type"),
@@ -1510,7 +1512,7 @@ mod tests {
         let string_id = arena.string();
         let func = arena.function(smallvec::smallvec![i32_id, string_id], arena.bool(), false);
         match arena.get(func) {
-            Type::Function {
+            SemaType::Function {
                 params,
                 ret,
                 is_closure,
@@ -1534,7 +1536,7 @@ mod tests {
             arena.bool()
         ]);
         match arena.get(tup) {
-            Type::Tuple(elements) => {
+            SemaType::Tuple(elements) => {
                 assert_eq!(elements.len(), 3);
             }
             _ => panic!("expected tuple type"),
@@ -1547,7 +1549,7 @@ mod tests {
         let type_def_id = TypeDefId::new(42);
         let cls = arena.class(type_def_id, smallvec::smallvec![arena.i32()]);
         match arena.get(cls) {
-            Type::Class {
+            SemaType::Class {
                 type_def_id: tid,
                 type_args,
             } => {
@@ -1971,6 +1973,7 @@ mod tests {
         let original = LegacyType::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
+            type_args_id: None,
         }));
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
@@ -1990,6 +1993,7 @@ mod tests {
                 LegacyType::Primitive(PrimitiveType::Bool),
             ]
             .into(),
+            type_args_id: None,
         }));
         let id = arena.from_type(&original);
         let back = arena.to_type(id);

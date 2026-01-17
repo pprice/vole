@@ -365,12 +365,14 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                         return LegacyType::Nominal(NominalType::Class(ClassType {
                             type_def_id: type_id,
                             type_args: resolved_args.into(),
+                            type_args_id: None,
                         }));
                     }
                     TypeDefKind::Record => {
                         return LegacyType::Nominal(NominalType::Record(RecordType {
                             type_def_id: type_id,
                             type_args: resolved_args.into(),
+                            type_args_id: None,
                         }));
                     }
                     TypeDefKind::Interface => {

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use smallvec::SmallVec;
 
 use crate::identity::{NameId, TypeDefId};
+use crate::sema::type_arena::TypeIdVec;
 
 use super::LegacyType;
 
@@ -120,21 +121,75 @@ impl NominalType {
 }
 
 /// Class type information
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Eq)]
 pub struct ClassType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
     /// Type arguments for generic classes (empty for non-generic classes)
     pub type_args: Arc<[LegacyType]>,
+    /// Interned type arguments (parallel to type_args, for efficient operations)
+    pub type_args_id: Option<TypeIdVec>,
+}
+
+impl PartialEq for ClassType {
+    fn eq(&self, other: &Self) -> bool {
+        self.type_def_id == other.type_def_id && self.type_args == other.type_args
+    }
+}
+
+impl std::hash::Hash for ClassType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.type_def_id.hash(state);
+        self.type_args.hash(state);
+    }
+}
+
+impl ClassType {
+    /// Check if interned type argument IDs are available.
+    pub fn has_interned_ids(&self) -> bool {
+        self.type_args_id.is_some()
+    }
+
+    /// Get interned type argument IDs if available.
+    pub fn type_args_id(&self) -> Option<&TypeIdVec> {
+        self.type_args_id.as_ref()
+    }
 }
 
 /// Record type information
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Eq)]
 pub struct RecordType {
     /// Reference to the type definition in EntityRegistry
     pub type_def_id: TypeDefId,
     /// Type arguments for generic records (empty for non-generic records)
     pub type_args: Arc<[LegacyType]>,
+    /// Interned type arguments (parallel to type_args, for efficient operations)
+    pub type_args_id: Option<TypeIdVec>,
+}
+
+impl PartialEq for RecordType {
+    fn eq(&self, other: &Self) -> bool {
+        self.type_def_id == other.type_def_id && self.type_args == other.type_args
+    }
+}
+
+impl std::hash::Hash for RecordType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.type_def_id.hash(state);
+        self.type_args.hash(state);
+    }
+}
+
+impl RecordType {
+    /// Check if interned type argument IDs are available.
+    pub fn has_interned_ids(&self) -> bool {
+        self.type_args_id.is_some()
+    }
+
+    /// Get interned type argument IDs if available.
+    pub fn type_args_id(&self) -> Option<&TypeIdVec> {
+        self.type_args_id.as_ref()
+    }
 }
 
 /// Interface type information
@@ -208,6 +263,7 @@ mod tests {
         NominalType::Class(ClassType {
             type_def_id: TypeDefId::new(id),
             type_args: vec![].into(),
+            type_args_id: None,
         })
     }
 
@@ -215,6 +271,7 @@ mod tests {
         NominalType::Record(RecordType {
             type_def_id: TypeDefId::new(id),
             type_args: vec![].into(),
+            type_args_id: None,
         })
     }
 

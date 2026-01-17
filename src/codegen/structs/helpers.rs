@@ -5,7 +5,7 @@ use cranelift::prelude::*;
 use crate::codegen::types::CompileCtx;
 use crate::codegen::types::CompiledValue;
 use crate::errors::CodegenError;
-use crate::sema::type_arena::{Type as ArenaType, TypeArena, TypeId};
+use crate::sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
 use crate::sema::types::NominalType;
 use crate::sema::{LegacyType, PrimitiveType};
 

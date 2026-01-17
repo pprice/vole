@@ -1046,6 +1046,7 @@ impl Analyzer {
             let record_type = RecordType {
                 type_def_id: entity_type_id,
                 type_args: vec![].into(), // Generic record base has no type args yet
+                type_args_id: None,
             };
             self.register_named_type(
                 record.name,

@@ -342,6 +342,7 @@ mod tests {
             LegacyType::Nominal(NominalType::Class(crate::sema::ClassType {
                 type_def_id,
                 type_args: vec![].into(),
+                type_args_id: None,
             })),
             name_id,
         );

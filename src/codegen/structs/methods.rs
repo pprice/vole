@@ -511,7 +511,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Range methods
-        if matches!(arena.get(obj.type_id), crate::sema::type_arena::Type::Range) {
+        if matches!(arena.get(obj.type_id), crate::sema::type_arena::SemaType::Range) {
             drop(arena);
             if method_name == "iter" {
                 // Load start and end from the range struct (pointer to [start, end])

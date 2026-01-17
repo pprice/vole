@@ -13,7 +13,7 @@ use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::implement_registry::ExternalMethodInfo;
-use crate::sema::type_arena::{Type as ArenaType, TypeId};
+use crate::sema::type_arena::{SemaType as ArenaType, TypeId};
 use crate::sema::{LegacyType, PrimitiveType};
 use smallvec::SmallVec;
 

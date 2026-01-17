@@ -650,6 +650,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                             crate::sema::types::ClassType {
                                 type_def_id,
                                 type_args: resolved_args.into(),
+                                type_args_id: None,
                             },
                         ));
                     }
@@ -658,6 +659,7 @@ pub(crate) fn resolve_type_expr_with_metadata(
                             crate::sema::types::RecordType {
                                 type_def_id,
                                 type_args: resolved_args.into(),
+                                type_args_id: None,
                             },
                         ));
                     }
@@ -811,7 +813,7 @@ pub(crate) fn type_to_cranelift(ty: &LegacyType, pointer_type: Type) -> Type {
 
 /// Convert a TypeId to a Cranelift type (no LegacyType conversion needed)
 pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: Type) -> Type {
-    use crate::sema::type_arena::Type as ArenaType;
+    use crate::sema::type_arena::SemaType as ArenaType;
     match arena.get(ty) {
         ArenaType::Primitive(PrimitiveType::I8) | ArenaType::Primitive(PrimitiveType::U8) => {
             types::I8
@@ -960,7 +962,7 @@ pub(crate) fn type_id_size(
     entity_registry: &EntityRegistry,
     arena: &TypeArena,
 ) -> u32 {
-    use crate::sema::type_arena::Type as ArenaType;
+    use crate::sema::type_arena::SemaType as ArenaType;
     match arena.get(ty) {
         ArenaType::Primitive(PrimitiveType::I8)
         | ArenaType::Primitive(PrimitiveType::U8)
@@ -1216,7 +1218,7 @@ pub(crate) fn value_to_word(
         return Ok(alloc_ptr);
     }
 
-    use crate::sema::type_arena::Type as ArenaType;
+    use crate::sema::type_arena::SemaType as ArenaType;
     let word = match arena_ref.get(value.type_id) {
         ArenaType::Primitive(PrimitiveType::F64) => {
             builder
@@ -1336,7 +1338,7 @@ pub(crate) fn word_to_value_type_id(
 /// Get the runtime tag value for an array element type.
 /// These tags are used by the runtime to distinguish element types.
 pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
-    use crate::sema::type_arena::Type as ArenaType;
+    use crate::sema::type_arena::SemaType as ArenaType;
     match arena.get(ty) {
         ArenaType::Primitive(PrimitiveType::String) => 1,
         ArenaType::Primitive(PrimitiveType::I64)
