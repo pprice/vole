@@ -3,6 +3,7 @@
 // Type compatibility checking functions.
 // These are pure functions that determine if types are compatible for assignment.
 
+use crate::sema::type_arena::{SemaType, TypeArena, TypeId};
 use crate::sema::types::{FunctionType, LegacyType, NominalType, PrimitiveType};
 
 /// Check if an integer literal value fits within a type's range
@@ -139,6 +140,171 @@ pub fn types_compatible_core(from: &LegacyType, to: &LegacyType) -> bool {
     }
 
     false
+}
+
+/// Check if two types are compatible using TypeId (no LegacyType conversion).
+///
+/// This is the TypeId-based version of `types_compatible_core` for Phase 3 migration.
+/// It performs the same compatibility checks but operates directly on TypeId and the arena.
+#[allow(unused)] // Phase 3 infrastructure - callers will migrate
+pub fn types_compatible_core_id(from: TypeId, to: TypeId, arena: &TypeArena) -> bool {
+    // TypeId equality is O(1)
+    if from == to {
+        return true;
+    }
+
+    let from_ty = arena.get(from);
+    let to_ty = arena.get(to);
+
+    // Check widening (primitive numeric types)
+    if can_widen_to_id(from, to, arena) {
+        return true;
+    }
+
+    // Allow numeric coercion
+    if is_integer_id(from_ty) && to == arena.i64() {
+        return true;
+    }
+    if is_numeric_id(from_ty) && to == arena.f64() {
+        return true;
+    }
+
+    // Check if assigning to a union that contains the from type
+    if let SemaType::Union(variants) = to_ty {
+        // Direct containment
+        if variants.contains(&from) {
+            return true;
+        }
+        // Also check if from can widen into a union variant
+        for &variant in variants.iter() {
+            if can_widen_to_id(from, variant, arena) {
+                return true;
+            }
+        }
+    }
+
+    // Nil is compatible with any optional (union containing Nil)
+    if from == arena.nil() && is_optional_id(to, arena) {
+        return true;
+    }
+
+    // Invalid type is compatible with anything (for error recovery)
+    if from == arena.invalid() || to == arena.invalid() {
+        return true;
+    }
+
+    // Class compatibility: compare by type_def_id and type_args
+    if let (
+        SemaType::Class {
+            type_def_id: from_def,
+            type_args: from_args,
+        },
+        SemaType::Class {
+            type_def_id: to_def,
+            type_args: to_args,
+        },
+    ) = (from_ty, to_ty)
+    {
+        if from_def == to_def
+            && from_args.len() == to_args.len()
+            && from_args
+                .iter()
+                .zip(to_args.iter())
+                .all(|(&f, &t)| types_compatible_core_id(f, t, arena))
+        {
+            return true;
+        }
+    }
+
+    // Record compatibility: compare by type_def_id and type_args
+    if let (
+        SemaType::Record {
+            type_def_id: from_def,
+            type_args: from_args,
+        },
+        SemaType::Record {
+            type_def_id: to_def,
+            type_args: to_args,
+        },
+    ) = (from_ty, to_ty)
+    {
+        if from_def == to_def
+            && from_args.len() == to_args.len()
+            && from_args
+                .iter()
+                .zip(to_args.iter())
+                .all(|(&f, &t)| types_compatible_core_id(f, t, arena))
+        {
+            return true;
+        }
+    }
+
+    // Tuple compatibility: same length and each element is compatible
+    if let (SemaType::Tuple(from_elems), SemaType::Tuple(to_elems)) = (from_ty, to_ty) {
+        if from_elems.len() == to_elems.len() {
+            return from_elems
+                .iter()
+                .zip(to_elems.iter())
+                .all(|(&f, &t)| types_compatible_core_id(f, t, arena));
+        }
+    }
+
+    // Fixed array compatibility: same element type and same size
+    if let (
+        SemaType::FixedArray {
+            element: from_elem,
+            size: from_size,
+        },
+        SemaType::FixedArray {
+            element: to_elem,
+            size: to_size,
+        },
+    ) = (from_ty, to_ty)
+    {
+        if from_size == to_size {
+            return types_compatible_core_id(*from_elem, *to_elem, arena);
+        }
+    }
+
+    false
+}
+
+/// Check if a type can be widened to another using TypeId
+fn can_widen_to_id(from: TypeId, to: TypeId, arena: &TypeArena) -> bool {
+    let from_ty = arena.get(from);
+    let to_ty = arena.get(to);
+
+    match (from_ty, to_ty) {
+        (SemaType::Primitive(from_prim), SemaType::Primitive(to_prim)) => {
+            from_prim.can_widen_to(*to_prim)
+        }
+        _ => false,
+    }
+}
+
+/// Check if a SemaType is numeric
+fn is_numeric_id(ty: &SemaType) -> bool {
+    match ty {
+        SemaType::Primitive(p) => p.is_numeric(),
+        _ => false,
+    }
+}
+
+/// Check if a SemaType is an integer
+fn is_integer_id(ty: &SemaType) -> bool {
+    match ty {
+        SemaType::Primitive(p) => p.is_integer(),
+        _ => false,
+    }
+}
+
+/// Check if a TypeId represents an optional type (union containing nil)
+fn is_optional_id(id: TypeId, arena: &TypeArena) -> bool {
+    if let SemaType::Union(variants) = arena.get(id) {
+        variants.contains(&arena.nil())
+    } else {
+        false
+    }
 }
 
 /// Check if a function type is compatible with a functional interface.

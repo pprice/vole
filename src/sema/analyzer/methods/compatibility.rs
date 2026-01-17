@@ -1,11 +1,65 @@
 use super::super::*;
 use crate::identity::TypeDefId;
-use crate::sema::compatibility::TypeCompatibility;
+use crate::sema::compatibility::{types_compatible_core_id, TypeCompatibility};
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType};
 use std::collections::HashSet;
 
 #[allow(dead_code)]
 impl Analyzer {
+    /// Check type compatibility using TypeId (Phase 3 version).
+    /// Falls back to LegacyType for interface checks that require entity registry access.
+    #[allow(unused)] // Phase 3 infrastructure
+    pub(crate) fn types_compatible_id(
+        &self,
+        from: ArenaTypeId,
+        to: ArenaTypeId,
+        interner: &Interner,
+    ) -> bool {
+        // Use the core TypeId-based compatibility check
+        if types_compatible_core_id(from, to, &self.type_arena.borrow()) {
+            return true;
+        }
+
+        // For interface compatibility, we still need LegacyType for now
+        let from_ty = self.type_arena.borrow().to_type(from);
+        let to_ty = self.type_arena.borrow().to_type(to);
+        self.types_compatible_legacy_interface(&from_ty, &to_ty, interner)
+    }
+
+    /// Interface-related compatibility checks (extracted for reuse)
+    fn types_compatible_legacy_interface(
+        &self,
+        from: &LegacyType,
+        to: &LegacyType,
+        interner: &Interner,
+    ) -> bool {
+        // Non-functional interface compatibility
+        if let LegacyType::Nominal(NominalType::Interface(iface)) = to {
+            if let LegacyType::Nominal(NominalType::Interface(from_iface)) = from
+                && self.interface_extends_by_type_def_id(from_iface.type_def_id, iface.type_def_id)
+            {
+                return true;
+            }
+
+            if self.satisfies_interface_via_entity_registry(from, iface.type_def_id, interner) {
+                return true;
+            }
+        }
+
+        // Function type is compatible with functional interface if signatures match
+        if let LegacyType::Function(fn_type) = from
+            && let LegacyType::Nominal(NominalType::Interface(iface)) = to
+            && let Some(iface_fn) =
+                self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
+            && fn_type.is_compatible_with_interface(&iface_fn)
+        {
+            return true;
+        }
+
+        false
+    }
+
     pub(crate) fn types_compatible(
         &self,
         from: &LegacyType,

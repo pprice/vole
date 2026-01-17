@@ -9,5 +9,7 @@
 mod core;
 mod traits;
 
-pub use core::{function_compatible_with_interface, literal_fits, types_compatible_core};
+pub use core::{
+    function_compatible_with_interface, literal_fits, types_compatible_core, types_compatible_core_id,
+};
 pub use traits::TypeCompatibility;
