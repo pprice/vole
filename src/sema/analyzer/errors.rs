@@ -3,6 +3,7 @@
 use super::{TypeError, TypeWarning};
 use crate::errors::{SemanticError, SemanticWarning};
 use crate::frontend::Span;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::StructuralType;
 use crate::sema::{LegacyType, TypeKey};
 
@@ -28,6 +29,12 @@ impl Analyzer {
         self.entity_registry
             .type_table
             .display_type(ty, &self.name_table, &self.entity_registry)
+    }
+
+    /// Display a type from TypeId (converts to LegacyType for display)
+    pub(super) fn type_display_id(&self, id: ArenaTypeId) -> String {
+        let ty = self.type_arena.borrow().to_type(id);
+        self.type_display(&ty)
     }
 
     pub(super) fn type_display_pair(&mut self, left: &LegacyType, right: &LegacyType) -> String {

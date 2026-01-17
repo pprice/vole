@@ -95,11 +95,9 @@ impl Analyzer {
                 self.check_expr(&expr_stmt.expr, interner)?;
             }
             Stmt::While(while_stmt) => {
-                let cond_type = self.check_expr(&while_stmt.condition, interner)?;
-                if cond_type != LegacyType::Primitive(PrimitiveType::Bool)
-                    && !cond_type.is_numeric()
-                {
-                    let found = self.type_display(&cond_type);
+                let cond_type_id = self.check_expr_id(&while_stmt.condition, interner)?;
+                if !self.is_bool_id(cond_type_id) && !self.is_numeric_id(cond_type_id) {
+                    let found = self.type_display_id(cond_type_id);
                     self.add_error(
                         SemanticError::ConditionNotBool {
                             found,
@@ -117,11 +115,9 @@ impl Analyzer {
                 }
             }
             Stmt::If(if_stmt) => {
-                let cond_type = self.check_expr(&if_stmt.condition, interner)?;
-                if cond_type != LegacyType::Primitive(PrimitiveType::Bool)
-                    && !cond_type.is_numeric()
-                {
-                    let found = self.type_display(&cond_type);
+                let cond_type_id = self.check_expr_id(&if_stmt.condition, interner)?;
+                if !self.is_bool_id(cond_type_id) && !self.is_numeric_id(cond_type_id) {
+                    let found = self.type_display_id(cond_type_id);
                     self.add_error(
                         SemanticError::ConditionNotBool {
                             found,

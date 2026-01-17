@@ -260,4 +260,90 @@ impl Analyzer {
         tracing::warn!(reason, "creating invalid type");
         self.type_arena.borrow_mut().invalid()
     }
+
+    // ========== TypeId comparison helpers ==========
+    //
+    // These check if a TypeId matches a well-known type.
+    // Useful for migrating code like `ty == LegacyType::Void` to TypeId.
+
+    /// Check if TypeId is void
+    #[inline]
+    pub(crate) fn is_void_id(&self, id: ArenaTypeId) -> bool {
+        id == self.type_arena.borrow().void()
+    }
+
+    /// Check if TypeId is nil
+    #[inline]
+    pub(crate) fn is_nil_id(&self, id: ArenaTypeId) -> bool {
+        id == self.type_arena.borrow().nil()
+    }
+
+    /// Check if TypeId is bool
+    #[inline]
+    pub(crate) fn is_bool_id(&self, id: ArenaTypeId) -> bool {
+        id == self.type_arena.borrow().bool()
+    }
+
+    /// Check if TypeId is metatype
+    #[inline]
+    pub(crate) fn is_metatype_id(&self, id: ArenaTypeId) -> bool {
+        id == self.type_arena.borrow().metatype()
+    }
+
+    /// Check if TypeId is invalid
+    #[inline]
+    pub(crate) fn is_invalid_id(&self, id: ArenaTypeId) -> bool {
+        id == self.type_arena.borrow().invalid()
+    }
+
+    /// Check if TypeId is a numeric type (integer or float)
+    #[inline]
+    pub(crate) fn is_numeric_id(&self, id: ArenaTypeId) -> bool {
+        use crate::sema::type_arena::SemaType;
+        match self.type_arena.borrow().get(id) {
+            SemaType::Primitive(p) => p.is_numeric(),
+            _ => false,
+        }
+    }
+
+    /// Check if TypeId is string type
+    #[inline]
+    pub(crate) fn is_string_id(&self, id: ArenaTypeId) -> bool {
+        id == self.type_arena.borrow().string()
+    }
+
+    /// Check if TypeId is f64 type
+    #[inline]
+    pub(crate) fn is_f64_id(&self, id: ArenaTypeId) -> bool {
+        id == self.type_arena.borrow().f64()
+    }
+
+    /// Check if TypeId is i64 type
+    #[inline]
+    pub(crate) fn is_i64_id(&self, id: ArenaTypeId) -> bool {
+        id == self.type_arena.borrow().i64()
+    }
+
+    /// Check if TypeId is an integer type (any size)
+    #[inline]
+    pub(crate) fn is_integer_id(&self, id: ArenaTypeId) -> bool {
+        use crate::sema::type_arena::SemaType;
+        match self.type_arena.borrow().get(id) {
+            SemaType::Primitive(p) => p.is_integer(),
+            _ => false,
+        }
+    }
+
+    /// Check if TypeId is a range type
+    #[inline]
+    pub(crate) fn is_range_id(&self, id: ArenaTypeId) -> bool {
+        id == self.type_arena.borrow().range()
+    }
+
+    /// Check if TypeId is an array type
+    #[inline]
+    pub(crate) fn is_array_id(&self, id: ArenaTypeId) -> bool {
+        use crate::sema::type_arena::SemaType;
+        matches!(self.type_arena.borrow().get(id), SemaType::Array(_))
+    }
 }
