@@ -434,15 +434,7 @@ impl Analyzer {
 
                     // Compare by string since interface was registered with different interner
                     if method_name_from_id == method_name_str {
-                        let func_type = FunctionType { params: method
-                            .signature
-                            .params
-                            .iter()
-                            .map(|t| substitute_type(t, &substitutions))
-                            .collect(), return_type: Box::new(substitute_type(
-                            &method.signature.return_type,
-                            &substitutions,
-                        )), is_closure: false, params_id: None, return_type_id: None };
+                        let func_type = self.apply_substitutions(&method.signature, &substitutions);
                         // Check for external binding
                         if let Some(external_info) = self
                             .entity_registry
@@ -500,14 +492,7 @@ impl Analyzer {
                     let substitutions = self
                         .entity_registry
                         .substitution_map(type_def_id, type_args);
-                    let substituted_func_type = FunctionType { params: func_type
-                        .params
-                        .iter()
-                        .map(|t| substitute_type(t, &substitutions))
-                        .collect(), return_type: Box::new(substitute_type(
-                        &func_type.return_type,
-                        &substitutions,
-                    )), is_closure: func_type.is_closure, params_id: None, return_type_id: None };
+                    let substituted_func_type = self.apply_substitutions(&func_type, &substitutions);
                     return Some(ResolvedMethod::Direct {
                         func_type: substituted_func_type,
                     });
