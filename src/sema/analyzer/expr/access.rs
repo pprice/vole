@@ -15,6 +15,7 @@ impl Analyzer {
         &self,
         type_def_id: TypeDefId,
         type_args: &[LegacyType],
+        type_args_id: Option<&crate::sema::type_arena::TypeIdVec>,
         field_name: &str,
     ) -> Option<(String, LegacyType)> {
         let type_def = self.entity_registry.get_type(type_def_id);
@@ -24,14 +25,29 @@ impl Analyzer {
         for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
             let name = self.name_table.last_segment_str(*field_name_id);
             if name.as_deref() == Some(field_name) {
-                // Convert TypeId to LegacyType for substitution
                 let field_type_id = generic_info.field_types[i];
-                let field_type = self.type_arena.borrow().to_type(field_type_id);
-                let substituted = self.entity_registry.substitute_type_with_args(
-                    type_def_id,
-                    type_args,
-                    &field_type,
-                );
+
+                // Prefer arena-based substitution when type_args_id is available
+                let substituted = if let Some(args_id) = type_args_id {
+                    let subst_id = self.entity_registry.substitute_type_id_with_args(
+                        type_def_id,
+                        args_id,
+                        field_type_id,
+                        &mut self.type_arena.borrow_mut(),
+                    );
+                    self.type_arena.borrow().to_type(subst_id)
+                } else if type_args.is_empty() {
+                    self.type_arena.borrow().to_type(field_type_id)
+                } else {
+                    // Fall back to LegacyType substitution
+                    let field_type = self.type_arena.borrow().to_type(field_type_id);
+                    self.entity_registry.substitute_type_with_args(
+                        type_def_id,
+                        type_args,
+                        &field_type,
+                    )
+                };
+
                 let type_name = self
                     .name_table
                     .last_segment_str(type_def.name_id)
@@ -126,11 +142,12 @@ impl Analyzer {
             self.type_error("class or record", &object_type, field_access.object.span);
             return Ok(self.ty_invalid_traced("field_access_non_struct"));
         }
-        let (type_def_id, type_args) = (n.type_def_id(), n.type_args());
+        let (type_def_id, type_args, type_args_id) =
+            (n.type_def_id(), n.type_args(), n.type_args_id());
 
         // Try to find the field
         if let Some((_type_name, field_type)) =
-            self.get_field_type(type_def_id, type_args, field_name)
+            self.get_field_type(type_def_id, type_args, type_args_id, field_name)
         {
             return Ok(field_type);
         }
@@ -211,12 +228,13 @@ impl Analyzer {
             );
             return Ok(self.ty_invalid_traced("optional_chain_non_struct"));
         }
-        let (type_def_id, type_args) = (n.type_def_id(), n.type_args());
+        let (type_def_id, type_args, type_args_id) =
+            (n.type_def_id(), n.type_args(), n.type_args_id());
 
         // Find the field
         let field_name = interner.resolve(opt_chain.field);
         if let Some((_type_name, field_type)) =
-            self.get_field_type(type_def_id, type_args, field_name)
+            self.get_field_type(type_def_id, type_args, type_args_id, field_name)
         {
             // Result is always optional (field_type | nil)
             // But if field type is already optional, don't double-wrap

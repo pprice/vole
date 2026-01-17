@@ -1,9 +1,24 @@
 // src/sema/analyzer/patterns.rs
 
 use super::*;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
+    /// Check pattern and return TypeId directly.
+    /// This is the Phase 2 entry point - callers should migrate to this.
+    #[allow(unused)] // Phase 2 infrastructure
+    pub(crate) fn check_pattern_id(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee_type_id: ArenaTypeId,
+        interner: &Interner,
+    ) -> Option<ArenaTypeId> {
+        let scrutinee_type = self.id_to_type(scrutinee_type_id);
+        self.check_pattern(pattern, &scrutinee_type, interner)
+            .map(|ty| self.type_to_id(&ty))
+    }
+
     /// Check a pattern against the scrutinee type.
     /// Returns the narrowed type if this pattern narrows the scrutinee (e.g., type patterns).
     #[tracing::instrument(skip(self, interner), fields(scrutinee = %self.type_display(scrutinee_type)))]

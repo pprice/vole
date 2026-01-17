@@ -99,6 +99,36 @@ impl EntityRegistry {
         substitute_type(ty, &subs)
     }
 
+    /// Build substitution map using TypeId (for arena-based substitution)
+    pub fn substitution_map_id(
+        &self,
+        type_def_id: TypeDefId,
+        type_args_id: &[ArenaTypeId],
+    ) -> hashbrown::HashMap<NameId, ArenaTypeId> {
+        let type_def = self.get_type(type_def_id);
+        type_def
+            .type_params
+            .iter()
+            .zip(type_args_id.iter())
+            .map(|(&param, &arg)| (param, arg))
+            .collect()
+    }
+
+    /// Apply substitution to a TypeId using arena-based substitution
+    pub fn substitute_type_id_with_args(
+        &self,
+        type_def_id: TypeDefId,
+        type_args_id: &[ArenaTypeId],
+        type_id: ArenaTypeId,
+        arena: &mut crate::sema::type_arena::TypeArena,
+    ) -> ArenaTypeId {
+        if type_args_id.is_empty() {
+            return type_id;
+        }
+        let subs = self.substitution_map_id(type_def_id, type_args_id);
+        arena.substitute(type_id, &subs)
+    }
+
     /// Get field type with type argument substitution applied
     /// Requires arena to convert stored TypeId to LegacyType for substitution
     pub fn field_type(

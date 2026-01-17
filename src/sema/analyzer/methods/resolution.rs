@@ -1,7 +1,6 @@
 use super::super::*;
 use crate::identity::{MethodId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
-use crate::sema::generic::substitute_type;
 use crate::sema::types::{LegacyType, NominalType};
 use std::collections::{HashMap, HashSet};
 
@@ -169,27 +168,21 @@ impl Analyzer {
             return func_type.clone();
         }
 
-        // Use arena-based substitution when FunctionType has interned TypeIds
-        if func_type.has_interned_ids() {
-            if let LegacyType::Function(result) = LegacyType::Function(func_type.clone())
-                .substitute_with_arena(substitutions, &mut self.type_arena.borrow_mut())
-            {
-                return result;
-            }
+        // Always use arena-based substitution - intern TypeIds first if needed
+        let func_with_ids = if func_type.has_interned_ids() {
+            func_type.clone()
+        } else {
+            func_type.clone().with_interned_ids(&mut self.type_arena.borrow_mut())
+        };
+
+        if let LegacyType::Function(result) = LegacyType::Function(func_with_ids)
+            .substitute_with_arena(substitutions, &mut self.type_arena.borrow_mut())
+        {
+            return result;
         }
 
-        // Fall back to LegacyType-based substitution
-        FunctionType {
-            params: func_type
-                .params
-                .iter()
-                .map(|t| substitute_type(t, substitutions))
-                .collect(),
-            return_type: Box::new(substitute_type(&func_type.return_type, substitutions)),
-            is_closure: func_type.is_closure,
-            params_id: None,
-            return_type_id: None,
-        }
+        // Should not reach here, but fall back just in case
+        func_type.clone()
     }
 
     /// Get TypeDefId for a Type if it's registered in EntityRegistry

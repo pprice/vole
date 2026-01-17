@@ -1,9 +1,24 @@
 use super::super::*;
 use crate::sema::PrimitiveType;
 use crate::sema::compatibility::TypeCompatibility;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
+    /// Check expression against expected type and return TypeId directly.
+    /// This is the Phase 2 entry point - callers should migrate to this.
+    #[allow(unused)] // Phase 2 infrastructure
+    pub(crate) fn check_expr_expecting_id(
+        &mut self,
+        expr: &Expr,
+        expected: Option<ArenaTypeId>,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        let expected_ty = expected.map(|id| self.id_to_type(id));
+        let ty = self.check_expr_expecting(expr, expected_ty.as_ref(), interner)?;
+        Ok(self.type_to_id(&ty))
+    }
+
     /// Check expression against an expected type (bidirectional type checking)
     /// If expected is None, falls back to inference mode.
     pub(crate) fn check_expr_expecting(

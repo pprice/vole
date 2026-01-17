@@ -52,6 +52,15 @@ impl NominalType {
         }
     }
 
+    /// Get type arguments as TypeIds (if available) for arena-based substitution.
+    pub fn type_args_id(&self) -> Option<&TypeIdVec> {
+        match self {
+            NominalType::Class(c) => c.type_args_id.as_ref(),
+            NominalType::Record(r) => r.type_args_id.as_ref(),
+            NominalType::Interface(_) | NominalType::Error(_) => None,
+        }
+    }
+
     /// Check if this is a class type.
     pub fn is_class(&self) -> bool {
         matches!(self, NominalType::Class(_))

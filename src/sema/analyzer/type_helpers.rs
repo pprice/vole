@@ -1,8 +1,10 @@
 // src/sema/analyzer/type_helpers.rs
 //
-// Arena-backed type construction helpers for the TypeArena migration (Phase 3.2).
+// Arena-backed type construction helpers for the TypeArena migration.
 // These methods wrap type_arena operations and convert back to Type for compatibility
-// with existing code. They will be optimized in later phases.
+// with existing code. The _id variants return TypeId directly for Phase 2+ migration.
+
+#![allow(unused)] // Phase 2 infrastructure - methods will be used as callers migrate
 
 use super::*;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
@@ -146,15 +148,116 @@ impl Analyzer {
 
     /// Convert Type to TypeId (interning)
     #[inline]
-    #[allow(unused)] // Will be used in Phase 4+ migration
     pub(crate) fn type_to_id(&mut self, ty: &LegacyType) -> ArenaTypeId {
         self.type_arena.borrow_mut().from_type(ty)
     }
 
     /// Convert TypeId to Type
     #[inline]
-    #[allow(unused)] // Will be used in Phase 4+ migration
     pub(crate) fn id_to_type(&self, id: ArenaTypeId) -> LegacyType {
         self.type_arena.borrow().to_type(id)
+    }
+
+    // ========== TypeId-returning type construction ==========
+    //
+    // Phase 2: These return TypeId directly, avoiding LegacyType materialization.
+    // Callers should prefer these over the ty_* variants.
+
+    /// Create a primitive TypeId
+    #[inline]
+    #[allow(unused)] // Phase 2 infrastructure
+    pub(crate) fn ty_prim_id(&self, p: PrimitiveType) -> ArenaTypeId {
+        self.type_arena.borrow_mut().primitive(p)
+    }
+
+    /// Create i64 TypeId
+    #[inline]
+    pub(crate) fn ty_i64_id(&self) -> ArenaTypeId {
+        self.ty_prim_id(PrimitiveType::I64)
+    }
+
+    /// Create i32 TypeId
+    #[inline]
+    pub(crate) fn ty_i32_id(&self) -> ArenaTypeId {
+        self.ty_prim_id(PrimitiveType::I32)
+    }
+
+    /// Create f64 TypeId
+    #[inline]
+    pub(crate) fn ty_f64_id(&self) -> ArenaTypeId {
+        self.ty_prim_id(PrimitiveType::F64)
+    }
+
+    /// Create bool TypeId
+    #[inline]
+    pub(crate) fn ty_bool_id(&self) -> ArenaTypeId {
+        self.ty_prim_id(PrimitiveType::Bool)
+    }
+
+    /// Create string TypeId
+    #[inline]
+    pub(crate) fn ty_string_id(&self) -> ArenaTypeId {
+        self.ty_prim_id(PrimitiveType::String)
+    }
+
+    /// Create void TypeId
+    #[inline]
+    pub(crate) fn ty_void_id(&self) -> ArenaTypeId {
+        self.type_arena.borrow_mut().void()
+    }
+
+    /// Create nil TypeId
+    #[inline]
+    pub(crate) fn ty_nil_id(&self) -> ArenaTypeId {
+        self.type_arena.borrow_mut().nil()
+    }
+
+    /// Create done TypeId
+    #[inline]
+    pub(crate) fn ty_done_id(&self) -> ArenaTypeId {
+        self.type_arena.borrow_mut().done()
+    }
+
+    /// Create range TypeId
+    #[inline]
+    pub(crate) fn ty_range_id(&self) -> ArenaTypeId {
+        self.type_arena.borrow_mut().range()
+    }
+
+    /// Create metatype TypeId
+    #[inline]
+    pub(crate) fn ty_type_id(&self) -> ArenaTypeId {
+        self.type_arena.borrow_mut().metatype()
+    }
+
+    /// Create an array TypeId
+    #[inline]
+    pub(crate) fn ty_array_id(&self, element_id: ArenaTypeId) -> ArenaTypeId {
+        self.type_arena.borrow_mut().array(element_id)
+    }
+
+    /// Create a tuple TypeId
+    #[inline]
+    pub(crate) fn ty_tuple_id(&self, element_ids: Vec<ArenaTypeId>) -> ArenaTypeId {
+        self.type_arena.borrow_mut().tuple(element_ids)
+    }
+
+    /// Create an optional TypeId (T | nil)
+    #[inline]
+    pub(crate) fn ty_optional_id(&self, inner_id: ArenaTypeId) -> ArenaTypeId {
+        self.type_arena.borrow_mut().optional(inner_id)
+    }
+
+    /// Create an invalid/error TypeId
+    #[inline]
+    pub(crate) fn ty_invalid_id(&self) -> ArenaTypeId {
+        self.type_arena.borrow_mut().invalid()
+    }
+
+    /// Create an invalid/error TypeId with tracing
+    #[inline]
+    pub(crate) fn ty_invalid_traced_id(&self, reason: &str) -> ArenaTypeId {
+        tracing::warn!(reason, "creating invalid type");
+        self.type_arena.borrow_mut().invalid()
     }
 }

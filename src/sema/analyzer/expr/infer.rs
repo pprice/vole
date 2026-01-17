@@ -1,9 +1,22 @@
 use super::super::*;
 use crate::sema::PrimitiveType;
 use crate::sema::compatibility::TypeCompatibility;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::LegacyType;
 
 impl Analyzer {
+    /// Check expression and return TypeId directly.
+    /// This is the Phase 2 entry point - callers should migrate to this.
+    #[allow(unused)] // Phase 2 infrastructure
+    pub(crate) fn check_expr_id(
+        &mut self,
+        expr: &Expr,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        let ty = self.check_expr(expr, interner)?;
+        Ok(self.type_to_id(&ty))
+    }
+
     pub(crate) fn check_expr(
         &mut self,
         expr: &Expr,
