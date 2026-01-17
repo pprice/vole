@@ -346,4 +346,38 @@ impl Analyzer {
         use crate::sema::type_arena::SemaType;
         matches!(self.type_arena.borrow().get(id), SemaType::Array(_))
     }
+
+    // ========== TypeId unwrapping helpers ==========
+    //
+    // These extract inner types from compound TypeIds.
+
+    /// Get array element type if this is an array
+    #[inline]
+    pub(crate) fn unwrap_array_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {
+        self.type_arena.borrow().unwrap_array(id)
+    }
+
+    /// Get runtime iterator element type if this is a runtime iterator
+    #[inline]
+    pub(crate) fn unwrap_runtime_iterator_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {
+        self.type_arena.borrow().unwrap_runtime_iterator(id)
+    }
+
+    /// Get fallible (success, error) types if this is a fallible type
+    #[inline]
+    pub(crate) fn unwrap_fallible_id(&self, id: ArenaTypeId) -> Option<(ArenaTypeId, ArenaTypeId)> {
+        self.type_arena.borrow().unwrap_fallible(id)
+    }
+
+    /// Check if TypeId is a fallible type
+    #[inline]
+    pub(crate) fn is_fallible_id(&self, id: ArenaTypeId) -> bool {
+        self.type_arena.borrow().unwrap_fallible(id).is_some()
+    }
+
+    /// Check if TypeId is a runtime iterator type
+    #[inline]
+    pub(crate) fn is_runtime_iterator_id(&self, id: ArenaTypeId) -> bool {
+        self.type_arena.borrow().unwrap_runtime_iterator(id).is_some()
+    }
 }

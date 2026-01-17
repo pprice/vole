@@ -1,7 +1,6 @@
 // src/sema/analyzer/stmt.rs
 
 use super::*;
-use crate::sema::PrimitiveType;
 use crate::sema::compatibility::TypeCompatibility;
 use crate::sema::types::{LegacyType, NominalType};
 
@@ -195,42 +194,47 @@ impl Analyzer {
                 self.type_overrides = saved_overrides;
             }
             Stmt::For(for_stmt) => {
-                let iterable_ty = self.check_expr(&for_stmt.iterable, interner)?;
+                let iterable_ty_id = self.check_expr_id(&for_stmt.iterable, interner)?;
 
-                let elem_ty = match &iterable_ty {
-                    LegacyType::Range => self.ty_i64(),
-                    LegacyType::Array(elem) => *elem.clone(),
+                // Determine element type based on iterable type using TypeId
+                let elem_ty_id = if self.is_range_id(iterable_ty_id) {
+                    self.ty_i64_id()
+                } else if let Some(elem_id) = self.unwrap_array_id(iterable_ty_id) {
+                    elem_id
+                } else if self.is_string_id(iterable_ty_id) {
                     // String is iterable - yields string (individual characters)
-                    LegacyType::Primitive(PrimitiveType::String) => self.ty_string(),
+                    self.ty_string_id()
+                } else if let Some(elem_id) = self.unwrap_runtime_iterator_id(iterable_ty_id) {
                     // Runtime iterators have their element type directly
-                    LegacyType::RuntimeIterator(elem) => *elem.clone(),
-                    LegacyType::Nominal(NominalType::Interface(_)) => {
+                    elem_id
+                } else {
+                    // Check for interface implementing Iterator
+                    let iterable_ty = self.id_to_type(iterable_ty_id);
+                    if let LegacyType::Nominal(NominalType::Interface(_)) = &iterable_ty {
                         if let Some(elem) =
                             self.extract_iterator_element_type(&iterable_ty, interner)
                         {
-                            elem
+                            self.type_to_id(&elem)
                         } else {
                             self.type_error(
                                 "iterable (range, array, string, or Iterator<T>)",
                                 &iterable_ty,
                                 for_stmt.iterable.span,
                             );
-                            self.ty_invalid()
+                            self.ty_invalid_id()
                         }
-                    }
-                    _ => {
+                    } else {
                         self.type_error(
                             "iterable (range, array, string, or Iterator<T>)",
                             &iterable_ty,
                             for_stmt.iterable.span,
                         );
-                        self.ty_invalid()
+                        self.ty_invalid_id()
                     }
                 };
 
                 let parent = std::mem::take(&mut self.scope);
                 self.scope = Scope::with_parent(parent);
-                let elem_ty_id = self.type_arena.borrow_mut().from_type(&elem_ty);
                 self.scope.define(
                     for_stmt.var_name,
                     Variable {
