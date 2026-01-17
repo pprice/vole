@@ -23,7 +23,7 @@ use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_arena::TypeId;
 use crate::sema::types::NominalType;
-use crate::sema::{LegacyType, PrimitiveType};
+use crate::sema::LegacyType;
 
 impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
@@ -450,12 +450,12 @@ impl Cg<'_, '_, '_> {
         let result = self.call_runtime(RuntimeFn::RangeIter, &[start.value, end_value])?;
 
         // Return as RuntimeIterator<i64> - concrete type for builtin iterators
-        let iter_type =
-            LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(PrimitiveType::I64)));
+        let i64_id = self.ctx.arena.borrow().primitives.i64;
+        let iter_type_id = self.ctx.arena.borrow_mut().runtime_iterator(i64_id);
         Ok(CompiledValue {
             value: result,
             ty: self.ctx.pointer_type,
-            type_id: self.intern_type(&iter_type),
+            type_id: iter_type_id,
         })
     }
 
