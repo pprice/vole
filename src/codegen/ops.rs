@@ -8,7 +8,6 @@ use cranelift::prelude::*;
 use crate::codegen::RuntimeFn;
 use crate::frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr};
 use crate::sema::implement_registry::ImplTypeId;
-use crate::sema::{LegacyType, PrimitiveType};
 
 use super::context::Cg;
 use super::structs::{
@@ -94,11 +93,8 @@ impl Cg<'_, '_, '_> {
         // Check if it's an external (native) method
         if let Some(ref external_info) = method_impl.external_info {
             // Call the external function directly
-            let result = self.call_external(
-                external_info,
-                &[val.value],
-                &LegacyType::Primitive(PrimitiveType::String),
-            )?;
+            let string_type_id = self.ctx.arena.borrow().primitives.string;
+            let result = self.call_external_id(external_info, &[val.value], string_type_id)?;
             return Ok(result.value);
         }
 
