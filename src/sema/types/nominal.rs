@@ -144,14 +144,16 @@ pub struct ClassType {
 
 impl PartialEq for ClassType {
     fn eq(&self, other: &Self) -> bool {
-        self.type_def_id == other.type_def_id && self.type_args == other.type_args
+        // Use type_args_id (TypeId) for equality - it's the canonical source
+        self.type_def_id == other.type_def_id && self.type_args_id == other.type_args_id
     }
 }
 
 impl std::hash::Hash for ClassType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Use type_args_id (TypeId) for hashing - it's the canonical source
         self.type_def_id.hash(state);
-        self.type_args.hash(state);
+        self.type_args_id.hash(state);
     }
 }
 
@@ -176,14 +178,16 @@ pub struct RecordType {
 
 impl PartialEq for RecordType {
     fn eq(&self, other: &Self) -> bool {
-        self.type_def_id == other.type_def_id && self.type_args == other.type_args
+        // Use type_args_id (TypeId) for equality - it's the canonical source
+        self.type_def_id == other.type_def_id && self.type_args_id == other.type_args_id
     }
 }
 
 impl std::hash::Hash for RecordType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Use type_args_id (TypeId) for hashing - it's the canonical source
         self.type_def_id.hash(state);
-        self.type_args.hash(state);
+        self.type_args_id.hash(state);
     }
 }
 
