@@ -230,11 +230,20 @@ impl Analyzer {
             interner,
         );
 
-        // Substitute inferred types into field types to get concrete field types
-        let concrete_field_types: Vec<LegacyType> = field_types
-            .iter()
-            .map(|t| substitute_type(t, &inferred))
-            .collect();
+        // Substitute inferred types into field types to get concrete field types via arena
+        let concrete_field_types: Vec<LegacyType> = {
+            let mut arena = self.type_arena.borrow_mut();
+            let subs_id: hashbrown::HashMap<_, _> = inferred
+                .iter()
+                .map(|(&k, v)| (k, arena.from_type(v)))
+                .collect();
+            let substituted_ids: Vec<_> = generic_info
+                .field_types
+                .iter()
+                .map(|&t| arena.substitute(t, &subs_id))
+                .collect();
+            substituted_ids.iter().map(|&t| arena.to_type(t)).collect()
+        };
 
         // Check that all required fields are present - compare by string value
         let provided_fields: HashSet<String> = struct_lit
@@ -353,11 +362,20 @@ impl Analyzer {
             interner,
         );
 
-        // Substitute inferred types into field types to get concrete field types
-        let concrete_field_types: Vec<LegacyType> = field_types
-            .iter()
-            .map(|t| substitute_type(t, &inferred))
-            .collect();
+        // Substitute inferred types into field types to get concrete field types via arena
+        let concrete_field_types: Vec<LegacyType> = {
+            let mut arena = self.type_arena.borrow_mut();
+            let subs_id: hashbrown::HashMap<_, _> = inferred
+                .iter()
+                .map(|(&k, v)| (k, arena.from_type(v)))
+                .collect();
+            let substituted_ids: Vec<_> = generic_info
+                .field_types
+                .iter()
+                .map(|&t| arena.substitute(t, &subs_id))
+                .collect();
+            substituted_ids.iter().map(|&t| arena.to_type(t)).collect()
+        };
 
         // Check that all required fields are present - compare by string value
         let provided_fields: HashSet<String> = struct_lit
