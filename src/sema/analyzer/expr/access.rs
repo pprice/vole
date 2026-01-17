@@ -81,31 +81,46 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         let object_type_id = self.check_expr(&field_access.object, interner)?;
-        let object_type = self.id_to_type(object_type_id);
 
-        // Handle module field access
-        if let LegacyType::Module(ref module_type) = object_type {
-            let field_name = interner.resolve(field_access.field);
-            if let Some(name_id) = self.module_name_id(module_type.module_id, field_name)
-                && let Some(export_type) = module_type.exports.get(&name_id)
-            {
-                return Ok(self.type_to_id(export_type));
-            } else {
-                let module_path = self
-                    .name_table
-                    .module_path(module_type.module_id)
-                    .to_string();
-                self.add_error(
-                    SemanticError::ModuleNoExport {
-                        module: module_path,
-                        name: field_name.to_string(),
-                        span: field_access.field_span.into(),
-                    },
-                    field_access.field_span,
-                );
-                return Ok(self.ty_invalid_traced_id("module_no_export"));
+        // Handle module field access using arena.unwrap_module (avoids LegacyType)
+        // Extract module data while holding the borrow, then release before calling add_error
+        let module_info = {
+            let arena = self.type_arena.borrow();
+            arena.unwrap_module(object_type_id).map(|module| {
+                let field_name = interner.resolve(field_access.field);
+                let module_id = module.module_id;
+                // Find export type if name matches
+                let export_type_id =
+                    self.module_name_id(module_id, field_name)
+                        .and_then(|name_id| {
+                            module
+                                .exports
+                                .iter()
+                                .find(|(n, _)| *n == name_id)
+                                .map(|&(_, type_id)| type_id)
+                        });
+                (module_id, field_name.to_string(), export_type_id)
+            })
+        };
+        if let Some((module_id, field_name, export_type_id)) = module_info {
+            if let Some(type_id) = export_type_id {
+                return Ok(type_id);
             }
+            // Export not found - emit error
+            let module_path = self.name_table.module_path(module_id).to_string();
+            self.add_error(
+                SemanticError::ModuleNoExport {
+                    module: module_path,
+                    name: field_name,
+                    span: field_access.field_span.into(),
+                },
+                field_access.field_span,
+            );
+            return Ok(self.ty_invalid_traced_id("module_no_export"));
         }
+
+        // Get object_type for nominal type checking (still needs LegacyType for now)
+        let object_type = self.id_to_type(object_type_id);
 
         // Handle Invalid type early - propagate
         if object_type_id.is_invalid() {
