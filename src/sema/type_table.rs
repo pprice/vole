@@ -170,7 +170,7 @@ impl TypeTable {
             SemaType::Done => "done".to_string(),
             SemaType::Range => "range".to_string(),
             SemaType::MetaType => "type".to_string(),
-            SemaType::Invalid { kind } => format!("invalid({})", kind),
+            SemaType::Invalid { .. } => "<invalid>".to_string(),
 
             SemaType::Function { params, ret, .. } => {
                 let params_str = params
