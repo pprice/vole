@@ -1,8 +1,8 @@
 use super::super::*;
 use crate::identity::TypeDefId;
-use crate::sema::compatibility::{TypeCompatibility, types_compatible_core_id};
+use crate::sema::compatibility::types_compatible_core_id;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::{LegacyType, NominalType};
+use crate::sema::types::LegacyType;
 use std::collections::HashSet;
 
 #[allow(dead_code)]
@@ -91,98 +91,6 @@ impl Analyzer {
         }
 
         false
-    }
-
-    /// Interface-related compatibility checks (extracted for reuse)
-    fn types_compatible_legacy_interface(
-        &self,
-        from: &LegacyType,
-        to: &LegacyType,
-        interner: &Interner,
-    ) -> bool {
-        // Non-functional interface compatibility
-        if let LegacyType::Nominal(NominalType::Interface(iface)) = to {
-            if let LegacyType::Nominal(NominalType::Interface(from_iface)) = from
-                && self.interface_extends_by_type_def_id(from_iface.type_def_id, iface.type_def_id)
-            {
-                return true;
-            }
-
-            if self.satisfies_interface_via_entity_registry(from, iface.type_def_id, interner) {
-                return true;
-            }
-        }
-
-        // Function type is compatible with functional interface if signatures match
-        if let LegacyType::Function(fn_type) = from
-            && let LegacyType::Nominal(NominalType::Interface(iface)) = to
-            && let Some(iface_fn) =
-                self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
-            && fn_type.is_compatible_with_interface(&iface_fn)
-        {
-            return true;
-        }
-
-        false
-    }
-
-    pub(crate) fn types_compatible(
-        &self,
-        from: &LegacyType,
-        to: &LegacyType,
-        interner: &Interner,
-    ) -> bool {
-        // Use the core compatibility check for most cases
-        if from.is_compatible(to) {
-            return true;
-        }
-
-        // Non-functional interface compatibility
-        if let LegacyType::Nominal(NominalType::Interface(iface)) = to {
-            if let LegacyType::Nominal(NominalType::Interface(from_iface)) = from
-                && self.interface_extends_by_type_def_id(from_iface.type_def_id, iface.type_def_id)
-            {
-                return true;
-            }
-
-            if self.satisfies_interface_via_entity_registry(from, iface.type_def_id, interner) {
-                return true;
-            }
-        }
-
-        // Function type is compatible with functional interface if signatures match
-        if let LegacyType::Function(fn_type) = from
-            && let LegacyType::Nominal(NominalType::Interface(iface)) = to
-            && let Some(iface_fn) =
-                self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
-            && fn_type.is_compatible_with_interface(&iface_fn)
-        {
-            return true;
-        }
-
-        false
-    }
-
-    #[allow(dead_code)]
-    fn interface_extends(&self, derived: Symbol, base: Symbol, interner: &Interner) -> bool {
-        if derived == base {
-            return true;
-        }
-
-        // Look up both interfaces via EntityRegistry
-        let derived_str = interner.resolve(derived);
-        let base_str = interner.resolve(base);
-        let resolver = self.resolver(interner);
-
-        let derived_id = resolver.resolve_type_str_or_interface(derived_str, &self.entity_registry);
-
-        let base_id = resolver.resolve_type_str_or_interface(base_str, &self.entity_registry);
-
-        let (Some(derived_id), Some(base_id)) = (derived_id, base_id) else {
-            return false;
-        };
-
-        self.interface_extends_by_type_def_id(derived_id, base_id)
     }
 
     fn interface_extends_by_name_id(
