@@ -294,18 +294,21 @@ impl Analyzer {
 
         // Check required methods (skip those with defaults)
         for method_id in method_ids {
-            let method = self.entity_registry.get_method(method_id);
-            if method.has_default {
+            let (has_default, method_name_str, signature) = {
+                let method = self.entity_registry.get_method(method_id);
+                (
+                    method.has_default,
+                    self.name_table
+                        .last_segment_str(method.name_id)
+                        .unwrap_or_default(),
+                    method.signature.clone(),
+                )
+            };
+            if has_default {
                 continue;
             }
-
-            let method_name_str = self
-                .name_table
-                .last_segment_str(method.name_id)
-                .unwrap_or_default();
-            // Methods still use LegacyType signature, so we need to fallback
-            let ty = self.type_arena.borrow().to_type(ty_id);
-            if !self.type_has_method_by_str(&ty, &method_name_str, &method.signature, interner) {
+            // Use TypeId-based method checking
+            if !self.type_has_method_by_str_id(ty_id, &method_name_str, &signature, interner) {
                 return false;
             }
         }
@@ -365,6 +368,89 @@ impl Analyzer {
             }
         }
         false
+    }
+
+    /// Check if a type has a method matching the given name and signature (TypeId version)
+    fn type_has_method_by_str_id(
+        &mut self,
+        ty_id: ArenaTypeId,
+        method_name: &str,
+        expected_sig: &FunctionType,
+        interner: &Interner,
+    ) -> bool {
+        // Get type_def_id from TypeId using arena queries
+        let type_def_id = {
+            let arena = self.type_arena.borrow();
+            if let Some((id, _)) = arena.unwrap_class(ty_id) {
+                Some(id)
+            } else if let Some((id, _)) = arena.unwrap_record(ty_id) {
+                Some(id)
+            } else {
+                None
+            }
+        };
+
+        // For primitives/arrays, check implement registry (still needs LegacyType for ImplTypeId)
+        if type_def_id.is_none() {
+            let ty = self.type_arena.borrow().to_type(ty_id);
+            if let Some(type_id) =
+                ImplTypeId::from_type(&ty, &self.entity_registry.type_table, &self.entity_registry)
+                && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
+            {
+                return self
+                    .implement_registry
+                    .get_method(&type_id, method_id)
+                    .is_some();
+            }
+            return false;
+        }
+
+        let type_def_id = type_def_id.expect("checked is_none above");
+
+        // Check direct methods on the type via EntityRegistry
+        if let Some(method_name_id) = self.method_name_id_by_str(method_name, interner)
+            && let Some(method_id) = self
+                .entity_registry
+                .find_method_on_type(type_def_id, method_name_id)
+        {
+            let method_def = self.entity_registry.get_method(method_id);
+            if self.signatures_compatible_id(expected_sig, &method_def.signature) {
+                return true;
+            }
+        }
+
+        // Check implement registry (still needs LegacyType for ImplTypeId)
+        let ty = self.type_arena.borrow().to_type(ty_id);
+        if let Some(type_id) =
+            ImplTypeId::from_type(&ty, &self.entity_registry.type_table, &self.entity_registry)
+            && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
+            && self
+                .implement_registry
+                .get_method(&type_id, method_id)
+                .is_some()
+        {
+            return true;
+        }
+
+        false
+    }
+
+    /// Check if two function signatures are compatible using TypeId fields
+    fn signatures_compatible_id(&self, expected: &FunctionType, found: &FunctionType) -> bool {
+        // Try TypeId comparison first (faster)
+        if let (Some(exp_params), Some(found_params)) =
+            (expected.params_id.as_ref(), found.params_id.as_ref())
+        {
+            if let (Some(exp_ret), Some(found_ret)) =
+                (expected.return_type_id, found.return_type_id)
+            {
+                return exp_params.as_slice() == found_params.as_slice() && exp_ret == found_ret;
+            }
+        }
+        // Fall back to LegacyType comparison
+        expected.params.len() == found.params.len()
+            && expected.params == found.params
+            && *expected.return_type == *found.return_type
     }
 
     /// Check if a type structurally satisfies an interface
