@@ -9,6 +9,7 @@ use cranelift_jit::JITModule;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::codegen::FunctionRegistry;
 use crate::commands::common::AnalyzedProgram;
@@ -18,7 +19,7 @@ use crate::identity::{self, ModuleId, NameId, NameTable, NamerLookup, Resolver, 
 use crate::runtime::NativeRegistry;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::entity_defs::TypeDefKind;
-use crate::sema::generic::{MonomorphCache, substitute_type};
+use crate::sema::generic::MonomorphCache;
 use crate::sema::implement_registry::ImplTypeId;
 use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use crate::sema::types::NominalType;
@@ -678,35 +679,71 @@ pub(crate) fn resolve_type_expr_with_metadata(
                                 type_def.name_id
                             );
                         }
-                        // Build substitution map using type param NameIds
-                        let mut substitutions = HashMap::new();
-                        for (name_id, arg) in type_def.type_params.iter().zip(resolved_args.iter())
-                        {
-                            substitutions.insert(*name_id, arg.clone());
-                        }
 
-                        // Build methods with substituted types
+                        // Build TypeId-based substitution map (fast path)
+                        let substitutions: hashbrown::HashMap<NameId, TypeId> = {
+                            let mut arena_mut = arena.borrow_mut();
+                            type_def
+                                .type_params
+                                .iter()
+                                .zip(resolved_args.iter())
+                                .map(|(name_id, arg)| (*name_id, arena_mut.from_type(arg)))
+                                .collect()
+                        };
+
+                        // Build methods with TypeId-based substitution
                         let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
                             .methods
                             .iter()
                             .map(|&method_id| {
                                 let method = entity_registry.get_method(method_id);
+                                let mut arena_mut = arena.borrow_mut();
+
+                                // Substitute using TypeId (fast arena-based)
+                                // Get params/return TypeIds - intern if not already present
+                                let new_params_id: TypeIdVec =
+                                    if let Some(params_id) = method.signature.params_id.as_ref() {
+                                        // Already interned - substitute directly
+                                        params_id
+                                            .iter()
+                                            .map(|&p| arena_mut.substitute(p, &substitutions))
+                                            .collect()
+                                    } else {
+                                        // Intern and substitute in one pass
+                                        method
+                                            .signature
+                                            .params
+                                            .iter()
+                                            .map(|p| {
+                                                let id = arena_mut.from_type(p);
+                                                arena_mut.substitute(id, &substitutions)
+                                            })
+                                            .collect()
+                                    };
+
+                                let new_return_id =
+                                    if let Some(return_id) = method.signature.return_type_id {
+                                        arena_mut.substitute(return_id, &substitutions)
+                                    } else {
+                                        let id = arena_mut.from_type(&method.signature.return_type);
+                                        arena_mut.substitute(id, &substitutions)
+                                    };
+
+                                // Convert to LegacyType for backwards compatibility
+                                let new_params: Arc<[LegacyType]> = new_params_id
+                                    .iter()
+                                    .map(|&id| arena_mut.to_type(id))
+                                    .collect::<Vec<_>>()
+                                    .into();
+                                let new_return = arena_mut.to_type(new_return_id);
+
                                 crate::sema::types::InterfaceMethodType {
                                     name: method.name_id,
-                                    params: method
-                                        .signature
-                                        .params
-                                        .iter()
-                                        .map(|t| substitute_type(t, &substitutions))
-                                        .collect::<Vec<_>>()
-                                        .into(),
-                                    return_type: Box::new(substitute_type(
-                                        &method.signature.return_type,
-                                        &substitutions,
-                                    )),
+                                    params: new_params,
+                                    return_type: Box::new(new_return),
                                     has_default: method.has_default,
-                                    params_id: None, // LegacyType substitution path
-                                    return_type_id: None,
+                                    params_id: Some(new_params_id),
+                                    return_type_id: Some(new_return_id),
                                 }
                             })
                             .collect();

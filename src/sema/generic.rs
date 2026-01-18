@@ -697,19 +697,6 @@ pub type StaticMethodMonomorphCache =
 pub fn substitute_type(ty: &LegacyType, substitutions: &HashMap<NameId, LegacyType>) -> LegacyType {
     ty.substitute(substitutions)
 }
-
-/// Substitute concrete types for type parameters using arena-based substitution.
-///
-/// This is faster than `substitute_type` when the type has interned TypeIds,
-/// because it uses `arena.substitute()` which avoids deep cloning.
-pub fn substitute_type_with_arena(
-    ty: &LegacyType,
-    substitutions: &HashMap<NameId, LegacyType>,
-    arena: &mut crate::sema::type_arena::TypeArena,
-) -> LegacyType {
-    ty.substitute_with_arena(substitutions, arena)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
