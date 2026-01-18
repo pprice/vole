@@ -251,6 +251,18 @@ pub fn resolve_type_with_arena(
             {
                 return arena.type_param(tp_info.name_id);
             }
+            // Check for type alias - use aliased_type_id directly
+            if let Some(type_def_id) = ctx
+                .resolver()
+                .resolve_type_or_interface(*sym, ctx.entity_registry)
+            {
+                let type_def = ctx.entity_registry.get_type(type_def_id);
+                if type_def.kind == TypeDefKind::Alias {
+                    if let Some(aliased_type_id) = type_def.aliased_type {
+                        return aliased_type_id;
+                    }
+                }
+            }
             // For other named types, fall back to Type-based resolution and convert
             let ty = resolve_type_impl(&TypeExpr::Named(*sym), ctx);
             arena.from_type(&ty)

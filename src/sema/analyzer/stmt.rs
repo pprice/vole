@@ -536,10 +536,10 @@ impl Analyzer {
         };
 
         if !is_compatible {
+            // Extract types before calling type_display_id to avoid borrow conflict
+            let raised_type_id = self.type_arena.borrow_mut().error_type(type_id);
             let declared_str = self.type_display_id(error_type);
-            let raised_str = self.type_display_id(
-                self.type_arena.borrow_mut().error_type(type_id)
-            );
+            let raised_str = self.type_display_id(raised_type_id);
 
             self.add_error(
                 SemanticError::IncompatibleRaiseError {

@@ -2,16 +2,17 @@
 
 use super::*;
 use crate::sema::generic::{TypeParamInfo, TypeParamVariance};
-use crate::sema::types::LegacyType;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 
 impl Analyzer {
-    /// Analyze a lambda expression, optionally with an expected function type for inference
+    /// Analyze a lambda expression, optionally with an expected function type for inference.
+    /// Returns TypeId directly (no LegacyType conversion).
     pub(crate) fn analyze_lambda(
         &mut self,
         lambda: &LambdaExpr,
         expected_type: Option<&FunctionType>,
         interner: &Interner,
-    ) -> LegacyType {
+    ) -> ArenaTypeId {
         // Push capture analysis stacks and side effects flag
         self.lambda_captures.push(HashMap::new());
         self.lambda_locals.push(HashSet::new());
@@ -40,17 +41,17 @@ impl Analyzer {
             self.type_param_stack.push(type_params.clone());
         }
 
-        // Resolve parameter types
-        let mut param_types = Vec::new();
+        // Resolve parameter types as TypeIds
+        let mut param_type_ids = Vec::new();
 
         for (i, param) in lambda.params.iter().enumerate() {
-            let ty = if let Some(type_expr) = &param.ty {
+            let ty_id = if let Some(type_expr) = &param.ty {
                 // Explicit type annotation
-                self.resolve_type(type_expr, interner)
+                self.resolve_type_id(type_expr, interner)
             } else if let Some(expected) = expected_type {
                 // Infer from expected type
                 if i < expected.params.len() {
-                    expected.params[i].clone()
+                    self.type_to_id(&expected.params[i])
                 } else {
                     self.add_error(
                         SemanticError::CannotInferLambdaParam {
@@ -59,7 +60,7 @@ impl Analyzer {
                         },
                         param.span,
                     );
-                    self.ty_invalid()
+                    ArenaTypeId::INVALID
                 }
             } else {
                 // No type info available
@@ -70,9 +71,9 @@ impl Analyzer {
                     },
                     param.span,
                 );
-                self.ty_invalid()
+                ArenaTypeId::INVALID
             };
-            param_types.push(ty);
+            param_type_ids.push(ty_id);
         }
 
         // Push new scope for lambda body
@@ -80,8 +81,7 @@ impl Analyzer {
         self.scope = Scope::with_parent(outer_scope);
 
         // Define parameters in scope and track as locals
-        for (param, ty) in lambda.params.iter().zip(param_types.iter()) {
-            let ty_id = self.type_arena.borrow_mut().from_type(ty);
+        for (param, &ty_id) in lambda.params.iter().zip(param_type_ids.iter()) {
             self.scope.define(
                 param.name,
                 Variable {
@@ -93,38 +93,33 @@ impl Analyzer {
             self.add_lambda_local(param.name);
         }
 
-        // Determine return type
-        let declared_return = lambda
+        // Determine return type as TypeId
+        let declared_return_id = lambda
             .return_type
             .as_ref()
-            .map(|t| self.resolve_type(t, interner));
-        let expected_return = expected_type.map(|ft| (*ft.return_type).clone());
+            .map(|t| self.resolve_type_id(t, interner));
+        let expected_return_id = expected_type.map(|ft| self.type_to_id(&ft.return_type));
 
         // Analyze body and infer return type
-        let body_type = match &lambda.body {
+        let body_type_id = match &lambda.body {
             LambdaBody::Expr(expr) => {
                 // For expression body, analyze and use as return type
                 match self.check_expr(expr, interner) {
-                    Ok(ty_id) => self.type_arena.borrow().to_type(ty_id),
-                    Err(_) => self.ty_invalid_traced("fallback"),
+                    Ok(ty_id) => ty_id,
+                    Err(_) => self.ty_invalid_traced_id("fallback"),
                 }
             }
             LambdaBody::Block(block) => {
                 // For blocks, set up return type context
                 let old_return = self.current_function_return.take();
-                // Convert LegacyType to ArenaTypeId for storage
-                let return_type = declared_return.clone().or(expected_return.clone());
-                self.current_function_return =
-                    return_type.map(|ty| self.type_arena.borrow_mut().from_type(&ty));
+                self.current_function_return = declared_return_id.or(expected_return_id);
 
                 let _ = self.check_block(block, interner);
 
-                // Convert back to LegacyType for return
                 let ret = self
                     .current_function_return
                     .take()
-                    .map(|ty| self.type_arena.borrow().to_type(ty))
-                    .unwrap_or(LegacyType::Void);
+                    .unwrap_or(ArenaTypeId::VOID);
                 self.current_function_return = old_return;
                 ret
             }
@@ -162,14 +157,13 @@ impl Analyzer {
         };
 
         // Determine final return type
-        let return_type = declared_return.or(expected_return).unwrap_or(body_type);
+        let return_type_id = declared_return_id
+            .or(expected_return_id)
+            .unwrap_or(body_type_id);
 
-        LegacyType::Function(FunctionType {
-            params: param_types.into(),
-            return_type: Box::new(return_type),
-            is_closure: has_captures,
-            params_id: None,
-            return_type_id: None,
-        })
+        // Build function type using arena
+        self.type_arena
+            .borrow_mut()
+            .function(param_type_ids, return_type_id, has_captures)
     }
 }

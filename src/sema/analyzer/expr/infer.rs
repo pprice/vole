@@ -382,8 +382,7 @@ impl Analyzer {
             ExprKind::Lambda(lambda) => {
                 // For now, analyze without expected type context
                 // (Context will be passed when we have assignment/call context)
-                let ty = self.analyze_lambda(lambda, None, interner);
-                Ok(self.type_to_id(&ty))
+                Ok(self.analyze_lambda(lambda, None, interner))
             }
 
             ExprKind::StructLiteral(struct_lit) => {

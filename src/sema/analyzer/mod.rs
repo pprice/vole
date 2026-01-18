@@ -28,6 +28,7 @@ use crate::sema::implement_registry::{
     ExternalMethodInfo, ImplTypeId, ImplementRegistry, MethodImpl,
 };
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
+use crate::sema::resolve::resolve_type_with_arena;
 use crate::sema::type_arena::{TypeArena, TypeId as ArenaTypeId};
 use crate::sema::types::{ConstantValue, LegacyType, ModuleType, NominalType, StructuralType};
 use crate::sema::{
@@ -615,6 +616,22 @@ impl Analyzer {
 
     fn resolve_type(&mut self, ty: &TypeExpr, interner: &Interner) -> LegacyType {
         self.resolve_type_with_self(ty, interner, None)
+    }
+
+    /// Resolve a type expression directly to TypeId (no LegacyType intermediate)
+    pub(crate) fn resolve_type_id(&mut self, ty: &TypeExpr, interner: &Interner) -> ArenaTypeId {
+        let module_id = self.current_module;
+        let mut arena = self.type_arena.borrow_mut();
+        let mut ctx = TypeResolutionContext {
+            entity_registry: &self.entity_registry,
+            interner,
+            name_table: &mut self.name_table,
+            module_id,
+            type_params: self.type_param_stack.current(),
+            self_type: None,
+            type_arena: None, // Arena passed directly to resolve_type_with_arena
+        };
+        resolve_type_with_arena(ty, &mut ctx, &mut arena)
     }
 
     /// Resolve a type expression with an optional Self type for method signatures

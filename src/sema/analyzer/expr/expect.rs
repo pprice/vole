@@ -1,368 +1,159 @@
 use super::super::*;
-use crate::sema::PrimitiveType;
 use crate::sema::compatibility::TypeCompatibility;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::{LegacyType, NominalType};
+use crate::sema::types::LegacyType;
 
 impl Analyzer {
     /// Check expression against expected type and return TypeId directly.
-    /// This is the Phase 2 entry point - callers should migrate to this.
-    #[allow(unused)] // Phase 2 infrastructure
+    /// This is the primary entry point - uses TypeId throughout.
     pub(crate) fn check_expr_expecting_id(
         &mut self,
         expr: &Expr,
         expected: Option<ArenaTypeId>,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        let expected_ty = expected.map(|id| self.type_arena.borrow().to_type(id));
-        let ty = self.check_expr_expecting(expr, expected_ty.as_ref(), interner)?;
-        Ok(self.type_to_id(&ty))
+        let ty_id = self.check_expr_expecting_inner_id(expr, expected, interner)?;
+        Ok(self.record_expr_type_id(expr, ty_id))
     }
 
     /// Check expression against an expected type (bidirectional type checking)
-    /// If expected is None, falls back to inference mode.
+    /// LegacyType version for compatibility - wraps the TypeId version.
     pub(crate) fn check_expr_expecting(
         &mut self,
         expr: &Expr,
         expected: Option<&LegacyType>,
         interner: &Interner,
     ) -> Result<LegacyType, Vec<TypeError>> {
-        let ty = self.check_expr_expecting_inner(expr, expected, interner)?;
-        Ok(self.record_expr_type(expr, ty))
+        let expected_id = expected.map(|t| self.type_to_id(t));
+        let ty_id = self.check_expr_expecting_id(expr, expected_id, interner)?;
+        Ok(self.type_arena.borrow().to_type(ty_id))
     }
 
-    fn check_expr_expecting_inner(
+    fn check_expr_expecting_inner_id(
         &mut self,
         expr: &Expr,
-        expected: Option<&LegacyType>,
+        expected: Option<ArenaTypeId>,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         match &expr.kind {
-            ExprKind::IntLiteral(value) => match expected {
-                // Integer literals can be assigned to unions containing a matching integer type
-                // Return the concrete type, not the union, so codegen properly constructs the union
-                Some(LegacyType::Union(variants)) => {
-                    if let Some(int_variant) = variants
-                        .iter()
-                        .find(|v| v.is_integer() && v.fits_literal(*value))
-                    {
-                        Ok(int_variant.clone())
-                    } else {
-                        let expected = self.type_display(&LegacyType::Union(variants.clone()));
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected,
-                                found: "integer literal".to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                        Ok(self.ty_i64()) // Return a sensible default
+            ExprKind::IntLiteral(value) => {
+                // Check if expected is a union type
+                let union_variants = expected.and_then(|id| {
+                    self.type_arena.borrow().unwrap_union(id).map(|v| v.to_vec())
+                });
+
+                if let Some(variants) = union_variants {
+                    // Find an integer variant that fits this literal
+                    for variant_id in variants {
+                        if variant_id.is_integer() {
+                            let variant_ty = self.type_arena.borrow().to_type(variant_id);
+                            if variant_ty.fits_literal(*value) {
+                                return Ok(variant_id);
+                            }
+                        }
                     }
-                }
-                Some(ty) if ty.fits_literal(*value) => Ok(ty.clone()),
-                Some(ty) => {
-                    let expected = self.type_display(ty);
+                    // No matching integer variant
+                    let expected_str = self.type_display_id(expected.unwrap());
                     self.add_error(
                         SemanticError::TypeMismatch {
-                            expected,
+                            expected: expected_str,
                             found: "integer literal".to_string(),
                             span: expr.span.into(),
                         },
                         expr.span,
                     );
-                    Ok(ty.clone())
+                    return Ok(ArenaTypeId::I64);
                 }
-                None => Ok(self.ty_i64()),
-            },
-            ExprKind::TypeLiteral(_) => match expected {
-                Some(LegacyType::MetaType) | None => Ok(self.ty_type()),
-                Some(ty) => {
-                    let expected = self.type_display(ty);
+
+                if let Some(exp_id) = expected {
+                    let exp_ty = self.type_arena.borrow().to_type(exp_id);
+                    if exp_ty.fits_literal(*value) {
+                        return Ok(exp_id);
+                    }
+                    let expected_str = self.type_display_id(exp_id);
                     self.add_error(
                         SemanticError::TypeMismatch {
-                            expected,
-                            found: "type".to_string(),
+                            expected: expected_str,
+                            found: "integer literal".to_string(),
                             span: expr.span.into(),
                         },
                         expr.span,
                     );
-                    Ok(self.ty_type())
+                    return Ok(exp_id);
                 }
-            },
-            ExprKind::FloatLiteral(_) => match expected {
-                Some(ty) if ty == &LegacyType::Primitive(PrimitiveType::F64) => Ok(self.ty_f64()),
-                Some(ty) if ty.is_numeric() => Ok(ty.clone()),
-                // Float literals can be assigned to unions containing f64
-                Some(LegacyType::Union(variants))
-                    if variants.contains(&LegacyType::Primitive(PrimitiveType::F64)) =>
-                {
-                    Ok(self.ty_f64())
+                Ok(ArenaTypeId::I64)
+            }
+            ExprKind::TypeLiteral(_) => {
+                if let Some(exp_id) = expected {
+                    if exp_id != ArenaTypeId::METATYPE {
+                        let expected_str = self.type_display_id(exp_id);
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: expected_str,
+                                found: "type".to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
                 }
-                Some(ty) => {
-                    let expected = self.type_display(ty);
+                Ok(ArenaTypeId::METATYPE)
+            }
+            ExprKind::FloatLiteral(_) => {
+                if let Some(exp_id) = expected {
+                    if exp_id == ArenaTypeId::F64 {
+                        return Ok(ArenaTypeId::F64);
+                    }
+                    if exp_id.is_numeric() {
+                        return Ok(exp_id);
+                    }
+                    // Check if union contains f64
+                    if let Some(variants) = self.type_arena.borrow().unwrap_union(exp_id) {
+                        if variants.iter().any(|&v| v == ArenaTypeId::F64) {
+                            return Ok(ArenaTypeId::F64);
+                        }
+                    }
+                    let expected_str = self.type_display_id(exp_id);
                     self.add_error(
                         SemanticError::TypeMismatch {
-                            expected,
+                            expected: expected_str,
                             found: "f64".to_string(),
                             span: expr.span.into(),
                         },
                         expr.span,
                     );
-                    Ok(self.ty_f64())
                 }
-                None => Ok(self.ty_f64()),
-            },
-            ExprKind::Binary(bin) => match bin.op {
-                // Add handles both numeric addition and string concatenation
-                BinaryOp::Add => {
-                    let left_ty = self.check_expr_expecting(&bin.left, expected, interner)?;
-                    let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
-
-                    // Handle string concatenation: string + Stringable
-                    if matches!(left_ty, LegacyType::Primitive(PrimitiveType::String)) {
-                        if matches!(right_ty, LegacyType::Primitive(PrimitiveType::String)) {
-                            // string + string is always valid
-                            Ok(self.ty_string())
-                        } else if self.satisfies_stringable(&right_ty, interner) {
-                            // Right implements Stringable
-                            Ok(self.ty_string())
-                        } else {
-                            self.type_error("Stringable", &right_ty, bin.right.span);
-                            Ok(self.ty_invalid())
-                        }
-                    } else if left_ty.is_numeric() && right_ty.is_numeric() {
-                        // Numeric addition
-                        if let Some(exp) = expected
-                            && self.types_compatible(&left_ty, exp, interner)
-                            && self.types_compatible(&right_ty, exp, interner)
-                        {
-                            return Ok(exp.clone());
-                        }
-                        if left_ty == LegacyType::Primitive(PrimitiveType::F64)
-                            || right_ty == LegacyType::Primitive(PrimitiveType::F64)
-                        {
-                            Ok(self.ty_f64())
-                        } else if left_ty == LegacyType::Primitive(PrimitiveType::I64)
-                            || right_ty == LegacyType::Primitive(PrimitiveType::I64)
-                        {
-                            Ok(self.ty_i64())
-                        } else {
-                            Ok(self.ty_i32())
-                        }
-                    } else {
-                        self.type_error_pair("numeric or string", &left_ty, &right_ty, expr.span);
-                        Ok(self.ty_invalid())
-                    }
-                }
-                // Arithmetic ops (except Add): propagate expected type to both operands
-                BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                    let left_ty = self.check_expr_expecting(&bin.left, expected, interner)?;
-                    let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
-
-                    if left_ty.is_numeric() && right_ty.is_numeric() {
-                        // If we have an expected type and both sides match, use it
-                        if let Some(exp) = expected
-                            && self.types_compatible(&left_ty, exp, interner)
-                            && self.types_compatible(&right_ty, exp, interner)
-                        {
-                            return Ok(exp.clone());
-                        }
-                        // Otherwise return wider type
-                        if left_ty == LegacyType::Primitive(PrimitiveType::F64)
-                            || right_ty == LegacyType::Primitive(PrimitiveType::F64)
-                        {
-                            Ok(self.ty_f64())
-                        } else if left_ty == LegacyType::Primitive(PrimitiveType::I64)
-                            || right_ty == LegacyType::Primitive(PrimitiveType::I64)
-                        {
-                            Ok(self.ty_i64())
-                        } else {
-                            Ok(self.ty_i32())
-                        }
-                    } else {
-                        self.type_error_pair("numeric", &left_ty, &right_ty, expr.span);
-                        Ok(self.ty_invalid())
-                    }
-                }
-                // Comparison ops: infer left, check right against left
-                BinaryOp::Eq
-                | BinaryOp::Ne
-                | BinaryOp::Lt
-                | BinaryOp::Gt
-                | BinaryOp::Le
-                | BinaryOp::Ge => {
-                    let left_ty = self.check_expr_expecting(&bin.left, None, interner)?;
-                    self.check_expr_expecting(&bin.right, Some(&left_ty), interner)?;
-                    Ok(self.ty_bool())
-                }
-                // Logical ops: both sides must be bool
-                BinaryOp::And | BinaryOp::Or => {
-                    let bool_ty = self.ty_bool();
-                    let left_ty = self.check_expr_expecting(&bin.left, Some(&bool_ty), interner)?;
-                    let right_ty =
-                        self.check_expr_expecting(&bin.right, Some(&bool_ty), interner)?;
-                    if left_ty == LegacyType::Primitive(PrimitiveType::Bool)
-                        && right_ty == LegacyType::Primitive(PrimitiveType::Bool)
-                    {
-                        Ok(self.ty_bool())
-                    } else {
-                        self.type_error_pair("bool", &left_ty, &right_ty, expr.span);
-                        Ok(self.ty_invalid())
-                    }
-                }
-                // Bitwise ops: both sides must be integer
-                BinaryOp::BitAnd
-                | BinaryOp::BitOr
-                | BinaryOp::BitXor
-                | BinaryOp::Shl
-                | BinaryOp::Shr => {
-                    let left_ty = self.check_expr_expecting(&bin.left, expected, interner)?;
-                    let right_ty = self.check_expr_expecting(&bin.right, expected, interner)?;
-
-                    if left_ty.is_integer() && right_ty.is_integer() {
-                        if let Some(exp) = expected
-                            && self.types_compatible(&left_ty, exp, interner)
-                            && self.types_compatible(&right_ty, exp, interner)
-                        {
-                            return Ok(exp.clone());
-                        }
-                        if left_ty == LegacyType::Primitive(PrimitiveType::I64)
-                            || right_ty == LegacyType::Primitive(PrimitiveType::I64)
-                        {
-                            Ok(self.ty_i64())
-                        } else {
-                            Ok(self.ty_i32())
-                        }
-                    } else {
-                        self.type_error_pair("integer", &left_ty, &right_ty, expr.span);
-                        Ok(self.ty_invalid())
-                    }
-                }
-            },
-            ExprKind::Unary(un) => match un.op {
-                UnaryOp::Neg => {
-                    // Special case: -INT_LITERAL should check if the negated value fits
-                    // This handles cases like -2147483648 (i32::MIN) where the positive
-                    // value doesn't fit but the negated value does
-                    if let ExprKind::IntLiteral(value) = &un.operand.kind {
-                        let negated = value.wrapping_neg();
-                        if let Some(target) = expected
-                            && target.fits_literal(negated)
-                        {
-                            return Ok(self.record_expr_type(&un.operand, target.clone()));
-                        }
-                        // Fall back to i64 if no expected type or doesn't fit
-                        let i64_ty = self.ty_i64();
-                        return Ok(self.record_expr_type(&un.operand, i64_ty));
-                    }
-
-                    // Propagate expected type through negation
-                    let operand_ty = self.check_expr_expecting(&un.operand, expected, interner)?;
-                    if operand_ty.is_numeric() {
-                        Ok(operand_ty)
-                    } else {
-                        self.type_error("numeric", &operand_ty, expr.span);
-                        Ok(self.ty_invalid())
-                    }
-                }
-                UnaryOp::Not => {
-                    // Not always expects and returns bool
-                    let bool_ty = self.ty_bool();
-                    let operand_ty =
-                        self.check_expr_expecting(&un.operand, Some(&bool_ty), interner)?;
-                    if operand_ty == LegacyType::Primitive(PrimitiveType::Bool) {
-                        Ok(self.ty_bool())
-                    } else {
-                        self.type_error("bool", &operand_ty, expr.span);
-                        Ok(self.ty_invalid())
-                    }
-                }
-                UnaryOp::BitNot => {
-                    // Bitwise not: propagate expected type, requires integer
-                    let operand_ty = self.check_expr_expecting(&un.operand, expected, interner)?;
-                    if operand_ty.is_integer() {
-                        Ok(operand_ty)
-                    } else {
-                        self.type_error("integer", &operand_ty, expr.span);
-                        Ok(self.ty_invalid())
-                    }
-                }
-            },
-            ExprKind::Grouping(inner) => self.check_expr_expecting(inner, expected, interner),
+                Ok(ArenaTypeId::F64)
+            }
+            ExprKind::Binary(bin) => self.check_binary_expr_expecting_id(expr, bin, expected, interner),
+            ExprKind::Unary(un) => self.check_unary_expr_expecting_id(expr, un, expected, interner),
+            ExprKind::Grouping(inner) => self.check_expr_expecting_id(inner, expected, interner),
             ExprKind::ArrayLiteral(elements) => {
-                // Check if expecting a tuple type
-                if let Some(LegacyType::Tuple(expected_elems)) = expected {
-                    // Check that literal has correct number of elements
-                    if elements.len() != expected_elems.len() {
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: format!("tuple with {} elements", expected_elems.len()),
-                                found: format!("{} elements", elements.len()),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                        return Ok(self.ty_invalid());
-                    }
-                    // Check each element against its expected type
-                    let elem_types: Vec<LegacyType> = elements
-                        .iter()
-                        .zip(expected_elems.iter())
-                        .map(|(elem, expected_elem)| {
-                            self.check_expr_expecting(elem, Some(expected_elem), interner)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    return Ok(self.ty_tuple(elem_types));
-                }
-
-                // Check if expecting an array type
-                let elem_expected = match expected {
-                    Some(LegacyType::Array(elem)) => Some(elem.as_ref()),
-                    _ => None,
-                };
-
-                if elements.is_empty() {
-                    if let Some(LegacyType::Array(elem)) = expected {
-                        return Ok(self.ty_array(elem));
-                    }
-                    return Ok(LegacyType::Array(Box::new(LegacyType::unknown())));
-                }
-
-                // Infer types for all elements, passing expected element type to each
-                let elem_types: Vec<LegacyType> = elements
-                    .iter()
-                    .map(|e| self.check_expr_expecting(e, elem_expected, interner))
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                // Check if all elements have compatible types (homogeneous → Array)
-                // or different types (heterogeneous → Tuple)
-                let first_ty = &elem_types[0];
-                let is_homogeneous = elem_types
-                    .iter()
-                    .skip(1)
-                    .all(|ty| self.types_compatible(ty, first_ty, interner));
-
-                if is_homogeneous {
-                    Ok(self.ty_array(first_ty))
-                } else {
-                    Ok(self.ty_tuple(elem_types))
-                }
+                self.check_array_literal_expecting_id(expr, elements, expected, interner)
             }
             ExprKind::Index(_) => {
                 // Index expressions just delegate to check_expr
-                let ty_id = self.check_expr(expr, interner)?;
-                Ok(self.type_arena.borrow().to_type(ty_id))
+                self.check_expr(expr, interner)
             }
             ExprKind::Lambda(lambda) => {
                 // Extract expected function type if available
-                // Support both direct function types and functional interfaces
-                let expected_fn = expected.and_then(|t| {
-                    if let LegacyType::Function(ft) = t {
-                        Some(ft.clone())
-                    } else if let LegacyType::Nominal(NominalType::Interface(iface)) = t {
-                        // Check if it's a functional interface (single abstract method, no fields)
-                        self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
+                let expected_fn = expected.and_then(|exp_id| {
+                    let arena = self.type_arena.borrow();
+                    if let Some((params, ret, _)) = arena.unwrap_function(exp_id) {
+                        // Build FunctionType from TypeIds
+                        let params_legacy: Vec<LegacyType> =
+                            params.iter().map(|&p| arena.to_type(p)).collect();
+                        let ret_legacy = arena.to_type(ret);
+                        Some(FunctionType {
+                            params: params_legacy.into(),
+                            return_type: Box::new(ret_legacy),
+                            is_closure: false,
+                            params_id: None,
+                            return_type_id: None,
+                        })
+                    } else if let Some((iface_id, _)) = arena.unwrap_interface(exp_id) {
+                        drop(arena);
+                        self.get_functional_interface_type_by_type_def_id(iface_id)
                     } else {
                         None
                     }
@@ -372,11 +163,9 @@ impl Analyzer {
             // All other cases: infer type, then check compatibility
             _ => {
                 let inferred_id = self.check_expr(expr, interner)?;
-                // Use TypeId for compatibility check
-                if let Some(expected_ty) = expected {
-                    let expected_id = self.type_to_id(expected_ty);
+                if let Some(expected_id) = expected {
                     if !self.types_compatible_id(inferred_id, expected_id, interner) {
-                        let expected_str = self.type_display(expected_ty);
+                        let expected_str = self.type_display_id(expected_id);
                         let found = self.type_display_id(inferred_id);
                         self.add_error(
                             SemanticError::TypeMismatch {
@@ -388,9 +177,309 @@ impl Analyzer {
                         );
                     }
                 }
-                // Convert to LegacyType for return (API requirement)
-                Ok(self.type_arena.borrow().to_type(inferred_id))
+                Ok(inferred_id)
             }
+        }
+    }
+
+    fn check_binary_expr_expecting_id(
+        &mut self,
+        expr: &Expr,
+        bin: &BinaryExpr,
+        expected: Option<ArenaTypeId>,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        match bin.op {
+            // Add handles both numeric addition and string concatenation
+            BinaryOp::Add => {
+                let left_id = self.check_expr_expecting_id(&bin.left, expected, interner)?;
+                let right_id = self.check_expr_expecting_id(&bin.right, expected, interner)?;
+
+                // Handle string concatenation
+                if left_id == ArenaTypeId::STRING {
+                    if right_id == ArenaTypeId::STRING {
+                        return Ok(ArenaTypeId::STRING);
+                    } else if self.satisfies_stringable_id(right_id, interner) {
+                        return Ok(ArenaTypeId::STRING);
+                    } else {
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: "Stringable".to_string(),
+                                found: self.type_display_id(right_id),
+                                span: bin.right.span.into(),
+                            },
+                            bin.right.span,
+                        );
+                        return Ok(ArenaTypeId::INVALID);
+                    }
+                }
+
+                // Numeric addition
+                if left_id.is_numeric() && right_id.is_numeric() {
+                    if let Some(exp) = expected {
+                        if self.types_compatible_id(left_id, exp, interner)
+                            && self.types_compatible_id(right_id, exp, interner)
+                        {
+                            return Ok(exp);
+                        }
+                    }
+                    return Ok(self.numeric_result_type(left_id, right_id));
+                }
+
+                self.add_error(
+                    SemanticError::TypeMismatch {
+                        expected: "numeric or string".to_string(),
+                        found: self.type_display_pair_id(left_id, right_id),
+                        span: expr.span.into(),
+                    },
+                    expr.span,
+                );
+                Ok(ArenaTypeId::INVALID)
+            }
+            // Arithmetic ops
+            BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                let left_id = self.check_expr_expecting_id(&bin.left, expected, interner)?;
+                let right_id = self.check_expr_expecting_id(&bin.right, expected, interner)?;
+
+                if left_id.is_numeric() && right_id.is_numeric() {
+                    if let Some(exp) = expected {
+                        if self.types_compatible_id(left_id, exp, interner)
+                            && self.types_compatible_id(right_id, exp, interner)
+                        {
+                            return Ok(exp);
+                        }
+                    }
+                    return Ok(self.numeric_result_type(left_id, right_id));
+                }
+
+                self.add_error(
+                    SemanticError::TypeMismatch {
+                        expected: "numeric".to_string(),
+                        found: self.type_display_pair_id(left_id, right_id),
+                        span: expr.span.into(),
+                    },
+                    expr.span,
+                );
+                Ok(ArenaTypeId::INVALID)
+            }
+            // Comparison ops
+            BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
+                let left_id = self.check_expr_expecting_id(&bin.left, None, interner)?;
+                self.check_expr_expecting_id(&bin.right, Some(left_id), interner)?;
+                Ok(ArenaTypeId::BOOL)
+            }
+            // Logical ops
+            BinaryOp::And | BinaryOp::Or => {
+                let left_id = self.check_expr_expecting_id(&bin.left, Some(ArenaTypeId::BOOL), interner)?;
+                let right_id = self.check_expr_expecting_id(&bin.right, Some(ArenaTypeId::BOOL), interner)?;
+
+                if left_id == ArenaTypeId::BOOL && right_id == ArenaTypeId::BOOL {
+                    Ok(ArenaTypeId::BOOL)
+                } else {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "bool".to_string(),
+                            found: self.type_display_pair_id(left_id, right_id),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    Ok(ArenaTypeId::INVALID)
+                }
+            }
+            // Bitwise ops
+            BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl | BinaryOp::Shr => {
+                let left_id = self.check_expr_expecting_id(&bin.left, expected, interner)?;
+                let right_id = self.check_expr_expecting_id(&bin.right, expected, interner)?;
+
+                if left_id.is_integer() && right_id.is_integer() {
+                    if let Some(exp) = expected {
+                        if self.types_compatible_id(left_id, exp, interner)
+                            && self.types_compatible_id(right_id, exp, interner)
+                        {
+                            return Ok(exp);
+                        }
+                    }
+                    return Ok(self.integer_result_type(left_id, right_id));
+                }
+
+                self.add_error(
+                    SemanticError::TypeMismatch {
+                        expected: "integer".to_string(),
+                        found: self.type_display_pair_id(left_id, right_id),
+                        span: expr.span.into(),
+                    },
+                    expr.span,
+                );
+                Ok(ArenaTypeId::INVALID)
+            }
+        }
+    }
+
+    fn check_unary_expr_expecting_id(
+        &mut self,
+        expr: &Expr,
+        un: &UnaryExpr,
+        expected: Option<ArenaTypeId>,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        match un.op {
+            UnaryOp::Neg => {
+                // Special case: -INT_LITERAL
+                if let ExprKind::IntLiteral(value) = &un.operand.kind {
+                    let negated = value.wrapping_neg();
+                    if let Some(target) = expected {
+                        let target_ty = self.type_arena.borrow().to_type(target);
+                        if target_ty.fits_literal(negated) {
+                            self.record_expr_type_id(&un.operand, target);
+                            return Ok(target);
+                        }
+                    }
+                    self.record_expr_type_id(&un.operand, ArenaTypeId::I64);
+                    return Ok(ArenaTypeId::I64);
+                }
+
+                let operand_id = self.check_expr_expecting_id(&un.operand, expected, interner)?;
+                if operand_id.is_numeric() {
+                    Ok(operand_id)
+                } else {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "numeric".to_string(),
+                            found: self.type_display_id(operand_id),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    Ok(ArenaTypeId::INVALID)
+                }
+            }
+            UnaryOp::Not => {
+                let operand_id = self.check_expr_expecting_id(&un.operand, Some(ArenaTypeId::BOOL), interner)?;
+                if operand_id == ArenaTypeId::BOOL {
+                    Ok(ArenaTypeId::BOOL)
+                } else {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "bool".to_string(),
+                            found: self.type_display_id(operand_id),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    Ok(ArenaTypeId::INVALID)
+                }
+            }
+            UnaryOp::BitNot => {
+                let operand_id = self.check_expr_expecting_id(&un.operand, expected, interner)?;
+                if operand_id.is_integer() {
+                    Ok(operand_id)
+                } else {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "integer".to_string(),
+                            found: self.type_display_id(operand_id),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    Ok(ArenaTypeId::INVALID)
+                }
+            }
+        }
+    }
+
+    fn check_array_literal_expecting_id(
+        &mut self,
+        expr: &Expr,
+        elements: &[Expr],
+        expected: Option<ArenaTypeId>,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        // Check if expecting a tuple type
+        if let Some(exp_id) = expected {
+            // Extract tuple elements upfront to avoid borrow conflict
+            let tuple_elems = self
+                .type_arena
+                .borrow()
+                .unwrap_tuple(exp_id)
+                .map(|e| e.to_vec());
+            if let Some(expected_elems) = tuple_elems {
+                if elements.len() != expected_elems.len() {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: format!("tuple with {} elements", expected_elems.len()),
+                            found: format!("{} elements", elements.len()),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    return Ok(ArenaTypeId::INVALID);
+                }
+                let mut elem_ids = Vec::with_capacity(elements.len());
+                for (elem, &exp_elem) in elements.iter().zip(expected_elems.iter()) {
+                    elem_ids.push(self.check_expr_expecting_id(elem, Some(exp_elem), interner)?);
+                }
+                return Ok(self.ty_tuple_id(elem_ids));
+            }
+
+            // Extract array element type upfront to avoid borrow conflict
+            let array_elem = self.type_arena.borrow().unwrap_array(exp_id);
+            if let Some(elem_expected) = array_elem {
+                if elements.is_empty() {
+                    return Ok(exp_id);
+                }
+                let mut elem_ids = Vec::with_capacity(elements.len());
+                for e in elements {
+                    elem_ids.push(self.check_expr_expecting_id(e, Some(elem_expected), interner)?);
+                }
+                return Ok(self.ty_array_id(elem_ids[0]));
+            }
+        }
+
+        if elements.is_empty() {
+            // Empty array with unknown element type
+            let unknown_id = self.type_arena.borrow_mut().from_type(&LegacyType::unknown());
+            return Ok(self.ty_array_id(unknown_id));
+        }
+
+        // Infer types for all elements
+        let elem_ids: Vec<ArenaTypeId> = elements
+            .iter()
+            .map(|e| self.check_expr_expecting_id(e, None, interner))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Check if all elements have compatible types
+        let first_id = elem_ids[0];
+        let is_homogeneous = elem_ids
+            .iter()
+            .skip(1)
+            .all(|&id| self.types_compatible_id(id, first_id, interner));
+
+        if is_homogeneous {
+            Ok(self.ty_array_id(first_id))
+        } else {
+            Ok(self.ty_tuple_id(elem_ids))
+        }
+    }
+
+    /// Get the result type for numeric operations (wider type wins)
+    fn numeric_result_type(&self, left: ArenaTypeId, right: ArenaTypeId) -> ArenaTypeId {
+        if left == ArenaTypeId::F64 || right == ArenaTypeId::F64 {
+            ArenaTypeId::F64
+        } else if left == ArenaTypeId::I64 || right == ArenaTypeId::I64 {
+            ArenaTypeId::I64
+        } else {
+            ArenaTypeId::I32
+        }
+    }
+
+    /// Get the result type for integer operations (wider type wins)
+    fn integer_result_type(&self, left: ArenaTypeId, right: ArenaTypeId) -> ArenaTypeId {
+        if left == ArenaTypeId::I64 || right == ArenaTypeId::I64 {
+            ArenaTypeId::I64
+        } else {
+            ArenaTypeId::I32
         }
     }
 }

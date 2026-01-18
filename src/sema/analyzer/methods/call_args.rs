@@ -65,8 +65,7 @@ impl Analyzer {
                     } else {
                         None
                     };
-                    let arg_ty = self.analyze_lambda(lambda, expected_fn, interner);
-                    self.type_to_id(&arg_ty)
+                    self.analyze_lambda(lambda, expected_fn, interner)
                 } else {
                     // Pass expected type to allow integer literal inference
                     let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
