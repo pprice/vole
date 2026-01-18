@@ -190,61 +190,49 @@ impl Analyzer {
     ) -> Result<LegacyType, Vec<TypeError>> {
         let type_name = interner.resolve(struct_lit.name).to_string();
 
-        // First, type-check all field values to get their actual types
+        // First, type-check all field values to get their actual types (as TypeId)
         // Use string keys since Symbols may be from different interners
-        let mut field_value_types: HashMap<String, LegacyType> = HashMap::new();
+        let mut field_value_type_ids: HashMap<String, ArenaTypeId> = HashMap::new();
         for field_init in &struct_lit.fields {
             let field_ty_id = self.check_expr(&field_init.value, interner)?;
-            let field_ty = self.type_arena.borrow().to_type(field_ty_id);
-            field_value_types.insert(interner.resolve(field_init.name).to_string(), field_ty);
+            field_value_type_ids.insert(interner.resolve(field_init.name).to_string(), field_ty_id);
         }
 
         // Build parallel arrays of expected types (from generic def) and actual types (from values)
-        // for type parameter inference
-        let mut expected_types = Vec::new();
-        let mut actual_types = Vec::new();
-
-        // Convert field types from TypeId to LegacyType
-        let field_types: Vec<LegacyType> = generic_info
-            .field_types
-            .iter()
-            .map(|&t| self.type_arena.borrow().to_type(t))
-            .collect();
+        // for type parameter inference - using TypeId directly
+        let mut expected_type_ids = Vec::new();
+        let mut actual_type_ids = Vec::new();
 
         for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
             if let Some(field_name_str) = self.name_table.last_segment_str(*field_name_id)
-                && let Some(actual_ty) = field_value_types.get(&field_name_str)
+                && let Some(&actual_ty_id) = field_value_type_ids.get(&field_name_str)
             {
-                expected_types.push(field_types[i].clone());
-                actual_types.push(actual_ty.clone());
+                expected_type_ids.push(generic_info.field_types[i]);
+                actual_type_ids.push(actual_ty_id);
             }
         }
 
-        // Infer type parameters from field values
-        let inferred =
-            self.infer_type_params(&generic_info.type_params, &expected_types, &actual_types);
+        // Infer type parameters from field values (using TypeId version)
+        let inferred_id =
+            self.infer_type_params_id(&generic_info.type_params, &expected_type_ids, &actual_type_ids);
 
         // Check type parameter constraints
-        self.check_type_param_constraints(
+        self.check_type_param_constraints_id(
             &generic_info.type_params,
-            &inferred,
+            &inferred_id,
             expr.span,
             interner,
         );
 
         // Substitute inferred types into field types to get concrete field types via arena
-        let concrete_field_types: Vec<LegacyType> = {
+        let subs_hashbrown: hashbrown::HashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
+        let concrete_field_type_ids: Vec<ArenaTypeId> = {
             let mut arena = self.type_arena.borrow_mut();
-            let subs_id: hashbrown::HashMap<_, _> = inferred
-                .iter()
-                .map(|(&k, v)| (k, arena.from_type(v)))
-                .collect();
-            let substituted_ids: Vec<_> = generic_info
+            generic_info
                 .field_types
                 .iter()
-                .map(|&t| arena.substitute(t, &subs_id))
-                .collect();
-            substituted_ids.iter().map(|&t| arena.to_type(t)).collect()
+                .map(|&t| arena.substitute(t, &subs_hashbrown))
+                .collect()
         };
 
         // Check that all required fields are present - compare by string value
@@ -278,14 +266,11 @@ impl Analyzer {
             if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
                 self.name_table.last_segment_str(*name_id).as_deref() == Some(field_init_name_str)
             }) {
-                let actual_ty = field_value_types
+                // Use TypeId directly for compatibility check
+                let actual_ty_id = *field_value_type_ids
                     .get(field_init_name_str)
                     .expect("field was validated in type check phase");
-                let expected_ty = &concrete_field_types[idx];
-
-                // Convert to TypeId for compatibility check (Phase 2 migration)
-                let actual_ty_id = self.type_to_id(actual_ty);
-                let expected_ty_id = self.type_to_id(expected_ty);
+                let expected_ty_id = concrete_field_type_ids[idx];
                 if !self.types_compatible_id(actual_ty_id, expected_ty_id, interner) {
                     self.add_type_mismatch_id(expected_ty_id, actual_ty_id, field_init.value.span);
                 }
@@ -301,17 +286,11 @@ impl Analyzer {
             }
         }
 
-        // Build type_args from inferred types in order of type params
-        let type_args: Vec<LegacyType> = generic_info
+        // Build type_args from inferred types in order of type params (already TypeId)
+        let type_args_id: TypeIdVec = generic_info
             .type_params
             .iter()
-            .filter_map(|tp| inferred.get(&tp.name_id).cloned())
-            .collect();
-
-        // Convert type args to TypeIds for canonical representation
-        let type_args_id: TypeIdVec = type_args
-            .iter()
-            .map(|t| self.type_arena.borrow_mut().from_type(t))
+            .filter_map(|tp| inferred_id.get(&tp.name_id).copied())
             .collect();
 
         let concrete_record = RecordType {
@@ -332,61 +311,49 @@ impl Analyzer {
     ) -> Result<LegacyType, Vec<TypeError>> {
         let type_name = interner.resolve(struct_lit.name).to_string();
 
-        // First, type-check all field values to get their actual types
+        // First, type-check all field values to get their actual types (as TypeId)
         // Use string keys since Symbols may be from different interners
-        let mut field_value_types: HashMap<String, LegacyType> = HashMap::new();
+        let mut field_value_type_ids: HashMap<String, ArenaTypeId> = HashMap::new();
         for field_init in &struct_lit.fields {
             let field_ty_id = self.check_expr(&field_init.value, interner)?;
-            let field_ty = self.type_arena.borrow().to_type(field_ty_id);
-            field_value_types.insert(interner.resolve(field_init.name).to_string(), field_ty);
+            field_value_type_ids.insert(interner.resolve(field_init.name).to_string(), field_ty_id);
         }
 
         // Build parallel arrays of expected types (from generic def) and actual types (from values)
-        // for type parameter inference
-        let mut expected_types = Vec::new();
-        let mut actual_types = Vec::new();
-
-        // Convert field types from TypeId to LegacyType
-        let field_types: Vec<LegacyType> = generic_info
-            .field_types
-            .iter()
-            .map(|&t| self.type_arena.borrow().to_type(t))
-            .collect();
+        // for type parameter inference - using TypeId directly
+        let mut expected_type_ids = Vec::new();
+        let mut actual_type_ids = Vec::new();
 
         for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
             if let Some(field_name_str) = self.name_table.last_segment_str(*field_name_id)
-                && let Some(actual_ty) = field_value_types.get(&field_name_str)
+                && let Some(&actual_ty_id) = field_value_type_ids.get(&field_name_str)
             {
-                expected_types.push(field_types[i].clone());
-                actual_types.push(actual_ty.clone());
+                expected_type_ids.push(generic_info.field_types[i]);
+                actual_type_ids.push(actual_ty_id);
             }
         }
 
-        // Infer type parameters from field values
-        let inferred =
-            self.infer_type_params(&generic_info.type_params, &expected_types, &actual_types);
+        // Infer type parameters from field values (using TypeId version)
+        let inferred_id =
+            self.infer_type_params_id(&generic_info.type_params, &expected_type_ids, &actual_type_ids);
 
         // Check type parameter constraints
-        self.check_type_param_constraints(
+        self.check_type_param_constraints_id(
             &generic_info.type_params,
-            &inferred,
+            &inferred_id,
             expr.span,
             interner,
         );
 
         // Substitute inferred types into field types to get concrete field types via arena
-        let concrete_field_types: Vec<LegacyType> = {
+        let subs_hashbrown: hashbrown::HashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
+        let concrete_field_type_ids: Vec<ArenaTypeId> = {
             let mut arena = self.type_arena.borrow_mut();
-            let subs_id: hashbrown::HashMap<_, _> = inferred
-                .iter()
-                .map(|(&k, v)| (k, arena.from_type(v)))
-                .collect();
-            let substituted_ids: Vec<_> = generic_info
+            generic_info
                 .field_types
                 .iter()
-                .map(|&t| arena.substitute(t, &subs_id))
-                .collect();
-            substituted_ids.iter().map(|&t| arena.to_type(t)).collect()
+                .map(|&t| arena.substitute(t, &subs_hashbrown))
+                .collect()
         };
 
         // Check that all required fields are present - compare by string value
@@ -420,14 +387,11 @@ impl Analyzer {
             if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
                 self.name_table.last_segment_str(*name_id).as_deref() == Some(field_init_name_str)
             }) {
-                let actual_ty = field_value_types
+                // Use TypeId directly for compatibility check
+                let actual_ty_id = *field_value_type_ids
                     .get(field_init_name_str)
                     .expect("field was validated in type check phase");
-                let expected_ty = &concrete_field_types[idx];
-
-                // Convert to TypeId for compatibility check (Phase 2 migration)
-                let actual_ty_id = self.type_to_id(actual_ty);
-                let expected_ty_id = self.type_to_id(expected_ty);
+                let expected_ty_id = concrete_field_type_ids[idx];
                 if !self.types_compatible_id(actual_ty_id, expected_ty_id, interner) {
                     self.add_type_mismatch_id(expected_ty_id, actual_ty_id, field_init.value.span);
                 }
@@ -445,13 +409,13 @@ impl Analyzer {
 
         // Convert inferred substitutions to ordered type_args based on type param order
         // When inference fails, fall back to type params from current scope (for same-type struct literals in methods)
-        let type_args: Vec<LegacyType> = generic_info
+        let type_args_id: TypeIdVec = generic_info
             .type_params
             .iter()
             .map(|param| {
-                // First try inferred type
-                if let Some(ty) = inferred.get(&param.name_id) {
-                    return ty.clone();
+                // First try inferred type (already TypeId)
+                if let Some(&ty_id) = inferred_id.get(&param.name_id) {
+                    return ty_id;
                 }
                 // Fall back to current type param scope - this handles cases like
                 // GenericContainer { _ptr: ... } inside GenericContainer<K,V>.new()
@@ -463,19 +427,13 @@ impl Analyzer {
                             let scope_param_name =
                                 self.name_table.last_segment_str(scope_param.name_id);
                             if scope_param_name.as_deref() == Some(&param_name) {
-                                return LegacyType::TypeParam(scope_param.name_id);
+                                return self.type_arena.borrow_mut().type_param(scope_param.name_id);
                             }
                         }
                     }
                 }
-                LegacyType::unknown()
+                ArenaTypeId::INVALID // Unknown type
             })
-            .collect();
-
-        // Convert type args to TypeIds for canonical representation
-        let type_args_id: TypeIdVec = type_args
-            .iter()
-            .map(|t| self.type_arena.borrow_mut().from_type(t))
             .collect();
 
         let concrete_class = ClassType {
