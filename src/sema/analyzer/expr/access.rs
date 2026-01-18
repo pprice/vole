@@ -11,13 +11,13 @@ use std::collections::HashMap;
 
 impl Analyzer {
     /// Get field type from a struct-like type by looking up the type definition
-    /// and substituting type arguments if needed.
-    fn get_field_type(
+    /// and substituting type arguments if needed. Returns TypeId directly.
+    fn get_field_type_id(
         &self,
         type_def_id: TypeDefId,
         type_args_id: &[crate::sema::type_arena::TypeId],
         field_name: &str,
-    ) -> Option<(String, LegacyType)> {
+    ) -> Option<ArenaTypeId> {
         let type_def = self.entity_registry.get_type(type_def_id);
         let generic_info = type_def.generic_info.as_ref()?;
 
@@ -34,13 +34,7 @@ impl Analyzer {
                     field_type_id,
                     &mut self.type_arena.borrow_mut(),
                 );
-                let substituted = self.type_arena.borrow().to_type(substituted_id);
-
-                let type_name = self
-                    .name_table
-                    .last_segment_str(type_def.name_id)
-                    .unwrap_or_else(|| "struct".to_string());
-                return Some((type_name, substituted));
+                return Some(substituted_id);
             }
         }
 
@@ -116,10 +110,9 @@ impl Analyzer {
         };
 
         // Try to find the field
-        if let Some((_type_name, field_type)) =
-            self.get_field_type(type_def_id, &type_args_id, field_name)
+        if let Some(field_type_id) = self.get_field_type_id(type_def_id, &type_args_id, field_name)
         {
-            return Ok(self.type_to_id(&field_type));
+            return Ok(field_type_id);
         }
 
         // Field not found - get struct info for error message using type_def_id
@@ -210,10 +203,8 @@ impl Analyzer {
 
         // Find the field
         let field_name = interner.resolve(opt_chain.field);
-        if let Some((_type_name, field_type)) =
-            self.get_field_type(type_def_id, &type_args_id, field_name)
+        if let Some(field_type_id) = self.get_field_type_id(type_def_id, &type_args_id, field_name)
         {
-            let field_type_id = self.type_to_id(&field_type);
             // Result is always optional (field_type | nil)
             // But if field type is already optional, don't double-wrap
             if self.unwrap_optional_id(field_type_id).is_some() {
