@@ -330,10 +330,9 @@ impl Analyzer {
                     .unwrap_optional_id(value_type_id)
                     .unwrap_or(ArenaTypeId::INVALID);
 
-                // Default must match the unwrapped type
-                let unwrapped = self.type_arena.borrow().to_type(unwrapped_id);
-                let _default_type =
-                    self.check_expr_expecting(&nc.default, Some(&unwrapped), interner)?;
+                // Default must match the unwrapped type (using TypeId version)
+                let _default_type_id =
+                    self.check_expr_expecting_id(&nc.default, Some(unwrapped_id), interner)?;
 
                 // Result is the non-nil type
                 Ok(unwrapped_id)

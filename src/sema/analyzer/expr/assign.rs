@@ -162,13 +162,13 @@ impl Analyzer {
             }
         };
 
-        // Now check the value expression with expected type context
-        let expected_ty = if target_valid && !target_ty_id.is_invalid() {
-            Some(self.type_arena.borrow().to_type(target_ty_id))
+        // Now check the value expression with expected type context (using TypeId version)
+        let expected_ty_id = if target_valid && !target_ty_id.is_invalid() {
+            Some(target_ty_id)
         } else {
             None
         };
-        let value_ty = self.check_expr_expecting(&assign.value, expected_ty.as_ref(), interner)?;
+        let value_ty_id = self.check_expr_expecting_id(&assign.value, expected_ty_id, interner)?;
 
         // Handle mutability and capture checks for variable targets
         if let AssignTarget::Variable(sym) = &assign.target
@@ -195,11 +195,8 @@ impl Analyzer {
         }
 
         // Check type compatibility
-        if target_valid {
-            let value_ty_id = self.type_to_id(&value_ty);
-            if !self.types_compatible_id(value_ty_id, target_ty_id, interner) {
-                self.add_type_mismatch_id(target_ty_id, value_ty_id, assign.value.span);
-            }
+        if target_valid && !self.types_compatible_id(value_ty_id, target_ty_id, interner) {
+            self.add_type_mismatch_id(target_ty_id, value_ty_id, assign.value.span);
         }
 
         Ok(target_ty_id)
@@ -384,14 +381,13 @@ impl Analyzer {
             }
         };
 
-        // Type-check the value expression with expected type context
-        let expected = if !target_type_id.is_invalid() {
-            Some(self.type_arena.borrow().to_type(target_type_id))
+        // Type-check the value expression with expected type context (using TypeId version)
+        let expected_id = if !target_type_id.is_invalid() {
+            Some(target_type_id)
         } else {
             None
         };
-        let value_type = self.check_expr_expecting(&compound.value, expected.as_ref(), interner)?;
-        let value_type_id = self.type_to_id(&value_type);
+        let value_type_id = self.check_expr_expecting_id(&compound.value, expected_id, interner)?;
 
         // Check operator compatibility - compound assignment operators are arithmetic
         // For +=, -=, *=, /=, %= both operands must be numeric
