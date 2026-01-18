@@ -305,79 +305,107 @@ impl Analyzer {
             return Ok(self.ty_invalid_traced_id("method_on_union"));
         }
 
-        // Handle module method calls (e.g., math.sqrt(16.0))
-        if let LegacyType::Module(ref module_type) = object_type {
-            let method_name_str = interner.resolve(method_call.method);
-            let name_id = self.module_name_id(module_type.module_id, method_name_str);
-
-            // Look up the method in module exports
-            if let Some(name_id) = name_id
-                && let Some(export_type) = module_type.exports.get(&name_id)
-            {
-                if let LegacyType::Function(func_type) = export_type {
-                    // Check argument count
-                    if method_call.args.len() != func_type.params.len() {
-                        self.add_wrong_arg_count(
-                            func_type.params.len(),
-                            method_call.args.len(),
-                            expr.span,
-                        );
-                    }
-
-                    // Check argument types
-                    for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
-                        let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
-                        let arg_ty_id = self.type_to_id(&arg_ty);
-                        let param_ty_id = self.type_to_id(param_ty);
-                        if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
-                            self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
-                        }
-                    }
-
-                    // Record resolution for codegen
-                    // Only set external_info for functions in the external_funcs set
-                    let external_info = if module_type.external_funcs.contains(&name_id) {
-                        Some(ExternalMethodInfo {
-                            module_path: self
-                                .name_table
-                                .module_path(module_type.module_id)
-                                .to_string(),
-                            native_name: method_name_str.to_string(),
-                            return_type: Some(Box::new((*func_type.return_type).clone())),
-                        })
-                    } else {
-                        None
-                    };
-
-                    self.method_resolutions.insert(
-                        expr.id,
-                        ResolvedMethod::Implemented {
-                            trait_name: None,
-                            func_type: func_type.clone(),
-                            is_builtin: false,
-                            external_info,
-                        },
-                    );
-
-                    return Ok(self.type_to_id(&func_type.return_type));
-                } else {
-                    self.type_error("function", export_type, method_call.method_span);
-                    return Ok(ArenaTypeId::INVALID);
-                }
-            } else {
+        // Handle module method calls (e.g., math.sqrt(16.0)) using TypeId-based lookup
+        let module_info = {
+            let arena = self.type_arena.borrow();
+            arena.unwrap_module(object_type_id).map(|m| {
+                let method_name_str = interner.resolve(method_call.method);
+                let name_id = self.module_name_id(m.module_id, method_name_str);
+                // Find export type if name matches
+                let export_type_id = name_id.and_then(|nid| {
+                    m.exports
+                        .iter()
+                        .find(|(n, _)| *n == nid)
+                        .map(|&(_, type_id)| type_id)
+                });
+                (m.module_id, method_name_str.to_string(), name_id, export_type_id)
+            })
+        };
+        if let Some((module_id, method_name_str, name_id, export_type_id)) = module_info {
+            let Some(name_id) = name_id else {
                 self.add_error(
                     SemanticError::ModuleNoExport {
-                        module: self
-                            .name_table
-                            .module_path(module_type.module_id)
-                            .to_string(),
-                        name: method_name_str.to_string(),
+                        module: self.name_table.module_path(module_id).to_string(),
+                        name: method_name_str,
                         span: method_call.method_span.into(),
                     },
                     method_call.method_span,
                 );
                 return Ok(ArenaTypeId::INVALID);
-            }
+            };
+            let Some(export_type_id) = export_type_id else {
+                self.add_error(
+                    SemanticError::ModuleNoExport {
+                        module: self.name_table.module_path(module_id).to_string(),
+                        name: method_name_str,
+                        span: method_call.method_span.into(),
+                    },
+                    method_call.method_span,
+                );
+                return Ok(ArenaTypeId::INVALID);
+            };
+
+            // Check if export is a function using arena
+            let func_info = {
+                let arena = self.type_arena.borrow();
+                arena
+                    .unwrap_function(export_type_id)
+                    .map(|(params, ret, is_closure)| (params.clone(), ret, is_closure))
+            };
+            let Some((param_ids, return_id, _is_closure)) = func_info else {
+                self.type_error_id("function", export_type_id, method_call.method_span);
+                return Ok(ArenaTypeId::INVALID);
+            };
+
+            // Check arguments using TypeId-based checking
+            self.check_call_args_id(
+                &method_call.args,
+                &param_ids,
+                return_id,
+                expr.span,
+                interner,
+            )?;
+
+            // Build FunctionType for resolution storage (still needed for codegen)
+            let func_type = {
+                let arena = self.type_arena.borrow();
+                FunctionType {
+                    params: param_ids.iter().map(|&id| arena.to_type(id)).collect(),
+                    return_type: Box::new(arena.to_type(return_id)),
+                    is_closure: false,
+                    params_id: None,
+                    return_type_id: None,
+                }
+            };
+
+            // Get external_funcs from module metadata
+            let is_external = self
+                .type_arena
+                .borrow()
+                .module_metadata(module_id)
+                .is_some_and(|meta| meta.external_funcs.contains(&name_id));
+
+            let external_info = if is_external {
+                Some(ExternalMethodInfo {
+                    module_path: self.name_table.module_path(module_id).to_string(),
+                    native_name: method_name_str.clone(),
+                    return_type: Some(func_type.return_type.clone()),
+                })
+            } else {
+                None
+            };
+
+            self.method_resolutions.insert(
+                expr.id,
+                ResolvedMethod::Implemented {
+                    trait_name: None,
+                    func_type,
+                    is_builtin: false,
+                    external_info,
+                },
+            );
+
+            return Ok(return_id);
         }
 
         // Get a descriptive type name for error messages
