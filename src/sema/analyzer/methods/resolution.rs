@@ -578,12 +578,13 @@ impl Analyzer {
     ) -> Option<FunctionType> {
         let method_id = self.entity_registry.is_functional(type_def_id)?;
         let method = self.entity_registry.get_method(method_id);
+        // Clone the signature and set is_closure, preserving TypeIds if present
         Some(FunctionType {
             params: method.signature.params.clone(),
             return_type: method.signature.return_type.clone(),
             is_closure: true,
-            params_id: None,
-            return_type_id: None,
+            params_id: method.signature.params_id.clone(),
+            return_type_id: method.signature.return_type_id,
         })
     }
 }

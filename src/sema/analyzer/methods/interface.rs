@@ -930,13 +930,12 @@ impl Analyzer {
                 .unwrap_or_default();
 
             // Create a FunctionType from the structural method signature
-            let expected_sig = FunctionType {
-                params: method.params.clone().into(),
-                return_type: Box::new(method.return_type.clone()),
-                params_id: None,
-                return_type_id: None,
-                is_closure: false,
-            };
+            let expected_sig = FunctionType::new_with_arena(
+                method.params.clone(),
+                method.return_type.clone(),
+                false,
+                &mut self.type_arena.borrow_mut(),
+            );
 
             if !self.type_has_method_by_str_id(ty_id, &method_name_str, &expected_sig, interner) {
                 let params_str = method
