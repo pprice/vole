@@ -258,11 +258,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Get the LegacyType for a TypeId (for interop with existing code)
-    pub fn to_legacy(&self, ty: TypeId) -> LegacyType {
-        self.ctx.arena.borrow().to_type(ty)
-    }
-
     /// Convert a TypeId to a Cranelift type
     pub fn cranelift_type(&self, ty: TypeId) -> Type {
         type_id_to_cranelift(ty, &self.ctx.arena.borrow(), self.ctx.pointer_type)

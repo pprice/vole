@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use crate::codegen::structs::get_type_name_id;
 use crate::codegen::types::{MethodInfo, method_name_id_by_str, type_metadata_by_name_id};
 use crate::commands::common::AnalyzedProgram;
 use crate::errors::CodegenError;
@@ -9,7 +8,6 @@ use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_arena::TypeId;
-use crate::sema::types::NominalType;
 use crate::sema::{LegacyType, PrimitiveType};
 
 #[derive(Debug)]
@@ -46,19 +44,32 @@ pub(crate) enum MethodTarget {
     },
 }
 
-pub(crate) struct MethodResolutionInput<'a> {
+/// TypeId-based method resolution input (avoids LegacyType conversion)
+pub(crate) struct MethodResolutionInputId<'a> {
     pub analyzed: &'a AnalyzedProgram,
     pub type_metadata: &'a HashMap<Symbol, crate::codegen::types::TypeMetadata>,
     pub impl_method_infos: &'a HashMap<(ImplTypeId, NameId), MethodInfo>,
     pub method_name_str: &'a str,
-    pub object_type: &'a LegacyType,
+    pub object_type_id: TypeId,
     pub method_id: NameId,
     pub resolution: Option<&'a ResolvedMethod>,
 }
 
-pub(crate) fn resolve_method_target(
-    input: MethodResolutionInput<'_>,
+/// Resolve method target using TypeId (no LegacyType conversion needed)
+pub(crate) fn resolve_method_target_id(
+    input: MethodResolutionInputId<'_>,
 ) -> Result<MethodTarget, String> {
+    use crate::codegen::structs::get_type_name_id_from_type_id;
+
+    // Check if object is an interface
+    let is_interface = input.analyzed.type_arena.borrow().is_interface(input.object_type_id);
+
+    // Filter out InterfaceMethod resolution when the concrete type is not an interface.
+    let effective_resolution = input.resolution.filter(|resolution| {
+        !matches!(resolution, ResolvedMethod::InterfaceMethod { .. }) || is_interface
+    });
+
+    // Helper closures for method lookup
     let lookup_direct_method = |type_name_id: NameId| {
         type_metadata_by_name_id(
             input.type_metadata,
@@ -83,39 +94,29 @@ pub(crate) fn resolve_method_target(
             .copied()
             .ok_or_else(|| {
                 format!(
-                    "Unknown method {} on {}",
+                    "Unknown method {} on type",
                     input.method_name_str,
-                    crate::codegen::types::display_type(
-                        input.analyzed,
-                        &input.analyzed.interner,
-                        input.object_type
-                    )
                 )
             })
     };
 
-    // Filter out InterfaceMethod resolution when the concrete type is not an interface.
-    // This happens in monomorphized code where sema stored InterfaceMethod for TypeParam,
-    // but at codegen time the type is concrete (e.g., i64).
-    let effective_resolution = input.resolution.filter(|resolution| {
-        !matches!(resolution, ResolvedMethod::InterfaceMethod { .. })
-            || matches!(
-                input.object_type,
-                LegacyType::Nominal(NominalType::Interface(_))
-            )
-    });
-
     if let Some(resolution) = effective_resolution {
         return match resolution {
             ResolvedMethod::Direct { func_type } => {
-                let type_name_id =
-                    get_type_name_id(input.object_type, &input.analyzed.entity_registry)?;
+                let arena = input.analyzed.type_arena.borrow();
+                let type_name_id = get_type_name_id_from_type_id(
+                    input.object_type_id,
+                    &arena,
+                    &input.analyzed.entity_registry,
+                )?;
                 let method_info = lookup_direct_method(type_name_id)?;
-                let return_type = input
-                    .analyzed
-                    .type_arena
-                    .borrow_mut()
-                    .from_type(&func_type.return_type);
+                let return_type = func_type.return_type_id.unwrap_or_else(|| {
+                    input
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&func_type.return_type)
+                });
                 Ok(MethodTarget::Direct {
                     method_info,
                     return_type,
@@ -135,13 +136,13 @@ pub(crate) fn resolve_method_target(
                     .into());
                 }
 
-                // For interface types, we need vtable dispatch - the external_info is for
-                // the default implementation, but the concrete type may override it
-                if let LegacyType::Nominal(NominalType::Interface(interface_type)) =
-                    input.object_type
+                // For interface types, we need vtable dispatch
+                if let Some((interface_type_id, _)) = input
+                    .analyzed
+                    .type_arena
+                    .borrow()
+                    .unwrap_interface(input.object_type_id)
                 {
-                    // Use TypeDefId directly for EntityRegistry-based dispatch
-                    let interface_type_id = interface_type.type_def_id;
                     let method_name_id = method_name_id_by_str(
                         input.analyzed,
                         &input.analyzed.interner,
@@ -150,11 +151,21 @@ pub(crate) fn resolve_method_target(
                     .ok_or_else(|| {
                         format!("method name {} not found as NameId", input.method_name_str)
                     })?;
-                    let func_type_id = input
-                        .analyzed
-                        .type_arena
-                        .borrow_mut()
-                        .from_type(&LegacyType::Function(func_type.clone()));
+                    let func_type_id = if let (Some(params_id), Some(return_type_id)) =
+                            (func_type.params_id.as_ref(), func_type.return_type_id)
+                        {
+                            input.analyzed.type_arena.borrow_mut().function(
+                                params_id.clone(),
+                                return_type_id,
+                                func_type.is_closure,
+                            )
+                        } else {
+                            input
+                                .analyzed
+                                .type_arena
+                                .borrow_mut()
+                                .from_type(&LegacyType::Function(func_type.clone()))
+                        };
                     return Ok(MethodTarget::InterfaceDispatch {
                         interface_type_id,
                         method_name_id,
@@ -163,54 +174,60 @@ pub(crate) fn resolve_method_target(
                 }
 
                 if let Some(ext_info) = external_info {
-                    // For concrete types with external implementation, call external directly
-                    let return_type = input
-                        .analyzed
-                        .type_arena
-                        .borrow_mut()
-                        .from_type(&func_type.return_type);
+                    let return_type = func_type.return_type_id.unwrap_or_else(|| {
+                        input
+                            .analyzed
+                            .type_arena
+                            .borrow_mut()
+                            .from_type(&func_type.return_type)
+                    });
                     return Ok(MethodTarget::External {
                         external_info: ext_info.clone(),
                         return_type,
                     });
                 }
-                let type_id = ImplTypeId::from_type(
-                    input.object_type,
+
+                let type_id = ImplTypeId::from_type_id(
+                    input.object_type_id,
+                    &input.analyzed.type_arena.borrow(),
                     &input.analyzed.entity_registry.type_table,
                     &input.analyzed.entity_registry,
                 )
                 .ok_or_else(|| {
-                    CodegenError::not_found(
-                        "method",
-                        format!(
-                            "{} on {}",
-                            input.method_name_str,
-                            crate::codegen::types::display_type(
-                                input.analyzed,
-                                &input.analyzed.interner,
-                                input.object_type
-                            )
-                        ),
+                    format!(
+                        "Cannot get ImplTypeId for method {}",
+                        input.method_name_str,
                     )
-                    .to_string()
                 })?;
                 let method_info = lookup_impl_method(type_id)?;
-                let return_type = input
-                    .analyzed
-                    .type_arena
-                    .borrow_mut()
-                    .from_type(&func_type.return_type);
+                let return_type = func_type.return_type_id.unwrap_or_else(|| {
+                    input
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&func_type.return_type)
+                });
                 Ok(MethodTarget::Implemented {
                     method_info,
                     return_type,
                 })
             }
             ResolvedMethod::FunctionalInterface { func_type } => {
-                let func_type_id = input
-                    .analyzed
-                    .type_arena
-                    .borrow_mut()
-                    .from_type(&LegacyType::Function(func_type.clone()));
+                let func_type_id = if let (Some(params_id), Some(return_type_id)) =
+                    (func_type.params_id.as_ref(), func_type.return_type_id)
+                {
+                    input.analyzed.type_arena.borrow_mut().function(
+                        params_id.clone(),
+                        return_type_id,
+                        func_type.is_closure,
+                    )
+                } else {
+                    input
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&LegacyType::Function(func_type.clone()))
+                };
                 Ok(MethodTarget::FunctionalInterface { func_type_id })
             }
             ResolvedMethod::DefaultMethod {
@@ -218,43 +235,46 @@ pub(crate) fn resolve_method_target(
                 external_info,
                 ..
             } => {
-                // If the default method is an external (like Iterator methods), call external
                 if let Some(ext_info) = external_info {
-                    let return_type = input
-                        .analyzed
-                        .type_arena
-                        .borrow_mut()
-                        .from_type(&func_type.return_type);
+                    let return_type = func_type.return_type_id.unwrap_or_else(|| {
+                        input
+                            .analyzed
+                            .type_arena
+                            .borrow_mut()
+                            .from_type(&func_type.return_type)
+                    });
                     return Ok(MethodTarget::External {
                         external_info: ext_info.clone(),
                         return_type,
                     });
                 }
-                // Otherwise, get the name_id from the object type since DefaultMethod is called on a class/record
-                let type_name_id =
-                    get_type_name_id(input.object_type, &input.analyzed.entity_registry)?;
+                let arena = input.analyzed.type_arena.borrow();
+                let type_name_id = get_type_name_id_from_type_id(
+                    input.object_type_id,
+                    &arena,
+                    &input.analyzed.entity_registry,
+                )?;
                 let method_info = lookup_direct_method(type_name_id)?;
-                let return_type = input
-                    .analyzed
-                    .type_arena
-                    .borrow_mut()
-                    .from_type(&func_type.return_type);
+                let return_type = func_type.return_type_id.unwrap_or_else(|| {
+                    input
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&func_type.return_type)
+                });
                 Ok(MethodTarget::Default {
                     method_info,
                     return_type,
                 })
             }
-            ResolvedMethod::InterfaceMethod {
-                interface_name: _,
-                method_name: _,
-                func_type,
-            } => {
+            ResolvedMethod::InterfaceMethod { func_type, .. } => {
                 // This branch is only taken when object_type is an interface
-                // (non-interface types are filtered out before the match)
-                let interface_type = match input.object_type {
-                    LegacyType::Nominal(NominalType::Interface(it)) => it,
-                    _ => unreachable!("InterfaceMethod filtered out for non-interface types"),
-                };
+                let (interface_type_id, _) = input
+                    .analyzed
+                    .type_arena
+                    .borrow()
+                    .unwrap_interface(input.object_type_id)
+                    .ok_or_else(|| "InterfaceMethod on non-interface type".to_string())?;
                 let method_name_id = method_name_id_by_str(
                     input.analyzed,
                     &input.analyzed.interner,
@@ -263,13 +283,23 @@ pub(crate) fn resolve_method_target(
                 .ok_or_else(|| {
                     format!("method name {} not found as NameId", input.method_name_str)
                 })?;
-                let func_type_id = input
-                    .analyzed
-                    .type_arena
-                    .borrow_mut()
-                    .from_type(&LegacyType::Function(func_type.clone()));
+                let func_type_id = if let (Some(params_id), Some(return_type_id)) =
+                    (func_type.params_id.as_ref(), func_type.return_type_id)
+                {
+                    input.analyzed.type_arena.borrow_mut().function(
+                        params_id.clone(),
+                        return_type_id,
+                        func_type.is_closure,
+                    )
+                } else {
+                    input
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&LegacyType::Function(func_type.clone()))
+                };
                 Ok(MethodTarget::InterfaceDispatch {
-                    interface_type_id: interface_type.type_def_id,
+                    interface_type_id,
                     method_name_id,
                     func_type_id,
                 })
@@ -279,13 +309,21 @@ pub(crate) fn resolve_method_target(
                 method_id,
                 func_type,
             } => {
-                // Static method call - will be compiled similarly to direct methods
-                // but without an implicit self parameter
-                let func_type_id = input
-                    .analyzed
-                    .type_arena
-                    .borrow_mut()
-                    .from_type(&LegacyType::Function(func_type.clone()));
+                let func_type_id = if let (Some(params_id), Some(return_type_id)) =
+                    (func_type.params_id.as_ref(), func_type.return_type_id)
+                {
+                    input.analyzed.type_arena.borrow_mut().function(
+                        params_id.clone(),
+                        return_type_id,
+                        func_type.is_closure,
+                    )
+                } else {
+                    input
+                        .analyzed
+                        .type_arena
+                        .borrow_mut()
+                        .from_type(&LegacyType::Function(func_type.clone()))
+                };
                 Ok(MethodTarget::StaticMethod {
                     type_def_id: *type_def_id,
                     method_id: *method_id,
@@ -296,12 +334,10 @@ pub(crate) fn resolve_method_target(
     }
 
     // No resolution found - try implement block methods first, then direct methods.
-    // This happens in monomorphized generic functions where the resolution was computed
-    // for the type parameter, not the concrete type.
+    let arena = input.analyzed.type_arena.borrow();
 
-    // First, try EntityRegistry method bindings (cross-interner safe, works for all types)
-    // This is the authoritative source for method implementations.
-    if let Some(type_def_id) = get_type_def_id_for_codegen(input.object_type, input.analyzed)
+    // First, try EntityRegistry method bindings
+    if let Some(type_def_id) = get_type_def_id_for_codegen_id(input.object_type_id, &arena, input.analyzed)
         && let Some(method_name_id) = method_name_id_by_str(
             input.analyzed,
             &input.analyzed.interner,
@@ -312,10 +348,12 @@ pub(crate) fn resolve_method_target(
             .entity_registry
             .find_method_binding(type_def_id, method_name_id)
     {
+        drop(arena);
+
         // Found method binding in EntityRegistry - now get the compiled MethodInfo
-        // Try impl_method_infos first (uses TypeId key)
-        if let Some(type_id) = ImplTypeId::from_type(
-            input.object_type,
+        if let Some(type_id) = ImplTypeId::from_type_id(
+            input.object_type_id,
+            &input.analyzed.type_arena.borrow(),
             &input.analyzed.entity_registry.type_table,
             &input.analyzed.entity_registry,
         ) && let Some(method_info) = input
@@ -323,11 +361,13 @@ pub(crate) fn resolve_method_target(
             .get(&(type_id, input.method_id))
             .copied()
         {
-            let return_type = input
-                .analyzed
-                .type_arena
-                .borrow_mut()
-                .from_type(&binding.func_type.return_type);
+            let return_type = binding.func_type.return_type_id.unwrap_or_else(|| {
+                input
+                    .analyzed
+                    .type_arena
+                    .borrow_mut()
+                    .from_type(&binding.func_type.return_type)
+            });
             return Ok(MethodTarget::Implemented {
                 method_info,
                 return_type,
@@ -335,8 +375,9 @@ pub(crate) fn resolve_method_target(
         }
 
         // Fallback: try looking up by method_name_id from EntityRegistry
-        if let Some(type_id) = ImplTypeId::from_type(
-            input.object_type,
+        if let Some(type_id) = ImplTypeId::from_type_id(
+            input.object_type_id,
+            &input.analyzed.type_arena.borrow(),
             &input.analyzed.entity_registry.type_table,
             &input.analyzed.entity_registry,
         ) && let Some(method_info) = input
@@ -344,11 +385,13 @@ pub(crate) fn resolve_method_target(
             .get(&(type_id, method_name_id))
             .copied()
         {
-            let return_type = input
-                .analyzed
-                .type_arena
-                .borrow_mut()
-                .from_type(&binding.func_type.return_type);
+            let return_type = binding.func_type.return_type_id.unwrap_or_else(|| {
+                input
+                    .analyzed
+                    .type_arena
+                    .borrow_mut()
+                    .from_type(&binding.func_type.return_type)
+            });
             return Ok(MethodTarget::Implemented {
                 method_info,
                 return_type,
@@ -356,28 +399,31 @@ pub(crate) fn resolve_method_target(
         }
 
         // If binding has external_info, use that directly
-        // This handles external methods from prelude that aren't in impl_method_infos
         if let Some(external_info) = &binding.external_info {
-            let return_type = input
-                .analyzed
-                .type_arena
-                .borrow_mut()
-                .from_type(&binding.func_type.return_type);
+            let return_type = binding.func_type.return_type_id.unwrap_or_else(|| {
+                input
+                    .analyzed
+                    .type_arena
+                    .borrow_mut()
+                    .from_type(&binding.func_type.return_type)
+            });
             return Ok(MethodTarget::External {
                 external_info: external_info.clone(),
                 return_type,
             });
         }
+    } else {
+        drop(arena);
     }
 
     // Fallback: try impl_method_infos directly (legacy path)
-    if let Some(type_id) = ImplTypeId::from_type(
-        input.object_type,
+    if let Some(type_id) = ImplTypeId::from_type_id(
+        input.object_type_id,
+        &input.analyzed.type_arena.borrow(),
         &input.analyzed.entity_registry.type_table,
         &input.analyzed.entity_registry,
     ) && let Ok(method_info) = lookup_impl_method(type_id)
     {
-        // Use method_info's return_type directly (already a TypeId)
         return Ok(MethodTarget::Implemented {
             method_info,
             return_type: method_info.return_type,
@@ -385,11 +431,11 @@ pub(crate) fn resolve_method_target(
     }
 
     // Try direct methods (methods defined inside class/record)
-    // This only works for classes/records, not primitives.
-    if let Ok(type_name_id) = get_type_name_id(input.object_type, &input.analyzed.entity_registry)
+    let arena = input.analyzed.type_arena.borrow();
+    if let Ok(type_name_id) =
+        get_type_name_id_from_type_id(input.object_type_id, &arena, &input.analyzed.entity_registry)
         && let Ok(method_info) = lookup_direct_method(type_name_id)
     {
-        // Use method_info's return_type directly (already a TypeId)
         return Ok(MethodTarget::Direct {
             method_info,
             return_type: method_info.return_type,
@@ -398,43 +444,43 @@ pub(crate) fn resolve_method_target(
 
     // Neither found - return error
     Err(format!(
-        "Method {} not found on type {}",
+        "Method {} not found on type",
         input.method_name_str,
-        crate::codegen::types::display_type(
-            input.analyzed,
-            &input.analyzed.interner,
-            input.object_type
-        )
     ))
 }
 
-/// Get TypeDefId for a type during codegen (handles primitives, records, classes, interfaces)
-fn get_type_def_id_for_codegen(ty: &LegacyType, analyzed: &AnalyzedProgram) -> Option<TypeDefId> {
-    // For Class, Record, and Interface, we already have the TypeDefId
-    match ty {
-        LegacyType::Nominal(NominalType::Class(c)) => return Some(c.type_def_id),
-        LegacyType::Nominal(NominalType::Record(r)) => return Some(r.type_def_id),
-        LegacyType::Nominal(NominalType::Interface(i)) => return Some(i.type_def_id),
+/// Get TypeDefId for a type during codegen using TypeId
+fn get_type_def_id_for_codegen_id(
+    type_id: TypeId,
+    arena: &crate::sema::type_arena::TypeArena,
+    analyzed: &AnalyzedProgram,
+) -> Option<TypeDefId> {
+    use crate::sema::type_arena::SemaType;
+
+    // For Class, Record, and Interface, extract TypeDefId directly
+    match arena.get(type_id) {
+        SemaType::Class { type_def_id, .. } => return Some(*type_def_id),
+        SemaType::Record { type_def_id, .. } => return Some(*type_def_id),
+        SemaType::Interface { type_def_id, .. } => return Some(*type_def_id),
+        SemaType::Primitive(prim) => {
+            let name_id = match prim {
+                PrimitiveType::I8 => analyzed.name_table.primitives.i8,
+                PrimitiveType::I16 => analyzed.name_table.primitives.i16,
+                PrimitiveType::I32 => analyzed.name_table.primitives.i32,
+                PrimitiveType::I64 => analyzed.name_table.primitives.i64,
+                PrimitiveType::I128 => analyzed.name_table.primitives.i128,
+                PrimitiveType::U8 => analyzed.name_table.primitives.u8,
+                PrimitiveType::U16 => analyzed.name_table.primitives.u16,
+                PrimitiveType::U32 => analyzed.name_table.primitives.u32,
+                PrimitiveType::U64 => analyzed.name_table.primitives.u64,
+                PrimitiveType::F32 => analyzed.name_table.primitives.f32,
+                PrimitiveType::F64 => analyzed.name_table.primitives.f64,
+                PrimitiveType::Bool => analyzed.name_table.primitives.bool,
+                PrimitiveType::String => analyzed.name_table.primitives.string,
+            };
+            return analyzed.entity_registry.type_by_name(name_id);
+        }
         _ => {}
     }
-
-    let name_id = match ty {
-        // Primitives - look up via well-known NameIds
-        LegacyType::Primitive(PrimitiveType::I8) => Some(analyzed.name_table.primitives.i8),
-        LegacyType::Primitive(PrimitiveType::I16) => Some(analyzed.name_table.primitives.i16),
-        LegacyType::Primitive(PrimitiveType::I32) => Some(analyzed.name_table.primitives.i32),
-        LegacyType::Primitive(PrimitiveType::I64) => Some(analyzed.name_table.primitives.i64),
-        LegacyType::Primitive(PrimitiveType::I128) => Some(analyzed.name_table.primitives.i128),
-        LegacyType::Primitive(PrimitiveType::U8) => Some(analyzed.name_table.primitives.u8),
-        LegacyType::Primitive(PrimitiveType::U16) => Some(analyzed.name_table.primitives.u16),
-        LegacyType::Primitive(PrimitiveType::U32) => Some(analyzed.name_table.primitives.u32),
-        LegacyType::Primitive(PrimitiveType::U64) => Some(analyzed.name_table.primitives.u64),
-        LegacyType::Primitive(PrimitiveType::F32) => Some(analyzed.name_table.primitives.f32),
-        LegacyType::Primitive(PrimitiveType::F64) => Some(analyzed.name_table.primitives.f64),
-        LegacyType::Primitive(PrimitiveType::Bool) => Some(analyzed.name_table.primitives.bool),
-        LegacyType::Primitive(PrimitiveType::String) => Some(analyzed.name_table.primitives.string),
-        _ => None,
-    }?;
-
-    analyzed.entity_registry.type_by_name(name_id)
+    None
 }

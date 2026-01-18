@@ -6,8 +6,7 @@ use crate::codegen::types::CompileCtx;
 use crate::codegen::types::CompiledValue;
 use crate::errors::CodegenError;
 use crate::sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
-use crate::sema::types::NominalType;
-use crate::sema::{LegacyType, PrimitiveType};
+use crate::sema::PrimitiveType;
 
 /// Get field slot and type for a field access using TypeId (no LegacyType conversion)
 pub(crate) fn get_field_slot_and_type_id(
@@ -62,32 +61,7 @@ pub(crate) fn get_field_slot_and_type_id(
     Err(CodegenError::not_found("field", format!("{} in type", field_name)).into())
 }
 
-/// Get the NameId for a class, record, interface, or generic instance type
-pub(crate) fn get_type_name_id(
-    vole_type: &LegacyType,
-    entity_registry: &crate::sema::entity_registry::EntityRegistry,
-) -> Result<crate::identity::NameId, String> {
-    match vole_type {
-        LegacyType::Nominal(NominalType::Class(class_type)) => {
-            Ok(entity_registry.class_name_id(class_type))
-        }
-        LegacyType::Nominal(NominalType::Record(record_type)) => {
-            Ok(entity_registry.record_name_id(record_type))
-        }
-        LegacyType::Nominal(NominalType::Interface(interface_type)) => {
-            Ok(entity_registry.name_id(interface_type.type_def_id))
-        }
-        _ => Err(CodegenError::type_mismatch(
-            "type name extraction",
-            "class, record, interface, or generic instance",
-            format!("{:?}", vole_type),
-        )
-        .into()),
-    }
-}
-
 /// Get the NameId for a class, record, interface, or generic instance type using TypeId
-#[allow(dead_code)] // Infrastructure for LegacyType migration
 pub(crate) fn get_type_name_id_from_type_id(
     type_id: TypeId,
     arena: &TypeArena,

@@ -10,7 +10,7 @@ use crate::codegen::RuntimeFn;
 type ArgVec = SmallVec<[Value; 8]>;
 use crate::codegen::context::Cg;
 use crate::codegen::method_resolution::{
-    MethodResolutionInput, MethodTarget, resolve_method_target,
+    MethodResolutionInputId, MethodTarget, resolve_method_target_id,
 };
 use crate::codegen::types::{
     CompiledValue, box_interface_value, box_interface_value_id, module_name_id, type_id_size,
@@ -174,20 +174,19 @@ impl Cg<'_, '_, '_> {
                 .method_at_in_module(expr_id, self.ctx.current_module)
         };
 
-        let obj_legacy_type = self.to_legacy(obj.type_id);
         tracing::debug!(
-            obj_type = ?obj_legacy_type,
+            obj_type_id = ?obj.type_id,
             method = %method_name_str,
             resolution = ?resolution,
             "method call"
         );
 
-        let target = resolve_method_target(MethodResolutionInput {
+        let target = resolve_method_target_id(MethodResolutionInputId {
             analyzed: self.ctx.analyzed,
             type_metadata: self.ctx.type_metadata,
             impl_method_infos: self.ctx.impl_method_infos,
             method_name_str,
-            object_type: &obj_legacy_type,
+            object_type_id: obj.type_id,
             method_id,
             resolution,
         })?;
@@ -195,14 +194,14 @@ impl Cg<'_, '_, '_> {
         let (method_info, return_type_id) = match target {
             MethodTarget::FunctionalInterface { func_type_id } => {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
-                if let LegacyType::Nominal(NominalType::Interface(interface_type)) =
-                    &obj_legacy_type
+                if let Some((interface_type_def_id, _)) =
+                    self.ctx.arena.borrow().unwrap_interface(obj.type_id)
                 {
                     let method_name_id = self.method_name_id(mc.method);
                     return self.interface_dispatch_call_args_by_type_def_id(
                         &obj,
                         &mc.args,
-                        interface_type.type_def_id,
+                        interface_type_def_id,
                         method_name_id,
                         func_type_id,
                     );
@@ -210,16 +209,20 @@ impl Cg<'_, '_, '_> {
                 // For functional interfaces, the object holds the function ptr or closure
                 // The actual is_closure status depends on the lambda's compilation.
                 // Get is_closure from the object's type if available, otherwise from func_type_id
-                let is_closure = if let LegacyType::Function(ft) = &obj_legacy_type {
-                    ft.is_closure
-                } else {
-                    self.ctx
-                        .arena
-                        .borrow()
-                        .unwrap_function(func_type_id)
-                        .map(|(_, _, is_closure)| is_closure)
-                        .unwrap_or(true)
-                };
+                let is_closure = self
+                    .ctx
+                    .arena
+                    .borrow()
+                    .unwrap_function(obj.type_id)
+                    .map(|(_, _, is_closure)| is_closure)
+                    .or_else(|| {
+                        self.ctx
+                            .arena
+                            .borrow()
+                            .unwrap_function(func_type_id)
+                            .map(|(_, _, is_closure)| is_closure)
+                    })
+                    .unwrap_or(true);
                 return self.functional_interface_call(obj.value, func_type_id, is_closure, mc);
             }
             MethodTarget::External {
@@ -307,7 +310,13 @@ impl Cg<'_, '_, '_> {
             }
         } else {
             // Not a monomorphized class method, use regular dispatch
-            let is_generic_class = matches!(&obj_legacy_type, LegacyType::Nominal(NominalType::Class(c)) if !c.type_args_id.is_empty());
+            let is_generic_class = self
+                .ctx
+                .arena
+                .borrow()
+                .unwrap_class(obj.type_id)
+                .map(|(_, type_args)| !type_args.is_empty())
+                .unwrap_or(false);
             (self.func_ref(method_info.func_key)?, is_generic_class)
         };
 

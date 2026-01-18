@@ -278,66 +278,6 @@ pub(crate) fn function_name_id_with_interner(
     namer.function(module, name)
 }
 
-#[allow(clippy::only_used_in_recursion)]
-pub(crate) fn display_type(
-    analyzed: &AnalyzedProgram,
-    interner: &Interner,
-    ty: &LegacyType,
-) -> String {
-    match ty {
-        LegacyType::Nominal(NominalType::Class(class_type)) => {
-            let name_id = analyzed.entity_registry.class_name_id(class_type);
-            let base = analyzed.name_table.display(name_id);
-            if class_type.type_args_id.is_empty() {
-                base
-            } else {
-                // Type args require arena for display; show placeholder
-                format!("{}<{} args>", base, class_type.type_args_id.len())
-            }
-        }
-        LegacyType::Nominal(NominalType::Record(record_type)) => {
-            let name_id = analyzed.entity_registry.record_name_id(record_type);
-            let base = analyzed.name_table.display(name_id);
-            if record_type.type_args_id.is_empty() {
-                base
-            } else {
-                // Type args require arena for display; show placeholder
-                format!("{}<{} args>", base, record_type.type_args_id.len())
-            }
-        }
-        LegacyType::Nominal(NominalType::Interface(interface_type)) => {
-            let name_id = analyzed.entity_registry.name_id(interface_type.type_def_id);
-            let base = analyzed.name_table.display(name_id);
-            if interface_type.type_args_id.is_empty() {
-                base
-            } else {
-                // Type args require arena for display; show placeholder
-                format!("{}<{} args>", base, interface_type.type_args_id.len())
-            }
-        }
-        LegacyType::Nominal(NominalType::Error(error_type)) => {
-            let name_id = analyzed.entity_registry.name_id(error_type.type_def_id);
-            analyzed.name_table.display(name_id)
-        }
-        LegacyType::Module(module_type) => format!(
-            "module(\"{}\")",
-            analyzed.name_table.module_path(module_type.module_id)
-        ),
-        LegacyType::Tuple(elements) => {
-            let elem_list = elements
-                .iter()
-                .map(|elem| display_type(analyzed, interner, elem))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("[{}]", elem_list)
-        }
-        LegacyType::FixedArray { element, size } => {
-            format!("[{}; {}]", display_type(analyzed, interner, element), size)
-        }
-        _ => ty.name().to_string(),
-    }
-}
-
 /// Build an InterfaceType from EntityRegistry's TypeDef
 fn build_interface_type_from_entity(
     type_def_id: TypeDefId,
