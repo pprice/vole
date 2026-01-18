@@ -8,10 +8,10 @@ use std::collections::HashSet;
 #[allow(dead_code)]
 impl Analyzer {
     /// Check type compatibility using TypeId (Phase 3 version).
-    /// Falls back to LegacyType for interface checks that require entity registry access.
+    /// Uses TypeId-based interface checks where possible.
     #[allow(unused)] // Phase 3 infrastructure
     pub(crate) fn types_compatible_id(
-        &self,
+        &mut self,
         from: ArenaTypeId,
         to: ArenaTypeId,
         interner: &Interner,
@@ -21,10 +21,77 @@ impl Analyzer {
             return true;
         }
 
-        // For interface compatibility, we still need LegacyType for now
+        // Check interface compatibility using TypeId
+        self.types_compatible_interface_id(from, to, interner)
+    }
+
+    /// Interface-related compatibility checks using TypeId
+    fn types_compatible_interface_id(
+        &mut self,
+        from: ArenaTypeId,
+        to: ArenaTypeId,
+        interner: &Interner,
+    ) -> bool {
+        // Extract interface info using TypeId
+        let to_iface_id = {
+            let arena = self.type_arena.borrow();
+            arena.unwrap_interface(to).map(|(id, _)| id)
+        };
+
+        let Some(to_iface_id) = to_iface_id else {
+            return false;
+        };
+
+        // Check interface extension
+        let from_iface_id = {
+            let arena = self.type_arena.borrow();
+            arena.unwrap_interface(from).map(|(id, _)| id)
+        };
+        if let Some(from_iface_id) = from_iface_id
+            && self.interface_extends_by_type_def_id(from_iface_id, to_iface_id)
+        {
+            return true;
+        }
+
+        // Check structural compatibility (needs LegacyType for now)
         let from_ty = self.type_arena.borrow().to_type(from);
-        let to_ty = self.type_arena.borrow().to_type(to);
-        self.types_compatible_legacy_interface(&from_ty, &to_ty, interner)
+        if self.satisfies_interface_via_entity_registry(&from_ty, to_iface_id, interner) {
+            return true;
+        }
+
+        // Check function type compatibility with functional interface
+        let fn_info = {
+            let arena = self.type_arena.borrow();
+            arena.unwrap_function(from).map(|(params, ret, _)| {
+                (params.to_vec(), ret)
+            })
+        };
+
+        if let Some((fn_param_ids, fn_ret)) = fn_info
+            && let Some(iface_fn) = self.get_functional_interface_type_by_type_def_id(to_iface_id)
+            && fn_param_ids.len() == iface_fn.params.len()
+        {
+            // Pre-compute interface param TypeIds
+            let iface_param_ids: Vec<ArenaTypeId> = iface_fn
+                .params
+                .iter()
+                .map(|p| self.type_to_id(p))
+                .collect();
+            let iface_ret_id = self.type_to_id(&iface_fn.return_type);
+
+            // Now check compatibility
+            let arena = self.type_arena.borrow();
+            let params_match = fn_param_ids
+                .iter()
+                .zip(iface_param_ids.iter())
+                .all(|(&p, &ip)| types_compatible_core_id(p, ip, &arena));
+
+            if params_match && types_compatible_core_id(fn_ret, iface_ret_id, &arena) {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Interface-related compatibility checks (extracted for reuse)

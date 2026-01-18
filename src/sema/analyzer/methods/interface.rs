@@ -2,6 +2,7 @@ use std::collections::HashMap as StdHashMap;
 
 use crate::identity::{NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType, StructuralType};
 
 use super::super::*;
@@ -240,9 +241,130 @@ impl Analyzer {
     }
 
     /// Check if a type implements Stringable (TypeId version)
-    pub fn satisfies_stringable_id(&self, ty_id: ArenaTypeId, interner: &Interner) -> bool {
-        let ty = self.type_arena.borrow().to_type(ty_id);
-        self.satisfies_stringable(&ty, interner)
+    pub fn satisfies_stringable_id(&mut self, ty_id: ArenaTypeId, interner: &Interner) -> bool {
+        // Look up Stringable interface
+        let type_def_id = self
+            .resolver(interner)
+            .resolve_type_str_or_interface("Stringable", &self.entity_registry);
+        if let Some(type_def_id) = type_def_id {
+            return self.satisfies_interface_by_type_def_id_typeid(ty_id, type_def_id, interner);
+        }
+        false
+    }
+
+    /// Check if a type structurally satisfies an interface by TypeDefId (TypeId version)
+    ///
+    /// This is the TypeId-based version that avoids LegacyType conversion.
+    fn satisfies_interface_by_type_def_id_typeid(
+        &mut self,
+        ty_id: ArenaTypeId,
+        interface_id: TypeDefId,
+        interner: &Interner,
+    ) -> bool {
+        // Extract all data we need from the interface upfront to avoid borrow conflicts
+        let (is_interface, field_ids, method_ids, extends) = {
+            let interface = self.entity_registry.get_type(interface_id);
+            (
+                interface.kind == TypeDefKind::Interface,
+                interface.fields.clone(),
+                interface.methods.clone(),
+                interface.extends.clone(),
+            )
+        };
+
+        if !is_interface {
+            return false;
+        }
+
+        // Check required fields
+        for field_id in field_ids {
+            let (field_name_str, field_type_id) = {
+                let field = self.entity_registry.get_field(field_id);
+                (
+                    self.name_table
+                        .last_segment_str(field.name_id)
+                        .unwrap_or_default(),
+                    field.ty,
+                )
+            };
+            if !self.type_has_field_by_str_id(ty_id, &field_name_str, field_type_id, interner) {
+                return false;
+            }
+        }
+
+        // Check required methods (skip those with defaults)
+        for method_id in method_ids {
+            let method = self.entity_registry.get_method(method_id);
+            if method.has_default {
+                continue;
+            }
+
+            let method_name_str = self
+                .name_table
+                .last_segment_str(method.name_id)
+                .unwrap_or_default();
+            // Methods still use LegacyType signature, so we need to fallback
+            let ty = self.type_arena.borrow().to_type(ty_id);
+            if !self.type_has_method_by_str(&ty, &method_name_str, &method.signature, interner) {
+                return false;
+            }
+        }
+
+        // Check parent interfaces (extends)
+        for parent_id in extends {
+            if !self.satisfies_interface_by_type_def_id_typeid(ty_id, parent_id, interner) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if a type has a field with the given name (string) and compatible type (TypeId version)
+    fn type_has_field_by_str_id(
+        &mut self,
+        ty_id: ArenaTypeId,
+        field_name: &str,
+        expected_type_id: ArenaTypeId,
+        interner: &Interner,
+    ) -> bool {
+        // Get type_def_id and type_args from TypeId using arena queries
+        let (type_def_id, type_args_id) = {
+            let arena = self.type_arena.borrow();
+            if let Some((id, args)) = arena.unwrap_class(ty_id) {
+                (id, args.clone())
+            } else if let Some((id, args)) = arena.unwrap_record(ty_id) {
+                (id, args.clone())
+            } else {
+                return false;
+            }
+        };
+
+        let type_def = self.entity_registry.get_type(type_def_id);
+        let Some(ref generic_info) = type_def.generic_info else {
+            return false;
+        };
+
+        // Build type substitutions directly using TypeId
+        let substitutions: hashbrown::HashMap<_, _> = generic_info
+            .type_params
+            .iter()
+            .zip(type_args_id.iter())
+            .map(|(tp, &arg_id)| (tp.name_id, arg_id))
+            .collect();
+
+        // Find field and check type compatibility using arena substitution
+        for (i, name_id) in generic_info.field_names.iter().enumerate() {
+            if self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name) {
+                let field_type_id = generic_info.field_types[i];
+                let substituted_field_type_id = self
+                    .type_arena
+                    .borrow_mut()
+                    .substitute(field_type_id, &substitutions);
+                return self.types_compatible_id(substituted_field_type_id, expected_type_id, interner);
+            }
+        }
+        false
     }
 
     /// Check if a type structurally satisfies an interface
