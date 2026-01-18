@@ -1,7 +1,6 @@
 use super::super::*;
 use crate::identity::{NameId, Namer};
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::LegacyType;
 use std::collections::HashMap;
 
 impl Analyzer {
@@ -141,17 +140,12 @@ impl Analyzer {
                     .iter()
                     .filter_map(|tp| inferred_id.get(&tp.name_id).copied())
                     .collect();
-                // Convert to LegacyType for monomorph key (still needed for key generation)
-                let type_args: Vec<LegacyType> = {
-                    let arena = self.type_arena.borrow();
-                    type_args_id.iter().map(|&id| arena.to_type(id)).collect()
-                };
                 tracing::debug!(
                     func = %interner.resolve(*sym),
-                    type_args = ?type_args.iter().map(|t| self.type_display(t)).collect::<Vec<_>>(),
+                    type_args = ?type_args_id.iter().map(|&id| self.type_display_id(id)).collect::<Vec<_>>(),
                     "generic instantiation"
                 );
-                let type_keys = type_args.iter().map(|ty| self.type_key_for(ty)).collect();
+                let type_keys = type_args_id.iter().map(|&id| self.type_key_for_id(id)).collect();
                 let module_id = self.name_table.main_module();
                 let name_id = {
                     let mut namer = Namer::new(&mut self.name_table, interner);

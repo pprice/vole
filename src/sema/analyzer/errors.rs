@@ -21,11 +21,6 @@ impl Analyzer {
         self.warnings.push(TypeWarning::new(warning, span));
     }
 
-    pub(super) fn type_key_for(&mut self, ty: &LegacyType) -> TypeKey {
-        self.entity_registry.type_table.key_for_type(ty)
-    }
-
-    #[allow(dead_code)]
     pub(super) fn type_key_for_id(&mut self, id: ArenaTypeId) -> TypeKey {
         self.entity_registry
             .type_table
