@@ -13,8 +13,8 @@ use crate::codegen::method_resolution::{
     MethodResolutionInput, MethodTarget, resolve_method_target,
 };
 use crate::codegen::types::{
-    CompiledValue, box_interface_value, module_name_id, type_id_size, type_id_to_cranelift,
-    type_to_cranelift, value_to_word, word_to_value_type_id,
+    CompiledValue, box_interface_value, box_interface_value_id, module_name_id, type_id_size,
+    type_id_to_cranelift, type_to_cranelift, value_to_word, word_to_value_type_id,
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
@@ -998,13 +998,8 @@ impl Cg<'_, '_, '_> {
         let mut args = Vec::new();
         for (arg, param_id) in mc.args.iter().zip(param_ids.iter()) {
             let compiled = self.expr(arg)?;
-            // Box interface values if needed
-            let param_ty = self.ctx.arena.borrow().to_type(*param_id);
-            let compiled = if matches!(param_ty, LegacyType::Nominal(NominalType::Interface(_))) {
-                box_interface_value(self.builder, self.ctx, compiled, &param_ty)?
-            } else {
-                compiled
-            };
+            // Box interface values if needed (box_interface_value_id is a no-op for non-interfaces)
+            let compiled = box_interface_value_id(self.builder, self.ctx, compiled, *param_id)?;
             args.push(compiled.value);
         }
 
