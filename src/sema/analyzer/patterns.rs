@@ -660,4 +660,118 @@ impl Analyzer {
             );
         }
     }
+
+    // ========== TypeId versions ==========
+
+    /// Check if a match expression is exhaustive (TypeId version)
+    pub(crate) fn check_match_exhaustiveness_id(
+        &mut self,
+        arms: &[MatchArm],
+        scrutinee_type_id: ArenaTypeId,
+        _span: Span,
+        interner: &Interner,
+    ) -> bool {
+        // Check for catch-all patterns (wildcard or identifier binding)
+        let has_catch_all = arms.iter().any(|arm| {
+            match &arm.pattern {
+                Pattern::Wildcard(_) => true,
+                Pattern::Identifier { name, .. } => {
+                    // Only a catch-all if NOT a known type name
+                    let is_type = self
+                        .resolver(interner)
+                        .resolve_type(*name, &self.entity_registry)
+                        .is_some();
+                    !is_type
+                }
+                _ => false,
+            }
+        });
+
+        if has_catch_all {
+            return true;
+        }
+
+        // For union types, check if all variants are covered by type patterns
+        let union_variants: Option<Vec<ArenaTypeId>> = {
+            let arena = self.type_arena.borrow();
+            arena.unwrap_union(scrutinee_type_id).map(|v| v.to_vec())
+        };
+
+        if let Some(variants) = union_variants {
+            let mut covered: Vec<bool> = vec![false; variants.len()];
+
+            for arm in arms {
+                let pattern_type_id = self.get_pattern_type_id(&arm.pattern, interner);
+
+                if let Some(pt_id) = pattern_type_id {
+                    for (i, &variant_id) in variants.iter().enumerate() {
+                        if variant_id == pt_id {
+                            covered[i] = true;
+                        }
+                    }
+                }
+            }
+
+            return covered.iter().all(|&c| c);
+        }
+
+        // For non-union types, check if any pattern covers the exact type
+        for arm in arms {
+            let pattern_type_id = self.get_pattern_type_id(&arm.pattern, interner);
+            if let Some(pt_id) = pattern_type_id
+                && pt_id == scrutinee_type_id
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Extract the TypeId that a pattern matches against, if it's a type pattern
+    fn get_pattern_type_id(&mut self, pattern: &Pattern, interner: &Interner) -> Option<ArenaTypeId> {
+        match pattern {
+            Pattern::Type { type_expr, .. } => {
+                Some(self.resolve_type_id(type_expr, interner))
+            }
+            Pattern::Identifier { name, .. } => {
+                // Look up via Resolver
+                self.resolver(interner)
+                    .resolve_type(*name, &self.entity_registry)
+                    .and_then(|type_def_id| {
+                        let type_def = self.entity_registry.get_type(type_def_id);
+                        match type_def.kind {
+                            TypeDefKind::Class => {
+                                self.type_arena.borrow_mut().class(type_def_id, vec![]).into()
+                            }
+                            TypeDefKind::Record => {
+                                self.type_arena.borrow_mut().record(type_def_id, vec![]).into()
+                            }
+                            _ => None,
+                        }
+                    })
+            }
+            Pattern::Record {
+                type_name: Some(name),
+                ..
+            } => {
+                // Typed record pattern: Point { x, y } covers type Point
+                self.resolver(interner)
+                    .resolve_type(*name, &self.entity_registry)
+                    .and_then(|type_def_id| {
+                        let type_def = self.entity_registry.get_type(type_def_id);
+                        match type_def.kind {
+                            TypeDefKind::Class => {
+                                self.type_arena.borrow_mut().class(type_def_id, vec![]).into()
+                            }
+                            TypeDefKind::Record => {
+                                self.type_arena.borrow_mut().record(type_def_id, vec![]).into()
+                            }
+                            _ => None,
+                        }
+                    })
+            }
+            _ => None,
+        }
+    }
 }

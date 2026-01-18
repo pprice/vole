@@ -490,6 +490,25 @@ impl Analyzer {
         self.satisfies_interface_by_type_def_id(ty, type_def_id, interner)
     }
 
+    /// Check if a TypeId satisfies an interface (TypeId version)
+    pub(crate) fn satisfies_interface_id(
+        &mut self,
+        ty_id: ArenaTypeId,
+        interface_name: Symbol,
+        interner: &Interner,
+    ) -> bool {
+        // Look up interface via Resolver with interface fallback
+        let type_def_id = self
+            .resolver(interner)
+            .resolve_type_or_interface(interface_name, &self.entity_registry);
+
+        let Some(type_def_id) = type_def_id else {
+            return false;
+        };
+
+        self.satisfies_interface_by_type_def_id_typeid(ty_id, type_def_id, interner)
+    }
+
     /// Validate that a type satisfies an interface by having all required methods with correct signatures
     pub(crate) fn validate_interface_satisfaction(
         &mut self,

@@ -1221,8 +1221,8 @@ impl Analyzer {
         }
     }
 
-    /// Check type param constraints (TypeId version).
-    /// Converts TypeIds to LegacyTypes internally for constraint checking.
+    /// Check type param constraints (TypeId version - direct).
+    /// Works with TypeIds throughout where possible, avoiding LegacyType materialization.
     fn check_type_param_constraints_id(
         &mut self,
         type_params: &[TypeParamInfo],
@@ -1230,15 +1230,97 @@ impl Analyzer {
         span: Span,
         interner: &Interner,
     ) {
-        // Convert inferred TypeIds to LegacyTypes for constraint checking
-        let inferred_legacy: HashMap<NameId, LegacyType> = {
-            let arena = self.type_arena.borrow();
-            inferred
-                .iter()
-                .map(|(&k, &v)| (k, arena.to_type(v)))
-                .collect()
-        };
-        self.check_type_param_constraints(type_params, &inferred_legacy, span, interner);
+        use crate::sema::compatibility::types_compatible_core_id;
+
+        for param in type_params {
+            let Some(constraint) = &param.constraint else {
+                continue;
+            };
+            let Some(&found_id) = inferred.get(&param.name_id) else {
+                continue;
+            };
+
+            // Check if found type is itself a type param with matching or stronger constraint
+            let found_param = {
+                let arena = self.type_arena.borrow();
+                if let Some(found_name_id) = arena.unwrap_type_param(found_id) {
+                    self.type_param_stack.get_by_name_id(found_name_id)
+                } else if let Some(type_param_id) = arena.unwrap_type_param_ref(found_id) {
+                    self.type_param_stack.get_by_type_param_id(type_param_id)
+                } else {
+                    None
+                }
+            };
+            if let Some(found_param) = found_param
+                && constraint_satisfied(&found_param.constraint, constraint)
+            {
+                continue; // Constraint is satisfied
+            }
+
+            match constraint {
+                crate::sema::generic::TypeConstraint::Interface(interface_names) => {
+                    // Check each interface constraint with TypeId
+                    for interface_name in interface_names {
+                        if !self.satisfies_interface_id(found_id, *interface_name, interner) {
+                            let found_display = self.type_display_id(found_id);
+                            self.add_error(
+                                SemanticError::TypeParamConstraintMismatch {
+                                    type_param: interner.resolve(param.name).to_string(),
+                                    expected: interner.resolve(*interface_name).to_string(),
+                                    found: found_display,
+                                    span: span.into(),
+                                },
+                                span,
+                            );
+                        }
+                    }
+                }
+                crate::sema::generic::TypeConstraint::Union(variants) => {
+                    // Convert union variants to TypeIds and check compatibility
+                    let variant_ids: Vec<ArenaTypeId> = {
+                        let mut arena = self.type_arena.borrow_mut();
+                        variants.iter().map(|v| arena.from_type(v)).collect()
+                    };
+                    let expected_id = self.type_arena.borrow_mut().union(variant_ids);
+                    let is_compatible = {
+                        let arena = self.type_arena.borrow();
+                        types_compatible_core_id(found_id, expected_id, &arena)
+                    };
+                    if !is_compatible {
+                        let expected_display = self.type_display_id(expected_id);
+                        let found_display = self.type_display_id(found_id);
+                        self.add_error(
+                            SemanticError::TypeParamConstraintMismatch {
+                                type_param: interner.resolve(param.name).to_string(),
+                                expected: expected_display,
+                                found: found_display,
+                                span: span.into(),
+                            },
+                            span,
+                        );
+                    }
+                }
+                crate::sema::generic::TypeConstraint::Structural(structural) => {
+                    // Structural constraints still use LegacyType internally (StructuralType fields are LegacyType)
+                    // Convert just this one TypeId for structural checking
+                    let found_legacy = self.type_arena.borrow().to_type(found_id);
+                    if let Some(mismatch) =
+                        self.check_structural_constraint(&found_legacy, structural, interner)
+                    {
+                        let found_display = self.type_display_id(found_id);
+                        self.add_error(
+                            SemanticError::StructuralConstraintMismatch {
+                                type_param: interner.resolve(param.name).to_string(),
+                                found: found_display,
+                                mismatch,
+                                span: span.into(),
+                            },
+                            span,
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// Analyze external block and register external methods in the implement registry
