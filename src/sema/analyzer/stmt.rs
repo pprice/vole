@@ -1,7 +1,6 @@
 // src/sema/analyzer/stmt.rs
 
 use super::*;
-use crate::sema::compatibility::TypeCompatibility;
 use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
@@ -450,21 +449,16 @@ impl Analyzer {
             .last_segment_str(self.entity_registry.name_id(type_id))
             .unwrap_or_else(|| "error".to_string());
 
-        // Build field info from EntityRegistry
-        let arena = self.type_arena.borrow();
-        let error_fields: Vec<StructField> = self
+        // Build field info from EntityRegistry using TypeId (avoids LegacyType)
+        let error_fields: Vec<(String, ArenaTypeId)> = self
             .entity_registry
             .fields_on_type(type_id)
             .filter_map(|field_id| {
                 let field = self.entity_registry.get_field(field_id);
-                Some(StructField {
-                    name: self.name_table.last_segment_str(field.name_id)?,
-                    ty: arena.to_type(field.ty),
-                    slot: field.slot,
-                })
+                let name = self.name_table.last_segment_str(field.name_id)?;
+                Some((name, field.ty))
             })
             .collect();
-        drop(arena);
 
         // Check for missing fields (fields in error type but not provided in raise)
         let provided_fields: HashSet<String> = stmt
@@ -472,12 +466,12 @@ impl Analyzer {
             .iter()
             .map(|f| interner.resolve(f.name).to_string())
             .collect();
-        for field in &error_fields {
-            if !provided_fields.contains(&field.name) {
+        for (field_name, _) in &error_fields {
+            if !provided_fields.contains(field_name) {
                 self.add_error(
                     SemanticError::MissingField {
                         ty: error_type_name.clone(),
-                        field: field.name.clone(),
+                        field: field_name.clone(),
                         span: stmt.span.into(),
                     },
                     stmt.span,
@@ -487,15 +481,18 @@ impl Analyzer {
 
         // Type check field initializers and check for unknown fields
         for field_init in &stmt.fields {
-            let value_type = match self.check_expr(&field_init.value, interner) {
-                Ok(ty_id) => self.id_to_type(ty_id),
-                Err(_) => self.ty_invalid_traced("fallback"),
+            let value_type_id = match self.check_expr(&field_init.value, interner) {
+                Ok(ty_id) => ty_id,
+                Err(_) => ArenaTypeId::INVALID,
             };
             let field_init_name = interner.resolve(field_init.name);
-            if let Some(field) = error_fields.iter().find(|f| f.name == field_init_name) {
-                // Known field - check type compatibility
-                if !value_type.is_compatible(&field.ty) {
-                    self.add_type_mismatch(&field.ty, &value_type, field_init.span);
+            if let Some((_, field_ty_id)) = error_fields
+                .iter()
+                .find(|(name, _)| name == field_init_name)
+            {
+                // Known field - check type compatibility using TypeId
+                if !self.types_compatible_id(value_type_id, *field_ty_id, interner) {
+                    self.add_type_mismatch_id(*field_ty_id, value_type_id, field_init.span);
                 }
             } else {
                 // Unknown field
