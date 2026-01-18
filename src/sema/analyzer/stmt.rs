@@ -391,9 +391,9 @@ impl Analyzer {
                 }
             }
             Pattern::Record { fields, span, .. } => {
-                // Record destructuring still uses LegacyType for now
-                let ty = self.id_to_type(ty_id);
-                self.check_record_destructuring(&ty, fields, mutable, *span, init_span, interner);
+                self.check_record_destructuring_id(
+                    ty_id, fields, mutable, *span, init_span, interner,
+                );
             }
             _ => {
                 // Other patterns not supported in let destructuring
@@ -612,7 +612,11 @@ impl Analyzer {
     }
 
     /// Check if error type is compatible with function's declared error type (TypeId version)
-    fn error_type_compatible_id(&self, error_type_id: ArenaTypeId, func_error_id: ArenaTypeId) -> bool {
+    fn error_type_compatible_id(
+        &self,
+        error_type_id: ArenaTypeId,
+        func_error_id: ArenaTypeId,
+    ) -> bool {
         // Same type (O(1) via TypeId equality)
         if error_type_id == func_error_id {
             return true;
@@ -633,24 +637,31 @@ impl Analyzer {
         false
     }
 
-    /// Check record destructuring and bind variables
-    fn check_record_destructuring(
+    /// Check record destructuring and bind variables (TypeId version)
+    fn check_record_destructuring_id(
         &mut self,
-        init_type: &LegacyType,
+        ty_id: ArenaTypeId,
         fields: &[RecordFieldPattern],
         mutable: bool,
         _pattern_span: Span,
         init_span: Span,
         interner: &Interner,
     ) {
-        // Get type_def_id from the type
-        let type_def_id = match init_type {
-            LegacyType::Nominal(NominalType::Record(record_type)) => record_type.type_def_id,
-            LegacyType::Nominal(NominalType::Class(class_type)) => class_type.type_def_id,
-            _ => {
-                self.type_error("record or class", init_type, init_span);
-                return;
+        // Get type_def_id from the type using arena
+        let type_def_id = {
+            let arena = self.type_arena.borrow();
+            if let Some((type_def_id, _)) = arena.unwrap_record(ty_id) {
+                Some(type_def_id)
+            } else if let Some((type_def_id, _)) = arena.unwrap_class(ty_id) {
+                Some(type_def_id)
+            } else {
+                None
             }
+        };
+
+        let Some(type_def_id) = type_def_id else {
+            self.type_error_id("record or class", ty_id, init_span);
+            return;
         };
 
         // Look up fields from entity_registry - clone to avoid borrow conflicts
@@ -658,7 +669,7 @@ impl Analyzer {
         let generic_info = match &type_def.generic_info {
             Some(gi) => gi.clone(),
             None => {
-                self.type_error("record or class with fields", init_type, init_span);
+                self.type_error_id("record or class with fields", ty_id, init_span);
                 return;
             }
         };
@@ -689,7 +700,7 @@ impl Analyzer {
                 self.add_lambda_local(field_pattern.binding);
             } else {
                 // Get the type name for the error message
-                let type_name = self.type_display(init_type);
+                let type_name = self.type_display_id(ty_id);
                 self.add_error(
                     SemanticError::UnknownField {
                         ty: type_name,

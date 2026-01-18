@@ -14,7 +14,7 @@ impl Analyzer {
         expected: Option<ArenaTypeId>,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        let expected_ty = expected.map(|id| self.id_to_type(id));
+        let expected_ty = expected.map(|id| self.type_arena.borrow().to_type(id));
         let ty = self.check_expr_expecting(expr, expected_ty.as_ref(), interner)?;
         Ok(self.type_to_id(&ty))
     }
@@ -352,7 +352,7 @@ impl Analyzer {
             ExprKind::Index(_) => {
                 // Index expressions just delegate to check_expr
                 let ty_id = self.check_expr(expr, interner)?;
-                Ok(self.id_to_type(ty_id))
+                Ok(self.type_arena.borrow().to_type(ty_id))
             }
             ExprKind::Lambda(lambda) => {
                 // Extract expected function type if available
@@ -372,7 +372,7 @@ impl Analyzer {
             // All other cases: infer type, then check compatibility
             _ => {
                 let inferred_id = self.check_expr(expr, interner)?;
-                let inferred = self.id_to_type(inferred_id);
+                let inferred = self.type_arena.borrow().to_type(inferred_id);
                 if let Some(expected_ty) = expected
                     && !self.types_compatible(&inferred, expected_ty, interner)
                 {

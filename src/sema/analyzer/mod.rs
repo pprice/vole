@@ -1405,14 +1405,12 @@ impl Analyzer {
     fn extract_iterator_element_type_id(&self, ty_id: ArenaTypeId) -> Option<ArenaTypeId> {
         let interface_info = {
             let arena = self.type_arena.borrow();
-            arena.unwrap_interface(ty_id).map(|(id, args)| (id, args.first().copied()))
+            arena
+                .unwrap_interface(ty_id)
+                .map(|(id, args)| (id, args.first().copied()))
         };
         let (type_def_id, first_arg) = interface_info?;
-        if !self
-            .name_table
-            .well_known
-            .is_iterator_type_def(type_def_id)
-        {
+        if !self.name_table.well_known.is_iterator_type_def(type_def_id) {
             return None;
         }
         first_arg

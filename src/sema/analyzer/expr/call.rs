@@ -96,8 +96,10 @@ impl Analyzer {
                     .collect::<Result<Vec<_>, _>>()?;
 
                 // Convert to LegacyTypes for inference (inference still uses LegacyType)
-                let arg_types: Vec<LegacyType> =
-                    arg_type_ids.iter().map(|&id| self.id_to_type(id)).collect();
+                let arg_types: Vec<LegacyType> = {
+                    let arena = self.type_arena.borrow();
+                    arg_type_ids.iter().map(|&id| arena.to_type(id)).collect()
+                };
 
                 // Convert TypeIds to LegacyTypes for inference
                 let param_types: Vec<LegacyType> = generic_def

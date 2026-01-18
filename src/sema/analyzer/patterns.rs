@@ -5,18 +5,45 @@ use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType};
 
 impl Analyzer {
-    /// Check pattern and return TypeId directly.
-    /// This is the Phase 2 entry point - callers should migrate to this.
-    #[allow(unused)] // Phase 2 infrastructure
+    /// Check pattern and return TypeId directly (TypeId version).
+    #[allow(unused)] // Phase 2 infrastructure - callers can migrate to this
     pub(crate) fn check_pattern_id(
         &mut self,
         pattern: &Pattern,
         scrutinee_type_id: ArenaTypeId,
         interner: &Interner,
     ) -> Option<ArenaTypeId> {
-        let scrutinee_type = self.id_to_type(scrutinee_type_id);
-        self.check_pattern(pattern, &scrutinee_type, interner)
-            .map(|ty| self.type_to_id(&ty))
+        match pattern {
+            Pattern::Wildcard(_) => {
+                // Wildcard always matches, nothing to check, no narrowing
+                None
+            }
+            Pattern::Literal(expr) => {
+                // Check literal type matches scrutinee type
+                if let Ok(lit_type_id) = self.check_expr(expr, interner)
+                    && !self.types_compatible_id(lit_type_id, scrutinee_type_id, interner)
+                    && !self.types_compatible_id(scrutinee_type_id, lit_type_id, interner)
+                {
+                    let expected = self.type_display_id(scrutinee_type_id);
+                    let found = self.type_display_id(lit_type_id);
+                    self.add_error(
+                        SemanticError::PatternTypeMismatch {
+                            expected,
+                            found,
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                }
+                None
+            }
+            _ => {
+                // Fall back to LegacyType version for other patterns
+                let scrutinee_type = self.type_arena.borrow().to_type(scrutinee_type_id);
+                self.check_pattern(pattern, &scrutinee_type, interner)
+                    .map(|ty| self.type_to_id(&ty))
+            }
+        }
     }
 
     /// Check a pattern against the scrutinee type.
@@ -36,7 +63,7 @@ impl Analyzer {
             Pattern::Literal(expr) => {
                 // Check literal type matches scrutinee type
                 if let Ok(lit_type_id) = self.check_expr(expr, interner) {
-                    let lit_type = self.id_to_type(lit_type_id);
+                    let lit_type = self.type_arena.borrow().to_type(lit_type_id);
                     if !self.types_compatible(&lit_type, scrutinee_type, interner)
                         && !self.types_compatible(scrutinee_type, &lit_type, interner)
                     {

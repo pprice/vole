@@ -152,12 +152,6 @@ impl Analyzer {
         self.type_arena.borrow_mut().from_type(ty)
     }
 
-    /// Convert TypeId to Type
-    #[inline]
-    pub(crate) fn id_to_type(&self, id: ArenaTypeId) -> LegacyType {
-        self.type_arena.borrow().to_type(id)
-    }
-
     // ========== TypeId-returning type construction ==========
     //
     // Phase 2: These return TypeId directly, avoiding LegacyType materialization.

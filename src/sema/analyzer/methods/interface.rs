@@ -241,7 +241,7 @@ impl Analyzer {
 
     /// Check if a type implements Stringable (TypeId version)
     pub fn satisfies_stringable_id(&self, ty_id: ArenaTypeId, interner: &Interner) -> bool {
-        let ty = self.id_to_type(ty_id);
+        let ty = self.type_arena.borrow().to_type(ty_id);
         self.satisfies_stringable(&ty, interner)
     }
 

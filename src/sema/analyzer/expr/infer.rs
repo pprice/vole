@@ -331,7 +331,7 @@ impl Analyzer {
                     .unwrap_or(ArenaTypeId::INVALID);
 
                 // Default must match the unwrapped type
-                let unwrapped = self.id_to_type(unwrapped_id);
+                let unwrapped = self.type_arena.borrow().to_type(unwrapped_id);
                 let _default_type =
                     self.check_expr_expecting(&nc.default, Some(&unwrapped), interner)?;
 
@@ -354,13 +354,18 @@ impl Analyzer {
                     self.check_expr(&is_expr.value, interner)?
                 };
 
-                // Warn/error if tested type is not a variant of value's union
-                let value_type = self.id_to_type(value_type_id);
-                if let LegacyType::Union(variants) = &value_type
-                    && !variants.contains(&tested_type)
+                // Warn/error if tested type is not a variant of value's union (using TypeId)
+                let tested_type_id = self.type_to_id(&tested_type);
+                let union_variants = self
+                    .type_arena
+                    .borrow()
+                    .unwrap_union(value_type_id)
+                    .cloned();
+                if let Some(variants) = union_variants
+                    && !variants.contains(&tested_type_id)
                 {
                     let tested = self.type_display(&tested_type);
-                    let union_type = self.type_display(&value_type);
+                    let union_type = self.type_display_id(value_type_id);
                     self.add_error(
                         SemanticError::IsNotVariant {
                             tested,

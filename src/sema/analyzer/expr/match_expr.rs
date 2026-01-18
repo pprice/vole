@@ -23,7 +23,8 @@ impl Analyzer {
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // Check scrutinee type
         let scrutinee_type_id = self.check_expr(&match_expr.scrutinee, interner)?;
-        let scrutinee_type = self.id_to_type(scrutinee_type_id);
+        // Convert to LegacyType for exhaustiveness/pattern checking (still needed for some paths)
+        let scrutinee_type = self.type_arena.borrow().to_type(scrutinee_type_id);
 
         // Get scrutinee symbol if it's an identifier (for type narrowing)
         let scrutinee_sym = if let ExprKind::Identifier(sym) = &match_expr.scrutinee.kind {
@@ -48,8 +49,13 @@ impl Analyzer {
             );
         }
 
-        // For fallible types, require at least one error arm
-        if let LegacyType::Fallible(_) = &scrutinee_type {
+        // For fallible types, require at least one error arm (using TypeId)
+        let is_fallible = self
+            .type_arena
+            .borrow()
+            .unwrap_fallible(scrutinee_type_id)
+            .is_some();
+        if is_fallible {
             let has_error_arm = match_expr
                 .arms
                 .iter()

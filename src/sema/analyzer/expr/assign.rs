@@ -164,7 +164,7 @@ impl Analyzer {
 
         // Now check the value expression with expected type context
         let expected_ty = if target_valid && !target_ty_id.is_invalid() {
-            Some(self.id_to_type(target_ty_id))
+            Some(self.type_arena.borrow().to_type(target_ty_id))
         } else {
             None
         };
@@ -386,7 +386,7 @@ impl Analyzer {
 
         // Type-check the value expression with expected type context
         let expected = if !target_type_id.is_invalid() {
-            Some(self.id_to_type(target_type_id))
+            Some(self.type_arena.borrow().to_type(target_type_id))
         } else {
             None
         };

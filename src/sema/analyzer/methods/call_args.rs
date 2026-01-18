@@ -71,10 +71,10 @@ impl Analyzer {
                 }
             } else {
                 let ty_id = self.check_expr(arg, interner)?;
-                self.id_to_type(ty_id)
+                self.type_arena.borrow().to_type(ty_id)
             };
 
-            // Convert to TypeId for compatibility check (Phase 2 migration)
+            // Convert to TypeId for compatibility check
             let arg_ty_id = self.type_to_id(&arg_ty);
             let param_ty_id = self.type_to_id(param_ty);
             if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {

@@ -264,7 +264,8 @@ impl Analyzer {
         }
 
         let object_type_id = self.check_expr(&method_call.object, interner)?;
-        let object_type = self.id_to_type(object_type_id);
+        // Convert to LegacyType for method resolution (still needed for some paths)
+        let object_type = self.type_arena.borrow().to_type(object_type_id);
         let method_name = interner.resolve(method_call.method);
 
         // Handle Invalid early
@@ -318,7 +319,12 @@ impl Analyzer {
                         .find(|(n, _)| *n == nid)
                         .map(|&(_, type_id)| type_id)
                 });
-                (m.module_id, method_name_str.to_string(), name_id, export_type_id)
+                (
+                    m.module_id,
+                    method_name_str.to_string(),
+                    name_id,
+                    export_type_id,
+                )
             })
         };
         if let Some((module_id, method_name_str, name_id, export_type_id)) = module_info {
@@ -388,7 +394,7 @@ impl Analyzer {
             let external_info = if is_external {
                 Some(ExternalMethodInfo {
                     module_path: self.name_table.module_path(module_id).to_string(),
-                    native_name: method_name_str.clone(),
+                    native_name: method_name_str,
                     return_type: Some(func_type.return_type.clone()),
                 })
             } else {
@@ -577,8 +583,10 @@ impl Analyzer {
                 arg_type_ids.push(arg_ty_id);
             }
             // Convert to LegacyType for type inference (still uses LegacyType)
-            let arg_types: Vec<LegacyType> =
-                arg_type_ids.iter().map(|&id| self.id_to_type(id)).collect();
+            let arg_types: Vec<LegacyType> = {
+                let arena = self.type_arena.borrow();
+                arg_type_ids.iter().map(|&id| arena.to_type(id)).collect()
+            };
 
             // Get class-level type params (if any)
             let class_type_params: Vec<TypeParamInfo> = generic_info
