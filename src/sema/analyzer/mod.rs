@@ -1301,11 +1301,9 @@ impl Analyzer {
                     }
                 }
                 crate::sema::generic::TypeConstraint::Structural(structural) => {
-                    // Structural constraints still use LegacyType internally (StructuralType fields are LegacyType)
-                    // Convert just this one TypeId for structural checking
-                    let found_legacy = self.type_arena.borrow().to_type(found_id);
+                    // Use TypeId-based structural constraint checking
                     if let Some(mismatch) =
-                        self.check_structural_constraint(&found_legacy, structural, interner)
+                        self.check_structural_constraint_id(found_id, structural, interner)
                     {
                         let found_display = self.type_display_id(found_id);
                         self.add_error(

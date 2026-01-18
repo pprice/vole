@@ -893,6 +893,73 @@ impl Analyzer {
         }
     }
 
+    /// Check if a TypeId satisfies a structural constraint (TypeId version).
+    /// Returns None if satisfied, or Some(mismatch_description) if not.
+    pub(crate) fn check_structural_constraint_id(
+        &mut self,
+        ty_id: ArenaTypeId,
+        structural: &StructuralType,
+        interner: &Interner,
+    ) -> Option<String> {
+        let mut mismatches = Vec::new();
+
+        // Check required fields
+        for field in &structural.fields {
+            let field_name_str = self
+                .name_table
+                .last_segment_str(field.name)
+                .unwrap_or_default();
+
+            // Convert structural field type to TypeId
+            let expected_type_id = self.type_arena.borrow_mut().from_type(&field.ty);
+
+            if !self.type_has_field_by_str_id(ty_id, &field_name_str, expected_type_id, interner) {
+                let type_str = self.type_display_id(expected_type_id);
+                mismatches.push(format!(
+                    "missing field '{}' of type '{}'",
+                    field_name_str, type_str
+                ));
+            }
+        }
+
+        // Check required methods
+        for method in &structural.methods {
+            let method_name_str = self
+                .name_table
+                .last_segment_str(method.name)
+                .unwrap_or_default();
+
+            // Create a FunctionType from the structural method signature
+            let expected_sig = FunctionType {
+                params: method.params.clone().into(),
+                return_type: Box::new(method.return_type.clone()),
+                params_id: None,
+                return_type_id: None,
+                is_closure: false,
+            };
+
+            if !self.type_has_method_by_str_id(ty_id, &method_name_str, &expected_sig, interner) {
+                let params_str = method
+                    .params
+                    .iter()
+                    .map(|p| self.type_display(p))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ret_str = self.type_display(&method.return_type);
+                mismatches.push(format!(
+                    "missing method '{}({}) -> {}'",
+                    method_name_str, params_str, ret_str
+                ));
+            }
+        }
+
+        if mismatches.is_empty() {
+            None
+        } else {
+            Some(mismatches.join(", "))
+        }
+    }
+
     /// Check if a type has a field with compatible type
     fn type_has_field_with_type(
         &self,
