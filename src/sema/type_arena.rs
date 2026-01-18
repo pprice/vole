@@ -131,6 +131,25 @@ impl TypeId {
         // Primitives are indices 1-13 (i8 through string)
         self.0 >= Self::I8.0 && self.0 <= Self::STRING.0
     }
+
+    /// Check if an integer literal value fits within this type's range (primitives only).
+    /// For unions, use TypeArena::literal_fits_id instead.
+    #[inline]
+    pub fn fits_literal(self, value: i64) -> bool {
+        match self {
+            Self::I8 => value >= i8::MIN as i64 && value <= i8::MAX as i64,
+            Self::I16 => value >= i16::MIN as i64 && value <= i16::MAX as i64,
+            Self::I32 => value >= i32::MIN as i64 && value <= i32::MAX as i64,
+            Self::I64 => true,
+            Self::I128 => true, // i64 always fits in i128
+            Self::U8 => value >= 0 && value <= u8::MAX as i64,
+            Self::U16 => value >= 0 && value <= u16::MAX as i64,
+            Self::U32 => value >= 0 && value <= u32::MAX as i64,
+            Self::U64 => value >= 0, // i64 positive values fit
+            Self::F32 | Self::F64 => true, // Integers can become floats
+            _ => false,
+        }
+    }
 }
 
 /// SmallVec for type children - inline up to 4 (covers most unions, tuples, params)
@@ -901,6 +920,19 @@ impl TypeArena {
     /// Check if this is a fallible type
     pub fn is_fallible(&self, id: TypeId) -> bool {
         matches!(self.get(id), SemaType::Fallible { .. })
+    }
+
+    /// Check if an integer literal value fits within a type (handles unions)
+    pub fn literal_fits_id(&self, value: i64, id: TypeId) -> bool {
+        // Check primitive types directly
+        if id.fits_literal(value) {
+            return true;
+        }
+        // For unions, check if literal fits any numeric variant
+        if let Some(variants) = self.unwrap_union(id) {
+            return variants.iter().any(|&v| v.fits_literal(value));
+        }
+        false
     }
 
     // =========================================================================

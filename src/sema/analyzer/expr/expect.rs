@@ -1,5 +1,4 @@
 use super::super::*;
-use crate::sema::compatibility::TypeCompatibility;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::LegacyType;
 
@@ -45,11 +44,8 @@ impl Analyzer {
                 if let Some(variants) = union_variants {
                     // Find an integer variant that fits this literal
                     for variant_id in variants {
-                        if variant_id.is_integer() {
-                            let variant_ty = self.type_arena.borrow().to_type(variant_id);
-                            if variant_ty.fits_literal(*value) {
-                                return Ok(variant_id);
-                            }
+                        if variant_id.is_integer() && variant_id.fits_literal(*value) {
+                            return Ok(variant_id);
                         }
                     }
                     // No matching integer variant
@@ -66,8 +62,7 @@ impl Analyzer {
                 }
 
                 if let Some(exp_id) = expected {
-                    let exp_ty = self.type_arena.borrow().to_type(exp_id);
-                    if exp_ty.fits_literal(*value) {
+                    if self.type_arena.borrow().literal_fits_id(*value, exp_id) {
                         return Ok(exp_id);
                     }
                     let expected_str = self.type_display_id(exp_id);
@@ -329,8 +324,7 @@ impl Analyzer {
                 if let ExprKind::IntLiteral(value) = &un.operand.kind {
                     let negated = value.wrapping_neg();
                     if let Some(target) = expected {
-                        let target_ty = self.type_arena.borrow().to_type(target);
-                        if target_ty.fits_literal(negated) {
+                        if self.type_arena.borrow().literal_fits_id(negated, target) {
                             self.record_expr_type_id(&un.operand, target);
                             return Ok(target);
                         }
