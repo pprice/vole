@@ -156,15 +156,33 @@ impl PartialEq for FunctionType {
     fn eq(&self, other: &Self) -> bool {
         // is_closure is not part of type equality - a closure () -> i64 is
         // compatible with a function type () -> i64 for type checking purposes
-        self.params == other.params && self.return_type == other.return_type
+        //
+        // Use TypeId fields for efficient O(1) comparison when both have them,
+        // otherwise fall back to comparing LegacyType trees
+        if let (Some(p1), Some(r1), Some(p2), Some(r2)) = (
+            &self.params_id,
+            &self.return_type_id,
+            &other.params_id,
+            &other.return_type_id,
+        ) {
+            p1 == p2 && r1 == r2
+        } else {
+            self.params == other.params && self.return_type == other.return_type
+        }
     }
 }
 
 // Manual Hash to match PartialEq semantics - ignore is_closure
 impl std::hash::Hash for FunctionType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.params.hash(state);
-        self.return_type.hash(state);
+        // Use TypeId fields for efficient hashing when available
+        if let (Some(params_id), Some(return_type_id)) = (&self.params_id, &self.return_type_id) {
+            params_id.hash(state);
+            return_type_id.hash(state);
+        } else {
+            self.params.hash(state);
+            self.return_type.hash(state);
+        }
         // is_closure deliberately not hashed to match PartialEq
     }
 }
@@ -206,6 +224,41 @@ impl FunctionType {
     /// Check if TypeId fields are populated for efficient substitution
     pub fn has_interned_ids(&self) -> bool {
         self.params_id.is_some() && self.return_type_id.is_some()
+    }
+
+    /// Create a new FunctionType, interning types into the arena.
+    /// This is the preferred constructor when you have LegacyTypes and an arena.
+    pub fn new_with_arena(
+        params: impl Into<Arc<[LegacyType]>>,
+        return_type: LegacyType,
+        is_closure: bool,
+        arena: &mut TypeArena,
+    ) -> Self {
+        let params: Arc<[LegacyType]> = params.into();
+        let params_id: TypeIdVec = params.iter().map(|p| arena.from_type(p)).collect();
+        let return_type_id = arena.from_type(&return_type);
+        Self {
+            params,
+            return_type: Box::new(return_type),
+            is_closure,
+            params_id: Some(params_id),
+            return_type_id: Some(return_type_id),
+        }
+    }
+
+    /// Get the interned parameter TypeIds. Panics if not interned.
+    #[inline]
+    pub fn get_params_id(&self) -> &[TypeId] {
+        self.params_id
+            .as_ref()
+            .expect("FunctionType params_id not populated - call intern_ids first")
+    }
+
+    /// Get the interned return type TypeId. Panics if not interned.
+    #[inline]
+    pub fn get_return_type_id(&self) -> TypeId {
+        self.return_type_id
+            .expect("FunctionType return_type_id not populated - call intern_ids first")
     }
 
     /// Check if this function type is compatible with a functional interface signature.
