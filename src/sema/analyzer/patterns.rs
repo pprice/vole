@@ -61,14 +61,14 @@ impl Analyzer {
                 None
             }
             Pattern::Literal(expr) => {
-                // Check literal type matches scrutinee type
+                // Check literal type matches scrutinee type (using TypeId for comparison)
                 if let Ok(lit_type_id) = self.check_expr(expr, interner) {
-                    let lit_type = self.type_arena.borrow().to_type(lit_type_id);
-                    if !self.types_compatible(&lit_type, scrutinee_type, interner)
-                        && !self.types_compatible(scrutinee_type, &lit_type, interner)
+                    let scrutinee_type_id = self.type_to_id(scrutinee_type);
+                    if !self.types_compatible_id(lit_type_id, scrutinee_type_id, interner)
+                        && !self.types_compatible_id(scrutinee_type_id, lit_type_id, interner)
                     {
                         let expected = self.type_display(scrutinee_type);
-                        let found = self.type_display(&lit_type);
+                        let found = self.type_display_id(lit_type_id);
                         self.add_error(
                             SemanticError::PatternTypeMismatch {
                                 expected,
@@ -179,14 +179,15 @@ impl Analyzer {
             }
             Pattern::Val { name, span } => {
                 // Val pattern compares against existing variable's value
-                if let Some(var) = self.scope.get(*name) {
-                    let var_ty = self.type_arena.borrow().to_type(var.ty);
-                    // Check type compatibility
-                    if !self.types_compatible(&var_ty, scrutinee_type, interner)
-                        && !self.types_compatible(scrutinee_type, &var_ty, interner)
+                let var_ty_id = self.scope.get(*name).map(|v| v.ty);
+                if let Some(var_ty_id) = var_ty_id {
+                    // Check type compatibility using TypeId
+                    let scrutinee_type_id = self.type_to_id(scrutinee_type);
+                    if !self.types_compatible_id(var_ty_id, scrutinee_type_id, interner)
+                        && !self.types_compatible_id(scrutinee_type_id, var_ty_id, interner)
                     {
                         let expected = self.type_display(scrutinee_type);
-                        let found = self.type_display(&var_ty);
+                        let found = self.type_display_id(var_ty_id);
                         self.add_error(
                             SemanticError::PatternTypeMismatch {
                                 expected,

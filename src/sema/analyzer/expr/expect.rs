@@ -372,22 +372,24 @@ impl Analyzer {
             // All other cases: infer type, then check compatibility
             _ => {
                 let inferred_id = self.check_expr(expr, interner)?;
-                let inferred = self.type_arena.borrow().to_type(inferred_id);
-                if let Some(expected_ty) = expected
-                    && !self.types_compatible(&inferred, expected_ty, interner)
-                {
-                    let expected = self.type_display(expected_ty);
-                    let found = self.type_display(&inferred);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected,
-                            found,
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
+                // Use TypeId for compatibility check
+                if let Some(expected_ty) = expected {
+                    let expected_id = self.type_to_id(expected_ty);
+                    if !self.types_compatible_id(inferred_id, expected_id, interner) {
+                        let expected_str = self.type_display(expected_ty);
+                        let found = self.type_display_id(inferred_id);
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: expected_str,
+                                found,
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
                 }
-                Ok(inferred)
+                // Convert to LegacyType for return (API requirement)
+                Ok(self.type_arena.borrow().to_type(inferred_id))
             }
         }
     }

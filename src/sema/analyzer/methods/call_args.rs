@@ -56,7 +56,8 @@ impl Analyzer {
 
         // Check each argument against its expected parameter type
         for (arg, param_ty) in args.iter().zip(param_types.iter()) {
-            let arg_ty = if with_inference {
+            // Get argument type as TypeId, avoiding LegacyType round-trip where possible
+            let arg_ty_id = if with_inference {
                 // For lambda arguments, pass expected function type for inference
                 if let ExprKind::Lambda(lambda) = &arg.kind {
                     let expected_fn = if let LegacyType::Function(ft) = param_ty {
@@ -64,18 +65,19 @@ impl Analyzer {
                     } else {
                         None
                     };
-                    self.analyze_lambda(lambda, expected_fn, interner)
+                    let arg_ty = self.analyze_lambda(lambda, expected_fn, interner);
+                    self.type_to_id(&arg_ty)
                 } else {
                     // Pass expected type to allow integer literal inference
-                    self.check_expr_expecting(arg, Some(param_ty), interner)?
+                    let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
+                    self.type_to_id(&arg_ty)
                 }
             } else {
-                let ty_id = self.check_expr(arg, interner)?;
-                self.type_arena.borrow().to_type(ty_id)
+                // No inference needed - just check and keep TypeId directly
+                self.check_expr(arg, interner)?
             };
 
-            // Convert to TypeId for compatibility check
-            let arg_ty_id = self.type_to_id(&arg_ty);
+            // Check compatibility using TypeId
             let param_ty_id = self.type_to_id(param_ty);
             if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
                 self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
