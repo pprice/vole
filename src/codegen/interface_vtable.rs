@@ -87,177 +87,35 @@ impl InterfaceVtableRegistry {
         Self::default()
     }
 
-    /// Atomic vtable creation (all phases at once).
-    /// Prefer get_or_declare + ensure_compiled for forward reference support.
-    #[allow(dead_code)]
-    #[tracing::instrument(skip(self, ctx, interface_type_args), fields(interface = %ctx.interner.resolve(interface_name)))]
-    pub(crate) fn get_or_create(
-        &mut self,
-        ctx: &mut CompileCtx,
-        interface_name: Symbol,
-        interface_type_args: &[LegacyType],
-        concrete_type: &LegacyType,
-    ) -> Result<DataId, String> {
-        let concrete_key = match concrete_type {
-            LegacyType::Function(func_type) => InterfaceConcreteType::Function {
-                is_closure: func_type.is_closure,
-            },
-            _ => {
-                let type_id = ImplTypeId::from_type(
-                    concrete_type,
-                    &ctx.analyzed.entity_registry.type_table,
-                    &ctx.analyzed.entity_registry,
-                )
-                .ok_or_else(|| {
-                    format!(
-                        "cannot build vtable for unsupported type {:?}",
-                        concrete_type
-                    )
-                })?;
-                InterfaceConcreteType::ImplTypeId(type_id)
-            }
-        };
-        let key = InterfaceVtableKey {
-            interface_name,
-            concrete: concrete_key,
-        };
-        if let Some(data_id) = self.vtables.get(&key) {
-            return Ok(*data_id);
-        }
-
-        // Get interface TypeDefId via Resolver, with short name fallback for prelude interfaces
-        let interface_name_str = ctx.interner.resolve(interface_name);
-        let interface_type_id = ctx
-            .resolver()
-            .resolve_type_str_or_interface(interface_name_str, &ctx.analyzed.entity_registry)
-            .ok_or_else(|| format!("unknown interface {:?}", interface_name_str))?;
-        let interface_name_id = ctx
-            .analyzed
-            .entity_registry
-            .get_type(interface_type_id)
-            .name_id;
-
-        // Build substitution map from interface type params to concrete type args
-        let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_id);
-        let substitutions: HashMap<NameId, TypeId> = interface_def
-            .type_params
-            .iter()
-            .zip(interface_type_args.iter())
-            .map(|(param_name_id, arg)| (*param_name_id, ctx.arena.borrow_mut().from_type(arg)))
-            .collect();
-
-        // Collect methods via EntityRegistry
-        let method_ids = collect_interface_methods_via_entity_registry(
-            interface_type_id,
-            &ctx.analyzed.entity_registry,
-        )?;
-
-        let word_bytes = ctx.pointer_type.bytes() as usize;
-
-        tracing::debug!(
-            interface = %ctx.interner.resolve(interface_name),
-            concrete_type = ?concrete_type,
-            method_count = method_ids.len(),
-            "building vtable"
-        );
-
-        let type_name = match concrete_key {
-            InterfaceConcreteType::ImplTypeId(type_id) => {
-                ctx.analyzed.name_table.display(type_id.name_id())
-            }
-            InterfaceConcreteType::Function { is_closure } => {
-                if is_closure {
-                    "closure".to_string()
-                } else {
-                    "function".to_string()
-                }
-            }
-        };
-        let vtable_name = format!(
-            "__vole_iface_vtable_{}_{}",
-            ctx.interner.resolve(interface_name),
-            type_name
-        );
-        let data_id = ctx
-            .module
-            .declare_data(&vtable_name, Linkage::Local, false, false)
-            .map_err(|e| e.to_string())?;
-
-        let mut data = DataDescription::new();
-        data.define_zeroinit(word_bytes * method_ids.len());
-        data.set_align(word_bytes as u64);
-
-        // Convert concrete type to TypeId once before the loop
-        let concrete_type_id = ctx.arena.borrow_mut().from_type(concrete_type);
-
-        for (index, &method_id) in method_ids.iter().enumerate() {
-            let method = ctx.analyzed.entity_registry.get_method(method_id);
-            let method_name_str = ctx.analyzed.name_table.display(method.name_id);
-            let target = resolve_vtable_target(
-                ctx,
-                interface_name_id,
-                concrete_type_id,
-                method_id,
-                &substitutions,
-            )?;
-            let wrapper_id = self.compile_wrapper(
-                ctx,
-                interface_name_str,
-                &method_name_str,
-                concrete_type_id,
-                &target,
-            )?;
-            let func_ref = ctx.module.declare_func_in_data(wrapper_id, &mut data);
-            data.write_function_addr((index * word_bytes) as u32, func_ref);
-            let target_type = match &target.target {
-                VtableMethodTarget::Method(_) => "Method",
-                VtableMethodTarget::External(_) => "External",
-                VtableMethodTarget::Function => "Function",
-            };
-            tracing::debug!(
-                slot = index,
-                method = %method_name_str,
-                target = target_type,
-                wrapper = ?wrapper_id,
-                "vtable slot"
-            );
-        }
-
-        ctx.module
-            .define_data(data_id, &data)
-            .map_err(|e| e.to_string())?;
-        self.vtables.insert(key, data_id);
-        Ok(data_id)
-    }
-
-    /// Phase 1: Get or declare a vtable, returning DataId for forward references.
+    /// Phase 1: Get or declare a vtable using TypeId parameters (no LegacyType conversion).
     /// Does not compile wrappers yet - call ensure_compiled() later.
-    #[tracing::instrument(skip(self, ctx, interface_type_args), fields(interface = %ctx.interner.resolve(interface_name)))]
+    #[tracing::instrument(skip(self, ctx, interface_type_arg_ids), fields(interface = %ctx.interner.resolve(interface_name)))]
     pub(crate) fn get_or_declare(
         &mut self,
         ctx: &mut CompileCtx,
         interface_name: Symbol,
-        interface_type_args: &[LegacyType],
-        concrete_type: &LegacyType,
+        interface_type_arg_ids: &[TypeId],
+        concrete_type_id: TypeId,
     ) -> Result<DataId, String> {
-        // Build key for lookup
-        let concrete_key = match concrete_type {
-            LegacyType::Function(func_type) => InterfaceConcreteType::Function {
-                is_closure: func_type.is_closure,
-            },
-            _ => {
-                let type_id = ImplTypeId::from_type(
-                    concrete_type,
+        // Build key for lookup using arena unwraps
+        let concrete_key = {
+            let arena = ctx.arena.borrow();
+            if let Some((_, _, is_closure)) = arena.unwrap_function(concrete_type_id) {
+                InterfaceConcreteType::Function { is_closure }
+            } else {
+                let impl_type_id = ImplTypeId::from_type_id(
+                    concrete_type_id,
+                    &arena,
                     &ctx.analyzed.entity_registry.type_table,
                     &ctx.analyzed.entity_registry,
                 )
                 .ok_or_else(|| {
                     format!(
                         "cannot build vtable for unsupported type {:?}",
-                        concrete_type
+                        concrete_type_id
                     )
                 })?;
-                InterfaceConcreteType::ImplTypeId(type_id)
+                InterfaceConcreteType::ImplTypeId(impl_type_id)
             }
         };
         let key = InterfaceVtableKey {
@@ -277,28 +135,28 @@ impl InterfaceVtableRegistry {
 
         // Resolve interface metadata
         let interface_name_str = ctx.interner.resolve(interface_name);
-        let interface_type_id = ctx
+        let interface_type_def_id = ctx
             .resolver()
             .resolve_type_str_or_interface(interface_name_str, &ctx.analyzed.entity_registry)
             .ok_or_else(|| format!("unknown interface {:?}", interface_name_str))?;
         let interface_name_id = ctx
             .analyzed
             .entity_registry
-            .get_type(interface_type_id)
+            .get_type(interface_type_def_id)
             .name_id;
 
-        // Build substitution map
-        let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_id);
+        // Build substitution map from type param names to concrete type args (already TypeIds)
+        let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_def_id);
         let substitutions: HashMap<NameId, TypeId> = interface_def
             .type_params
             .iter()
-            .zip(interface_type_args.iter())
-            .map(|(param_name_id, arg)| (*param_name_id, ctx.arena.borrow_mut().from_type(arg)))
+            .zip(interface_type_arg_ids.iter())
+            .map(|(param_name_id, &arg_id)| (*param_name_id, arg_id))
             .collect();
 
         // Collect method IDs
         let method_ids = collect_interface_methods_via_entity_registry(
-            interface_type_id,
+            interface_type_def_id,
             &ctx.analyzed.entity_registry,
         )?;
 
@@ -327,13 +185,12 @@ impl InterfaceVtableRegistry {
 
         tracing::debug!(
             interface = %ctx.interner.resolve(interface_name),
-            concrete_type = ?concrete_type,
+            concrete_type = ?concrete_type_id,
             method_count = method_ids.len(),
             "declared vtable (phase 1)"
         );
 
-        // Store pending state
-        let concrete_type_id = ctx.arena.borrow_mut().from_type(concrete_type);
+        // Store pending state (concrete_type_id already a TypeId)
         self.pending.insert(
             key,
             VtableBuildState {
@@ -348,33 +205,34 @@ impl InterfaceVtableRegistry {
         Ok(data_id)
     }
 
-    /// Phase 2+3: Ensure a vtable is fully compiled.
+    /// Phase 2+3: Ensure a vtable is fully compiled using TypeId (no LegacyType conversion).
     /// Must be called after get_or_declare() for the same key.
     #[tracing::instrument(skip(self, ctx), fields(interface = %ctx.interner.resolve(interface_name)))]
     pub(crate) fn ensure_compiled(
         &mut self,
         ctx: &mut CompileCtx,
         interface_name: Symbol,
-        concrete_type: &LegacyType,
+        concrete_type_id: TypeId,
     ) -> Result<DataId, String> {
-        // Build key for lookup
-        let concrete_key = match concrete_type {
-            LegacyType::Function(func_type) => InterfaceConcreteType::Function {
-                is_closure: func_type.is_closure,
-            },
-            _ => {
-                let type_id = ImplTypeId::from_type(
-                    concrete_type,
+        // Build key for lookup using arena unwraps
+        let concrete_key = {
+            let arena = ctx.arena.borrow();
+            if let Some((_, _, is_closure)) = arena.unwrap_function(concrete_type_id) {
+                InterfaceConcreteType::Function { is_closure }
+            } else {
+                let impl_type_id = ImplTypeId::from_type_id(
+                    concrete_type_id,
+                    &arena,
                     &ctx.analyzed.entity_registry.type_table,
                     &ctx.analyzed.entity_registry,
                 )
                 .ok_or_else(|| {
                     format!(
                         "cannot build vtable for unsupported type {:?}",
-                        concrete_type
+                        concrete_type_id
                     )
                 })?;
-                InterfaceConcreteType::ImplTypeId(type_id)
+                InterfaceConcreteType::ImplTypeId(impl_type_id)
             }
         };
         let key = InterfaceVtableKey {
@@ -947,17 +805,14 @@ pub(crate) fn box_interface_value(
         )
     })?;
 
-    let value_legacy_type = ctx.arena.borrow().to_type(value.type_id);
     tracing::debug!(
         interface = %ctx.interner.resolve(interface_name),
-        value_type = ?value_legacy_type,
+        value_type = ?value.type_id,
         "boxing value as interface"
     );
 
-    if matches!(
-        value_legacy_type,
-        LegacyType::Nominal(NominalType::Interface(_))
-    ) {
+    // Check if already an interface using TypeId unwrap
+    if ctx.arena.borrow().unwrap_interface(value.type_id).is_some() {
         tracing::debug!("already interface, skip boxing");
         return Ok(value);
     }
@@ -987,30 +842,17 @@ pub(crate) fn box_interface_value(
         &ctx.analyzed.entity_registry,
     )?;
 
-    // Get the legacy type for vtable lookup (needs the full type for matching)
-    let value_legacy_type = ctx.arena.borrow().to_type(value.type_id);
-
-    // Convert type_args_id to Vec<LegacyType> for vtable lookup
-    let interface_type_args: Vec<LegacyType> = {
-        let arena = ctx.arena.borrow();
-        interface
-            .type_args_id
-            .iter()
-            .map(|&id| arena.to_type(id))
-            .collect()
-    };
-
-    // Phase 1: Declare vtable, getting DataId for forward reference
+    // Phase 1: Declare vtable using TypeId (no LegacyType conversion)
     let vtable_id = ctx.interface_vtables.borrow_mut().get_or_declare(
         ctx,
         interface_name,
-        &interface_type_args,
-        &value_legacy_type,
+        &interface.type_args_id,
+        value.type_id,
     )?;
     // Phase 2+3: Compile wrappers and define vtable data
     ctx.interface_vtables
         .borrow_mut()
-        .ensure_compiled(ctx, interface_name, &value_legacy_type)?;
+        .ensure_compiled(ctx, interface_name, value.type_id)?;
     let vtable_gv = ctx.module.declare_data_in_func(vtable_id, builder.func);
     let vtable_ptr = builder.ins().global_value(ctx.pointer_type, vtable_gv);
 
@@ -1081,13 +923,6 @@ pub(crate) fn box_interface_value_id(
         });
     }
 
-    // For vtable operations, we need LegacyType - convert here
-    let arena = ctx.arena.borrow();
-    let interface_type_args: Vec<LegacyType> =
-        type_args_ids.iter().map(|id| arena.to_type(*id)).collect();
-    let value_legacy_type = arena.to_type(value.type_id);
-    drop(arena);
-
     let heap_alloc_ref = runtime_heap_alloc_ref(ctx, builder)?;
     let data_word = value_to_word(
         builder,
@@ -1098,17 +933,17 @@ pub(crate) fn box_interface_value_id(
         &ctx.analyzed.entity_registry,
     )?;
 
-    // Phase 1: Declare vtable
+    // Phase 1: Declare vtable using TypeId (no LegacyType conversion)
     let vtable_id = ctx.interface_vtables.borrow_mut().get_or_declare(
         ctx,
         interface_name,
-        &interface_type_args,
-        &value_legacy_type,
+        &type_args_ids,
+        value.type_id,
     )?;
     // Phase 2+3: Compile wrappers and define vtable data
     ctx.interface_vtables
         .borrow_mut()
-        .ensure_compiled(ctx, interface_name, &value_legacy_type)?;
+        .ensure_compiled(ctx, interface_name, value.type_id)?;
     let vtable_gv = ctx.module.declare_data_in_func(vtable_id, builder.func);
     let vtable_ptr = builder.ins().global_value(ctx.pointer_type, vtable_gv);
 
