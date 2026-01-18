@@ -1352,11 +1352,11 @@ impl TypeArena {
             LegacyType::TypeParamRef(param_id) => self.type_param_ref(*param_id),
 
             LegacyType::Module(module_type) => {
-                // Convert exports to (NameId, TypeId) pairs
+                // Exports are already TypeId - just collect them
                 let exports: SmallVec<[(NameId, TypeId); 8]> = module_type
                     .exports
                     .iter()
-                    .map(|(name_id, ty)| (*name_id, self.from_type(ty)))
+                    .map(|(&name_id, &ty_id)| (name_id, ty_id))
                     .collect();
 
                 // Register module metadata (constants, external_funcs)
@@ -1496,11 +1496,11 @@ impl TypeArena {
             SemaType::TypeParamRef(param_id) => LegacyType::TypeParamRef(*param_id),
 
             SemaType::Module(m) => {
-                // Reconstruct exports from interned types
-                let exports_map: std::collections::HashMap<NameId, LegacyType> = m
+                // Exports are already TypeId - just copy them
+                let exports_map: std::collections::HashMap<NameId, TypeId> = m
                     .exports
                     .iter()
-                    .map(|(name_id, type_id)| (*name_id, self.to_type(*type_id)))
+                    .map(|(name_id, type_id)| (*name_id, *type_id))
                     .collect();
 
                 // Get metadata (constants, external_funcs) from arena storage

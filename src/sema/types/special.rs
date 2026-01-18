@@ -31,6 +31,7 @@
 
 use crate::frontend::Span;
 use crate::identity::{ModuleId, NameId};
+use crate::sema::type_arena::TypeId;
 
 use super::LegacyType;
 
@@ -266,8 +267,8 @@ impl std::hash::Hash for ConstantValue {
 pub struct ModuleType {
     /// Unique identifier for this module
     pub module_id: ModuleId,
-    /// Exports keyed by fully-qualified name id
-    pub exports: std::collections::HashMap<NameId, LegacyType>,
+    /// Exports keyed by fully-qualified name id (TypeId into the type arena)
+    pub exports: std::collections::HashMap<NameId, TypeId>,
     /// Constant values from the module (let PI = 3.14...)
     pub constants: std::collections::HashMap<NameId, ConstantValue>,
     /// Names of functions that are external (FFI) - others are pure Vole

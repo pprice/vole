@@ -1367,13 +1367,12 @@ impl Analyzer {
                 None => LegacyType::Void,
             };
 
-            let func_type = FunctionType {
-                params: param_types.into(),
-                return_type: Box::new(return_type),
-                is_closure: false,
-                params_id: None,
-                return_type_id: None,
-            };
+            let func_type = FunctionType::new_with_arena(
+                param_types,
+                return_type,
+                false,
+                &mut self.type_arena.borrow_mut(),
+            );
 
             // Determine native name: explicit or default to vole_name
             let native_name = func
@@ -1793,19 +1792,22 @@ impl Analyzer {
                         (params, return_type)
                     };
 
-                    let func_type = LegacyType::Function(FunctionType {
-                        params: params.into(),
-                        return_type: Box::new(return_type),
-                        is_closure: false,
-                        params_id: None,
-                        return_type_id: None,
-                    });
+                    // Intern the function type directly as a TypeId
+                    let func_type_id = {
+                        let mut arena = self.type_arena.borrow_mut();
+                        let param_ids: crate::sema::type_arena::TypeIdVec = params
+                            .iter()
+                            .map(|p| arena.from_type(p))
+                            .collect();
+                        let return_id = arena.from_type(&return_type);
+                        arena.function(param_ids, return_id, false)
+                    };
 
                     // Store export by name string
                     let name_id = self
                         .name_table
                         .intern(module_id, &[f.name], &module_interner);
-                    exports.insert(name_id, func_type);
+                    exports.insert(name_id, func_type_id);
                 }
                 Decl::Let(l) if !l.mutable => {
                     // Only export immutable let bindings (skip type aliases for now)
@@ -1817,26 +1819,18 @@ impl Analyzer {
                     let name_id = self
                         .name_table
                         .intern(module_id, &[l.name], &module_interner);
-                    let (ty, const_val) = match &init_expr.kind {
-                        ExprKind::FloatLiteral(v) => (
-                            LegacyType::Primitive(PrimitiveType::F64),
-                            Some(ConstantValue::F64(*v)),
-                        ),
-                        ExprKind::IntLiteral(v) => (
-                            LegacyType::Primitive(PrimitiveType::I64),
-                            Some(ConstantValue::I64(*v)),
-                        ),
-                        ExprKind::BoolLiteral(v) => (
-                            LegacyType::Primitive(PrimitiveType::Bool),
-                            Some(ConstantValue::Bool(*v)),
-                        ),
-                        ExprKind::StringLiteral(v) => (
-                            LegacyType::Primitive(PrimitiveType::String),
-                            Some(ConstantValue::String(v.clone())),
-                        ),
-                        _ => (LegacyType::unknown(), None), // Complex expressions need full analysis
+                    let arena = self.type_arena.borrow();
+                    let (ty_id, const_val) = match &init_expr.kind {
+                        ExprKind::FloatLiteral(v) => (arena.f64(), Some(ConstantValue::F64(*v))),
+                        ExprKind::IntLiteral(v) => (arena.i64(), Some(ConstantValue::I64(*v))),
+                        ExprKind::BoolLiteral(v) => (arena.bool(), Some(ConstantValue::Bool(*v))),
+                        ExprKind::StringLiteral(v) => {
+                            (arena.string(), Some(ConstantValue::String(v.clone())))
+                        }
+                        _ => (arena.invalid(), None), // Complex expressions need full analysis
                     };
-                    exports.insert(name_id, ty);
+                    drop(arena);
+                    exports.insert(name_id, ty_id);
                     if let Some(cv) = const_val {
                         constants.insert(name_id, cv);
                     }
@@ -1867,18 +1861,21 @@ impl Analyzer {
                             (params, return_type)
                         };
 
-                        let func_type = LegacyType::Function(FunctionType {
-                            params: params.into(),
-                            return_type: Box::new(return_type),
-                            is_closure: false,
-                            params_id: None,
-                            return_type_id: None,
-                        });
+                        // Intern the function type directly as a TypeId
+                        let func_type_id = {
+                            let mut arena = self.type_arena.borrow_mut();
+                            let param_ids: crate::sema::type_arena::TypeIdVec = params
+                                .iter()
+                                .map(|p| arena.from_type(p))
+                                .collect();
+                            let return_id = arena.from_type(&return_type);
+                            arena.function(param_ids, return_id, false)
+                        };
 
                         let name_id =
                             self.name_table
                                 .intern(module_id, &[func.vole_name], &module_interner);
-                        exports.insert(name_id, func_type);
+                        exports.insert(name_id, func_type_id);
                         // Mark as external function (FFI)
                         external_funcs.insert(name_id);
                     }
