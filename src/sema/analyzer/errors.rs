@@ -88,19 +88,6 @@ impl Analyzer {
         );
     }
 
-    /// Helper to add a type mismatch error with automatic type display
-    pub(crate) fn type_error(&mut self, expected: &str, found: &LegacyType, span: Span) {
-        let found_str = self.type_display(found);
-        self.add_error(
-            SemanticError::TypeMismatch {
-                expected: expected.to_string(),
-                found: found_str,
-                span: span.into(),
-            },
-            span,
-        );
-    }
-
     /// Helper to add a type mismatch error with TypeId
     pub(crate) fn type_error_id(&mut self, expected: &str, found: ArenaTypeId, span: Span) {
         let found_str = self.type_display_id(found);
