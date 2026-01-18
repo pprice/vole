@@ -284,12 +284,11 @@ impl Analyzer {
             Stmt::LetTuple(let_tuple) => {
                 // Check the initializer
                 let init_type_id = self.check_expr(&let_tuple.init, interner)?;
-                let init_type = self.id_to_type(init_type_id);
 
-                // Recursively check the destructuring pattern
-                self.check_destructure_pattern(
+                // Recursively check the destructuring pattern using TypeId
+                self.check_destructure_pattern_id(
                     &let_tuple.pattern,
-                    &init_type,
+                    init_type_id,
                     let_tuple.mutable,
                     let_tuple.init.span,
                     interner,
@@ -299,81 +298,103 @@ impl Analyzer {
         Ok(())
     }
 
-    /// Recursively check a destructuring pattern against a type, defining variables as needed
-    fn check_destructure_pattern(
+    /// Recursively check a destructuring pattern against a type using TypeId (avoids LegacyType)
+    fn check_destructure_pattern_id(
         &mut self,
         pattern: &Pattern,
-        ty: &LegacyType,
+        ty_id: ArenaTypeId,
         mutable: bool,
         init_span: Span,
         interner: &Interner,
     ) {
         match pattern {
             Pattern::Identifier { name, .. } => {
-                let ty_id = self.type_arena.borrow_mut().from_type(ty);
                 self.scope.define(*name, Variable { ty: ty_id, mutable });
                 self.add_lambda_local(*name);
             }
             Pattern::Wildcard(_) => {
                 // Wildcard - nothing to bind
             }
-            Pattern::Tuple { elements, span } => match ty {
-                LegacyType::Tuple(elem_types) => {
-                    if elements.len() != elem_types.len() {
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: format!("tuple of {} elements", elem_types.len()),
-                                found: format!(
-                                    "destructuring pattern with {} elements",
-                                    elements.len()
-                                ),
-                                span: (*span).into(),
-                            },
-                            *span,
-                        );
+            Pattern::Tuple { elements, span } => {
+                // Check for tuple or fixed array using arena (extract info first to avoid borrow conflicts)
+                enum TupleOrArray {
+                    Tuple(crate::sema::type_arena::TypeIdVec),
+                    FixedArray(ArenaTypeId, usize),
+                    Neither,
+                }
+                let type_info = {
+                    let arena = self.type_arena.borrow();
+                    if let Some(elem_ids) = arena.unwrap_tuple(ty_id) {
+                        TupleOrArray::Tuple(elem_ids.clone())
+                    } else if let Some((elem_id, size)) = arena.unwrap_fixed_array(ty_id) {
+                        TupleOrArray::FixedArray(elem_id, size)
                     } else {
-                        for (elem_pattern, elem_type) in elements.iter().zip(elem_types.iter()) {
-                            self.check_destructure_pattern(
-                                elem_pattern,
-                                elem_type,
-                                mutable,
-                                init_span,
-                                interner,
+                        TupleOrArray::Neither
+                    }
+                };
+
+                match type_info {
+                    TupleOrArray::Tuple(elem_type_ids) => {
+                        if elements.len() != elem_type_ids.len() {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: format!("tuple of {} elements", elem_type_ids.len()),
+                                    found: format!(
+                                        "destructuring pattern with {} elements",
+                                        elements.len()
+                                    ),
+                                    span: (*span).into(),
+                                },
+                                *span,
                             );
+                        } else {
+                            for (elem_pattern, &elem_type_id) in
+                                elements.iter().zip(elem_type_ids.iter())
+                            {
+                                self.check_destructure_pattern_id(
+                                    elem_pattern,
+                                    elem_type_id,
+                                    mutable,
+                                    init_span,
+                                    interner,
+                                );
+                            }
                         }
                     }
-                }
-                LegacyType::FixedArray { element, size } => {
-                    if elements.len() != *size {
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: format!("array of {} elements", size),
-                                found: format!(
-                                    "destructuring pattern with {} elements",
-                                    elements.len()
-                                ),
-                                span: (*span).into(),
-                            },
-                            *span,
-                        );
-                    } else {
-                        for elem_pattern in elements.iter() {
-                            self.check_destructure_pattern(
-                                elem_pattern,
-                                element,
-                                mutable,
-                                init_span,
-                                interner,
+                    TupleOrArray::FixedArray(elem_id, size) => {
+                        if elements.len() != size {
+                            self.add_error(
+                                SemanticError::TypeMismatch {
+                                    expected: format!("array of {} elements", size),
+                                    found: format!(
+                                        "destructuring pattern with {} elements",
+                                        elements.len()
+                                    ),
+                                    span: (*span).into(),
+                                },
+                                *span,
                             );
+                        } else {
+                            for elem_pattern in elements.iter() {
+                                self.check_destructure_pattern_id(
+                                    elem_pattern,
+                                    elem_id,
+                                    mutable,
+                                    init_span,
+                                    interner,
+                                );
+                            }
                         }
                     }
+                    TupleOrArray::Neither => {
+                        self.type_error_id("tuple or fixed array", ty_id, init_span);
+                    }
                 }
-                _ => {
-                    self.type_error("tuple or fixed array", ty, init_span);
-                }
-            },
+            }
             Pattern::Record { fields, span, .. } => {
-                self.check_record_destructuring(ty, fields, mutable, *span, init_span, interner);
+                // Record destructuring still uses LegacyType for now
+                let ty = self.id_to_type(ty_id);
+                self.check_record_destructuring(&ty, fields, mutable, *span, init_span, interner);
             }
             _ => {
                 // Other patterns not supported in let destructuring
