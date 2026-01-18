@@ -2,6 +2,7 @@ use std::collections::HashMap as StdHashMap;
 
 use crate::identity::{NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
+use crate::sema::implement_registry::ImplTypeId;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType, StructuralType};
 
@@ -390,16 +391,23 @@ impl Analyzer {
             }
         };
 
-        // For primitives/arrays, check implement registry (still needs LegacyType for ImplTypeId)
+        // For primitives/arrays, check implement registry (using TypeId)
         if type_def_id.is_none() {
-            let ty = self.type_arena.borrow().to_type(ty_id);
-            if let Some(type_id) =
-                ImplTypeId::from_type(&ty, &self.entity_registry.type_table, &self.entity_registry)
+            let impl_type_id = {
+                let arena = self.type_arena.borrow();
+                ImplTypeId::from_type_id(
+                    ty_id,
+                    &arena,
+                    &self.entity_registry.type_table,
+                    &self.entity_registry,
+                )
+            };
+            if let Some(impl_type_id) = impl_type_id
                 && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             {
                 return self
                     .implement_registry
-                    .get_method(&type_id, method_id)
+                    .get_method(&impl_type_id, method_id)
                     .is_some();
             }
             return false;
@@ -419,14 +427,21 @@ impl Analyzer {
             }
         }
 
-        // Check implement registry (still needs LegacyType for ImplTypeId)
-        let ty = self.type_arena.borrow().to_type(ty_id);
-        if let Some(type_id) =
-            ImplTypeId::from_type(&ty, &self.entity_registry.type_table, &self.entity_registry)
+        // Check implement registry (using TypeId)
+        let impl_type_id = {
+            let arena = self.type_arena.borrow();
+            ImplTypeId::from_type_id(
+                ty_id,
+                &arena,
+                &self.entity_registry.type_table,
+                &self.entity_registry,
+            )
+        };
+        if let Some(impl_type_id) = impl_type_id
             && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             && self
                 .implement_registry
-                .get_method(&type_id, method_id)
+                .get_method(&impl_type_id, method_id)
                 .is_some()
         {
             return true;
