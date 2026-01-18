@@ -44,14 +44,6 @@ impl Analyzer {
         self.type_display(&ty)
     }
 
-    pub(super) fn type_display_pair(&mut self, left: &LegacyType, right: &LegacyType) -> String {
-        format!(
-            "{} and {}",
-            self.type_display(left),
-            self.type_display(right)
-        )
-    }
-
     pub(super) fn type_display_pair_id(&self, left: ArenaTypeId, right: ArenaTypeId) -> String {
         format!(
             "{} and {}",
@@ -120,25 +112,6 @@ impl Analyzer {
             SemanticError::TypeMismatch {
                 expected: expected.to_string(),
                 found: found_str,
-                span: span.into(),
-            },
-            span,
-        );
-    }
-
-    /// Helper to add a type mismatch error for binary operations
-    pub(crate) fn type_error_pair(
-        &mut self,
-        expected: &str,
-        left: &LegacyType,
-        right: &LegacyType,
-        span: Span,
-    ) {
-        let found = self.type_display_pair(left, right);
-        self.add_error(
-            SemanticError::TypeMismatch {
-                expected: expected.to_string(),
-                found,
                 span: span.into(),
             },
             span,

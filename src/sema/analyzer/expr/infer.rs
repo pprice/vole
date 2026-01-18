@@ -1,6 +1,4 @@
 use super::super::*;
-use crate::sema::PrimitiveType;
-use crate::sema::compatibility::TypeCompatibility;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::LegacyType;
 
@@ -512,46 +510,6 @@ impl Analyzer {
     }
 
     /// Infer a literal's type from a type hint for bidirectional type inference.
-    /// Returns the hint type if the literal can be that type, otherwise returns
-    /// the default type for the literal.
-    ///
-    /// This is used for the `is` operator so that `42 is i32` works correctly -
-    /// since 42 CAN be i32, we type it as i32 and the `is` check returns true.
-    pub(crate) fn infer_literal_type(
-        &mut self,
-        expr: &Expr,
-        hint: &LegacyType,
-        _interner: &Interner,
-    ) -> LegacyType {
-        match &expr.kind {
-            ExprKind::IntLiteral(value) => {
-                if hint.fits_literal(*value) {
-                    hint.clone()
-                } else {
-                    self.ty_i64() // Default
-                }
-            }
-            ExprKind::FloatLiteral(_) => {
-                if matches!(
-                    hint,
-                    LegacyType::Primitive(PrimitiveType::F32)
-                        | LegacyType::Primitive(PrimitiveType::F64)
-                ) {
-                    hint.clone()
-                } else {
-                    self.ty_f64() // Default
-                }
-            }
-            // Bool, String, and Nil have only one possible type
-            ExprKind::BoolLiteral(_) => self.ty_bool(),
-            ExprKind::StringLiteral(_) => self.ty_string(),
-            ExprKind::Nil => self.ty_nil(),
-            // Not a literal - this shouldn't happen if is_literal() was checked
-            _ => self.ty_invalid_traced("fallback"),
-        }
-    }
-
-    /// TypeId version of infer_literal_type.
     /// Takes a TypeId hint and returns the hint if the literal can be that type,
     /// otherwise returns the default type for the literal.
     pub(crate) fn infer_literal_type_id(

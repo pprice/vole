@@ -346,14 +346,6 @@ impl Analyzer {
         }
     }
 
-    /// Record the resolved type for an expression, returning the type for chaining.
-    /// Interns the LegacyType to an ArenaTypeId handle for O(1) storage and comparison.
-    fn record_expr_type(&mut self, expr: &Expr, ty: LegacyType) -> LegacyType {
-        let type_id = self.type_arena.borrow_mut().from_type(&ty);
-        self.expr_types.insert(expr.id, type_id);
-        ty
-    }
-
     /// Record the resolved type for an expression using TypeId directly.
     fn record_expr_type_id(&mut self, expr: &Expr, type_id: ArenaTypeId) -> ArenaTypeId {
         self.expr_types.insert(expr.id, type_id);
