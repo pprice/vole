@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use hashbrown::HashMap;
+use std::collections::HashSet;
 
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
@@ -13,9 +14,8 @@ use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
-use crate::sema::generic::substitute_type;
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
-use crate::sema::type_arena::TypeId;
+use crate::sema::type_arena::{SemaType, TypeId};
 use crate::sema::types::NominalType;
 use crate::sema::{EntityRegistry, LegacyType};
 
@@ -187,11 +187,8 @@ impl InterfaceVtableRegistry {
         data.define_zeroinit(word_bytes * method_ids.len());
         data.set_align(word_bytes as u64);
 
-        // Convert substitutions to LegacyType for resolve_vtable_target
-        let substitutions_legacy: HashMap<NameId, LegacyType> = substitutions
-            .iter()
-            .map(|(&k, &v)| (k, ctx.arena.borrow().to_type(v)))
-            .collect();
+        // Convert concrete type to TypeId once before the loop
+        let concrete_type_id = ctx.arena.borrow_mut().from_type(concrete_type);
 
         for (index, &method_id) in method_ids.iter().enumerate() {
             let method = ctx.analyzed.entity_registry.get_method(method_id);
@@ -199,11 +196,10 @@ impl InterfaceVtableRegistry {
             let target = resolve_vtable_target(
                 ctx,
                 interface_name_id,
-                concrete_type,
+                concrete_type_id,
                 method_id,
-                &substitutions_legacy,
+                &substitutions,
             )?;
-            let concrete_type_id = ctx.arena.borrow_mut().from_type(concrete_type);
             let wrapper_id = self.compile_wrapper(
                 ctx,
                 interface_name_str,
@@ -405,25 +401,15 @@ impl InterfaceVtableRegistry {
         data.define_zeroinit(word_bytes * state.method_ids.len());
         data.set_align(word_bytes as u64);
 
-        // Convert concrete_type back to LegacyType for wrapper compilation
-        let concrete_type = ctx.arena.borrow().to_type(state.concrete_type);
-
-        // Convert substitutions to LegacyType for resolve_vtable_target
-        let substitutions_legacy: HashMap<NameId, LegacyType> = state
-            .substitutions
-            .iter()
-            .map(|(&k, &v)| (k, ctx.arena.borrow().to_type(v)))
-            .collect();
-
         for (index, &method_id) in state.method_ids.iter().enumerate() {
             let method = ctx.analyzed.entity_registry.get_method(method_id);
             let method_name_str = ctx.analyzed.name_table.display(method.name_id);
             let target = resolve_vtable_target(
                 ctx,
                 state.interface_name_id,
-                &concrete_type,
+                state.concrete_type,
                 method_id,
-                &substitutions_legacy,
+                &state.substitutions,
             )?;
             let wrapper_id = self.compile_wrapper(
                 ctx,
@@ -1148,53 +1134,61 @@ pub(crate) fn box_interface_value_id(
 fn resolve_vtable_target(
     ctx: &CompileCtx,
     interface_name_id: NameId,
-    concrete_type: &LegacyType,
+    concrete_type_id: TypeId,
     interface_method_id: MethodId,
-    substitutions: &HashMap<NameId, LegacyType>,
+    substitutions: &HashMap<NameId, TypeId>,
 ) -> Result<VtableMethod, String> {
     // Get method info from EntityRegistry
     let interface_method = ctx.analyzed.entity_registry.get_method(interface_method_id);
     let method_name_str = ctx.analyzed.name_table.display(interface_method.name_id);
 
-    // Apply substitutions to get concrete param/return types
-    let substituted_params: Vec<LegacyType> = interface_method
-        .signature
-        .params
-        .iter()
-        .map(|t| substitute_type(t, substitutions))
-        .collect();
-    let substituted_return_type =
-        substitute_type(&interface_method.signature.return_type, substitutions);
-
-    if let LegacyType::Function(func_type) = concrete_type {
-        let (param_type_ids, return_type_id) = {
-            let mut arena = ctx.arena.borrow_mut();
-            let params: Vec<TypeId> = func_type
-                .params
-                .iter()
-                .map(|p| arena.from_type(p))
-                .collect();
-            let ret = arena.from_type(&func_type.return_type);
-            (params, ret)
+    // Apply substitutions to get concrete param/return types (using TypeId-based substitution)
+    let (substituted_param_ids, substituted_return_id) = {
+        let mut arena = ctx.arena.borrow_mut();
+        // Use TypeId fields if available, otherwise convert from LegacyType
+        let param_ids: Vec<TypeId> = if let Some(ref params_id) = interface_method.signature.params_id {
+            params_id.iter().map(|&p| arena.substitute(p, substitutions)).collect()
+        } else {
+            interface_method.signature.params.iter().map(|p| {
+                let id = arena.from_type(p);
+                arena.substitute(id, substitutions)
+            }).collect()
         };
+        let ret_id = if let Some(ret_id) = interface_method.signature.return_type_id {
+            arena.substitute(ret_id, substitutions)
+        } else {
+            let id = arena.from_type(&interface_method.signature.return_type);
+            arena.substitute(id, substitutions)
+        };
+        (param_ids, ret_id)
+    };
+
+    // Check if concrete type is a function/closure
+    let fn_info = ctx.arena.borrow().unwrap_function(concrete_type_id).map(|(params, ret, is_closure)| {
+        (params.to_vec(), ret, is_closure)
+    });
+    if let Some((param_ids, return_id, _)) = fn_info {
+        let arena = ctx.arena.borrow();
+        let returns_void = matches!(arena.get(return_id), SemaType::Void);
         return Ok(VtableMethod {
-            param_count: func_type.params.len(),
-            returns_void: func_type.return_type.as_ref() == &LegacyType::Void,
-            param_type_ids,
-            return_type_id,
+            param_count: param_ids.len(),
+            returns_void,
+            param_type_ids: param_ids,
+            return_type_id: return_id,
             target: VtableMethodTarget::Function,
         });
     }
 
-    let type_id = ImplTypeId::from_type(
-        concrete_type,
+    let impl_type_id = ImplTypeId::from_type_id(
+        concrete_type_id,
+        &ctx.arena.borrow(),
         &ctx.analyzed.entity_registry.type_table,
         &ctx.analyzed.entity_registry,
     )
     .ok_or_else(|| {
         format!(
-            "cannot resolve interface method {} on {:?}",
-            method_name_str, concrete_type
+            "cannot resolve interface method {} on type {:?}",
+            method_name_str, concrete_type_id
         )
     })?;
     // Use string-based lookup for cross-interner safety (method_def is from stdlib interner)
@@ -1206,9 +1200,14 @@ fn resolve_vtable_target(
         && let Some(impl_) = ctx
             .analyzed
             .implement_registry
-            .get_method(&type_id, method_name_id)
+            .get_method(&impl_type_id, method_name_id)
     {
-        let (param_type_ids, return_type_id) = {
+        // Use TypeId fields if available for efficiency
+        let (param_type_ids, return_type_id) = if let (Some(params_id), Some(ret_id)) =
+            (&impl_.func_type.params_id, impl_.func_type.return_type_id)
+        {
+            (params_id.to_vec(), ret_id)
+        } else {
             let mut arena = ctx.arena.borrow_mut();
             let params: Vec<TypeId> = impl_
                 .func_type
@@ -1219,10 +1218,11 @@ fn resolve_vtable_target(
             let ret = arena.from_type(&impl_.func_type.return_type);
             (params, ret)
         };
+        let returns_void = matches!(ctx.arena.borrow().get(return_type_id), SemaType::Void);
         if let Some(external_info) = impl_.external_info.clone() {
             return Ok(VtableMethod {
                 param_count: impl_.func_type.params.len(),
-                returns_void: impl_.func_type.return_type.as_ref() == &LegacyType::Void,
+                returns_void,
                 param_type_ids,
                 return_type_id,
                 target: VtableMethodTarget::External(external_info),
@@ -1230,79 +1230,67 @@ fn resolve_vtable_target(
         }
         let method_info = ctx
             .impl_method_infos
-            .get(&(type_id, method_name_id))
+            .get(&(impl_type_id, method_name_id))
             .copied()
             .ok_or_else(|| "implement method info not found".to_string())?;
         return Ok(VtableMethod {
             param_count: impl_.func_type.params.len(),
-            returns_void: impl_.func_type.return_type.as_ref() == &LegacyType::Void,
+            returns_void,
             param_type_ids,
             return_type_id,
             target: VtableMethodTarget::Method(method_info),
         });
     }
 
-    // Check direct methods on class/record
-    // Returns (method_info, param_count, returns_void, params, return_type)
-    let direct_method_result: Option<(MethodInfo, usize, bool, Vec<LegacyType>, LegacyType)> =
-        (|| {
-            let method_name_id = method_name_id?;
-            let type_name_id = match concrete_type {
-                LegacyType::Nominal(NominalType::Class(class_type)) => {
-                    Some(ctx.analyzed.entity_registry.class_name_id(class_type))
-                }
-                LegacyType::Nominal(NominalType::Record(record_type)) => {
-                    Some(ctx.analyzed.entity_registry.record_name_id(record_type))
-                }
-                _ => None,
-            }?;
-            let meta = type_metadata_by_name_id(
-                ctx.type_metadata,
-                type_name_id,
-                &ctx.analyzed.entity_registry,
-                &ctx.arena.borrow(),
-            )?;
-            let method_info = meta.method_infos.get(&method_name_id).copied()?;
+    // Check direct methods on class/record using TypeId-based lookup
+    // Returns (method_info, param_type_ids, return_type_id)
+    let direct_method_result: Option<(MethodInfo, Vec<TypeId>, TypeId)> = (|| {
+        let method_name_id = method_name_id?;
+        // Get type_def_id from concrete_type_id using arena unwraps
+        let arena = ctx.arena.borrow();
+        let type_def_id = arena.unwrap_class(concrete_type_id)
+            .map(|(id, _)| id)
+            .or_else(|| arena.unwrap_record(concrete_type_id).map(|(id, _)| id))?;
+        drop(arena);
 
-            // Look up method signature via EntityRegistry to get param count, return type, and params
-            let (param_count, returns_void, params, ret_type) = ctx
-                .analyzed
-                .entity_registry
-                .type_by_name(type_name_id)
-                .and_then(|type_def_id| {
-                    ctx.analyzed
-                        .entity_registry
-                        .find_method_on_type(type_def_id, method_name_id)
-                })
-                .map(|m_id| {
-                    let sig = &ctx.analyzed.entity_registry.get_method(m_id).signature;
-                    (
-                        sig.params.len(),
-                        sig.return_type.as_ref() == &LegacyType::Void,
-                        sig.params.to_vec(),
-                        (*sig.return_type).clone(),
-                    )
-                })
-                .unwrap_or_else(|| {
-                    (
-                        substituted_params.len(),
-                        substituted_return_type == LegacyType::Void,
-                        substituted_params.clone(),
-                        substituted_return_type.clone(),
-                    )
-                });
-            Some((method_info, param_count, returns_void, params, ret_type))
-        })();
+        let type_name_id = ctx.analyzed.entity_registry.get_type(type_def_id).name_id;
+        let meta = type_metadata_by_name_id(
+            ctx.type_metadata,
+            type_name_id,
+            &ctx.analyzed.entity_registry,
+            &ctx.arena.borrow(),
+        )?;
+        let method_info = meta.method_infos.get(&method_name_id).copied()?;
 
-    if let Some((method_info, param_count, returns_void, params, ret_type)) = direct_method_result {
-        let (param_type_ids, return_type_id) = {
-            let mut arena = ctx.arena.borrow_mut();
-            let p: Vec<TypeId> = params.iter().map(|p| arena.from_type(p)).collect();
-            let r = arena.from_type(&ret_type);
-            (p, r)
-        };
+        // Look up method signature via EntityRegistry - prefer TypeId fields
+        let (param_ids, ret_id) = ctx
+            .analyzed
+            .entity_registry
+            .find_method_on_type(type_def_id, method_name_id)
+            .and_then(|m_id| {
+                let sig = &ctx.analyzed.entity_registry.get_method(m_id).signature;
+                // Use TypeId fields if available
+                if let (Some(params_id), Some(ret_id)) = (&sig.params_id, sig.return_type_id) {
+                    Some((params_id.to_vec(), ret_id))
+                } else {
+                    // Fall back to from_type conversion
+                    let mut arena = ctx.arena.borrow_mut();
+                    let params: Vec<TypeId> = sig.params.iter().map(|p| arena.from_type(p)).collect();
+                    let ret = arena.from_type(&sig.return_type);
+                    Some((params, ret))
+                }
+            })
+            .unwrap_or_else(|| {
+                // Use substituted types as fallback
+                (substituted_param_ids.clone(), substituted_return_id)
+            });
+        Some((method_info, param_ids, ret_id))
+    })();
+
+    if let Some((method_info, param_type_ids, return_type_id)) = direct_method_result {
+        let returns_void = matches!(ctx.arena.borrow().get(return_type_id), SemaType::Void);
         return Ok(VtableMethod {
-            param_count,
+            param_count: param_type_ids.len(),
             returns_void,
             param_type_ids,
             return_type_id,
@@ -1313,13 +1301,13 @@ fn resolve_vtable_target(
     // Fall back to interface default if method has one
     if interface_method.has_default {
         // Check for default external binding via EntityRegistry
-        if let Some(interface_type_id) =
+        if let Some(interface_type_def_id) =
             ctx.analyzed.entity_registry.type_by_name(interface_name_id)
             && let Some(method_name_id) = method_name_id
             && let Some(found_method_id) = ctx
                 .analyzed
                 .entity_registry
-                .find_method_on_type(interface_type_id, method_name_id)
+                .find_method_on_type(interface_type_def_id, method_name_id)
             && let Some(external_info) = ctx
                 .analyzed
                 .entity_registry
@@ -1327,7 +1315,12 @@ fn resolve_vtable_target(
         {
             // For external bindings, use the original interface method signature.
             // The Rust implementation handles type dispatch, so we don't need substituted types.
-            let (param_type_ids, return_type_id) = {
+            // Prefer TypeId fields if available
+            let (param_type_ids, return_type_id) = if let (Some(params_id), Some(ret_id)) =
+                (&interface_method.signature.params_id, interface_method.signature.return_type_id)
+            {
+                (params_id.to_vec(), ret_id)
+            } else {
                 let mut arena = ctx.arena.borrow_mut();
                 let params: Vec<TypeId> = interface_method
                     .signature
@@ -1338,9 +1331,10 @@ fn resolve_vtable_target(
                 let ret = arena.from_type(&interface_method.signature.return_type);
                 (params, ret)
             };
+            let returns_void = matches!(ctx.arena.borrow().get(return_type_id), SemaType::Void);
             return Ok(VtableMethod {
                 param_count: interface_method.signature.params.len(),
-                returns_void: interface_method.signature.return_type.as_ref() == &LegacyType::Void,
+                returns_void,
                 param_type_ids,
                 return_type_id,
                 target: VtableMethodTarget::External(external_info.clone()),
@@ -1351,7 +1345,7 @@ fn resolve_vtable_target(
 
     Err(CodegenError::not_found(
         "method implementation",
-        format!("{} on {:?}", method_name_str, concrete_type),
+        format!("{} on type {:?}", method_name_str, concrete_type_id),
     )
     .into())
 }
