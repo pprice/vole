@@ -1,10 +1,9 @@
 use super::super::*;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::LegacyType;
 
 impl Analyzer {
     /// Check expression against expected type and return TypeId directly.
-    /// This is the primary entry point - uses TypeId throughout.
+    /// Uses TypeId throughout for bidirectional type checking.
     pub(crate) fn check_expr_expecting_id(
         &mut self,
         expr: &Expr,
@@ -13,19 +12,6 @@ impl Analyzer {
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         let ty_id = self.check_expr_expecting_inner_id(expr, expected, interner)?;
         Ok(self.record_expr_type_id(expr, ty_id))
-    }
-
-    /// Check expression against an expected type (bidirectional type checking)
-    /// LegacyType version for compatibility - wraps the TypeId version.
-    pub(crate) fn check_expr_expecting(
-        &mut self,
-        expr: &Expr,
-        expected: Option<&LegacyType>,
-        interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
-        let expected_id = expected.map(|t| self.type_to_id(t));
-        let ty_id = self.check_expr_expecting_id(expr, expected_id, interner)?;
-        Ok(self.type_arena.borrow().to_type(ty_id))
     }
 
     fn check_expr_expecting_inner_id(

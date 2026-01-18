@@ -445,11 +445,10 @@ impl Analyzer {
                 self.add_wrong_arg_count(func_type.params.len(), method_call.args.len(), expr.span);
             }
 
-            // Check argument types
+            // Check argument types using TypeId directly
             for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
-                let arg_ty = self.check_expr_expecting(arg, Some(param_ty), interner)?;
-                let arg_ty_id = self.type_to_id(&arg_ty);
                 let param_ty_id = self.type_to_id(param_ty);
+                let arg_ty_id = self.check_expr_expecting_id(arg, Some(param_ty_id), interner)?;
                 if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
                     self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
                 }

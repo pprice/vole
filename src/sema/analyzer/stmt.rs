@@ -45,13 +45,16 @@ impl Analyzer {
                             }
                         }
 
-                        let declared_type =
-                            let_stmt.ty.as_ref().map(|t| self.resolve_type(t, interner));
-                        let init_type =
-                            self.check_expr_expecting(init_expr, declared_type.as_ref(), interner)?;
+                        // Use TypeId throughout to avoid LegacyType materialization
+                        let declared_type_id = let_stmt.ty.as_ref().map(|t| {
+                            let ty = self.resolve_type(t, interner);
+                            self.type_to_id(&ty)
+                        });
+                        let init_type_id =
+                            self.check_expr_expecting_id(init_expr, declared_type_id, interner)?;
 
                         // Check if trying to use void return value
-                        if init_type == LegacyType::Void {
+                        if init_type_id == ArenaTypeId::VOID {
                             self.add_error(
                                 SemanticError::VoidReturnUsed {
                                     span: init_expr.span.into(),
@@ -60,17 +63,15 @@ impl Analyzer {
                             );
                         }
 
-                        let var_type = declared_type.unwrap_or(init_type);
+                        let var_type_id = declared_type_id.unwrap_or(init_type_id);
 
                         // If this is a type alias (RHS is a type expression), store it
-                        if var_type == LegacyType::MetaType
+                        if var_type_id == ArenaTypeId::METATYPE
                             && let ExprKind::TypeLiteral(type_expr) = &init_expr.kind
                         {
                             let aliased_type = self.resolve_type(type_expr, interner);
                             self.register_type_alias(let_stmt.name, aliased_type, interner);
                         }
-
-                        let var_type_id = self.type_arena.borrow_mut().from_type(&var_type);
                         self.scope.define(
                             let_stmt.name,
                             Variable {
