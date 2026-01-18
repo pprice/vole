@@ -267,8 +267,8 @@ impl Analyzer {
             }
 
             // Check if it's a variable with a non-function type
-            if let Some(var_ty) = self.get_variable_type(*sym) {
-                let ty = self.type_display(&var_ty);
+            if let Some(var_ty_id) = self.get_variable_type_id(*sym) {
+                let ty = self.type_display_id(var_ty_id);
                 self.add_error(
                     SemanticError::NotCallable {
                         ty,

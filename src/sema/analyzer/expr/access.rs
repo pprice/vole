@@ -514,7 +514,7 @@ impl Analyzer {
             // Named types: Point.create(), MyClass.static_method()
             ExprKind::Identifier(type_sym) => {
                 // Only consider this a static call if it's not a variable
-                if self.get_variable_type(*type_sym).is_some() {
+                if self.get_variable_type_id(*type_sym).is_some() {
                     return None;
                 }
                 let type_name_str = interner.resolve(*type_sym).to_string();

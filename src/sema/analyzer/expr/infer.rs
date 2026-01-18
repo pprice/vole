@@ -339,22 +339,19 @@ impl Analyzer {
             }
 
             ExprKind::Is(is_expr) => {
-                let tested_type = self.resolve_type(&is_expr.type_expr, interner);
+                let tested_type_id = self.resolve_type_id(&is_expr.type_expr, interner);
 
                 // For literals, use bidirectional type inference so `42 is i32` works
                 // For non-literals, just check normally (no type coercion)
                 let value_type_id = if is_expr.value.is_literal() {
                     // Try to infer literal's type from tested type (won't error on mismatch)
-                    let inferred = self.infer_literal_type(&is_expr.value, &tested_type, interner);
+                    let inferred_id = self.infer_literal_type_id(&is_expr.value, tested_type_id, interner);
                     // Record the inferred type so codegen uses it
-                    self.record_expr_type(&is_expr.value, inferred.clone());
-                    self.type_to_id(&inferred)
+                    self.record_expr_type_id(&is_expr.value, inferred_id);
+                    inferred_id
                 } else {
                     self.check_expr(&is_expr.value, interner)?
                 };
-
-                // Warn/error if tested type is not a variant of value's union (using TypeId)
-                let tested_type_id = self.type_to_id(&tested_type);
                 let union_variants = self
                     .type_arena
                     .borrow()
@@ -363,7 +360,7 @@ impl Analyzer {
                 if let Some(variants) = union_variants
                     && !variants.contains(&tested_type_id)
                 {
-                    let tested = self.type_display(&tested_type);
+                    let tested = self.type_display_id(tested_type_id);
                     let union_type = self.type_display_id(value_type_id);
                     self.add_error(
                         SemanticError::IsNotVariant {
@@ -551,6 +548,40 @@ impl Analyzer {
             ExprKind::Nil => self.ty_nil(),
             // Not a literal - this shouldn't happen if is_literal() was checked
             _ => self.ty_invalid_traced("fallback"),
+        }
+    }
+
+    /// TypeId version of infer_literal_type.
+    /// Takes a TypeId hint and returns the hint if the literal can be that type,
+    /// otherwise returns the default type for the literal.
+    pub(crate) fn infer_literal_type_id(
+        &mut self,
+        expr: &Expr,
+        hint: ArenaTypeId,
+        _interner: &Interner,
+    ) -> ArenaTypeId {
+        match &expr.kind {
+            ExprKind::IntLiteral(value) => {
+                // Use TypeArena's literal_fits_id which handles primitives and unions
+                if self.type_arena.borrow().literal_fits_id(*value, hint) {
+                    hint
+                } else {
+                    self.ty_i64_id() // Default
+                }
+            }
+            ExprKind::FloatLiteral(_) => {
+                if hint == ArenaTypeId::F32 || hint == ArenaTypeId::F64 {
+                    hint
+                } else {
+                    self.ty_f64_id() // Default
+                }
+            }
+            // Bool, String, and Nil have only one possible type
+            ExprKind::BoolLiteral(_) => self.ty_bool_id(),
+            ExprKind::StringLiteral(_) => self.ty_string_id(),
+            ExprKind::Nil => self.ty_nil_id(),
+            // Not a literal - this shouldn't happen if is_literal() was checked
+            _ => self.ty_invalid_traced_id("fallback"),
         }
     }
 }

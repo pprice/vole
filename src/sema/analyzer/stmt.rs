@@ -402,7 +402,7 @@ impl Analyzer {
     }
 
     /// Analyze a raise statement
-    fn analyze_raise_stmt(&mut self, stmt: &RaiseStmt, interner: &Interner) -> LegacyType {
+    fn analyze_raise_stmt(&mut self, stmt: &RaiseStmt, interner: &Interner) -> ArenaTypeId {
         // Check we're in a fallible function
         let Some(error_type) = self.current_function_error_type else {
             self.add_error(
@@ -411,7 +411,7 @@ impl Analyzer {
                 },
                 stmt.span,
             );
-            return self.ty_invalid();
+            return self.ty_invalid_id();
         };
 
         // Look up the error type via resolver
@@ -427,7 +427,7 @@ impl Analyzer {
                 },
                 stmt.span,
             );
-            return self.ty_invalid();
+            return self.ty_invalid_id();
         };
 
         let type_def = self.entity_registry.get_type(type_id);
@@ -440,7 +440,7 @@ impl Analyzer {
                 },
                 stmt.span,
             );
-            return self.ty_invalid();
+            return self.ty_invalid_id();
         }
 
         // Get the error type name for error messages
@@ -551,7 +551,7 @@ impl Analyzer {
             );
         }
 
-        self.ty_void() // raise doesn't produce a value - it transfers control
+        self.ty_void_id() // raise doesn't produce a value - it transfers control
     }
 
     /// Analyze a try expression (propagation)
