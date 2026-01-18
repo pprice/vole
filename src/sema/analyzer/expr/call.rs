@@ -1,7 +1,7 @@
 use super::super::*;
 use crate::identity::{NameId, Namer};
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::{LegacyType, NominalType};
+use crate::sema::types::LegacyType;
 use std::collections::HashMap;
 
 impl Analyzer {
@@ -197,40 +197,45 @@ impl Analyzer {
                 return Ok(concrete_return_id);
             }
 
-            // Check if it's a variable with a function type
-            if let Some(LegacyType::Function(func_type)) = self.get_variable_type(*sym) {
-                // Calling a function-typed variable - conservatively mark side effects
-                if self.in_lambda() {
-                    self.mark_lambda_has_side_effects();
+            // Check if it's a variable with a function type (using TypeId path)
+            if let Some(var_type_id) = self.get_variable_type_id(*sym) {
+                let arena = self.type_arena.borrow();
+                if let Some((params, ret, _is_closure)) = arena.unwrap_function(var_type_id) {
+                    let params = params.clone();
+                    let ret = ret;
+                    drop(arena);
+                    // Calling a function-typed variable - conservatively mark side effects
+                    if self.in_lambda() {
+                        self.mark_lambda_has_side_effects();
+                    }
+                    return self.check_call_args_id(
+                        &call.args,
+                        &params,
+                        ret,
+                        expr.span,
+                        interner,
+                    );
                 }
-                self.check_call_args(
-                    &call.args,
-                    &func_type.params,
-                    expr.span,
-                    true, // with_inference
-                    interner,
-                )?;
-                return Ok(self.type_to_id(&func_type.return_type));
-            }
-
-            // Check if it's a variable with a functional interface type
-            if let Some(LegacyType::Nominal(NominalType::Interface(iface))) =
-                self.get_variable_type(*sym)
-                && let Some(func_type) =
-                    self.get_functional_interface_type_by_type_def_id(iface.type_def_id)
-            {
-                // Calling a functional interface - treat like a closure call
-                if self.in_lambda() {
-                    self.mark_lambda_has_side_effects();
+                // Check if it's a variable with a functional interface type
+                if let Some((type_def_id, _type_args)) = arena.unwrap_interface(var_type_id) {
+                    drop(arena);
+                    if let Some(func_type) =
+                        self.get_functional_interface_type_by_type_def_id(type_def_id)
+                    {
+                        // Calling a functional interface - treat like a closure call
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                        }
+                        self.check_call_args(
+                            &call.args,
+                            &func_type.params,
+                            expr.span,
+                            true, // with_inference
+                            interner,
+                        )?;
+                        return Ok(self.type_to_id(&func_type.return_type));
+                    }
                 }
-                self.check_call_args(
-                    &call.args,
-                    &func_type.params,
-                    expr.span,
-                    true, // with_inference
-                    interner,
-                )?;
-                return Ok(self.type_to_id(&func_type.return_type));
             }
 
             // Check if it's a known builtin function

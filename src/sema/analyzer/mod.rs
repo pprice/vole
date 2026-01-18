@@ -533,17 +533,6 @@ impl Analyzer {
         }
     }
 
-    /// Get variable type with flow-sensitive overrides
-    fn get_variable_type(&self, sym: Symbol) -> Option<LegacyType> {
-        // Check overrides first (for narrowed types inside if-blocks)
-        if let Some(ty) = self.type_overrides.get(&sym) {
-            return Some(self.type_arena.borrow().to_type(*ty));
-        }
-        // Then check scope
-        let arena = self.type_arena.borrow();
-        self.scope.get(sym).map(|v| arena.to_type(v.ty))
-    }
-
     /// Get variable type as TypeId with flow-sensitive overrides
     fn get_variable_type_id(&self, sym: Symbol) -> Option<ArenaTypeId> {
         // Check overrides first (for narrowed types inside if-blocks)

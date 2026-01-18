@@ -6,7 +6,7 @@ impl Analyzer {
     /// Check call arguments against expected parameter types (TypeId version).
     ///
     /// This version takes TypeIds directly and avoids LegacyType conversion.
-    /// Use this for simple call checking without type inference.
+    /// Uses check_expr_expecting_id for inference (integer literals, union coercion).
     pub(crate) fn check_call_args_id(
         &mut self,
         args: &[Expr],
@@ -22,7 +22,9 @@ impl Analyzer {
 
         // Check each argument against its expected parameter type
         for (arg, &param_ty_id) in args.iter().zip(param_type_ids.iter()) {
-            let arg_ty_id = self.check_expr(arg, interner)?;
+            // Use check_expr_expecting_id to enable integer literal inference
+            // and union type coercion (e.g., passing i32 literal to union param)
+            let arg_ty_id = self.check_expr_expecting_id(arg, Some(param_ty_id), interner)?;
             if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
                 self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
             }

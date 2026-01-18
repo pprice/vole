@@ -200,28 +200,23 @@ impl Analyzer {
         };
 
         // Substitute using arena
-        let mut arena = self.type_arena.borrow_mut();
-        let new_params_id: crate::sema::type_arena::TypeIdVec = params_id
-            .iter()
-            .map(|&p| arena.substitute(p, substitutions))
-            .collect();
-        let new_return_type_id = arena.substitute(return_type_id, substitutions);
+        let (new_params_id, new_return_type_id) = {
+            let mut arena = self.type_arena.borrow_mut();
+            let params: crate::sema::type_arena::TypeIdVec = params_id
+                .iter()
+                .map(|&p| arena.substitute(p, substitutions))
+                .collect();
+            let ret = arena.substitute(return_type_id, substitutions);
+            (params, ret)
+        };
 
-        // Convert back to LegacyType for the FunctionType
-        let new_params: std::sync::Arc<[LegacyType]> = new_params_id
-            .iter()
-            .map(|&id| arena.to_type(id))
-            .collect::<Vec<_>>()
-            .into();
-        let new_return_type = arena.to_type(new_return_type_id);
-
-        FunctionType {
-            params: new_params,
-            return_type: Box::new(new_return_type),
-            is_closure: func_with_ids.is_closure,
-            params_id: Some(new_params_id),
-            return_type_id: Some(new_return_type_id),
-        }
+        // Build FunctionType from substituted TypeIds
+        FunctionType::from_ids(
+            &new_params_id,
+            new_return_type_id,
+            func_with_ids.is_closure,
+            &self.type_arena.borrow(),
+        )
     }
 
     /// Get TypeDefId for a Type if it's registered in EntityRegistry
