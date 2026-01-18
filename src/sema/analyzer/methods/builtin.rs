@@ -12,21 +12,18 @@ impl Analyzer {
         args: &[Expr],
         interner: &Interner,
     ) -> Option<FunctionType> {
-        let method_type = |params: Vec<LegacyType>, return_type: LegacyType| FunctionType {
-            params: params.into(),
-            return_type: Box::new(return_type),
-            is_closure: false,
-            params_id: None,
-            return_type_id: None,
-        };
-
         match (object_type, method_name) {
             // Array.length() -> i64
             (LegacyType::Array(_), "length") => {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                Some(method_type(vec![], self.ty_i64()))
+                Some(FunctionType::from_ids(
+                    &[],
+                    self.ty_i64_id(),
+                    false,
+                    &self.type_arena.borrow(),
+                ))
             }
             // Array.iter() -> Iterator<T>
             (LegacyType::Array(elem_ty), "iter") => {
@@ -35,32 +32,52 @@ impl Analyzer {
                 }
                 let iter_type =
                     self.interface_type("Iterator", vec![*elem_ty.clone()], interner)?;
-                Some(method_type(vec![], iter_type))
+                Some(FunctionType::new_with_arena(
+                    Vec::<LegacyType>::new(),
+                    iter_type,
+                    false,
+                    &mut self.type_arena.borrow_mut(),
+                ))
             }
             // Range.iter() -> Iterator<i64>
             (LegacyType::Range, "iter") => {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                let i64_ty = self.ty_i64();
+                let i64_ty = self.type_arena.borrow().to_type(self.ty_i64_id());
                 let iter_type = self.interface_type("Iterator", vec![i64_ty], interner)?;
-                Some(method_type(vec![], iter_type))
+                Some(FunctionType::new_with_arena(
+                    Vec::<LegacyType>::new(),
+                    iter_type,
+                    false,
+                    &mut self.type_arena.borrow_mut(),
+                ))
             }
             // String.length() -> i64
             (LegacyType::Primitive(PrimitiveType::String), "length") => {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                Some(method_type(vec![], self.ty_i64()))
+                Some(FunctionType::from_ids(
+                    &[],
+                    self.ty_i64_id(),
+                    false,
+                    &self.type_arena.borrow(),
+                ))
             }
             // String.iter() -> Iterator<string>
             (LegacyType::Primitive(PrimitiveType::String), "iter") => {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                let string_ty = self.ty_string();
+                let string_ty = self.type_arena.borrow().to_type(self.ty_string_id());
                 let iter_type = self.interface_type("Iterator", vec![string_ty], interner)?;
-                Some(method_type(vec![], iter_type))
+                Some(FunctionType::new_with_arena(
+                    Vec::<LegacyType>::new(),
+                    iter_type,
+                    false,
+                    &mut self.type_arena.borrow_mut(),
+                ))
             }
             _ => None,
         }

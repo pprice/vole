@@ -5,6 +5,7 @@
 // with existing code. The _id variants return TypeId directly for Phase 2+ migration.
 
 #![allow(unused)] // Phase 2 infrastructure - methods will be used as callers migrate
+#![allow(deprecated)] // Deprecated methods calling other deprecated methods is expected
 
 use super::*;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
