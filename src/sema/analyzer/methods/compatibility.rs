@@ -53,9 +53,8 @@ impl Analyzer {
             return true;
         }
 
-        // Check structural compatibility (needs LegacyType for now)
-        let from_ty = self.type_arena.borrow().to_type(from);
-        if self.satisfies_interface_via_entity_registry(&from_ty, to_iface_id, interner) {
+        // Check structural compatibility using TypeId
+        if self.satisfies_interface_by_type_def_id_typeid(from, to_iface_id, interner) {
             return true;
         }
 

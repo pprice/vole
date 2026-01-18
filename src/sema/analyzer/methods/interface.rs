@@ -255,7 +255,7 @@ impl Analyzer {
     /// Check if a type structurally satisfies an interface by TypeDefId (TypeId version)
     ///
     /// This is the TypeId-based version that avoids LegacyType conversion.
-    fn satisfies_interface_by_type_def_id_typeid(
+    pub(crate) fn satisfies_interface_by_type_def_id_typeid(
         &mut self,
         ty_id: ArenaTypeId,
         interface_id: TypeDefId,
