@@ -1,6 +1,5 @@
 use super::super::*;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::LegacyType;
 
 impl Analyzer {
     /// Check if a pattern is a type pattern (matches a class/record/primitive type name)
@@ -71,12 +70,18 @@ impl Analyzer {
         // Convert to LegacyType for pattern checking (still needed for some paths)
         let scrutinee_type = self.type_arena.borrow().to_type(scrutinee_type_id);
 
-        // Check each arm, collect result types
-        let mut result_type: Option<LegacyType> = None;
+        // Check each arm, collect result types (using TypeId)
+        let mut result_type_id: Option<ArenaTypeId> = None;
         let mut first_arm_span: Option<Span> = None;
 
-        // Track covered types for wildcard narrowing
-        let mut covered_types: Vec<LegacyType> = Vec::new();
+        // Track covered types for wildcard narrowing (using TypeId)
+        let mut covered_type_ids: Vec<ArenaTypeId> = Vec::new();
+
+        // Get union variants if scrutinee is a union type (for wildcard narrowing)
+        let union_variants: Option<Vec<ArenaTypeId>> = {
+            let arena = self.type_arena.borrow();
+            arena.unwrap_union(scrutinee_type_id).map(|v| v.to_vec())
+        };
 
         for arm in &match_expr.arms {
             // Enter new scope for arm (bindings live here)
@@ -87,40 +92,42 @@ impl Analyzer {
 
             // Check pattern and get narrowing info
             let narrowed_type = self.check_pattern(&arm.pattern, &scrutinee_type, interner);
+            let narrowed_type_id = narrowed_type
+                .as_ref()
+                .map(|ty| self.type_arena.borrow_mut().from_type(ty));
 
             // For wildcard patterns on union types, compute remaining type
-            let effective_narrowed = if matches!(arm.pattern, Pattern::Wildcard(_))
+            let effective_narrowed_id = if matches!(arm.pattern, Pattern::Wildcard(_))
                 || matches!(arm.pattern, Pattern::Identifier { .. }
                     if !self.is_type_pattern(&arm.pattern, interner))
             {
                 // Wildcard or binding pattern - narrow to remaining types
-                if let LegacyType::Union(variants) = &scrutinee_type {
+                if let Some(ref variants) = union_variants {
                     let remaining: Vec<_> = variants
                         .iter()
-                        .filter(|v| !covered_types.contains(v))
-                        .cloned()
+                        .filter(|v| !covered_type_ids.contains(v))
+                        .copied()
                         .collect();
                     if remaining.len() == 1 {
-                        Some(remaining[0].clone())
+                        Some(remaining[0])
                     } else if remaining.len() > 1 {
-                        Some(LegacyType::Union(remaining.into()))
+                        Some(self.type_arena.borrow_mut().union(remaining))
                     } else {
-                        narrowed_type
+                        narrowed_type_id
                     }
                 } else {
-                    narrowed_type
+                    narrowed_type_id
                 }
             } else {
                 // Track this type as covered for future wildcard narrowing
-                if let Some(ref ty) = narrowed_type {
-                    covered_types.push(ty.clone());
+                if let Some(ty_id) = narrowed_type_id {
+                    covered_type_ids.push(ty_id);
                 }
-                narrowed_type
+                narrowed_type_id
             };
 
             // Apply type narrowing if scrutinee is an identifier and pattern provides narrowing
-            if let (Some(sym), Some(narrow_ty)) = (scrutinee_sym, &effective_narrowed) {
-                let narrow_ty_id = self.type_arena.borrow_mut().from_type(narrow_ty);
+            if let (Some(sym), Some(narrow_ty_id)) = (scrutinee_sym, effective_narrowed_id) {
                 self.type_overrides.insert(sym, narrow_ty_id);
             }
 
@@ -140,20 +147,20 @@ impl Analyzer {
             }
 
             // Check body expression with expected type from first arm (if known)
-            let body_type = self.check_expr_expecting(&arm.body, result_type.as_ref(), interner)?;
+            let body_type_id = self.check_expr_expecting_id(&arm.body, result_type_id, interner)?;
 
             // Restore type overrides
             self.type_overrides = saved_overrides;
 
             // Unify with previous arms
-            match &result_type {
+            match result_type_id {
                 None => {
-                    result_type = Some(body_type);
+                    result_type_id = Some(body_type_id);
                     first_arm_span = Some(arm.span);
                 }
-                Some(expected) if *expected != body_type => {
-                    let expected_str = self.type_display(expected);
-                    let found = self.type_display(&body_type);
+                Some(expected_id) if expected_id != body_type_id => {
+                    let expected_str = self.type_display_id(expected_id);
+                    let found = self.type_display_id(body_type_id);
                     self.add_error(
                         SemanticError::MatchArmTypeMismatch {
                             expected: expected_str,
@@ -175,6 +182,6 @@ impl Analyzer {
             }
         }
 
-        Ok(self.type_to_id(&result_type.unwrap_or(LegacyType::Void)))
+        Ok(result_type_id.unwrap_or(ArenaTypeId::VOID))
     }
 }

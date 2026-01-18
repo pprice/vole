@@ -32,7 +32,7 @@ use crate::sema::resolve::resolve_type_with_arena;
 use crate::sema::type_arena::{TypeArena, TypeId as ArenaTypeId};
 use crate::sema::types::{ConstantValue, LegacyType, ModuleType, NominalType, StructuralType};
 use crate::sema::{
-    ClassType, ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField,
+    ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField,
     compatibility::TypeCompatibility,
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},

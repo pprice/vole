@@ -1,7 +1,7 @@
 // src/sema/analyzer/stmt.rs
 
 use super::*;
-use crate::sema::types::LegacyType;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 
 impl Analyzer {
     pub(crate) fn check_block(
@@ -125,13 +125,13 @@ impl Analyzer {
                     );
                 }
 
-                // Check if condition is `x is T` for flow-sensitive narrowing
+                // Check if condition is `x is T` for flow-sensitive narrowing (using TypeId)
                 let narrowing_info = if let ExprKind::Is(is_expr) = &if_stmt.condition.kind {
                     if let ExprKind::Identifier(sym) = &is_expr.value.kind {
-                        let tested_type = self.resolve_type(&is_expr.type_expr, interner);
+                        let tested_type_id = self.resolve_type_id(&is_expr.type_expr, interner);
                         // Get original type of variable for else-branch narrowing
-                        let original_type = self.get_variable_type(*sym);
-                        Some((*sym, tested_type, original_type))
+                        let original_type_id = self.get_variable_type_id(*sym);
+                        Some((*sym, tested_type_id, original_type_id))
                     } else {
                         None
                     }
@@ -145,9 +145,8 @@ impl Analyzer {
                 // Then branch (with narrowing if applicable)
                 let parent = std::mem::take(&mut self.scope);
                 self.scope = Scope::with_parent(parent);
-                if let Some((sym, narrowed_type, _)) = &narrowing_info {
-                    let narrowed_type_id = self.type_arena.borrow_mut().from_type(narrowed_type);
-                    self.type_overrides.insert(*sym, narrowed_type_id);
+                if let Some((sym, narrowed_type_id, _)) = &narrowing_info {
+                    self.type_overrides.insert(*sym, *narrowed_type_id);
                 }
                 self.check_block(&if_stmt.then_branch, interner)?;
                 if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
@@ -162,24 +161,27 @@ impl Analyzer {
                     self.scope = Scope::with_parent(parent);
 
                     // Apply else-branch narrowing: if x is T, else branch has x: (original - T)
-                    if let Some((sym, tested_type, Some(LegacyType::Union(variants)))) =
-                        &narrowing_info
-                    {
-                        // Remove tested type from union
-                        let remaining: Vec<_> = variants
-                            .iter()
-                            .filter(|v| *v != tested_type)
-                            .cloned()
-                            .collect();
-                        if remaining.len() == 1 {
-                            // Single type remaining - narrow to that
-                            let narrow_id = self.type_arena.borrow_mut().from_type(&remaining[0]);
-                            self.type_overrides.insert(*sym, narrow_id);
-                        } else if remaining.len() > 1 {
-                            // Multiple types remaining - narrow to smaller union
-                            let narrow_type = LegacyType::Union(remaining.into());
-                            let narrow_id = self.type_arena.borrow_mut().from_type(&narrow_type);
-                            self.type_overrides.insert(*sym, narrow_id);
+                    // Using TypeId - check if original type is a union
+                    if let Some((sym, tested_type_id, Some(original_type_id))) = &narrowing_info {
+                        let union_variants: Option<Vec<ArenaTypeId>> = {
+                            let arena = self.type_arena.borrow();
+                            arena.unwrap_union(*original_type_id).map(|v| v.to_vec())
+                        };
+                        if let Some(variants) = union_variants {
+                            // Remove tested type from union
+                            let remaining: Vec<_> = variants
+                                .iter()
+                                .filter(|&&v| v != *tested_type_id)
+                                .copied()
+                                .collect();
+                            if remaining.len() == 1 {
+                                // Single type remaining - narrow to that
+                                self.type_overrides.insert(*sym, remaining[0]);
+                            } else if remaining.len() > 1 {
+                                // Multiple types remaining - narrow to smaller union
+                                let narrow_id = self.type_arena.borrow_mut().union(remaining);
+                                self.type_overrides.insert(*sym, narrow_id);
+                            }
                         }
                     }
 
