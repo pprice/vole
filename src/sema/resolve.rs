@@ -74,32 +74,37 @@ fn interface_instance(
                     method.signature.clone().with_interned_ids(&mut arena)
                 };
 
-                // Substitute using TypeId
-                let new_params: Vec<LegacyType> = sig
+                // Substitute using TypeId - keep both TypeId and LegacyType versions
+                let (new_params, new_params_id): (Vec<LegacyType>, Option<TypeIdVec>) = sig
                     .params_id
                     .as_ref()
                     .map(|ids| {
-                        ids.iter()
-                            .map(|&p| {
-                                let substituted = arena.substitute(p, &substitutions);
-                                arena.to_type(substituted)
-                            })
-                            .collect()
+                        let substituted_ids: TypeIdVec = ids
+                            .iter()
+                            .map(|&p| arena.substitute(p, &substitutions))
+                            .collect();
+                        let legacy: Vec<LegacyType> = substituted_ids
+                            .iter()
+                            .map(|&id| arena.to_type(id))
+                            .collect();
+                        (legacy, Some(substituted_ids))
                     })
-                    .unwrap_or_else(|| method.signature.params.to_vec());
-                let new_return = sig
+                    .unwrap_or_else(|| (method.signature.params.to_vec(), None));
+                let (new_return, new_return_id): (LegacyType, Option<TypeId>) = sig
                     .return_type_id
                     .map(|r| {
                         let substituted = arena.substitute(r, &substitutions);
-                        arena.to_type(substituted)
+                        (arena.to_type(substituted), Some(substituted))
                     })
-                    .unwrap_or_else(|| (*method.signature.return_type).clone());
+                    .unwrap_or_else(|| ((*method.signature.return_type).clone(), None));
 
                 InterfaceMethodType {
                     name: method.name_id,
                     params: new_params.into(),
                     return_type: Box::new(new_return),
                     has_default: method.has_default,
+                    params_id: new_params_id,
+                    return_type_id: new_return_id,
                 }
             })
             .collect()
@@ -131,6 +136,8 @@ fn interface_instance(
                         &substitutions,
                     )),
                     has_default: method.has_default,
+                    params_id: None, // No arena available in fallback path
+                    return_type_id: None,
                 }
             })
             .collect()

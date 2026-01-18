@@ -9,7 +9,7 @@ use std::sync::Arc;
 use smallvec::SmallVec;
 
 use crate::identity::{NameId, TypeDefId};
-use crate::sema::type_arena::TypeIdVec;
+use crate::sema::type_arena::{TypeId, TypeIdVec};
 
 use super::LegacyType;
 
@@ -43,7 +43,7 @@ impl NominalType {
 
     /// Get type arguments as TypeIds for arena-based substitution.
     /// Returns empty slice for errors.
-    pub fn type_args_id(&self) -> &[crate::sema::type_arena::TypeId] {
+    pub fn type_args_id(&self) -> &[TypeId] {
         match self {
             NominalType::Class(c) => &c.type_args_id,
             NominalType::Record(r) => &r.type_args_id,
@@ -234,6 +234,10 @@ pub struct InterfaceMethodType {
     pub params: Arc<[LegacyType]>,
     pub return_type: Box<LegacyType>,
     pub has_default: bool, // True if interface provides default implementation
+    /// Interned parameter types (parallel to params, for efficient substitution)
+    pub params_id: Option<TypeIdVec>,
+    /// Interned return type (parallel to return_type, for efficient substitution)
+    pub return_type_id: Option<TypeId>,
 }
 
 /// Error type definition (e.g., DivByZero, OutOfRange { value: i32 })

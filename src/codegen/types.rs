@@ -356,6 +356,8 @@ fn build_interface_type_from_entity(
                 params: method.signature.params.clone(),
                 return_type: Box::new((*method.signature.return_type).clone()),
                 has_default: method.has_default,
+                params_id: method.signature.params_id.clone(),
+                return_type_id: method.signature.return_type_id,
             }
         })
         .collect();
@@ -703,6 +705,8 @@ pub(crate) fn resolve_type_expr_with_metadata(
                                         &substitutions,
                                     )),
                                     has_default: method.has_default,
+                                    params_id: None, // LegacyType substitution path
+                                    return_type_id: None,
                                 }
                             })
                             .collect();

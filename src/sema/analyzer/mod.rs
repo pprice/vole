@@ -469,7 +469,7 @@ impl Analyzer {
                     .map(|r| arena.substitute(r, &substitutions))
                     .unwrap_or_else(|| arena.void());
 
-                // Convert back to LegacyType for InterfaceMethodType
+                // Convert to LegacyType for InterfaceMethodType (keep TypeIds too)
                 let new_params: std::sync::Arc<[LegacyType]> = new_params_id
                     .iter()
                     .map(|&id| arena.to_type(id))
@@ -482,6 +482,8 @@ impl Analyzer {
                     params: new_params,
                     return_type: Box::new(new_return),
                     has_default: method.has_default,
+                    params_id: Some(new_params_id.clone()),
+                    return_type_id: Some(new_return_id),
                 }
             })
             .collect();
