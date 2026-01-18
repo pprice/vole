@@ -1,5 +1,3 @@
-use std::collections::HashMap as StdHashMap;
-
 use crate::identity::{NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::implement_registry::ImplTypeId;
@@ -33,9 +31,8 @@ impl Analyzer {
                 .name_table
                 .last_segment_str(field.name_id)
                 .unwrap_or_default();
-            // Convert TypeId to LegacyType for interface checking
-            let field_type = self.type_arena.borrow().to_type(field.ty);
-            if !self.type_has_field_by_str(ty, &field_name_str, &field_type, interner) {
+            // Pass TypeId directly (avoids to_type conversion)
+            if !self.type_has_field_by_str(ty, &field_name_str, field.ty) {
                 return false;
             }
         }
@@ -81,12 +78,12 @@ impl Analyzer {
     }
 
     /// Check if a type has a field with the given name (string) and compatible type
+    /// Takes TypeId directly for expected_type to avoid to_type conversion at call sites.
     fn type_has_field_by_str(
         &self,
         ty: &LegacyType,
         field_name: &str,
-        expected_type: &LegacyType,
-        interner: &Interner,
+        expected_type_id: ArenaTypeId,
     ) -> bool {
         let LegacyType::Nominal(n) = ty else {
             return false;
@@ -109,16 +106,20 @@ impl Analyzer {
             .map(|(tp, &arg_id)| (tp.name_id, arg_id))
             .collect();
 
-        // Find field and check type compatibility using arena substitution
+        // Find field and check type compatibility using TypeId
         for (i, name_id) in generic_info.field_names.iter().enumerate() {
             if self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name) {
                 let field_type_id = generic_info.field_types[i];
-                let field_ty = {
-                    let mut arena = self.type_arena.borrow_mut();
-                    let substituted_id = arena.substitute(field_type_id, &substitutions);
-                    arena.to_type(substituted_id)
-                };
-                return self.types_compatible(&field_ty, expected_type, interner);
+                let substituted_id = self
+                    .type_arena
+                    .borrow_mut()
+                    .substitute(field_type_id, &substitutions);
+                // Use core TypeId compatibility check
+                return crate::sema::compatibility::types_compatible_core_id(
+                    substituted_id,
+                    expected_type_id,
+                    &self.type_arena.borrow(),
+                );
             }
         }
         false
@@ -555,21 +556,20 @@ impl Analyzer {
             let extends = iface.extends.clone();
             let interface_type_params = iface.type_params.clone();
 
-            // Build substitution map for generic interface type parameters
+            // Build substitution map for generic interface type parameters (TypeId-based)
             // E.g., MapLike<K, V> implemented as MapLike<i64, i64> → {K: i64, V: i64}
-            let substitutions: StdHashMap<NameId, LegacyType> =
+            let substitutions: hashbrown::HashMap<NameId, ArenaTypeId> =
                 if let Some(impl_type_id) = type_id_opt {
                     let type_args = self
                         .entity_registry
                         .get_implementation_type_args(impl_type_id, interface_type_id);
-                    let arena = self.type_arena.borrow();
                     interface_type_params
                         .iter()
                         .zip(type_args.iter())
-                        .map(|(param, arg)| (*param, arena.to_type(*arg)))
+                        .map(|(param, arg)| (*param, *arg))
                         .collect()
                 } else {
-                    StdHashMap::new()
+                    hashbrown::HashMap::new()
                 };
 
             // Collect method info upfront (name_str, has_default, signature with substitutions applied)
@@ -581,15 +581,40 @@ impl Analyzer {
                         .name_table
                         .last_segment_str(method.name_id)
                         .unwrap_or_default();
-                    // Apply type parameter substitution to signature using arena
-                    let subst_sig = if let LegacyType::Function(ft) = LegacyType::Function(
-                        method.signature.clone(),
-                    )
-                    .substitute_with_arena(&substitutions, &mut self.type_arena.borrow_mut())
-                    {
-                        ft
+                    // Apply type parameter substitution using TypeId-based arena substitution
+                    let subst_sig = if substitutions.is_empty() {
+                        method.signature.clone()
                     } else {
-                        unreachable!()
+                        let sig = &method.signature;
+                        // Get param TypeIds (convert if needed)
+                        let param_ids: Vec<ArenaTypeId> = if let Some(ref ids) = sig.params_id {
+                            ids.iter().copied().collect()
+                        } else {
+                            let mut arena = self.type_arena.borrow_mut();
+                            sig.params.iter().map(|p| arena.from_type(p)).collect()
+                        };
+                        let return_id = sig.return_type_id.unwrap_or_else(|| {
+                            self.type_arena.borrow_mut().from_type(&sig.return_type)
+                        });
+
+                        // Substitute using arena
+                        let (subst_params, subst_ret) = {
+                            let mut arena = self.type_arena.borrow_mut();
+                            let params: Vec<ArenaTypeId> = param_ids
+                                .iter()
+                                .map(|&p| arena.substitute(p, &substitutions))
+                                .collect();
+                            let ret = arena.substitute(return_id, &substitutions);
+                            (params, ret)
+                        };
+
+                        // Build FunctionType from substituted TypeIds
+                        FunctionType::from_ids(
+                            &subst_params,
+                            subst_ret,
+                            sig.is_closure,
+                            &self.type_arena.borrow(),
+                        )
                     };
                     (name, method.has_default, subst_sig)
                 })
@@ -965,7 +990,7 @@ impl Analyzer {
         ty: &LegacyType,
         field_name: &str,
         expected_type: &LegacyType,
-        interner: &Interner,
+        _interner: &Interner,
     ) -> bool {
         let LegacyType::Nominal(n) = ty else {
             return false;
@@ -988,16 +1013,22 @@ impl Analyzer {
             .map(|(tp, &arg_id)| (tp.name_id, arg_id))
             .collect();
 
-        // Find field and check type compatibility using arena substitution
+        // Find field and check type compatibility using TypeId (avoids to_type conversion)
         for (i, name_id) in generic_info.field_names.iter().enumerate() {
             if self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name) {
                 let field_type_id = generic_info.field_types[i];
-                let field_ty = {
+                let (substituted_id, expected_type_id) = {
                     let mut arena = self.type_arena.borrow_mut();
-                    let substituted_id = arena.substitute(field_type_id, &substitutions);
-                    arena.to_type(substituted_id)
+                    let subst = arena.substitute(field_type_id, &substitutions);
+                    let expected = arena.from_type(expected_type);
+                    (subst, expected)
                 };
-                return self.types_compatible(&field_ty, expected_type, interner);
+                // Use core TypeId compatibility check
+                return crate::sema::compatibility::types_compatible_core_id(
+                    substituted_id,
+                    expected_type_id,
+                    &self.type_arena.borrow(),
+                );
             }
         }
         false

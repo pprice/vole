@@ -33,7 +33,6 @@ use crate::sema::type_arena::{TypeArena, TypeId as ArenaTypeId};
 use crate::sema::types::{ConstantValue, LegacyType, ModuleType, NominalType, StructuralType};
 use crate::sema::{
     ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField,
-    compatibility::TypeCompatibility,
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
 };
@@ -72,6 +71,13 @@ fn constraint_satisfied(
             found_types
                 .iter()
                 .all(|f| required_types.iter().any(|r| f == r))
+        }
+        // UnionId constraints: found must be a subset of or equal to required (TypeId version)
+        (TypeConstraint::UnionId(found_ids), TypeConstraint::UnionId(required_ids)) => {
+            // All found TypeIds must be in the required TypeIds
+            found_ids
+                .iter()
+                .all(|f| required_ids.iter().any(|r| f == r))
         }
         // Structural constraints: more complex matching needed, for now require exact match
         (TypeConstraint::Structural(found_struct), TypeConstraint::Structural(required_struct)) => {
@@ -974,14 +980,17 @@ impl Analyzer {
                         if type_def.kind == TypeDefKind::Alias
                             && let Some(aliased_type_id) = type_def.aliased_type
                         {
-                            // Convert TypeId to LegacyType for pattern matching
-                            let aliased_type = self.type_arena.borrow().to_type(aliased_type_id);
-                            // Convert the aliased type to a union constraint
-                            let types = match &aliased_type {
-                                LegacyType::Union(types) => types.to_vec(),
-                                other => vec![other.clone()],
+                            // Use TypeId directly (avoids to_type conversion)
+                            let arena = self.type_arena.borrow();
+                            let type_ids = if let Some(variants) = arena.unwrap_union(aliased_type_id)
+                            {
+                                // It's a union - use the variant TypeIds
+                                variants.to_vec()
+                            } else {
+                                // Not a union - use the single TypeId
+                                vec![aliased_type_id]
                             };
-                            return Some(crate::sema::generic::TypeConstraint::Union(types));
+                            return Some(crate::sema::generic::TypeConstraint::UnionId(type_ids));
                         }
                     }
                 }
@@ -1062,92 +1071,6 @@ impl Analyzer {
         }
     }
 
-    fn check_type_param_constraints(
-        &mut self,
-        type_params: &[TypeParamInfo],
-        inferred: &HashMap<NameId, LegacyType>,
-        span: Span,
-        interner: &Interner,
-    ) {
-        for param in type_params {
-            let Some(constraint) = &param.constraint else {
-                continue;
-            };
-            let Some(found) = inferred.get(&param.name_id) else {
-                continue;
-            };
-
-            // If the inferred type is itself a type param that has a matching or stronger constraint,
-            // the constraint is satisfied. Check if it's a type param in our current scope.
-            let found_param = match found {
-                LegacyType::TypeParam(found_name_id) => {
-                    self.type_param_stack.get_by_name_id(*found_name_id)
-                }
-                LegacyType::TypeParamRef(type_param_id) => {
-                    self.type_param_stack.get_by_type_param_id(*type_param_id)
-                }
-                _ => None,
-            };
-            if let Some(found_param) = found_param
-                && constraint_satisfied(&found_param.constraint, constraint)
-            {
-                continue; // Constraint is satisfied
-            }
-
-            match constraint {
-                crate::sema::generic::TypeConstraint::Interface(interface_names) => {
-                    // Must satisfy all interfaces in the constraint
-                    for interface_name in interface_names {
-                        if !self.satisfies_interface(found, *interface_name, interner) {
-                            let found_display = self.type_display(found);
-                            self.add_error(
-                                SemanticError::TypeParamConstraintMismatch {
-                                    type_param: interner.resolve(param.name).to_string(),
-                                    expected: interner.resolve(*interface_name).to_string(),
-                                    found: found_display,
-                                    span: span.into(),
-                                },
-                                span,
-                            );
-                        }
-                    }
-                }
-                crate::sema::generic::TypeConstraint::Union(variants) => {
-                    let expected = LegacyType::normalize_union(variants.clone());
-                    if !found.is_compatible(&expected) {
-                        let expected_display = self.type_display(&expected);
-                        let found_display = self.type_display(found);
-                        self.add_error(
-                            SemanticError::TypeParamConstraintMismatch {
-                                type_param: interner.resolve(param.name).to_string(),
-                                expected: expected_display,
-                                found: found_display,
-                                span: span.into(),
-                            },
-                            span,
-                        );
-                    }
-                }
-                crate::sema::generic::TypeConstraint::Structural(structural) => {
-                    if let Some(mismatch) =
-                        self.check_structural_constraint(found, structural, interner)
-                    {
-                        let found_display = self.type_display(found);
-                        self.add_error(
-                            SemanticError::StructuralConstraintMismatch {
-                                type_param: interner.resolve(param.name).to_string(),
-                                found: found_display,
-                                mismatch,
-                                span: span.into(),
-                            },
-                            span,
-                        );
-                    }
-                }
-            }
-        }
-    }
-
     /// Check type param constraints (TypeId version - direct).
     /// Works with TypeIds throughout where possible, avoiding LegacyType materialization.
     fn check_type_param_constraints_id(
@@ -1209,6 +1132,27 @@ impl Analyzer {
                         variants.iter().map(|v| arena.from_type(v)).collect()
                     };
                     let expected_id = self.type_arena.borrow_mut().union(variant_ids);
+                    let is_compatible = {
+                        let arena = self.type_arena.borrow();
+                        types_compatible_core_id(found_id, expected_id, &arena)
+                    };
+                    if !is_compatible {
+                        let expected_display = self.type_display_id(expected_id);
+                        let found_display = self.type_display_id(found_id);
+                        self.add_error(
+                            SemanticError::TypeParamConstraintMismatch {
+                                type_param: interner.resolve(param.name).to_string(),
+                                expected: expected_display,
+                                found: found_display,
+                                span: span.into(),
+                            },
+                            span,
+                        );
+                    }
+                }
+                crate::sema::generic::TypeConstraint::UnionId(variant_ids) => {
+                    // TypeId-based - no conversion needed
+                    let expected_id = self.type_arena.borrow_mut().union(variant_ids.clone());
                     let is_compatible = {
                         let arena = self.type_arena.borrow();
                         types_compatible_core_id(found_id, expected_id, &arena)

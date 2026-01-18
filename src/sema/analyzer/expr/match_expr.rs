@@ -67,9 +67,6 @@ impl Analyzer {
             }
         }
 
-        // Convert to LegacyType for pattern checking (still needed for some paths)
-        let scrutinee_type = self.type_arena.borrow().to_type(scrutinee_type_id);
-
         // Check each arm, collect result types (using TypeId)
         let mut result_type_id: Option<ArenaTypeId> = None;
         let mut first_arm_span: Option<Span> = None;
@@ -90,11 +87,8 @@ impl Analyzer {
             // Save current type overrides
             let saved_overrides = self.type_overrides.clone();
 
-            // Check pattern and get narrowing info
-            let narrowed_type = self.check_pattern(&arm.pattern, &scrutinee_type, interner);
-            let narrowed_type_id = narrowed_type
-                .as_ref()
-                .map(|ty| self.type_arena.borrow_mut().from_type(ty));
+            // Check pattern and get narrowing info (using TypeId version)
+            let narrowed_type_id = self.check_pattern_id(&arm.pattern, scrutinee_type_id, interner);
 
             // For wildcard patterns on union types, compute remaining type
             let effective_narrowed_id = if matches!(arm.pattern, Pattern::Wildcard(_))

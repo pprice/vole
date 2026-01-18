@@ -1,6 +1,8 @@
 use super::super::*;
-use crate::identity::{MethodId, TypeDefId};
+use crate::identity::{MethodId, TypeDefId, TypeParamId};
 use crate::sema::entity_defs::TypeDefKind;
+use crate::sema::implement_registry::ImplTypeId;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType};
 use std::collections::HashSet;
 
@@ -144,6 +146,256 @@ impl Analyzer {
         self.resolve_method(object_type, method_name, interner)
     }
 
+    /// Resolve a method call using TypeId directly (avoids to_type conversion)
+    #[tracing::instrument(skip(self, interner), fields(method = %interner.resolve(method_name)))]
+    pub fn resolve_method_via_entity_registry_id(
+        &mut self,
+        object_type_id: ArenaTypeId,
+        method_name: Symbol,
+        interner: &Interner,
+    ) -> Option<ResolvedMethod> {
+        // Handle type params using arena unwraps
+        // Check for TypeParam or TypeParamRef first
+        enum TypeParamResult {
+            TypeParam(NameId),
+            TypeParamRef(TypeParamId),
+            None,
+        }
+        let type_param_result = {
+            let arena = self.type_arena.borrow();
+            if let Some(param_name_id) = arena.unwrap_type_param(object_type_id) {
+                TypeParamResult::TypeParam(param_name_id)
+            } else if let Some(type_param_id) = arena.unwrap_type_param_ref(object_type_id) {
+                TypeParamResult::TypeParamRef(type_param_id)
+            } else {
+                TypeParamResult::None
+            }
+        };
+        match type_param_result {
+            TypeParamResult::TypeParam(param_name_id) => {
+                return self.resolve_method_on_type_param(param_name_id, method_name, interner);
+            }
+            TypeParamResult::TypeParamRef(type_param_id) => {
+                if let Some(info) = self.type_param_stack.get_by_type_param_id(type_param_id) {
+                    return self.resolve_method_on_type_param(info.name_id, method_name, interner);
+                }
+                return None;
+            }
+            TypeParamResult::None => {}
+        }
+
+        // Try to get TypeDefId and type_args from the object type using arena unwraps
+        let (type_def_id, type_args_id): (Option<TypeDefId>, Vec<ArenaTypeId>) = {
+            let arena = self.type_arena.borrow();
+            if let Some((id, args)) = arena.unwrap_class(object_type_id) {
+                (Some(id), args.to_vec())
+            } else if let Some((id, args)) = arena.unwrap_record(object_type_id) {
+                (Some(id), args.to_vec())
+            } else if let Some((id, args)) = arena.unwrap_interface(object_type_id) {
+                (Some(id), args.to_vec())
+            } else {
+                (None, vec![])
+            }
+        };
+
+        // Try primitives if no nominal type matched
+        if type_def_id.is_none() && object_type_id.is_primitive() {
+            // Map primitive TypeId to NameId and look up method binding
+            let primitive_name_id = self.name_id_for_primitive_type_id(object_type_id);
+            if let Some(name_id) = primitive_name_id {
+                if let Some(tdef_id) = self.entity_registry.type_by_name(name_id) {
+                    let method_name_id = self.method_name_id(method_name, interner);
+                    if let Some((interface_id, binding)) = self
+                        .entity_registry
+                        .find_method_binding_with_interface(tdef_id, method_name_id)
+                    {
+                        let trait_name = self
+                            .name_table
+                            .last_segment_str(self.entity_registry.get_type(interface_id).name_id)
+                            .and_then(|s| interner.lookup(&s));
+                        return Some(ResolvedMethod::Implemented {
+                            trait_name,
+                            func_type: binding.func_type.clone(),
+                            is_builtin: binding.is_builtin,
+                            external_info: binding.external_info.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some(type_def_id) = type_def_id {
+            // Get the method name_id
+            let method_name_id = self.method_name_id(method_name, interner);
+
+            // Try to find the method via EntityRegistry
+            if let Some(method_id) =
+                self.find_method_via_entity_registry(type_def_id, method_name_id)
+            {
+                let method_def = self.entity_registry.get_method(method_id);
+                let defining_type = self.entity_registry.get_type(method_def.defining_type);
+
+                // Build substitutions for generic types
+                let substitutions = if !type_args_id.is_empty() {
+                    self.build_substitutions_id(type_def_id, &type_args_id)
+                } else {
+                    hashbrown::HashMap::new()
+                };
+                let func_type = self.apply_substitutions_id(&method_def.signature, &substitutions);
+
+                // Determine the resolution type based on the defining type's kind
+                match defining_type.kind {
+                    TypeDefKind::Interface => {
+                        // Check if object_type is an interface type using arena
+                        let is_interface_type = {
+                            let arena = self.type_arena.borrow();
+                            arena.unwrap_interface(object_type_id).is_some()
+                        };
+
+                        // For external default methods on CONCRETE types (not interface types)
+                        if method_def.has_default
+                            && method_def.external_binding.is_some()
+                            && !is_interface_type
+                        {
+                            let type_name_id =
+                                self.entity_registry.get_type(type_def_id).name_id;
+                            let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner);
+                            let interface_sym =
+                                self.get_type_symbol_by_name_id(defining_type.name_id, interner);
+                            if let (Some(type_sym), Some(interface_sym)) = (type_sym, interface_sym)
+                            {
+                                return Some(ResolvedMethod::DefaultMethod {
+                                    interface_name: interface_sym,
+                                    type_name: type_sym,
+                                    method_name,
+                                    func_type,
+                                    external_info: method_def.external_binding.clone(),
+                                });
+                            }
+                        }
+
+                        // For non-external default methods on concrete types (Class/Record)
+                        let is_class_or_record = {
+                            let arena = self.type_arena.borrow();
+                            arena.unwrap_class(object_type_id).is_some()
+                                || arena.unwrap_record(object_type_id).is_some()
+                        };
+                        if method_def.has_default && is_class_or_record {
+                            let type_name_id =
+                                self.entity_registry.get_type(type_def_id).name_id;
+                            let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner);
+                            let interface_sym =
+                                self.get_type_symbol_by_name_id(defining_type.name_id, interner);
+                            if let (Some(type_sym), Some(interface_sym)) = (type_sym, interface_sym)
+                            {
+                                return Some(ResolvedMethod::DefaultMethod {
+                                    interface_name: interface_sym,
+                                    type_name: type_sym,
+                                    method_name,
+                                    func_type,
+                                    external_info: None,
+                                });
+                            }
+                        }
+
+                        // For interface types and non-default methods, use vtable dispatch
+                        let interface_sym =
+                            self.get_type_symbol_by_name_id(defining_type.name_id, interner);
+                        if let Some(interface_sym) = interface_sym {
+                            return Some(ResolvedMethod::InterfaceMethod {
+                                interface_name: interface_sym,
+                                method_name,
+                                func_type,
+                            });
+                        }
+                    }
+                    TypeDefKind::Class | TypeDefKind::Record => {
+                        // Direct method on class/record
+                        return Some(ResolvedMethod::Direct { func_type });
+                    }
+                    _ => {}
+                }
+            }
+
+            // Check interface method bindings (for default methods on classes/records)
+            if let Some((interface_id, binding)) = self
+                .entity_registry
+                .find_method_binding_with_interface(type_def_id, method_name_id)
+            {
+                let trait_name = self
+                    .name_table
+                    .last_segment_str(self.entity_registry.get_type(interface_id).name_id)
+                    .and_then(|s| interner.lookup(&s));
+                return Some(ResolvedMethod::Implemented {
+                    trait_name,
+                    func_type: binding.func_type.clone(),
+                    is_builtin: binding.is_builtin,
+                    external_info: binding.external_info.clone(),
+                });
+            }
+
+            // Check default methods from implemented interfaces
+            let type_name_id = self.entity_registry.get_type(type_def_id).name_id;
+            let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner);
+            let method_name_str = interner.resolve(method_name);
+            for interface_id in self.entity_registry.get_implemented_interfaces(type_def_id) {
+                let interface_def = self.entity_registry.get_type(interface_id);
+                for &method_id in &interface_def.methods {
+                    let method = self.entity_registry.get_method(method_id);
+                    let def_method_name = self
+                        .name_table
+                        .last_segment_str(method.name_id)
+                        .unwrap_or_default();
+                    if def_method_name == method_name_str && method.has_default {
+                        // Get interface name Symbol
+                        let interface_name = self
+                            .name_table
+                            .last_segment_str(interface_def.name_id)
+                            .and_then(|s| interner.lookup(&s))
+                            .unwrap_or(Symbol(0));
+                        if let Some(type_sym) = type_sym {
+                            return Some(ResolvedMethod::DefaultMethod {
+                                interface_name,
+                                type_name: type_sym,
+                                method_name,
+                                func_type: method.signature.clone(),
+                                external_info: method.external_binding.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback to implement_registry for builtins (Array.length, String.length, etc.)
+        let method_name_id = self.method_name_id(method_name, interner);
+        let impl_type_id = {
+            let arena = self.type_arena.borrow();
+            ImplTypeId::from_type_id(
+                object_type_id,
+                &arena,
+                &self.entity_registry.type_table,
+                &self.entity_registry,
+            )
+        };
+        if let Some(impl_type_id) = impl_type_id {
+            if let Some(impl_) = self
+                .implement_registry
+                .get_method(&impl_type_id, method_name_id)
+            {
+                return Some(ResolvedMethod::Implemented {
+                    trait_name: impl_.trait_name,
+                    func_type: impl_.func_type.clone(),
+                    is_builtin: impl_.is_builtin,
+                    external_info: impl_.external_info.clone(),
+                });
+            }
+        }
+
+        // No method found - return None
+        None
+    }
+
     /// Build substitution map for generic interface types using TypeId
     fn build_interface_substitutions_id(
         &self,
@@ -241,6 +493,27 @@ impl Analyzer {
             LegacyType::Nominal(NominalType::Interface(interface_type)) => {
                 Some(self.entity_registry.name_id(interface_type.type_def_id))
             }
+            _ => None,
+        }
+    }
+
+    /// Map primitive TypeId to NameId for method binding lookup
+    fn name_id_for_primitive_type_id(&self, type_id: ArenaTypeId) -> Option<NameId> {
+        let primitives = &self.name_table.primitives;
+        match type_id {
+            ArenaTypeId::I8 => Some(primitives.i8),
+            ArenaTypeId::I16 => Some(primitives.i16),
+            ArenaTypeId::I32 => Some(primitives.i32),
+            ArenaTypeId::I64 => Some(primitives.i64),
+            ArenaTypeId::I128 => Some(primitives.i128),
+            ArenaTypeId::U8 => Some(primitives.u8),
+            ArenaTypeId::U16 => Some(primitives.u16),
+            ArenaTypeId::U32 => Some(primitives.u32),
+            ArenaTypeId::U64 => Some(primitives.u64),
+            ArenaTypeId::F32 => Some(primitives.f32),
+            ArenaTypeId::F64 => Some(primitives.f64),
+            ArenaTypeId::BOOL => Some(primitives.bool),
+            ArenaTypeId::STRING => Some(primitives.string),
             _ => None,
         }
     }

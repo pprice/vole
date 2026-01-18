@@ -6,7 +6,6 @@ use crate::sema::generic::{
 };
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::LegacyType;
 use std::collections::HashMap;
 
 impl Analyzer {
@@ -255,8 +254,6 @@ impl Analyzer {
         }
 
         let object_type_id = self.check_expr(&method_call.object, interner)?;
-        // Convert to LegacyType for method resolution (still needed for some paths)
-        let object_type = self.type_arena.borrow().to_type(object_type_id);
         let method_name = interner.resolve(method_call.method);
 
         // Handle Invalid early
@@ -405,32 +402,32 @@ impl Analyzer {
         let type_name = self.type_display_id(object_type_id);
 
         if let Some(resolved) =
-            self.resolve_method_via_entity_registry(&object_type, method_call.method, interner)
+            self.resolve_method_via_entity_registry_id(object_type_id, method_call.method, interner)
         {
-            if resolved.is_builtin()
-                && let Some(func_type) = self.check_builtin_method(
-                    &object_type,
+            if resolved.is_builtin() {
+                if let Some(func_type) = self.check_builtin_method_id(
+                    object_type_id,
                     method_name,
                     &method_call.args,
                     interner,
-                )
-            {
-                let updated = match resolved {
-                    ResolvedMethod::Implemented {
-                        trait_name,
-                        is_builtin,
-                        external_info,
-                        ..
-                    } => ResolvedMethod::Implemented {
-                        trait_name,
-                        func_type: func_type.clone(),
-                        is_builtin,
-                        external_info,
-                    },
-                    other => other,
-                };
-                self.method_resolutions.insert(expr.id, updated);
-                return Ok(self.type_to_id(&func_type.return_type));
+                ) {
+                    let updated = match resolved {
+                        ResolvedMethod::Implemented {
+                            trait_name,
+                            is_builtin,
+                            external_info,
+                            ..
+                        } => ResolvedMethod::Implemented {
+                            trait_name,
+                            func_type: func_type.clone(),
+                            is_builtin,
+                            external_info,
+                        },
+                        other => other,
+                    };
+                    self.method_resolutions.insert(expr.id, updated);
+                    return Ok(self.type_to_id(&func_type.return_type));
+                }
             }
 
             let func_type = resolved.func_type().clone();
@@ -562,17 +559,25 @@ impl Analyzer {
             let type_def = self.entity_registry.get_type(type_def_id);
             let generic_info = type_def.generic_info.clone();
 
-            // First pass: type-check arguments to get their types (as TypeId, then convert to LegacyType for inference)
+            // First pass: type-check arguments to get their types (as TypeId)
             let mut arg_type_ids = Vec::new();
             for arg in args {
                 let arg_ty_id = self.check_expr(arg, interner)?;
                 arg_type_ids.push(arg_ty_id);
             }
-            // Convert to LegacyType for type inference (still uses LegacyType)
-            let arg_types: Vec<LegacyType> = {
-                let arena = self.type_arena.borrow();
-                arg_type_ids.iter().map(|&id| arena.to_type(id)).collect()
+
+            // Get param TypeIds for type inference (convert func_type.params once if needed)
+            let param_type_ids: Vec<ArenaTypeId> = if let Some(ref ids) = func_type.params_id {
+                ids.iter().copied().collect()
+            } else {
+                let mut arena = self.type_arena.borrow_mut();
+                func_type.params.iter().map(|p| arena.from_type(p)).collect()
             };
+
+            // Get return TypeId
+            let return_type_id: ArenaTypeId = func_type.return_type_id.unwrap_or_else(|| {
+                self.type_arena.borrow_mut().from_type(&func_type.return_type)
+            });
 
             // Get class-level type params (if any)
             let class_type_params: Vec<TypeParamInfo> = generic_info
@@ -584,9 +589,10 @@ impl Analyzer {
             let all_type_params = merge_type_params(&class_type_params, &method_type_params);
 
             // Infer type params if there are any (class-level or method-level)
-            let (final_params, final_return_id, maybe_inferred) = if !all_type_params.is_empty() {
-                // Build substitution map from explicit type args if provided
-                let inferred = if !explicit_type_args.is_empty() {
+            let (final_param_ids, final_return_id, maybe_inferred) = if !all_type_params.is_empty()
+            {
+                // Build substitution map from explicit type args if provided (TypeId version)
+                let inferred: HashMap<NameId, ArenaTypeId> = if !explicit_type_args.is_empty() {
                     // Resolve explicit type args and map to class type params
                     if explicit_type_args.len() != class_type_params.len() {
                         self.add_error(
@@ -598,32 +604,36 @@ impl Analyzer {
                             method_span,
                         );
                     }
-                    let mut explicit_map = std::collections::HashMap::new();
+                    let mut explicit_map = HashMap::new();
                     for (param, type_expr) in
                         class_type_params.iter().zip(explicit_type_args.iter())
                     {
-                        let resolved = self.resolve_type(type_expr, interner);
-                        explicit_map.insert(param.name_id, resolved);
+                        let resolved_id = self.resolve_type_id(type_expr, interner);
+                        explicit_map.insert(param.name_id, resolved_id);
                     }
                     explicit_map
                 } else {
-                    // Infer type params from argument types
-                    self.infer_type_params(&all_type_params, &func_type.params, &arg_types)
+                    // Infer type params from argument types (TypeId version)
+                    self.infer_type_params_id(&all_type_params, &param_type_ids, &arg_type_ids)
                 };
 
                 // Substitute inferred types into param types and return type using arena
-                let (substituted_params, substituted_return) = if let LegacyType::Function(ft) =
-                    LegacyType::Function(func_type.clone())
-                        .substitute_with_arena(&inferred, &mut self.type_arena.borrow_mut())
-                {
-                    (ft.params.to_vec(), (*ft.return_type).clone())
-                } else {
-                    unreachable!("substitute_with_arena on Function returns Function")
+                let (substituted_param_ids, substituted_return_id) = {
+                    let mut arena = self.type_arena.borrow_mut();
+                    // Convert to hashbrown::HashMap for arena.substitute()
+                    let inferred_hb: hashbrown::HashMap<NameId, ArenaTypeId> =
+                        inferred.iter().map(|(&k, &v)| (k, v)).collect();
+                    let params: Vec<ArenaTypeId> = param_type_ids
+                        .iter()
+                        .map(|&p| arena.substitute(p, &inferred_hb))
+                        .collect();
+                    let ret = arena.substitute(return_type_id, &inferred_hb);
+                    (params, ret)
                 };
 
-                // Check type parameter constraints for class type params
+                // Check type parameter constraints for class type params (TypeId version)
                 if !class_type_params.is_empty() {
-                    self.check_type_param_constraints(
+                    self.check_type_param_constraints_id(
                         &class_type_params,
                         &inferred,
                         expr.span,
@@ -631,9 +641,9 @@ impl Analyzer {
                     );
                 }
 
-                // Check type parameter constraints for method type params
+                // Check type parameter constraints for method type params (TypeId version)
                 if !method_type_params.is_empty() {
-                    self.check_type_param_constraints(
+                    self.check_type_param_constraints_id(
                         &method_type_params,
                         &inferred,
                         expr.span,
@@ -641,27 +651,18 @@ impl Analyzer {
                     );
                 }
 
-                (
-                    substituted_params,
-                    self.type_to_id(&substituted_return),
-                    Some(inferred),
-                )
+                (substituted_param_ids, substituted_return_id, Some(inferred))
             } else {
-                (
-                    func_type.params.to_vec(),
-                    self.type_to_id(&func_type.return_type),
-                    None,
-                )
+                (param_type_ids.clone(), return_type_id, None)
             };
 
             // Second pass: check argument types against (potentially substituted) param types
-            for (arg, (arg_ty_id, param_ty)) in args
+            for (arg, (&arg_ty_id, &param_ty_id)) in args
                 .iter()
-                .zip(arg_type_ids.iter().zip(final_params.iter()))
+                .zip(arg_type_ids.iter().zip(final_param_ids.iter()))
             {
-                let param_ty_id = self.type_to_id(param_ty);
-                if !self.types_compatible_id(*arg_ty_id, param_ty_id, interner) {
-                    self.add_type_mismatch_id(param_ty_id, *arg_ty_id, arg.span);
+                if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
                 }
             }
 
@@ -844,7 +845,7 @@ impl Analyzer {
         func_type: &FunctionType,
         class_type_params: &[TypeParamInfo],
         method_type_params: &[TypeParamInfo],
-        inferred: &std::collections::HashMap<NameId, LegacyType>,
+        inferred: &HashMap<NameId, ArenaTypeId>,
         interner: &Interner,
     ) {
         // Get the type def to extract name and type args
@@ -854,18 +855,26 @@ impl Analyzer {
         // Get the method name_id
         let method_name_id = self.method_name_id(method_sym, interner);
 
-        // Create type keys for class type params (in type param order)
+        // Create type keys for class type params (in type param order) using TypeId
         let class_type_keys: Vec<_> = class_type_params
             .iter()
             .filter_map(|tp| inferred.get(&tp.name_id))
-            .map(|t| self.entity_registry.type_table.key_for_type(t))
+            .map(|&id| {
+                self.entity_registry
+                    .type_table
+                    .key_for_type_id(id, &self.type_arena.borrow())
+            })
             .collect();
 
-        // Create type keys for method type params (in type param order)
+        // Create type keys for method type params (in type param order) using TypeId
         let method_type_keys: Vec<_> = method_type_params
             .iter()
             .filter_map(|tp| inferred.get(&tp.name_id))
-            .map(|t| self.entity_registry.type_table.key_for_type(t))
+            .map(|&id| {
+                self.entity_registry
+                    .type_table
+                    .key_for_type_id(id, &self.type_arena.borrow())
+            })
             .collect();
 
         // Create the monomorph key with separate class and method type keys
@@ -882,9 +891,6 @@ impl Analyzer {
             .static_method_monomorph_cache
             .contains(&key)
         {
-            // Build substitutions from type params to inferred types
-            let legacy_substitutions: HashMap<NameId, LegacyType> = inferred.clone();
-
             // Generate unique mangled name
             let instance_id = self
                 .entity_registry
@@ -903,24 +909,41 @@ impl Analyzer {
                 .name_table
                 .intern_raw(self.current_module, &[&mangled_name_str]);
 
-            // Create the substituted function type using arena
-            let substituted_func_type = if let LegacyType::Function(ft) =
-                LegacyType::Function(func_type.clone())
-                    .substitute_with_arena(&legacy_substitutions, &mut self.type_arena.borrow_mut())
-            {
-                ft
+            // Get param TypeIds from func_type (convert if needed)
+            let param_type_ids: Vec<ArenaTypeId> = if let Some(ref ids) = func_type.params_id {
+                ids.iter().copied().collect()
             } else {
-                unreachable!("substitute_with_arena on Function returns Function")
+                let mut arena = self.type_arena.borrow_mut();
+                func_type.params.iter().map(|p| arena.from_type(p)).collect()
+            };
+            let return_type_id: ArenaTypeId = func_type.return_type_id.unwrap_or_else(|| {
+                self.type_arena.borrow_mut().from_type(&func_type.return_type)
+            });
+
+            // Create the substituted function type using arena substitution (TypeId-based)
+            let inferred_hb: hashbrown::HashMap<NameId, ArenaTypeId> =
+                inferred.iter().map(|(&k, &v)| (k, v)).collect();
+            let (subst_param_ids, subst_return_id) = {
+                let mut arena = self.type_arena.borrow_mut();
+                let params: Vec<ArenaTypeId> = param_type_ids
+                    .iter()
+                    .map(|&p| arena.substitute(p, &inferred_hb))
+                    .collect();
+                let ret = arena.substitute(return_type_id, &inferred_hb);
+                (params, ret)
             };
 
-            // Convert substitutions to TypeId for storage
-            let substitutions = {
-                let mut arena = self.type_arena.borrow_mut();
-                legacy_substitutions
-                    .iter()
-                    .map(|(k, v)| (*k, arena.from_type(v)))
-                    .collect()
-            };
+            // Build substituted FunctionType from TypeIds
+            let substituted_func_type = FunctionType::from_ids(
+                &subst_param_ids,
+                subst_return_id,
+                func_type.is_closure,
+                &self.type_arena.borrow(),
+            );
+
+            // Convert back to std::collections::HashMap for storage
+            let substitutions: HashMap<NameId, ArenaTypeId> =
+                inferred_hb.iter().map(|(&k, &v)| (k, v)).collect();
 
             let instance = StaticMethodMonomorphInstance {
                 class_name: class_name_id,
