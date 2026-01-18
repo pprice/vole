@@ -211,7 +211,9 @@ pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
         .current_module
         .and_then(|path| ctx.analyzed.name_table.module_id_if_known(path))
         .unwrap_or_else(|| ctx.analyzed.name_table.main_module());
-    let resolved = resolve_type_expr_with_metadata(
+
+    // Use the TypeId-native resolution function directly
+    let type_id = resolve_type_expr_to_id(
         ty,
         &ctx.analyzed.entity_registry,
         ctx.type_metadata,
@@ -220,9 +222,6 @@ pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
         module_id,
         ctx.arena,
     );
-
-    // Convert to TypeId
-    let type_id = ctx.arena.borrow_mut().from_type(&resolved);
 
     // Apply type substitutions if compiling a monomorphized context
     if let Some(substitutions) = ctx.type_substitutions {
@@ -822,6 +821,324 @@ pub(crate) fn resolve_type_expr_with_metadata(
         TypeExpr::Combination(_) => {
             // Type combinations are constraint-only, not concrete types for codegen
             LegacyType::Void
+        }
+    }
+}
+
+/// Resolve a type expression directly to TypeId (no LegacyType intermediate).
+/// This is more efficient than resolve_type_expr_with_metadata when you need TypeId.
+/// Use this function when you don't need to handle generic interface method substitution.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve_type_expr_to_id(
+    ty: &TypeExpr,
+    entity_registry: &EntityRegistry,
+    type_metadata: &HashMap<Symbol, TypeMetadata>,
+    interner: &Interner,
+    name_table: &NameTable,
+    module_id: ModuleId,
+    arena: &RefCell<TypeArena>,
+) -> TypeId {
+    use crate::sema::type_arena::SemaType;
+    use crate::sema::types::primitive::PrimitiveType as SemaPrimitive;
+
+    // Create resolver for name lookups
+    let resolver = Resolver::new(interner, name_table, module_id, &[]);
+
+    match ty {
+        TypeExpr::Primitive(p) => {
+            // Convert ast::PrimitiveType to sema::PrimitiveType
+            let sema_prim = match p {
+                crate::frontend::ast::PrimitiveType::I8 => SemaPrimitive::I8,
+                crate::frontend::ast::PrimitiveType::I16 => SemaPrimitive::I16,
+                crate::frontend::ast::PrimitiveType::I32 => SemaPrimitive::I32,
+                crate::frontend::ast::PrimitiveType::I64 => SemaPrimitive::I64,
+                crate::frontend::ast::PrimitiveType::I128 => SemaPrimitive::I128,
+                crate::frontend::ast::PrimitiveType::U8 => SemaPrimitive::U8,
+                crate::frontend::ast::PrimitiveType::U16 => SemaPrimitive::U16,
+                crate::frontend::ast::PrimitiveType::U32 => SemaPrimitive::U32,
+                crate::frontend::ast::PrimitiveType::U64 => SemaPrimitive::U64,
+                crate::frontend::ast::PrimitiveType::F32 => SemaPrimitive::F32,
+                crate::frontend::ast::PrimitiveType::F64 => SemaPrimitive::F64,
+                crate::frontend::ast::PrimitiveType::Bool => SemaPrimitive::Bool,
+                crate::frontend::ast::PrimitiveType::String => SemaPrimitive::String,
+            };
+            arena.borrow().primitive(sema_prim)
+        }
+        TypeExpr::Named(sym) => {
+            // Check entity registry for type definition (aliases, interfaces, etc.)
+            let type_def_id = resolver.resolve_type_or_interface(*sym, entity_registry);
+
+            if let Some(type_def_id) = type_def_id {
+                let type_def = entity_registry.get_type(type_def_id);
+                match type_def.kind {
+                    TypeDefKind::Alias => {
+                        // Type alias - return the aliased type directly
+                        type_def.aliased_type.unwrap_or_else(|| {
+                            panic!(
+                                "INTERNAL ERROR: type alias has no aliased_type\n\
+                                 type_def_id: {:?}, name_id: {:?}",
+                                type_def_id, type_def.name_id
+                            )
+                        })
+                    }
+                    TypeDefKind::Interface => {
+                        // Non-generic interface - just use type_def_id
+                        if !type_def.type_params.is_empty() {
+                            panic!(
+                                "INTERNAL ERROR: generic interface used without type args\n\
+                                 type_def_id: {:?}, name_id: {:?}, type_params: {:?}",
+                                type_def_id, type_def.name_id, type_def.type_params
+                            );
+                        }
+                        arena.borrow_mut().interface(type_def_id, TypeIdVec::new())
+                    }
+                    TypeDefKind::ErrorType => {
+                        arena.borrow_mut().error_type(type_def_id)
+                    }
+                    TypeDefKind::Record | TypeDefKind::Class => {
+                        // For Record and Class types, first try direct lookup by Symbol
+                        if let Some(metadata) = type_metadata.get(sym) {
+                            // Verify this is the right type by comparing type_def_ids
+                            let matches = {
+                                let arena_ref = arena.borrow();
+                                match arena_ref.get(metadata.vole_type) {
+                                    SemaType::Record {
+                                        type_def_id: id, ..
+                                    } => *id == type_def_id,
+                                    SemaType::Class {
+                                        type_def_id: id, ..
+                                    } => *id == type_def_id,
+                                    _ => false,
+                                }
+                            };
+                            if matches {
+                                return metadata.vole_type;
+                            }
+                        }
+                        // Build from entity registry
+                        if type_def.kind == TypeDefKind::Record {
+                            arena.borrow_mut().record(type_def_id, TypeIdVec::new())
+                        } else {
+                            arena.borrow_mut().class(type_def_id, TypeIdVec::new())
+                        }
+                    }
+                    _ => {
+                        // Primitive or unknown - check type metadata
+                        type_metadata.get(sym).map(|m| m.vole_type).unwrap_or_else(|| {
+                            panic!(
+                                "INTERNAL ERROR: unknown type kind with no metadata\n\
+                                 type_def_id: {:?}, kind: {:?}, sym: {:?}",
+                                type_def_id, type_def.kind, sym
+                            )
+                        })
+                    }
+                }
+            } else if let Some(metadata) = type_metadata.get(sym) {
+                metadata.vole_type
+            } else {
+                // Type parameter - use placeholder
+                let name = interner.resolve(*sym);
+                tracing::trace!(name, "type parameter in codegen, using Placeholder");
+                arena
+                    .borrow_mut()
+                    .placeholder(crate::sema::types::PlaceholderKind::TypeParam(
+                        name.to_string(),
+                    ))
+            }
+        }
+        TypeExpr::Array(elem) => {
+            let elem_id = resolve_type_expr_to_id(
+                elem,
+                entity_registry,
+                type_metadata,
+                interner,
+                name_table,
+                module_id,
+                arena,
+            );
+            arena.borrow_mut().array(elem_id)
+        }
+        TypeExpr::Optional(inner) => {
+            // T? desugars to T | nil
+            let inner_id = resolve_type_expr_to_id(
+                inner,
+                entity_registry,
+                type_metadata,
+                interner,
+                name_table,
+                module_id,
+                arena,
+            );
+            arena.borrow_mut().optional(inner_id)
+        }
+        TypeExpr::Union(variants) => {
+            let variant_ids: Vec<TypeId> = variants
+                .iter()
+                .map(|v| {
+                    resolve_type_expr_to_id(
+                        v,
+                        entity_registry,
+                        type_metadata,
+                        interner,
+                        name_table,
+                        module_id,
+                        arena,
+                    )
+                })
+                .collect();
+            arena.borrow_mut().union(variant_ids)
+        }
+        TypeExpr::Nil => arena.borrow().nil(),
+        TypeExpr::Done => arena.borrow().done(),
+        TypeExpr::Function {
+            params,
+            return_type,
+        } => {
+            let param_ids: TypeIdVec = params
+                .iter()
+                .map(|p| {
+                    resolve_type_expr_to_id(
+                        p,
+                        entity_registry,
+                        type_metadata,
+                        interner,
+                        name_table,
+                        module_id,
+                        arena,
+                    )
+                })
+                .collect();
+            let ret_id = resolve_type_expr_to_id(
+                return_type,
+                entity_registry,
+                type_metadata,
+                interner,
+                name_table,
+                module_id,
+                arena,
+            );
+            arena.borrow_mut().function(param_ids, ret_id, false)
+        }
+        TypeExpr::SelfType => {
+            // Self type placeholder
+            arena
+                .borrow_mut()
+                .placeholder(crate::sema::types::PlaceholderKind::SelfType)
+        }
+        TypeExpr::Fallible {
+            success_type,
+            error_type,
+        } => {
+            let success_id = resolve_type_expr_to_id(
+                success_type,
+                entity_registry,
+                type_metadata,
+                interner,
+                name_table,
+                module_id,
+                arena,
+            );
+            let error_id = resolve_type_expr_to_id(
+                error_type,
+                entity_registry,
+                type_metadata,
+                interner,
+                name_table,
+                module_id,
+                arena,
+            );
+            arena.borrow_mut().fallible(success_id, error_id)
+        }
+        TypeExpr::Generic { name, args } => {
+            // Resolve all type arguments
+            let arg_ids: TypeIdVec = args
+                .iter()
+                .map(|a| {
+                    resolve_type_expr_to_id(
+                        a,
+                        entity_registry,
+                        type_metadata,
+                        interner,
+                        name_table,
+                        module_id,
+                        arena,
+                    )
+                })
+                .collect();
+
+            // Check entity registry for generic type
+            let type_def_id = resolver.resolve_type_or_interface(*name, entity_registry);
+
+            let name_str = interner.resolve(*name);
+            if let Some(type_def_id) = type_def_id {
+                let type_def = entity_registry.get_type(type_def_id);
+                match type_def.kind {
+                    TypeDefKind::Class => arena.borrow_mut().class(type_def_id, arg_ids),
+                    TypeDefKind::Record => arena.borrow_mut().record(type_def_id, arg_ids),
+                    TypeDefKind::Interface => {
+                        if !type_def.type_params.is_empty()
+                            && type_def.type_params.len() != arg_ids.len()
+                        {
+                            panic!(
+                                "INTERNAL ERROR: generic interface type arg count mismatch\n\
+                                 expected {} type args, got {}\n\
+                                 type_def_id: {:?}, name_id: {:?}",
+                                type_def.type_params.len(),
+                                arg_ids.len(),
+                                type_def_id,
+                                type_def.name_id
+                            );
+                        }
+                        arena.borrow_mut().interface(type_def_id, arg_ids)
+                    }
+                    TypeDefKind::Alias | TypeDefKind::ErrorType | TypeDefKind::Primitive => {
+                        panic!(
+                            "INTERNAL ERROR: type '{}' cannot have type arguments\n\
+                             kind: {:?}, type_def_id: {:?}",
+                            name_str, type_def.kind, type_def_id
+                        );
+                    }
+                }
+            } else {
+                panic!(
+                    "INTERNAL ERROR: unknown generic type '{}'\n\
+                     module_id: {:?}",
+                    name_str, module_id
+                )
+            }
+        }
+        TypeExpr::Tuple(elements) => {
+            let element_ids: TypeIdVec = elements
+                .iter()
+                .map(|e| {
+                    resolve_type_expr_to_id(
+                        e,
+                        entity_registry,
+                        type_metadata,
+                        interner,
+                        name_table,
+                        module_id,
+                        arena,
+                    )
+                })
+                .collect();
+            arena.borrow_mut().tuple(element_ids)
+        }
+        TypeExpr::FixedArray { element, size } => {
+            let elem_id = resolve_type_expr_to_id(
+                element,
+                entity_registry,
+                type_metadata,
+                interner,
+                name_table,
+                module_id,
+                arena,
+            );
+            arena.borrow_mut().fixed_array(elem_id, *size)
+        }
+        TypeExpr::Structural { .. } | TypeExpr::Combination(_) => {
+            // Constraint-only types - use void
+            arena.borrow().void()
         }
     }
 }
