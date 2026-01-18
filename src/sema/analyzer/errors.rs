@@ -137,26 +137,7 @@ impl Analyzer {
         );
     }
 
-    /// Helper to add a type mismatch error with two Type arguments
-    pub(crate) fn add_type_mismatch(
-        &mut self,
-        expected: &LegacyType,
-        found: &LegacyType,
-        span: Span,
-    ) {
-        let expected_str = self.type_display(expected);
-        let found_str = self.type_display(found);
-        self.add_error(
-            SemanticError::TypeMismatch {
-                expected: expected_str,
-                found: found_str,
-                span: span.into(),
-            },
-            span,
-        );
-    }
-
-    /// Helper to add a type mismatch error with TypeId arguments (Phase 2)
+    /// Helper to add a type mismatch error with TypeId arguments
     pub(crate) fn add_type_mismatch_id(
         &mut self,
         expected: ArenaTypeId,

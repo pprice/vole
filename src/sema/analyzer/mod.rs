@@ -1219,6 +1219,26 @@ impl Analyzer {
         }
     }
 
+    /// Check type param constraints (TypeId version).
+    /// Converts TypeIds to LegacyTypes internally for constraint checking.
+    fn check_type_param_constraints_id(
+        &mut self,
+        type_params: &[TypeParamInfo],
+        inferred: &HashMap<NameId, ArenaTypeId>,
+        span: Span,
+        interner: &Interner,
+    ) {
+        // Convert inferred TypeIds to LegacyTypes for constraint checking
+        let inferred_legacy: HashMap<NameId, LegacyType> = {
+            let arena = self.type_arena.borrow();
+            inferred
+                .iter()
+                .map(|(&k, &v)| (k, arena.to_type(v)))
+                .collect()
+        };
+        self.check_type_param_constraints(type_params, &inferred_legacy, span, interner);
+    }
+
     /// Analyze external block and register external methods in the implement registry
     fn analyze_external_block(
         &mut self,

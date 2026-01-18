@@ -1012,6 +1012,22 @@ impl TypeArena {
         }
     }
 
+    /// Unwrap a type parameter, returning its NameId
+    pub fn unwrap_type_param(&self, id: TypeId) -> Option<NameId> {
+        match self.get(id) {
+            SemaType::TypeParam(name_id) => Some(*name_id),
+            _ => None,
+        }
+    }
+
+    /// Unwrap a type parameter reference, returning its TypeParamId
+    pub fn unwrap_type_param_ref(&self, id: TypeId) -> Option<TypeParamId> {
+        match self.get(id) {
+            SemaType::TypeParamRef(id) => Some(*id),
+            _ => None,
+        }
+    }
+
     /// Display a type for error messages (basic version without name resolution)
     pub fn display_basic(&self, id: TypeId) -> String {
         match self.get(id) {

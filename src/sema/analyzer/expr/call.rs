@@ -1,8 +1,8 @@
 use super::super::*;
-use crate::identity::Namer;
-use crate::sema::compatibility::TypeCompatibility;
+use crate::identity::{NameId, Namer};
 use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::{LegacyType, NominalType};
+use std::collections::HashMap;
 
 impl Analyzer {
     pub(super) fn check_call_expr(
@@ -95,72 +95,57 @@ impl Analyzer {
                     .map(|arg| self.check_expr(arg, interner))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                // Convert to LegacyTypes for inference (inference still uses LegacyType)
-                let arg_types: Vec<LegacyType> = {
-                    let arena = self.type_arena.borrow();
-                    arg_type_ids.iter().map(|&id| arena.to_type(id)).collect()
-                };
-
-                // Convert TypeIds to LegacyTypes for inference
-                let param_types: Vec<LegacyType> = generic_def
-                    .param_types
-                    .iter()
-                    .map(|&t| self.type_arena.borrow().to_type(t))
-                    .collect();
-
-                // Infer type parameters from argument types
-                let inferred =
-                    self.infer_type_params(&generic_def.type_params, &param_types, &arg_types);
-                self.check_type_param_constraints(
+                // Infer type parameters from argument types (using TypeId version)
+                let inferred_id =
+                    self.infer_type_params_id(&generic_def.type_params, &generic_def.param_types, &arg_type_ids);
+                self.check_type_param_constraints_id(
                     &generic_def.type_params,
-                    &inferred,
+                    &inferred_id,
                     expr.span,
                     interner,
                 );
 
                 // Create the concrete function type by substituting via arena
-                let (concrete_params, concrete_return) = {
+                // Convert std HashMap to hashbrown HashMap for arena.substitute
+                let subs_hashbrown: hashbrown::HashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
+                let (concrete_param_ids, concrete_return_id) = {
                     let mut arena = self.type_arena.borrow_mut();
-                    // Convert substitutions to TypeId-based
-                    let subs_id: hashbrown::HashMap<_, _> = inferred
-                        .iter()
-                        .map(|(&k, v)| (k, arena.from_type(v)))
-                        .collect();
-                    // Substitute all types
+                    // Substitute all types using TypeId-based substitutions directly
                     let param_ids: Vec<_> = generic_def
                         .param_types
                         .iter()
-                        .map(|&t| arena.substitute(t, &subs_id))
+                        .map(|&t| arena.substitute(t, &subs_hashbrown))
                         .collect();
-                    let return_id = arena.substitute(generic_def.return_type, &subs_id);
-                    // Convert back to LegacyTypes
-                    let params: Vec<LegacyType> =
-                        param_ids.iter().map(|&t| arena.to_type(t)).collect();
-                    let ret = arena.to_type(return_id);
-                    (params, ret)
+                    let return_id = arena.substitute(generic_def.return_type, &subs_hashbrown);
+                    (param_ids, return_id)
                 };
 
                 // Check arg count
-                if call.args.len() != concrete_params.len() {
-                    self.add_wrong_arg_count(concrete_params.len(), call.args.len(), expr.span);
+                if call.args.len() != concrete_param_ids.len() {
+                    self.add_wrong_arg_count(concrete_param_ids.len(), call.args.len(), expr.span);
                     return Ok(ArenaTypeId::INVALID);
                 }
 
-                // Type check arguments against concrete params
-                for (i, (arg, expected)) in call.args.iter().zip(concrete_params.iter()).enumerate()
+                // Type check arguments against concrete params (using TypeId)
+                for (i, (arg, &expected_id)) in call.args.iter().zip(concrete_param_ids.iter()).enumerate()
                 {
-                    let arg_ty = &arg_types[i];
-                    if !arg_ty.is_compatible(expected) {
-                        self.add_type_mismatch(expected, arg_ty, arg.span);
+                    let arg_ty_id = arg_type_ids[i];
+                    if !self.types_compatible_id(arg_ty_id, expected_id, interner) {
+                        self.add_type_mismatch_id(expected_id, arg_ty_id, arg.span);
                     }
                 }
 
                 // Get or create monomorphized instance
-                let type_args: Vec<LegacyType> = generic_def
+                let type_args_id: Vec<ArenaTypeId> = generic_def
                     .type_params
                     .iter()
-                    .filter_map(|tp| inferred.get(&tp.name_id).cloned())
+                    .filter_map(|tp| inferred_id.get(&tp.name_id).copied())
                     .collect();
+                // Convert to LegacyType for monomorph key (still needed for key generation)
+                let type_args: Vec<LegacyType> = {
+                    let arena = self.type_arena.borrow();
+                    type_args_id.iter().map(|&id| arena.to_type(id)).collect()
+                };
                 tracing::debug!(
                     func = %interner.resolve(*sym),
                     type_args = ?type_args.iter().map(|t| self.type_display(t)).collect::<Vec<_>>(),
@@ -185,13 +170,15 @@ impl Analyzer {
                         let mut namer = Namer::new(&mut self.name_table, interner);
                         namer.monomorph_str(module_id, &base_str, id)
                     };
-                    // Convert substitutions to TypeId for storage
-                    let substitutions = {
-                        let mut arena = self.type_arena.borrow_mut();
-                        inferred
-                            .iter()
-                            .map(|(k, v)| (*k, arena.from_type(v)))
-                            .collect()
+                    // Use inferred_id directly as substitutions (already TypeId-based)
+                    // MonomorphInstance uses std HashMap
+                    let substitutions: HashMap<NameId, ArenaTypeId> = inferred_id.clone();
+                    // Convert param/return to LegacyType for FunctionType (still needed for codegen)
+                    let (concrete_params, concrete_return) = {
+                        let arena = self.type_arena.borrow();
+                        let params: Vec<LegacyType> = concrete_param_ids.iter().map(|&id| arena.to_type(id)).collect();
+                        let ret = arena.to_type(concrete_return_id);
+                        (params, ret)
                     };
                     self.entity_registry.monomorph_cache.insert(
                         key.clone(),
@@ -201,7 +188,7 @@ impl Analyzer {
                             instance_id: id,
                             func_type: FunctionType {
                                 params: concrete_params.into(),
-                                return_type: Box::new(concrete_return.clone()),
+                                return_type: Box::new(concrete_return),
                                 is_closure: false,
                                 params_id: None,
                                 return_type_id: None,
@@ -214,7 +201,7 @@ impl Analyzer {
                 // Record the call -> monomorph key mapping for codegen
                 self.generic_calls.insert(expr.id, key);
 
-                return Ok(self.type_to_id(&concrete_return));
+                return Ok(concrete_return_id);
             }
 
             // Check if it's a variable with a function type
