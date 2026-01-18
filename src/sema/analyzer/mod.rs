@@ -408,12 +408,13 @@ impl Analyzer {
         self.name_table.name_id(module_id, &[sym], module_interner)
     }
 
-    fn interface_type(
+    /// Create an interface TypeId by name (e.g., "Iterator").
+    fn interface_type_id(
         &mut self,
         name: &str,
-        type_args: Vec<LegacyType>,
+        type_args_id: &[crate::sema::type_arena::TypeId],
         interner: &Interner,
-    ) -> Option<LegacyType> {
+    ) -> Option<crate::sema::type_arena::TypeId> {
         // Look up interface by string name using resolver with interface fallback
         let type_def_id = self
             .resolver(interner)
@@ -421,81 +422,17 @@ impl Analyzer {
         let type_def = self.entity_registry.get_type(type_def_id);
 
         // Check type params match
-        if !type_def.type_params.is_empty() && type_def.type_params.len() != type_args.len() {
-            return Some(LegacyType::invalid("propagate"));
+        if !type_def.type_params.is_empty() && type_def.type_params.len() != type_args_id.len() {
+            return Some(crate::sema::type_arena::TypeId::INVALID);
         }
 
-        // Convert type_args to TypeId for arena-based substitution
-        let type_args_id: crate::sema::type_arena::TypeIdVec = type_args
-            .iter()
-            .map(|t| self.type_arena.borrow_mut().from_type(t))
-            .collect();
-
-        // Build substitution map using TypeId
-        let substitutions = self
-            .entity_registry
-            .substitution_map_id(type_def_id, &type_args_id);
-
-        // Build methods with substituted types using arena-based substitution
-        let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
-            .methods
-            .iter()
-            .map(|&method_id| {
-                let method = self.entity_registry.get_method(method_id);
-
-                // Ensure signature has interned IDs
-                let sig = if method.signature.has_interned_ids() {
-                    method.signature.clone()
-                } else {
-                    method
-                        .signature
-                        .clone()
-                        .with_interned_ids(&mut self.type_arena.borrow_mut())
-                };
-
-                // Substitute using arena
-                let mut arena = self.type_arena.borrow_mut();
-                let new_params_id: crate::sema::type_arena::TypeIdVec = sig
-                    .params_id
-                    .as_ref()
-                    .map(|ids| {
-                        ids.iter()
-                            .map(|&p| arena.substitute(p, &substitutions))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let new_return_id = sig
-                    .return_type_id
-                    .map(|r| arena.substitute(r, &substitutions))
-                    .unwrap_or_else(|| arena.void());
-
-                // Convert to LegacyType for InterfaceMethodType (keep TypeIds too)
-                let new_params: std::sync::Arc<[LegacyType]> = new_params_id
-                    .iter()
-                    .map(|&id| arena.to_type(id))
-                    .collect::<Vec<_>>()
-                    .into();
-                let new_return = arena.to_type(new_return_id);
-
-                crate::sema::types::InterfaceMethodType {
-                    name: method.name_id,
-                    params: new_params,
-                    return_type: Box::new(new_return),
-                    has_default: method.has_default,
-                    params_id: Some(new_params_id.clone()),
-                    return_type_id: Some(new_return_id),
-                }
-            })
-            .collect();
-
-        Some(LegacyType::Nominal(NominalType::Interface(
-            crate::sema::types::InterfaceType {
-                type_def_id,
-                type_args_id,
-                methods: methods.into(),
-                extends: type_def.extends.clone().into(),
-            },
-        )))
+        // Create interface type directly in arena
+        let type_args_vec: crate::sema::type_arena::TypeIdVec = type_args_id.iter().copied().collect();
+        let type_id = self
+            .type_arena
+            .borrow_mut()
+            .interface(type_def_id, type_args_vec);
+        Some(type_id)
     }
 
     fn method_name_id(&mut self, name: Symbol, interner: &Interner) -> NameId {

@@ -30,13 +30,14 @@ impl Analyzer {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                let iter_type =
-                    self.interface_type("Iterator", vec![*elem_ty.clone()], interner)?;
-                Some(FunctionType::new_with_arena(
-                    Vec::<LegacyType>::new(),
-                    iter_type,
+                // Convert element type to TypeId for interface_type_id
+                let elem_ty_id = self.type_arena.borrow_mut().from_type(elem_ty);
+                let iter_type_id = self.interface_type_id("Iterator", &[elem_ty_id], interner)?;
+                Some(FunctionType::from_ids(
+                    &[],
+                    iter_type_id,
                     false,
-                    &mut self.type_arena.borrow_mut(),
+                    &self.type_arena.borrow(),
                 ))
             }
             // Range.iter() -> Iterator<i64>
@@ -44,13 +45,12 @@ impl Analyzer {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                let i64_ty = self.type_arena.borrow().to_type(self.ty_i64_id());
-                let iter_type = self.interface_type("Iterator", vec![i64_ty], interner)?;
-                Some(FunctionType::new_with_arena(
-                    Vec::<LegacyType>::new(),
-                    iter_type,
+                let iter_type_id = self.interface_type_id("Iterator", &[self.ty_i64_id()], interner)?;
+                Some(FunctionType::from_ids(
+                    &[],
+                    iter_type_id,
                     false,
-                    &mut self.type_arena.borrow_mut(),
+                    &self.type_arena.borrow(),
                 ))
             }
             // String.length() -> i64
@@ -70,13 +70,12 @@ impl Analyzer {
                 if !args.is_empty() {
                     self.add_wrong_arg_count(0, args.len(), args[0].span);
                 }
-                let string_ty = self.type_arena.borrow().to_type(self.ty_string_id());
-                let iter_type = self.interface_type("Iterator", vec![string_ty], interner)?;
-                Some(FunctionType::new_with_arena(
-                    Vec::<LegacyType>::new(),
-                    iter_type,
+                let iter_type_id = self.interface_type_id("Iterator", &[self.ty_string_id()], interner)?;
+                Some(FunctionType::from_ids(
+                    &[],
+                    iter_type_id,
                     false,
-                    &mut self.type_arena.borrow_mut(),
+                    &self.type_arena.borrow(),
                 ))
             }
             _ => None,
