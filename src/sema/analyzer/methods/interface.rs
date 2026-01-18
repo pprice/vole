@@ -63,20 +63,6 @@ impl Analyzer {
         true
     }
 
-    /// Check if a type structurally satisfies an interface by NameId
-    /// (EntityRegistry-first version with fallback)
-    ///
-    /// Tries EntityRegistry lookup first for better performance,
-    /// Check if a type satisfies an interface using TypeDefId directly.
-    pub fn satisfies_interface_via_entity_registry(
-        &self,
-        ty: &LegacyType,
-        interface_type_def_id: TypeDefId,
-        interner: &Interner,
-    ) -> bool {
-        self.satisfies_interface_by_type_def_id(ty, interface_type_def_id, interner)
-    }
-
     /// Check if a type has a field with the given name (string) and compatible type
     /// Takes TypeId directly for expected_type to avoid to_type conversion at call sites.
     fn type_has_field_by_str(
@@ -203,23 +189,6 @@ impl Analyzer {
         // For now, just check that params and return type match
         // TODO: Handle Self type substitution properly
         expected.params == found.params && *expected.return_type == *found.return_type
-    }
-
-    /// Check if a type structurally satisfies an interface by NameId
-    ///
-    /// This implements duck typing: a type satisfies an interface if it has
-    /// all required fields and methods, regardless of explicit `implements`.
-    pub fn satisfies_interface_by_name_id(
-        &self,
-        ty: &LegacyType,
-        interface_name_id: NameId,
-        interner: &Interner,
-    ) -> bool {
-        // Use EntityRegistry for interface lookup
-        let Some(type_def_id) = self.entity_registry.type_by_name(interface_name_id) else {
-            return false;
-        };
-        self.satisfies_interface_by_type_def_id(ty, type_def_id, interner)
     }
 
     /// Check if a type implements Stringable (TypeId version)
