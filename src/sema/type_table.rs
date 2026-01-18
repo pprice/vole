@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::identity::{NameId, NameTable, TypeDefId};
 use crate::sema::implement_registry::PrimitiveTypeId;
-use crate::sema::type_arena::{TypeArena, TypeId as ArenaTypeId};
+use crate::sema::type_arena::{SemaType, TypeArena, TypeId as ArenaTypeId};
 use crate::sema::types::{LegacyType, NominalType, PrimitiveType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -132,6 +132,7 @@ impl TypeTable {
     }
 
     /// Display a TypeId by converting it to LegacyType via the arena
+    #[deprecated(note = "use display_type_id_direct to avoid LegacyType conversion")]
     pub fn display_type_id(
         &self,
         type_id: ArenaTypeId,
@@ -141,6 +142,174 @@ impl TypeTable {
     ) -> String {
         let ty = arena.to_type(type_id);
         self.display_type_inner(&ty, names, entity_registry)
+    }
+
+    /// Display a TypeId directly from SemaType without LegacyType materialization
+    pub fn display_type_id_direct(
+        &self,
+        type_id: ArenaTypeId,
+        arena: &TypeArena,
+        names: &NameTable,
+        entity_registry: &crate::sema::entity_registry::EntityRegistry,
+    ) -> String {
+        self.display_sema_type(type_id, arena, names, entity_registry)
+    }
+
+    /// Internal: format a TypeId by matching on SemaType
+    fn display_sema_type(
+        &self,
+        type_id: ArenaTypeId,
+        arena: &TypeArena,
+        names: &NameTable,
+        entity_registry: &crate::sema::entity_registry::EntityRegistry,
+    ) -> String {
+        match arena.get(type_id) {
+            SemaType::Primitive(prim) => prim.name().to_string(),
+            SemaType::Void => "void".to_string(),
+            SemaType::Nil => "nil".to_string(),
+            SemaType::Done => "done".to_string(),
+            SemaType::Range => "range".to_string(),
+            SemaType::MetaType => "type".to_string(),
+            SemaType::Invalid { kind } => format!("invalid({})", kind),
+
+            SemaType::Function { params, ret, .. } => {
+                let params_str = params
+                    .iter()
+                    .map(|&p| self.display_sema_type(p, arena, names, entity_registry))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "({}) -> {}",
+                    params_str,
+                    self.display_sema_type(*ret, arena, names, entity_registry)
+                )
+            }
+
+            SemaType::Union(variants) => variants
+                .iter()
+                .map(|&v| self.display_sema_type(v, arena, names, entity_registry))
+                .collect::<Vec<_>>()
+                .join(" | "),
+
+            SemaType::Array(elem) => {
+                format!(
+                    "[{}]",
+                    self.display_sema_type(*elem, arena, names, entity_registry)
+                )
+            }
+
+            SemaType::FixedArray { element, size } => {
+                format!(
+                    "[{}; {}]",
+                    self.display_sema_type(*element, arena, names, entity_registry),
+                    size
+                )
+            }
+
+            SemaType::Tuple(elements) => {
+                let elem_list = elements
+                    .iter()
+                    .map(|&e| self.display_sema_type(e, arena, names, entity_registry))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({})", elem_list)
+            }
+
+            SemaType::RuntimeIterator(elem) => {
+                format!(
+                    "Iterator<{}>",
+                    self.display_sema_type(*elem, arena, names, entity_registry)
+                )
+            }
+
+            SemaType::Class { type_def_id, type_args } => {
+                let type_def = entity_registry.get_type(*type_def_id);
+                let base = names.display(type_def.name_id);
+                if type_args.is_empty() {
+                    base
+                } else {
+                    let args = type_args
+                        .iter()
+                        .map(|&a| self.display_sema_type(a, arena, names, entity_registry))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}<{}>", base, args)
+                }
+            }
+
+            SemaType::Record { type_def_id, type_args } => {
+                let type_def = entity_registry.get_type(*type_def_id);
+                let base = names.display(type_def.name_id);
+                if type_args.is_empty() {
+                    base
+                } else {
+                    let args = type_args
+                        .iter()
+                        .map(|&a| self.display_sema_type(a, arena, names, entity_registry))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}<{}>", base, args)
+                }
+            }
+
+            SemaType::Interface { type_def_id, type_args } => {
+                let name_id = entity_registry.name_id(*type_def_id);
+                let base = names.display(name_id);
+                if type_args.is_empty() {
+                    base
+                } else {
+                    let args = type_args
+                        .iter()
+                        .map(|&a| self.display_sema_type(a, arena, names, entity_registry))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}<{}>", base, args)
+                }
+            }
+
+            SemaType::Error { type_def_id } => {
+                names.display(entity_registry.name_id(*type_def_id))
+            }
+
+            SemaType::Fallible { success, error } => format!(
+                "fallible({}, {})",
+                self.display_sema_type(*success, arena, names, entity_registry),
+                self.display_sema_type(*error, arena, names, entity_registry)
+            ),
+
+            SemaType::Module(module) => {
+                format!("module(\"{}\")", names.module_path(module.module_id))
+            }
+
+            SemaType::TypeParam(name_id) => names.display(*name_id),
+
+            SemaType::TypeParamRef(type_param_id) => {
+                format!("TypeParam#{}", type_param_id.index())
+            }
+
+            SemaType::Structural(structural) => {
+                // Display structural type fields and methods
+                let mut parts = Vec::new();
+                for (name_id, type_id) in &structural.fields {
+                    let name = names.last_segment_str(*name_id).unwrap_or_default();
+                    let ty = self.display_sema_type(*type_id, arena, names, entity_registry);
+                    parts.push(format!("{}: {}", name, ty));
+                }
+                for method in &structural.methods {
+                    let name = names.last_segment_str(method.name).unwrap_or_default();
+                    let params: Vec<String> = method
+                        .params
+                        .iter()
+                        .map(|&p| self.display_sema_type(p, arena, names, entity_registry))
+                        .collect();
+                    let ret = self.display_sema_type(method.return_type, arena, names, entity_registry);
+                    parts.push(format!("func {}({}) -> {}", name, params.join(", "), ret));
+                }
+                format!("{{ {} }}", parts.join(", "))
+            }
+
+            SemaType::Placeholder(kind) => format!("placeholder({:?})", kind),
+        }
     }
 
     /// Get a TypeKey for a TypeId (arena-based type).
