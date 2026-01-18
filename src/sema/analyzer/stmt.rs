@@ -1,7 +1,7 @@
 // src/sema/analyzer/stmt.rs
 
 use super::*;
-use crate::sema::types::{LegacyType, NominalType};
+use crate::sema::types::LegacyType;
 
 impl Analyzer {
     pub(crate) fn check_block(
@@ -508,39 +508,38 @@ impl Analyzer {
         }
 
         // Verify that raised error type is compatible with declared error type
+        // Use arena queries to avoid LegacyType conversion
         let stmt_error_name = interner.resolve(stmt.error_name);
-        let error_type_legacy = self.type_arena.borrow().to_type(error_type);
-        let is_compatible = match &error_type_legacy {
-            LegacyType::Nominal(NominalType::Error(declared_info)) => {
+        let is_compatible = {
+            let arena = self.type_arena.borrow();
+            if let Some(declared_type_def_id) = arena.unwrap_error(error_type) {
                 // Single error type - must match exactly
                 let name = self
                     .name_table
-                    .last_segment_str(self.entity_registry.name_id(declared_info.type_def_id));
+                    .last_segment_str(self.entity_registry.name_id(declared_type_def_id));
                 name.as_deref() == Some(stmt_error_name)
-            }
-            LegacyType::Union(variants) => {
+            } else if let Some(variants) = arena.unwrap_union(error_type) {
                 // Union of error types - raised error must be one of the variants
-                variants.iter().any(|variant| {
-                    if let LegacyType::Nominal(NominalType::Error(info)) = variant {
+                variants.iter().any(|&variant_id| {
+                    if let Some(variant_type_def_id) = arena.unwrap_error(variant_id) {
                         let name = self
                             .name_table
-                            .last_segment_str(self.entity_registry.name_id(info.type_def_id));
+                            .last_segment_str(self.entity_registry.name_id(variant_type_def_id));
                         name.as_deref() == Some(stmt_error_name)
                     } else {
                         false
                     }
                 })
+            } else {
+                false // Should not happen if we got past the fallible check
             }
-            _ => false, // Should not happen if we got past the fallible check
         };
 
         if !is_compatible {
-            let declared_str = self.type_display(&error_type_legacy);
-            let raised_error_info = ErrorTypeInfo {
-                type_def_id: type_id,
-            };
-            let raised_str =
-                self.type_display(&LegacyType::Nominal(NominalType::Error(raised_error_info)));
+            let declared_str = self.type_display_id(error_type);
+            let raised_str = self.type_display_id(
+                self.type_arena.borrow_mut().error_type(type_id)
+            );
 
             self.add_error(
                 SemanticError::IncompatibleRaiseError {
