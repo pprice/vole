@@ -1,7 +1,8 @@
 use super::super::*;
 use crate::sema::entity_defs::GenericTypeInfo;
+use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::type_arena::TypeIdVec;
-use crate::sema::types::{LegacyType, NominalType, StructFieldId};
+use crate::sema::types::StructFieldId;
 
 impl Analyzer {
     pub(super) fn check_struct_literal_expr(
@@ -9,7 +10,7 @@ impl Analyzer {
         expr: &Expr,
         struct_lit: &StructLiteralExpr,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // Look up the type (class or record) via Resolver
         let type_id_opt = self
             .resolver(interner)
@@ -38,7 +39,7 @@ impl Analyzer {
                             &generic_info,
                             interner,
                         ),
-                        _ => Ok(self.ty_invalid()),
+                        _ => Ok(self.ty_invalid_id()),
                     };
                 }
             }
@@ -61,16 +62,17 @@ impl Analyzer {
                     .unwrap_or_default()
             };
 
-        let (type_name, fields, result_type) = if let Some(type_id) = type_id_opt {
+        let (type_name, fields, result_type_id) = if let Some(type_id) = type_id_opt {
             let type_def = self.entity_registry.get_type(type_id);
             match type_def.kind {
                 TypeDefKind::Class => {
-                    if let Some(class_type) = self.entity_registry.build_class_type(type_id) {
+                    if self.entity_registry.build_class_type(type_id).is_some() {
                         let fields = get_fields_from_typedef(type_def);
+                        let result_id = self.type_arena.borrow_mut().class(type_id, vec![]);
                         (
                             interner.resolve(struct_lit.name).to_string(),
                             fields,
-                            LegacyType::Nominal(NominalType::Class(class_type)),
+                            result_id,
                         )
                     } else {
                         self.add_error(
@@ -80,16 +82,17 @@ impl Analyzer {
                             },
                             expr.span,
                         );
-                        return Ok(self.ty_invalid());
+                        return Ok(self.ty_invalid_id());
                     }
                 }
                 TypeDefKind::Record => {
-                    if let Some(record_type) = self.entity_registry.build_record_type(type_id) {
+                    if self.entity_registry.build_record_type(type_id).is_some() {
                         let fields = get_fields_from_typedef(type_def);
+                        let result_id = self.type_arena.borrow_mut().record(type_id, vec![]);
                         (
                             interner.resolve(struct_lit.name).to_string(),
                             fields,
-                            LegacyType::Nominal(NominalType::Record(record_type)),
+                            result_id,
                         )
                     } else {
                         self.add_error(
@@ -99,7 +102,7 @@ impl Analyzer {
                             },
                             expr.span,
                         );
-                        return Ok(self.ty_invalid());
+                        return Ok(self.ty_invalid_id());
                     }
                 }
                 _ => {
@@ -110,7 +113,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    return Ok(self.ty_invalid());
+                    return Ok(self.ty_invalid_id());
                 }
             }
         } else {
@@ -121,7 +124,7 @@ impl Analyzer {
                 },
                 expr.span,
             );
-            return Ok(self.ty_invalid());
+            return Ok(self.ty_invalid_id());
         };
 
         // Check that all required fields are present
@@ -176,7 +179,7 @@ impl Analyzer {
         }
 
         // Return the appropriate type
-        Ok(result_type)
+        Ok(result_type_id)
     }
 
     /// Check a struct literal for a generic record, inferring type parameters from field values
@@ -187,7 +190,7 @@ impl Analyzer {
         type_def_id: TypeDefId,
         generic_info: &GenericTypeInfo,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         let type_name = interner.resolve(struct_lit.name).to_string();
 
         // First, type-check all field values to get their actual types (as TypeId)
@@ -293,11 +296,7 @@ impl Analyzer {
             .filter_map(|tp| inferred_id.get(&tp.name_id).copied())
             .collect();
 
-        let concrete_record = RecordType {
-            type_def_id,
-            type_args_id,
-        };
-        Ok(LegacyType::Nominal(NominalType::Record(concrete_record)))
+        Ok(self.type_arena.borrow_mut().record(type_def_id, type_args_id.to_vec()))
     }
 
     /// Check a struct literal for a generic class, inferring type parameters from field values
@@ -308,7 +307,7 @@ impl Analyzer {
         type_def_id: TypeDefId,
         generic_info: &GenericTypeInfo,
         interner: &Interner,
-    ) -> Result<LegacyType, Vec<TypeError>> {
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         let type_name = interner.resolve(struct_lit.name).to_string();
 
         // First, type-check all field values to get their actual types (as TypeId)
@@ -436,10 +435,6 @@ impl Analyzer {
             })
             .collect();
 
-        let concrete_class = ClassType {
-            type_def_id,
-            type_args_id,
-        };
-        Ok(LegacyType::Nominal(NominalType::Class(concrete_class)))
+        Ok(self.type_arena.borrow_mut().class(type_def_id, type_args_id.to_vec()))
     }
 }

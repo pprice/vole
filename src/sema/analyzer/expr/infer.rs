@@ -381,8 +381,7 @@ impl Analyzer {
             }
 
             ExprKind::StructLiteral(struct_lit) => {
-                let ty = self.check_struct_literal_expr(expr, struct_lit, interner)?;
-                Ok(self.type_to_id(&ty))
+                self.check_struct_literal_expr(expr, struct_lit, interner)
             }
 
             ExprKind::FieldAccess(field_access) => {
