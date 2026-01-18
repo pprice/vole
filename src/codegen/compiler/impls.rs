@@ -401,33 +401,42 @@ impl Compiler<'_> {
             self.func_registry.main_module()
         };
 
-        // Get the Vole type for the target (used for creating signature)
         // For named types (records/classes), look up in type_metadata since they're not in type_aliases
-        let self_vole_type = match &impl_block.target_type {
-            TypeExpr::Primitive(p) => LegacyType::from_primitive(*p),
-            TypeExpr::Named(sym) => self
-                .type_metadata
-                .get(sym)
-                .map(|m| self.analyzed.type_arena.borrow().to_type(m.vole_type))
-                .unwrap_or_else(|| {
+        // Get type_id directly from metadata to avoid to_type() conversion
+        let (self_vole_type, type_id) = match &impl_block.target_type {
+            TypeExpr::Primitive(p) => {
+                let vole_type = LegacyType::from_primitive(*p);
+                let type_id = self.impl_type_id_from_type(&vole_type);
+                (vole_type, type_id)
+            }
+            TypeExpr::Named(sym) => {
+                let metadata = self.type_metadata.get(sym).unwrap_or_else(|| {
                     panic!(
                         "INTERNAL ERROR: implement block target type not in type_metadata\n\
                          sym: {:?}",
                         sym
                     )
-                }),
-            _ => resolve_type_expr_with_metadata(
-                &impl_block.target_type,
-                &self.analyzed.entity_registry,
-                &self.type_metadata,
-                interner,
-                &self.analyzed.name_table,
-                module_id,
-                &self.analyzed.type_arena,
-            ),
+                });
+                // Use TypeId directly for impl_type_id lookup
+                let type_id = self.impl_type_id_from_type_id(metadata.vole_type);
+                // Still need LegacyType for SelfParam::Typed below
+                let vole_type = self.analyzed.type_arena.borrow().to_type(metadata.vole_type);
+                (vole_type, type_id)
+            }
+            _ => {
+                let vole_type = resolve_type_expr_with_metadata(
+                    &impl_block.target_type,
+                    &self.analyzed.entity_registry,
+                    &self.type_metadata,
+                    interner,
+                    &self.analyzed.name_table,
+                    module_id,
+                    &self.analyzed.type_arena,
+                );
+                let type_id = self.impl_type_id_from_type(&vole_type);
+                (vole_type, type_id)
+            }
         };
-
-        let type_id = self.impl_type_id_from_type(&self_vole_type);
 
         // Declare methods as functions: TypeName::methodName (implement block convention)
         for method in &impl_block.methods {

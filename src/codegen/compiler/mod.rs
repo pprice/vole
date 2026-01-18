@@ -141,6 +141,19 @@ impl<'a> Compiler<'a> {
         )
     }
 
+    /// Get ImplTypeId from a TypeId (no LegacyType conversion needed)
+    fn impl_type_id_from_type_id(
+        &self,
+        ty: crate::sema::type_arena::TypeId,
+    ) -> Option<ImplTypeId> {
+        ImplTypeId::from_type_id(
+            ty,
+            &self.analyzed.type_arena.borrow(),
+            &self.analyzed.entity_registry.type_table,
+            &self.analyzed.entity_registry,
+        )
+    }
+
     /// Set the source file path for error reporting.
     /// The string is stored in the JitContext so it lives as long as the JIT code.
     pub fn set_source_file(&mut self, file: &str) {

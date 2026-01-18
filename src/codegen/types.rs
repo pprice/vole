@@ -893,116 +893,6 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
     }
 }
 
-/// Get the size in bytes for a Vole type (used for union layout)
-/// The entity_registry and arena parameters are needed to look up error type fields.
-pub(crate) fn type_size(
-    ty: &LegacyType,
-    pointer_type: Type,
-    entity_registry: &EntityRegistry,
-    arena: &TypeArena,
-) -> u32 {
-    match ty {
-        LegacyType::Primitive(PrimitiveType::I8)
-        | LegacyType::Primitive(PrimitiveType::U8)
-        | LegacyType::Primitive(PrimitiveType::Bool) => 1,
-        LegacyType::Primitive(PrimitiveType::I16) | LegacyType::Primitive(PrimitiveType::U16) => 2,
-        LegacyType::Primitive(PrimitiveType::I32)
-        | LegacyType::Primitive(PrimitiveType::U32)
-        | LegacyType::Primitive(PrimitiveType::F32) => 4,
-        LegacyType::Primitive(PrimitiveType::I64)
-        | LegacyType::Primitive(PrimitiveType::U64)
-        | LegacyType::Primitive(PrimitiveType::F64) => 8,
-        LegacyType::Primitive(PrimitiveType::I128) => 16,
-        LegacyType::Primitive(PrimitiveType::String) | LegacyType::Array(_) => pointer_type.bytes(), // pointer size
-        LegacyType::Nominal(NominalType::Interface(_)) => pointer_type.bytes(),
-        LegacyType::Nil | LegacyType::Done | LegacyType::Void => 0,
-        LegacyType::Range => 16, // start (i64) + end (i64)
-        LegacyType::Union(variants) => {
-            // Tag (1 byte) + padding + max payload size, aligned to 8
-            let max_payload = variants
-                .iter()
-                .map(|t| type_size(t, pointer_type, entity_registry, arena))
-                .max()
-                .unwrap_or(0);
-            // Layout: [tag:1][padding:7][payload:max_payload] aligned to 8
-            8 + max_payload.div_ceil(8) * 8
-        }
-        LegacyType::Nominal(NominalType::Error(info)) => {
-            // Error types are struct-like: sum of all field sizes, aligned to 8
-            // Look up fields from EntityRegistry
-            let fields_size: u32 = entity_registry
-                .fields_on_type(info.type_def_id)
-                .map(|field_id| {
-                    let field = entity_registry.get_field(field_id);
-                    let field_ty = arena.to_type(field.ty);
-                    type_size(&field_ty, pointer_type, entity_registry, arena)
-                })
-                .sum();
-            fields_size.div_ceil(8) * 8
-        }
-        LegacyType::Fallible(ft) => {
-            // Fallible layout: | tag (i64) | payload (max size of T or any E) |
-            // Tag is always 8 bytes (i64)
-            let success_size = type_size(&ft.success_type, pointer_type, entity_registry, arena);
-
-            // Compute max error payload size
-            let error_size = match ft.error_type.as_ref() {
-                LegacyType::Nominal(NominalType::Error(info)) => {
-                    // Single error type - look up fields from EntityRegistry
-                    entity_registry
-                        .fields_on_type(info.type_def_id)
-                        .map(|field_id| {
-                            let field = entity_registry.get_field(field_id);
-                            let field_ty = arena.to_type(field.ty);
-                            type_size(&field_ty, pointer_type, entity_registry, arena)
-                        })
-                        .sum()
-                }
-                LegacyType::Union(variants) => {
-                    // Union of error types - find max payload
-                    variants
-                        .iter()
-                        .filter_map(|v| match v {
-                            LegacyType::Nominal(NominalType::Error(info)) => {
-                                let size: u32 = entity_registry
-                                    .fields_on_type(info.type_def_id)
-                                    .map(|field_id| {
-                                        let field = entity_registry.get_field(field_id);
-                                        let field_ty = arena.to_type(field.ty);
-                                        type_size(&field_ty, pointer_type, entity_registry, arena)
-                                    })
-                                    .sum();
-                                Some(size)
-                            }
-                            _ => None,
-                        })
-                        .max()
-                        .unwrap_or(0)
-                }
-                _ => 0,
-            };
-
-            let max_payload = success_size.max(error_size);
-            // Layout: [tag:8][payload:max_payload] aligned to 8
-            8 + max_payload.div_ceil(8) * 8
-        }
-        LegacyType::Tuple(elements) => {
-            // Sum of element sizes, each aligned to 8 bytes
-            elements
-                .iter()
-                .map(|t| type_size(t, pointer_type, entity_registry, arena).div_ceil(8) * 8)
-                .sum()
-        }
-        LegacyType::FixedArray { element, size } => {
-            // Element size * count, each element aligned to 8 bytes
-            let elem_size =
-                type_size(element, pointer_type, entity_registry, arena).div_ceil(8) * 8;
-            elem_size * (*size as u32)
-        }
-        _ => 8, // default
-    }
-}
-
 /// Get the size in bytes for a TypeId (no LegacyType conversion)
 pub(crate) fn type_id_size(
     ty: TypeId,
@@ -1306,51 +1196,53 @@ pub(crate) fn value_to_word(
     Ok(word)
 }
 
-/// Convert a uniform word representation back into a typed value.
-pub(crate) fn word_to_value(
+/// Convert a uniform word representation back into a typed value using TypeId.
+/// Native TypeId version that avoids LegacyType conversion.
+pub(crate) fn word_to_value_type_id(
     builder: &mut FunctionBuilder,
     word: Value,
-    vole_type: &LegacyType,
+    type_id: TypeId,
     pointer_type: Type,
     entity_registry: &EntityRegistry,
     arena: &TypeArena,
 ) -> Value {
+    use crate::sema::type_arena::SemaType as ArenaType;
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
-    let needs_unbox = type_size(vole_type, pointer_type, entity_registry, arena) > word_bytes;
+    let needs_unbox = type_id_size(type_id, pointer_type, entity_registry, arena) > word_bytes;
 
     if needs_unbox {
         // If the target Cranelift type is pointer_type (e.g., unions), the word is
         // already a pointer to the data - just return it, don't load from it.
-        let target_type = type_to_cranelift(vole_type, pointer_type);
+        let target_type = type_id_to_cranelift(type_id, arena, pointer_type);
         if target_type == pointer_type {
             return word;
         }
         return builder.ins().load(target_type, MemFlags::new(), word, 0);
     }
 
-    match vole_type {
-        LegacyType::Primitive(PrimitiveType::F64) => {
+    match arena.get(type_id) {
+        ArenaType::Primitive(PrimitiveType::F64) => {
             builder.ins().bitcast(types::F64, MemFlags::new(), word)
         }
-        LegacyType::Primitive(PrimitiveType::F32) => {
+        ArenaType::Primitive(PrimitiveType::F32) => {
             let i32_val = builder.ins().ireduce(types::I32, word);
             builder.ins().bitcast(types::F32, MemFlags::new(), i32_val)
         }
-        LegacyType::Primitive(PrimitiveType::Bool) => builder.ins().ireduce(types::I8, word),
-        LegacyType::Primitive(PrimitiveType::I8) | LegacyType::Primitive(PrimitiveType::U8) => {
+        ArenaType::Primitive(PrimitiveType::Bool) => builder.ins().ireduce(types::I8, word),
+        ArenaType::Primitive(PrimitiveType::I8) | ArenaType::Primitive(PrimitiveType::U8) => {
             builder.ins().ireduce(types::I8, word)
         }
-        LegacyType::Primitive(PrimitiveType::I16) | LegacyType::Primitive(PrimitiveType::U16) => {
+        ArenaType::Primitive(PrimitiveType::I16) | ArenaType::Primitive(PrimitiveType::U16) => {
             builder.ins().ireduce(types::I16, word)
         }
-        LegacyType::Primitive(PrimitiveType::I32) | LegacyType::Primitive(PrimitiveType::U32) => {
+        ArenaType::Primitive(PrimitiveType::I32) | ArenaType::Primitive(PrimitiveType::U32) => {
             builder.ins().ireduce(types::I32, word)
         }
-        LegacyType::Primitive(PrimitiveType::I64) | LegacyType::Primitive(PrimitiveType::U64) => {
+        ArenaType::Primitive(PrimitiveType::I64) | ArenaType::Primitive(PrimitiveType::U64) => {
             word
         }
-        LegacyType::Primitive(PrimitiveType::I128) => {
+        ArenaType::Primitive(PrimitiveType::I128) => {
             let low = if word_type == types::I64 {
                 word
             } else {
@@ -1360,27 +1252,6 @@ pub(crate) fn word_to_value(
         }
         _ => word,
     }
-}
-
-/// Convert a uniform word representation back into a typed value using TypeId.
-/// Convenience wrapper for when you have a TypeId instead of LegacyType.
-pub(crate) fn word_to_value_type_id(
-    builder: &mut FunctionBuilder,
-    word: Value,
-    type_id: TypeId,
-    pointer_type: Type,
-    entity_registry: &EntityRegistry,
-    arena: &TypeArena,
-) -> Value {
-    let vole_type = arena.to_type(type_id);
-    word_to_value(
-        builder,
-        word,
-        &vole_type,
-        pointer_type,
-        entity_registry,
-        arena,
-    )
 }
 
 /// Get the runtime tag value for an array element type.
