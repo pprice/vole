@@ -246,6 +246,25 @@ impl FunctionType {
         }
     }
 
+    /// Create a new FunctionType from TypeIds.
+    /// This is the preferred constructor when you already have TypeIds (avoids LegacyType conversion).
+    pub fn from_ids(
+        param_ids: &[TypeId],
+        return_id: TypeId,
+        is_closure: bool,
+        arena: &TypeArena,
+    ) -> Self {
+        let params: Arc<[LegacyType]> = param_ids.iter().map(|&id| arena.to_type(id)).collect();
+        let return_type = Box::new(arena.to_type(return_id));
+        Self {
+            params,
+            return_type,
+            is_closure,
+            params_id: Some(param_ids.iter().copied().collect()),
+            return_type_id: Some(return_id),
+        }
+    }
+
     /// Get the interned parameter TypeIds. Panics if not interned.
     #[inline]
     pub fn get_params_id(&self) -> &[TypeId] {

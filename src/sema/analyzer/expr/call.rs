@@ -173,26 +173,19 @@ impl Analyzer {
                     // Use inferred_id directly as substitutions (already TypeId-based)
                     // MonomorphInstance uses std HashMap
                     let substitutions: HashMap<NameId, ArenaTypeId> = inferred_id.clone();
-                    // Convert param/return to LegacyType for FunctionType (still needed for codegen)
-                    let (concrete_params, concrete_return) = {
-                        let arena = self.type_arena.borrow();
-                        let params: Vec<LegacyType> = concrete_param_ids.iter().map(|&id| arena.to_type(id)).collect();
-                        let ret = arena.to_type(concrete_return_id);
-                        (params, ret)
-                    };
+                    let func_type = FunctionType::from_ids(
+                        &concrete_param_ids,
+                        concrete_return_id,
+                        false,
+                        &self.type_arena.borrow(),
+                    );
                     self.entity_registry.monomorph_cache.insert(
                         key.clone(),
                         MonomorphInstance {
                             original_name: name_id,
                             mangled_name,
                             instance_id: id,
-                            func_type: FunctionType {
-                                params: concrete_params.into(),
-                                return_type: Box::new(concrete_return),
-                                is_closure: false,
-                                params_id: None,
-                                return_type_id: None,
-                            },
+                            func_type,
                             substitutions,
                         },
                     );

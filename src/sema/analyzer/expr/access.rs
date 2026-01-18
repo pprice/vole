@@ -364,16 +364,12 @@ impl Analyzer {
             )?;
 
             // Build FunctionType for resolution storage (still needed for codegen)
-            let func_type = {
-                let arena = self.type_arena.borrow();
-                FunctionType {
-                    params: param_ids.iter().map(|&id| arena.to_type(id)).collect(),
-                    return_type: Box::new(arena.to_type(return_id)),
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                }
-            };
+            let func_type = FunctionType::from_ids(
+                &param_ids,
+                return_id,
+                false,
+                &self.type_arena.borrow(),
+            );
 
             // Get external_funcs from module metadata
             let is_external = self

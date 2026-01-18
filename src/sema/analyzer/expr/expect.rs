@@ -136,16 +136,7 @@ impl Analyzer {
                     let arena = self.type_arena.borrow();
                     if let Some((params, ret, _)) = arena.unwrap_function(exp_id) {
                         // Build FunctionType from TypeIds
-                        let params_legacy: Vec<LegacyType> =
-                            params.iter().map(|&p| arena.to_type(p)).collect();
-                        let ret_legacy = arena.to_type(ret);
-                        Some(FunctionType {
-                            params: params_legacy.into(),
-                            return_type: Box::new(ret_legacy),
-                            is_closure: false,
-                            params_id: None,
-                            return_type_id: None,
-                        })
+                        Some(FunctionType::from_ids(params, ret, false, &arena))
                     } else if let Some((iface_id, _)) = arena.unwrap_interface(exp_id) {
                         drop(arena);
                         self.get_functional_interface_type_by_type_def_id(iface_id)
