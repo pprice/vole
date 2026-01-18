@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::{LegacyType, NominalType};
+use crate::sema::types::{LegacyType, NominalType, StructFieldId};
 
 impl Analyzer {
     /// Check pattern and return TypeId directly (TypeId version).
@@ -297,36 +297,32 @@ impl Analyzer {
 
                     if let Some(type_id) = type_id_opt {
                         let type_def = self.entity_registry.get_type(type_id);
-                        // Helper to get fields from generic_info as StructField
-                        let get_fields = |type_def: &crate::sema::entity_defs::TypeDef,
-                                          arena: &TypeArena|
-                         -> Vec<StructField> {
-                            type_def
-                                .generic_info
-                                .as_ref()
-                                .map(|gi| {
-                                    gi.field_names
-                                        .iter()
-                                        .zip(gi.field_types.iter())
-                                        .enumerate()
-                                        .filter_map(|(i, (name_id, ty))| {
-                                            Some(StructField {
-                                                name: self.name_table.last_segment_str(*name_id)?,
-                                                ty: arena.to_type(*ty),
+                        // Helper to get fields from generic_info as StructFieldId (no LegacyType conversion)
+                        let get_fields_id =
+                            |type_def: &crate::sema::entity_defs::TypeDef| -> Vec<StructFieldId> {
+                                type_def
+                                    .generic_info
+                                    .as_ref()
+                                    .map(|gi| {
+                                        gi.field_names
+                                            .iter()
+                                            .zip(gi.field_types.iter())
+                                            .enumerate()
+                                            .map(|(i, (&name_id, &ty))| StructFieldId {
+                                                name_id,
+                                                ty,
                                                 slot: i,
                                             })
-                                        })
-                                        .collect()
-                                })
-                                .unwrap_or_default()
-                        };
+                                            .collect()
+                                    })
+                                    .unwrap_or_default()
+                            };
                         let (pattern_type, type_fields) = match type_def.kind {
                             TypeDefKind::Record => {
                                 if let Some(record_type) =
                                     self.entity_registry.build_record_type(type_id)
                                 {
-                                    let fields_ref =
-                                        get_fields(type_def, &self.type_arena.borrow());
+                                    let fields_ref = get_fields_id(type_def);
                                     (
                                         Some(LegacyType::Nominal(NominalType::Record(record_type))),
                                         fields_ref,
@@ -339,8 +335,7 @@ impl Analyzer {
                                 if let Some(class_type) =
                                     self.entity_registry.build_class_type(type_id)
                                 {
-                                    let fields_ref =
-                                        get_fields(type_def, &self.type_arena.borrow());
+                                    let fields_ref = get_fields_id(type_def);
                                     (
                                         Some(LegacyType::Nominal(NominalType::Class(class_type))),
                                         fields_ref,
@@ -352,19 +347,16 @@ impl Analyzer {
                             TypeDefKind::ErrorType => {
                                 // Error type destructuring: error Overflow { value, max }
                                 // Get fields from EntityRegistry (like classes/records)
-                                let arena = self.type_arena.borrow();
-                                let fields_ref: Vec<StructField> = self
+                                let fields_ref: Vec<StructFieldId> = self
                                     .entity_registry
                                     .fields_on_type(type_id)
-                                    .filter_map(|field_id| {
+                                    .map(|field_id| {
                                         let field = self.entity_registry.get_field(field_id);
-                                        Some(StructField {
-                                            name: self
-                                                .name_table
-                                                .last_segment_str(field.name_id)?,
-                                            ty: arena.to_type(field.ty),
+                                        StructFieldId {
+                                            name_id: field.name_id,
+                                            ty: field.ty,
                                             slot: field.slot,
-                                        })
+                                        }
                                     })
                                     .collect();
                                 let error_info = ErrorTypeInfo {
@@ -397,17 +389,19 @@ impl Analyzer {
                                 interner,
                             );
 
-                            // Bind each field
+                            // Bind each field - use NameId comparison via name_table
                             for field_pattern in fields {
                                 let field_name_str = interner.resolve(field_pattern.field_name);
-                                if let Some(field) =
-                                    type_fields.iter().find(|f| f.name == field_name_str)
-                                {
-                                    let ty_id = self.type_arena.borrow_mut().from_type(&field.ty);
+                                if let Some(field) = type_fields.iter().find(|f| {
+                                    self.name_table
+                                        .last_segment_str(f.name_id)
+                                        .map_or(false, |n| n == field_name_str)
+                                }) {
+                                    // Use TypeId directly - no conversion needed
                                     self.scope.define(
                                         field_pattern.binding,
                                         Variable {
-                                            ty: ty_id,
+                                            ty: field.ty,
                                             mutable: false,
                                         },
                                     );
@@ -436,40 +430,34 @@ impl Analyzer {
                     }
                 } else {
                     // Untyped record pattern in match - bind fields from scrutinee type
-                    // Get fields from EntityRegistry via type_def_id
-                    let type_fields: Option<Vec<StructField>> = match scrutinee_type {
+                    // Get fields from EntityRegistry via type_def_id (using StructFieldId)
+                    let type_fields: Option<Vec<StructFieldId>> = match scrutinee_type {
                         LegacyType::Nominal(NominalType::Record(r)) => {
                             let type_def = self.entity_registry.get_type(r.type_def_id);
-                            let arena = self.type_arena.borrow();
                             type_def.generic_info.as_ref().map(|gi| {
                                 gi.field_names
                                     .iter()
                                     .zip(gi.field_types.iter())
                                     .enumerate()
-                                    .filter_map(|(i, (name_id, ty))| {
-                                        Some(StructField {
-                                            name: self.name_table.last_segment_str(*name_id)?,
-                                            ty: arena.to_type(*ty),
-                                            slot: i,
-                                        })
+                                    .map(|(i, (&name_id, &ty))| StructFieldId {
+                                        name_id,
+                                        ty,
+                                        slot: i,
                                     })
                                     .collect()
                             })
                         }
                         LegacyType::Nominal(NominalType::Class(c)) => {
                             let type_def = self.entity_registry.get_type(c.type_def_id);
-                            let arena = self.type_arena.borrow();
                             type_def.generic_info.as_ref().map(|gi| {
                                 gi.field_names
                                     .iter()
                                     .zip(gi.field_types.iter())
                                     .enumerate()
-                                    .filter_map(|(i, (name_id, ty))| {
-                                        Some(StructField {
-                                            name: self.name_table.last_segment_str(*name_id)?,
-                                            ty: arena.to_type(*ty),
-                                            slot: i,
-                                        })
+                                    .map(|(i, (&name_id, &ty))| StructFieldId {
+                                        name_id,
+                                        ty,
+                                        slot: i,
                                     })
                                     .collect()
                             })
@@ -494,14 +482,16 @@ impl Analyzer {
                         };
                         for field_pattern in fields {
                             let field_name_str = interner.resolve(field_pattern.field_name);
-                            if let Some(field) =
-                                type_fields.iter().find(|f| f.name == field_name_str)
-                            {
-                                let ty_id = self.type_arena.borrow_mut().from_type(&field.ty);
+                            if let Some(field) = type_fields.iter().find(|f| {
+                                self.name_table
+                                    .last_segment_str(f.name_id)
+                                    .map_or(false, |n| n == field_name_str)
+                            }) {
+                                // Use TypeId directly - no conversion needed
                                 self.scope.define(
                                     field_pattern.binding,
                                     Variable {
-                                        ty: ty_id,
+                                        ty: field.ty,
                                         mutable: false,
                                     },
                                 );

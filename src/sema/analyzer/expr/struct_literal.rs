@@ -1,7 +1,7 @@
 use super::super::*;
 use crate::sema::entity_defs::GenericTypeInfo;
 use crate::sema::type_arena::TypeIdVec;
-use crate::sema::types::{LegacyType, NominalType};
+use crate::sema::types::{LegacyType, NominalType, StructFieldId};
 
 impl Analyzer {
     pub(super) fn check_struct_literal_expr(
@@ -44,40 +44,29 @@ impl Analyzer {
             }
         }
 
-        // Helper to get fields from TypeDef
-        // Borrows arena to convert TypeIds to LegacyTypes
-        let arena = &self.type_arena;
-        let get_fields_from_typedef = |type_def: &crate::sema::entity_defs::TypeDef,
-                                       name_table: &NameTable|
-         -> Vec<StructField> {
-            type_def
-                .generic_info
-                .as_ref()
-                .map(|gi| {
-                    gi.field_names
-                        .iter()
-                        .zip(gi.field_types.iter())
-                        .enumerate()
-                        .filter_map(|(i, (name_id, &ty_id))| {
-                            // Convert TypeId to LegacyType
-                            let ty = arena.borrow().to_type(ty_id);
-                            Some(StructField {
-                                name: name_table.last_segment_str(*name_id)?,
-                                ty,
-                                slot: i,
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
+        // Helper to get fields from TypeDef - uses StructFieldId (no LegacyType conversion)
+        let get_fields_from_typedef =
+            |type_def: &crate::sema::entity_defs::TypeDef| -> Vec<StructFieldId> {
+                type_def
+                    .generic_info
+                    .as_ref()
+                    .map(|gi| {
+                        gi.field_names
+                            .iter()
+                            .zip(gi.field_types.iter())
+                            .enumerate()
+                            .map(|(i, (&name_id, &ty))| StructFieldId { name_id, ty, slot: i })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
 
         let (type_name, fields, result_type) = if let Some(type_id) = type_id_opt {
             let type_def = self.entity_registry.get_type(type_id);
             match type_def.kind {
                 TypeDefKind::Class => {
                     if let Some(class_type) = self.entity_registry.build_class_type(type_id) {
-                        let fields = get_fields_from_typedef(type_def, &self.name_table);
+                        let fields = get_fields_from_typedef(type_def);
                         (
                             interner.resolve(struct_lit.name).to_string(),
                             fields,
@@ -96,7 +85,7 @@ impl Analyzer {
                 }
                 TypeDefKind::Record => {
                     if let Some(record_type) = self.entity_registry.build_record_type(type_id) {
-                        let fields = get_fields_from_typedef(type_def, &self.name_table);
+                        let fields = get_fields_from_typedef(type_def);
                         (
                             interner.resolve(struct_lit.name).to_string(),
                             fields,
@@ -143,24 +132,35 @@ impl Analyzer {
             .collect();
 
         for field in &fields {
-            if !provided_fields.contains(&field.name) {
-                self.add_error(
-                    SemanticError::MissingField {
-                        ty: type_name.clone(),
-                        field: field.name.clone(),
-                        span: expr.span.into(),
-                    },
-                    expr.span,
-                );
+            if let Some(field_name) = self.name_table.last_segment_str(field.name_id) {
+                if !provided_fields.contains(&field_name) {
+                    self.add_error(
+                        SemanticError::MissingField {
+                            ty: type_name.clone(),
+                            field: field_name,
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                }
             }
         }
 
         // Check each provided field
         for field_init in &struct_lit.fields {
             let field_init_name = interner.resolve(field_init.name);
-            if let Some(expected_field) = fields.iter().find(|f| f.name == field_init_name) {
-                // check_expr_expecting will report errors if types don't match
-                self.check_expr_expecting(&field_init.value, Some(&expected_field.ty), interner)?;
+            if let Some(expected_field) = fields.iter().find(|f| {
+                self.name_table
+                    .last_segment_str(f.name_id)
+                    .map_or(false, |n| n == field_init_name)
+            }) {
+                // check_expr_expecting_id will report errors if types don't match
+                // Use TypeId directly - no LegacyType conversion
+                self.check_expr_expecting_id(
+                    &field_init.value,
+                    Some(expected_field.ty),
+                    interner,
+                )?;
             } else {
                 self.add_error(
                     SemanticError::UnknownField {

@@ -130,7 +130,15 @@ pub struct FunctionType {
     pub return_type_id: Option<TypeId>,
 }
 
-/// Field information for a class/record
+/// Field information for a class/record (TypeId version)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StructFieldId {
+    pub name_id: NameId,
+    pub ty: TypeId,
+    pub slot: usize, // Compile-time slot index
+}
+
+/// Field information for a class/record (LegacyType version - deprecated)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructField {
     pub name: String,
