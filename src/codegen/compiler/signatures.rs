@@ -2,9 +2,10 @@ use cranelift::prelude::{Signature, Type as CraneliftType};
 use smallvec::{SmallVec, smallvec};
 
 use super::Compiler;
-use crate::codegen::types::{resolve_type_expr_with_metadata, type_to_cranelift};
+use crate::codegen::types::{resolve_type_expr_with_metadata, type_id_to_cranelift, type_to_cranelift};
 use crate::frontend::{Interner, Param, TypeExpr};
 use crate::sema::LegacyType;
+use crate::sema::type_arena::TypeId;
 
 /// SmallVec for function parameters - most functions have <= 8 params
 type ParamVec = SmallVec<[CraneliftType; 8]>;
@@ -17,6 +18,8 @@ pub enum SelfParam<'a> {
     Pointer,
     /// Self has a specific type (implement blocks on primitives)
     Typed(&'a LegacyType),
+    /// Self has a specific type using TypeId (no LegacyType conversion needed)
+    TypedId(TypeId),
 }
 
 /// Describes how to resolve type expressions
@@ -41,6 +44,9 @@ impl Compiler<'_> {
             SelfParam::None => SmallVec::new(),
             SelfParam::Pointer => smallvec![self.pointer_type],
             SelfParam::Typed(ty) => smallvec![type_to_cranelift(ty, self.pointer_type)],
+            SelfParam::TypedId(type_id) => {
+                smallvec![type_id_to_cranelift(type_id, &self.analyzed.type_arena.borrow(), self.pointer_type)]
+            }
         };
 
         // Resolve and add function parameters

@@ -7,7 +7,7 @@ use super::{Compiler, ControlFlowCtx, SelfParam, TypeResolver};
 use crate::codegen::stmt::compile_block;
 use crate::codegen::types::{
     CompileCtx, MethodInfo, TypeMetadata, method_name_id_with_interner,
-    resolve_type_expr_with_metadata, type_to_cranelift,
+    resolve_type_expr_to_id, resolve_type_expr_with_metadata, type_to_cranelift,
 };
 use crate::frontend::{
     ClassDecl, FuncDecl, ImplementBlock, InterfaceMethod, Interner, RecordDecl, StaticsBlock,
@@ -403,11 +403,12 @@ impl Compiler<'_> {
 
         // For named types (records/classes), look up in type_metadata since they're not in type_aliases
         // Get type_id directly from metadata to avoid to_type() conversion
-        let (self_vole_type, type_id) = match &impl_block.target_type {
+        let (self_type_id, impl_type_id) = match &impl_block.target_type {
             TypeExpr::Primitive(p) => {
-                let vole_type = LegacyType::from_primitive(*p);
-                let type_id = self.impl_type_id_from_type(&vole_type);
-                (vole_type, type_id)
+                let prim_type = crate::sema::PrimitiveType::from_ast(*p);
+                let type_id = self.analyzed.type_arena.borrow_mut().primitive(prim_type);
+                let impl_id = self.impl_type_id_from_type_id(type_id);
+                (type_id, impl_id)
             }
             TypeExpr::Named(sym) => {
                 let metadata = self.type_metadata.get(sym).unwrap_or_else(|| {
@@ -417,14 +418,12 @@ impl Compiler<'_> {
                         sym
                     )
                 });
-                // Use TypeId directly for impl_type_id lookup
-                let type_id = self.impl_type_id_from_type_id(metadata.vole_type);
-                // Still need LegacyType for SelfParam::Typed below
-                let vole_type = self.analyzed.type_arena.borrow().to_type(metadata.vole_type);
-                (vole_type, type_id)
+                // Use TypeId directly
+                let impl_id = self.impl_type_id_from_type_id(metadata.vole_type);
+                (metadata.vole_type, impl_id)
             }
             _ => {
-                let vole_type = resolve_type_expr_with_metadata(
+                let type_id = resolve_type_expr_to_id(
                     &impl_block.target_type,
                     &self.analyzed.entity_registry,
                     &self.type_metadata,
@@ -433,8 +432,8 @@ impl Compiler<'_> {
                     module_id,
                     &self.analyzed.type_arena,
                 );
-                let type_id = self.impl_type_id_from_type(&vole_type);
-                (vole_type, type_id)
+                let impl_id = self.impl_type_id_from_type_id(type_id);
+                (type_id, impl_id)
             }
         };
 
@@ -463,15 +462,15 @@ impl Compiler<'_> {
             let sig = self.build_signature(
                 &method.params,
                 method.return_type.as_ref(),
-                SelfParam::Typed(&self_vole_type),
+                SelfParam::TypedId(self_type_id),
                 TypeResolver::Query,
             );
             let func_key = if let Some(type_sym) = type_sym {
                 self.func_registry
                     .intern_qualified(func_module, &[type_sym, method.name], interner)
-            } else if let Some(type_id) = type_id {
+            } else if let Some(impl_id) = impl_type_id {
                 self.func_registry
-                    .intern_with_prefix(type_id.name_id(), method.name, interner)
+                    .intern_with_prefix(impl_id.name_id(), method.name, interner)
             } else {
                 let method_name_str = interner.resolve(method.name);
                 self.func_registry
@@ -480,11 +479,11 @@ impl Compiler<'_> {
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
-            if let Some(type_id) = type_id {
+            if let Some(impl_id) = impl_type_id {
                 let method_id = method_name_id_with_interner(self.analyzed, interner, method.name)
                     .expect("implement method name_id should be registered");
                 self.impl_method_infos.insert(
-                    (type_id, method_id),
+                    (impl_id, method_id),
                     MethodInfo {
                         func_key,
                         return_type,
