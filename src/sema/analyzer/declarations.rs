@@ -1483,8 +1483,8 @@ impl Analyzer {
                     params: params.clone().into(),
                     return_type: Box::new(return_type.clone()),
                     has_default: *has_default,
-                    params_id: Some(params_id),
-                    return_type_id: Some(return_type_id),
+                    params_id,
+                    return_type_id,
                 }
             })
             .collect();

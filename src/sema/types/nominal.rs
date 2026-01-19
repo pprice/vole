@@ -234,10 +234,10 @@ pub struct InterfaceMethodType {
     pub params: Arc<[LegacyType]>,
     pub return_type: Box<LegacyType>,
     pub has_default: bool, // True if interface provides default implementation
-    /// Interned parameter types (parallel to params, for efficient substitution)
-    pub params_id: Option<TypeIdVec>,
-    /// Interned return type (parallel to return_type, for efficient substitution)
-    pub return_type_id: Option<TypeId>,
+    /// Interned parameter types (canonical - use for comparisons)
+    pub params_id: TypeIdVec,
+    /// Interned return type (canonical - use for comparisons)
+    pub return_type_id: TypeId,
 }
 
 /// Error type definition (e.g., DivByZero, OutOfRange { value: i32 })

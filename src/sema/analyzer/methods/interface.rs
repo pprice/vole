@@ -279,6 +279,8 @@ impl Analyzer {
             Some(t) => t,
             None => return, // Unknown type, can't validate
         };
+        // Intern implementing type for TypeId-based comparison
+        let implementing_type_id = self.type_arena.borrow_mut().from_type(&implementing_type);
 
         // Look up interface via Resolver with interface fallback
         let type_def_id = self
@@ -378,11 +380,11 @@ impl Analyzer {
                     }
                     Some(found_sig) => {
                         // Method exists, check signature (substituting Self with implementing type)
-                        if !Self::signatures_match_entity(
-                            &signature.params,
-                            &signature.return_type,
+                        if !Self::signatures_match_entity_id(
+                            &signature.params_id,
+                            signature.return_type_id,
                             found_sig,
-                            &implementing_type,
+                            implementing_type_id,
                         ) {
                             // Use interface-specific formatter to show "Self" properly
                             let expected = self.format_interface_method_signature(
@@ -434,35 +436,37 @@ impl Analyzer {
         }
     }
 
-    /// Check if method signature matches (EntityRegistry version)
-    fn signatures_match_entity(
-        required_params: &[LegacyType],
-        required_return: &LegacyType,
+    /// Check if method signature matches using TypeId (avoids LegacyType comparison)
+    fn signatures_match_entity_id(
+        required_params_id: &[ArenaTypeId],
+        required_return_id: ArenaTypeId,
         found: &FunctionType,
-        implementing_type: &LegacyType,
+        implementing_type_id: ArenaTypeId,
     ) -> bool {
         // Check parameter count
-        if required_params.len() != found.params.len() {
+        if required_params_id.len() != found.params_id.len() {
             return false;
         }
-        // Check parameter types, substituting Self (LegacyType::Error) with implementing_type
-        for (req_param, found_param) in required_params.iter().zip(found.params.iter()) {
-            let effective_req = if req_param.is_invalid() {
-                implementing_type
+        // Check parameter types, substituting Self (TypeId::INVALID) with implementing_type_id
+        for (&req_param_id, &found_param_id) in
+            required_params_id.iter().zip(found.params_id.iter())
+        {
+            let effective_req = if req_param_id.is_invalid() {
+                implementing_type_id
             } else {
-                req_param
+                req_param_id
             };
-            if effective_req != found_param {
+            if effective_req != found_param_id {
                 return false;
             }
         }
-        // Check return type, substituting Self (LegacyType::Error) with implementing_type
-        let effective_return = if required_return.is_invalid() {
-            implementing_type
+        // Check return type, substituting Self (TypeId::INVALID) with implementing_type_id
+        let effective_return = if required_return_id.is_invalid() {
+            implementing_type_id
         } else {
-            required_return
+            required_return_id
         };
-        effective_return == &*found.return_type
+        effective_return == found.return_type_id
     }
 
     /// Describe what specifically mismatches between required and found signatures.

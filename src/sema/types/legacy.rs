@@ -836,8 +836,10 @@ fn substitute_interface_methods(
                     params: new_params.unwrap_or_else(|| method.params.clone()),
                     return_type: Box::new(new_return),
                     has_default: method.has_default,
-                    params_id: None, // LegacyType substitution doesn't track TypeIds
-                    return_type_id: None,
+                    // LegacyType substitution doesn't track TypeIds - use placeholders
+                    // Use arena.substitute() for proper TypeId-based substitution
+                    params_id: TypeIdVec::new(),
+                    return_type_id: TypeId::INVALID,
                 }
             } else {
                 method.clone()

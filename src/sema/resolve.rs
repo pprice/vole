@@ -85,8 +85,8 @@ fn interface_instance(
                 params: new_params.into(),
                 return_type: Box::new(new_return),
                 has_default: method.has_default,
-                params_id: Some(substituted_params),
-                return_type_id: Some(substituted_return),
+                params_id: substituted_params,
+                return_type_id: substituted_return,
             }
         })
         .collect();
