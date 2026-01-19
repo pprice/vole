@@ -2,7 +2,6 @@ use crate::identity::{NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::implement_registry::ImplTypeId;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::StructuralType;
 
 use super::super::*;
 
@@ -580,23 +579,20 @@ impl Analyzer {
     pub(crate) fn check_structural_constraint_id(
         &mut self,
         ty_id: ArenaTypeId,
-        structural: &StructuralType,
+        structural: &crate::sema::type_arena::InternedStructural,
         interner: &Interner,
     ) -> Option<String> {
         let mut mismatches = Vec::new();
 
-        // Check required fields
-        for field in &structural.fields {
+        // Check required fields - InternedStructural uses (NameId, TypeId) pairs
+        for (field_name, field_type_id) in &structural.fields {
             let field_name_str = self
                 .name_table
-                .last_segment_str(field.name)
+                .last_segment_str(*field_name)
                 .unwrap_or_default();
 
-            // Convert structural field type to TypeId
-            let expected_type_id = self.type_arena.borrow_mut().from_display(&field.ty);
-
-            if !self.type_has_field_by_str_id(ty_id, &field_name_str, expected_type_id, interner) {
-                let type_str = self.type_display_id(expected_type_id);
+            if !self.type_has_field_by_str_id(ty_id, &field_name_str, *field_type_id, interner) {
+                let type_str = self.type_display_id(*field_type_id);
                 mismatches.push(format!(
                     "missing field '{}' of type '{}'",
                     field_name_str, type_str
@@ -604,29 +600,24 @@ impl Analyzer {
             }
         }
 
-        // Check required methods
+        // Check required methods - InternedStructuralMethod uses TypeId directly
         for method in &structural.methods {
             let method_name_str = self
                 .name_table
                 .last_segment_str(method.name)
                 .unwrap_or_default();
 
-            // Create a FunctionType from the structural method signature
-            let expected_sig = FunctionType::new_with_arena(
-                method.params.iter(),
-                &method.return_type,
-                false,
-                &mut self.type_arena.borrow_mut(),
-            );
+            // Create a FunctionType from the structural method signature (TypeId-based)
+            let expected_sig = FunctionType::from_ids(&method.params, method.return_type, false);
 
             if !self.type_has_method_by_str_id(ty_id, &method_name_str, &expected_sig, interner) {
                 let params_str = method
                     .params
                     .iter()
-                    .map(|p| self.type_display(p))
+                    .map(|&p| self.type_display_id(p))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let ret_str = self.type_display(&method.return_type);
+                let ret_str = self.type_display_id(method.return_type);
                 mismatches.push(format!(
                     "missing method '{}({}) -> {}'",
                     method_name_str, params_str, ret_str

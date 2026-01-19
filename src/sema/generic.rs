@@ -8,8 +8,8 @@ use crate::frontend::Symbol;
 use crate::identity::{NameId, TypeParamId};
 use crate::sema::TypeKey;
 use crate::sema::implement_registry::ExternalMethodInfo;
-use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::{DisplayType, FunctionType, StructuralType};
+use crate::sema::type_arena::{InternedStructural, TypeId as ArenaTypeId};
+use crate::sema::types::FunctionType;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -290,12 +290,10 @@ pub fn merge_type_params(
 pub enum TypeConstraint {
     /// Interface constraints: T: Stringable or T: Hashable + Eq
     Interface(Vec<Symbol>),
-    /// Union constraint: T: i32 | i64 (DisplayType version)
-    Union(Vec<DisplayType>),
-    /// Union constraint: T: i32 | i64 (TypeId version - avoids to_display conversion)
+    /// Union constraint: T: i32 | i64 (TypeId version)
     UnionId(Vec<ArenaTypeId>),
     /// Structural constraint: T: { name: string, func get() -> i32 }
-    Structural(StructuralType),
+    Structural(InternedStructural),
 }
 
 /// Tracks type parameters currently in scope during type checking.

@@ -30,10 +30,10 @@ use crate::sema::implement_registry::{
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::resolve::resolve_type_to_id;
 use crate::sema::type_arena::{TypeArena, TypeId as ArenaTypeId};
-use crate::sema::types::{ConstantValue, DisplayType, ModuleType, NominalType, StructuralType};
+use crate::sema::types::{ConstantValue, DisplayType, ModuleType, NominalType};
 use crate::sema::{
     ErrorTypeInfo, FunctionType, PrimitiveType, RecordType,
-    resolve::{TypeResolutionContext, resolve_type},
+    resolve::TypeResolutionContext,
     scope::{Scope, Variable},
 };
 use rustc_hash::FxHashMap;
@@ -65,14 +65,7 @@ fn constraint_satisfied(
                 .iter()
                 .all(|req| found_interfaces.contains(req))
         }
-        // Union constraints: found must be a subset of or equal to required
-        (TypeConstraint::Union(found_types), TypeConstraint::Union(required_types)) => {
-            // All found types must be in the required types
-            found_types
-                .iter()
-                .all(|f| required_types.iter().any(|r| f == r))
-        }
-        // UnionId constraints: found must be a subset of or equal to required (TypeId version)
+        // Union constraints: found must be a subset of or equal to required (TypeId version)
         (TypeConstraint::UnionId(found_ids), TypeConstraint::UnionId(required_ids)) => {
             // All found TypeIds must be in the required TypeIds
             found_ids
@@ -1006,8 +999,12 @@ impl Analyzer {
                     type_param_scope,
                     &self.type_arena,
                 );
-                let resolved = types.iter().map(|ty| resolve_type(ty, &mut ctx)).collect();
-                Some(crate::sema::generic::TypeConstraint::Union(resolved))
+                // Resolve directly to TypeIds (no DisplayType intermediate)
+                let resolved_ids = types
+                    .iter()
+                    .map(|ty| resolve_type_to_id(ty, &mut ctx))
+                    .collect();
+                Some(crate::sema::generic::TypeConstraint::UnionId(resolved_ids))
             }
             TypeConstraint::Structural { fields, methods } => {
                 let module_id = self.current_module;
@@ -1019,28 +1016,40 @@ impl Analyzer {
                     type_param_scope,
                     &self.type_arena,
                 );
-                // Convert AST structural to sema structural
-                let resolved_fields = fields
+                // Convert AST structural to InternedStructural (TypeId-based)
+                let resolved_fields: smallvec::SmallVec<[(NameId, ArenaTypeId); 4]> = fields
                     .iter()
-                    .map(|f| crate::sema::types::StructuralFieldType {
-                        name: ctx
+                    .map(|f| {
+                        let name = ctx
                             .name_table
-                            .intern(ctx.module_id, &[f.name], ctx.interner),
-                        ty: resolve_type(&f.ty, &mut ctx),
+                            .intern(ctx.module_id, &[f.name], ctx.interner);
+                        let ty = resolve_type_to_id(&f.ty, &mut ctx);
+                        (name, ty)
                     })
                     .collect();
-                let resolved_methods = methods
+                let resolved_methods: smallvec::SmallVec<
+                    [crate::sema::type_arena::InternedStructuralMethod; 2],
+                > = methods
                     .iter()
-                    .map(|m| crate::sema::types::StructuralMethodType {
-                        name: ctx
+                    .map(|m| {
+                        let name = ctx
                             .name_table
-                            .intern(ctx.module_id, &[m.name], ctx.interner),
-                        params: m.params.iter().map(|p| resolve_type(p, &mut ctx)).collect(),
-                        return_type: resolve_type(&m.return_type, &mut ctx),
+                            .intern(ctx.module_id, &[m.name], ctx.interner);
+                        let params = m
+                            .params
+                            .iter()
+                            .map(|p| resolve_type_to_id(p, &mut ctx))
+                            .collect();
+                        let return_type = resolve_type_to_id(&m.return_type, &mut ctx);
+                        crate::sema::type_arena::InternedStructuralMethod {
+                            name,
+                            params,
+                            return_type,
+                        }
                     })
                     .collect();
                 Some(crate::sema::generic::TypeConstraint::Structural(
-                    StructuralType {
+                    crate::sema::type_arena::InternedStructural {
                         fields: resolved_fields,
                         methods: resolved_methods,
                     },
@@ -1101,31 +1110,6 @@ impl Analyzer {
                                 span,
                             );
                         }
-                    }
-                }
-                crate::sema::generic::TypeConstraint::Union(variants) => {
-                    // Convert union variants to TypeIds and check compatibility
-                    let variant_ids: Vec<ArenaTypeId> = {
-                        let mut arena = self.type_arena.borrow_mut();
-                        variants.iter().map(|v| arena.from_display(v)).collect()
-                    };
-                    let expected_id = self.type_arena.borrow_mut().union(variant_ids);
-                    let is_compatible = {
-                        let arena = self.type_arena.borrow();
-                        types_compatible_core_id(found_id, expected_id, &arena)
-                    };
-                    if !is_compatible {
-                        let expected_display = self.type_display_id(expected_id);
-                        let found_display = self.type_display_id(found_id);
-                        self.add_error(
-                            SemanticError::TypeParamConstraintMismatch {
-                                type_param: interner.resolve(param.name).to_string(),
-                                expected: expected_display,
-                                found: found_display,
-                                span: span.into(),
-                            },
-                            span,
-                        );
                     }
                 }
                 crate::sema::generic::TypeConstraint::UnionId(variant_ids) => {
