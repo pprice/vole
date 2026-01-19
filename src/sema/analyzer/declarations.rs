@@ -982,28 +982,6 @@ impl Analyzer {
             let type_param_name_ids: Vec<NameId> =
                 type_params.iter().map(|tp| tp.name_id).collect();
 
-            // Also register in regular records with TypeParam placeholders
-            // This allows struct literal checking to find the record definition
-            let _fields: Vec<StructField> = record
-                .fields
-                .iter()
-                .enumerate()
-                .map(|(i, f)| {
-                    let mut ctx = TypeResolutionContext::with_type_params_and_arena(
-                        &self.entity_registry,
-                        interner,
-                        &mut self.name_table,
-                        module_id,
-                        &type_param_scope,
-                        &self.type_arena,
-                    );
-                    StructField {
-                        name: interner.resolve(f.name).to_string(),
-                        ty: resolve_type(&f.ty, &mut ctx),
-                        slot: i,
-                    }
-                })
-                .collect();
             // Lookup shell registered in pass 0.5
             let entity_type_id = self
                 .entity_registry
@@ -1635,10 +1613,10 @@ impl Analyzer {
             }
         }
 
-        let target_type = self.resolve_type(&impl_block.target_type, interner);
+        let target_type_id = self.resolve_type_id(&impl_block.target_type, interner);
 
         // Validate target type exists
-        if target_type.is_invalid() {
+        if target_type_id.is_invalid() {
             let type_name = match &impl_block.target_type {
                 TypeExpr::Named(sym) => interner.resolve(*sym).to_string(),
                 _ => "unknown".to_string(),
@@ -1652,15 +1630,24 @@ impl Analyzer {
             );
         }
 
-        if let Some(impl_type_id) = ImplTypeId::from_type(
-            &target_type,
-            &self.entity_registry.type_table,
-            &self.entity_registry,
-        ) {
+        // Extract impl_type_id with borrow scoped to just this call
+        let impl_type_id = {
+            let arena = self.type_arena.borrow();
+            ImplTypeId::from_type_id(
+                target_type_id,
+                &arena,
+                &self.entity_registry.type_table,
+                &self.entity_registry,
+            )
+        };
+
+        if let Some(impl_type_id) = impl_type_id {
             // Get TypeDefId for the target type (for EntityRegistry updates)
             // Use impl_type_id.name_id() which we already have, avoiding name_id_for_type
-            let entity_type_id = target_type
-                .type_def_id()
+            let entity_type_id = self
+                .type_arena
+                .borrow()
+                .type_def_id(target_type_id)
                 .or_else(|| self.entity_registry.type_by_name(impl_type_id.name_id()));
 
             // Get interface TypeDefId if implementing an interface
@@ -1715,15 +1702,17 @@ impl Analyzer {
 
             // Analyze external block if present
             if let Some(ref external) = impl_block.external {
-                self.analyze_external_block(external, &target_type, trait_name, interner);
+                self.analyze_external_block(external, target_type_id, trait_name, interner);
             }
 
             // Register static methods from statics block (if present)
             if let Some(ref statics_block) = impl_block.statics {
                 // Get entity type id for registering static methods
                 // Use impl_type_id.name_id() which we already have
-                let entity_type_id = target_type
-                    .type_def_id()
+                let entity_type_id = self
+                    .type_arena
+                    .borrow()
+                    .type_def_id(target_type_id)
                     .or_else(|| self.entity_registry.type_by_name(impl_type_id.name_id()));
 
                 if let Some(entity_type_id) = entity_type_id {

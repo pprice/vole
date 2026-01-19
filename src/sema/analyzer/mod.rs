@@ -32,7 +32,7 @@ use crate::sema::resolve::resolve_type_to_id;
 use crate::sema::type_arena::{TypeArena, TypeId as ArenaTypeId};
 use crate::sema::types::{ConstantValue, LegacyType, ModuleType, NominalType, StructuralType};
 use crate::sema::{
-    ErrorTypeInfo, FunctionType, PrimitiveType, RecordType, StructField,
+    ErrorTypeInfo, FunctionType, PrimitiveType, RecordType,
     resolve::{TypeResolutionContext, resolve_type},
     scope::{Scope, Variable},
 };
@@ -897,28 +897,6 @@ impl Analyzer {
     }
 
     fn analyze_error_decl(&mut self, decl: &ErrorDecl, interner: &Interner) {
-        let mut fields = Vec::new();
-
-        for (slot, field) in decl.fields.iter().enumerate() {
-            let module_id = self.current_module;
-            let mut ctx = TypeResolutionContext {
-                entity_registry: &self.entity_registry,
-                interner,
-                name_table: &mut self.name_table,
-                module_id,
-                type_params: None,
-                self_type: None,
-                type_arena: &self.type_arena,
-            };
-            let ty = resolve_type(&field.ty, &mut ctx);
-
-            fields.push(StructField {
-                name: interner.resolve(field.name).to_string(),
-                ty,
-                slot,
-            });
-        }
-
         let name_id = self
             .name_table
             .intern(self.current_module, &[decl.name], interner);
@@ -944,7 +922,7 @@ impl Analyzer {
         self.entity_registry
             .set_error_info(entity_type_id, error_info);
 
-        // Register fields in EntityRegistry
+        // Register fields in EntityRegistry - resolve types directly to TypeId
         let builtin_module = self.name_table.builtin_module();
         let type_name_str = interner.resolve(decl.name);
         for (i, field) in decl.fields.iter().enumerate() {
@@ -955,9 +933,20 @@ impl Analyzer {
             let full_field_name_id = self
                 .name_table
                 .intern_raw(self.current_module, &[type_name_str, field_name_str]);
-            let field_ty = fields[i].ty.clone();
-            // Convert to ArenaTypeId for storage
-            let field_type_id = self.type_arena.borrow_mut().from_type(&field_ty);
+
+            // Resolve field type directly to TypeId
+            let module_id = self.current_module;
+            let mut ctx = TypeResolutionContext {
+                entity_registry: &self.entity_registry,
+                interner,
+                name_table: &mut self.name_table,
+                module_id,
+                type_params: None,
+                self_type: None,
+                type_arena: &self.type_arena,
+            };
+            let field_type_id = resolve_type_to_id(&field.ty, &mut ctx);
+
             self.entity_registry.register_field(
                 entity_type_id,
                 field_name_id,
@@ -1209,12 +1198,13 @@ impl Analyzer {
     fn analyze_external_block(
         &mut self,
         external: &ExternalBlock,
-        target_type: &LegacyType,
+        target_type_id: ArenaTypeId,
         trait_name: Option<Symbol>,
         interner: &Interner,
     ) {
-        let impl_type_id = match ImplTypeId::from_type(
-            target_type,
+        let impl_type_id = match ImplTypeId::from_type_id(
+            target_type_id,
+            &self.type_arena.borrow(),
             &self.entity_registry.type_table,
             &self.entity_registry,
         ) {
@@ -1224,8 +1214,10 @@ impl Analyzer {
 
         // Get EntityRegistry TypeDefId for the target type
         // Use impl_type_id.name_id() which we already have, avoiding name_id_for_type
-        let entity_type_id = target_type
-            .type_def_id()
+        let entity_type_id = self
+            .type_arena
+            .borrow()
+            .type_def_id(target_type_id)
             .or_else(|| self.entity_registry.type_by_name(impl_type_id.name_id()));
 
         // Get interface TypeDefId if implementing an interface

@@ -12,9 +12,7 @@ pub mod legacy;
 pub mod nominal;
 pub mod primitive;
 pub mod special;
-pub use legacy::{
-    LegacyType, StructField, StructuralFieldType, StructuralMethodType, StructuralType,
-};
+pub use legacy::{LegacyType, StructuralFieldType, StructuralMethodType, StructuralType};
 pub use nominal::{
     ClassType, ErrorTypeInfo, ExtendsVec, InterfaceMethodType, InterfaceType, NominalType,
     RecordType,

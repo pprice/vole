@@ -106,14 +106,6 @@ pub struct StructuralMethodType {
     pub return_type: LegacyType,
 }
 
-/// Field information for a class/record (LegacyType version - deprecated)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StructField {
-    pub name: String,
-    pub ty: LegacyType,
-    pub slot: usize, // Compile-time slot index
-}
-
 impl LegacyType {
     /// Convert from AST PrimitiveType to Type
     pub fn from_primitive(p: AstPrimitiveType) -> Self {

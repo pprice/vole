@@ -31,7 +31,6 @@ pub use resolution::{MethodResolutions, ResolvedMethod};
 pub use type_table::{TypeInfo, TypeKey, TypeTable};
 pub use types::{
     ClassType, ErrorTypeInfo, FunctionType, LegacyType, ModuleType, PrimitiveType, RecordType,
-    StructField,
 };
 pub use well_known::{WellKnownMethods, WellKnownTypes};
 
