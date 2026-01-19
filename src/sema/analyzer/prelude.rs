@@ -115,7 +115,7 @@ impl Analyzer {
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
-            module_types: FxHashMap::default(),
+            module_type_ids: FxHashMap::default(),
             module_programs: FxHashMap::default(),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
@@ -150,7 +150,6 @@ impl Analyzer {
                     CachedModule {
                         program: program.clone(),
                         interner: prelude_interner.clone(),
-                        module_type: None,
                         expr_types: sub_analyzer.expr_types.clone(),
                         method_resolutions: sub_analyzer.method_resolutions.clone_inner(),
                         entity_registry: sub_analyzer.entity_registry.clone(),

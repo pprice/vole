@@ -13,7 +13,7 @@ use crate::identity::NameTable;
 use crate::sema::TypeArena;
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_arena::TypeId;
-use crate::sema::types::{FunctionType, ModuleType};
+use crate::sema::types::FunctionType;
 use crate::sema::{EntityRegistry, ImplementRegistry};
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -27,8 +27,6 @@ pub struct CachedModule {
     pub program: Program,
     /// Interner with symbols from this module
     pub interner: Interner,
-    /// Module type (exports, constants, external functions) - only for user imports
-    pub module_type: Option<ModuleType>,
     /// Expression types from analysis.
     /// Stored as TypeId (interned handles) - valid because TypeArena is shared
     /// across all analyzers via Rc<RefCell<TypeArena>>.

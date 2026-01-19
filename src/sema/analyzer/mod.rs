@@ -30,7 +30,7 @@ use crate::sema::implement_registry::{
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::resolve::resolve_type_to_id;
 use crate::sema::type_arena::{TypeArena, TypeId as ArenaTypeId};
-use crate::sema::types::{ConstantValue, DisplayType, ModuleType, NominalType};
+use crate::sema::types::{ConstantValue, DisplayType, NominalType};
 use crate::sema::{
     ErrorTypeInfo, FunctionType, PrimitiveType, RecordType,
     resolve::TypeResolutionContext,
@@ -182,8 +182,8 @@ pub struct Analyzer {
     pub method_resolutions: MethodResolutions,
     /// Module loader for handling imports
     module_loader: ModuleLoader,
-    /// Analyzed module types by import path
-    module_types: FxHashMap<String, ModuleType>,
+    /// Cached module TypeIds by import path (avoids re-parsing)
+    module_type_ids: FxHashMap<String, ArenaTypeId>,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     module_programs: FxHashMap<String, (Program, Interner)>,
     /// Expression types for module programs (keyed by module path -> NodeId -> ArenaTypeId)
@@ -250,7 +250,7 @@ impl Analyzer {
             implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
-            module_types: FxHashMap::default(),
+            module_type_ids: FxHashMap::default(),
             module_programs: FxHashMap::default(),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
@@ -1519,21 +1519,9 @@ impl Analyzer {
         span: Span,
         _interner: &Interner,
     ) -> Result<ArenaTypeId, ()> {
-        // Check cache first
-        if let Some(module_type) = self.module_types.get(import_path) {
-            // Create TypeId from cached ModuleType
-            let exports: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> =
-                module_type.exports.iter().map(|(&k, &v)| (k, v)).collect();
-            let mut arena = self.type_arena.borrow_mut();
-            // Register module metadata (constants, external_funcs) for method resolution
-            arena.register_module_metadata(
-                module_type.module_id,
-                crate::sema::type_arena::ModuleMetadata {
-                    constants: module_type.constants.clone(),
-                    external_funcs: module_type.external_funcs.clone(),
-                },
-            );
-            return Ok(arena.module(module_type.module_id, exports));
+        // Check cache first - return cached TypeId directly
+        if let Some(&type_id) = self.module_type_ids.get(import_path) {
+            return Ok(type_id);
         }
 
         // Load the module
@@ -1679,16 +1667,6 @@ impl Analyzer {
             }
         }
 
-        let module_type = ModuleType {
-            module_id,
-            exports: exports.clone(),
-            constants: constants.clone(),
-            external_funcs: external_funcs.clone(),
-        };
-
-        self.module_types
-            .insert(import_path.to_string(), module_type);
-
         // Store the program and interner for compiling pure Vole functions
         self.module_programs
             .insert(import_path.to_string(), (program, module_interner));
@@ -1705,7 +1683,13 @@ impl Analyzer {
                 external_funcs,
             },
         );
-        Ok(arena.module(module_id, exports_vec))
+        let type_id = arena.module(module_id, exports_vec);
+        drop(arena);
+
+        // Cache the TypeId for subsequent imports
+        self.module_type_ids.insert(import_path.to_string(), type_id);
+
+        Ok(type_id)
     }
 }
 
