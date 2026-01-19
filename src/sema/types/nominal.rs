@@ -11,8 +11,6 @@ use smallvec::SmallVec;
 use crate::identity::{NameId, TypeDefId};
 use crate::sema::type_arena::{TypeId, TypeIdVec};
 
-use super::LegacyType;
-
 /// SmallVec for interface extends list - most interfaces extend 0-2 parents
 pub type ExtendsVec = SmallVec<[TypeDefId; 2]>;
 
@@ -231,12 +229,10 @@ impl InterfaceType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InterfaceMethodType {
     pub name: NameId,
-    pub params: Arc<[LegacyType]>,
-    pub return_type: Box<LegacyType>,
     pub has_default: bool, // True if interface provides default implementation
-    /// Interned parameter types (canonical - use for comparisons)
+    /// Interned parameter types
     pub params_id: TypeIdVec,
-    /// Interned return type (canonical - use for comparisons)
+    /// Interned return type
     pub return_type_id: TypeId,
 }
 

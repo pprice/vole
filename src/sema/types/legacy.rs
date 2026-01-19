@@ -792,42 +792,15 @@ fn substitute_slice(
     }
 }
 
-/// Helper: substitute types in interface methods, returning Some only if any changed
+/// Helper: substitute types in interface methods.
+/// InterfaceMethodType only stores TypeIds - can't substitute without arena.
+/// Use arena.substitute() for proper TypeId-based substitution.
 fn substitute_interface_methods(
-    methods: &Arc<[InterfaceMethodType]>,
-    substitutions: &std::collections::HashMap<NameId, LegacyType>,
+    _methods: &Arc<[InterfaceMethodType]>,
+    _substitutions: &std::collections::HashMap<NameId, LegacyType>,
 ) -> Option<Arc<[InterfaceMethodType]>> {
-    let mut changed = false;
-    let new_methods: Vec<_> = methods
-        .iter()
-        .map(|method| {
-            let new_params = substitute_slice(&method.params, substitutions);
-            let new_return = method.return_type.substitute(substitutions);
-            let return_changed = &new_return != method.return_type.as_ref();
-
-            if new_params.is_some() || return_changed {
-                changed = true;
-                InterfaceMethodType {
-                    name: method.name,
-                    params: new_params.unwrap_or_else(|| method.params.clone()),
-                    return_type: Box::new(new_return),
-                    has_default: method.has_default,
-                    // LegacyType substitution doesn't track TypeIds - use placeholders
-                    // Use arena.substitute() for proper TypeId-based substitution
-                    params_id: TypeIdVec::new(),
-                    return_type_id: TypeId::INVALID,
-                }
-            } else {
-                method.clone()
-            }
-        })
-        .collect();
-
-    if changed {
-        Some(new_methods.into())
-    } else {
-        None
-    }
+    // InterfaceMethodType only has TypeId fields - no arena access for substitution
+    None // Return None to indicate no changes
 }
 
 impl std::fmt::Display for LegacyType {

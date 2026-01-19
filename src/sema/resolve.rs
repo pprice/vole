@@ -72,18 +72,10 @@ fn interface_instance(
                 .iter()
                 .map(|&p| arena.substitute(p, &substitutions))
                 .collect();
-            let new_params: Vec<LegacyType> = substituted_params
-                .iter()
-                .map(|&id| arena.to_type(id))
-                .collect();
-
             let substituted_return = arena.substitute(sig.return_type_id, &substitutions);
-            let new_return = arena.to_type(substituted_return);
 
             InterfaceMethodType {
                 name: method.name_id,
-                params: new_params.into(),
-                return_type: Box::new(new_return),
                 has_default: method.has_default,
                 params_id: substituted_params,
                 return_type_id: substituted_return,

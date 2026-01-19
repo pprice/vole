@@ -1,8 +1,6 @@
 // src/sema/analyzer/declarations.rs
 //! Declaration signature collection (Pass 1 of semantic analysis).
 
-use std::sync::Arc;
-
 use super::*;
 use crate::frontend::ast::{ExprKind, LetInit, TypeExpr};
 use crate::sema::entity_defs::{GenericFuncInfo, GenericTypeInfo, TypeDefKind};
@@ -1392,17 +1390,9 @@ impl Analyzer {
         let interface_methods: Vec<crate::sema::types::InterfaceMethodType> = method_data
             .iter()
             .map(|(name, _, params_id, return_type_id, has_default)| {
-                // Get method name_id before borrowing arena
                 let method_name_id = self.method_name_id(*name, interner);
-                // Convert TypeId back to LegacyType for the legacy fields
-                let arena = self.type_arena.borrow();
-                let params: Arc<[LegacyType]> =
-                    params_id.iter().map(|&id| arena.to_type(id)).collect();
-                let return_type = Box::new(arena.to_type(*return_type_id));
                 crate::sema::types::InterfaceMethodType {
                     name: method_name_id,
-                    params,
-                    return_type,
                     has_default: *has_default,
                     params_id: params_id.iter().copied().collect(),
                     return_type_id: *return_type_id,
