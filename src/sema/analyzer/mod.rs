@@ -1203,7 +1203,7 @@ impl Analyzer {
         trait_name: Option<Symbol>,
         interner: &Interner,
     ) {
-        let type_id = match ImplTypeId::from_type(
+        let impl_type_id = match ImplTypeId::from_type(
             target_type,
             &self.entity_registry.type_table,
             &self.entity_registry,
@@ -1213,12 +1213,10 @@ impl Analyzer {
         };
 
         // Get EntityRegistry TypeDefId for the target type
-        let entity_type_id = target_type.type_def_id().or_else(|| {
-            self.name_table
-                .primitives
-                .name_id_for_type(target_type)
-                .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-        });
+        // Use impl_type_id.name_id() which we already have, avoiding name_id_for_type
+        let entity_type_id = target_type
+            .type_def_id()
+            .or_else(|| self.entity_registry.type_by_name(impl_type_id.name_id()));
 
         // Get interface TypeDefId if implementing an interface
         let interface_type_id = trait_name.and_then(|name| {
@@ -1263,7 +1261,7 @@ impl Analyzer {
                 return_type: Some(Box::new(return_type_clone)),
             };
             self.implement_registry.register_method(
-                type_id,
+                impl_type_id,
                 method_id,
                 MethodImpl {
                     trait_name,

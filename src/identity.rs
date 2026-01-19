@@ -5,8 +5,6 @@
 use std::collections::HashMap;
 
 use crate::frontend::{Interner, Span, Symbol};
-use crate::sema::PrimitiveType;
-use crate::sema::types::LegacyType;
 
 mod entities;
 mod namer;
@@ -114,26 +112,6 @@ impl Primitives {
             PrimitiveType::F64 => self.f64,
             PrimitiveType::Bool => self.bool,
             PrimitiveType::String => self.string,
-        }
-    }
-
-    /// Map resolved Type to NameId for primitive types
-    pub fn name_id_for_type(&self, ty: &LegacyType) -> Option<NameId> {
-        match ty {
-            LegacyType::Primitive(PrimitiveType::I8) => Some(self.i8),
-            LegacyType::Primitive(PrimitiveType::I16) => Some(self.i16),
-            LegacyType::Primitive(PrimitiveType::I32) => Some(self.i32),
-            LegacyType::Primitive(PrimitiveType::I64) => Some(self.i64),
-            LegacyType::Primitive(PrimitiveType::I128) => Some(self.i128),
-            LegacyType::Primitive(PrimitiveType::U8) => Some(self.u8),
-            LegacyType::Primitive(PrimitiveType::U16) => Some(self.u16),
-            LegacyType::Primitive(PrimitiveType::U32) => Some(self.u32),
-            LegacyType::Primitive(PrimitiveType::U64) => Some(self.u64),
-            LegacyType::Primitive(PrimitiveType::F32) => Some(self.f32),
-            LegacyType::Primitive(PrimitiveType::F64) => Some(self.f64),
-            LegacyType::Primitive(PrimitiveType::Bool) => Some(self.bool),
-            LegacyType::Primitive(PrimitiveType::String) => Some(self.string),
-            _ => None,
         }
     }
 }

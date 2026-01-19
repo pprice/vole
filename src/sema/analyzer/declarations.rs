@@ -1755,18 +1755,16 @@ impl Analyzer {
             );
         }
 
-        if let Some(type_id) = ImplTypeId::from_type(
+        if let Some(impl_type_id) = ImplTypeId::from_type(
             &target_type,
             &self.entity_registry.type_table,
             &self.entity_registry,
         ) {
             // Get TypeDefId for the target type (for EntityRegistry updates)
-            let entity_type_id = target_type.type_def_id().or_else(|| {
-                self.name_table
-                    .primitives
-                    .name_id_for_type(&target_type)
-                    .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-            });
+            // Use impl_type_id.name_id() which we already have, avoiding name_id_for_type
+            let entity_type_id = target_type
+                .type_def_id()
+                .or_else(|| self.entity_registry.type_by_name(impl_type_id.name_id()));
 
             // Get interface TypeDefId if implementing an interface
             let interface_type_id = trait_name.and_then(|name| {
@@ -1795,7 +1793,7 @@ impl Analyzer {
 
                 let method_name_id = self.method_name_id(method.name, interner);
                 self.implement_registry.register_method(
-                    type_id,
+                    impl_type_id,
                     method_name_id,
                     MethodImpl {
                         trait_name,
@@ -1831,12 +1829,10 @@ impl Analyzer {
             // Register static methods from statics block (if present)
             if let Some(ref statics_block) = impl_block.statics {
                 // Get entity type id for registering static methods
-                let entity_type_id = target_type.type_def_id().or_else(|| {
-                    self.name_table
-                        .primitives
-                        .name_id_for_type(&target_type)
-                        .and_then(|name_id| self.entity_registry.type_by_name(name_id))
-                });
+                // Use impl_type_id.name_id() which we already have
+                let entity_type_id = target_type
+                    .type_def_id()
+                    .or_else(|| self.entity_registry.type_by_name(impl_type_id.name_id()));
 
                 if let Some(entity_type_id) = entity_type_id {
                     let type_name_str = match &impl_block.target_type {
