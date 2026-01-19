@@ -5,7 +5,6 @@ use super::*;
 use crate::frontend::ast::{ExprKind, LetInit, TypeExpr};
 use crate::sema::entity_defs::{GenericFuncInfo, GenericTypeInfo, TypeDefKind};
 use crate::sema::type_arena::{TypeId as ArenaTypeId, TypeIdVec};
-use crate::sema::types::{DisplayType, NominalType};
 
 /// Extract the base interface name from a TypeExpr.
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
@@ -281,16 +280,6 @@ impl Analyzer {
                 );
             }
 
-            // Register in type_table for type resolution
-            let class_type = self.entity_registry.build_class_type(entity_type_id);
-            if let Some(ref ct) = class_type {
-                self.register_named_type(
-                    class.name,
-                    DisplayType::Nominal(NominalType::Class(ct.clone())),
-                    interner,
-                );
-            }
-
             // Register and validate implements list
             self.validate_and_register_implements(
                 entity_type_id,
@@ -516,15 +505,6 @@ impl Analyzer {
                 );
             }
 
-            // Build and register class type with TypeParam placeholders
-            let class_type = self.entity_registry.build_class_type(entity_type_id);
-            if let Some(ref ct) = class_type {
-                self.register_named_type(
-                    class.name,
-                    DisplayType::Nominal(NominalType::Class(ct.clone())),
-                    interner,
-                );
-            }
 
             // Register and validate implements list (for generic classes)
             self.validate_and_register_implements(
@@ -821,15 +801,6 @@ impl Analyzer {
                 );
             }
 
-            // Register in type_table for type resolution
-            let record_type = self.entity_registry.build_record_type(entity_type_id);
-            if let Some(ref rt) = record_type {
-                self.register_named_type(
-                    record.name,
-                    DisplayType::Nominal(NominalType::Record(rt.clone())),
-                    interner,
-                );
-            }
 
             // Register and validate implements list
             self.validate_and_register_implements(
@@ -987,16 +958,6 @@ impl Analyzer {
                 .entity_registry
                 .type_by_name(name_id)
                 .expect("record shell registered in register_all_type_shells");
-
-            let record_type = RecordType {
-                type_def_id: entity_type_id,
-                type_args_id: TypeIdVec::new(),
-            };
-            self.register_named_type(
-                record.name,
-                DisplayType::Nominal(NominalType::Record(record_type)),
-                interner,
-            );
 
             // Register and validate implements list (for generic records)
             self.validate_and_register_implements(
@@ -1367,7 +1328,7 @@ impl Analyzer {
                 })
                 .collect();
 
-        let interface_methods: Vec<crate::sema::types::InterfaceMethodType> = method_data
+        let _interface_methods: Vec<crate::sema::types::InterfaceMethodType> = method_data
             .iter()
             .map(|(name, _, params_id, return_type_id, has_default)| {
                 let method_name_id = self.method_name_id(*name, interner);
@@ -1442,8 +1403,8 @@ impl Analyzer {
         self.entity_registry
             .set_type_params(entity_type_id, entity_type_params);
 
-        // Register extends relationships and build extends Vec<TypeDefId>
-        let extends_type_ids: Vec<TypeDefId> = interface_decl
+        // Register extends relationships
+        let _extends_type_ids: Vec<TypeDefId> = interface_decl
             .extends
             .iter()
             .filter_map(|&parent_sym| {
@@ -1575,16 +1536,6 @@ impl Analyzer {
             );
         }
 
-        self.register_named_type(
-            interface_decl.name,
-            DisplayType::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
-                type_def_id: entity_type_id,
-                type_args_id: TypeIdVec::new(),
-                methods: interface_methods.into(),
-                extends: extends_type_ids.into(),
-            })),
-            interner,
-        );
     }
 
     fn collect_implement_block(&mut self, impl_block: &ImplementBlock, interner: &Interner) {

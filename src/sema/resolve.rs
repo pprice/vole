@@ -10,7 +10,6 @@ use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::TypeParamScope;
 use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
-use crate::sema::types::DisplayType;
 
 /// Context needed for type resolution
 pub struct TypeResolutionContext<'a> {
@@ -52,17 +51,6 @@ impl<'a> TypeResolutionContext<'a> {
     pub fn resolver(&self) -> Resolver<'_> {
         Resolver::new(self.interner, self.name_table, self.module_id, &[])
     }
-}
-
-/// Resolve a TypeExpr to a Type
-///
-/// This converts AST type expressions (from parsing) to semantic types (for type checking).
-/// It handles primitives, named types (aliases, classes, records, interfaces), arrays,
-/// optionals, unions, and function types.
-pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> DisplayType {
-    // Resolve to TypeId first, then project to DisplayType for backwards compatibility
-    let type_id = resolve_type_to_id(ty, ctx);
-    ctx.type_arena.borrow().to_display(type_id)
 }
 
 /// Resolve a TypeExpr directly to a TypeId.

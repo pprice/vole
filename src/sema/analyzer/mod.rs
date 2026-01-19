@@ -30,9 +30,9 @@ use crate::sema::implement_registry::{
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::resolve::resolve_type_to_id;
 use crate::sema::type_arena::{TypeArena, TypeId as ArenaTypeId};
-use crate::sema::types::{ConstantValue, DisplayType, NominalType};
+use crate::sema::types::ConstantValue;
 use crate::sema::{
-    ErrorTypeInfo, FunctionType, PrimitiveType, RecordType,
+    ErrorTypeInfo, FunctionType, PrimitiveType,
     resolve::TypeResolutionContext,
     scope::{Scope, Variable},
 };
@@ -391,11 +391,6 @@ impl Analyzer {
         {
             info.is_mutated = true;
         }
-    }
-
-    fn register_named_type(&mut self, _name: Symbol, _ty: DisplayType, _interner: &Interner) {
-        // No-op: Named types are now displayed via EntityRegistry lookup
-        // This function is kept for API compatibility but does nothing
     }
 
     fn module_name_id(&self, module_id: ModuleId, name: &str) -> Option<NameId> {
@@ -869,12 +864,6 @@ impl Analyzer {
         let error_info = ErrorTypeInfo {
             type_def_id: entity_type_id,
         };
-
-        self.register_named_type(
-            decl.name,
-            DisplayType::Nominal(NominalType::Error(error_info.clone())),
-            interner,
-        );
 
         // Set error info for lookup
         self.entity_registry
