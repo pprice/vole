@@ -6,7 +6,8 @@ use crate::identity::Namer;
 use crate::sema::implement_registry::{
     ExternalMethodInfo, ImplTypeId, MethodImpl, PrimitiveTypeId,
 };
-use crate::sema::{FunctionType, LegacyType, PrimitiveType};
+use crate::sema::types::PlaceholderKind;
+use crate::sema::FunctionType;
 
 impl Analyzer {
     /// Register built-in interfaces and their implementations
@@ -61,25 +62,19 @@ impl Analyzer {
             .map(ImplTypeId::from_name_id);
 
         if let Some(type_id) = array_id {
+            let mut arena = self.type_arena.borrow_mut();
+            let i64_type = arena.i64();
+            let unknown_type = arena.placeholder(PlaceholderKind::Inference);
+            drop(arena);
             register_builtin!(
                 type_id,
                 method_len,
-                FunctionType::new_with_arena(
-                    vec![],
-                    LegacyType::Primitive(PrimitiveType::I64),
-                    false,
-                    &mut self.type_arena.borrow_mut(),
-                )
+                FunctionType::from_ids(&[], i64_type, false, &self.type_arena.borrow())
             );
             register_builtin!(
                 type_id,
                 method_iter,
-                FunctionType::new_with_arena(
-                    vec![],
-                    LegacyType::unknown(), // Will be refined by check_builtin_method
-                    false,
-                    &mut self.type_arena.borrow_mut(),
-                ),
+                FunctionType::from_ids(&[], unknown_type, false, &self.type_arena.borrow()),
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "array_iter".to_string(),
@@ -89,25 +84,19 @@ impl Analyzer {
         }
 
         if let Some(type_id) = string_id {
+            let mut arena = self.type_arena.borrow_mut();
+            let i64_type = arena.i64();
+            let unknown_type = arena.placeholder(PlaceholderKind::Inference);
+            drop(arena);
             register_builtin!(
                 type_id,
                 method_len,
-                FunctionType::new_with_arena(
-                    vec![],
-                    LegacyType::Primitive(PrimitiveType::I64),
-                    false,
-                    &mut self.type_arena.borrow_mut(),
-                )
+                FunctionType::from_ids(&[], i64_type, false, &self.type_arena.borrow())
             );
             register_builtin!(
                 type_id,
                 method_iter,
-                FunctionType::new_with_arena(
-                    vec![],
-                    LegacyType::unknown(), // Will be refined by check_builtin_method
-                    false,
-                    &mut self.type_arena.borrow_mut(),
-                ),
+                FunctionType::from_ids(&[], unknown_type, false, &self.type_arena.borrow()),
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "string_chars_iter".to_string(),
@@ -123,15 +112,11 @@ impl Analyzer {
             .primitive_name_id(PrimitiveTypeId::Range)
             .map(ImplTypeId::from_name_id);
         if let Some(type_id) = range_id {
+            let unknown_type = self.type_arena.borrow_mut().placeholder(PlaceholderKind::Inference);
             register_builtin!(
                 type_id,
                 method_iter,
-                FunctionType::new_with_arena(
-                    vec![],
-                    LegacyType::unknown(), // Will be refined by check_builtin_method
-                    false,
-                    &mut self.type_arena.borrow_mut(),
-                ),
+                FunctionType::from_ids(&[], unknown_type, false, &self.type_arena.borrow()),
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "range_iter".to_string(),
