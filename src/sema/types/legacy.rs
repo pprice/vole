@@ -11,7 +11,9 @@ use crate::frontend::Span;
 use crate::identity::{NameId, TypeDefId, TypeParamId};
 use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 
-use super::nominal::{ClassType, ErrorTypeInfo, InterfaceMethodType, InterfaceType, NominalType, RecordType};
+use super::nominal::{
+    ClassType, ErrorTypeInfo, InterfaceMethodType, InterfaceType, NominalType, RecordType,
+};
 use super::special::{AnalysisError, FallibleType, ModuleType, PlaceholderKind};
 use super::{FunctionType, PrimitiveType};
 
@@ -618,7 +620,9 @@ impl LegacyType {
                     .iter()
                     .map(|f| (f.name, f.ty.intern(arena)))
                     .collect();
-                let methods: smallvec::SmallVec<[crate::sema::type_arena::InternedStructuralMethod; 2]> = st
+                let methods: smallvec::SmallVec<
+                    [crate::sema::type_arena::InternedStructuralMethod; 2],
+                > = st
                     .methods
                     .iter()
                     .map(|m| crate::sema::type_arena::InternedStructuralMethod {
@@ -650,12 +654,18 @@ impl LegacyType {
             SemaType::Array(elem) => LegacyType::Array(Box::new(Self::from_arena(*elem, arena))),
 
             SemaType::Union(variants) => {
-                let types: Vec<LegacyType> = variants.iter().map(|&v| Self::from_arena(v, arena)).collect();
+                let types: Vec<LegacyType> = variants
+                    .iter()
+                    .map(|&v| Self::from_arena(v, arena))
+                    .collect();
                 LegacyType::Union(types.into())
             }
 
             SemaType::Tuple(elements) => {
-                let types: Vec<LegacyType> = elements.iter().map(|&e| Self::from_arena(e, arena)).collect();
+                let types: Vec<LegacyType> = elements
+                    .iter()
+                    .map(|&e| Self::from_arena(e, arena))
+                    .collect();
                 LegacyType::Tuple(types.into())
             }
 
@@ -748,34 +758,34 @@ impl LegacyType {
                 })
             }
 
-            SemaType::Fallible { success, error } => {
-                LegacyType::Fallible(FallibleType {
-                    success_type: Box::new(Self::from_arena(*success, arena)),
-                    error_type: Box::new(Self::from_arena(*error, arena)),
-                })
-            }
+            SemaType::Fallible { success, error } => LegacyType::Fallible(FallibleType {
+                success_type: Box::new(Self::from_arena(*success, arena)),
+                error_type: Box::new(Self::from_arena(*error, arena)),
+            }),
 
-            SemaType::Structural(st) => {
-                LegacyType::Structural(StructuralType {
-                    fields: st
-                        .fields
-                        .iter()
-                        .map(|(name, ty)| StructuralFieldType {
-                            name: *name,
-                            ty: Self::from_arena(*ty, arena),
-                        })
-                        .collect(),
-                    methods: st
-                        .methods
-                        .iter()
-                        .map(|m| StructuralMethodType {
-                            name: m.name,
-                            params: m.params.iter().map(|&p| Self::from_arena(p, arena)).collect(),
-                            return_type: Self::from_arena(m.return_type, arena),
-                        })
-                        .collect(),
-                })
-            }
+            SemaType::Structural(st) => LegacyType::Structural(StructuralType {
+                fields: st
+                    .fields
+                    .iter()
+                    .map(|(name, ty)| StructuralFieldType {
+                        name: *name,
+                        ty: Self::from_arena(*ty, arena),
+                    })
+                    .collect(),
+                methods: st
+                    .methods
+                    .iter()
+                    .map(|m| StructuralMethodType {
+                        name: m.name,
+                        params: m
+                            .params
+                            .iter()
+                            .map(|&p| Self::from_arena(p, arena))
+                            .collect(),
+                        return_type: Self::from_arena(m.return_type, arena),
+                    })
+                    .collect(),
+            }),
 
             SemaType::Placeholder(kind) => LegacyType::Placeholder(kind.clone()),
         }
