@@ -46,10 +46,10 @@ impl Analyzer {
                         }
 
                         // Use TypeId throughout to avoid LegacyType materialization
-                        let declared_type_id = let_stmt.ty.as_ref().map(|t| {
-                            let ty = self.resolve_type(t, interner);
-                            self.type_to_id(&ty)
-                        });
+                        let declared_type_id = let_stmt
+                            .ty
+                            .as_ref()
+                            .map(|t| self.resolve_type_id(t, interner));
                         let init_type_id =
                             self.check_expr_expecting_id(init_expr, declared_type_id, interner)?;
 
