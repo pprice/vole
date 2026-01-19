@@ -94,14 +94,6 @@ impl TypeTable {
         id
     }
 
-    pub fn insert_anonymous(&mut self, ty: LegacyType) -> TypeKey {
-        self.insert(TypeInfo {
-            ty,
-            type_id: None,
-            name_id: None,
-        })
-    }
-
     pub fn by_name(&self, name_id: NameId) -> Option<TypeKey> {
         self.name_lookup.get(&name_id).copied()
     }
@@ -125,19 +117,6 @@ impl TypeTable {
         entity_registry: &crate::sema::entity_registry::EntityRegistry,
     ) -> String {
         self.display_type_inner(ty, names, entity_registry)
-    }
-
-    /// Display a TypeId by converting it to LegacyType via the arena
-    #[deprecated(note = "use display_type_id_direct to avoid LegacyType conversion")]
-    pub fn display_type_id(
-        &self,
-        type_id: ArenaTypeId,
-        arena: &TypeArena,
-        names: &NameTable,
-        entity_registry: &crate::sema::entity_registry::EntityRegistry,
-    ) -> String {
-        let ty = arena.to_type(type_id);
-        self.display_type_inner(&ty, names, entity_registry)
     }
 
     /// Display a TypeId directly from SemaType without LegacyType materialization
