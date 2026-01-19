@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
+use crate::sema::types::PlaceholderKind;
 
 impl Analyzer {
     /// Check expression against expected type and return TypeId directly.
@@ -447,11 +448,11 @@ impl Analyzer {
         }
 
         if elements.is_empty() {
-            // Empty array with unknown element type
+            // Empty array with unknown element type - use arena.placeholder directly
             let unknown_id = self
                 .type_arena
                 .borrow_mut()
-                .from_type(&LegacyType::unknown());
+                .placeholder(PlaceholderKind::Inference);
             return Ok(self.ty_array_id(unknown_id));
         }
 

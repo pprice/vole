@@ -1,6 +1,6 @@
 use super::super::*;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::LegacyType;
+use crate::sema::types::{LegacyType, PlaceholderKind};
 
 impl Analyzer {
     /// Check expression and return TypeId.
@@ -214,7 +214,10 @@ impl Analyzer {
             ExprKind::ArrayLiteral(elements) => {
                 if elements.is_empty() {
                     // Empty array needs type annotation or we use unknown placeholder
-                    let unknown_id = self.type_to_id(&LegacyType::unknown());
+                    let unknown_id = self
+                        .type_arena
+                        .borrow_mut()
+                        .placeholder(PlaceholderKind::Inference);
                     Ok(self.ty_array_id(unknown_id))
                 } else {
                     // Infer types for all elements (TypeId-based)
