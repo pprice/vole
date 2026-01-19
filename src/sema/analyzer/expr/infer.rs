@@ -413,10 +413,9 @@ impl Analyzer {
             }
 
             ExprKind::Import(path) => {
-                let ty = self
-                    .analyze_module(path, expr.span, interner)
-                    .map_err(|_| self.errors.clone())?;
-                Ok(self.type_to_id(&ty))
+                // analyze_module returns TypeId directly
+                self.analyze_module(path, expr.span, interner)
+                    .map_err(|_| self.errors.clone())
             }
 
             ExprKind::Yield(yield_expr) => {

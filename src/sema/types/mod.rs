@@ -64,28 +64,7 @@ impl std::hash::Hash for FunctionType {
 }
 
 impl FunctionType {
-    /// Create a new FunctionType, interning types into the arena.
-    /// This is the preferred constructor when you have DisplayTypes and an arena.
-    pub fn new_with_arena(
-        params: impl IntoIterator<Item = impl std::borrow::Borrow<DisplayType>>,
-        return_type: &DisplayType,
-        is_closure: bool,
-        arena: &mut TypeArena,
-    ) -> Self {
-        let params_id: TypeIdVec = params
-            .into_iter()
-            .map(|p| arena.from_display(p.borrow()))
-            .collect();
-        let return_type_id = arena.from_display(return_type);
-        Self {
-            is_closure,
-            params_id,
-            return_type_id,
-        }
-    }
-
     /// Create a new FunctionType from TypeIds.
-    /// This is the preferred constructor when you already have TypeIds (avoids DisplayType conversion).
     pub fn from_ids(param_ids: &[TypeId], return_id: TypeId, is_closure: bool) -> Self {
         Self {
             is_closure,

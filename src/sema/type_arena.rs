@@ -1324,23 +1324,12 @@ impl TypeArena {
     }
 
     // ========================================================================
-    // Bridge methods for incremental migration
-    // TEMPORARY: These will be deleted in Phase 5 of the TypeArena refactor
+    // Display conversion
     // ========================================================================
-
-    /// Convert a DisplayType to a TypeId (interning).
-    ///
-    /// This materializes a recursive type representation into an arena-interned handle.
-    /// Delegates to DisplayType::intern() - conversion logic lives in display.rs.
-    #[inline]
-    pub fn from_display(&mut self, ty: &DisplayType) -> TypeId {
-        ty.intern(self)
-    }
 
     /// Convert a TypeId to a DisplayType (materialization for error messages).
     ///
-    /// This is the inverse of from_display - used when we need a recursive
-    /// representation for error messages or display.
+    /// This is used when we need a recursive representation for error messages.
     /// Delegates to DisplayType::from_arena() - conversion logic lives in display.rs.
     #[inline]
     pub fn to_display(&self, id: TypeId) -> DisplayType {
@@ -1811,248 +1800,69 @@ mod tests {
     }
 
     // ========================================================================
-    // Phase 2.1 tests: Bridge methods (Type <-> TypeId)
+    // to_display tests (for error message formatting)
     // ========================================================================
 
     #[test]
-    fn bridge_roundtrip_primitives() {
+    fn to_display_primitives() {
         use crate::sema::types::PrimitiveType;
 
-        let mut arena = TypeArena::new();
-        let original = DisplayType::Primitive(PrimitiveType::I32);
-        let id = arena.from_display(&original);
-        let back = arena.to_display(id);
-        assert_eq!(original, back);
-
-        // Test other primitives
-        let string_type = DisplayType::Primitive(PrimitiveType::String);
-        let string_id = arena.from_display(&string_type);
-        assert_eq!(arena.to_display(string_id), string_type);
-
-        let bool_type = DisplayType::Primitive(PrimitiveType::Bool);
-        let bool_id = arena.from_display(&bool_type);
-        assert_eq!(arena.to_display(bool_id), bool_type);
-    }
-
-    #[test]
-    fn bridge_roundtrip_special_types() {
-        let mut arena = TypeArena::new();
-
-        // Void
-        let void = DisplayType::Void;
-        let void_id = arena.from_display(&void);
-        assert_eq!(arena.to_display(void_id), void);
-
-        // Nil
-        let nil = DisplayType::Nil;
-        let nil_id = arena.from_display(&nil);
-        assert_eq!(arena.to_display(nil_id), nil);
-
-        // Done
-        let done = DisplayType::Done;
-        let done_id = arena.from_display(&done);
-        assert_eq!(arena.to_display(done_id), done);
-
-        // Range
-        let range = DisplayType::Range;
-        let range_id = arena.from_display(&range);
-        assert_eq!(arena.to_display(range_id), range);
-
-        // Type (metatype)
-        let metatype = DisplayType::MetaType;
-        let metatype_id = arena.from_display(&metatype);
-        assert_eq!(arena.to_display(metatype_id), metatype);
-    }
-
-    #[test]
-    fn bridge_roundtrip_array() {
-        use crate::sema::types::PrimitiveType;
-
-        let mut arena = TypeArena::new();
-        let original = DisplayType::Array(Box::new(DisplayType::Primitive(PrimitiveType::String)));
-        let id = arena.from_display(&original);
-        let back = arena.to_display(id);
-        assert_eq!(original, back);
-    }
-
-    #[test]
-    fn bridge_roundtrip_union() {
-        use crate::sema::types::PrimitiveType;
-
-        let mut arena = TypeArena::new();
-        let original = DisplayType::Union(
-            vec![DisplayType::Primitive(PrimitiveType::I32), DisplayType::Nil].into(),
+        let arena = TypeArena::new();
+        assert_eq!(
+            arena.to_display(TypeId::I32),
+            DisplayType::Primitive(PrimitiveType::I32)
         );
-        let id = arena.from_display(&original);
-        let back = arena.to_display(id);
-        assert_eq!(original, back);
-    }
-
-    #[test]
-    fn bridge_roundtrip_tuple() {
-        use crate::sema::types::PrimitiveType;
-
-        let mut arena = TypeArena::new();
-        let original = DisplayType::Tuple(
-            vec![
-                DisplayType::Primitive(PrimitiveType::I32),
-                DisplayType::Primitive(PrimitiveType::String),
-                DisplayType::Primitive(PrimitiveType::Bool),
-            ]
-            .into(),
+        assert_eq!(
+            arena.to_display(TypeId::STRING),
+            DisplayType::Primitive(PrimitiveType::String)
         );
-        let id = arena.from_display(&original);
-        let back = arena.to_display(id);
-        assert_eq!(original, back);
+        assert_eq!(
+            arena.to_display(TypeId::BOOL),
+            DisplayType::Primitive(PrimitiveType::Bool)
+        );
     }
 
     #[test]
-    fn bridge_roundtrip_function() {
-        use crate::sema::types::{FunctionType, PrimitiveType};
+    fn to_display_special_types() {
+        let arena = TypeArena::new();
+
+        assert_eq!(arena.to_display(TypeId::VOID), DisplayType::Void);
+        assert_eq!(arena.to_display(TypeId::NIL), DisplayType::Nil);
+        assert_eq!(arena.to_display(TypeId::DONE), DisplayType::Done);
+        assert_eq!(arena.to_display(TypeId::RANGE), DisplayType::Range);
+        assert_eq!(arena.to_display(TypeId::METATYPE), DisplayType::MetaType);
+    }
+
+    #[test]
+    fn to_display_array() {
+        use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let params = vec![DisplayType::Primitive(PrimitiveType::I32)];
-        let ret = DisplayType::Primitive(PrimitiveType::String);
-        let original = DisplayType::Function(FunctionType::new_with_arena(
-            params.iter(),
-            &ret,
+        let array_id = arena.array(TypeId::STRING);
+        let display = arena.to_display(array_id);
+        assert_eq!(
+            display,
+            DisplayType::Array(Box::new(DisplayType::Primitive(PrimitiveType::String)))
+        );
+    }
+
+    #[test]
+    fn to_display_function() {
+        let mut arena = TypeArena::new();
+        let func_id = arena.function(
+            smallvec::smallvec![TypeId::I32, TypeId::I32],
+            TypeId::BOOL,
             false,
-            &mut arena,
-        ));
-        let id = arena.from_display(&original);
-        let back = arena.to_display(id);
-        assert_eq!(original, back);
-
-        // Test with closure flag
-        let closure = DisplayType::Function(FunctionType::new_with_arena(
-            std::iter::empty::<&DisplayType>(),
-            &DisplayType::Void,
-            true,
-            &mut arena,
-        ));
-        let closure_id = arena.from_display(&closure);
-        let closure_back = arena.to_display(closure_id);
-        assert_eq!(closure, closure_back);
-    }
-
-    #[test]
-    fn bridge_roundtrip_class() {
-        use crate::sema::types::{ClassType, NominalType, PrimitiveType};
-
-        let mut arena = TypeArena::new();
-        let type_def_id = TypeDefId::new(42);
-        // Create type args with consistent DisplayType and TypeId representations
-        let type_args_legacy = [DisplayType::Primitive(PrimitiveType::I32)];
-        let type_args_id: TypeIdVec = type_args_legacy
-            .iter()
-            .map(|t| arena.from_display(t))
-            .collect();
-        let original = DisplayType::Nominal(NominalType::Class(ClassType {
-            type_def_id,
-            type_args_id,
-        }));
-        let id = arena.from_display(&original);
-        let back = arena.to_display(id);
-        assert_eq!(original, back);
-    }
-
-    #[test]
-    fn bridge_roundtrip_record() {
-        use crate::sema::types::{NominalType, PrimitiveType, RecordType};
-
-        let mut arena = TypeArena::new();
-        let type_def_id = TypeDefId::new(123);
-        // Create type args
-        let type_args_legacy = [
-            DisplayType::Primitive(PrimitiveType::String),
-            DisplayType::Primitive(PrimitiveType::Bool),
-        ];
-        let type_args_id: TypeIdVec = type_args_legacy
-            .iter()
-            .map(|t| arena.from_display(t))
-            .collect();
-        let original = DisplayType::Nominal(NominalType::Record(RecordType {
-            type_def_id,
-            type_args_id,
-        }));
-        let id = arena.from_display(&original);
-        let back = arena.to_display(id);
-        assert_eq!(original, back);
-    }
-
-    #[test]
-    fn bridge_roundtrip_fixed_array() {
-        use crate::sema::types::PrimitiveType;
-
-        let mut arena = TypeArena::new();
-        let original = DisplayType::FixedArray {
-            element: Box::new(DisplayType::Primitive(PrimitiveType::I32)),
-            size: 10,
-        };
-        let id = arena.from_display(&original);
-        let back = arena.to_display(id);
-        assert_eq!(original, back);
-    }
-
-    #[test]
-    fn bridge_roundtrip_runtime_iterator() {
-        use crate::sema::types::PrimitiveType;
-
-        let mut arena = TypeArena::new();
-        let original =
-            DisplayType::RuntimeIterator(Box::new(DisplayType::Primitive(PrimitiveType::String)));
-        let id = arena.from_display(&original);
-        let back = arena.to_display(id);
-        assert_eq!(original, back);
-    }
-
-    #[test]
-    fn bridge_roundtrip_type_param() {
-        let mut arena = TypeArena::new();
-        let name_id = NameId::new_for_test(999);
-        let original = DisplayType::TypeParam(name_id);
-        let id = arena.from_display(&original);
-        let back = arena.to_display(id);
-        assert_eq!(original, back);
-    }
-
-    #[test]
-    fn bridge_interning_via_from_display() {
-        use crate::sema::types::PrimitiveType;
-
-        let mut arena = TypeArena::new();
-        let ty1 = DisplayType::Array(Box::new(DisplayType::Primitive(PrimitiveType::I32)));
-        let ty2 = DisplayType::Array(Box::new(DisplayType::Primitive(PrimitiveType::I32)));
-
-        let id1 = arena.from_display(&ty1);
-        let id2 = arena.from_display(&ty2);
-
-        // Same types should get same TypeId
-        assert_eq!(id1, id2);
-    }
-
-    #[test]
-    fn bridge_nested_complex_type() {
-        use crate::sema::types::{FunctionType, PrimitiveType};
-
-        let mut arena = TypeArena::new();
-
-        // Array<(i32, string) -> bool>
-        let params = vec![
-            DisplayType::Primitive(PrimitiveType::I32),
-            DisplayType::Primitive(PrimitiveType::String),
-        ];
-        let ret = DisplayType::Primitive(PrimitiveType::Bool);
-        let func = DisplayType::Function(FunctionType::new_with_arena(
-            params.iter(),
-            &ret,
-            false,
-            &mut arena,
-        ));
-        let original = DisplayType::Array(Box::new(func));
-
-        let id = arena.from_display(&original);
-        let back = arena.to_display(id);
-        assert_eq!(original, back);
+        );
+        let display = arena.to_display(func_id);
+        if let DisplayType::Function(ft) = display {
+            assert_eq!(ft.params_id.len(), 2);
+            assert_eq!(ft.params_id[0], TypeId::I32);
+            assert_eq!(ft.params_id[1], TypeId::I32);
+            assert_eq!(ft.return_type_id, TypeId::BOOL);
+            assert!(!ft.is_closure);
+        } else {
+            panic!("Expected function type");
+        }
     }
 }

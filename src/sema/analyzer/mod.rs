@@ -1518,10 +1518,22 @@ impl Analyzer {
         import_path: &str,
         span: Span,
         _interner: &Interner,
-    ) -> Result<DisplayType, ()> {
+    ) -> Result<ArenaTypeId, ()> {
         // Check cache first
         if let Some(module_type) = self.module_types.get(import_path) {
-            return Ok(DisplayType::Module(module_type.clone()));
+            // Create TypeId from cached ModuleType
+            let exports: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> =
+                module_type.exports.iter().map(|(&k, &v)| (k, v)).collect();
+            let mut arena = self.type_arena.borrow_mut();
+            // Register module metadata (constants, external_funcs) for method resolution
+            arena.register_module_metadata(
+                module_type.module_id,
+                crate::sema::type_arena::ModuleMetadata {
+                    constants: module_type.constants.clone(),
+                    external_funcs: module_type.external_funcs.clone(),
+                },
+            );
+            return Ok(arena.module(module_type.module_id, exports));
         }
 
         // Load the module
@@ -1669,19 +1681,31 @@ impl Analyzer {
 
         let module_type = ModuleType {
             module_id,
-            exports,
-            constants,
-            external_funcs,
+            exports: exports.clone(),
+            constants: constants.clone(),
+            external_funcs: external_funcs.clone(),
         };
 
         self.module_types
-            .insert(import_path.to_string(), module_type.clone());
+            .insert(import_path.to_string(), module_type);
 
         // Store the program and interner for compiling pure Vole functions
         self.module_programs
             .insert(import_path.to_string(), (program, module_interner));
 
-        Ok(DisplayType::Module(module_type))
+        // Create TypeId from exports and register module metadata
+        let exports_vec: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> =
+            exports.into_iter().collect();
+        let mut arena = self.type_arena.borrow_mut();
+        // Register module metadata (constants, external_funcs) for method resolution
+        arena.register_module_metadata(
+            module_id,
+            crate::sema::type_arena::ModuleMetadata {
+                constants,
+                external_funcs,
+            },
+        );
+        Ok(arena.module(module_id, exports_vec))
     }
 }
 

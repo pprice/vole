@@ -9,14 +9,6 @@ use super::*;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
 
 impl Analyzer {
-    // ========== Arena TypeId operations ==========
-
-    /// Convert Type to TypeId (interning)
-    #[inline]
-    pub(crate) fn type_to_id(&mut self, ty: &DisplayType) -> ArenaTypeId {
-        self.type_arena.borrow_mut().from_display(ty)
-    }
-
     // ========== TypeId-returning type construction ==========
     //
     // These return TypeId directly, avoiding DisplayType materialization.
