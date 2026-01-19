@@ -505,7 +505,6 @@ impl Analyzer {
                 );
             }
 
-
             // Register and validate implements list (for generic classes)
             self.validate_and_register_implements(
                 entity_type_id,
@@ -800,7 +799,6 @@ impl Analyzer {
                     i,
                 );
             }
-
 
             // Register and validate implements list
             self.validate_and_register_implements(
@@ -1535,7 +1533,6 @@ impl Analyzer {
                 i,
             );
         }
-
     }
 
     fn collect_implement_block(&mut self, impl_block: &ImplementBlock, interner: &Interner) {

@@ -11,7 +11,7 @@ use hashbrown::HashMap;
 use smallvec::SmallVec;
 
 use crate::identity::{ModuleId, NameId, TypeDefId, TypeParamId};
-use crate::sema::types::{ConstantValue, DisplayType, PlaceholderKind, PrimitiveType};
+use crate::sema::types::{ConstantValue, PlaceholderKind, PrimitiveType};
 
 /// Concrete type identity in the TypeArena.
 ///
@@ -1322,19 +1322,6 @@ impl TypeArena {
             | SemaType::Placeholder(_) => ty,
         }
     }
-
-    // ========================================================================
-    // Display conversion
-    // ========================================================================
-
-    /// Convert a TypeId to a DisplayType (materialization for error messages).
-    ///
-    /// This is used when we need a recursive representation for error messages.
-    /// Delegates to DisplayType::from_arena() - conversion logic lives in display.rs.
-    #[inline]
-    pub fn to_display(&self, id: TypeId) -> DisplayType {
-        DisplayType::from_arena(id, self)
-    }
 }
 
 impl Default for TypeArena {
@@ -1797,72 +1784,5 @@ mod tests {
         let inner = arena.unwrap_array(result).unwrap();
         let innermost = arena.unwrap_array(inner).unwrap();
         assert_eq!(innermost, arena.bool());
-    }
-
-    // ========================================================================
-    // to_display tests (for error message formatting)
-    // ========================================================================
-
-    #[test]
-    fn to_display_primitives() {
-        use crate::sema::types::PrimitiveType;
-
-        let arena = TypeArena::new();
-        assert_eq!(
-            arena.to_display(TypeId::I32),
-            DisplayType::Primitive(PrimitiveType::I32)
-        );
-        assert_eq!(
-            arena.to_display(TypeId::STRING),
-            DisplayType::Primitive(PrimitiveType::String)
-        );
-        assert_eq!(
-            arena.to_display(TypeId::BOOL),
-            DisplayType::Primitive(PrimitiveType::Bool)
-        );
-    }
-
-    #[test]
-    fn to_display_special_types() {
-        let arena = TypeArena::new();
-
-        assert_eq!(arena.to_display(TypeId::VOID), DisplayType::Void);
-        assert_eq!(arena.to_display(TypeId::NIL), DisplayType::Nil);
-        assert_eq!(arena.to_display(TypeId::DONE), DisplayType::Done);
-        assert_eq!(arena.to_display(TypeId::RANGE), DisplayType::Range);
-        assert_eq!(arena.to_display(TypeId::METATYPE), DisplayType::MetaType);
-    }
-
-    #[test]
-    fn to_display_array() {
-        use crate::sema::types::PrimitiveType;
-
-        let mut arena = TypeArena::new();
-        let array_id = arena.array(TypeId::STRING);
-        let display = arena.to_display(array_id);
-        assert_eq!(
-            display,
-            DisplayType::Array(Box::new(DisplayType::Primitive(PrimitiveType::String)))
-        );
-    }
-
-    #[test]
-    fn to_display_function() {
-        let mut arena = TypeArena::new();
-        let func_id = arena.function(
-            smallvec::smallvec![TypeId::I32, TypeId::I32],
-            TypeId::BOOL,
-            false,
-        );
-        let display = arena.to_display(func_id);
-        if let DisplayType::Function(ft) = display {
-            assert_eq!(ft.params_id.len(), 2);
-            assert_eq!(ft.params_id[0], TypeId::I32);
-            assert_eq!(ft.params_id[1], TypeId::I32);
-            assert_eq!(ft.return_type_id, TypeId::BOOL);
-            assert!(!ft.is_closure);
-        } else {
-            panic!("Expected function type");
-        }
     }
 }

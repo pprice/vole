@@ -143,7 +143,8 @@ pub(crate) fn resolve_method_target_id(
                     .ok_or_else(|| {
                         format!("method name {} not found as NameId", input.method_name_str)
                     })?;
-                    let func_type_id = func_type.intern(&mut input.analyzed.type_arena.borrow_mut());
+                    let func_type_id =
+                        func_type.intern(&mut input.analyzed.type_arena.borrow_mut());
                     return Ok(MethodTarget::InterfaceDispatch {
                         interface_type_id,
                         method_name_id,

@@ -1668,7 +1668,8 @@ impl Analyzer {
         drop(arena);
 
         // Cache the TypeId for subsequent imports
-        self.module_type_ids.insert(import_path.to_string(), type_id);
+        self.module_type_ids
+            .insert(import_path.to_string(), type_id);
 
         Ok(type_id)
     }
