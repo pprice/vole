@@ -21,7 +21,6 @@
 // - `TypeParam(NameId)` - A type parameter in generic context (`T` in `Box<T>`)
 //
 // ## Compound Special Types
-// - `Fallible(FallibleType)` - Result-like type: `fallible(T, E)`
 // - `Module(ModuleType)` - Imported module with exports
 // - `RuntimeIterator(Box<DisplayType>)` - Builtin iterator (array.iter(), range.iter())
 // - `Range` - Range literal type (0..10)
@@ -32,8 +31,6 @@
 use crate::frontend::Span;
 use crate::identity::{ModuleId, NameId};
 use crate::sema::type_arena::TypeId;
-
-use super::DisplayType;
 
 /// Analysis error - represents a type that couldn't be determined.
 ///
@@ -201,23 +198,6 @@ impl std::fmt::Display for PlaceholderKind {
             PlaceholderKind::SelfType => write!(f, "Self"),
         }
     }
-}
-
-/// Fallible type: `fallible(T, E)` - a result-like type.
-///
-/// Used for functions that can fail with specific error types:
-/// ```ignore
-/// func divide(a: i32, b: i32) -> fallible(i32, DivByZero)
-/// ```
-///
-/// At runtime, represented as a tagged union where success returns `T`
-/// and failure returns the error type `E`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FallibleType {
-    /// The success type (returned on success)
-    pub success_type: Box<DisplayType>,
-    /// The error type (ErrorType or Union of ErrorTypes)
-    pub error_type: Box<DisplayType>,
 }
 
 /// A constant value that can be stored in a module.

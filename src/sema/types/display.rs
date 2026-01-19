@@ -14,7 +14,7 @@ use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use super::nominal::{
     ClassType, ErrorTypeInfo, InterfaceMethodType, InterfaceType, NominalType, RecordType,
 };
-use super::special::{AnalysisError, FallibleType, ModuleType, PlaceholderKind};
+use super::special::{AnalysisError, ModuleType, PlaceholderKind};
 use super::{FunctionType, PrimitiveType};
 
 /// Legacy type enum - being replaced by Type(TypeId) newtype
@@ -53,8 +53,6 @@ pub enum DisplayType {
     MetaType,
     /// Nominal types (Class, Record, Interface, Error) - types with a TypeDefId
     Nominal(NominalType),
-    /// Fallible return type: fallible(T, E)
-    Fallible(FallibleType),
     /// Module type (from import expression)
     Module(ModuleType),
     /// Runtime iterator type - represents builtin iterators (array.iter(), range.iter(), etc.)
@@ -195,7 +193,6 @@ impl DisplayType {
             DisplayType::Invalid(_) => "<invalid>",
             DisplayType::MetaType => "type",
             DisplayType::Nominal(n) => n.name(),
-            DisplayType::Fallible(_) => "fallible",
             DisplayType::Module(_) => "module",
             DisplayType::TypeParam(_) | DisplayType::TypeParamRef(_) => "type parameter",
             DisplayType::RuntimeIterator(_) => "iterator",
@@ -418,22 +415,6 @@ impl DisplayType {
                 }
             }
 
-            DisplayType::Fallible(ft) => {
-                let new_success = ft.success_type.substitute(substitutions);
-                let new_error = ft.error_type.substitute(substitutions);
-                let success_changed = &new_success != ft.success_type.as_ref();
-                let error_changed = &new_error != ft.error_type.as_ref();
-
-                if !success_changed && !error_changed {
-                    self.clone()
-                } else {
-                    DisplayType::Fallible(FallibleType {
-                        success_type: Box::new(new_success),
-                        error_type: Box::new(new_error),
-                    })
-                }
-            }
-
             DisplayType::Structural(st) => {
                 let mut fields_changed = false;
                 let new_fields: Vec<_> = st
@@ -583,12 +564,6 @@ impl DisplayType {
 
             DisplayType::Placeholder(kind) => arena.placeholder(kind.clone()),
 
-            DisplayType::Fallible(ft) => {
-                let success_id = ft.success_type.intern(arena);
-                let error_id = ft.error_type.intern(arena);
-                arena.fallible(success_id, error_id)
-            }
-
             DisplayType::Structural(st) => {
                 let fields: smallvec::SmallVec<[(NameId, TypeId); 4]> = st
                     .fields
@@ -726,10 +701,16 @@ impl DisplayType {
                 })
             }
 
-            SemaType::Fallible { success, error } => DisplayType::Fallible(FallibleType {
-                success_type: Box::new(Self::from_arena(*success, arena)),
-                error_type: Box::new(Self::from_arena(*error, arena)),
-            }),
+            SemaType::Fallible { success, error } => {
+                // Fallible is displayed as a union of success | error
+                DisplayType::Union(
+                    vec![
+                        Self::from_arena(*success, arena),
+                        Self::from_arena(*error, arena),
+                    ]
+                    .into(),
+                )
+            }
 
             SemaType::Structural(st) => DisplayType::Structural(StructuralType {
                 fields: st
@@ -807,9 +788,6 @@ impl std::fmt::Display for DisplayType {
             }
             DisplayType::Array(elem) => write!(f, "[{}]", elem),
             DisplayType::Nominal(n) => write!(f, "{}", n),
-            DisplayType::Fallible(ft) => {
-                write!(f, "fallible({}, {})", ft.success_type, ft.error_type)
-            }
             DisplayType::Module(m) => write!(f, "module(id:{})", m.module_id.index()),
             DisplayType::TypeParam(name_id) => write!(f, "{:?}", name_id), // NameId Debug shows the identity
             DisplayType::TypeParamRef(id) => write!(f, "TypeParam#{}", id.index()),

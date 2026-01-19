@@ -18,7 +18,7 @@ pub use nominal::{
     RecordType,
 };
 pub use primitive::PrimitiveType;
-pub use special::{AnalysisError, ConstantValue, FallibleType, ModuleType, PlaceholderKind};
+pub use special::{AnalysisError, ConstantValue, ModuleType, PlaceholderKind};
 
 use crate::identity::NameId;
 use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
