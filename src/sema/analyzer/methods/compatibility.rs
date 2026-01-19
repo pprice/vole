@@ -68,21 +68,16 @@ impl Analyzer {
 
         if let Some((fn_param_ids, fn_ret)) = fn_info
             && let Some(iface_fn) = self.get_functional_interface_type_by_type_def_id(to_iface_id)
-            && fn_param_ids.len() == iface_fn.params.len()
+            && fn_param_ids.len() == iface_fn.params_id.len()
         {
-            // Pre-compute interface param TypeIds
-            let iface_param_ids: Vec<ArenaTypeId> =
-                iface_fn.params.iter().map(|p| self.type_to_id(p)).collect();
-            let iface_ret_id = self.type_to_id(&iface_fn.return_type);
-
-            // Now check compatibility
+            // Use TypeId fields directly
             let arena = self.type_arena.borrow();
             let params_match = fn_param_ids
                 .iter()
-                .zip(iface_param_ids.iter())
+                .zip(iface_fn.params_id.iter())
                 .all(|(&p, &ip)| types_compatible_core_id(p, ip, &arena));
 
-            if params_match && types_compatible_core_id(fn_ret, iface_ret_id, &arena) {
+            if params_match && types_compatible_core_id(fn_ret, iface_fn.return_type_id, &arena) {
                 return true;
             }
         }

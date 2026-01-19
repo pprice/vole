@@ -49,9 +49,9 @@ impl Analyzer {
                 // Explicit type annotation
                 self.resolve_type_id(type_expr, interner)
             } else if let Some(expected) = expected_type {
-                // Infer from expected type
-                if i < expected.params.len() {
-                    self.type_to_id(&expected.params[i])
+                // Infer from expected type - use params_id directly
+                if i < expected.params_id.len() {
+                    expected.params_id[i]
                 } else {
                     self.add_error(
                         SemanticError::CannotInferLambdaParam {
@@ -98,7 +98,7 @@ impl Analyzer {
             .return_type
             .as_ref()
             .map(|t| self.resolve_type_id(t, interner));
-        let expected_return_id = expected_type.map(|ft| self.type_to_id(&ft.return_type));
+        let expected_return_id = expected_type.map(|ft| ft.return_type_id);
 
         // Analyze body and infer return type
         let body_type_id = match &lambda.body {

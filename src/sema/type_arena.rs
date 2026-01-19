@@ -1371,9 +1371,8 @@ impl TypeArena {
             }
 
             LegacyType::Function(ft) => {
-                let param_ids: TypeIdVec = ft.params.iter().map(|p| self.from_type(p)).collect();
-                let ret_id = self.from_type(&ft.return_type);
-                self.function(param_ids, ret_id, ft.is_closure)
+                // Use TypeId fields directly (they're now required)
+                self.function(ft.params_id.clone(), ft.return_type_id, ft.is_closure)
             }
 
             LegacyType::Nominal(NominalType::Class(c)) => {
