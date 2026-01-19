@@ -72,10 +72,10 @@ impl Cg<'_, '_, '_> {
                     let is_declared_interface = arena.is_interface(declared_type_id);
                     drop(arena);
 
-                    if is_declared_union && !self.is_union(init.type_id) {
+                    if is_declared_union && !self.ctx.arena.borrow().is_union(init.type_id) {
                         let wrapped = self.construct_union_id(init, declared_type_id)?;
                         (wrapped.value, wrapped.type_id)
-                    } else if is_declared_integer && self.type_is_integer(init.type_id) {
+                    } else if is_declared_integer && init.type_id.is_integer() {
                         let arena = self.ctx.arena.borrow();
                         let declared_cty =
                             type_id_to_cranelift(declared_type_id, &arena, self.ctx.pointer_type);
@@ -90,17 +90,11 @@ impl Cg<'_, '_, '_> {
                         } else {
                             (init.value, declared_type_id)
                         }
-                    } else if is_declared_f32
-                        && self.type_is_float(init.type_id)
-                        && init.ty == types::F64
-                    {
+                    } else if is_declared_f32 && init.type_id.is_float() && init.ty == types::F64 {
                         // f64 -> f32: demote to narrower float
                         let narrowed = self.builder.ins().fdemote(types::F32, init.value);
                         (narrowed, declared_type_id)
-                    } else if is_declared_f64
-                        && self.type_is_float(init.type_id)
-                        && init.ty == types::F32
-                    {
+                    } else if is_declared_f64 && init.type_id.is_float() && init.ty == types::F32 {
                         // f32 -> f64: promote to wider float
                         let widened = self.builder.ins().fpromote(types::F64, init.value);
                         (widened, declared_type_id)
@@ -174,9 +168,13 @@ impl Cg<'_, '_, '_> {
                     // Box concrete types to interface representation if needed
                     // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
                     if let Some(ret_type_id) = return_type_id
-                        && self.is_interface(ret_type_id)
-                        && !self.is_interface(compiled.type_id)
-                        && !self.is_runtime_iterator(compiled.type_id)
+                        && self.ctx.arena.borrow().is_interface(ret_type_id)
+                        && !self.ctx.arena.borrow().is_interface(compiled.type_id)
+                        && !self
+                            .ctx
+                            .arena
+                            .borrow()
+                            .is_runtime_iterator(compiled.type_id)
                     {
                         let boxed =
                             box_interface_value_id(self.builder, self.ctx, compiled, ret_type_id)?;
@@ -365,7 +363,7 @@ impl Cg<'_, '_, '_> {
 
         let var = self.builder.declare_var(types::I64);
         self.builder.def_var(var, start_val.value);
-        self.vars.insert(for_stmt.var_name, (var, self.i64_type()));
+        self.vars.insert(for_stmt.var_name, (var, TypeId::I64));
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
@@ -601,7 +599,7 @@ impl Cg<'_, '_, '_> {
         let zero = self.builder.ins().iconst(types::I64, 0);
         self.builder.def_var(elem_var, zero);
         self.vars
-            .insert(for_stmt.var_name, (elem_var, self.string_type()));
+            .insert(for_stmt.var_name, (elem_var, TypeId::STRING));
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();

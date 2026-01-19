@@ -1036,7 +1036,7 @@ impl Compiler<'_> {
                 self.pointer_type,
             ));
         }
-        let ret = if return_type_id == TypeId::VOID {
+        let ret = if return_type_id.is_void() {
             None
         } else {
             Some(type_id_to_cranelift(
@@ -1173,7 +1173,7 @@ impl Compiler<'_> {
             .iter()
             .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
             .collect();
-        let ret = if return_type_id == TypeId::VOID {
+        let ret = if return_type_id.is_void() {
             None
         } else {
             Some(type_id_to_cranelift(
@@ -1422,7 +1422,7 @@ impl Compiler<'_> {
                 self.pointer_type,
             ));
         }
-        let ret = if return_type_id == TypeId::VOID {
+        let ret = if return_type_id.is_void() {
             None
         } else {
             Some(type_id_to_cranelift(
@@ -1752,7 +1752,7 @@ impl Compiler<'_> {
             .iter()
             .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
             .collect();
-        let ret = if return_type_id == TypeId::VOID {
+        let ret = if return_type_id.is_void() {
             None
         } else {
             Some(type_id_to_cranelift(

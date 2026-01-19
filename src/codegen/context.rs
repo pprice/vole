@@ -139,85 +139,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.captures.is_some()
     }
 
-    // ========== Type interning helpers ==========
-
-    /// Get the interned void type
-    pub fn void_type(&self) -> TypeId {
-        self.ctx.arena.borrow().void()
-    }
-
-    /// Get the interned nil type
-    pub fn nil_type(&self) -> TypeId {
-        self.ctx.arena.borrow().nil()
-    }
-
-    /// Get the interned done type
-    pub fn done_type(&self) -> TypeId {
-        self.ctx.arena.borrow().done()
-    }
-
-    /// Get the interned bool type
-    pub fn bool_type(&self) -> TypeId {
-        self.ctx.arena.borrow().primitives.bool
-    }
-
-    /// Get the interned i64 type
-    pub fn i64_type(&self) -> TypeId {
-        self.ctx.arena.borrow().primitives.i64
-    }
-
-    /// Get the interned f64 type
-    pub fn f64_type(&self) -> TypeId {
-        self.ctx.arena.borrow().primitives.f64
-    }
-
-    /// Get the interned string type
-    pub fn string_type(&self) -> TypeId {
-        self.ctx.arena.borrow().primitives.string
-    }
-
-    // ========== Arena query helpers ==========
-
-    /// Check if type is a string
-    pub fn is_string(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_string(ty)
-    }
-
-    /// Check if type is nil
-    pub fn is_nil(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_nil(ty)
-    }
-
-    /// Check if type is an array
-    pub fn is_array(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_array(ty)
-    }
-
-    /// Check if type is a union
-    pub fn is_union(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_union(ty)
-    }
-
-    /// Check if type is a function
-    pub fn is_function(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_function(ty)
-    }
-
-    /// Check if type is an interface
-    pub fn is_interface(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_interface(ty)
-    }
-
-    /// Check if type is a runtime iterator
-    pub fn is_runtime_iterator(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_runtime_iterator(ty)
-    }
+    // ========== Arena helpers ==========
 
     /// Find the nil variant index in a union (for optional handling)
     pub fn find_nil_variant(&self, ty: TypeId) -> Option<usize> {
         let arena = self.ctx.arena.borrow();
         if let Some(variants) = arena.unwrap_union(ty) {
-            variants.iter().position(|&id| arena.is_nil(id))
+            variants.iter().position(|&id| id.is_nil())
         } else {
             None
         }
@@ -235,26 +163,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .borrow()
             .unwrap_interface(ty)
             .map(|(id, _)| id)
-    }
-
-    /// Check if type is an integer type (signed or unsigned)
-    pub fn type_is_integer(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_integer(ty)
-    }
-
-    /// Check if type is a float type (f32 or f64)
-    pub fn type_is_float(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_float(ty)
-    }
-
-    /// Check if type is unsigned
-    pub fn type_is_unsigned(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_unsigned(ty)
-    }
-
-    /// Check if type is optional (union with nil)
-    pub fn type_is_optional(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_optional(ty)
     }
 
     /// Get capture binding for a symbol, if any
@@ -353,7 +261,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value: zero,
             ty: types::I64,
-            type_id: self.void_type(),
+            type_id: TypeId::VOID,
         }
     }
 
@@ -364,7 +272,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I8,
-            type_id: self.bool_type(),
+            type_id: TypeId::BOOL,
         }
     }
 
@@ -379,7 +287,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I64,
-            type_id: self.i64_type(),
+            type_id: TypeId::I64,
         }
     }
 
@@ -415,7 +323,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I8,
-            type_id: self.nil_type(),
+            type_id: TypeId::NIL,
         }
     }
 
@@ -425,7 +333,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: types::I8,
-            type_id: self.done_type(),
+            type_id: TypeId::DONE,
         }
     }
 
@@ -434,7 +342,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue {
             value,
             ty: self.ctx.pointer_type,
-            type_id: self.string_type(),
+            type_id: TypeId::STRING,
         }
     }
 

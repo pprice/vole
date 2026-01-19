@@ -104,17 +104,17 @@ impl Cg<'_, '_, '_> {
 
     /// Convert a value to a string
     fn value_to_string(&mut self, val: CompiledValue) -> Result<Value, String> {
-        if self.is_string(val.type_id) {
+        if val.type_id == TypeId::STRING {
             return Ok(val.value);
         }
 
         // Handle arrays
-        if self.is_array(val.type_id) {
+        if self.ctx.arena.borrow().is_array(val.type_id) {
             return self.call_runtime(RuntimeFn::ArrayI64ToString, &[val.value]);
         }
 
         // Handle nil type directly
-        if self.is_nil(val.type_id) {
+        if val.type_id.is_nil() {
             return self.call_runtime(RuntimeFn::NilToString, &[]);
         }
 
@@ -182,7 +182,7 @@ impl Cg<'_, '_, '_> {
             .iter()
             .find(|&&v| !arena.is_nil(v))
             .copied()
-            .unwrap_or_else(|| self.nil_type());
+            .unwrap_or(TypeId::NIL);
         let inner_cr_type = type_id_to_cranelift(inner_type_id, &arena, self.ctx.pointer_type);
         drop(arena);
 
@@ -229,7 +229,7 @@ impl Cg<'_, '_, '_> {
 
         // Check if it's a closure variable
         if let Some((var, type_id)) = self.vars.get(&callee_sym)
-            && self.is_function(*type_id)
+            && self.ctx.arena.borrow().is_function(*type_id)
         {
             return self.call_closure(*var, *type_id, call);
         }
@@ -322,7 +322,7 @@ impl Cg<'_, '_, '_> {
             }
 
             // If it's a function type, call as closure
-            if self.is_function(lambda_val.type_id) {
+            if self.ctx.arena.borrow().is_function(lambda_val.type_id) {
                 return self.call_closure_value(lambda_val.value, lambda_val.type_id, call);
             }
 
@@ -636,7 +636,7 @@ impl Cg<'_, '_, '_> {
     fn indirect_call(&mut self, call: &CallExpr) -> Result<CompiledValue, String> {
         let callee = self.expr(&call.callee)?;
 
-        if self.is_function(callee.type_id) {
+        if self.ctx.arena.borrow().is_function(callee.type_id) {
             return self.call_closure_value(callee.value, callee.type_id, call);
         }
 
@@ -653,7 +653,7 @@ impl Cg<'_, '_, '_> {
         let arg = self.expr(&call.args[0])?;
 
         // Dispatch based on argument type
-        let (runtime, call_arg) = if self.is_string(arg.type_id) {
+        let (runtime, call_arg) = if arg.type_id == TypeId::STRING {
             (
                 if newline {
                     RuntimeFn::PrintlnString
@@ -838,12 +838,12 @@ impl Cg<'_, '_, '_> {
         let mut args: ArgVec = smallvec![closure_ptr];
         for (arg, &param_type_id) in call.args.iter().zip(params.iter()) {
             let compiled = self.expr(arg)?;
-            let is_param_interface = self.is_interface(param_type_id);
-            let is_param_union = self.is_union(param_type_id);
+            let is_param_interface = self.ctx.arena.borrow().is_interface(param_type_id);
+            let is_param_union = self.ctx.arena.borrow().is_union(param_type_id);
 
             let compiled = if is_param_interface {
                 box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
-            } else if is_param_union && !self.is_union(compiled.type_id) {
+            } else if is_param_union && !self.ctx.arena.borrow().is_union(compiled.type_id) {
                 // Box concrete type into union representation
                 self.construct_union_id(compiled, param_type_id)?
             } else {

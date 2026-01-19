@@ -42,18 +42,12 @@ impl Cg<'_, '_, '_> {
             ExprKind::IntLiteral(n) => {
                 // Look up inferred type from semantic analysis for bidirectional type inference
                 // Uses get_expr_type helper to check module-specific expr_types when compiling prelude
-                let type_id = self
-                    .ctx
-                    .get_expr_type(&expr.id)
-                    .unwrap_or_else(|| self.i64_type());
+                let type_id = self.ctx.get_expr_type(&expr.id).unwrap_or(TypeId::I64);
                 Ok(self.int_const(*n, type_id))
             }
             ExprKind::FloatLiteral(n) => {
                 // Look up inferred type from semantic analysis for bidirectional type inference
-                let type_id = self
-                    .ctx
-                    .get_expr_type(&expr.id)
-                    .unwrap_or_else(|| self.f64_type());
+                let type_id = self.ctx.get_expr_type(&expr.id).unwrap_or(TypeId::F64);
                 Ok(self.float_const(*n, type_id))
             }
             ExprKind::BoolLiteral(b) => Ok(self.bool_const(*b)),
@@ -118,7 +112,7 @@ impl Cg<'_, '_, '_> {
 
             // Check for narrowed type from semantic analysis
             if let Some(narrowed_type_id) = self.ctx.get_expr_type(&expr.id)
-                && self.is_union(*type_id)
+                && self.ctx.arena.borrow().is_union(*type_id)
                 && !self.ctx.arena.borrow().is_union(narrowed_type_id)
             {
                 // Union layout: [tag:1][padding:7][payload]
@@ -152,7 +146,7 @@ impl Cg<'_, '_, '_> {
             if let Some(ref ty_expr) = global.ty {
                 let declared_type_id = resolve_type_expr_id(ty_expr, self.ctx);
                 if self.ctx.arena.borrow().is_interface(declared_type_id)
-                    && !self.is_interface(value.type_id)
+                    && !self.ctx.arena.borrow().is_interface(value.type_id)
                 {
                     value =
                         box_interface_value_id(self.builder, self.ctx, value, declared_type_id)?;
@@ -369,11 +363,15 @@ impl Cg<'_, '_, '_> {
                 let var = *var;
                 let var_type_id = *var_type_id;
 
-                if self.is_interface(var_type_id) && !self.is_interface(value.type_id) {
+                if self.ctx.arena.borrow().is_interface(var_type_id)
+                    && !self.ctx.arena.borrow().is_interface(value.type_id)
+                {
                     value = box_interface_value_id(self.builder, self.ctx, value, var_type_id)?;
                 }
 
-                let final_value = if self.is_union(var_type_id) && !self.is_union(value.type_id) {
+                let final_value = if self.ctx.arena.borrow().is_union(var_type_id)
+                    && !self.ctx.arena.borrow().is_union(value.type_id)
+                {
                     let wrapped = self.construct_union_id(value, var_type_id)?;
                     wrapped.value
                 } else {
@@ -414,7 +412,7 @@ impl Cg<'_, '_, '_> {
         let array_push_ref = self.func_ref(array_push_key)?;
 
         // Use i64 as default - will be overwritten by first element if any
-        let mut elem_type_id = self.i64_type();
+        let mut elem_type_id = TypeId::I64;
 
         for (i, elem) in elements.iter().enumerate() {
             let compiled = self.expr(elem)?;
@@ -1046,7 +1044,7 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().jump(merge_block, &[default_arg]);
         }
 
-        let mut result_type_id = self.void_type();
+        let mut result_type_id = TypeId::VOID;
 
         for (i, arm) in match_expr.arms.iter().enumerate() {
             let arm_block = arm_blocks[i];

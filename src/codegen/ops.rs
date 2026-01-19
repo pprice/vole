@@ -8,6 +8,7 @@ use cranelift::prelude::*;
 use crate::codegen::RuntimeFn;
 use crate::frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr};
 use crate::sema::implement_registry::ImplTypeId;
+use crate::sema::type_arena::TypeId;
 
 use super::context::Cg;
 use super::structs::{
@@ -28,7 +29,7 @@ impl Cg<'_, '_, '_> {
         let left = self.expr(&bin.left)?;
 
         // Handle string concatenation: string + Stringable
-        if bin.op == BinaryOp::Add && self.is_string(left.type_id) {
+        if bin.op == BinaryOp::Add && left.type_id == TypeId::STRING {
             let right = self.expr(&bin.right)?;
             return self.string_concat(left, right);
         }
@@ -46,7 +47,7 @@ impl Cg<'_, '_, '_> {
         right: CompiledValue,
     ) -> Result<CompiledValue, String> {
         // Get the right operand as a string
-        let right_string = if self.is_string(right.type_id) {
+        let right_string = if right.type_id == TypeId::STRING {
             // Right is already a string, use it directly
             right.value
         } else {
@@ -194,11 +195,11 @@ impl Cg<'_, '_, '_> {
         // When comparing optional == nil or optional != nil, we need to check the tag
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
             // Check if left is optional and right is nil
-            if self.type_is_optional(left.type_id) && self.is_nil(right.type_id) {
+            if self.ctx.arena.borrow().is_optional(left.type_id) && right.type_id.is_nil() {
                 return self.optional_nil_compare(left, op);
             }
             // Check if right is optional and left is nil
-            if self.type_is_optional(right.type_id) && self.is_nil(left.type_id) {
+            if self.ctx.arena.borrow().is_optional(right.type_id) && left.type_id.is_nil() {
                 return self.optional_nil_compare(right, op);
             }
             // Check if left is optional and right is a compatible value type (using TypeId)
@@ -232,7 +233,7 @@ impl Cg<'_, '_, '_> {
         };
 
         let left_type_id = left.type_id;
-        let left_is_string = self.is_string(left_type_id);
+        let left_is_string = left_type_id == TypeId::STRING;
 
         // Convert operands
         let left_val = convert_to_type(self.builder, left, result_ty, self.ctx.arena);
@@ -263,7 +264,7 @@ impl Cg<'_, '_, '_> {
             BinaryOp::Div => {
                 if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fdiv(left_val, right_val)
-                } else if self.type_is_unsigned(left_type_id) {
+                } else if left_type_id.is_unsigned_int() {
                     self.builder.ins().udiv(left_val, right_val)
                 } else {
                     self.builder.ins().sdiv(left_val, right_val)
@@ -275,7 +276,7 @@ impl Cg<'_, '_, '_> {
                     let floor = self.builder.ins().floor(div);
                     let mul = self.builder.ins().fmul(floor, right_val);
                     self.builder.ins().fsub(left_val, mul)
-                } else if self.type_is_unsigned(left_type_id) {
+                } else if left_type_id.is_unsigned_int() {
                     self.builder.ins().urem(left_val, right_val)
                 } else {
                     self.builder.ins().srem(left_val, right_val)
@@ -310,7 +311,7 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .fcmp(FloatCC::LessThan, left_val, right_val)
-                } else if self.type_is_unsigned(left_type_id) {
+                } else if left_type_id.is_unsigned_int() {
                     self.builder
                         .ins()
                         .icmp(IntCC::UnsignedLessThan, left_val, right_val)
@@ -325,7 +326,7 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .fcmp(FloatCC::GreaterThan, left_val, right_val)
-                } else if self.type_is_unsigned(left_type_id) {
+                } else if left_type_id.is_unsigned_int() {
                     self.builder
                         .ins()
                         .icmp(IntCC::UnsignedGreaterThan, left_val, right_val)
@@ -340,7 +341,7 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .fcmp(FloatCC::LessThanOrEqual, left_val, right_val)
-                } else if self.type_is_unsigned(left_type_id) {
+                } else if left_type_id.is_unsigned_int() {
                     self.builder
                         .ins()
                         .icmp(IntCC::UnsignedLessThanOrEqual, left_val, right_val)
@@ -355,7 +356,7 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .fcmp(FloatCC::GreaterThanOrEqual, left_val, right_val)
-                } else if self.type_is_unsigned(left_type_id) {
+                } else if left_type_id.is_unsigned_int() {
                     self.builder
                         .ins()
                         .icmp(IntCC::UnsignedGreaterThanOrEqual, left_val, right_val)
@@ -371,7 +372,7 @@ impl Cg<'_, '_, '_> {
             BinaryOp::BitXor => self.builder.ins().bxor(left_val, right_val),
             BinaryOp::Shl => self.builder.ins().ishl(left_val, right_val),
             BinaryOp::Shr => {
-                if self.type_is_unsigned(left_type_id) {
+                if left_type_id.is_unsigned_int() {
                     self.builder.ins().ushr(left_val, right_val)
                 } else {
                     self.builder.ins().sshr(left_val, right_val)
@@ -396,7 +397,7 @@ impl Cg<'_, '_, '_> {
             | BinaryOp::Lt
             | BinaryOp::Gt
             | BinaryOp::Le
-            | BinaryOp::Ge => self.bool_type(),
+            | BinaryOp::Ge => TypeId::BOOL,
             BinaryOp::And | BinaryOp::Or => unreachable!(),
             _ => left_type_id,
         };

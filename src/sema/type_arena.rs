@@ -744,43 +744,38 @@ impl TypeArena {
     // ========================================================================
 
     /// Check if this is a numeric type (can do arithmetic)
+    #[inline]
     pub fn is_numeric(&self, id: TypeId) -> bool {
-        match self.get(id) {
-            SemaType::Primitive(p) => p.is_numeric(),
-            _ => false,
-        }
+        // Short-circuit: TypeId knows all primitive numerics
+        id.is_numeric()
     }
 
     /// Check if this is an integer type
+    #[inline]
     pub fn is_integer(&self, id: TypeId) -> bool {
-        match self.get(id) {
-            SemaType::Primitive(p) => p.is_integer(),
-            _ => false,
-        }
+        // Short-circuit: TypeId knows all primitive integers
+        id.is_integer()
     }
 
     /// Check if this is a floating point type
+    #[inline]
     pub fn is_float(&self, id: TypeId) -> bool {
-        match self.get(id) {
-            SemaType::Primitive(p) => p.is_float(),
-            _ => false,
-        }
+        // Short-circuit: TypeId knows all primitive floats
+        id.is_float()
     }
 
     /// Check if this is a signed integer type
+    #[inline]
     pub fn is_signed(&self, id: TypeId) -> bool {
-        match self.get(id) {
-            SemaType::Primitive(p) => p.is_signed(),
-            _ => false,
-        }
+        // Short-circuit: TypeId knows all signed integers
+        id.is_signed_int()
     }
 
     /// Check if this is an unsigned integer type
+    #[inline]
     pub fn is_unsigned(&self, id: TypeId) -> bool {
-        match self.get(id) {
-            SemaType::Primitive(p) => p.is_unsigned(),
-            _ => false,
-        }
+        // Short-circuit: TypeId knows all unsigned integers
+        id.is_unsigned_int()
     }
 
     /// Check if this is an optional type (union containing nil)
@@ -941,18 +936,21 @@ impl TypeArena {
     }
 
     /// Check if this is the string primitive
+    #[inline]
     pub fn is_string(&self, id: TypeId) -> bool {
-        id == self.primitives.string
+        id == TypeId::STRING
     }
 
     /// Check if this is nil
+    #[inline]
     pub fn is_nil(&self, id: TypeId) -> bool {
-        id == self.primitives.nil
+        id.is_nil()
     }
 
     /// Check if this is void
+    #[inline]
     pub fn is_void(&self, id: TypeId) -> bool {
-        id == self.primitives.void
+        id.is_void()
     }
 
     /// Check if this is a runtime iterator type
