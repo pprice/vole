@@ -3,13 +3,12 @@
 // Type resolution: converts TypeExpr (AST representation) to Type (semantic representation)
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 use crate::frontend::{Interner, Symbol, TypeExpr};
 use crate::identity::{ModuleId, NameTable, Resolver};
 use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
-use crate::sema::generic::{TypeParamScope, substitute_type};
+use crate::sema::generic::TypeParamScope;
 use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use crate::sema::types::{
     ClassType, FallibleType, FunctionType, InterfaceMethodType, InterfaceType, LegacyType,
@@ -52,106 +51,68 @@ fn interface_instance(
     }
 
     // Build methods with substituted types using TypeId-based substitution
-    let methods: Vec<InterfaceMethodType> = if let Some(arena_ref) = ctx.type_arena {
-        // Use TypeId-based substitution (preferred)
-        let mut arena = arena_ref.borrow_mut();
-        let substitutions: hashbrown::HashMap<_, _> = type_def
-            .type_params
-            .iter()
-            .zip(type_args.iter())
-            .map(|(name_id, arg)| (*name_id, arena.from_type(arg)))
-            .collect();
+    let arena_ref = ctx
+        .type_arena
+        .expect("type_arena must be available for interface_instance");
+    let mut arena = arena_ref.borrow_mut();
+    let substitutions: hashbrown::HashMap<_, _> = type_def
+        .type_params
+        .iter()
+        .zip(type_args.iter())
+        .map(|(name_id, arg)| (*name_id, arena.from_type(arg)))
+        .collect();
 
-        type_def
-            .methods
-            .iter()
-            .map(|&method_id| {
-                let method = ctx.entity_registry.get_method(method_id);
-                // Get or create interned signature
-                let sig = if method.signature.has_interned_ids() {
-                    method.signature.clone()
-                } else {
-                    method.signature.clone().with_interned_ids(&mut arena)
-                };
+    let methods: Vec<InterfaceMethodType> = type_def
+        .methods
+        .iter()
+        .map(|&method_id| {
+            let method = ctx.entity_registry.get_method(method_id);
+            // Get or create interned signature
+            let sig = if method.signature.has_interned_ids() {
+                method.signature.clone()
+            } else {
+                method.signature.clone().with_interned_ids(&mut arena)
+            };
 
-                // Substitute using TypeId - keep both TypeId and LegacyType versions
-                let (new_params, new_params_id): (Vec<LegacyType>, Option<TypeIdVec>) = sig
-                    .params_id
-                    .as_ref()
-                    .map(|ids| {
-                        let substituted_ids: TypeIdVec = ids
-                            .iter()
-                            .map(|&p| arena.substitute(p, &substitutions))
-                            .collect();
-                        let legacy: Vec<LegacyType> = substituted_ids
-                            .iter()
-                            .map(|&id| arena.to_type(id))
-                            .collect();
-                        (legacy, Some(substituted_ids))
-                    })
-                    .unwrap_or_else(|| (method.signature.params.to_vec(), None));
-                let (new_return, new_return_id): (LegacyType, Option<TypeId>) = sig
-                    .return_type_id
-                    .map(|r| {
-                        let substituted = arena.substitute(r, &substitutions);
-                        (arena.to_type(substituted), Some(substituted))
-                    })
-                    .unwrap_or_else(|| ((*method.signature.return_type).clone(), None));
+            // Substitute using TypeId - require TypeId fields to be set
+            let params_id = sig
+                .params_id
+                .as_ref()
+                .expect("FunctionType.params_id must be set for interface method");
+            let substituted_params: TypeIdVec = params_id
+                .iter()
+                .map(|&p| arena.substitute(p, &substitutions))
+                .collect();
+            let new_params: Vec<LegacyType> = substituted_params
+                .iter()
+                .map(|&id| arena.to_type(id))
+                .collect();
 
-                InterfaceMethodType {
-                    name: method.name_id,
-                    params: new_params.into(),
-                    return_type: Box::new(new_return),
-                    has_default: method.has_default,
-                    params_id: new_params_id,
-                    return_type_id: new_return_id,
-                }
-            })
-            .collect()
-    } else {
-        // Fallback to LegacyType substitution when no arena
-        let substitutions: HashMap<_, _> = type_def
-            .type_params
-            .iter()
-            .zip(type_args.iter())
-            .map(|(name_id, arg)| (*name_id, arg.clone()))
-            .collect();
+            let return_type_id = sig
+                .return_type_id
+                .expect("FunctionType.return_type_id must be set for interface method");
+            let substituted_return = arena.substitute(return_type_id, &substitutions);
+            let new_return = arena.to_type(substituted_return);
 
-        type_def
-            .methods
-            .iter()
-            .map(|&method_id| {
-                let method = ctx.entity_registry.get_method(method_id);
-                InterfaceMethodType {
-                    name: method.name_id,
-                    params: method
-                        .signature
-                        .params
-                        .iter()
-                        .map(|t| substitute_type(t, &substitutions))
-                        .collect::<Vec<_>>()
-                        .into(),
-                    return_type: Box::new(substitute_type(
-                        &method.signature.return_type,
-                        &substitutions,
-                    )),
-                    has_default: method.has_default,
-                    params_id: None, // No arena available in fallback path
-                    return_type_id: None,
-                }
-            })
-            .collect()
-    };
+            InterfaceMethodType {
+                name: method.name_id,
+                params: new_params.into(),
+                return_type: Box::new(new_return),
+                has_default: method.has_default,
+                params_id: Some(substituted_params),
+                return_type_id: Some(substituted_return),
+            }
+        })
+        .collect();
+    drop(arena);
 
     // Keep extends as TypeDefIds directly
     let extends = type_def.extends.to_vec();
 
-    // Convert type_args to TypeIds if arena is available
-    let type_args_id = if let Some(arena_ref) = ctx.type_arena {
+    // Convert type_args to TypeIds
+    let type_args_id: TypeIdVec = {
         let mut arena = arena_ref.borrow_mut();
         type_args.iter().map(|t| arena.from_type(t)).collect()
-    } else {
-        TypeIdVec::new()
     };
 
     Some(LegacyType::Nominal(NominalType::Interface(InterfaceType {
@@ -163,23 +124,6 @@ fn interface_instance(
 }
 
 impl<'a> TypeResolutionContext<'a> {
-    pub fn new(
-        entity_registry: &'a EntityRegistry,
-        interner: &'a Interner,
-        name_table: &'a mut NameTable,
-        module_id: ModuleId,
-    ) -> Self {
-        Self {
-            entity_registry,
-            interner,
-            name_table,
-            module_id,
-            type_params: None,
-            self_type: None,
-            type_arena: None,
-        }
-    }
-
     /// Create a context with type parameters in scope
     pub fn with_type_params(
         entity_registry: &'a EntityRegistry,
@@ -378,12 +322,10 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                     TypeDefKind::Primitive => LegacyType::invalid("resolve_primitive"),
                     TypeDefKind::Alias => {
                         if let Some(aliased_type_id) = type_def.aliased_type {
-                            if let Some(arena) = ctx.type_arena {
-                                arena.borrow().to_type(aliased_type_id)
-                            } else {
-                                // Fallback when arena not available
-                                LegacyType::invalid("resolve_no_arena")
-                            }
+                            let arena = ctx
+                                .type_arena
+                                .expect("type_arena must be available for alias resolution");
+                            arena.borrow().to_type(aliased_type_id)
                         } else {
                             LegacyType::invalid("resolve_failed")
                         }
@@ -416,32 +358,29 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
             let param_types: Vec<LegacyType> =
                 params.iter().map(|p| resolve_type(p, ctx)).collect();
             let ret = resolve_type(return_type, ctx);
-            // Populate TypeId fields if arena is available
-            let (params_id, return_type_id) = if let Some(arena_ref) = ctx.type_arena {
-                let mut arena = arena_ref.borrow_mut();
-                let p_ids: TypeIdVec = param_types.iter().map(|p| arena.from_type(p)).collect();
-                let r_id = arena.from_type(&ret);
-                (Some(p_ids), Some(r_id))
-            } else {
-                (None, None)
-            };
+            // Populate TypeId fields - arena is always available
+            let arena_ref = ctx
+                .type_arena
+                .expect("type_arena must be available for function type resolution");
+            let mut arena = arena_ref.borrow_mut();
+            let params_id: TypeIdVec = param_types.iter().map(|p| arena.from_type(p)).collect();
+            let return_type_id = arena.from_type(&ret);
             LegacyType::Function(FunctionType {
                 params: param_types.into(),
                 return_type: Box::new(ret),
                 is_closure: false, // Type annotations don't know if it's a closure
-                params_id,
-                return_type_id,
+                params_id: Some(params_id),
+                return_type_id: Some(return_type_id),
             })
         }
         TypeExpr::SelfType => {
             // Self resolves to the implementing type when in a method context
             if let Some(self_type_id) = ctx.self_type {
                 // Convert TypeId to LegacyType using arena
-                if let Some(arena) = ctx.type_arena {
-                    arena.borrow().to_type(self_type_id)
-                } else {
-                    LegacyType::invalid("resolve_no_arena")
-                }
+                let arena = ctx
+                    .type_arena
+                    .expect("type_arena must be available for Self type resolution");
+                arena.borrow().to_type(self_type_id)
             } else {
                 // Return Error to indicate Self can't be used outside method context
                 LegacyType::invalid("resolve_failed")
@@ -476,14 +415,13 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                 match type_def.kind {
                     TypeDefKind::Class => {
                         // Convert type args to TypeIds for canonical representation
-                        let type_args_id: TypeIdVec = if let Some(arena) = ctx.type_arena {
-                            resolved_args
-                                .iter()
-                                .map(|t| arena.borrow_mut().from_type(t))
-                                .collect()
-                        } else {
-                            TypeIdVec::new()
-                        };
+                        let arena = ctx
+                            .type_arena
+                            .expect("type_arena must be available for class type resolution");
+                        let type_args_id: TypeIdVec = resolved_args
+                            .iter()
+                            .map(|t| arena.borrow_mut().from_type(t))
+                            .collect();
                         return LegacyType::Nominal(NominalType::Class(ClassType {
                             type_def_id: type_id,
                             type_args_id,
@@ -491,14 +429,13 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                     }
                     TypeDefKind::Record => {
                         // Convert type args to TypeIds for canonical representation
-                        let type_args_id: TypeIdVec = if let Some(arena) = ctx.type_arena {
-                            resolved_args
-                                .iter()
-                                .map(|t| arena.borrow_mut().from_type(t))
-                                .collect()
-                        } else {
-                            TypeIdVec::new()
-                        };
+                        let arena = ctx
+                            .type_arena
+                            .expect("type_arena must be available for record type resolution");
+                        let type_args_id: TypeIdVec = resolved_args
+                            .iter()
+                            .map(|t| arena.borrow_mut().from_type(t))
+                            .collect();
                         return LegacyType::Nominal(NominalType::Record(RecordType {
                             type_def_id: type_id,
                             type_args_id,
@@ -608,18 +545,23 @@ mod tests {
         F: FnOnce(&mut TypeResolutionContext<'_>) -> R,
     {
         use crate::identity::NameTable;
+        use std::cell::RefCell;
 
         static EMPTY_ENTITY_REGISTRY: std::sync::LazyLock<EntityRegistry> =
             std::sync::LazyLock::new(EntityRegistry::new);
 
         let mut name_table = NameTable::new();
         let module_id = name_table.main_module();
-        let mut ctx = TypeResolutionContext::new(
-            &EMPTY_ENTITY_REGISTRY,
+        let arena = RefCell::new(TypeArena::new());
+        let mut ctx = TypeResolutionContext {
+            entity_registry: &EMPTY_ENTITY_REGISTRY,
             interner,
-            &mut name_table,
+            name_table: &mut name_table,
             module_id,
-        );
+            type_params: None,
+            self_type: None,
+            type_arena: Some(&arena),
+        };
         f(&mut ctx)
     }
 
@@ -703,6 +645,7 @@ mod tests {
     fn resolve_unknown_named_type() {
         // Create a context with an interner that has the symbol
         use crate::frontend::Interner;
+        use std::cell::RefCell;
 
         static EMPTY_ENTITY_REGISTRY: std::sync::LazyLock<EntityRegistry> =
             std::sync::LazyLock::new(EntityRegistry::new);
@@ -714,12 +657,16 @@ mod tests {
 
         let mut name_table = NameTable::new();
         let module_id = name_table.main_module();
-        let mut ctx = TypeResolutionContext::new(
-            &EMPTY_ENTITY_REGISTRY,
-            &TEST_INTERNER,
-            &mut name_table,
+        let arena = RefCell::new(TypeArena::new());
+        let mut ctx = TypeResolutionContext {
+            entity_registry: &EMPTY_ENTITY_REGISTRY,
+            interner: &TEST_INTERNER,
+            name_table: &mut name_table,
             module_id,
-        );
+            type_params: None,
+            self_type: None,
+            type_arena: Some(&arena),
+        };
         let named = TypeExpr::Named(Symbol(0));
         assert!(resolve_type(&named, &mut ctx).is_invalid());
     }
