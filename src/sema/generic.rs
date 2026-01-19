@@ -690,17 +690,10 @@ impl MonomorphInstanceTrait for StaticMethodMonomorphInstance {
 pub type StaticMethodMonomorphCache =
     MonomorphCacheBase<StaticMethodMonomorphKey, StaticMethodMonomorphInstance>;
 
-/// Substitute concrete types for type parameters in a type.
-///
-/// This is a convenience wrapper around `Type::substitute`. Prefer calling
-/// `ty.substitute(substitutions)` directly in new code.
-pub fn substitute_type(ty: &LegacyType, substitutions: &HashMap<NameId, LegacyType>) -> LegacyType {
-    ty.substitute(substitutions)
-}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sema::types::{LegacyType, PrimitiveType};
+    use crate::sema::TypeArena;
 
     #[test]
     fn test_type_param_scope() {
@@ -729,6 +722,7 @@ mod tests {
 
     #[test]
     fn test_monomorph_cache() {
+        let arena = TypeArena::new();
         let mut cache = MonomorphCache::new();
         let mut names = crate::identity::NameTable::new();
         let mut interner = crate::frontend::Interner::new();
@@ -738,15 +732,15 @@ mod tests {
 
         let key1 = MonomorphKey::new(
             func_name,
-            vec![table.key_for_type(&LegacyType::Primitive(PrimitiveType::I64))],
+            vec![table.key_for_type_id(arena.i64(), &arena)],
         );
         let key2 = MonomorphKey::new(
             func_name,
-            vec![table.key_for_type(&LegacyType::Primitive(PrimitiveType::String))],
+            vec![table.key_for_type_id(arena.string(), &arena)],
         );
         let key1_dup = MonomorphKey::new(
             func_name,
-            vec![table.key_for_type(&LegacyType::Primitive(PrimitiveType::I64))],
+            vec![table.key_for_type_id(arena.i64(), &arena)],
         );
 
         assert!(!cache.contains(&key1));
@@ -757,13 +751,7 @@ mod tests {
                 original_name: func_name,
                 mangled_name: names.intern_raw(names.main_module(), &["foo__mono_0"]),
                 instance_id: 0,
-                func_type: FunctionType {
-                    params: vec![LegacyType::Primitive(PrimitiveType::I64)].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                },
+                func_type: FunctionType::from_ids(&[arena.i64()], arena.i64(), false, &arena),
                 substitutions: HashMap::new(),
             },
         );
@@ -773,27 +761,4 @@ mod tests {
         assert!(!cache.contains(&key2)); // Different types = different key
     }
 
-    #[test]
-    fn test_substitute_type() {
-        let mut names = crate::identity::NameTable::new();
-        let t_name_id = names.intern_raw(names.main_module(), &["T"]);
-        let mut subs = HashMap::new();
-        subs.insert(t_name_id, LegacyType::Primitive(PrimitiveType::I64));
-
-        // Simple substitution
-        let result = substitute_type(&LegacyType::TypeParam(t_name_id), &subs);
-        assert_eq!(result, LegacyType::Primitive(PrimitiveType::I64));
-
-        // Array of type param
-        let arr = LegacyType::Array(Box::new(LegacyType::TypeParam(t_name_id)));
-        let result = substitute_type(&arr, &subs);
-        assert_eq!(
-            result,
-            LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::I64)))
-        );
-
-        // Non-param types unchanged
-        let result = substitute_type(&LegacyType::Primitive(PrimitiveType::Bool), &subs);
-        assert_eq!(result, LegacyType::Primitive(PrimitiveType::Bool));
-    }
 }

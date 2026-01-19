@@ -117,22 +117,17 @@ impl MethodResolutions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sema::types::{LegacyType, PrimitiveType};
+    use crate::sema::TypeArena;
 
     #[test]
     fn resolved_method_func_type() {
-        let ft = FunctionType {
-            params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
-            return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
-            is_closure: false,
-            params_id: None,
-            return_type_id: None,
-        };
+        let arena = TypeArena::new();
+        let ft = FunctionType::from_ids(&[arena.i32()], arena.bool(), false, &arena);
 
         let direct = ResolvedMethod::Direct {
             func_type: ft.clone(),
         };
-        assert_eq!(direct.func_type().params.len(), 1);
+        assert_eq!(direct.func_type().params_id.as_ref().unwrap().len(), 1);
 
         let implemented = ResolvedMethod::Implemented {
             trait_name: None,
@@ -145,19 +140,14 @@ mod tests {
 
     #[test]
     fn method_resolutions_storage() {
+        let arena = TypeArena::new();
         let mut resolutions = MethodResolutions::new();
         let node_id = NodeId(42);
 
         resolutions.insert(
             node_id,
             ResolvedMethod::Direct {
-                func_type: FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::Void),
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                },
+                func_type: FunctionType::from_ids(&[], arena.void(), false, &arena),
             },
         );
 
