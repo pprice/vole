@@ -715,7 +715,7 @@ impl Analyzer {
         Ok(())
     }
 
-    /// Pass 2: LegacyType check function bodies, tests, and methods
+    /// Pass 2: Type check function bodies, tests, and methods
     fn check_declaration_bodies(
         &mut self,
         program: &Program,
