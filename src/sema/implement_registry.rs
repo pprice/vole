@@ -238,6 +238,7 @@ impl ImplementRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sema::TypeArena;
 
     fn sym(id: u32) -> Symbol {
         Symbol(id)
@@ -245,6 +246,7 @@ mod tests {
 
     #[test]
     fn register_and_get_method() {
+        let arena = TypeArena::new();
         let mut interner = crate::frontend::Interner::new();
         let length_sym = interner.intern("length");
         let mut names = crate::identity::NameTable::new();
@@ -262,13 +264,7 @@ mod tests {
             method_id,
             MethodImpl {
                 trait_name: Some(sym(2)), // "Sized"
-                func_type: FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                },
+                func_type: FunctionType::from_ids(&[], arena.i64(), false, &arena),
                 is_builtin: true,
                 external_info: None,
             },
@@ -331,6 +327,7 @@ mod tests {
 
     #[test]
     fn get_methods_for_type() {
+        let arena = TypeArena::new();
         let mut interner = crate::frontend::Interner::new();
         let length_sym = interner.intern("length");
         let to_upper_sym = interner.intern("to_upper");
@@ -350,13 +347,7 @@ mod tests {
             length_id,
             MethodImpl {
                 trait_name: None,
-                func_type: FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                },
+                func_type: FunctionType::from_ids(&[], arena.i64(), false, &arena),
                 is_builtin: true,
                 external_info: None,
             },
@@ -367,13 +358,7 @@ mod tests {
             to_upper_id,
             MethodImpl {
                 trait_name: None,
-                func_type: FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::String)),
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                },
+                func_type: FunctionType::from_ids(&[], arena.string(), false, &arena),
                 is_builtin: true,
                 external_info: None,
             },
@@ -385,6 +370,7 @@ mod tests {
 
     #[test]
     fn merge_registries() {
+        let arena = TypeArena::new();
         let mut interner = crate::frontend::Interner::new();
         let equals_sym = interner.intern("equals");
         let length_sym = interner.intern("length");
@@ -409,13 +395,7 @@ mod tests {
             equals_id,
             MethodImpl {
                 trait_name: Some(sym(20)), // "Equatable"
-                func_type: FunctionType {
-                    params: vec![LegacyType::Primitive(PrimitiveType::I64)].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                },
+                func_type: FunctionType::from_ids(&[arena.i64()], arena.bool(), false, &arena),
                 is_builtin: false,
                 external_info: None,
             },
@@ -427,13 +407,7 @@ mod tests {
             length_id,
             MethodImpl {
                 trait_name: None,
-                func_type: FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                },
+                func_type: FunctionType::from_ids(&[], arena.i64(), false, &arena),
                 is_builtin: false,
                 external_info: None,
             },
