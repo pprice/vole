@@ -21,7 +21,6 @@ use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDe
 use crate::sema::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
 use crate::sema::type_arena::TypeIdVec;
 use crate::sema::type_table::{TypeKey, TypeTable};
-use crate::sema::types::{LegacyType, NominalType};
 
 /// Central registry for all language entities
 #[derive(Debug, Clone)]
@@ -297,16 +296,6 @@ impl EntityRegistry {
         self.get_type(record_type.type_def_id).name_id
     }
 
-    /// Get the name_id for any struct-like Type (Class, Record, Interface)
-    pub fn type_name_id(&self, ty: &LegacyType) -> Option<NameId> {
-        match ty {
-            LegacyType::Nominal(NominalType::Class(c)) => Some(self.class_name_id(c)),
-            LegacyType::Nominal(NominalType::Record(r)) => Some(self.record_name_id(r)),
-            LegacyType::Nominal(NominalType::Interface(i)) => Some(self.name_id(i.type_def_id)),
-            _ => None,
-        }
-    }
-
     // ===== Alias Management =====
 
     /// Get all type aliases that resolve to a given type.
@@ -523,7 +512,7 @@ mod tests {
     use super::*;
     use crate::identity::NameTable;
     use crate::sema::FunctionType;
-    use crate::sema::types::PrimitiveType;
+    use crate::sema::TypeArena;
 
     #[test]
     fn register_and_lookup_type() {
@@ -540,6 +529,7 @@ mod tests {
 
     #[test]
     fn register_and_lookup_method() {
+        let arena = TypeArena::new();
         let mut names = NameTable::new();
         let main_mod = names.main_module();
         let builtin_mod = names.builtin_module();
@@ -550,13 +540,7 @@ mod tests {
         let mut registry = EntityRegistry::new();
         let type_id = registry.register_type(type_name, TypeDefKind::Interface, main_mod);
 
-        let signature = FunctionType {
-            params: vec![].into(),
-            return_type: Box::new(LegacyType::Primitive(PrimitiveType::I32)),
-            is_closure: false,
-            params_id: None,
-            return_type_id: None,
-        };
+        let signature = FunctionType::from_ids(&[], arena.i32(), false, &arena);
 
         let method_id =
             registry.register_method(type_id, method_name, full_method_name, signature, false);
@@ -574,6 +558,7 @@ mod tests {
 
     #[test]
     fn register_and_lookup_field() {
+        let arena = TypeArena::new();
         let mut names = NameTable::new();
         let main_mod = names.main_module();
         let builtin_mod = names.builtin_module();
@@ -584,9 +569,7 @@ mod tests {
         let mut registry = EntityRegistry::new();
         let type_id = registry.register_type(type_name, TypeDefKind::Record, main_mod);
 
-        // Create arena for type interning
-        let mut arena = crate::sema::type_arena::TypeArena::new();
-        let field_type_id = arena.from_type(&LegacyType::Primitive(PrimitiveType::I32));
+        let field_type_id = arena.i32();
 
         let field_id =
             registry.register_field(type_id, field_name, full_field_name, field_type_id, 0);
@@ -605,19 +588,14 @@ mod tests {
 
     #[test]
     fn register_and_lookup_function() {
+        let arena = TypeArena::new();
         let mut names = NameTable::new();
         let math_mod = names.module_id("math");
         let func_name = names.intern_raw(math_mod, &["sin"]);
 
         let mut registry = EntityRegistry::new();
 
-        let signature = FunctionType {
-            params: vec![LegacyType::Primitive(PrimitiveType::F64)].into(),
-            return_type: Box::new(LegacyType::Primitive(PrimitiveType::F64)),
-            is_closure: false,
-            params_id: None,
-            return_type_id: None,
-        };
+        let signature = FunctionType::from_ids(&[arena.f64()], arena.f64(), false, &arena);
 
         let func_id = registry.register_function(
             func_name, func_name, // For simple functions, name_id == full_name_id
@@ -648,6 +626,7 @@ mod tests {
 
     #[test]
     fn resolve_inherited_method() {
+        let arena = TypeArena::new();
         let mut names = NameTable::new();
         let main_mod = names.main_module();
         let builtin_mod = names.builtin_module();
@@ -661,13 +640,7 @@ mod tests {
         let base_id = registry.register_type(base_name, TypeDefKind::Interface, main_mod);
         let derived_id = registry.register_type(derived_name, TypeDefKind::Interface, main_mod);
 
-        let signature = FunctionType {
-            params: vec![].into(),
-            return_type: Box::new(LegacyType::Void),
-            is_closure: false,
-            params_id: None,
-            return_type_id: None,
-        };
+        let signature = FunctionType::from_ids(&[], arena.void(), false, &arena);
 
         let method_id =
             registry.register_method(base_id, method_name, full_method_name, signature, false);
