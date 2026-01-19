@@ -278,7 +278,6 @@ mod tests {
     use super::*;
     use crate::frontend::PrimitiveType as FrontendPrimitiveType;
     use crate::identity::NameTable;
-    use crate::sema::types::PrimitiveType;
 
     fn with_empty_context<F, R>(interner: &Interner, f: F) -> R
     where
@@ -309,17 +308,18 @@ mod tests {
     fn resolve_primitive_types() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
+            // Use TypeId constants for comparison
             assert_eq!(
-                resolve_type(&TypeExpr::Primitive(FrontendPrimitiveType::I32), ctx),
-                DisplayType::Primitive(PrimitiveType::I32)
+                resolve_type_to_id(&TypeExpr::Primitive(FrontendPrimitiveType::I32), ctx),
+                TypeId::I32
             );
             assert_eq!(
-                resolve_type(&TypeExpr::Primitive(FrontendPrimitiveType::Bool), ctx),
-                DisplayType::Primitive(PrimitiveType::Bool)
+                resolve_type_to_id(&TypeExpr::Primitive(FrontendPrimitiveType::Bool), ctx),
+                TypeId::BOOL
             );
             assert_eq!(
-                resolve_type(&TypeExpr::Primitive(FrontendPrimitiveType::String), ctx),
-                DisplayType::Primitive(PrimitiveType::String)
+                resolve_type_to_id(&TypeExpr::Primitive(FrontendPrimitiveType::String), ctx),
+                TypeId::STRING
             );
         });
     }
@@ -328,7 +328,7 @@ mod tests {
     fn resolve_nil_type() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
-            assert_eq!(resolve_type(&TypeExpr::Nil, ctx), DisplayType::Nil);
+            assert_eq!(resolve_type_to_id(&TypeExpr::Nil, ctx), TypeId::NIL);
         });
     }
 
@@ -338,11 +338,10 @@ mod tests {
         with_empty_context(&interner, |ctx| {
             let array_expr =
                 TypeExpr::Array(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::I64)));
-            let resolved = resolve_type(&array_expr, ctx);
-            assert_eq!(
-                resolved,
-                DisplayType::Array(Box::new(DisplayType::Primitive(PrimitiveType::I64)))
-            );
+            let type_id = resolve_type_to_id(&array_expr, ctx);
+            // Use arena queries to verify structure
+            let elem = ctx.type_arena.borrow().unwrap_array(type_id);
+            assert_eq!(elem, Some(TypeId::I64));
         });
     }
 
@@ -352,8 +351,10 @@ mod tests {
         with_empty_context(&interner, |ctx| {
             let opt_expr =
                 TypeExpr::Optional(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::I32)));
-            let resolved = resolve_type(&opt_expr, ctx);
-            assert!(resolved.is_optional());
+            let type_id = resolve_type_to_id(&opt_expr, ctx);
+            // Optional should unwrap to inner type
+            let inner = ctx.type_arena.borrow().unwrap_optional(type_id);
+            assert_eq!(inner, Some(TypeId::I32));
         });
     }
 
@@ -368,23 +369,15 @@ mod tests {
                 ],
                 return_type: Box::new(TypeExpr::Primitive(FrontendPrimitiveType::Bool)),
             };
-            let resolved = resolve_type(&func_expr, ctx);
-            if let DisplayType::Function(ft) = resolved {
-                assert_eq!(ft.params_id.len(), 2);
-                let arena = ctx.type_arena.borrow();
-                assert_eq!(
-                    arena.to_display(ft.params_id[0]),
-                    DisplayType::Primitive(PrimitiveType::I32)
-                );
-                assert_eq!(
-                    arena.to_display(ft.params_id[1]),
-                    DisplayType::Primitive(PrimitiveType::I32)
-                );
-                assert_eq!(
-                    arena.to_display(ft.return_type_id),
-                    DisplayType::Primitive(PrimitiveType::Bool)
-                );
-                assert!(!ft.is_closure);
+            let type_id = resolve_type_to_id(&func_expr, ctx);
+            // Use arena queries to verify function structure
+            let arena = ctx.type_arena.borrow();
+            if let Some((params, ret, is_closure)) = arena.unwrap_function(type_id) {
+                assert_eq!(params.len(), 2);
+                assert_eq!(params[0], TypeId::I32);
+                assert_eq!(params[1], TypeId::I32);
+                assert_eq!(ret, TypeId::BOOL);
+                assert!(!is_closure);
             } else {
                 panic!("Expected function type");
             }
@@ -418,7 +411,7 @@ mod tests {
             type_arena: &arena,
         };
         let named = TypeExpr::Named(Symbol(0));
-        assert!(resolve_type(&named, &mut ctx).is_invalid());
+        assert!(resolve_type_to_id(&named, &mut ctx).is_invalid());
     }
 
     #[test]
@@ -426,115 +419,55 @@ mod tests {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
             // Self type is only valid in interface/implement context
-            assert!(resolve_type(&TypeExpr::SelfType, ctx).is_invalid());
+            assert!(resolve_type_to_id(&TypeExpr::SelfType, ctx).is_invalid());
         });
     }
 
     // ========================================================================
-    // Phase 2.2 tests: resolve_type_to_id
+    // TypeId interning tests
     // ========================================================================
 
     #[test]
-    fn resolve_to_id_primitives() {
+    fn resolve_to_id_interning() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
             let i32_expr = TypeExpr::Primitive(FrontendPrimitiveType::I32);
             let type_id = resolve_type_to_id(&i32_expr, ctx);
-            let back = ctx.type_arena.borrow().to_display(type_id);
 
-            assert_eq!(back, DisplayType::Primitive(PrimitiveType::I32));
+            // Should get the reserved constant
+            assert_eq!(type_id, TypeId::I32);
 
             // Interning should work - same expr gives same TypeId
             let type_id2 = resolve_type_to_id(&i32_expr, ctx);
             assert_eq!(type_id, type_id2);
-        });
-    }
 
-    #[test]
-    fn resolve_to_id_array() {
-        let interner = Interner::new();
-        with_empty_context(&interner, |ctx| {
+            // Complex types should also intern
             let array_expr =
                 TypeExpr::Array(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::String)));
-            let type_id = resolve_type_to_id(&array_expr, ctx);
-            let back = ctx.type_arena.borrow().to_display(type_id);
-
-            assert_eq!(
-                back,
-                DisplayType::Array(Box::new(DisplayType::Primitive(PrimitiveType::String)))
-            );
+            let arr_id1 = resolve_type_to_id(&array_expr, ctx);
+            let arr_id2 = resolve_type_to_id(&array_expr, ctx);
+            assert_eq!(arr_id1, arr_id2);
         });
     }
 
     #[test]
-    fn resolve_to_id_function() {
+    fn resolve_to_id_tuple() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
-            let func_expr = TypeExpr::Function {
-                params: vec![TypeExpr::Primitive(FrontendPrimitiveType::I32)],
-                return_type: Box::new(TypeExpr::Primitive(FrontendPrimitiveType::Bool)),
-            };
-            let type_id = resolve_type_to_id(&func_expr, ctx);
-            let back = ctx.type_arena.borrow().to_display(type_id);
+            let tuple_expr = TypeExpr::Tuple(vec![
+                TypeExpr::Primitive(FrontendPrimitiveType::I32),
+                TypeExpr::Primitive(FrontendPrimitiveType::String),
+            ]);
+            let type_id = resolve_type_to_id(&tuple_expr, ctx);
 
-            if let DisplayType::Function(ft) = back {
-                assert_eq!(ft.params_id.len(), 1);
-                let arena = ctx.type_arena.borrow();
-                assert_eq!(
-                    arena.to_display(ft.params_id[0]),
-                    DisplayType::Primitive(PrimitiveType::I32)
-                );
-                assert_eq!(
-                    arena.to_display(ft.return_type_id),
-                    DisplayType::Primitive(PrimitiveType::Bool)
-                );
+            // Use arena queries to verify tuple structure
+            let arena = ctx.type_arena.borrow();
+            if let Some(elements) = arena.unwrap_tuple(type_id) {
+                assert_eq!(elements.len(), 2);
+                assert_eq!(elements[0], TypeId::I32);
+                assert_eq!(elements[1], TypeId::STRING);
             } else {
-                panic!("Expected function type, got {:?}", back);
-            }
-        });
-    }
-
-    #[test]
-    fn resolve_to_id_optional() {
-        let interner = Interner::new();
-        with_empty_context(&interner, |ctx| {
-            let opt_expr =
-                TypeExpr::Optional(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::I32)));
-            let type_id = resolve_type_to_id(&opt_expr, ctx);
-            let back = ctx.type_arena.borrow().to_display(type_id);
-
-            // Optional is represented as Union([inner, nil])
-            if let DisplayType::Union(variants) = back {
-                assert_eq!(variants.len(), 2);
-                assert!(variants.contains(&DisplayType::Primitive(PrimitiveType::I32)));
-                assert!(variants.contains(&DisplayType::Nil));
-            } else {
-                panic!("Expected union type for optional, got {:?}", back);
-            }
-        });
-    }
-
-    #[test]
-    fn resolve_to_id_matches_resolve_type() {
-        let interner = Interner::new();
-        with_empty_context(&interner, |ctx| {
-            // Test various expressions
-            let exprs = vec![
-                TypeExpr::Nil,
-                TypeExpr::Done,
-                TypeExpr::Primitive(FrontendPrimitiveType::F64),
-                TypeExpr::Array(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::I32))),
-                TypeExpr::Tuple(vec![
-                    TypeExpr::Primitive(FrontendPrimitiveType::I32),
-                    TypeExpr::Primitive(FrontendPrimitiveType::String),
-                ]),
-            ];
-
-            for expr in exprs {
-                let legacy = resolve_type(&expr, ctx);
-                let type_id = resolve_type_to_id(&expr, ctx);
-                let arena_result = ctx.type_arena.borrow().to_display(type_id);
-                assert_eq!(legacy, arena_result, "Mismatch for {:?}", expr);
+                panic!("Expected tuple type");
             }
         });
     }
