@@ -109,7 +109,6 @@ impl Cg<'_, '_, '_> {
             // If field type is optional (union) and value type is not a union, wrap it
             // Use heap allocation for unions stored in class/record fields since stack slots
             // don't persist beyond the current function's stack frame
-            // Use arena methods for type checks to avoid DisplayType allocation
             let final_value = if let Some(&field_type_id) = field_types.get(init_name) {
                 let arena = self.ctx.arena.borrow();
                 let field_is_union = arena.is_union(field_type_id);

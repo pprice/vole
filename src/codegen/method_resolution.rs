@@ -44,7 +44,7 @@ pub(crate) enum MethodTarget {
     },
 }
 
-/// TypeId-based method resolution input (avoids DisplayType conversion)
+/// Method resolution input.
 pub(crate) struct MethodResolutionInputId<'a> {
     pub analyzed: &'a AnalyzedProgram,
     pub type_metadata: &'a HashMap<Symbol, crate::codegen::types::TypeMetadata>,
@@ -55,7 +55,7 @@ pub(crate) struct MethodResolutionInputId<'a> {
     pub resolution: Option<&'a ResolvedMethod>,
 }
 
-/// Resolve method target using TypeId (no DisplayType conversion needed)
+/// Resolve method target to determine how to call it.
 pub(crate) fn resolve_method_target_id(
     input: MethodResolutionInputId<'_>,
 ) -> Result<MethodTarget, String> {

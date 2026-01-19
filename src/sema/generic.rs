@@ -235,7 +235,6 @@ pub struct TypeParamInfo {
 }
 
 /// Registry for allocating and looking up TypeParamIds.
-/// Each type parameter gets a unique ID that can be used in DisplayType::TypeParamRef.
 #[derive(Debug, Default)]
 pub struct TypeParamRegistry {
     /// Maps TypeParamId -> (NameId, Symbol) for lookups

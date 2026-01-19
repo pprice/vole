@@ -1,7 +1,6 @@
 // src/sema/analyzer/type_helpers.rs
 //
-// TypeId-based type construction and manipulation helpers.
-// These methods work with TypeId directly, avoiding DisplayType materialization.
+// Type construction and manipulation helpers.
 
 #![allow(unused)] // Some methods used conditionally
 
@@ -9,12 +8,6 @@ use super::*;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
 
 impl Analyzer {
-    // ========== TypeId-returning type construction ==========
-    //
-    // These return TypeId directly, avoiding DisplayType materialization.
-    // For primitives and special types, we use reserved TypeId constants
-    // which require no arena access at all.
-
     /// Create a primitive TypeId (uses reserved constants - no arena access)
     #[inline]
     pub(crate) fn ty_prim_id(&self, p: PrimitiveType) -> ArenaTypeId {

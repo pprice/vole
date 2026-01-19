@@ -7,11 +7,7 @@ use crate::sema::type_arena::TypeId as ArenaTypeId;
 use std::collections::HashMap;
 
 impl Analyzer {
-    // ========== TypeId-based inference ==========
-    //
-    // These versions work directly with TypeId, avoiding DisplayType conversion.
-
-    /// Infer type parameters from argument types (TypeId version).
+    /// Infer type parameters from argument types.
     /// Returns a map from type parameter NameId to inferred TypeId.
     pub(crate) fn infer_type_params_id(
         &self,

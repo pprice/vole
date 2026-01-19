@@ -6,7 +6,6 @@ use crate::sema::type_arena::TypeId as ArenaTypeId;
 
 impl Analyzer {
     /// Analyze a lambda expression, optionally with an expected function type for inference.
-    /// Returns TypeId directly (no DisplayType conversion).
     pub(crate) fn analyze_lambda(
         &mut self,
         lambda: &LambdaExpr,

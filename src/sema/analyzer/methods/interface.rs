@@ -18,9 +18,7 @@ impl Analyzer {
         false
     }
 
-    /// Check if a type structurally satisfies an interface by TypeDefId (TypeId version)
-    ///
-    /// This is the TypeId-based version that avoids DisplayType conversion.
+    /// Check if a type structurally satisfies an interface by TypeDefId.
     pub(crate) fn satisfies_interface_by_type_def_id_typeid(
         &mut self,
         ty_id: ArenaTypeId,
@@ -420,7 +418,7 @@ impl Analyzer {
         }
     }
 
-    /// Check if method signature matches using TypeId (avoids DisplayType comparison)
+    /// Check if method signature matches.
     fn signatures_match_entity_id(
         required_params_id: &[ArenaTypeId],
         required_return_id: ArenaTypeId,

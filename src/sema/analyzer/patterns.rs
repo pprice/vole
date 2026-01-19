@@ -5,8 +5,7 @@ use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::StructFieldId;
 
 impl Analyzer {
-    /// Check pattern and return TypeId directly (TypeId version).
-    /// Handles most pattern types natively, falls back to DisplayType version for complex patterns.
+    /// Check pattern and return TypeId directly.
     pub(crate) fn check_pattern_id(
         &mut self,
         pattern: &Pattern,

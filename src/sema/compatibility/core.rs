@@ -4,7 +4,7 @@
 
 use crate::sema::type_arena::{SemaType, TypeArena, TypeId};
 
-/// Check if two types are compatible using TypeId (no DisplayType conversion).
+/// Check if two types are compatible.
 pub fn types_compatible_core_id(from: TypeId, to: TypeId, arena: &TypeArena) -> bool {
     // TypeId equality is O(1)
     if from == to {

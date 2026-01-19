@@ -413,7 +413,6 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| "vole_array_push not found".to_string())?;
         let array_push_ref = self.func_ref(array_push_key)?;
 
-        // Track element type using TypeId (no DisplayType conversion)
         // Use i64 as default - will be overwritten by first element if any
         let mut elem_type_id = self.i64_type();
 
@@ -424,7 +423,6 @@ impl Cg<'_, '_, '_> {
                 elem_type_id = compiled.type_id;
             }
 
-            // Use TypeId-based tag lookup to avoid DisplayType conversion in hot loop
             let arena = self.ctx.arena.borrow();
             let tag_val = self
                 .builder
@@ -590,7 +588,6 @@ impl Cg<'_, '_, '_> {
     fn index(&mut self, object: &Expr, index: &Expr) -> Result<CompiledValue, String> {
         let obj = self.expr(object)?;
 
-        // Check type using arena methods (no DisplayType allocation)
         let arena = self.ctx.arena.borrow();
 
         // Try tuple first
@@ -716,7 +713,6 @@ impl Cg<'_, '_, '_> {
         let arr = self.expr(object)?;
         let val = self.expr(value)?;
 
-        // Use arena methods instead of DisplayType pattern matching
         let arena = self.ctx.arena.borrow();
         let fixed_array_info = arena.unwrap_fixed_array(arr.type_id);
         let is_dynamic_array = arena.is_array(arr.type_id);
@@ -1050,7 +1046,6 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().jump(merge_block, &[default_arg]);
         }
 
-        // Track result type using TypeId (no DisplayType conversion)
         let mut result_type_id = self.void_type();
 
         for (i, arm) in match_expr.arms.iter().enumerate() {
@@ -1430,7 +1425,6 @@ impl Cg<'_, '_, '_> {
         // Compile the inner fallible expression
         let fallible = self.expr(inner)?;
 
-        // Get success type using arena method (no DisplayType conversion)
         let success_type_id = {
             let arena = self.ctx.arena.borrow();
             match arena.unwrap_fallible(fallible.type_id) {

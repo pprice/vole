@@ -8,7 +8,7 @@ use crate::errors::CodegenError;
 use crate::sema::PrimitiveType;
 use crate::sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
 
-/// Get field slot and type for a field access using TypeId (no DisplayType conversion)
+/// Get field slot and type for a field access.
 pub(crate) fn get_field_slot_and_type_id(
     type_id: TypeId,
     field_name: &str,
@@ -87,7 +87,7 @@ pub(crate) fn get_type_name_id_from_type_id(
     .into())
 }
 
-/// Convert a raw i64 field value to the appropriate Cranelift type using TypeId (no DisplayType)
+/// Convert a raw i64 field value to the appropriate Cranelift type.
 pub(crate) fn convert_field_value_id(
     builder: &mut FunctionBuilder,
     raw_value: Value,

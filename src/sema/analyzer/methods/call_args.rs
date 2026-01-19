@@ -2,9 +2,8 @@ use super::super::*;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
 
 impl Analyzer {
-    /// Check call arguments against expected parameter types (TypeId version).
+    /// Check call arguments against expected parameter types.
     ///
-    /// This version takes TypeIds directly and avoids DisplayType conversion.
     /// Uses check_expr_expecting_id for inference (integer literals, union coercion).
     pub(crate) fn check_call_args_id(
         &mut self,

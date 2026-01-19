@@ -265,7 +265,6 @@ impl Analyzer {
         // Non-identifier callee (e.g., a lambda expression being called directly)
         let callee_ty_id = self.check_expr(&call.callee, interner)?;
 
-        // Use arena.unwrap_function to check if callable (avoids DisplayType)
         let func_info = self
             .type_arena
             .borrow()

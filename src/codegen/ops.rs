@@ -64,7 +64,6 @@ impl Cg<'_, '_, '_> {
     /// Call to_string() on a value via the Stringable interface.
     /// Returns the resulting string value.
     fn call_to_string(&mut self, val: &CompiledValue) -> Result<Value, String> {
-        // Look up the to_string method in the implement registry (no DisplayType conversion)
         let arena = self.ctx.arena.borrow();
         let impl_type_id =
             ImplTypeId::from_type_id(val.type_id, &arena, &self.ctx.analyzed.entity_registry)

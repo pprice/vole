@@ -22,7 +22,7 @@
 //
 // ## Compound Special Types
 // - `Module(ModuleType)` - Imported module with exports
-// - `RuntimeIterator(Box<DisplayType>)` - Builtin iterator (array.iter(), range.iter())
+// - `RuntimeIterator` - Builtin iterator (array.iter(), range.iter())
 // - `Range` - Range literal type (0..10)
 //
 // This module defines the supporting structs for these variants. The variants

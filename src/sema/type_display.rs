@@ -1,7 +1,6 @@
 //! Type display utilities for formatting types in error messages.
 //!
-//! This module provides functions to display types from TypeId without
-//! materializing DisplayType, which is more efficient for error reporting.
+//! This module provides functions to display types directly from TypeId.
 
 use crate::identity::NameTable;
 use crate::sema::entity_registry::EntityRegistry;

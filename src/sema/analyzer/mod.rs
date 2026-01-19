@@ -174,7 +174,6 @@ pub struct Analyzer {
     lambda_side_effects: Vec<bool>,
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their interned type handles for O(1) equality.
-    /// Converted to DisplayType at boundaries when passed to codegen.
     expr_types: HashMap<NodeId, ArenaTypeId>,
     /// Methods added via implement blocks
     pub implement_registry: ImplementRegistry,
@@ -208,7 +207,6 @@ pub struct Analyzer {
     /// Entity registry for first-class type/method/field/function identity (includes type_table)
     pub entity_registry: EntityRegistry,
     /// Stack of type parameter scopes for nested generic contexts.
-    /// Used for resolving methods on DisplayType::TypeParam via constraint interfaces.
     type_param_stack: TypeParamScopeStack,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
@@ -298,7 +296,6 @@ impl Analyzer {
     // Type inference: inference.rs
 
     /// Get the resolved expression types as interned ArenaTypeId handles.
-    /// Use type_arena.to_display() to convert back to DisplayType if needed.
     pub fn expr_types(&self) -> &HashMap<NodeId, ArenaTypeId> {
         &self.expr_types
     }
@@ -323,8 +320,6 @@ impl Analyzer {
 
     /// Take ownership of analysis results (consuming self)
     pub fn into_analysis_results(self) -> AnalysisOutput {
-        // Pass Types directly - ExpressionData now stores Type handles
-        // and has access to the shared arena for DisplayType conversion
         let expression_data = ExpressionData::from_analysis(
             self.expr_types,
             self.method_resolutions.into_inner(),
@@ -527,7 +522,7 @@ impl Analyzer {
         }
     }
 
-    /// Resolve a type expression directly to TypeId (no DisplayType intermediate)
+    /// Resolve a type expression to TypeId.
     pub(crate) fn resolve_type_id(&mut self, ty: &TypeExpr, interner: &Interner) -> ArenaTypeId {
         self.resolve_type_id_with_self(ty, interner, None)
     }
@@ -626,7 +621,6 @@ impl Analyzer {
                             }
                         }
 
-                        // Use TypeId throughout to avoid DisplayType materialization
                         let declared_type_id = let_stmt
                             .ty
                             .as_ref()
@@ -977,7 +971,6 @@ impl Analyzer {
                     type_param_scope,
                     &self.type_arena,
                 );
-                // Resolve directly to TypeIds (no DisplayType intermediate)
                 let resolved_ids = types
                     .iter()
                     .map(|ty| resolve_type_to_id(ty, &mut ctx))
@@ -1036,8 +1029,7 @@ impl Analyzer {
         }
     }
 
-    /// Check type param constraints (TypeId version - direct).
-    /// Works with TypeIds throughout where possible, avoiding DisplayType materialization.
+    /// Check type param constraints.
     fn check_type_param_constraints_id(
         &mut self,
         type_params: &[TypeParamInfo],
@@ -1306,7 +1298,7 @@ impl Analyzer {
         Ok(())
     }
 
-    /// Extract the element type from an Iterator<T> type using TypeId (avoids DisplayType)
+    /// Extract the element type from an Iterator<T> type.
     fn extract_iterator_element_type_id(&self, ty_id: ArenaTypeId) -> Option<ArenaTypeId> {
         let interface_info = {
             let arena = self.type_arena.borrow();

@@ -6,7 +6,7 @@
 // - `primitive` - PrimitiveType enum (i8-i128, u8-u64, f32, f64, bool, string)
 // - `nominal` - NominalType enum (Class, Record, Interface, Error) with TypeDefIds
 // - `special` - Supporting types for special Type variants (Placeholder, Invalid, etc.)
-// - `display` - DisplayType enum (materialized form for error messages)
+// - `display` - Legacy DisplayType enum (being removed)
 
 pub mod display;
 pub mod nominal;

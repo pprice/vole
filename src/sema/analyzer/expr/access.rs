@@ -47,7 +47,6 @@ impl Analyzer {
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         let object_type_id = self.check_expr(&field_access.object, interner)?;
 
-        // Handle module field access using arena.unwrap_module (avoids DisplayType)
         // Extract module data while holding the borrow, then release before calling add_error
         let module_info = {
             let arena = self.type_arena.borrow();
@@ -92,7 +91,6 @@ impl Analyzer {
         // Get fields from object type (Class or Record)
         let field_name = interner.resolve(field_access.field);
 
-        // Extract type_def_id and type_args using arena queries (avoids DisplayType)
         let struct_info = {
             let arena = self.type_arena.borrow();
             if let Some((id, args)) = arena.unwrap_class(object_type_id) {

@@ -59,7 +59,6 @@ impl Cg<'_, '_, '_> {
                 };
                 let init = self.expr(init_expr)?;
 
-                // Track type as TypeId throughout to avoid DisplayType conversions
                 let mut declared_type_id_opt = None;
                 let (mut final_value, mut final_type_id) = if let Some(ty_expr) = &let_stmt.ty {
                     let declared_type_id = resolve_type_expr_id(ty_expr, self.ctx);
@@ -649,7 +648,7 @@ impl Cg<'_, '_, '_> {
         Ok(false)
     }
 
-    /// Wrap a value in a union representation using TypeId (no DisplayType conversion)
+    /// Wrap a value in a union representation.
     pub fn construct_union_id(
         &mut self,
         value: CompiledValue,

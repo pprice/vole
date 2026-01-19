@@ -20,7 +20,7 @@ impl Analyzer {
         self.warnings.push(TypeWarning::new(warning, span));
     }
 
-    /// Display a type from TypeId (directly from SemaType, no DisplayType materialization)
+    /// Display a type from TypeId.
     pub(super) fn type_display_id(&self, id: ArenaTypeId) -> String {
         display_type_id(
             id,
