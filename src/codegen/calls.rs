@@ -247,17 +247,11 @@ impl Cg<'_, '_, '_> {
             // Create function TypeId directly from method signature using TypeId fields
             let func_type_id = {
                 let mut arena = self.ctx.arena.borrow_mut();
-                let param_ids = method
-                    .signature
-                    .params_id
-                    .as_ref()
-                    .expect("FunctionType.params_id not set for functional interface call")
-                    .clone();
-                let ret_id = method
-                    .signature
-                    .return_type_id
-                    .expect("FunctionType.return_type_id not set for functional interface call");
-                arena.function(param_ids, ret_id, false)
+                arena.function(
+                    method.signature.params_id.clone(),
+                    method.signature.return_type_id,
+                    false,
+                )
             };
             let method_name_id = method.name_id;
             let value = self.builder.use_var(*var);
@@ -303,18 +297,11 @@ impl Cg<'_, '_, '_> {
                     // Create function TypeId directly from method signature using TypeId fields
                     let func_type_id = {
                         let mut arena = self.ctx.arena.borrow_mut();
-                        let param_ids = method
-                            .signature
-                            .params_id
-                            .as_ref()
-                            .expect(
-                                "FunctionType.params_id not set for global functional interface",
-                            )
-                            .clone();
-                        let ret_id = method.signature.return_type_id.expect(
-                            "FunctionType.return_type_id not set for global functional interface",
-                        );
-                        arena.function(param_ids, ret_id, false)
+                        arena.function(
+                            method.signature.params_id.clone(),
+                            method.signature.return_type_id,
+                            false,
+                        )
                     };
                     let method_name_id = method.name_id;
                     // Box the lambda value to create the interface representation
@@ -348,17 +335,11 @@ impl Cg<'_, '_, '_> {
                 // Create function TypeId directly from method signature using TypeId fields
                 let func_type_id = {
                     let mut arena = self.ctx.arena.borrow_mut();
-                    let param_ids = method
-                        .signature
-                        .params_id
-                        .as_ref()
-                        .expect("FunctionType.params_id not set for interface vtable call")
-                        .clone();
-                    let ret_id = method
-                        .signature
-                        .return_type_id
-                        .expect("FunctionType.return_type_id not set for interface vtable call");
-                    arena.function(param_ids, ret_id, false)
+                    arena.function(
+                        method.signature.params_id.clone(),
+                        method.signature.return_type_id,
+                        false,
+                    )
                 };
                 let method_name_id = method.name_id;
                 return self.interface_dispatch_call_args_by_type_def_id(
@@ -411,10 +392,7 @@ impl Cg<'_, '_, '_> {
                 // substitutions to fully resolve the type.
                 let return_type_id = self
                     .ctx
-                    .arena
-                    .borrow_mut()
-                    .from_type(&instance.func_type.return_type);
-                let return_type_id = self.ctx.substitute_type_id(return_type_id);
+                    .substitute_type_id(instance.func_type.return_type_id);
                 return self.compile_native_call_with_types(native_func, call, return_type_id);
             }
         }
@@ -493,27 +471,12 @@ impl Cg<'_, '_, '_> {
                 } else {
                     // For generic external functions, use sema-inferred type first.
                     // Fall back to declared type for non-generic externals.
-                    let ext_info = self
-                        .ctx
-                        .analyzed
-                        .implement_registry
-                        .get_external_func(callee_name);
-                    let type_id = self
-                        .ctx
-                        .get_expr_type(&call_expr_id)
-                        .or_else(|| {
-                            ext_info.and_then(|info| {
-                                info.return_type
-                                    .as_ref()
-                                    .map(|t| self.ctx.arena.borrow_mut().from_type(t))
-                            })
-                        })
-                        .unwrap_or_else(|| {
-                            native_type_to_type_id(
-                                &native_func.signature.return_type,
-                                &mut self.ctx.arena.borrow_mut(),
-                            )
-                        });
+                    let type_id = self.ctx.get_expr_type(&call_expr_id).unwrap_or_else(|| {
+                        native_type_to_type_id(
+                            &native_func.signature.return_type,
+                            &mut self.ctx.arena.borrow_mut(),
+                        )
+                    });
                     // Convert Iterator<T> to RuntimeIterator(T) since external functions
                     // return raw iterator pointers, not boxed interface values
                     let type_id = self.maybe_convert_iterator_return_type(type_id);
@@ -586,22 +549,12 @@ impl Cg<'_, '_, '_> {
                 // For generic external functions, the sema analyzer stores the inferred
                 // concrete return type in expr_types. Use that first.
                 // Fall back to declared type for non-generic externals.
-                let type_id = self
-                    .ctx
-                    .get_expr_type(&call_expr_id)
-                    .or_else(|| {
-                        ext_info.and_then(|info| {
-                            info.return_type
-                                .as_ref()
-                                .map(|t| self.ctx.arena.borrow_mut().from_type(t))
-                        })
-                    })
-                    .unwrap_or_else(|| {
-                        native_type_to_type_id(
-                            &native_func.signature.return_type,
-                            &mut self.ctx.arena.borrow_mut(),
-                        )
-                    });
+                let type_id = self.ctx.get_expr_type(&call_expr_id).unwrap_or_else(|| {
+                    native_type_to_type_id(
+                        &native_func.signature.return_type,
+                        &mut self.ctx.arena.borrow_mut(),
+                    )
+                });
                 // Convert Iterator<T> to RuntimeIterator(T) since external functions
                 // return raw iterator pointers, not boxed interface values
                 let type_id = self.maybe_convert_iterator_return_type(type_id);

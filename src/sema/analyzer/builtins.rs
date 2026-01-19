@@ -3,11 +3,11 @@
 use super::Analyzer;
 use crate::frontend::Interner;
 use crate::identity::Namer;
+use crate::sema::FunctionType;
 use crate::sema::implement_registry::{
     ExternalMethodInfo, ImplTypeId, MethodImpl, PrimitiveTypeId,
 };
 use crate::sema::types::PlaceholderKind;
-use crate::sema::FunctionType;
 
 impl Analyzer {
     /// Register built-in interfaces and their implementations
@@ -78,7 +78,6 @@ impl Analyzer {
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "array_iter".to_string(),
-                    return_type: None, // Refined by check_builtin_method
                 })
             );
         }
@@ -100,7 +99,6 @@ impl Analyzer {
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "string_chars_iter".to_string(),
-                    return_type: None, // Refined by check_builtin_method
                 })
             );
         }
@@ -112,7 +110,10 @@ impl Analyzer {
             .primitive_name_id(PrimitiveTypeId::Range)
             .map(ImplTypeId::from_name_id);
         if let Some(type_id) = range_id {
-            let unknown_type = self.type_arena.borrow_mut().placeholder(PlaceholderKind::Inference);
+            let unknown_type = self
+                .type_arena
+                .borrow_mut()
+                .placeholder(PlaceholderKind::Inference);
             register_builtin!(
                 type_id,
                 method_iter,
@@ -120,7 +121,6 @@ impl Analyzer {
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "range_iter".to_string(),
-                    return_type: None, // Refined by check_builtin_method
                 })
             );
         }

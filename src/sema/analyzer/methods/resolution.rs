@@ -286,30 +286,15 @@ impl Analyzer {
             return func_type.clone();
         }
 
-        // Ensure func_type has interned IDs
-        let func_with_ids = if func_type.has_interned_ids() {
-            func_type.clone()
-        } else {
-            func_type
-                .clone()
-                .with_interned_ids(&mut self.type_arena.borrow_mut())
-        };
-
-        let Some(params_id) = &func_with_ids.params_id else {
-            return func_type.clone();
-        };
-        let Some(return_type_id) = func_with_ids.return_type_id else {
-            return func_type.clone();
-        };
-
         // Substitute using arena
         let (new_params_id, new_return_type_id) = {
             let mut arena = self.type_arena.borrow_mut();
-            let params: crate::sema::type_arena::TypeIdVec = params_id
+            let params: crate::sema::type_arena::TypeIdVec = func_type
+                .params_id
                 .iter()
                 .map(|&p| arena.substitute(p, substitutions))
                 .collect();
-            let ret = arena.substitute(return_type_id, substitutions);
+            let ret = arena.substitute(func_type.return_type_id, substitutions);
             (params, ret)
         };
 
@@ -317,7 +302,7 @@ impl Analyzer {
         FunctionType::from_ids(
             &new_params_id,
             new_return_type_id,
-            func_with_ids.is_closure,
+            func_type.is_closure,
             &self.type_arena.borrow(),
         )
     }

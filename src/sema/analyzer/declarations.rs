@@ -439,7 +439,6 @@ impl Analyzer {
                         Some(ExternalMethodInfo {
                             module_path: external.module_path.clone(),
                             native_name,
-                            return_type: Some(Box::new(return_type)),
                         }),
                     );
                 }
@@ -811,7 +810,6 @@ impl Analyzer {
                         Some(ExternalMethodInfo {
                             module_path: external.module_path.clone(),
                             native_name,
-                            return_type: Some(Box::new(return_type)),
                         }),
                     );
                 }
@@ -1531,7 +1529,6 @@ impl Analyzer {
                     ExternalMethodInfo {
                         module_path: external.module_path.clone(),
                         native_name,
-                        return_type: None, // Type is already defined in interface method declaration
                     },
                 );
             }
@@ -1622,7 +1619,6 @@ impl Analyzer {
                         ExternalMethodInfo {
                             module_path: external.module_path.clone(),
                             native_name,
-                            return_type: None,
                         },
                     );
                 }
@@ -1925,7 +1921,6 @@ impl Analyzer {
                                 Some(ExternalMethodInfo {
                                     module_path: external.module_path.clone(),
                                     native_name,
-                                    return_type: Some(Box::new(return_type)),
                                 }),
                                 Vec::new(), // External static methods, no method type params
                             );
@@ -2035,7 +2030,6 @@ impl Analyzer {
                     ExternalMethodInfo {
                         module_path: ext_block.module_path.clone(),
                         native_name,
-                        return_type: Some(Box::new(return_type)),
                     },
                 );
             } else {
@@ -2081,7 +2075,6 @@ impl Analyzer {
                     ExternalMethodInfo {
                         module_path: ext_block.module_path.clone(),
                         native_name,
-                        return_type: Some(Box::new(return_type)),
                     },
                 );
             }

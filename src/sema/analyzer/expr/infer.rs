@@ -71,9 +71,13 @@ impl Analyzer {
                 } else if let Some(func_type) = self.get_function_type(*sym, interner) {
                     // Identifier refers to a function - treat it as a function value
                     // Use the pre-interned TypeId fields from FunctionType
-                    let params_id = func_type.params_id.as_ref().expect("function type should have params_id");
-                    let return_id = func_type.return_type_id.expect("function type should have return_type_id");
-                    Ok(self.type_arena.borrow_mut().function(params_id.clone(), return_id, func_type.is_closure))
+                    let params_id = &func_type.params_id;
+                    let return_id = func_type.return_type_id;
+                    Ok(self.type_arena.borrow_mut().function(
+                        params_id.clone(),
+                        return_id,
+                        func_type.is_closure,
+                    ))
                 } else {
                     let name = interner.resolve(*sym);
                     self.add_error(

@@ -57,14 +57,13 @@ impl Analyzer {
                 if self.in_lambda() {
                     self.mark_lambda_has_side_effects();
                 }
-                self.check_call_args(
+                return self.check_call_args_id(
                     &call.args,
-                    &func_type.params,
+                    &func_type.params_id,
+                    func_type.return_type_id,
                     expr.span,
-                    true, // with_inference
                     interner,
-                )?;
-                return Ok(self.type_to_id(&func_type.return_type));
+                );
             }
 
             // Check if it's a generic function via EntityRegistry
@@ -221,14 +220,13 @@ impl Analyzer {
                         if self.in_lambda() {
                             self.mark_lambda_has_side_effects();
                         }
-                        self.check_call_args(
+                        return self.check_call_args_id(
                             &call.args,
-                            &func_type.params,
+                            &func_type.params_id,
+                            func_type.return_type_id,
                             expr.span,
-                            true, // with_inference
                             interner,
-                        )?;
-                        return Ok(self.type_to_id(&func_type.return_type));
+                        );
                     }
                 }
             }

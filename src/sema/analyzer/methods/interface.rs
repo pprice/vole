@@ -222,18 +222,9 @@ impl Analyzer {
 
     /// Check if two function signatures are compatible using TypeId fields
     fn signatures_compatible_id(&self, expected: &FunctionType, found: &FunctionType) -> bool {
-        // Try TypeId comparison first (faster)
-        if let (Some(exp_params), Some(found_params)) =
-            (expected.params_id.as_ref(), found.params_id.as_ref())
-            && let (Some(exp_ret), Some(found_ret)) =
-                (expected.return_type_id, found.return_type_id)
-        {
-            return exp_params.as_slice() == found_params.as_slice() && exp_ret == found_ret;
-        }
-        // Fall back to LegacyType comparison
-        expected.params.len() == found.params.len()
-            && expected.params == found.params
-            && *expected.return_type == *found.return_type
+        // Compare TypeId fields directly
+        expected.params_id.as_slice() == found.params_id.as_slice()
+            && expected.return_type_id == found.return_type_id
     }
 
     /// Check if a TypeId satisfies an interface (TypeId version)
@@ -331,16 +322,9 @@ impl Analyzer {
                         method.signature.clone()
                     } else {
                         let sig = &method.signature;
-                        // Get param TypeIds (convert if needed)
-                        let param_ids: Vec<ArenaTypeId> = if let Some(ref ids) = sig.params_id {
-                            ids.iter().copied().collect()
-                        } else {
-                            let mut arena = self.type_arena.borrow_mut();
-                            sig.params.iter().map(|p| arena.from_type(p)).collect()
-                        };
-                        let return_id = sig.return_type_id.unwrap_or_else(|| {
-                            self.type_arena.borrow_mut().from_type(&sig.return_type)
-                        });
+                        // Get param TypeIds
+                        let param_ids: Vec<ArenaTypeId> = sig.params_id.iter().copied().collect();
+                        let return_id = sig.return_type_id;
 
                         // Substitute using arena
                         let (subst_params, subst_ret) = {

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use crate::frontend::PrimitiveType as AstPrimitiveType;
 use crate::frontend::Span;
 use crate::identity::{NameId, TypeDefId, TypeParamId};
+use crate::sema::type_arena::{TypeId, TypeIdVec};
 
 use super::nominal::{InterfaceMethodType, InterfaceType, NominalType};
 use super::special::{AnalysisError, FallibleType, ModuleType, PlaceholderKind};
@@ -372,12 +373,15 @@ impl LegacyType {
                 if new_params.is_none() && !return_changed {
                     self.clone()
                 } else {
+                    // Note: params_id/return_type_id are invalid placeholders here
+                    // because LegacyType::substitute doesn't have arena access.
+                    // Use arena.substitute() for proper TypeId-based substitution.
                     LegacyType::Function(FunctionType {
                         params: new_params.unwrap_or_else(|| ft.params.clone()),
                         return_type: Box::new(new_return),
                         is_closure: ft.is_closure,
-                        params_id: None,
-                        return_type_id: None,
+                        params_id: TypeIdVec::new(),
+                        return_type_id: TypeId::INVALID,
                     })
                 }
             }

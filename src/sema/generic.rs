@@ -730,18 +730,13 @@ mod tests {
         let func_name = names.intern(names.main_module(), &[func_sym], &interner);
         let mut table = crate::sema::TypeTable::new();
 
-        let key1 = MonomorphKey::new(
-            func_name,
-            vec![table.key_for_type_id(arena.i64(), &arena)],
-        );
+        let key1 = MonomorphKey::new(func_name, vec![table.key_for_type_id(arena.i64(), &arena)]);
         let key2 = MonomorphKey::new(
             func_name,
             vec![table.key_for_type_id(arena.string(), &arena)],
         );
-        let key1_dup = MonomorphKey::new(
-            func_name,
-            vec![table.key_for_type_id(arena.i64(), &arena)],
-        );
+        let key1_dup =
+            MonomorphKey::new(func_name, vec![table.key_for_type_id(arena.i64(), &arena)]);
 
         assert!(!cache.contains(&key1));
 
@@ -760,5 +755,4 @@ mod tests {
         assert!(cache.contains(&key1_dup)); // Same types = same key
         assert!(!cache.contains(&key2)); // Different types = different key
     }
-
 }

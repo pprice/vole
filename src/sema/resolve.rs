@@ -64,19 +64,11 @@ fn interface_instance(
         .iter()
         .map(|&method_id| {
             let method = ctx.entity_registry.get_method(method_id);
-            // Get or create interned signature
-            let sig = if method.signature.has_interned_ids() {
-                method.signature.clone()
-            } else {
-                method.signature.clone().with_interned_ids(&mut arena)
-            };
+            let sig = &method.signature;
 
-            // Substitute using TypeId - require TypeId fields to be set
-            let params_id = sig
+            // Substitute using TypeId
+            let substituted_params: TypeIdVec = sig
                 .params_id
-                .as_ref()
-                .expect("FunctionType.params_id must be set for interface method");
-            let substituted_params: TypeIdVec = params_id
                 .iter()
                 .map(|&p| arena.substitute(p, &substitutions))
                 .collect();
@@ -85,10 +77,7 @@ fn interface_instance(
                 .map(|&id| arena.to_type(id))
                 .collect();
 
-            let return_type_id = sig
-                .return_type_id
-                .expect("FunctionType.return_type_id must be set for interface method");
-            let substituted_return = arena.substitute(return_type_id, &substitutions);
+            let substituted_return = arena.substitute(sig.return_type_id, &substitutions);
             let new_return = arena.to_type(substituted_return);
 
             InterfaceMethodType {
@@ -211,12 +200,11 @@ pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) ->
             params,
             return_type,
         } => {
-            let param_ids: TypeIdVec = params
-                .iter()
-                .map(|p| resolve_type_to_id(p, ctx))
-                .collect();
+            let param_ids: TypeIdVec = params.iter().map(|p| resolve_type_to_id(p, ctx)).collect();
             let ret_id = resolve_type_to_id(return_type, ctx);
-            ctx.type_arena.borrow_mut().function(param_ids, ret_id, false)
+            ctx.type_arena
+                .borrow_mut()
+                .function(param_ids, ret_id, false)
         }
         TypeExpr::Tuple(elements) => {
             let elem_ids: TypeIdVec = elements
@@ -335,8 +323,8 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
                 params: param_types.into(),
                 return_type: Box::new(ret),
                 is_closure: false, // Type annotations don't know if it's a closure
-                params_id: Some(params_id),
-                return_type_id: Some(return_type_id),
+                params_id,
+                return_type_id,
             })
         }
         TypeExpr::SelfType => {

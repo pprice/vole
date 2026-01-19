@@ -127,7 +127,7 @@ mod tests {
         let direct = ResolvedMethod::Direct {
             func_type: ft.clone(),
         };
-        assert_eq!(direct.func_type().params_id.as_ref().unwrap().len(), 1);
+        assert_eq!(direct.func_type().params_id.len(), 1);
 
         let implemented = ResolvedMethod::Implemented {
             trait_name: None,

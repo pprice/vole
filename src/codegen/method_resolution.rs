@@ -109,12 +109,9 @@ pub(crate) fn resolve_method_target_id(
                     &input.analyzed.entity_registry,
                 )?;
                 let method_info = lookup_direct_method(type_name_id)?;
-                let return_type = func_type
-                    .return_type_id
-                    .expect("FunctionType.return_type_id not set for direct method");
                 Ok(MethodTarget::Direct {
                     method_info,
-                    return_type,
+                    return_type: func_type.return_type_id,
                 })
             }
             ResolvedMethod::Implemented {
@@ -147,14 +144,8 @@ pub(crate) fn resolve_method_target_id(
                         format!("method name {} not found as NameId", input.method_name_str)
                     })?;
                     let func_type_id = input.analyzed.type_arena.borrow_mut().function(
-                        func_type
-                            .params_id
-                            .as_ref()
-                            .expect("FunctionType.params_id not set for interface dispatch")
-                            .clone(),
-                        func_type
-                            .return_type_id
-                            .expect("FunctionType.return_type_id not set for interface dispatch"),
+                        func_type.params_id.clone(),
+                        func_type.return_type_id,
                         func_type.is_closure,
                     );
                     return Ok(MethodTarget::InterfaceDispatch {
@@ -165,12 +156,9 @@ pub(crate) fn resolve_method_target_id(
                 }
 
                 if let Some(ext_info) = external_info {
-                    let return_type = func_type
-                        .return_type_id
-                        .expect("FunctionType.return_type_id not set for external method");
                     return Ok(MethodTarget::External {
                         external_info: ext_info.clone(),
-                        return_type,
+                        return_type: func_type.return_type_id,
                     });
                 }
 
@@ -184,24 +172,15 @@ pub(crate) fn resolve_method_target_id(
                     format!("Cannot get ImplTypeId for method {}", input.method_name_str,)
                 })?;
                 let method_info = lookup_impl_method(type_id)?;
-                let return_type = func_type
-                    .return_type_id
-                    .expect("FunctionType.return_type_id not set for implemented method");
                 Ok(MethodTarget::Implemented {
                     method_info,
-                    return_type,
+                    return_type: func_type.return_type_id,
                 })
             }
             ResolvedMethod::FunctionalInterface { func_type } => {
                 let func_type_id = input.analyzed.type_arena.borrow_mut().function(
-                    func_type
-                        .params_id
-                        .as_ref()
-                        .expect("FunctionType.params_id not set for functional interface")
-                        .clone(),
-                    func_type
-                        .return_type_id
-                        .expect("FunctionType.return_type_id not set for functional interface"),
+                    func_type.params_id.clone(),
+                    func_type.return_type_id,
                     func_type.is_closure,
                 );
                 Ok(MethodTarget::FunctionalInterface { func_type_id })
@@ -212,12 +191,9 @@ pub(crate) fn resolve_method_target_id(
                 ..
             } => {
                 if let Some(ext_info) = external_info {
-                    let return_type = func_type
-                        .return_type_id
-                        .expect("FunctionType.return_type_id not set for external method");
                     return Ok(MethodTarget::External {
                         external_info: ext_info.clone(),
-                        return_type,
+                        return_type: func_type.return_type_id,
                     });
                 }
                 let arena = input.analyzed.type_arena.borrow();
@@ -227,12 +203,9 @@ pub(crate) fn resolve_method_target_id(
                     &input.analyzed.entity_registry,
                 )?;
                 let method_info = lookup_direct_method(type_name_id)?;
-                let return_type = func_type
-                    .return_type_id
-                    .expect("FunctionType.return_type_id not set for default method");
                 Ok(MethodTarget::Default {
                     method_info,
-                    return_type,
+                    return_type: func_type.return_type_id,
                 })
             }
             ResolvedMethod::InterfaceMethod { func_type, .. } => {
@@ -252,14 +225,8 @@ pub(crate) fn resolve_method_target_id(
                     format!("method name {} not found as NameId", input.method_name_str)
                 })?;
                 let func_type_id = input.analyzed.type_arena.borrow_mut().function(
-                    func_type
-                        .params_id
-                        .as_ref()
-                        .expect("FunctionType.params_id not set for interface method dispatch")
-                        .clone(),
-                    func_type.return_type_id.expect(
-                        "FunctionType.return_type_id not set for interface method dispatch",
-                    ),
+                    func_type.params_id.clone(),
+                    func_type.return_type_id,
                     func_type.is_closure,
                 );
                 Ok(MethodTarget::InterfaceDispatch {
@@ -274,14 +241,8 @@ pub(crate) fn resolve_method_target_id(
                 func_type,
             } => {
                 let func_type_id = input.analyzed.type_arena.borrow_mut().function(
-                    func_type
-                        .params_id
-                        .as_ref()
-                        .expect("FunctionType.params_id not set for static method")
-                        .clone(),
-                    func_type
-                        .return_type_id
-                        .expect("FunctionType.return_type_id not set for static method"),
+                    func_type.params_id.clone(),
+                    func_type.return_type_id,
                     func_type.is_closure,
                 );
                 Ok(MethodTarget::StaticMethod {
@@ -322,13 +283,9 @@ pub(crate) fn resolve_method_target_id(
             .get(&(type_id, input.method_id))
             .copied()
         {
-            let return_type = binding
-                .func_type
-                .return_type_id
-                .expect("FunctionType.return_type_id not set for bound method");
             return Ok(MethodTarget::Implemented {
                 method_info,
-                return_type,
+                return_type: binding.func_type.return_type_id,
             });
         }
 
@@ -343,25 +300,17 @@ pub(crate) fn resolve_method_target_id(
             .get(&(type_id, method_name_id))
             .copied()
         {
-            let return_type = binding
-                .func_type
-                .return_type_id
-                .expect("FunctionType.return_type_id not set for bound method");
             return Ok(MethodTarget::Implemented {
                 method_info,
-                return_type,
+                return_type: binding.func_type.return_type_id,
             });
         }
 
         // If binding has external_info, use that directly
         if let Some(external_info) = &binding.external_info {
-            let return_type = binding
-                .func_type
-                .return_type_id
-                .expect("FunctionType.return_type_id not set for bound method");
             return Ok(MethodTarget::External {
                 external_info: external_info.clone(),
-                return_type,
+                return_type: binding.func_type.return_type_id,
             });
         }
     } else {

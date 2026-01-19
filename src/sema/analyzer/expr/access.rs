@@ -375,7 +375,6 @@ impl Analyzer {
                 Some(ExternalMethodInfo {
                     module_path: self.name_table.module_path(module_id).to_string(),
                     native_name: method_name_str,
-                    return_type: Some(func_type.return_type.clone()),
                 })
             } else {
                 None
@@ -423,7 +422,7 @@ impl Analyzer {
                     other => other,
                 };
                 self.method_resolutions.insert(expr.id, updated);
-                return Ok(self.type_to_id(&func_type.return_type));
+                return Ok(func_type.return_type_id);
             }
 
             let func_type = resolved.func_type().clone();
@@ -434,13 +433,16 @@ impl Analyzer {
             }
 
             // Check argument count
-            if method_call.args.len() != func_type.params.len() {
-                self.add_wrong_arg_count(func_type.params.len(), method_call.args.len(), expr.span);
+            if method_call.args.len() != func_type.params_id.len() {
+                self.add_wrong_arg_count(
+                    func_type.params_id.len(),
+                    method_call.args.len(),
+                    expr.span,
+                );
             }
 
             // Check argument types using TypeId directly
-            for (arg, param_ty) in method_call.args.iter().zip(func_type.params.iter()) {
-                let param_ty_id = self.type_to_id(param_ty);
+            for (arg, &param_ty_id) in method_call.args.iter().zip(func_type.params_id.iter()) {
                 let arg_ty_id = self.check_expr_expecting_id(arg, Some(param_ty_id), interner)?;
                 if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
                     self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
@@ -462,7 +464,7 @@ impl Analyzer {
                 interner,
             );
 
-            return Ok(self.type_to_id(&func_type.return_type));
+            return Ok(func_type.return_type_id);
         }
 
         // No method found - report error
@@ -547,8 +549,8 @@ impl Analyzer {
             let method_type_params = method_def.method_type_params.clone();
 
             // Check argument count
-            if args.len() != func_type.params.len() {
-                self.add_wrong_arg_count(func_type.params.len(), args.len(), expr.span);
+            if args.len() != func_type.params_id.len() {
+                self.add_wrong_arg_count(func_type.params_id.len(), args.len(), expr.span);
             }
 
             // Get type params from the generic class/record definition
@@ -562,24 +564,11 @@ impl Analyzer {
                 arg_type_ids.push(arg_ty_id);
             }
 
-            // Get param TypeIds for type inference (convert func_type.params once if needed)
-            let param_type_ids: Vec<ArenaTypeId> = if let Some(ref ids) = func_type.params_id {
-                ids.iter().copied().collect()
-            } else {
-                let mut arena = self.type_arena.borrow_mut();
-                func_type
-                    .params
-                    .iter()
-                    .map(|p| arena.from_type(p))
-                    .collect()
-            };
+            // Get param TypeIds for type inference
+            let param_type_ids: Vec<ArenaTypeId> = func_type.params_id.iter().copied().collect();
 
             // Get return TypeId
-            let return_type_id: ArenaTypeId = func_type.return_type_id.unwrap_or_else(|| {
-                self.type_arena
-                    .borrow_mut()
-                    .from_type(&func_type.return_type)
-            });
+            let return_type_id: ArenaTypeId = func_type.return_type_id;
 
             // Get class-level type params (if any)
             let class_type_params: Vec<TypeParamInfo> = generic_info
@@ -911,22 +900,9 @@ impl Analyzer {
                 .name_table
                 .intern_raw(self.current_module, &[&mangled_name_str]);
 
-            // Get param TypeIds from func_type (convert if needed)
-            let param_type_ids: Vec<ArenaTypeId> = if let Some(ref ids) = func_type.params_id {
-                ids.iter().copied().collect()
-            } else {
-                let mut arena = self.type_arena.borrow_mut();
-                func_type
-                    .params
-                    .iter()
-                    .map(|p| arena.from_type(p))
-                    .collect()
-            };
-            let return_type_id: ArenaTypeId = func_type.return_type_id.unwrap_or_else(|| {
-                self.type_arena
-                    .borrow_mut()
-                    .from_type(&func_type.return_type)
-            });
+            // Get param TypeIds from func_type
+            let param_type_ids: Vec<ArenaTypeId> = func_type.params_id.iter().copied().collect();
+            let return_type_id: ArenaTypeId = func_type.return_type_id;
 
             // Create the substituted function type using arena substitution (TypeId-based)
             let inferred_hb: hashbrown::HashMap<NameId, ArenaTypeId> =

@@ -1020,14 +1020,8 @@ impl Compiler<'_> {
         let func_type = instance.func_type();
 
         // Get TypeId versions of params and return type
-        let param_type_ids: Vec<TypeId> = func_type
-            .params_id
-            .as_ref()
-            .expect("FunctionType.params_id not set for monomorph instance")
-            .to_vec();
-        let return_type_id = func_type
-            .return_type_id
-            .expect("FunctionType.return_type_id not set for monomorph instance");
+        let param_type_ids: Vec<TypeId> = func_type.params_id.to_vec();
+        let return_type_id = func_type.return_type_id;
 
         // Create signature from the concrete function type (TypeId-native)
         let arena_ref = self.analyzed.type_arena.borrow();
@@ -1170,16 +1164,8 @@ impl Compiler<'_> {
 
         // Get parameter names and concrete type ids (using FunctionType's TypeId fields)
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
-        let param_type_ids: Vec<TypeId> = instance
-            .func_type
-            .params_id
-            .as_ref()
-            .expect("FunctionType.params_id not set for monomorph function")
-            .to_vec();
-        let return_type_id = instance
-            .func_type
-            .return_type_id
-            .expect("FunctionType.return_type_id not set for monomorph function");
+        let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
+        let return_type_id = instance.func_type.return_type_id;
 
         // Create function signature from concrete types (TypeId-native)
         let arena_ref = self.analyzed.type_arena.borrow();
@@ -1423,16 +1409,8 @@ impl Compiler<'_> {
             .ok_or_else(|| format!("Monomorphized class method {} not declared", mangled_name))?;
 
         // Get param and return type ids (TypeId-native)
-        let param_type_ids: Vec<TypeId> = instance
-            .func_type
-            .params_id
-            .as_ref()
-            .expect("FunctionType.params_id not set for monomorph class method")
-            .to_vec();
-        let return_type_id = instance
-            .func_type
-            .return_type_id
-            .expect("FunctionType.return_type_id not set for monomorph class method");
+        let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
+        let return_type_id = instance.func_type.return_type_id;
 
         // Create method signature (self + params) with concrete types (TypeId-native)
         let arena_ref = self.analyzed.type_arena.borrow();
@@ -1765,16 +1743,8 @@ impl Compiler<'_> {
             .ok_or_else(|| format!("Monomorphized static method {} not declared", mangled_name))?;
 
         // Get param and return type ids (TypeId-native)
-        let param_type_ids: Vec<TypeId> = instance
-            .func_type
-            .params_id
-            .as_ref()
-            .expect("FunctionType.params_id not set for monomorph static method")
-            .to_vec();
-        let return_type_id = instance
-            .func_type
-            .return_type_id
-            .expect("FunctionType.return_type_id not set for monomorph static method");
+        let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
+        let return_type_id = instance.func_type.return_type_id;
 
         // Create signature (no self parameter) with concrete types (TypeId-native)
         let arena_ref = self.analyzed.type_arena.borrow();

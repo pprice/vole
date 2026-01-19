@@ -35,10 +35,10 @@ pub struct FunctionType {
     /// to be called with the closure pointer as the first argument.
     /// The closure pointer is passed implicitly and is not included in `params`.
     pub is_closure: bool,
-    /// Interned parameter types (parallel to params, for efficient substitution)
-    pub params_id: Option<TypeIdVec>,
-    /// Interned return type (parallel to return_type, for efficient substitution)
-    pub return_type_id: Option<TypeId>,
+    /// Interned parameter types (parallel to params)
+    pub params_id: TypeIdVec,
+    /// Interned return type (parallel to return_type)
+    pub return_type_id: TypeId,
 }
 
 /// Field information for a class/record (TypeId version)
@@ -54,60 +54,22 @@ impl PartialEq for FunctionType {
         // is_closure is not part of type equality - a closure () -> i64 is
         // compatible with a function type () -> i64 for type checking purposes
         //
-        // Use TypeId fields for efficient O(1) comparison when both have them,
-        // otherwise fall back to comparing LegacyType trees
-        if let (Some(p1), Some(r1), Some(p2), Some(r2)) = (
-            &self.params_id,
-            &self.return_type_id,
-            &other.params_id,
-            &other.return_type_id,
-        ) {
-            p1 == p2 && r1 == r2
-        } else {
-            self.params == other.params && self.return_type == other.return_type
-        }
+        // Use TypeId fields for efficient O(1) comparison
+        self.params_id == other.params_id && self.return_type_id == other.return_type_id
     }
 }
 
 // Manual Hash to match PartialEq semantics - ignore is_closure
 impl std::hash::Hash for FunctionType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        // Use TypeId fields for efficient hashing when available
-        if let (Some(params_id), Some(return_type_id)) = (&self.params_id, &self.return_type_id) {
-            params_id.hash(state);
-            return_type_id.hash(state);
-        } else {
-            self.params.hash(state);
-            self.return_type.hash(state);
-        }
+        // Use TypeId fields for efficient hashing
+        self.params_id.hash(state);
+        self.return_type_id.hash(state);
         // is_closure deliberately not hashed to match PartialEq
     }
 }
 
 impl FunctionType {
-    /// Intern the parameter and return types into the arena, populating params_id and return_type_id.
-    /// This enables efficient TypeId-based substitution instead of cloning the entire type tree.
-    pub fn intern_ids(&mut self, arena: &mut TypeArena) {
-        if self.params_id.is_none() {
-            let param_ids: TypeIdVec = self.params.iter().map(|p| arena.from_type(p)).collect();
-            self.params_id = Some(param_ids);
-        }
-        if self.return_type_id.is_none() {
-            self.return_type_id = Some(arena.from_type(&self.return_type));
-        }
-    }
-
-    /// Create a copy with interned TypeIds populated
-    pub fn with_interned_ids(mut self, arena: &mut TypeArena) -> Self {
-        self.intern_ids(arena);
-        self
-    }
-
-    /// Check if TypeId fields are populated for efficient substitution
-    pub fn has_interned_ids(&self) -> bool {
-        self.params_id.is_some() && self.return_type_id.is_some()
-    }
-
     /// Create a new FunctionType, interning types into the arena.
     /// This is the preferred constructor when you have LegacyTypes and an arena.
     pub fn new_with_arena(
@@ -123,8 +85,8 @@ impl FunctionType {
             params,
             return_type: Box::new(return_type),
             is_closure,
-            params_id: Some(params_id),
-            return_type_id: Some(return_type_id),
+            params_id,
+            return_type_id,
         }
     }
 
@@ -142,11 +104,10 @@ impl FunctionType {
             params,
             return_type,
             is_closure,
-            params_id: Some(param_ids.iter().copied().collect()),
-            return_type_id: Some(return_id),
+            params_id: param_ids.iter().copied().collect(),
+            return_type_id: return_id,
         }
     }
-
 }
 
 impl std::fmt::Display for FunctionType {

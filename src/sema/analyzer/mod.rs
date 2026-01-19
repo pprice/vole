@@ -1254,11 +1254,9 @@ impl Analyzer {
 
             // Register in implement registry
             let method_id = self.method_name_id(func.vole_name, interner);
-            let return_type_clone = (*func_type.return_type).clone();
             let external_info = ExternalMethodInfo {
                 module_path: external.module_path.clone(),
                 native_name,
-                return_type: Some(Box::new(return_type_clone)),
             };
             self.implement_registry.register_method(
                 impl_type_id,
@@ -1292,13 +1290,9 @@ impl Analyzer {
     }
 
     /// Enter a function/method check context, saving current state.
-    /// Automatically sets return/error/generator types from return_type.
+    /// Automatically sets return/error/generator types from return_type_id.
     /// For static methods, caller should set static_method and push type params after calling.
-    fn enter_function_context(
-        &mut self,
-        return_type: &LegacyType,
-        _interner: &Interner,
-    ) -> FunctionCheckContext {
+    fn enter_function_context(&mut self, return_type_id: ArenaTypeId) -> FunctionCheckContext {
         let saved = FunctionCheckContext {
             return_type: self.current_function_return.take(),
             error_type: self.current_function_error_type.take(),
@@ -1307,14 +1301,11 @@ impl Analyzer {
             type_param_stack_depth: self.type_param_stack.depth(),
         };
 
-        // Convert LegacyType to ArenaTypeId for storage
-        let return_type_id = self.type_arena.borrow_mut().from_type(return_type);
         self.current_function_return = Some(return_type_id);
 
         // Set error type context if this is a fallible function
-        if let LegacyType::Fallible(ft) = return_type {
-            let error_type_id = self.type_arena.borrow_mut().from_type(&ft.error_type);
-            self.current_function_error_type = Some(error_type_id);
+        if let Some((_success, error)) = self.type_arena.borrow().unwrap_fallible(return_type_id) {
+            self.current_function_error_type = Some(error);
         }
 
         // Set generator context if return type is Iterator<T>
@@ -1353,15 +1344,13 @@ impl Analyzer {
             .get(&func.name)
             .cloned()
             .expect("function registered in signature collection pass");
-        let return_type = *func_type.return_type.clone();
-        let saved_ctx = self.enter_function_context(&return_type, interner);
+        let saved_ctx = self.enter_function_context(func_type.return_type_id);
 
         // Create new scope with parameters
         let parent_scope = std::mem::take(&mut self.scope);
         self.scope = Scope::with_parent(parent_scope);
 
-        for (param, ty) in func.params.iter().zip(func_type.params.iter()) {
-            let ty_id = self.type_arena.borrow_mut().from_type(ty);
+        for (param, &ty_id) in func.params.iter().zip(func_type.params_id.iter()) {
             self.scope.define(
                 param.name,
                 Variable {
@@ -1412,8 +1401,7 @@ impl Analyzer {
         let lookup = self
             .lookup_method(type_def_id, method.name, interner)
             .expect("method should be registered in EntityRegistry");
-        let return_type = (*lookup.signature.return_type).clone();
-        let saved_ctx = self.enter_function_context(&return_type, interner);
+        let saved_ctx = self.enter_function_context(lookup.signature.return_type_id);
 
         // Create scope with 'self' and parameters
         let parent_scope = std::mem::take(&mut self.scope);
@@ -1449,8 +1437,7 @@ impl Analyzer {
         );
 
         // Add parameters
-        for (param, ty) in method.params.iter().zip(lookup.signature.params.iter()) {
-            let ty_id = self.type_arena.borrow_mut().from_type(ty);
+        for (param, &ty_id) in method.params.iter().zip(lookup.signature.params_id.iter()) {
             self.scope.define(
                 param.name,
                 Variable {
@@ -1508,8 +1495,7 @@ impl Analyzer {
         let method_def = self.entity_registry.get_method(method_id);
         let method_type = method_def.signature.clone();
         let method_type_params = method_def.method_type_params.clone();
-        let return_type = *method_type.return_type.clone();
-        let saved_ctx = self.enter_function_context(&return_type, interner);
+        let saved_ctx = self.enter_function_context(method_type.return_type_id);
 
         // Mark that we're in a static method (for self-usage detection)
         self.current_static_method = Some(interner.resolve(method.name).to_string());
@@ -1525,8 +1511,7 @@ impl Analyzer {
         self.scope = Scope::with_parent(parent_scope);
 
         // Add parameters (no 'self' for static methods)
-        for (param, ty) in method.params.iter().zip(method_type.params.iter()) {
-            let ty_id = self.type_arena.borrow_mut().from_type(ty);
+        for (param, &ty_id) in method.params.iter().zip(method_type.params_id.iter()) {
             self.scope.define(
                 param.name,
                 Variable {
@@ -1559,7 +1544,8 @@ impl Analyzer {
             self.scope = Scope::with_parent(parent_scope);
 
             // Tests implicitly return void
-            let saved_ctx = self.enter_function_context(&LegacyType::Void, interner);
+            let void_id = self.type_arena.borrow().void();
+            let saved_ctx = self.enter_function_context(void_id);
 
             // Type check all statements in the test body
             self.check_block(&test_case.body, interner)?;

@@ -876,20 +876,13 @@ fn resolve_vtable_target(
     // Apply substitutions to get concrete param/return types (using TypeId-based substitution)
     let (substituted_param_ids, substituted_return_id) = {
         let mut arena = ctx.arena.borrow_mut();
-        let params_id = interface_method
+        let param_ids: Vec<TypeId> = interface_method
             .signature
             .params_id
-            .as_ref()
-            .expect("FunctionType.params_id not set for interface method vtable");
-        let param_ids: Vec<TypeId> = params_id
             .iter()
             .map(|&p| arena.substitute(p, substitutions))
             .collect();
-        let ret_id = interface_method
-            .signature
-            .return_type_id
-            .expect("FunctionType.return_type_id not set for interface method vtable");
-        let ret_id = arena.substitute(ret_id, substitutions);
+        let ret_id = arena.substitute(interface_method.signature.return_type_id, substitutions);
         (param_ids, ret_id)
     };
 
@@ -934,21 +927,13 @@ fn resolve_vtable_target(
             .implement_registry
             .get_method(&impl_type_id, method_name_id)
     {
-        // Use TypeId fields (required - no fallback)
-        let param_type_ids = impl_
-            .func_type
-            .params_id
-            .as_ref()
-            .expect("FunctionType.params_id not set for implement method vtable")
-            .to_vec();
-        let return_type_id = impl_
-            .func_type
-            .return_type_id
-            .expect("FunctionType.return_type_id not set for implement method vtable");
+        // Use TypeId fields (required)
+        let param_type_ids = impl_.func_type.params_id.to_vec();
+        let return_type_id = impl_.func_type.return_type_id;
         let returns_void = matches!(ctx.arena.borrow().get(return_type_id), SemaType::Void);
         if let Some(external_info) = impl_.external_info.clone() {
             return Ok(VtableMethod {
-                param_count: impl_.func_type.params.len(),
+                param_count: impl_.func_type.params_id.len(),
                 returns_void,
                 param_type_ids,
                 return_type_id,
@@ -961,7 +946,7 @@ fn resolve_vtable_target(
             .copied()
             .ok_or_else(|| "implement method info not found".to_string())?;
         return Ok(VtableMethod {
-            param_count: impl_.func_type.params.len(),
+            param_count: impl_.func_type.params_id.len(),
             returns_void,
             param_type_ids,
             return_type_id,
@@ -997,14 +982,7 @@ fn resolve_vtable_target(
             .find_method_on_type(type_def_id, method_name_id)
             .map(|m_id| {
                 let sig = &ctx.analyzed.entity_registry.get_method(m_id).signature;
-                let params_id = sig
-                    .params_id
-                    .as_ref()
-                    .expect("FunctionType.params_id not set for direct method vtable");
-                let ret_id = sig
-                    .return_type_id
-                    .expect("FunctionType.return_type_id not set for direct method vtable");
-                (params_id.to_vec(), ret_id)
+                (sig.params_id.to_vec(), sig.return_type_id)
             })
             .unwrap_or_else(|| {
                 // Use substituted types as fallback (from interface method)
@@ -1041,19 +1019,11 @@ fn resolve_vtable_target(
         {
             // For external bindings, use the original interface method signature.
             // The Rust implementation handles type dispatch, so we don't need substituted types.
-            let param_type_ids = interface_method
-                .signature
-                .params_id
-                .as_ref()
-                .expect("FunctionType.params_id not set for external default method vtable")
-                .to_vec();
-            let return_type_id = interface_method
-                .signature
-                .return_type_id
-                .expect("FunctionType.return_type_id not set for external default method vtable");
+            let param_type_ids = interface_method.signature.params_id.to_vec();
+            let return_type_id = interface_method.signature.return_type_id;
             let returns_void = matches!(ctx.arena.borrow().get(return_type_id), SemaType::Void);
             return Ok(VtableMethod {
-                param_count: interface_method.signature.params.len(),
+                param_count: interface_method.signature.params_id.len(),
                 returns_void,
                 param_type_ids,
                 return_type_id,

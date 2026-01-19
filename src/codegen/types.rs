@@ -742,7 +742,6 @@ pub(crate) const FALLIBLE_TAG_OFFSET: i32 = 0;
 /// Offset of the payload field in a fallible value (always 8, after the i64 tag)
 pub(crate) const FALLIBLE_PAYLOAD_OFFSET: i32 = 8;
 
-
 /// Get the error tag for a specific error type within a fallible type.
 /// Returns the 1-based index (tag 0 is reserved for success).
 ///

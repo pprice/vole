@@ -1493,8 +1493,8 @@ impl TypeArena {
                     return_type: Box::new(self.to_type(*ret)),
                     is_closure: *is_closure,
                     // Preserve TypeIds from arena since we're converting FROM TypeId
-                    params_id: Some(params.clone()),
-                    return_type_id: Some(*ret),
+                    params_id: params.clone(),
+                    return_type_id: *ret,
                 })
             }
 
@@ -2166,25 +2166,23 @@ mod tests {
         use crate::sema::types::{FunctionType, PrimitiveType};
 
         let mut arena = TypeArena::new();
-        let original = LegacyType::Function(FunctionType {
-            params: vec![LegacyType::Primitive(PrimitiveType::I32)].into(),
-            return_type: Box::new(LegacyType::Primitive(PrimitiveType::String)),
-            is_closure: false,
-            params_id: None,
-            return_type_id: None,
-        });
+        let original = LegacyType::Function(FunctionType::new_with_arena(
+            vec![LegacyType::Primitive(PrimitiveType::I32)],
+            LegacyType::Primitive(PrimitiveType::String),
+            false,
+            &mut arena,
+        ));
         let id = arena.from_type(&original);
         let back = arena.to_type(id);
         assert_eq!(original, back);
 
         // Test with closure flag
-        let closure = LegacyType::Function(FunctionType {
-            params: vec![].into(),
-            return_type: Box::new(LegacyType::Void),
-            is_closure: true,
-            params_id: None,
-            return_type_id: None,
-        });
+        let closure = LegacyType::Function(FunctionType::new_with_arena(
+            vec![],
+            LegacyType::Void,
+            true,
+            &mut arena,
+        ));
         let closure_id = arena.from_type(&closure);
         let closure_back = arena.to_type(closure_id);
         assert_eq!(closure, closure_back);
@@ -2293,17 +2291,15 @@ mod tests {
         let mut arena = TypeArena::new();
 
         // Array<(i32, string) -> bool>
-        let func = LegacyType::Function(FunctionType {
-            params: vec![
+        let func = LegacyType::Function(FunctionType::new_with_arena(
+            vec![
                 LegacyType::Primitive(PrimitiveType::I32),
                 LegacyType::Primitive(PrimitiveType::String),
-            ]
-            .into(),
-            return_type: Box::new(LegacyType::Primitive(PrimitiveType::Bool)),
-            is_closure: false,
-            params_id: None,
-            return_type_id: None,
-        });
+            ],
+            LegacyType::Primitive(PrimitiveType::Bool),
+            false,
+            &mut arena,
+        ));
         let original = LegacyType::Array(Box::new(func));
 
         let id = arena.from_type(&original);
