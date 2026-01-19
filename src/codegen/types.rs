@@ -137,7 +137,6 @@ pub(crate) struct CompileCtx<'a> {
     /// Interface vtable registry (interface + concrete type -> data id)
     pub interface_vtables: &'a RefCell<crate::codegen::interface_vtable::InterfaceVtableRegistry>,
     /// Current function's return type (needed for raise statements in fallible functions)
-    /// Stored as TypeId for O(1) equality; convert via arena.to_display() when needed
     pub current_function_return_type: Option<TypeId>,
     /// Registry of native functions for external method calls
     pub native_registry: &'a NativeRegistry,

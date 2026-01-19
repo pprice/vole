@@ -21,7 +21,6 @@
 // - `TypeParam(NameId)` - A type parameter in generic context (`T` in `Box<T>`)
 //
 // ## Compound Special Types
-// - `Module(ModuleType)` - Imported module with exports
 // - `RuntimeIterator` - Builtin iterator (array.iter(), range.iter())
 // - `Range` - Range literal type (0..10)
 //
@@ -29,8 +28,6 @@
 // themselves remain in the main Type enum for pattern matching convenience.
 
 use crate::frontend::Span;
-use crate::identity::{ModuleId, NameId};
-use crate::sema::type_arena::TypeId;
 
 /// Analysis error - represents a type that couldn't be determined.
 ///
@@ -84,16 +81,6 @@ impl AnalysisError {
             kind,
             message: msg,
             span: Some(span),
-            source: None,
-        }
-    }
-
-    /// Create a simple error (for migration from old API - prefer new() with message)
-    pub fn simple(kind: &'static str) -> Self {
-        Self {
-            kind,
-            message: kind.to_string(),
-            span: None,
             source: None,
         }
     }
@@ -202,7 +189,7 @@ impl std::fmt::Display for PlaceholderKind {
 
 /// A constant value that can be stored in a module.
 ///
-/// Used by ModuleType to track compile-time constant exports:
+/// Used to track compile-time constant exports:
 /// ```ignore
 /// // In math.vole:
 /// let PI = 3.14159
@@ -228,38 +215,6 @@ impl std::hash::Hash for ConstantValue {
             ConstantValue::Bool(v) => v.hash(state),
             ConstantValue::String(v) => v.hash(state),
         }
-    }
-}
-
-/// Module type: represents an imported module with its exports.
-///
-/// Created when a module is imported:
-/// ```ignore
-/// let math = import("std/math")
-/// math.sin(1.0)  // Access export via module type
-/// ```
-///
-/// Tracks:
-/// - All exported types and functions
-/// - Constant values that can be inlined
-/// - Which functions are external (FFI)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModuleType {
-    /// Unique identifier for this module
-    pub module_id: ModuleId,
-    /// Exports keyed by fully-qualified name id (TypeId into the type arena)
-    pub exports: std::collections::HashMap<NameId, TypeId>,
-    /// Constant values from the module (let PI = 3.14...)
-    pub constants: std::collections::HashMap<NameId, ConstantValue>,
-    /// Names of functions that are external (FFI) - others are pure Vole
-    pub external_funcs: std::collections::HashSet<NameId>,
-}
-
-// Manual Hash implementation because HashMap doesn't implement Hash.
-// Two ModuleTypes with the same module_id refer to the same module.
-impl std::hash::Hash for ModuleType {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.module_id.hash(state);
     }
 }
 

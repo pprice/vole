@@ -68,12 +68,6 @@ impl TypeId {
         self.0
     }
 
-    /// Check if this is a reserved (primitive/special) TypeId
-    #[inline]
-    pub fn is_reserved(self) -> bool {
-        self.0 < Self::FIRST_DYNAMIC
-    }
-
     /// Check if this is the invalid type (no arena needed)
     #[inline]
     pub fn is_invalid(self) -> bool {
@@ -884,25 +878,9 @@ impl TypeArena {
         matches!(self.get(id), SemaType::Array(_))
     }
 
-    /// Check if this is a fixed array type
-    pub fn is_fixed_array(&self, id: TypeId) -> bool {
-        matches!(self.get(id), SemaType::FixedArray { .. })
-    }
-
     /// Check if this is a function type
     pub fn is_function(&self, id: TypeId) -> bool {
         matches!(self.get(id), SemaType::Function { .. })
-    }
-
-    /// Check if this is a closure (function with is_closure=true)
-    pub fn is_closure(&self, id: TypeId) -> bool {
-        matches!(
-            self.get(id),
-            SemaType::Function {
-                is_closure: true,
-                ..
-            }
-        )
     }
 
     /// Check if this is a class type
@@ -930,11 +908,6 @@ impl TypeArena {
         matches!(self.get(id), SemaType::Union(_))
     }
 
-    /// Check if this is a tuple type
-    pub fn is_tuple(&self, id: TypeId) -> bool {
-        matches!(self.get(id), SemaType::Tuple(_))
-    }
-
     /// Check if this is the string primitive
     #[inline]
     pub fn is_string(&self, id: TypeId) -> bool {
@@ -956,11 +929,6 @@ impl TypeArena {
     /// Check if this is a runtime iterator type
     pub fn is_runtime_iterator(&self, id: TypeId) -> bool {
         matches!(self.get(id), SemaType::RuntimeIterator(_))
-    }
-
-    /// Check if this is a fallible type
-    pub fn is_fallible(&self, id: TypeId) -> bool {
-        matches!(self.get(id), SemaType::Fallible { .. })
     }
 
     /// Check if an integer literal value fits within a type (handles unions)

@@ -923,7 +923,7 @@ impl Analyzer {
                         if type_def.kind == TypeDefKind::Alias
                             && let Some(aliased_type_id) = type_def.aliased_type
                         {
-                            // Use TypeId directly (avoids to_display conversion)
+                            // Use TypeId directly
                             let arena = self.type_arena.borrow();
                             let type_ids =
                                 if let Some(variants) = arena.unwrap_union(aliased_type_id) {
