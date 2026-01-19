@@ -10,10 +10,7 @@ use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::TypeParamScope;
 use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
-use crate::sema::types::{
-    ClassType, DisplayType, FallibleType, FunctionType, InterfaceMethodType, InterfaceType,
-    NominalType, RecordType, StructuralFieldType, StructuralMethodType, StructuralType,
-};
+use crate::sema::types::DisplayType;
 
 /// Context needed for type resolution
 pub struct TypeResolutionContext<'a> {
@@ -27,80 +24,6 @@ pub struct TypeResolutionContext<'a> {
     pub self_type: Option<TypeId>,
     /// Type arena for interning types (RefCell for interior mutability)
     pub type_arena: &'a RefCell<TypeArena>,
-}
-
-fn interface_instance(
-    name: Symbol,
-    type_args: Vec<DisplayType>,
-    ctx: &mut TypeResolutionContext<'_>,
-) -> Option<DisplayType> {
-    // Look up interface by Symbol -> TypeDefId via resolver with interface fallback
-    let name_str = ctx.interner.resolve(name);
-    let type_def_id = ctx
-        .resolver()
-        .resolve_type_str_or_interface(name_str, ctx.entity_registry)?;
-    let type_def = ctx.entity_registry.get_type(type_def_id);
-
-    // Verify it's an interface
-    if type_def.kind != TypeDefKind::Interface {
-        return None;
-    }
-
-    if !type_def.type_params.is_empty() && type_def.type_params.len() != type_args.len() {
-        return Some(DisplayType::invalid("propagate"));
-    }
-
-    // Build methods with substituted types using TypeId-based substitution
-    let mut arena = ctx.type_arena.borrow_mut();
-    let substitutions: hashbrown::HashMap<_, _> = type_def
-        .type_params
-        .iter()
-        .zip(type_args.iter())
-        .map(|(name_id, arg)| (*name_id, arena.from_display(arg)))
-        .collect();
-
-    let methods: Vec<InterfaceMethodType> = type_def
-        .methods
-        .iter()
-        .map(|&method_id| {
-            let method = ctx.entity_registry.get_method(method_id);
-            let sig = &method.signature;
-
-            // Substitute using TypeId
-            let substituted_params: TypeIdVec = sig
-                .params_id
-                .iter()
-                .map(|&p| arena.substitute(p, &substitutions))
-                .collect();
-            let substituted_return = arena.substitute(sig.return_type_id, &substitutions);
-
-            InterfaceMethodType {
-                name: method.name_id,
-                has_default: method.has_default,
-                params_id: substituted_params,
-                return_type_id: substituted_return,
-            }
-        })
-        .collect();
-    drop(arena);
-
-    // Keep extends as TypeDefIds directly
-    let extends = type_def.extends.to_vec();
-
-    // Convert type_args to TypeIds
-    let type_args_id: TypeIdVec = {
-        let mut arena = ctx.type_arena.borrow_mut();
-        type_args.iter().map(|t| arena.from_display(t)).collect()
-    };
-
-    Some(DisplayType::Nominal(NominalType::Interface(
-        InterfaceType {
-            type_def_id,
-            type_args_id,
-            methods: methods.into(),
-            extends: extends.into(),
-        },
-    )))
 }
 
 impl<'a> TypeResolutionContext<'a> {
@@ -137,7 +60,9 @@ impl<'a> TypeResolutionContext<'a> {
 /// It handles primitives, named types (aliases, classes, records, interfaces), arrays,
 /// optionals, unions, and function types.
 pub fn resolve_type(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> DisplayType {
-    resolve_type_impl(ty, ctx)
+    // Resolve to TypeId first, then project to DisplayType for backwards compatibility
+    let type_id = resolve_type_to_id(ty, ctx);
+    ctx.type_arena.borrow().to_display(type_id)
 }
 
 /// Resolve a TypeExpr directly to a TypeId.
@@ -150,29 +75,7 @@ pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) ->
             let prim_type = crate::sema::types::PrimitiveType::from_ast(*p);
             ctx.type_arena.borrow_mut().primitive(prim_type)
         }
-        TypeExpr::Named(sym) => {
-            // Check if it's a type parameter in scope first
-            if let Some(type_params) = ctx.type_params
-                && let Some(tp_info) = type_params.get(*sym)
-            {
-                return ctx.type_arena.borrow_mut().type_param(tp_info.name_id);
-            }
-            // Check for type alias - use aliased_type_id directly
-            if let Some(type_def_id) = ctx
-                .resolver()
-                .resolve_type_or_interface(*sym, ctx.entity_registry)
-            {
-                let type_def = ctx.entity_registry.get_type(type_def_id);
-                if type_def.kind == TypeDefKind::Alias
-                    && let Some(aliased_type_id) = type_def.aliased_type
-                {
-                    return aliased_type_id;
-                }
-            }
-            // For other named types, fall back to Type-based resolution and convert
-            let ty = resolve_type_impl(&TypeExpr::Named(*sym), ctx);
-            ctx.type_arena.borrow_mut().from_display(&ty)
-        }
+        TypeExpr::Named(sym) => resolve_named_type_to_id(*sym, ctx),
         TypeExpr::Array(elem) => {
             let elem_id = resolve_type_to_id(elem, ctx);
             ctx.type_arena.borrow_mut().array(elem_id)
@@ -211,263 +114,163 @@ pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) ->
             let elem_id = resolve_type_to_id(element, ctx);
             ctx.type_arena.borrow_mut().fixed_array(elem_id, *size)
         }
-        // For complex cases (Generic, SelfType, Fallible, Structural, Combination),
-        // fall back to Type-based resolution and convert
-        _ => {
-            let ty = resolve_type_impl(ty, ctx);
-            ctx.type_arena.borrow_mut().from_display(&ty)
-        }
-    }
-}
-
-/// Internal implementation of resolve_type (non-arena version).
-fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> DisplayType {
-    match ty {
-        TypeExpr::Primitive(p) => DisplayType::from_primitive(*p),
-        TypeExpr::Named(sym) => {
-            // Handle "void" as a special case - it's not a registered type but a language primitive
-            let name_str = ctx.interner.resolve(*sym);
-            if name_str == "void" {
-                return DisplayType::Void;
-            }
-
-            // Check if it's a type parameter in scope first
-            if let Some(type_params) = ctx.type_params
-                && let Some(tp_info) = type_params.get(*sym)
-            {
-                return DisplayType::TypeParam(tp_info.name_id);
-            }
-            // Look up type via EntityRegistry (handles aliases via TypeDefKind::Alias)
-            // Uses resolve_type_or_interface to also find prelude classes like Map/Set
-            if let Some(type_id) = ctx
-                .resolver()
-                .resolve_type_or_interface(*sym, ctx.entity_registry)
-            {
-                // Look up via EntityRegistry
-                let type_def = ctx.entity_registry.get_type(type_id);
-                match type_def.kind {
-                    TypeDefKind::Record => {
-                        if let Some(record) = ctx.entity_registry.build_record_type(type_id) {
-                            DisplayType::Nominal(NominalType::Record(record))
-                        } else {
-                            DisplayType::invalid("resolve_failed")
-                        }
-                    }
-                    TypeDefKind::Class => {
-                        if let Some(class) = ctx.entity_registry.build_class_type(type_id) {
-                            DisplayType::Nominal(NominalType::Class(class))
-                        } else {
-                            DisplayType::invalid("resolve_failed")
-                        }
-                    }
-                    TypeDefKind::Interface => {
-                        // Use interface_instance for proper method resolution
-                        interface_instance(*sym, Vec::new(), ctx)
-                            .unwrap_or_else(|| DisplayType::invalid("unwrap_failed"))
-                    }
-                    TypeDefKind::ErrorType => {
-                        // Get error info from EntityRegistry
-                        if let Some(error_info) = type_def.error_info.clone() {
-                            DisplayType::Nominal(NominalType::Error(error_info))
-                        } else {
-                            DisplayType::invalid("resolve_failed")
-                        }
-                    }
-                    TypeDefKind::Primitive => DisplayType::invalid("resolve_primitive"),
-                    TypeDefKind::Alias => {
-                        if let Some(aliased_type_id) = type_def.aliased_type {
-                            ctx.type_arena.borrow().to_display(aliased_type_id)
-                        } else {
-                            DisplayType::invalid("resolve_failed")
-                        }
-                    }
-                }
-            } else if let Some(interface) = interface_instance(*sym, Vec::new(), ctx) {
-                interface
-            } else {
-                DisplayType::invalid("unknown_type_name") // Unknown type name
-            }
-        }
-        TypeExpr::Array(elem) => {
-            let elem_ty = resolve_type(elem, ctx);
-            DisplayType::Array(Box::new(elem_ty))
-        }
-        TypeExpr::Nil => DisplayType::Nil,
-        TypeExpr::Done => DisplayType::Done,
-        TypeExpr::Optional(inner) => {
-            let inner_ty = resolve_type(inner, ctx);
-            DisplayType::optional(inner_ty)
-        }
-        TypeExpr::Union(variants) => {
-            let types: Vec<DisplayType> = variants.iter().map(|t| resolve_type(t, ctx)).collect();
-            DisplayType::normalize_union(types)
-        }
-        TypeExpr::Function {
-            params,
-            return_type,
-        } => {
-            let param_types: Vec<DisplayType> =
-                params.iter().map(|p| resolve_type(p, ctx)).collect();
-            let ret = resolve_type(return_type, ctx);
-            // Intern types to get TypeIds
-            let mut arena = ctx.type_arena.borrow_mut();
-            let params_id: TypeIdVec = param_types.iter().map(|p| arena.from_display(p)).collect();
-            let return_type_id = arena.from_display(&ret);
-            DisplayType::Function(FunctionType {
-                is_closure: false, // Type annotations don't know if it's a closure
-                params_id,
-                return_type_id,
-            })
-        }
+        TypeExpr::Generic { name, args } => resolve_generic_type_to_id(*name, args, ctx),
         TypeExpr::SelfType => {
             // Self resolves to the implementing type when in a method context
-            if let Some(self_type_id) = ctx.self_type {
-                // Convert TypeId to DisplayType using arena
-                ctx.type_arena.borrow().to_display(self_type_id)
-            } else {
-                // Return Error to indicate Self can't be used outside method context
-                DisplayType::invalid("resolve_failed")
-            }
+            ctx.self_type.unwrap_or_else(|| {
+                // Self can't be used outside method context - return invalid
+                ctx.type_arena.borrow_mut().invalid()
+            })
         }
         TypeExpr::Fallible {
             success_type,
             error_type,
         } => {
-            let success = resolve_type(success_type, ctx);
-            let error = resolve_type(error_type, ctx);
-            DisplayType::Fallible(FallibleType {
-                success_type: Box::new(success),
-                error_type: Box::new(error),
-            })
-        }
-        TypeExpr::Generic { name, args } => {
-            // Resolve all type arguments
-            let resolved_args: Vec<DisplayType> =
-                args.iter().map(|a| resolve_type(a, ctx)).collect();
-            if let Some(interface) = interface_instance(*name, resolved_args.clone(), ctx) {
-                return interface;
-            }
-
-            // Check if this is a class, record, or other type kind
-            let name_str = ctx.interner.resolve(*name);
-            if let Some(type_id) = ctx
-                .resolver()
-                .resolve_type_or_interface(*name, ctx.entity_registry)
-            {
-                let type_def = ctx.entity_registry.get_type(type_id);
-                match type_def.kind {
-                    TypeDefKind::Class => {
-                        // Convert type args to TypeIds for canonical representation
-                        let type_args_id: TypeIdVec = resolved_args
-                            .iter()
-                            .map(|t| ctx.type_arena.borrow_mut().from_display(t))
-                            .collect();
-                        return DisplayType::Nominal(NominalType::Class(ClassType {
-                            type_def_id: type_id,
-                            type_args_id,
-                        }));
-                    }
-                    TypeDefKind::Record => {
-                        // Convert type args to TypeIds for canonical representation
-                        let type_args_id: TypeIdVec = resolved_args
-                            .iter()
-                            .map(|t| ctx.type_arena.borrow_mut().from_display(t))
-                            .collect();
-                        return DisplayType::Nominal(NominalType::Record(RecordType {
-                            type_def_id: type_id,
-                            type_args_id,
-                        }));
-                    }
-                    TypeDefKind::Interface => {
-                        // interface_instance() should have handled this, but as fallback
-                        // return invalid - interfaces need full method info
-                        return DisplayType::invalid_msg(
-                            "resolve_generic_interface",
-                            format!(
-                                "interface '{}' requires interface_instance resolution",
-                                name_str
-                            ),
-                        );
-                    }
-                    TypeDefKind::Alias => {
-                        // Type aliases don't support type parameters
-                        return DisplayType::invalid_msg(
-                            "resolve_generic_alias",
-                            format!("type alias '{}' cannot have type arguments", name_str),
-                        );
-                    }
-                    TypeDefKind::ErrorType => {
-                        // Error types don't support type parameters
-                        return DisplayType::invalid_msg(
-                            "resolve_generic_error",
-                            format!("error type '{}' cannot have type arguments", name_str),
-                        );
-                    }
-                    TypeDefKind::Primitive => {
-                        // Primitives don't support type parameters
-                        return DisplayType::invalid_msg(
-                            "resolve_generic_primitive",
-                            format!("primitive type '{}' cannot have type arguments", name_str),
-                        );
-                    }
-                }
-            }
-
-            // Type not found - return invalid
-            DisplayType::invalid_msg(
-                "resolve_unknown_generic",
-                format!("unknown generic type '{}'", name_str),
-            )
-        }
-        TypeExpr::Tuple(elements) => {
-            let resolved_elements: Vec<DisplayType> =
-                elements.iter().map(|e| resolve_type(e, ctx)).collect();
-            DisplayType::Tuple(resolved_elements.into())
-        }
-        TypeExpr::FixedArray { element, size } => {
-            let elem_ty = resolve_type(element, ctx);
-            DisplayType::FixedArray {
-                element: Box::new(elem_ty),
-                size: *size,
-            }
+            let success_id = resolve_type_to_id(success_type, ctx);
+            let error_id = resolve_type_to_id(error_type, ctx);
+            ctx.type_arena.borrow_mut().fallible(success_id, error_id)
         }
         TypeExpr::Structural { fields, methods } => {
-            let resolved_fields = fields
-                .iter()
-                .map(|f| {
-                    let name_id = ctx
-                        .name_table
-                        .intern(ctx.module_id, &[f.name], ctx.interner);
-                    StructuralFieldType {
-                        name: name_id,
-                        ty: resolve_type(&f.ty, ctx),
-                    }
-                })
-                .collect();
-            let resolved_methods = methods
-                .iter()
-                .map(|m| {
-                    let name_id = ctx
-                        .name_table
-                        .intern(ctx.module_id, &[m.name], ctx.interner);
-                    StructuralMethodType {
-                        name: name_id,
-                        params: m.params.iter().map(|p| resolve_type(p, ctx)).collect(),
-                        return_type: resolve_type(&m.return_type, ctx),
-                    }
-                })
-                .collect();
-            DisplayType::Structural(StructuralType {
-                fields: resolved_fields,
-                methods: resolved_methods,
-            })
+            resolve_structural_type_to_id(fields, methods, ctx)
         }
         TypeExpr::Combination(_) => {
-            // Type combinations are constraint-only, not resolved to a concrete Type
-            // Semantic analysis handles these specially in constraint contexts
-            DisplayType::invalid("resolve_failed")
+            // Type combinations are constraint-only, not resolved to a concrete type
+            ctx.type_arena.borrow_mut().invalid()
         }
     }
+}
+
+/// Resolve a named type (non-generic) to TypeId
+fn resolve_named_type_to_id(sym: Symbol, ctx: &mut TypeResolutionContext<'_>) -> TypeId {
+    // Handle "void" as a special case
+    let name_str = ctx.interner.resolve(sym);
+    if name_str == "void" {
+        return ctx.type_arena.borrow_mut().void();
+    }
+
+    // Check if it's a type parameter in scope first
+    if let Some(type_params) = ctx.type_params
+        && let Some(tp_info) = type_params.get(sym)
+    {
+        return ctx.type_arena.borrow_mut().type_param(tp_info.name_id);
+    }
+
+    // Look up type via EntityRegistry
+    if let Some(type_def_id) = ctx
+        .resolver()
+        .resolve_type_or_interface(sym, ctx.entity_registry)
+    {
+        let type_def = ctx.entity_registry.get_type(type_def_id);
+        match type_def.kind {
+            TypeDefKind::Alias => {
+                // Return aliased type directly
+                type_def
+                    .aliased_type
+                    .unwrap_or_else(|| ctx.type_arena.borrow_mut().invalid())
+            }
+            TypeDefKind::Record => ctx
+                .type_arena
+                .borrow_mut()
+                .record(type_def_id, TypeIdVec::new()),
+            TypeDefKind::Class => ctx
+                .type_arena
+                .borrow_mut()
+                .class(type_def_id, TypeIdVec::new()),
+            TypeDefKind::Interface => ctx
+                .type_arena
+                .borrow_mut()
+                .interface(type_def_id, TypeIdVec::new()),
+            TypeDefKind::ErrorType => ctx.type_arena.borrow_mut().error_type(type_def_id),
+            TypeDefKind::Primitive => {
+                // Shouldn't reach here - primitives are handled by TypeExpr::Primitive
+                ctx.type_arena.borrow_mut().invalid()
+            }
+        }
+    } else {
+        // Unknown type name
+        ctx.type_arena.borrow_mut().invalid()
+    }
+}
+
+/// Resolve a generic type (with type arguments) to TypeId
+fn resolve_generic_type_to_id(
+    name: Symbol,
+    args: &[TypeExpr],
+    ctx: &mut TypeResolutionContext<'_>,
+) -> TypeId {
+    // Resolve all type arguments first
+    let type_args_id: TypeIdVec = args.iter().map(|a| resolve_type_to_id(a, ctx)).collect();
+
+    // Look up the type
+    if let Some(type_def_id) = ctx
+        .resolver()
+        .resolve_type_or_interface(name, ctx.entity_registry)
+    {
+        let type_def = ctx.entity_registry.get_type(type_def_id);
+        match type_def.kind {
+            TypeDefKind::Class => ctx.type_arena.borrow_mut().class(type_def_id, type_args_id),
+            TypeDefKind::Record => ctx
+                .type_arena
+                .borrow_mut()
+                .record(type_def_id, type_args_id),
+            TypeDefKind::Interface => ctx
+                .type_arena
+                .borrow_mut()
+                .interface(type_def_id, type_args_id),
+            TypeDefKind::Alias | TypeDefKind::ErrorType | TypeDefKind::Primitive => {
+                // These types don't support type parameters
+                ctx.type_arena.borrow_mut().invalid()
+            }
+        }
+    } else {
+        // Unknown type name
+        ctx.type_arena.borrow_mut().invalid()
+    }
+}
+
+/// Resolve a structural type to TypeId
+fn resolve_structural_type_to_id(
+    fields: &[crate::frontend::StructuralField],
+    methods: &[crate::frontend::StructuralMethod],
+    ctx: &mut TypeResolutionContext<'_>,
+) -> TypeId {
+    use crate::sema::type_arena::InternedStructuralMethod;
+    use smallvec::SmallVec;
+
+    let resolved_fields: SmallVec<[(crate::identity::NameId, TypeId); 4]> = fields
+        .iter()
+        .map(|f| {
+            let name_id = ctx
+                .name_table
+                .intern(ctx.module_id, &[f.name], ctx.interner);
+            let ty_id = resolve_type_to_id(&f.ty, ctx);
+            (name_id, ty_id)
+        })
+        .collect();
+
+    let resolved_methods: SmallVec<[InternedStructuralMethod; 2]> = methods
+        .iter()
+        .map(|m| {
+            let name_id = ctx
+                .name_table
+                .intern(ctx.module_id, &[m.name], ctx.interner);
+            let params: TypeIdVec = m
+                .params
+                .iter()
+                .map(|p| resolve_type_to_id(p, ctx))
+                .collect();
+            let return_type = resolve_type_to_id(&m.return_type, ctx);
+            InternedStructuralMethod {
+                name: name_id,
+                params,
+                return_type,
+            }
+        })
+        .collect();
+
+    ctx.type_arena
+        .borrow_mut()
+        .structural(resolved_fields, resolved_methods)
 }
 
 #[cfg(test)]
