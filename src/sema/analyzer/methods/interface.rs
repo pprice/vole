@@ -2,7 +2,7 @@ use crate::identity::{NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::implement_registry::ImplTypeId;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::{LegacyType, NominalType, StructuralType};
+use crate::sema::types::StructuralType;
 
 use super::super::*;
 
@@ -259,28 +259,29 @@ impl Analyzer {
         let type_id_opt = self
             .resolver(interner)
             .resolve_type(type_name, &self.entity_registry);
-        let implementing_type = if let Some(type_id) = type_id_opt {
+        // Build implementing type directly as TypeId
+        let implementing_type_id = if let Some(type_id) = type_id_opt {
             let type_def = self.entity_registry.get_type(type_id);
             match type_def.kind {
-                TypeDefKind::Class => self
-                    .entity_registry
-                    .build_class_type(type_id)
-                    .map(|c| LegacyType::Nominal(NominalType::Class(c))),
-                TypeDefKind::Record => self
-                    .entity_registry
-                    .build_record_type(type_id)
-                    .map(|r| LegacyType::Nominal(NominalType::Record(r))),
+                TypeDefKind::Class => Some(
+                    self.type_arena
+                        .borrow_mut()
+                        .class(type_id, crate::sema::type_arena::TypeIdVec::new()),
+                ),
+                TypeDefKind::Record => Some(
+                    self.type_arena
+                        .borrow_mut()
+                        .record(type_id, crate::sema::type_arena::TypeIdVec::new()),
+                ),
                 _ => None,
             }
         } else {
             None
         };
-        let implementing_type = match implementing_type {
+        let implementing_type_id = match implementing_type_id {
             Some(t) => t,
             None => return, // Unknown type, can't validate
         };
-        // Intern implementing type for TypeId-based comparison
-        let implementing_type_id = self.type_arena.borrow_mut().from_type(&implementing_type);
 
         // Look up interface via Resolver with interface fallback
         let type_def_id = self

@@ -1409,22 +1409,19 @@ impl Analyzer {
         let self_sym = interner
             .lookup("self")
             .expect("'self' should be interned during parsing");
-        // Get self type via EntityRegistry
+        // Build self type directly as TypeId
         let type_def = self.entity_registry.get_type(type_def_id);
-        let self_type = match type_def.kind {
+        let self_type_id = match type_def.kind {
             TypeDefKind::Class => self
-                .entity_registry
-                .build_class_type(type_def_id)
-                .map(|c| LegacyType::Nominal(NominalType::Class(c)))
-                .unwrap_or_else(|| LegacyType::invalid("unwrap_failed")),
+                .type_arena
+                .borrow_mut()
+                .class(type_def_id, crate::sema::type_arena::TypeIdVec::new()),
             TypeDefKind::Record => self
-                .entity_registry
-                .build_record_type(type_def_id)
-                .map(|r| LegacyType::Nominal(NominalType::Record(r)))
-                .unwrap_or_else(|| LegacyType::invalid("unwrap_failed")),
-            _ => LegacyType::invalid("fallback"),
+                .type_arena
+                .borrow_mut()
+                .record(type_def_id, crate::sema::type_arena::TypeIdVec::new()),
+            _ => self.type_arena.borrow().invalid(),
         };
-        let self_type_id = self.type_arena.borrow_mut().from_type(&self_type);
         self.scope.define(
             self_sym,
             Variable {
