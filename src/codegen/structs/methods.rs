@@ -53,8 +53,14 @@ impl Cg<'_, '_, '_> {
             .method_at_in_module(expr_id, self.ctx.current_module)
         {
             let func_type_id = self.ctx.arena.borrow_mut().function(
-                func_type.params_id.as_ref().expect("FunctionType.params_id not set").clone(),
-                func_type.return_type_id.expect("FunctionType.return_type_id not set"),
+                func_type
+                    .params_id
+                    .as_ref()
+                    .expect("FunctionType.params_id not set")
+                    .clone(),
+                func_type
+                    .return_type_id
+                    .expect("FunctionType.return_type_id not set"),
                 func_type.is_closure,
             );
             return self.static_method_call(*type_def_id, *method_id, func_type_id, mc, expr_id);
@@ -102,7 +108,8 @@ impl Cg<'_, '_, '_> {
                     args.push(compiled.value);
                 }
 
-                let return_type_id = func_type.return_type_id
+                let return_type_id = func_type
+                    .return_type_id
                     .expect("FunctionType.return_type_id not set for module method");
 
                 if let Some(ext_info) = external_info {
@@ -229,7 +236,10 @@ impl Cg<'_, '_, '_> {
             } => {
                 // Use TypeId-based params for interface boxing check
                 let param_type_ids = resolution.map(|resolved| {
-                    resolved.func_type().params_id.as_ref()
+                    resolved
+                        .func_type()
+                        .params_id
+                        .as_ref()
                         .expect("FunctionType.params_id not set for external method")
                         .clone()
                 });
@@ -238,7 +248,12 @@ impl Cg<'_, '_, '_> {
                     for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                         let compiled = self.expr(arg)?;
                         // Check if param is interface type using arena
-                        let is_interface = self.ctx.arena.borrow().unwrap_interface(param_type_id).is_some();
+                        let is_interface = self
+                            .ctx
+                            .arena
+                            .borrow()
+                            .unwrap_interface(param_type_id)
+                            .is_some();
                         let compiled = if is_interface {
                             box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
                         } else {
@@ -325,7 +340,10 @@ impl Cg<'_, '_, '_> {
 
         // Use TypeId-based params for interface boxing check
         let param_type_ids = resolution.map(|resolved| {
-            resolved.func_type().params_id.as_ref()
+            resolved
+                .func_type()
+                .params_id
+                .as_ref()
                 .expect("FunctionType.params_id not set for direct method")
                 .clone()
         });
@@ -334,7 +352,12 @@ impl Cg<'_, '_, '_> {
             for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                 let compiled = self.expr(arg)?;
                 // Check if param is interface type using arena
-                let is_interface = self.ctx.arena.borrow().unwrap_interface(param_type_id).is_some();
+                let is_interface = self
+                    .ctx
+                    .arena
+                    .borrow()
+                    .unwrap_interface(param_type_id)
+                    .is_some();
                 let compiled = if is_interface {
                     box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
                 } else {
@@ -948,13 +971,21 @@ impl Cg<'_, '_, '_> {
                 .get(mono_key)
             {
                 // Compile arguments with substituted param types (TypeId-based)
-                let param_type_ids = instance.func_type.params_id.as_ref()
+                let param_type_ids = instance
+                    .func_type
+                    .params_id
+                    .as_ref()
                     .expect("MonomorphInstance.func_type.params_id not set for static method");
                 let mut args = Vec::new();
                 for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                     let compiled = self.expr(arg)?;
                     // Box interface values if needed - check using arena
-                    let is_interface = self.ctx.arena.borrow().unwrap_interface(param_type_id).is_some();
+                    let is_interface = self
+                        .ctx
+                        .arena
+                        .borrow()
+                        .unwrap_interface(param_type_id)
+                        .is_some();
                     let compiled = if is_interface {
                         box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
                     } else {
@@ -969,7 +1000,9 @@ impl Cg<'_, '_, '_> {
                 let call = self.builder.ins().call(func_ref, &args);
                 let results = self.builder.inst_results(call);
 
-                let return_type_id = instance.func_type.return_type_id
+                let return_type_id = instance
+                    .func_type
+                    .return_type_id
                     .expect("MonomorphInstance.func_type.return_type_id not set for static method");
                 if results.is_empty() {
                     return Ok(self.void_value());

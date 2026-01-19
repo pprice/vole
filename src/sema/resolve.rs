@@ -416,12 +416,21 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
             let param_types: Vec<LegacyType> =
                 params.iter().map(|p| resolve_type(p, ctx)).collect();
             let ret = resolve_type(return_type, ctx);
+            // Populate TypeId fields if arena is available
+            let (params_id, return_type_id) = if let Some(arena_ref) = ctx.type_arena {
+                let mut arena = arena_ref.borrow_mut();
+                let p_ids: TypeIdVec = param_types.iter().map(|p| arena.from_type(p)).collect();
+                let r_id = arena.from_type(&ret);
+                (Some(p_ids), Some(r_id))
+            } else {
+                (None, None)
+            };
             LegacyType::Function(FunctionType {
                 params: param_types.into(),
                 return_type: Box::new(ret),
                 is_closure: false, // Type annotations don't know if it's a closure
-                params_id: None,
-                return_type_id: None,
+                params_id,
+                return_type_id,
             })
         }
         TypeExpr::SelfType => {

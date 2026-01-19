@@ -13,10 +13,10 @@ use crate::codegen::types::{
 use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::identity::{MethodId, NameId, TypeDefId};
+use crate::sema::EntityRegistry;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
 use crate::sema::type_arena::{SemaType, TypeId};
-use crate::sema::EntityRegistry;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 enum InterfaceConcreteType {

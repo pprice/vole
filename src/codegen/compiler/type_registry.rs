@@ -11,10 +11,7 @@ use crate::runtime::type_registry::{FieldTypeTag, register_instance_type};
 use crate::sema::type_arena::{TypeId, TypeIdVec};
 
 /// Convert a TypeId to a FieldTypeTag for runtime cleanup
-fn type_id_to_field_tag(
-    ty: TypeId,
-    arena: &crate::sema::type_arena::TypeArena,
-) -> FieldTypeTag {
+fn type_id_to_field_tag(ty: TypeId, arena: &crate::sema::type_arena::TypeArena) -> FieldTypeTag {
     if arena.is_string(ty) {
         FieldTypeTag::String
     } else if arena.is_array(ty) {
@@ -141,7 +138,10 @@ impl Compiler<'_> {
             let field_name = query.resolve_symbol(field.name).to_string();
             field_slots.insert(field_name, i);
             let field_type_id = self.resolve_type_to_id(&field.ty);
-            field_type_tags.push(type_id_to_field_tag(field_type_id, &self.analyzed.type_arena.borrow()));
+            field_type_tags.push(type_id_to_field_tag(
+                field_type_id,
+                &self.analyzed.type_arena.borrow(),
+            ));
         }
 
         // Register field types in runtime type registry for cleanup
@@ -325,7 +325,10 @@ impl Compiler<'_> {
             let field_name = query.resolve_symbol(field.name).to_string();
             field_slots.insert(field_name, i);
             let field_type_id = self.resolve_type_to_id(&field.ty);
-            field_type_tags.push(type_id_to_field_tag(field_type_id, &self.analyzed.type_arena.borrow()));
+            field_type_tags.push(type_id_to_field_tag(
+                field_type_id,
+                &self.analyzed.type_arena.borrow(),
+            ));
         }
 
         // Register field types in runtime type registry for cleanup
@@ -554,7 +557,10 @@ impl Compiler<'_> {
             let field_name = module_interner.resolve(field.name).to_string();
             field_slots.insert(field_name, i);
             let field_type_id = self.resolve_type_to_id_with_interner(&field.ty, module_interner);
-            field_type_tags.push(type_id_to_field_tag(field_type_id, &self.analyzed.type_arena.borrow()));
+            field_type_tags.push(type_id_to_field_tag(
+                field_type_id,
+                &self.analyzed.type_arena.borrow(),
+            ));
         }
 
         // Register field types in runtime type registry

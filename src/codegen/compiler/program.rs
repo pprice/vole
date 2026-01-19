@@ -1050,12 +1050,20 @@ impl Compiler<'_> {
             params.push(self.pointer_type);
         }
         for &param_type_id in &param_type_ids {
-            params.push(type_id_to_cranelift(param_type_id, &arena_ref, self.pointer_type));
+            params.push(type_id_to_cranelift(
+                param_type_id,
+                &arena_ref,
+                self.pointer_type,
+            ));
         }
         let ret = if return_type_id == TypeId::VOID {
             None
         } else {
-            Some(type_id_to_cranelift(return_type_id, &arena_ref, self.pointer_type))
+            Some(type_id_to_cranelift(
+                return_type_id,
+                &arena_ref,
+                self.pointer_type,
+            ))
         };
         drop(arena_ref);
 
@@ -1196,7 +1204,11 @@ impl Compiler<'_> {
         let ret = if return_type_id == TypeId::VOID {
             None
         } else {
-            Some(type_id_to_cranelift(return_type_id, &arena_ref, self.pointer_type))
+            Some(type_id_to_cranelift(
+                return_type_id,
+                &arena_ref,
+                self.pointer_type,
+            ))
         };
         let param_types = params.clone();
         drop(arena_ref);
@@ -1440,12 +1452,20 @@ impl Compiler<'_> {
         let arena_ref = self.analyzed.type_arena.borrow();
         let mut params = vec![self.pointer_type]; // self
         for &param_type_id in &param_type_ids {
-            params.push(type_id_to_cranelift(param_type_id, &arena_ref, self.pointer_type));
+            params.push(type_id_to_cranelift(
+                param_type_id,
+                &arena_ref,
+                self.pointer_type,
+            ));
         }
         let ret = if return_type_id == TypeId::VOID {
             None
         } else {
-            Some(type_id_to_cranelift(return_type_id, &arena_ref, self.pointer_type))
+            Some(type_id_to_cranelift(
+                return_type_id,
+                &arena_ref,
+                self.pointer_type,
+            ))
         };
         let param_types: Vec<types::Type> = param_type_ids
             .iter()
@@ -1588,7 +1608,10 @@ impl Compiler<'_> {
                                 .get(&param.name_id)
                                 .copied()
                                 .unwrap_or_else(|| {
-                                    self.analyzed.type_arena.borrow_mut().type_param(param.name_id)
+                                    self.analyzed
+                                        .type_arena
+                                        .borrow_mut()
+                                        .type_param(param.name_id)
                                 })
                         })
                         .collect();
@@ -1776,7 +1799,11 @@ impl Compiler<'_> {
         let ret = if return_type_id == TypeId::VOID {
             None
         } else {
-            Some(type_id_to_cranelift(return_type_id, &arena_ref, self.pointer_type))
+            Some(type_id_to_cranelift(
+                return_type_id,
+                &arena_ref,
+                self.pointer_type,
+            ))
         };
         let param_types = params.clone();
         drop(arena_ref);

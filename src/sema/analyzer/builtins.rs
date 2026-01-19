@@ -64,24 +64,22 @@ impl Analyzer {
             register_builtin!(
                 type_id,
                 method_len,
-                FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                }
+                FunctionType::new_with_arena(
+                    vec![],
+                    LegacyType::Primitive(PrimitiveType::I64),
+                    false,
+                    &mut self.type_arena.borrow_mut(),
+                )
             );
             register_builtin!(
                 type_id,
                 method_iter,
-                FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::unknown()),
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                },
+                FunctionType::new_with_arena(
+                    vec![],
+                    LegacyType::unknown(), // Will be refined by check_builtin_method
+                    false,
+                    &mut self.type_arena.borrow_mut(),
+                ),
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "array_iter".to_string(),
@@ -94,24 +92,22 @@ impl Analyzer {
             register_builtin!(
                 type_id,
                 method_len,
-                FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::Primitive(PrimitiveType::I64)),
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                }
+                FunctionType::new_with_arena(
+                    vec![],
+                    LegacyType::Primitive(PrimitiveType::I64),
+                    false,
+                    &mut self.type_arena.borrow_mut(),
+                )
             );
             register_builtin!(
                 type_id,
                 method_iter,
-                FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::unknown()), // Will be refined by check_builtin_method
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                },
+                FunctionType::new_with_arena(
+                    vec![],
+                    LegacyType::unknown(), // Will be refined by check_builtin_method
+                    false,
+                    &mut self.type_arena.borrow_mut(),
+                ),
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "string_chars_iter".to_string(),
@@ -130,13 +126,12 @@ impl Analyzer {
             register_builtin!(
                 type_id,
                 method_iter,
-                FunctionType {
-                    params: vec![].into(),
-                    return_type: Box::new(LegacyType::unknown()), // Will be refined by check_builtin_method
-                    is_closure: false,
-                    params_id: None,
-                    return_type_id: None,
-                },
+                FunctionType::new_with_arena(
+                    vec![],
+                    LegacyType::unknown(), // Will be refined by check_builtin_method
+                    false,
+                    &mut self.type_arena.borrow_mut(),
+                ),
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "range_iter".to_string(),

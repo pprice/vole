@@ -275,7 +275,6 @@ pub(crate) fn function_name_id_with_interner(
     namer.function(module, name)
 }
 
-
 /// Resolve a type expression directly to TypeId (no LegacyType intermediate).
 /// Use this function when you don't need to handle generic interface method substitution.
 #[allow(clippy::too_many_arguments)]

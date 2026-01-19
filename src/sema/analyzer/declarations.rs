@@ -1474,13 +1474,19 @@ impl Analyzer {
         let interface_methods: Vec<crate::sema::types::InterfaceMethodType> = method_data
             .iter()
             .map(|(name, _, params, return_type, has_default)| {
+                // Get method name_id before borrowing arena
+                let method_name_id = self.method_name_id(*name, interner);
+                // Intern types into arena
+                let mut arena = self.type_arena.borrow_mut();
+                let params_id: TypeIdVec = params.iter().map(|p| arena.from_type(p)).collect();
+                let return_type_id = arena.from_type(return_type);
                 crate::sema::types::InterfaceMethodType {
-                    name: self.method_name_id(*name, interner),
+                    name: method_name_id,
                     params: params.clone().into(),
                     return_type: Box::new(return_type.clone()),
                     has_default: *has_default,
-                    params_id: None, // TypeIds populated lazily when needed
-                    return_type_id: None,
+                    params_id: Some(params_id),
+                    return_type_id: Some(return_type_id),
                 }
             })
             .collect();

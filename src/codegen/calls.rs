@@ -307,12 +307,13 @@ impl Cg<'_, '_, '_> {
                             .signature
                             .params_id
                             .as_ref()
-                            .expect("FunctionType.params_id not set for global functional interface")
+                            .expect(
+                                "FunctionType.params_id not set for global functional interface",
+                            )
                             .clone();
-                        let ret_id = method
-                            .signature
-                            .return_type_id
-                            .expect("FunctionType.return_type_id not set for global functional interface");
+                        let ret_id = method.signature.return_type_id.expect(
+                            "FunctionType.return_type_id not set for global functional interface",
+                        );
                         arena.function(param_ids, ret_id, false)
                     };
                     let method_name_id = method.name_id;

@@ -1492,8 +1492,9 @@ impl TypeArena {
                     params: param_types.into(),
                     return_type: Box::new(self.to_type(*ret)),
                     is_closure: *is_closure,
-                    params_id: None,
-                    return_type_id: None,
+                    // Preserve TypeIds from arena since we're converting FROM TypeId
+                    params_id: Some(params.clone()),
+                    return_type_id: Some(*ret),
                 })
             }
 

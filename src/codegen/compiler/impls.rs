@@ -9,11 +9,11 @@ use crate::codegen::types::{
     CompileCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_to_id,
     type_id_to_cranelift,
 };
+use crate::frontend::ast::PrimitiveType as AstPrimitive;
 use crate::frontend::{
     ClassDecl, FuncDecl, ImplementBlock, InterfaceMethod, Interner, RecordDecl, StaticsBlock,
     Symbol, TypeExpr,
 };
-use crate::frontend::ast::PrimitiveType as AstPrimitive;
 use crate::identity::ModuleId;
 use crate::sema::type_arena::TypeId;
 

@@ -5,10 +5,10 @@ use crate::commands::common::AnalyzedProgram;
 use crate::errors::CodegenError;
 use crate::frontend::Symbol;
 use crate::identity::{MethodId, NameId, TypeDefId};
+use crate::sema::PrimitiveType;
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_arena::TypeId;
-use crate::sema::PrimitiveType;
 
 #[derive(Debug)]
 pub(crate) enum MethodTarget {
@@ -147,8 +147,14 @@ pub(crate) fn resolve_method_target_id(
                         format!("method name {} not found as NameId", input.method_name_str)
                     })?;
                     let func_type_id = input.analyzed.type_arena.borrow_mut().function(
-                        func_type.params_id.as_ref().expect("FunctionType.params_id not set for interface dispatch").clone(),
-                        func_type.return_type_id.expect("FunctionType.return_type_id not set for interface dispatch"),
+                        func_type
+                            .params_id
+                            .as_ref()
+                            .expect("FunctionType.params_id not set for interface dispatch")
+                            .clone(),
+                        func_type
+                            .return_type_id
+                            .expect("FunctionType.return_type_id not set for interface dispatch"),
                         func_type.is_closure,
                     );
                     return Ok(MethodTarget::InterfaceDispatch {
@@ -188,8 +194,14 @@ pub(crate) fn resolve_method_target_id(
             }
             ResolvedMethod::FunctionalInterface { func_type } => {
                 let func_type_id = input.analyzed.type_arena.borrow_mut().function(
-                    func_type.params_id.as_ref().expect("FunctionType.params_id not set for functional interface").clone(),
-                    func_type.return_type_id.expect("FunctionType.return_type_id not set for functional interface"),
+                    func_type
+                        .params_id
+                        .as_ref()
+                        .expect("FunctionType.params_id not set for functional interface")
+                        .clone(),
+                    func_type
+                        .return_type_id
+                        .expect("FunctionType.return_type_id not set for functional interface"),
                     func_type.is_closure,
                 );
                 Ok(MethodTarget::FunctionalInterface { func_type_id })
@@ -240,8 +252,14 @@ pub(crate) fn resolve_method_target_id(
                     format!("method name {} not found as NameId", input.method_name_str)
                 })?;
                 let func_type_id = input.analyzed.type_arena.borrow_mut().function(
-                    func_type.params_id.as_ref().expect("FunctionType.params_id not set for interface method dispatch").clone(),
-                    func_type.return_type_id.expect("FunctionType.return_type_id not set for interface method dispatch"),
+                    func_type
+                        .params_id
+                        .as_ref()
+                        .expect("FunctionType.params_id not set for interface method dispatch")
+                        .clone(),
+                    func_type.return_type_id.expect(
+                        "FunctionType.return_type_id not set for interface method dispatch",
+                    ),
                     func_type.is_closure,
                 );
                 Ok(MethodTarget::InterfaceDispatch {
@@ -256,8 +274,14 @@ pub(crate) fn resolve_method_target_id(
                 func_type,
             } => {
                 let func_type_id = input.analyzed.type_arena.borrow_mut().function(
-                    func_type.params_id.as_ref().expect("FunctionType.params_id not set for static method").clone(),
-                    func_type.return_type_id.expect("FunctionType.return_type_id not set for static method"),
+                    func_type
+                        .params_id
+                        .as_ref()
+                        .expect("FunctionType.params_id not set for static method")
+                        .clone(),
+                    func_type
+                        .return_type_id
+                        .expect("FunctionType.return_type_id not set for static method"),
                     func_type.is_closure,
                 );
                 Ok(MethodTarget::StaticMethod {
