@@ -174,7 +174,8 @@ impl Analyzer {
                     // Use inferred_id directly as substitutions (already TypeId-based)
                     // MonomorphInstance uses std HashMap
                     let substitutions: HashMap<NameId, ArenaTypeId> = inferred_id.clone();
-                    let func_type = FunctionType::from_ids(&concrete_param_ids, concrete_return_id, false);
+                    let func_type =
+                        FunctionType::from_ids(&concrete_param_ids, concrete_return_id, false);
                     self.entity_registry.monomorph_cache.insert(
                         key.clone(),
                         MonomorphInstance {
@@ -267,7 +268,7 @@ impl Analyzer {
         // Non-identifier callee (e.g., a lambda expression being called directly)
         let callee_ty_id = self.check_expr(&call.callee, interner)?;
 
-        // Use arena.unwrap_function to check if callable (avoids LegacyType)
+        // Use arena.unwrap_function to check if callable (avoids DisplayType)
         let func_info = self
             .type_arena
             .borrow()

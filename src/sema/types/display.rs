@@ -1,6 +1,6 @@
 //! Legacy type system - being replaced by TypeId.
 //!
-//! This module contains the recursive LegacyType enum and related types.
+//! This module contains the recursive DisplayType enum and related types.
 //! During the migration to TypeId, this module isolates the legacy code
 //! for easier tracking and eventual removal.
 
@@ -19,10 +19,10 @@ use super::{FunctionType, PrimitiveType};
 
 /// Legacy type enum - being replaced by Type(TypeId) newtype
 ///
-/// During migration, LegacyType is the recursive structure and
+/// During migration, DisplayType is the recursive structure and
 /// Type will become an alias then a newtype over TypeId.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum LegacyType {
+pub enum DisplayType {
     /// Primitive types (integers, floats, bool, string)
     Primitive(PrimitiveType),
     /// Void (no return value)
@@ -36,11 +36,11 @@ pub enum LegacyType {
     /// Union type - value can be any of the variant types
     /// Represented at runtime as tagged union (discriminant + payload)
     /// TODO: Consider nullable pointer optimization for pointer types (String, Array)
-    Union(Arc<[LegacyType]>),
+    Union(Arc<[DisplayType]>),
     /// Range type (e.g., 0..10)
     Range,
     /// Array type (e.g., [i32], [string])
-    Array(Box<LegacyType>),
+    Array(Box<DisplayType>),
     /// Function type
     Function(FunctionType),
     /// Placeholder type - waiting for substitution or inference.
@@ -60,7 +60,7 @@ pub enum LegacyType {
     /// Runtime iterator type - represents builtin iterators (array.iter(), range.iter(), etc.)
     /// These are raw pointers to UnifiedIterator and should call external functions directly
     /// without interface boxing. The inner type is the element type.
-    RuntimeIterator(Box<LegacyType>),
+    RuntimeIterator(Box<DisplayType>),
     /// Type parameter placeholder (e.g., T during inference)
     /// Only valid within generic context during type checking.
     /// Note: This is for inference placeholders. For resolved type parameter
@@ -72,11 +72,11 @@ pub enum LegacyType {
     TypeParamRef(TypeParamId),
     /// Tuple type - heterogeneous fixed-size collection
     /// e.g., [i32, string, bool] - different types per position
-    Tuple(Arc<[LegacyType]>),
+    Tuple(Arc<[DisplayType]>),
     /// Fixed-size array - homogeneous fixed-size array
     /// e.g., [i32; 10] - single element type, compile-time known size
     FixedArray {
-        element: Box<LegacyType>,
+        element: Box<DisplayType>,
         size: usize,
     },
     /// Structural type - duck typing constraint
@@ -95,28 +95,28 @@ pub struct StructuralType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructuralFieldType {
     pub name: NameId,
-    pub ty: LegacyType,
+    pub ty: DisplayType,
 }
 
 /// A method in a structural type
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructuralMethodType {
     pub name: NameId,
-    pub params: Vec<LegacyType>,
-    pub return_type: LegacyType,
+    pub params: Vec<DisplayType>,
+    pub return_type: DisplayType,
 }
 
-impl LegacyType {
+impl DisplayType {
     /// Convert from AST PrimitiveType to Type
     pub fn from_primitive(p: AstPrimitiveType) -> Self {
-        LegacyType::Primitive(PrimitiveType::from_ast(p))
+        DisplayType::Primitive(PrimitiveType::from_ast(p))
     }
 
     /// Get TypeDefId for nominal types (Class, Record, Interface, ErrorType).
     /// Returns None for primitives, functions, unions, etc.
     pub fn type_def_id(&self) -> Option<TypeDefId> {
         match self {
-            LegacyType::Nominal(n) => Some(n.type_def_id()),
+            DisplayType::Nominal(n) => Some(n.type_def_id()),
             _ => None,
         }
     }
@@ -124,7 +124,7 @@ impl LegacyType {
     /// Check if this type is numeric (can do arithmetic)
     pub fn is_numeric(&self) -> bool {
         match self {
-            LegacyType::Primitive(p) => p.is_numeric(),
+            DisplayType::Primitive(p) => p.is_numeric(),
             _ => false,
         }
     }
@@ -132,7 +132,7 @@ impl LegacyType {
     /// Check if this type is an integer
     pub fn is_integer(&self) -> bool {
         match self {
-            LegacyType::Primitive(p) => p.is_integer(),
+            DisplayType::Primitive(p) => p.is_integer(),
             _ => false,
         }
     }
@@ -140,7 +140,7 @@ impl LegacyType {
     /// Check if this is a signed integer type
     pub fn is_signed(&self) -> bool {
         match self {
-            LegacyType::Primitive(p) => p.is_signed(),
+            DisplayType::Primitive(p) => p.is_signed(),
             _ => false,
         }
     }
@@ -148,7 +148,7 @@ impl LegacyType {
     /// Check if this is an unsigned integer type
     pub fn is_unsigned(&self) -> bool {
         match self {
-            LegacyType::Primitive(p) => p.is_unsigned(),
+            DisplayType::Primitive(p) => p.is_unsigned(),
             _ => false,
         }
     }
@@ -156,7 +156,7 @@ impl LegacyType {
     /// Check if this is a floating point type
     pub fn is_float(&self) -> bool {
         match self {
-            LegacyType::Primitive(p) => p.is_float(),
+            DisplayType::Primitive(p) => p.is_float(),
             _ => false,
         }
     }
@@ -164,18 +164,18 @@ impl LegacyType {
     /// Get the bit width of a numeric type
     pub fn bit_width(&self) -> Option<u8> {
         match self {
-            LegacyType::Primitive(p) => p.bit_width(),
+            DisplayType::Primitive(p) => p.bit_width(),
             _ => None,
         }
     }
 
     /// Check if this type can be implicitly widened to target type
-    pub fn can_widen_to(&self, target: &LegacyType) -> bool {
+    pub fn can_widen_to(&self, target: &DisplayType) -> bool {
         if self == target {
             return true;
         }
         match (self, target) {
-            (LegacyType::Primitive(from), LegacyType::Primitive(to)) => from.can_widen_to(*to),
+            (DisplayType::Primitive(from), DisplayType::Primitive(to)) => from.can_widen_to(*to),
             _ => false,
         }
     }
@@ -183,46 +183,46 @@ impl LegacyType {
     /// Get the type name for error messages
     pub fn name(&self) -> &'static str {
         match self {
-            LegacyType::Primitive(p) => p.name(),
-            LegacyType::Void => "void",
-            LegacyType::Nil => "nil",
-            LegacyType::Done => "Done",
-            LegacyType::Union(_) => "union", // Display impl handles full representation
-            LegacyType::Range => "range",
-            LegacyType::Array(_) => "array",
-            LegacyType::Function(_) => "function",
-            LegacyType::Placeholder(_) => "placeholder",
-            LegacyType::Invalid(_) => "<invalid>",
-            LegacyType::MetaType => "type",
-            LegacyType::Nominal(n) => n.name(),
-            LegacyType::Fallible(_) => "fallible",
-            LegacyType::Module(_) => "module",
-            LegacyType::TypeParam(_) | LegacyType::TypeParamRef(_) => "type parameter",
-            LegacyType::RuntimeIterator(_) => "iterator",
-            LegacyType::Tuple(_) => "tuple",
-            LegacyType::FixedArray { .. } => "fixed array",
-            LegacyType::Structural(_) => "structural",
+            DisplayType::Primitive(p) => p.name(),
+            DisplayType::Void => "void",
+            DisplayType::Nil => "nil",
+            DisplayType::Done => "Done",
+            DisplayType::Union(_) => "union", // Display impl handles full representation
+            DisplayType::Range => "range",
+            DisplayType::Array(_) => "array",
+            DisplayType::Function(_) => "function",
+            DisplayType::Placeholder(_) => "placeholder",
+            DisplayType::Invalid(_) => "<invalid>",
+            DisplayType::MetaType => "type",
+            DisplayType::Nominal(n) => n.name(),
+            DisplayType::Fallible(_) => "fallible",
+            DisplayType::Module(_) => "module",
+            DisplayType::TypeParam(_) | DisplayType::TypeParamRef(_) => "type parameter",
+            DisplayType::RuntimeIterator(_) => "iterator",
+            DisplayType::Tuple(_) => "tuple",
+            DisplayType::FixedArray { .. } => "fixed array",
+            DisplayType::Structural(_) => "structural",
         }
     }
 
     /// Check if this is a union type containing Nil
     pub fn is_optional(&self) -> bool {
-        matches!(self, LegacyType::Union(types) if types.contains(&LegacyType::Nil))
+        matches!(self, DisplayType::Union(types) if types.contains(&DisplayType::Nil))
     }
 
     /// For an optional/union type, get the non-nil variants
-    pub fn unwrap_optional(&self) -> Option<LegacyType> {
+    pub fn unwrap_optional(&self) -> Option<DisplayType> {
         match self {
-            LegacyType::Union(types) => {
+            DisplayType::Union(types) => {
                 let non_nil: Vec<_> = types
                     .iter()
-                    .filter(|t| **t != LegacyType::Nil)
+                    .filter(|t| **t != DisplayType::Nil)
                     .cloned()
                     .collect();
                 match non_nil.len() {
                     0 => None,
                     1 => Some(non_nil.into_iter().next().expect("len checked to be 1")),
-                    _ => Some(LegacyType::Union(non_nil.into())),
+                    _ => Some(DisplayType::Union(non_nil.into())),
                 }
             }
             _ => None,
@@ -230,47 +230,47 @@ impl LegacyType {
     }
 
     /// Create an optional type (T | nil)
-    pub fn optional(inner: LegacyType) -> LegacyType {
-        LegacyType::Union(vec![inner, LegacyType::Nil].into())
+    pub fn optional(inner: DisplayType) -> DisplayType {
+        DisplayType::Union(vec![inner, DisplayType::Nil].into())
     }
 
     /// Create an invalid type with just a kind (for migration - prefer invalid_msg)
-    pub fn invalid(kind: &'static str) -> LegacyType {
-        LegacyType::Invalid(AnalysisError::simple(kind))
+    pub fn invalid(kind: &'static str) -> DisplayType {
+        DisplayType::Invalid(AnalysisError::simple(kind))
     }
 
     /// Create an invalid type with kind and descriptive message
-    pub fn invalid_msg(kind: &'static str, message: impl Into<String>) -> LegacyType {
-        LegacyType::Invalid(AnalysisError::new(kind, message))
+    pub fn invalid_msg(kind: &'static str, message: impl Into<String>) -> DisplayType {
+        DisplayType::Invalid(AnalysisError::new(kind, message))
     }
 
     /// Create an invalid type with kind, message, and location
-    pub fn invalid_at(kind: &'static str, message: impl Into<String>, span: Span) -> LegacyType {
-        LegacyType::Invalid(AnalysisError::at(kind, message, span))
+    pub fn invalid_at(kind: &'static str, message: impl Into<String>, span: Span) -> DisplayType {
+        DisplayType::Invalid(AnalysisError::at(kind, message, span))
     }
 
     /// Check if this type is invalid (analysis failed)
     pub fn is_invalid(&self) -> bool {
-        matches!(self, LegacyType::Invalid(_))
+        matches!(self, DisplayType::Invalid(_))
     }
 
     /// Create an inference placeholder (for type inference during analysis)
-    pub fn unknown() -> LegacyType {
-        LegacyType::Placeholder(PlaceholderKind::Inference)
+    pub fn unknown() -> DisplayType {
+        DisplayType::Placeholder(PlaceholderKind::Inference)
     }
 
     /// Check if this is a placeholder type
     pub fn is_placeholder(&self) -> bool {
-        matches!(self, LegacyType::Placeholder(_))
+        matches!(self, DisplayType::Placeholder(_))
     }
 
     /// Assert this type is valid (not Invalid). Panics with context if Invalid.
     /// Use in codegen where Invalid types indicate a compiler bug.
     #[track_caller]
     pub fn expect_valid(&self, context: &str) -> &Self {
-        if let LegacyType::Invalid(err) = self {
+        if let DisplayType::Invalid(err) = self {
             panic!(
-                "INTERNAL ERROR: LegacyType::Invalid encountered in codegen\n\
+                "INTERNAL ERROR: DisplayType::Invalid encountered in codegen\n\
                  Context: {}\n\
                  Error chain:\n  {}\n\
                  Location: {}",
@@ -283,12 +283,12 @@ impl LegacyType {
     }
 
     /// Normalize a union: flatten nested unions, sort descending, dedupe, unwrap single-element
-    pub fn normalize_union(mut types: Vec<LegacyType>) -> LegacyType {
+    pub fn normalize_union(mut types: Vec<DisplayType>) -> DisplayType {
         // Flatten nested unions
         let mut flattened = Vec::new();
         for ty in types.drain(..) {
             match ty {
-                LegacyType::Union(inner) => flattened.extend(inner.iter().cloned()),
+                DisplayType::Union(inner) => flattened.extend(inner.iter().cloned()),
                 other => flattened.push(other),
             }
         }
@@ -304,7 +304,7 @@ impl LegacyType {
         if flattened.len() == 1 {
             flattened.into_iter().next().expect("len checked to be 1")
         } else {
-            LegacyType::Union(flattened.into())
+            DisplayType::Union(flattened.into())
         }
     }
 
@@ -317,14 +317,14 @@ impl LegacyType {
     /// # Example
     /// ```ignore
     /// // For a function `fn identity<T>(x: T) -> T` called with i64:
-    /// let substitutions = HashMap::from([(t_name_id, LegacyType::Primitive(PrimitiveType::I64))]);
-    /// let param_type = LegacyType::TypeParam(t_name_id);
-    /// assert_eq!(param_type.substitute(&substitutions), LegacyType::Primitive(PrimitiveType::I64));
+    /// let substitutions = HashMap::from([(t_name_id, DisplayType::Primitive(PrimitiveType::I64))]);
+    /// let param_type = DisplayType::TypeParam(t_name_id);
+    /// assert_eq!(param_type.substitute(&substitutions), DisplayType::Primitive(PrimitiveType::I64));
     /// ```
     pub fn substitute(
         &self,
-        substitutions: &std::collections::HashMap<NameId, LegacyType>,
-    ) -> LegacyType {
+        substitutions: &std::collections::HashMap<NameId, DisplayType>,
+    ) -> DisplayType {
         // Early exit if no substitutions - just clone (cheap for Arc-based types)
         if substitutions.is_empty() {
             return self.clone();
@@ -332,41 +332,41 @@ impl LegacyType {
 
         match self {
             // Direct substitution for type parameters
-            LegacyType::TypeParam(name_id) => substitutions
+            DisplayType::TypeParam(name_id) => substitutions
                 .get(name_id)
                 .cloned()
                 .unwrap_or_else(|| self.clone()),
 
             // TypeParamRef doesn't substitute based on NameId - it's an opaque reference
-            LegacyType::TypeParamRef(_) => self.clone(),
+            DisplayType::TypeParamRef(_) => self.clone(),
 
             // Recursive substitution for compound types - reuse Arc if unchanged
-            LegacyType::Array(elem) => {
+            DisplayType::Array(elem) => {
                 let new_elem = elem.substitute(substitutions);
                 if &new_elem == elem.as_ref() {
                     self.clone()
                 } else {
-                    LegacyType::Array(Box::new(new_elem))
+                    DisplayType::Array(Box::new(new_elem))
                 }
             }
 
-            LegacyType::Union(types) => {
+            DisplayType::Union(types) => {
                 let new_types = substitute_slice(types, substitutions);
                 if let Some(reused) = new_types {
-                    LegacyType::Union(reused)
+                    DisplayType::Union(reused)
                 } else {
                     self.clone()
                 }
             }
 
-            // FunctionType only stores TypeIds - LegacyType::substitute can't substitute
+            // FunctionType only stores TypeIds - DisplayType::substitute can't substitute
             // without arena access. Use arena.substitute() for proper substitution.
-            LegacyType::Function(_) => self.clone(),
+            DisplayType::Function(_) => self.clone(),
 
-            LegacyType::Tuple(elements) => {
+            DisplayType::Tuple(elements) => {
                 let new_elements = substitute_slice(elements, substitutions);
                 if let Some(reused) = new_elements {
-                    LegacyType::Tuple(reused)
+                    DisplayType::Tuple(reused)
                 } else {
                     self.clone()
                 }
@@ -375,11 +375,11 @@ impl LegacyType {
             // Nominal types: type_args_id requires arena for substitution.
             // Use arena.substitute() for proper TypeId-based substitution.
             // Here we only substitute methods for interfaces.
-            LegacyType::Nominal(NominalType::Interface(interface_type)) => {
+            DisplayType::Nominal(NominalType::Interface(interface_type)) => {
                 let new_methods =
                     substitute_interface_methods(&interface_type.methods, substitutions);
                 if let Some(methods) = new_methods {
-                    LegacyType::Nominal(NominalType::Interface(InterfaceType {
+                    DisplayType::Nominal(NominalType::Interface(InterfaceType {
                         type_def_id: interface_type.type_def_id,
                         type_args_id: interface_type.type_args_id.clone(),
                         methods,
@@ -390,35 +390,35 @@ impl LegacyType {
                 }
             }
 
-            LegacyType::Nominal(NominalType::Record(_))
-            | LegacyType::Nominal(NominalType::Class(_)) => {
+            DisplayType::Nominal(NominalType::Record(_))
+            | DisplayType::Nominal(NominalType::Class(_)) => {
                 // Class/Record type_args_id requires arena for substitution.
                 // Use arena.substitute() for proper TypeId-based substitution.
                 self.clone()
             }
 
-            LegacyType::RuntimeIterator(elem) => {
+            DisplayType::RuntimeIterator(elem) => {
                 let new_elem = elem.substitute(substitutions);
                 if &new_elem == elem.as_ref() {
                     self.clone()
                 } else {
-                    LegacyType::RuntimeIterator(Box::new(new_elem))
+                    DisplayType::RuntimeIterator(Box::new(new_elem))
                 }
             }
 
-            LegacyType::FixedArray { element, size } => {
+            DisplayType::FixedArray { element, size } => {
                 let new_elem = element.substitute(substitutions);
                 if &new_elem == element.as_ref() {
                     self.clone()
                 } else {
-                    LegacyType::FixedArray {
+                    DisplayType::FixedArray {
                         element: Box::new(new_elem),
                         size: *size,
                     }
                 }
             }
 
-            LegacyType::Fallible(ft) => {
+            DisplayType::Fallible(ft) => {
                 let new_success = ft.success_type.substitute(substitutions);
                 let new_error = ft.error_type.substitute(substitutions);
                 let success_changed = &new_success != ft.success_type.as_ref();
@@ -427,14 +427,14 @@ impl LegacyType {
                 if !success_changed && !error_changed {
                     self.clone()
                 } else {
-                    LegacyType::Fallible(FallibleType {
+                    DisplayType::Fallible(FallibleType {
                         success_type: Box::new(new_success),
                         error_type: Box::new(new_error),
                     })
                 }
             }
 
-            LegacyType::Structural(st) => {
+            DisplayType::Structural(st) => {
                 let mut fields_changed = false;
                 let new_fields: Vec<_> = st
                     .fields
@@ -478,7 +478,7 @@ impl LegacyType {
                 if !fields_changed && !methods_changed {
                     self.clone()
                 } else {
-                    LegacyType::Structural(StructuralType {
+                    DisplayType::Structural(StructuralType {
                         fields: new_fields,
                         methods: new_methods,
                     })
@@ -486,82 +486,82 @@ impl LegacyType {
             }
 
             // Types without nested type parameters - return unchanged
-            LegacyType::Primitive(_)
-            | LegacyType::Void
-            | LegacyType::Nil
-            | LegacyType::Done
-            | LegacyType::Range
-            | LegacyType::MetaType
-            | LegacyType::Placeholder(_)
-            | LegacyType::Invalid(_)
-            | LegacyType::Module(_)
-            | LegacyType::Nominal(NominalType::Error(_)) => self.clone(),
+            DisplayType::Primitive(_)
+            | DisplayType::Void
+            | DisplayType::Nil
+            | DisplayType::Done
+            | DisplayType::Range
+            | DisplayType::MetaType
+            | DisplayType::Placeholder(_)
+            | DisplayType::Invalid(_)
+            | DisplayType::Module(_)
+            | DisplayType::Nominal(NominalType::Error(_)) => self.clone(),
         }
     }
 
-    /// Intern this LegacyType into a TypeArena, returning a TypeId.
+    /// Intern this DisplayType into a TypeArena, returning a TypeId.
     ///
-    /// This is the canonical conversion from LegacyType to TypeId.
-    /// TEMPORARY: For migration only - will be removed when LegacyType is deleted.
+    /// This is the canonical conversion from DisplayType to TypeId.
+    /// TEMPORARY: For migration only - will be removed when DisplayType is deleted.
     pub fn intern(&self, arena: &mut TypeArena) -> TypeId {
         match self {
-            LegacyType::Primitive(p) => arena.primitive(*p),
-            LegacyType::Void => arena.void(),
-            LegacyType::Nil => arena.nil(),
-            LegacyType::Done => arena.done(),
-            LegacyType::Range => arena.range(),
-            LegacyType::MetaType => arena.metatype(),
-            LegacyType::Invalid(_) => arena.invalid(),
+            DisplayType::Primitive(p) => arena.primitive(*p),
+            DisplayType::Void => arena.void(),
+            DisplayType::Nil => arena.nil(),
+            DisplayType::Done => arena.done(),
+            DisplayType::Range => arena.range(),
+            DisplayType::MetaType => arena.metatype(),
+            DisplayType::Invalid(_) => arena.invalid(),
 
-            LegacyType::Array(elem) => {
+            DisplayType::Array(elem) => {
                 let elem_id = elem.intern(arena);
                 arena.array(elem_id)
             }
 
-            LegacyType::Union(variants) => {
+            DisplayType::Union(variants) => {
                 let variant_ids: TypeIdVec = variants.iter().map(|v| v.intern(arena)).collect();
                 arena.union(variant_ids)
             }
 
-            LegacyType::Tuple(elements) => {
+            DisplayType::Tuple(elements) => {
                 let elem_ids: TypeIdVec = elements.iter().map(|e| e.intern(arena)).collect();
                 arena.tuple(elem_ids)
             }
 
-            LegacyType::FixedArray { element, size } => {
+            DisplayType::FixedArray { element, size } => {
                 let elem_id = element.intern(arena);
                 arena.fixed_array(elem_id, *size)
             }
 
-            LegacyType::RuntimeIterator(elem) => {
+            DisplayType::RuntimeIterator(elem) => {
                 let elem_id = elem.intern(arena);
                 arena.runtime_iterator(elem_id)
             }
 
-            LegacyType::Function(ft) => {
+            DisplayType::Function(ft) => {
                 // Use TypeId fields directly (they're now required)
                 arena.function(ft.params_id.clone(), ft.return_type_id, ft.is_closure)
             }
 
-            LegacyType::Nominal(NominalType::Class(c)) => {
+            DisplayType::Nominal(NominalType::Class(c)) => {
                 arena.class(c.type_def_id, c.type_args_id.clone())
             }
 
-            LegacyType::Nominal(NominalType::Record(r)) => {
+            DisplayType::Nominal(NominalType::Record(r)) => {
                 arena.record(r.type_def_id, r.type_args_id.clone())
             }
 
-            LegacyType::Nominal(NominalType::Interface(i)) => {
+            DisplayType::Nominal(NominalType::Interface(i)) => {
                 arena.interface(i.type_def_id, i.type_args_id.clone())
             }
 
-            LegacyType::Nominal(NominalType::Error(e)) => arena.error_type(e.type_def_id),
+            DisplayType::Nominal(NominalType::Error(e)) => arena.error_type(e.type_def_id),
 
-            LegacyType::TypeParam(name_id) => arena.type_param(*name_id),
+            DisplayType::TypeParam(name_id) => arena.type_param(*name_id),
 
-            LegacyType::TypeParamRef(param_id) => arena.type_param_ref(*param_id),
+            DisplayType::TypeParamRef(param_id) => arena.type_param_ref(*param_id),
 
-            LegacyType::Module(module_type) => {
+            DisplayType::Module(module_type) => {
                 // Exports are already TypeId - just collect them
                 let exports: smallvec::SmallVec<[(NameId, TypeId); 8]> = module_type
                     .exports
@@ -581,15 +581,15 @@ impl LegacyType {
                 arena.module(module_type.module_id, exports)
             }
 
-            LegacyType::Placeholder(kind) => arena.placeholder(kind.clone()),
+            DisplayType::Placeholder(kind) => arena.placeholder(kind.clone()),
 
-            LegacyType::Fallible(ft) => {
+            DisplayType::Fallible(ft) => {
                 let success_id = ft.success_type.intern(arena);
                 let error_id = ft.error_type.intern(arena);
                 arena.fallible(success_id, error_id)
             }
 
-            LegacyType::Structural(st) => {
+            DisplayType::Structural(st) => {
                 let fields: smallvec::SmallVec<[(NameId, TypeId); 4]> = st
                     .fields
                     .iter()
@@ -611,53 +611,53 @@ impl LegacyType {
         }
     }
 
-    /// Create a LegacyType from a TypeId by reading from the arena.
+    /// Create a DisplayType from a TypeId by reading from the arena.
     ///
-    /// TEMPORARY: For migration only - will be removed when LegacyType is deleted.
+    /// TEMPORARY: For migration only - will be removed when DisplayType is deleted.
     pub fn from_arena(id: TypeId, arena: &TypeArena) -> Self {
         use crate::sema::type_arena::SemaType;
 
         match arena.get(id) {
-            SemaType::Primitive(p) => LegacyType::Primitive(*p),
-            SemaType::Void => LegacyType::Void,
-            SemaType::Nil => LegacyType::Nil,
-            SemaType::Done => LegacyType::Done,
-            SemaType::Range => LegacyType::Range,
-            SemaType::MetaType => LegacyType::MetaType,
-            SemaType::Invalid { kind } => LegacyType::invalid(kind),
+            SemaType::Primitive(p) => DisplayType::Primitive(*p),
+            SemaType::Void => DisplayType::Void,
+            SemaType::Nil => DisplayType::Nil,
+            SemaType::Done => DisplayType::Done,
+            SemaType::Range => DisplayType::Range,
+            SemaType::MetaType => DisplayType::MetaType,
+            SemaType::Invalid { kind } => DisplayType::invalid(kind),
 
-            SemaType::Array(elem) => LegacyType::Array(Box::new(Self::from_arena(*elem, arena))),
+            SemaType::Array(elem) => DisplayType::Array(Box::new(Self::from_arena(*elem, arena))),
 
             SemaType::Union(variants) => {
-                let types: Vec<LegacyType> = variants
+                let types: Vec<DisplayType> = variants
                     .iter()
                     .map(|&v| Self::from_arena(v, arena))
                     .collect();
-                LegacyType::Union(types.into())
+                DisplayType::Union(types.into())
             }
 
             SemaType::Tuple(elements) => {
-                let types: Vec<LegacyType> = elements
+                let types: Vec<DisplayType> = elements
                     .iter()
                     .map(|&e| Self::from_arena(e, arena))
                     .collect();
-                LegacyType::Tuple(types.into())
+                DisplayType::Tuple(types.into())
             }
 
-            SemaType::FixedArray { element, size } => LegacyType::FixedArray {
+            SemaType::FixedArray { element, size } => DisplayType::FixedArray {
                 element: Box::new(Self::from_arena(*element, arena)),
                 size: *size,
             },
 
             SemaType::RuntimeIterator(elem) => {
-                LegacyType::RuntimeIterator(Box::new(Self::from_arena(*elem, arena)))
+                DisplayType::RuntimeIterator(Box::new(Self::from_arena(*elem, arena)))
             }
 
             SemaType::Function {
                 params,
                 ret,
                 is_closure,
-            } => LegacyType::Function(FunctionType {
+            } => DisplayType::Function(FunctionType {
                 is_closure: *is_closure,
                 params_id: params.clone(),
                 return_type_id: *ret,
@@ -666,7 +666,7 @@ impl LegacyType {
             SemaType::Class {
                 type_def_id,
                 type_args,
-            } => LegacyType::Nominal(NominalType::Class(ClassType {
+            } => DisplayType::Nominal(NominalType::Class(ClassType {
                 type_def_id: *type_def_id,
                 type_args_id: type_args.clone(),
             })),
@@ -674,7 +674,7 @@ impl LegacyType {
             SemaType::Record {
                 type_def_id,
                 type_args,
-            } => LegacyType::Nominal(NominalType::Record(RecordType {
+            } => DisplayType::Nominal(NominalType::Record(RecordType {
                 type_def_id: *type_def_id,
                 type_args_id: type_args.clone(),
             })),
@@ -684,7 +684,7 @@ impl LegacyType {
                 type_args,
             } => {
                 // Note: We lose methods/extends info here - lookup from EntityRegistry if needed
-                LegacyType::Nominal(NominalType::Interface(InterfaceType {
+                DisplayType::Nominal(NominalType::Interface(InterfaceType {
                     type_def_id: *type_def_id,
                     type_args_id: type_args.clone(),
                     methods: vec![].into(),
@@ -693,14 +693,14 @@ impl LegacyType {
             }
 
             SemaType::Error { type_def_id } => {
-                LegacyType::Nominal(NominalType::Error(ErrorTypeInfo {
+                DisplayType::Nominal(NominalType::Error(ErrorTypeInfo {
                     type_def_id: *type_def_id,
                 }))
             }
 
-            SemaType::TypeParam(name_id) => LegacyType::TypeParam(*name_id),
+            SemaType::TypeParam(name_id) => DisplayType::TypeParam(*name_id),
 
-            SemaType::TypeParamRef(param_id) => LegacyType::TypeParamRef(*param_id),
+            SemaType::TypeParamRef(param_id) => DisplayType::TypeParamRef(*param_id),
 
             SemaType::Module(m) => {
                 let exports_map: std::collections::HashMap<NameId, TypeId> = m
@@ -718,7 +718,7 @@ impl LegacyType {
                     ),
                 };
 
-                LegacyType::Module(ModuleType {
+                DisplayType::Module(ModuleType {
                     module_id: m.module_id,
                     exports: exports_map,
                     constants,
@@ -726,12 +726,12 @@ impl LegacyType {
                 })
             }
 
-            SemaType::Fallible { success, error } => LegacyType::Fallible(FallibleType {
+            SemaType::Fallible { success, error } => DisplayType::Fallible(FallibleType {
                 success_type: Box::new(Self::from_arena(*success, arena)),
                 error_type: Box::new(Self::from_arena(*error, arena)),
             }),
 
-            SemaType::Structural(st) => LegacyType::Structural(StructuralType {
+            SemaType::Structural(st) => DisplayType::Structural(StructuralType {
                 fields: st
                     .fields
                     .iter()
@@ -755,16 +755,16 @@ impl LegacyType {
                     .collect(),
             }),
 
-            SemaType::Placeholder(kind) => LegacyType::Placeholder(kind.clone()),
+            SemaType::Placeholder(kind) => DisplayType::Placeholder(kind.clone()),
         }
     }
 }
 
 /// Helper: substitute types in a slice, returning Some(new_arc) only if any changed
 fn substitute_slice(
-    types: &Arc<[LegacyType]>,
-    substitutions: &std::collections::HashMap<NameId, LegacyType>,
-) -> Option<Arc<[LegacyType]>> {
+    types: &Arc<[DisplayType]>,
+    substitutions: &std::collections::HashMap<NameId, DisplayType>,
+) -> Option<Arc<[DisplayType]>> {
     let mut changed = false;
     let new_types: Vec<_> = types
         .iter()
@@ -789,31 +789,31 @@ fn substitute_slice(
 /// Use arena.substitute() for proper TypeId-based substitution.
 fn substitute_interface_methods(
     _methods: &Arc<[InterfaceMethodType]>,
-    _substitutions: &std::collections::HashMap<NameId, LegacyType>,
+    _substitutions: &std::collections::HashMap<NameId, DisplayType>,
 ) -> Option<Arc<[InterfaceMethodType]>> {
     // InterfaceMethodType only has TypeId fields - no arena access for substitution
     None // Return None to indicate no changes
 }
 
-impl std::fmt::Display for LegacyType {
+impl std::fmt::Display for DisplayType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LegacyType::Primitive(p) => write!(f, "{}", p),
+            DisplayType::Primitive(p) => write!(f, "{}", p),
             // FunctionType only has TypeIds - use arena-based display for proper names
-            LegacyType::Function(ft) => write!(f, "{}", ft),
-            LegacyType::Union(types) => {
+            DisplayType::Function(ft) => write!(f, "{}", ft),
+            DisplayType::Union(types) => {
                 let parts: Vec<String> = types.iter().map(|t| format!("{}", t)).collect();
                 write!(f, "{}", parts.join(" | "))
             }
-            LegacyType::Array(elem) => write!(f, "[{}]", elem),
-            LegacyType::Nominal(n) => write!(f, "{}", n),
-            LegacyType::Fallible(ft) => {
+            DisplayType::Array(elem) => write!(f, "[{}]", elem),
+            DisplayType::Nominal(n) => write!(f, "{}", n),
+            DisplayType::Fallible(ft) => {
                 write!(f, "fallible({}, {})", ft.success_type, ft.error_type)
             }
-            LegacyType::Module(m) => write!(f, "module(id:{})", m.module_id.index()),
-            LegacyType::TypeParam(name_id) => write!(f, "{:?}", name_id), // NameId Debug shows the identity
-            LegacyType::TypeParamRef(id) => write!(f, "TypeParam#{}", id.index()),
-            LegacyType::Tuple(elements) => {
+            DisplayType::Module(m) => write!(f, "module(id:{})", m.module_id.index()),
+            DisplayType::TypeParam(name_id) => write!(f, "{:?}", name_id), // NameId Debug shows the identity
+            DisplayType::TypeParamRef(id) => write!(f, "TypeParam#{}", id.index()),
+            DisplayType::Tuple(elements) => {
                 write!(f, "[")?;
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
@@ -823,7 +823,7 @@ impl std::fmt::Display for LegacyType {
                 }
                 write!(f, "]")
             }
-            LegacyType::FixedArray { element, size } => {
+            DisplayType::FixedArray { element, size } => {
                 write!(f, "[{}; {}]", element, size)
             }
             _ => write!(f, "{}", self.name()),
@@ -835,8 +835,8 @@ impl std::fmt::Display for LegacyType {
 mod tests {
     use super::*;
 
-    fn p(p: PrimitiveType) -> LegacyType {
-        LegacyType::Primitive(p)
+    fn p(p: PrimitiveType) -> DisplayType {
+        DisplayType::Primitive(p)
     }
 
     #[test]
@@ -902,22 +902,22 @@ mod tests {
     fn type_from_primitive() {
         use crate::frontend::PrimitiveType as AstPrimitive;
         assert_eq!(
-            LegacyType::from_primitive(AstPrimitive::I32),
+            DisplayType::from_primitive(AstPrimitive::I32),
             p(PrimitiveType::I32)
         );
         assert_eq!(
-            LegacyType::from_primitive(AstPrimitive::U64),
+            DisplayType::from_primitive(AstPrimitive::U64),
             p(PrimitiveType::U64)
         );
         assert_eq!(
-            LegacyType::from_primitive(AstPrimitive::F32),
+            DisplayType::from_primitive(AstPrimitive::F32),
             p(PrimitiveType::F32)
         );
     }
 
     #[test]
     fn type_optional() {
-        let opt = LegacyType::optional(p(PrimitiveType::I32));
+        let opt = DisplayType::optional(p(PrimitiveType::I32));
         assert!(opt.is_optional());
         assert_eq!(opt.unwrap_optional(), Some(p(PrimitiveType::I32)));
     }
@@ -925,14 +925,14 @@ mod tests {
     #[test]
     fn type_normalize_union() {
         // Nested unions flatten
-        let normalized = LegacyType::normalize_union(vec![
+        let normalized = DisplayType::normalize_union(vec![
             p(PrimitiveType::I32),
-            LegacyType::Union(vec![p(PrimitiveType::String), LegacyType::Nil].into()),
+            DisplayType::Union(vec![p(PrimitiveType::String), DisplayType::Nil].into()),
         ]);
-        assert!(matches!(normalized, LegacyType::Union(_)));
+        assert!(matches!(normalized, DisplayType::Union(_)));
 
         // Single element unwraps
-        let single = LegacyType::normalize_union(vec![p(PrimitiveType::I64)]);
+        let single = DisplayType::normalize_union(vec![p(PrimitiveType::I64)]);
         assert_eq!(single, p(PrimitiveType::I64));
     }
 }

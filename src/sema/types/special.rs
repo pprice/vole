@@ -23,7 +23,7 @@
 // ## Compound Special Types
 // - `Fallible(FallibleType)` - Result-like type: `fallible(T, E)`
 // - `Module(ModuleType)` - Imported module with exports
-// - `RuntimeIterator(Box<LegacyType>)` - Builtin iterator (array.iter(), range.iter())
+// - `RuntimeIterator(Box<DisplayType>)` - Builtin iterator (array.iter(), range.iter())
 // - `Range` - Range literal type (0..10)
 //
 // This module defines the supporting structs for these variants. The variants
@@ -33,7 +33,7 @@ use crate::frontend::Span;
 use crate::identity::{ModuleId, NameId};
 use crate::sema::type_arena::TypeId;
 
-use super::LegacyType;
+use super::DisplayType;
 
 /// Analysis error - represents a type that couldn't be determined.
 ///
@@ -215,9 +215,9 @@ impl std::fmt::Display for PlaceholderKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FallibleType {
     /// The success type (returned on success)
-    pub success_type: Box<LegacyType>,
+    pub success_type: Box<DisplayType>,
     /// The error type (ErrorType or Union of ErrorTypes)
-    pub error_type: Box<LegacyType>,
+    pub error_type: Box<DisplayType>,
 }
 
 /// A constant value that can be stored in a module.

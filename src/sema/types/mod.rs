@@ -6,13 +6,13 @@
 // - `primitive` - PrimitiveType enum (i8-i128, u8-u64, f32, f64, bool, string)
 // - `nominal` - NominalType enum (Class, Record, Interface, Error) with TypeDefIds
 // - `special` - Supporting types for special Type variants (Placeholder, Invalid, etc.)
-// - `legacy` - LegacyType enum (being replaced by TypeId)
+// - `display` - DisplayType enum (materialized form for error messages)
 
-pub mod legacy;
+pub mod display;
 pub mod nominal;
 pub mod primitive;
 pub mod special;
-pub use legacy::{LegacyType, StructuralFieldType, StructuralMethodType, StructuralType};
+pub use display::{DisplayType, StructuralFieldType, StructuralMethodType, StructuralType};
 pub use nominal::{
     ClassType, ErrorTypeInfo, ExtendsVec, InterfaceMethodType, InterfaceType, NominalType,
     RecordType,
@@ -65,18 +65,18 @@ impl std::hash::Hash for FunctionType {
 
 impl FunctionType {
     /// Create a new FunctionType, interning types into the arena.
-    /// This is the preferred constructor when you have LegacyTypes and an arena.
+    /// This is the preferred constructor when you have DisplayTypes and an arena.
     pub fn new_with_arena(
-        params: impl IntoIterator<Item = impl std::borrow::Borrow<LegacyType>>,
-        return_type: &LegacyType,
+        params: impl IntoIterator<Item = impl std::borrow::Borrow<DisplayType>>,
+        return_type: &DisplayType,
         is_closure: bool,
         arena: &mut TypeArena,
     ) -> Self {
         let params_id: TypeIdVec = params
             .into_iter()
-            .map(|p| arena.from_type(p.borrow()))
+            .map(|p| arena.from_display(p.borrow()))
             .collect();
-        let return_type_id = arena.from_type(return_type);
+        let return_type_id = arena.from_display(return_type);
         Self {
             is_closure,
             params_id,
@@ -85,7 +85,7 @@ impl FunctionType {
     }
 
     /// Create a new FunctionType from TypeIds.
-    /// This is the preferred constructor when you already have TypeIds (avoids LegacyType conversion).
+    /// This is the preferred constructor when you already have TypeIds (avoids DisplayType conversion).
     pub fn from_ids(param_ids: &[TypeId], return_id: TypeId, is_closure: bool) -> Self {
         Self {
             is_closure,

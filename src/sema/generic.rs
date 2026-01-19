@@ -9,7 +9,7 @@ use crate::identity::{NameId, TypeParamId};
 use crate::sema::TypeKey;
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::{FunctionType, LegacyType, StructuralType};
+use crate::sema::types::{DisplayType, FunctionType, StructuralType};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -236,7 +236,7 @@ pub struct TypeParamInfo {
 }
 
 /// Registry for allocating and looking up TypeParamIds.
-/// Each type parameter gets a unique ID that can be used in LegacyType::TypeParamRef.
+/// Each type parameter gets a unique ID that can be used in DisplayType::TypeParamRef.
 #[derive(Debug, Default)]
 pub struct TypeParamRegistry {
     /// Maps TypeParamId -> (NameId, Symbol) for lookups
@@ -290,9 +290,9 @@ pub fn merge_type_params(
 pub enum TypeConstraint {
     /// Interface constraints: T: Stringable or T: Hashable + Eq
     Interface(Vec<Symbol>),
-    /// Union constraint: T: i32 | i64 (LegacyType version)
-    Union(Vec<LegacyType>),
-    /// Union constraint: T: i32 | i64 (TypeId version - avoids to_type conversion)
+    /// Union constraint: T: i32 | i64 (DisplayType version)
+    Union(Vec<DisplayType>),
+    /// Union constraint: T: i32 | i64 (TypeId version - avoids to_display conversion)
     UnionId(Vec<ArenaTypeId>),
     /// Structural constraint: T: { name: string, func get() -> i32 }
     Structural(StructuralType),

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 impl Analyzer {
     // ========== TypeId-based inference ==========
     //
-    // These versions work directly with TypeId, avoiding LegacyType conversion.
+    // These versions work directly with TypeId, avoiding DisplayType conversion.
 
     /// Infer type parameters from argument types (TypeId version).
     /// Returns a map from type parameter NameId to inferred TypeId.

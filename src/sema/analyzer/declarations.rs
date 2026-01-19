@@ -5,7 +5,7 @@ use super::*;
 use crate::frontend::ast::{ExprKind, LetInit, TypeExpr};
 use crate::sema::entity_defs::{GenericFuncInfo, GenericTypeInfo, TypeDefKind};
 use crate::sema::type_arena::{TypeId as ArenaTypeId, TypeIdVec};
-use crate::sema::types::{LegacyType, NominalType};
+use crate::sema::types::{DisplayType, NominalType};
 
 /// Extract the base interface name from a TypeExpr.
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
@@ -286,7 +286,7 @@ impl Analyzer {
             if let Some(ref ct) = class_type {
                 self.register_named_type(
                     class.name,
-                    LegacyType::Nominal(NominalType::Class(ct.clone())),
+                    DisplayType::Nominal(NominalType::Class(ct.clone())),
                     interner,
                 );
             }
@@ -521,7 +521,7 @@ impl Analyzer {
             if let Some(ref ct) = class_type {
                 self.register_named_type(
                     class.name,
-                    LegacyType::Nominal(NominalType::Class(ct.clone())),
+                    DisplayType::Nominal(NominalType::Class(ct.clone())),
                     interner,
                 );
             }
@@ -826,7 +826,7 @@ impl Analyzer {
             if let Some(ref rt) = record_type {
                 self.register_named_type(
                     record.name,
-                    LegacyType::Nominal(NominalType::Record(rt.clone())),
+                    DisplayType::Nominal(NominalType::Record(rt.clone())),
                     interner,
                 );
             }
@@ -994,7 +994,7 @@ impl Analyzer {
             };
             self.register_named_type(
                 record.name,
-                LegacyType::Nominal(NominalType::Record(record_type.clone())),
+                DisplayType::Nominal(NominalType::Record(record_type)),
                 interner,
             );
 
@@ -1343,27 +1343,29 @@ impl Analyzer {
 
         // Build interface_methods for Type and collect method data for EntityRegistry registration
         // We resolve types once to TypeId and reuse the data
-        let method_data: Vec<(Symbol, String, Vec<ArenaTypeId>, ArenaTypeId, bool)> = interface_decl
-            .methods
-            .iter()
-            .map(|m| {
-                let name = m.name;
-                let name_str = interner.resolve(m.name).to_string();
-                let params_id: Vec<ArenaTypeId> = m
-                    .params
-                    .iter()
-                    .map(|p| resolve_type_to_id(&p.ty, &mut type_ctx))
-                    .collect();
-                let return_type_id = m
-                    .return_type
-                    .as_ref()
-                    .map(|t| resolve_type_to_id(t, &mut type_ctx))
-                    .unwrap_or_else(|| self.type_arena.borrow().void());
-                let has_default =
-                    m.is_default || m.body.is_some() || default_external_methods.contains(&m.name);
-                (name, name_str, params_id, return_type_id, has_default)
-            })
-            .collect();
+        let method_data: Vec<(Symbol, String, Vec<ArenaTypeId>, ArenaTypeId, bool)> =
+            interface_decl
+                .methods
+                .iter()
+                .map(|m| {
+                    let name = m.name;
+                    let name_str = interner.resolve(m.name).to_string();
+                    let params_id: Vec<ArenaTypeId> = m
+                        .params
+                        .iter()
+                        .map(|p| resolve_type_to_id(&p.ty, &mut type_ctx))
+                        .collect();
+                    let return_type_id = m
+                        .return_type
+                        .as_ref()
+                        .map(|t| resolve_type_to_id(t, &mut type_ctx))
+                        .unwrap_or_else(|| self.type_arena.borrow().void());
+                    let has_default = m.is_default
+                        || m.body.is_some()
+                        || default_external_methods.contains(&m.name);
+                    (name, name_str, params_id, return_type_id, has_default)
+                })
+                .collect();
 
         let interface_methods: Vec<crate::sema::types::InterfaceMethodType> = method_data
             .iter()
@@ -1466,9 +1468,7 @@ impl Analyzer {
             let full_method_name_id = self
                 .name_table
                 .intern_raw(self.current_module, &[&name_str, method_name_str]);
-            let signature = FunctionType::from_ids(params_id,
-            *return_type_id,
-            false);
+            let signature = FunctionType::from_ids(params_id, *return_type_id, false);
             // Look up external binding for this method
             let external_binding = external_methods.get(method_name_str).cloned();
             self.entity_registry.register_method_with_binding(
@@ -1577,7 +1577,7 @@ impl Analyzer {
 
         self.register_named_type(
             interface_decl.name,
-            LegacyType::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
+            DisplayType::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
                 type_def_id: entity_type_id,
                 type_args_id: TypeIdVec::new(),
                 methods: interface_methods.into(),
@@ -1780,7 +1780,8 @@ impl Analyzer {
                                 .map(|t| self.resolve_type_id(t, interner))
                                 .unwrap_or_else(|| self.type_arena.borrow().void());
 
-                            let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                            let signature =
+                                FunctionType::from_ids(&params_id, return_type_id, false);
 
                             let native_name = func
                                 .native_name

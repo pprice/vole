@@ -86,7 +86,7 @@ impl InterfaceVtableRegistry {
         Self::default()
     }
 
-    /// Phase 1: Get or declare a vtable using TypeId parameters (no LegacyType conversion).
+    /// Phase 1: Get or declare a vtable using TypeId parameters (no DisplayType conversion).
     /// Does not compile wrappers yet - call ensure_compiled() later.
     #[tracing::instrument(skip(self, ctx, interface_type_arg_ids), fields(interface = %ctx.interner.resolve(interface_name)))]
     pub(crate) fn get_or_declare(
@@ -204,7 +204,7 @@ impl InterfaceVtableRegistry {
         Ok(data_id)
     }
 
-    /// Phase 2+3: Ensure a vtable is fully compiled using TypeId (no LegacyType conversion).
+    /// Phase 2+3: Ensure a vtable is fully compiled using TypeId (no DisplayType conversion).
     /// Must be called after get_or_declare() for the same key.
     #[tracing::instrument(skip(self, ctx), fields(interface = %ctx.interner.resolve(interface_name)))]
     pub(crate) fn ensure_compiled(
@@ -829,7 +829,7 @@ pub(crate) fn box_interface_value_id(
         &ctx.analyzed.entity_registry,
     )?;
 
-    // Phase 1: Declare vtable using TypeId (no LegacyType conversion)
+    // Phase 1: Declare vtable using TypeId (no DisplayType conversion)
     let vtable_id = ctx.interface_vtables.borrow_mut().get_or_declare(
         ctx,
         interface_name,

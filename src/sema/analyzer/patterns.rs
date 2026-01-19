@@ -6,7 +6,7 @@ use crate::sema::types::StructFieldId;
 
 impl Analyzer {
     /// Check pattern and return TypeId directly (TypeId version).
-    /// Handles most pattern types natively, falls back to LegacyType version for complex patterns.
+    /// Handles most pattern types natively, falls back to DisplayType version for complex patterns.
     pub(crate) fn check_pattern_id(
         &mut self,
         pattern: &Pattern,

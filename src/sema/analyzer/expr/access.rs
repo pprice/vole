@@ -47,7 +47,7 @@ impl Analyzer {
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         let object_type_id = self.check_expr(&field_access.object, interner)?;
 
-        // Handle module field access using arena.unwrap_module (avoids LegacyType)
+        // Handle module field access using arena.unwrap_module (avoids DisplayType)
         // Extract module data while holding the borrow, then release before calling add_error
         let module_info = {
             let arena = self.type_arena.borrow();
@@ -92,7 +92,7 @@ impl Analyzer {
         // Get fields from object type (Class or Record)
         let field_name = interner.resolve(field_access.field);
 
-        // Extract type_def_id and type_args using arena queries (avoids LegacyType)
+        // Extract type_def_id and type_args using arena queries (avoids DisplayType)
         let struct_info = {
             let arena = self.type_arena.borrow();
             if let Some((id, args)) = arena.unwrap_class(object_type_id) {
@@ -361,8 +361,7 @@ impl Analyzer {
             )?;
 
             // Build FunctionType for resolution storage (still needed for codegen)
-            let func_type =
-                FunctionType::from_ids(&param_ids, return_id, false);
+            let func_type = FunctionType::from_ids(&param_ids, return_id, false);
 
             // Get external_funcs from module metadata
             let is_external = self
@@ -918,7 +917,8 @@ impl Analyzer {
             };
 
             // Build substituted FunctionType from TypeIds
-            let substituted_func_type = FunctionType::from_ids(&subst_param_ids, subst_return_id, func_type.is_closure);
+            let substituted_func_type =
+                FunctionType::from_ids(&subst_param_ids, subst_return_id, func_type.is_closure);
 
             // Convert back to std::collections::HashMap for storage
             let substitutions: HashMap<NameId, ArenaTypeId> =

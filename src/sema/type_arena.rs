@@ -11,7 +11,7 @@ use hashbrown::HashMap;
 use smallvec::SmallVec;
 
 use crate::identity::{ModuleId, NameId, TypeDefId, TypeParamId};
-use crate::sema::types::{ConstantValue, LegacyType, PlaceholderKind, PrimitiveType};
+use crate::sema::types::{ConstantValue, DisplayType, PlaceholderKind, PrimitiveType};
 
 /// Concrete type identity in the TypeArena.
 ///
@@ -1328,22 +1328,23 @@ impl TypeArena {
     // TEMPORARY: These will be deleted in Phase 5 of the TypeArena refactor
     // ========================================================================
 
-    /// Convert a legacy Type to a TypeId.
+    /// Convert a DisplayType to a TypeId (interning).
     ///
-    /// TEMPORARY: For migration only, delete in Phase 5.
-    /// Delegates to LegacyType::intern() - conversion logic lives in legacy.rs.
+    /// This materializes a recursive type representation into an arena-interned handle.
+    /// Delegates to DisplayType::intern() - conversion logic lives in display.rs.
     #[inline]
-    pub fn from_type(&mut self, ty: &LegacyType) -> TypeId {
+    pub fn from_display(&mut self, ty: &DisplayType) -> TypeId {
         ty.intern(self)
     }
 
-    /// Convert a TypeId back to a legacy Type.
+    /// Convert a TypeId to a DisplayType (materialization for error messages).
     ///
-    /// TEMPORARY: For migration only, delete in Phase 5.
-    /// Delegates to LegacyType::from_arena() - conversion logic lives in legacy.rs.
+    /// This is the inverse of from_display - used when we need a recursive
+    /// representation for error messages or display.
+    /// Delegates to DisplayType::from_arena() - conversion logic lives in display.rs.
     #[inline]
-    pub fn to_type(&self, id: TypeId) -> LegacyType {
-        LegacyType::from_arena(id, self)
+    pub fn to_display(&self, id: TypeId) -> DisplayType {
+        DisplayType::from_arena(id, self)
     }
 }
 
@@ -1818,19 +1819,19 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = LegacyType::Primitive(PrimitiveType::I32);
-        let id = arena.from_type(&original);
-        let back = arena.to_type(id);
+        let original = DisplayType::Primitive(PrimitiveType::I32);
+        let id = arena.from_display(&original);
+        let back = arena.to_display(id);
         assert_eq!(original, back);
 
         // Test other primitives
-        let string_type = LegacyType::Primitive(PrimitiveType::String);
-        let string_id = arena.from_type(&string_type);
-        assert_eq!(arena.to_type(string_id), string_type);
+        let string_type = DisplayType::Primitive(PrimitiveType::String);
+        let string_id = arena.from_display(&string_type);
+        assert_eq!(arena.to_display(string_id), string_type);
 
-        let bool_type = LegacyType::Primitive(PrimitiveType::Bool);
-        let bool_id = arena.from_type(&bool_type);
-        assert_eq!(arena.to_type(bool_id), bool_type);
+        let bool_type = DisplayType::Primitive(PrimitiveType::Bool);
+        let bool_id = arena.from_display(&bool_type);
+        assert_eq!(arena.to_display(bool_id), bool_type);
     }
 
     #[test]
@@ -1838,29 +1839,29 @@ mod tests {
         let mut arena = TypeArena::new();
 
         // Void
-        let void = LegacyType::Void;
-        let void_id = arena.from_type(&void);
-        assert_eq!(arena.to_type(void_id), void);
+        let void = DisplayType::Void;
+        let void_id = arena.from_display(&void);
+        assert_eq!(arena.to_display(void_id), void);
 
         // Nil
-        let nil = LegacyType::Nil;
-        let nil_id = arena.from_type(&nil);
-        assert_eq!(arena.to_type(nil_id), nil);
+        let nil = DisplayType::Nil;
+        let nil_id = arena.from_display(&nil);
+        assert_eq!(arena.to_display(nil_id), nil);
 
         // Done
-        let done = LegacyType::Done;
-        let done_id = arena.from_type(&done);
-        assert_eq!(arena.to_type(done_id), done);
+        let done = DisplayType::Done;
+        let done_id = arena.from_display(&done);
+        assert_eq!(arena.to_display(done_id), done);
 
         // Range
-        let range = LegacyType::Range;
-        let range_id = arena.from_type(&range);
-        assert_eq!(arena.to_type(range_id), range);
+        let range = DisplayType::Range;
+        let range_id = arena.from_display(&range);
+        assert_eq!(arena.to_display(range_id), range);
 
         // Type (metatype)
-        let metatype = LegacyType::MetaType;
-        let metatype_id = arena.from_type(&metatype);
-        assert_eq!(arena.to_type(metatype_id), metatype);
+        let metatype = DisplayType::MetaType;
+        let metatype_id = arena.from_display(&metatype);
+        assert_eq!(arena.to_display(metatype_id), metatype);
     }
 
     #[test]
@@ -1868,9 +1869,9 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::String)));
-        let id = arena.from_type(&original);
-        let back = arena.to_type(id);
+        let original = DisplayType::Array(Box::new(DisplayType::Primitive(PrimitiveType::String)));
+        let id = arena.from_display(&original);
+        let back = arena.to_display(id);
         assert_eq!(original, back);
     }
 
@@ -1879,11 +1880,11 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = LegacyType::Union(
-            vec![LegacyType::Primitive(PrimitiveType::I32), LegacyType::Nil].into(),
+        let original = DisplayType::Union(
+            vec![DisplayType::Primitive(PrimitiveType::I32), DisplayType::Nil].into(),
         );
-        let id = arena.from_type(&original);
-        let back = arena.to_type(id);
+        let id = arena.from_display(&original);
+        let back = arena.to_display(id);
         assert_eq!(original, back);
     }
 
@@ -1892,16 +1893,16 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = LegacyType::Tuple(
+        let original = DisplayType::Tuple(
             vec![
-                LegacyType::Primitive(PrimitiveType::I32),
-                LegacyType::Primitive(PrimitiveType::String),
-                LegacyType::Primitive(PrimitiveType::Bool),
+                DisplayType::Primitive(PrimitiveType::I32),
+                DisplayType::Primitive(PrimitiveType::String),
+                DisplayType::Primitive(PrimitiveType::Bool),
             ]
             .into(),
         );
-        let id = arena.from_type(&original);
-        let back = arena.to_type(id);
+        let id = arena.from_display(&original);
+        let back = arena.to_display(id);
         assert_eq!(original, back);
     }
 
@@ -1910,27 +1911,27 @@ mod tests {
         use crate::sema::types::{FunctionType, PrimitiveType};
 
         let mut arena = TypeArena::new();
-        let params = vec![LegacyType::Primitive(PrimitiveType::I32)];
-        let ret = LegacyType::Primitive(PrimitiveType::String);
-        let original = LegacyType::Function(FunctionType::new_with_arena(
+        let params = vec![DisplayType::Primitive(PrimitiveType::I32)];
+        let ret = DisplayType::Primitive(PrimitiveType::String);
+        let original = DisplayType::Function(FunctionType::new_with_arena(
             params.iter(),
             &ret,
             false,
             &mut arena,
         ));
-        let id = arena.from_type(&original);
-        let back = arena.to_type(id);
+        let id = arena.from_display(&original);
+        let back = arena.to_display(id);
         assert_eq!(original, back);
 
         // Test with closure flag
-        let closure = LegacyType::Function(FunctionType::new_with_arena(
-            std::iter::empty::<&LegacyType>(),
-            &LegacyType::Void,
+        let closure = DisplayType::Function(FunctionType::new_with_arena(
+            std::iter::empty::<&DisplayType>(),
+            &DisplayType::Void,
             true,
             &mut arena,
         ));
-        let closure_id = arena.from_type(&closure);
-        let closure_back = arena.to_type(closure_id);
+        let closure_id = arena.from_display(&closure);
+        let closure_back = arena.to_display(closure_id);
         assert_eq!(closure, closure_back);
     }
 
@@ -1940,18 +1941,18 @@ mod tests {
 
         let mut arena = TypeArena::new();
         let type_def_id = TypeDefId::new(42);
-        // Create type args with consistent LegacyType and TypeId representations
-        let type_args_legacy = [LegacyType::Primitive(PrimitiveType::I32)];
+        // Create type args with consistent DisplayType and TypeId representations
+        let type_args_legacy = [DisplayType::Primitive(PrimitiveType::I32)];
         let type_args_id: TypeIdVec = type_args_legacy
             .iter()
-            .map(|t| arena.from_type(t))
+            .map(|t| arena.from_display(t))
             .collect();
-        let original = LegacyType::Nominal(NominalType::Class(ClassType {
+        let original = DisplayType::Nominal(NominalType::Class(ClassType {
             type_def_id,
             type_args_id,
         }));
-        let id = arena.from_type(&original);
-        let back = arena.to_type(id);
+        let id = arena.from_display(&original);
+        let back = arena.to_display(id);
         assert_eq!(original, back);
     }
 
@@ -1963,19 +1964,19 @@ mod tests {
         let type_def_id = TypeDefId::new(123);
         // Create type args
         let type_args_legacy = [
-            LegacyType::Primitive(PrimitiveType::String),
-            LegacyType::Primitive(PrimitiveType::Bool),
+            DisplayType::Primitive(PrimitiveType::String),
+            DisplayType::Primitive(PrimitiveType::Bool),
         ];
         let type_args_id: TypeIdVec = type_args_legacy
             .iter()
-            .map(|t| arena.from_type(t))
+            .map(|t| arena.from_display(t))
             .collect();
-        let original = LegacyType::Nominal(NominalType::Record(RecordType {
+        let original = DisplayType::Nominal(NominalType::Record(RecordType {
             type_def_id,
             type_args_id,
         }));
-        let id = arena.from_type(&original);
-        let back = arena.to_type(id);
+        let id = arena.from_display(&original);
+        let back = arena.to_display(id);
         assert_eq!(original, back);
     }
 
@@ -1984,12 +1985,12 @@ mod tests {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let original = LegacyType::FixedArray {
-            element: Box::new(LegacyType::Primitive(PrimitiveType::I32)),
+        let original = DisplayType::FixedArray {
+            element: Box::new(DisplayType::Primitive(PrimitiveType::I32)),
             size: 10,
         };
-        let id = arena.from_type(&original);
-        let back = arena.to_type(id);
+        let id = arena.from_display(&original);
+        let back = arena.to_display(id);
         assert_eq!(original, back);
     }
 
@@ -1999,9 +2000,9 @@ mod tests {
 
         let mut arena = TypeArena::new();
         let original =
-            LegacyType::RuntimeIterator(Box::new(LegacyType::Primitive(PrimitiveType::String)));
-        let id = arena.from_type(&original);
-        let back = arena.to_type(id);
+            DisplayType::RuntimeIterator(Box::new(DisplayType::Primitive(PrimitiveType::String)));
+        let id = arena.from_display(&original);
+        let back = arena.to_display(id);
         assert_eq!(original, back);
     }
 
@@ -2009,22 +2010,22 @@ mod tests {
     fn bridge_roundtrip_type_param() {
         let mut arena = TypeArena::new();
         let name_id = NameId::new_for_test(999);
-        let original = LegacyType::TypeParam(name_id);
-        let id = arena.from_type(&original);
-        let back = arena.to_type(id);
+        let original = DisplayType::TypeParam(name_id);
+        let id = arena.from_display(&original);
+        let back = arena.to_display(id);
         assert_eq!(original, back);
     }
 
     #[test]
-    fn bridge_interning_via_from_type() {
+    fn bridge_interning_via_from_display() {
         use crate::sema::types::PrimitiveType;
 
         let mut arena = TypeArena::new();
-        let ty1 = LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::I32)));
-        let ty2 = LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::I32)));
+        let ty1 = DisplayType::Array(Box::new(DisplayType::Primitive(PrimitiveType::I32)));
+        let ty2 = DisplayType::Array(Box::new(DisplayType::Primitive(PrimitiveType::I32)));
 
-        let id1 = arena.from_type(&ty1);
-        let id2 = arena.from_type(&ty2);
+        let id1 = arena.from_display(&ty1);
+        let id2 = arena.from_display(&ty2);
 
         // Same types should get same TypeId
         assert_eq!(id1, id2);
@@ -2038,20 +2039,20 @@ mod tests {
 
         // Array<(i32, string) -> bool>
         let params = vec![
-            LegacyType::Primitive(PrimitiveType::I32),
-            LegacyType::Primitive(PrimitiveType::String),
+            DisplayType::Primitive(PrimitiveType::I32),
+            DisplayType::Primitive(PrimitiveType::String),
         ];
-        let ret = LegacyType::Primitive(PrimitiveType::Bool);
-        let func = LegacyType::Function(FunctionType::new_with_arena(
+        let ret = DisplayType::Primitive(PrimitiveType::Bool);
+        let func = DisplayType::Function(FunctionType::new_with_arena(
             params.iter(),
             &ret,
             false,
             &mut arena,
         ));
-        let original = LegacyType::Array(Box::new(func));
+        let original = DisplayType::Array(Box::new(func));
 
-        let id = arena.from_type(&original);
-        let back = arena.to_type(id);
+        let id = arena.from_display(&original);
+        let back = arena.to_display(id);
         assert_eq!(original, back);
     }
 }

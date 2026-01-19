@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use crate::identity::{NameId, NameTable};
 use crate::sema::implement_registry::PrimitiveTypeId;
 use crate::sema::type_arena::{SemaType, TypeArena, TypeId as ArenaTypeId};
-use crate::sema::types::{LegacyType, NominalType, PrimitiveType};
+use crate::sema::types::{DisplayType, NominalType, PrimitiveType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeKey(u32);
@@ -20,7 +20,7 @@ impl TypeKey {
 
 #[derive(Debug, Clone)]
 pub struct TypeInfo {
-    pub ty: LegacyType,
+    pub ty: DisplayType,
     pub type_id: Option<ArenaTypeId>,
     pub name_id: Option<NameId>,
 }
@@ -51,20 +51,20 @@ impl TypeTable {
         }
         self.primitive_names.insert(prim, name_id);
         let ty = match prim {
-            PrimitiveTypeId::I8 => LegacyType::Primitive(PrimitiveType::I8),
-            PrimitiveTypeId::I16 => LegacyType::Primitive(PrimitiveType::I16),
-            PrimitiveTypeId::I32 => LegacyType::Primitive(PrimitiveType::I32),
-            PrimitiveTypeId::I64 => LegacyType::Primitive(PrimitiveType::I64),
-            PrimitiveTypeId::I128 => LegacyType::Primitive(PrimitiveType::I128),
-            PrimitiveTypeId::U8 => LegacyType::Primitive(PrimitiveType::U8),
-            PrimitiveTypeId::U16 => LegacyType::Primitive(PrimitiveType::U16),
-            PrimitiveTypeId::U32 => LegacyType::Primitive(PrimitiveType::U32),
-            PrimitiveTypeId::U64 => LegacyType::Primitive(PrimitiveType::U64),
-            PrimitiveTypeId::F32 => LegacyType::Primitive(PrimitiveType::F32),
-            PrimitiveTypeId::F64 => LegacyType::Primitive(PrimitiveType::F64),
-            PrimitiveTypeId::Bool => LegacyType::Primitive(PrimitiveType::Bool),
-            PrimitiveTypeId::String => LegacyType::Primitive(PrimitiveType::String),
-            PrimitiveTypeId::Range => LegacyType::Range,
+            PrimitiveTypeId::I8 => DisplayType::Primitive(PrimitiveType::I8),
+            PrimitiveTypeId::I16 => DisplayType::Primitive(PrimitiveType::I16),
+            PrimitiveTypeId::I32 => DisplayType::Primitive(PrimitiveType::I32),
+            PrimitiveTypeId::I64 => DisplayType::Primitive(PrimitiveType::I64),
+            PrimitiveTypeId::I128 => DisplayType::Primitive(PrimitiveType::I128),
+            PrimitiveTypeId::U8 => DisplayType::Primitive(PrimitiveType::U8),
+            PrimitiveTypeId::U16 => DisplayType::Primitive(PrimitiveType::U16),
+            PrimitiveTypeId::U32 => DisplayType::Primitive(PrimitiveType::U32),
+            PrimitiveTypeId::U64 => DisplayType::Primitive(PrimitiveType::U64),
+            PrimitiveTypeId::F32 => DisplayType::Primitive(PrimitiveType::F32),
+            PrimitiveTypeId::F64 => DisplayType::Primitive(PrimitiveType::F64),
+            PrimitiveTypeId::Bool => DisplayType::Primitive(PrimitiveType::Bool),
+            PrimitiveTypeId::String => DisplayType::Primitive(PrimitiveType::String),
+            PrimitiveTypeId::Range => DisplayType::Range,
         };
         let _ = self.insert_named(ty, name_id);
     }
@@ -84,7 +84,7 @@ impl TypeTable {
         self.array_name
     }
 
-    pub fn insert_named(&mut self, ty: LegacyType, name_id: NameId) -> TypeKey {
+    pub fn insert_named(&mut self, ty: DisplayType, name_id: NameId) -> TypeKey {
         let id = self.insert(TypeInfo {
             ty,
             type_id: None,
@@ -112,14 +112,14 @@ impl TypeTable {
 
     pub fn display_type(
         &self,
-        ty: &LegacyType,
+        ty: &DisplayType,
         names: &NameTable,
         entity_registry: &crate::sema::entity_registry::EntityRegistry,
     ) -> String {
         self.display_type_inner(ty, names, entity_registry)
     }
 
-    /// Display a TypeId directly from SemaType without LegacyType materialization
+    /// Display a TypeId directly from SemaType without DisplayType materialization
     pub fn display_type_id_direct(
         &self,
         type_id: ArenaTypeId,
@@ -301,8 +301,8 @@ impl TypeTable {
         if let Some(key) = self.type_id_lookup.get(&type_id) {
             return *key;
         }
-        // Convert to LegacyType for storage (transitional)
-        let ty = arena.to_type(type_id);
+        // Convert to DisplayType for storage (transitional)
+        let ty = arena.to_display(type_id);
         let key = self.insert(TypeInfo {
             ty,
             type_id: Some(type_id),
@@ -320,26 +320,26 @@ impl TypeTable {
 
     fn display_type_inner(
         &self,
-        ty: &LegacyType,
+        ty: &DisplayType,
         names: &NameTable,
         entity_registry: &crate::sema::entity_registry::EntityRegistry,
     ) -> String {
         match ty {
             // FunctionType only has TypeIds - use arena-based display_type_id_direct for proper names
             // Here we just show the TypeId-based representation
-            LegacyType::Function(ft) => format!("{}", ft),
-            LegacyType::Union(variants) => variants
+            DisplayType::Function(ft) => format!("{}", ft),
+            DisplayType::Union(variants) => variants
                 .iter()
                 .map(|variant| self.display_type_inner(variant, names, entity_registry))
                 .collect::<Vec<_>>()
                 .join(" | "),
-            LegacyType::Array(elem) => {
+            DisplayType::Array(elem) => {
                 format!(
                     "[{}]",
                     self.display_type_inner(elem, names, entity_registry)
                 )
             }
-            LegacyType::Nominal(NominalType::Class(class_type)) => {
+            DisplayType::Nominal(NominalType::Class(class_type)) => {
                 let type_def = entity_registry.get_type(class_type.type_def_id);
                 let base = names.display(type_def.name_id);
                 if class_type.type_args_id.is_empty() {
@@ -349,7 +349,7 @@ impl TypeTable {
                     format!("{}<{} args>", base, class_type.type_args_id.len())
                 }
             }
-            LegacyType::Nominal(NominalType::Record(record_type)) => {
+            DisplayType::Nominal(NominalType::Record(record_type)) => {
                 let type_def = entity_registry.get_type(record_type.type_def_id);
                 let base = names.display(type_def.name_id);
                 if record_type.type_args_id.is_empty() {
@@ -359,7 +359,7 @@ impl TypeTable {
                     format!("{}<{} args>", base, record_type.type_args_id.len())
                 }
             }
-            LegacyType::Nominal(NominalType::Interface(interface_type)) => {
+            DisplayType::Nominal(NominalType::Interface(interface_type)) => {
                 let name_id = entity_registry.name_id(interface_type.type_def_id);
                 let base = names.display(name_id);
                 if interface_type.type_args_id.is_empty() {
@@ -369,27 +369,27 @@ impl TypeTable {
                     format!("{}<{} args>", base, interface_type.type_args_id.len())
                 }
             }
-            LegacyType::Nominal(NominalType::Error(error_type)) => {
+            DisplayType::Nominal(NominalType::Error(error_type)) => {
                 names.display(entity_registry.name_id(error_type.type_def_id))
             }
-            LegacyType::Fallible(ft) => format!(
+            DisplayType::Fallible(ft) => format!(
                 "fallible({}, {})",
                 self.display_type_inner(&ft.success_type, names, entity_registry),
                 self.display_type_inner(&ft.error_type, names, entity_registry)
             ),
-            LegacyType::Module(module_type) => {
+            DisplayType::Module(module_type) => {
                 format!("module(\"{}\")", names.module_path(module_type.module_id))
             }
-            LegacyType::TypeParam(name_id) => {
+            DisplayType::TypeParam(name_id) => {
                 // For TypeParam, display the NameId
                 // In practice, TypeParams should be substituted before display
                 names.display(*name_id)
             }
-            LegacyType::TypeParamRef(type_param_id) => {
+            DisplayType::TypeParamRef(type_param_id) => {
                 // TypeParamRef displays by its internal ID
                 format!("TypeParam#{}", type_param_id.index())
             }
-            LegacyType::Tuple(elements) => {
+            DisplayType::Tuple(elements) => {
                 let elem_list = elements
                     .iter()
                     .map(|elem| self.display_type_inner(elem, names, entity_registry))
@@ -431,7 +431,7 @@ mod tests {
 
         let mut types = TypeTable::new();
         let key = types.insert_named(
-            LegacyType::Nominal(NominalType::Class(crate::sema::ClassType {
+            DisplayType::Nominal(NominalType::Class(crate::sema::ClassType {
                 type_def_id,
                 type_args_id: TypeIdVec::new(),
             })),

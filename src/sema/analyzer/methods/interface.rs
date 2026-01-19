@@ -21,7 +21,7 @@ impl Analyzer {
 
     /// Check if a type structurally satisfies an interface by TypeDefId (TypeId version)
     ///
-    /// This is the TypeId-based version that avoids LegacyType conversion.
+    /// This is the TypeId-based version that avoids DisplayType conversion.
     pub(crate) fn satisfies_interface_by_type_def_id_typeid(
         &mut self,
         ty_id: ArenaTypeId,
@@ -431,7 +431,7 @@ impl Analyzer {
         }
     }
 
-    /// Check if method signature matches using TypeId (avoids LegacyType comparison)
+    /// Check if method signature matches using TypeId (avoids DisplayType comparison)
     fn signatures_match_entity_id(
         required_params_id: &[ArenaTypeId],
         required_return_id: ArenaTypeId,
@@ -484,8 +484,10 @@ impl Analyzer {
             ));
         } else {
             // Check each parameter type
-            for (i, (&req_param, &found_param)) in
-                required_params.iter().zip(found.params_id.iter()).enumerate()
+            for (i, (&req_param, &found_param)) in required_params
+                .iter()
+                .zip(found.params_id.iter())
+                .enumerate()
             {
                 let req_is_invalid = self.type_arena.borrow().is_invalid(req_param);
                 let effective_req = if req_is_invalid {
@@ -591,7 +593,7 @@ impl Analyzer {
                 .unwrap_or_default();
 
             // Convert structural field type to TypeId
-            let expected_type_id = self.type_arena.borrow_mut().from_type(&field.ty);
+            let expected_type_id = self.type_arena.borrow_mut().from_display(&field.ty);
 
             if !self.type_has_field_by_str_id(ty_id, &field_name_str, expected_type_id, interner) {
                 let type_str = self.type_display_id(expected_type_id);

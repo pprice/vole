@@ -16,7 +16,7 @@ impl Cg<'_, '_, '_> {
     pub fn field_access(&mut self, fa: &FieldAccessExpr) -> Result<CompiledValue, String> {
         let obj = self.expr(&fa.object)?;
 
-        // Check for module type using arena methods (no LegacyType conversion)
+        // Check for module type using arena methods (no DisplayType conversion)
         let module_info = {
             let arena = self.ctx.arena.borrow();
             arena.unwrap_module(obj.type_id).map(|m| {
@@ -122,7 +122,7 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(&oc.object)?;
 
         // The object should be an optional type (union with nil)
-        // Use arena methods instead of LegacyType pattern matching
+        // Use arena methods instead of DisplayType pattern matching
         let (_variants, nil_tag, inner_type_id) = {
             let arena = self.ctx.arena.borrow();
             let variants = arena.unwrap_union(obj.type_id).ok_or_else(|| {
@@ -265,7 +265,7 @@ impl Cg<'_, '_, '_> {
         let value = self.expr(value_expr)?;
 
         let field_name = self.ctx.interner.resolve(field);
-        // Use TypeId-based helper to avoid LegacyType conversion
+        // Use TypeId-based helper to avoid DisplayType conversion
         let (slot, field_type_id) = get_field_slot_and_type_id(obj.type_id, field_name, self.ctx)?;
         let value = if self.ctx.arena.borrow().is_interface(field_type_id) {
             box_interface_value_id(self.builder, self.ctx, value, field_type_id)?

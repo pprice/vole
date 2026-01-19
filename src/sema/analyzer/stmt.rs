@@ -45,7 +45,7 @@ impl Analyzer {
                             }
                         }
 
-                        // Use TypeId throughout to avoid LegacyType materialization
+                        // Use TypeId throughout to avoid DisplayType materialization
                         let declared_type_id = let_stmt
                             .ty
                             .as_ref()
@@ -69,8 +69,8 @@ impl Analyzer {
                         if var_type_id == ArenaTypeId::METATYPE
                             && let ExprKind::TypeLiteral(type_expr) = &init_expr.kind
                         {
-                            let aliased_type = self.resolve_type(type_expr, interner);
-                            self.register_type_alias(let_stmt.name, aliased_type, interner);
+                            let aliased_type_id = self.resolve_type_id(type_expr, interner);
+                            self.register_type_alias_id(let_stmt.name, aliased_type_id, interner);
                         }
                         self.scope.define(
                             let_stmt.name,
@@ -85,8 +85,8 @@ impl Analyzer {
                     }
                     LetInit::TypeAlias(type_expr) => {
                         // Type alias: let Numeric = i32 | i64
-                        let aliased_type = self.resolve_type(type_expr, interner);
-                        self.register_type_alias(let_stmt.name, aliased_type, interner);
+                        let aliased_type_id = self.resolve_type_id(type_expr, interner);
+                        self.register_type_alias_id(let_stmt.name, aliased_type_id, interner);
                     }
                 }
             }
@@ -300,7 +300,7 @@ impl Analyzer {
         Ok(())
     }
 
-    /// Recursively check a destructuring pattern against a type using TypeId (avoids LegacyType)
+    /// Recursively check a destructuring pattern against a type using TypeId (avoids DisplayType)
     fn check_destructure_pattern_id(
         &mut self,
         pattern: &Pattern,
@@ -452,7 +452,7 @@ impl Analyzer {
             .last_segment_str(self.entity_registry.name_id(type_id))
             .unwrap_or_else(|| "error".to_string());
 
-        // Build field info from EntityRegistry using TypeId (avoids LegacyType)
+        // Build field info from EntityRegistry using TypeId (avoids DisplayType)
         let error_fields: Vec<(String, ArenaTypeId)> = self
             .entity_registry
             .fields_on_type(type_id)
@@ -511,7 +511,7 @@ impl Analyzer {
         }
 
         // Verify that raised error type is compatible with declared error type
-        // Use arena queries to avoid LegacyType conversion
+        // Use arena queries to avoid DisplayType conversion
         let stmt_error_name = interner.resolve(stmt.error_name);
         let is_compatible = {
             let arena = self.type_arena.borrow();
@@ -570,7 +570,7 @@ impl Analyzer {
         // Check the inner expression - must be fallible
         let inner_type_id = self.check_expr(inner_expr, _interner)?;
 
-        // Use arena.unwrap_fallible to check if fallible (avoids LegacyType)
+        // Use arena.unwrap_fallible to check if fallible (avoids DisplayType)
         let fallible_info = self.type_arena.borrow().unwrap_fallible(inner_type_id);
         let Some((success_type_id, error_type_id)) = fallible_info else {
             let found = self.type_display_id(inner_type_id);

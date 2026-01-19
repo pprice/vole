@@ -30,7 +30,7 @@ pub use query::ProgramQuery;
 pub use resolution::{MethodResolutions, ResolvedMethod};
 pub use type_table::{TypeInfo, TypeKey, TypeTable};
 pub use types::{
-    ClassType, ErrorTypeInfo, FunctionType, LegacyType, ModuleType, PrimitiveType, RecordType,
+    ClassType, DisplayType, ErrorTypeInfo, FunctionType, ModuleType, PrimitiveType, RecordType,
 };
 pub use well_known::{WellKnownMethods, WellKnownTypes};
 

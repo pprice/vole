@@ -5,7 +5,7 @@ use crate::errors::{SemanticError, SemanticWarning};
 use crate::frontend::Span;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::StructuralType;
-use crate::sema::{LegacyType, TypeKey};
+use crate::sema::{DisplayType, TypeKey};
 
 use super::Analyzer;
 
@@ -27,13 +27,13 @@ impl Analyzer {
             .key_for_type_id(id, &self.type_arena.borrow())
     }
 
-    pub(super) fn type_display(&self, ty: &LegacyType) -> String {
+    pub(super) fn type_display(&self, ty: &DisplayType) -> String {
         self.entity_registry
             .type_table
             .display_type(ty, &self.name_table, &self.entity_registry)
     }
 
-    /// Display a type from TypeId (directly from SemaType, no LegacyType materialization)
+    /// Display a type from TypeId (directly from SemaType, no DisplayType materialization)
     pub(super) fn type_display_id(&self, id: ArenaTypeId) -> String {
         self.entity_registry.type_table.display_type_id_direct(
             id,

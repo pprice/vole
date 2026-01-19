@@ -45,7 +45,7 @@ impl Analyzer {
             }
         }
 
-        // Helper to get fields from TypeDef - uses StructFieldId (no LegacyType conversion)
+        // Helper to get fields from TypeDef - uses StructFieldId (no DisplayType conversion)
         let get_fields_from_typedef =
             |type_def: &crate::sema::entity_defs::TypeDef| -> Vec<StructFieldId> {
                 type_def
@@ -162,7 +162,7 @@ impl Analyzer {
                     .is_some_and(|n| n == field_init_name)
             }) {
                 // check_expr_expecting_id will report errors if types don't match
-                // Use TypeId directly - no LegacyType conversion
+                // Use TypeId directly - no DisplayType conversion
                 self.check_expr_expecting_id(&field_init.value, Some(expected_field.ty), interner)?;
             } else {
                 self.add_error(

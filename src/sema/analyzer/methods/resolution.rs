@@ -19,7 +19,7 @@ impl Analyzer {
             .resolve_method(type_def_id, method_name_id)
     }
 
-    /// Resolve a method call using TypeId directly (avoids to_type conversion)
+    /// Resolve a method call using TypeId directly (avoids to_display conversion)
     #[tracing::instrument(skip(self, interner), fields(method = %interner.resolve(method_name)))]
     pub fn resolve_method_via_entity_registry_id(
         &mut self,

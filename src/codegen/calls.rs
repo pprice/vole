@@ -619,7 +619,7 @@ impl Cg<'_, '_, '_> {
         let call_inst = self.builder.ins().call(func_ref, &args);
         let results = self.builder.inst_results(call_inst);
 
-        // Use TypeId directly to avoid LegacyType conversion
+        // Use TypeId directly to avoid DisplayType conversion
         let return_type_id = self
             .ctx
             .func_registry
@@ -925,7 +925,7 @@ impl Cg<'_, '_, '_> {
     }
 }
 
-/// Convert NativeType directly to TypeId (no LegacyType intermediate)
+/// Convert NativeType directly to TypeId (no DisplayType intermediate)
 fn native_type_to_type_id(nt: &NativeType, arena: &mut TypeArena) -> TypeId {
     match nt {
         NativeType::I8 => arena.primitives.i8,

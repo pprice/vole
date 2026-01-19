@@ -238,7 +238,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     // ========== TypeCompatibility delegation helpers ==========
-    // These delegate to the LegacyType methods for convenience during migration
+    // These delegate to the DisplayType methods for convenience during migration
 
     /// Check if type is an integer type (signed or unsigned)
     pub fn type_is_integer(&self, ty: TypeId) -> bool {
@@ -395,7 +395,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Create a float constant with explicit type (for bidirectional inference)
     pub fn float_const(&mut self, n: f64, type_id: TypeId) -> CompiledValue {
-        // Match directly on arena type to avoid LegacyType conversion
+        // Match directly on arena type to avoid DisplayType conversion
         let arena = self.ctx.arena.borrow();
         let (ty, value) = match arena.get(type_id) {
             ArenaType::Primitive(PrimitiveType::F32) => {
@@ -444,7 +444,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Create a CompiledValue from a value and TypeId
     pub fn typed_value_interned(&self, value: Value, type_id: TypeId) -> CompiledValue {
-        // Use type_id_to_cranelift to avoid LegacyType conversion
+        // Use type_id_to_cranelift to avoid DisplayType conversion
         let arena = self.ctx.arena.borrow();
         CompiledValue {
             value,

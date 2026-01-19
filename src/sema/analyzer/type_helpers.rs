@@ -1,7 +1,7 @@
 // src/sema/analyzer/type_helpers.rs
 //
 // TypeId-based type construction and manipulation helpers.
-// These methods work with TypeId directly, avoiding LegacyType materialization.
+// These methods work with TypeId directly, avoiding DisplayType materialization.
 
 #![allow(unused)] // Some methods used conditionally
 
@@ -13,13 +13,13 @@ impl Analyzer {
 
     /// Convert Type to TypeId (interning)
     #[inline]
-    pub(crate) fn type_to_id(&mut self, ty: &LegacyType) -> ArenaTypeId {
-        self.type_arena.borrow_mut().from_type(ty)
+    pub(crate) fn type_to_id(&mut self, ty: &DisplayType) -> ArenaTypeId {
+        self.type_arena.borrow_mut().from_display(ty)
     }
 
     // ========== TypeId-returning type construction ==========
     //
-    // These return TypeId directly, avoiding LegacyType materialization.
+    // These return TypeId directly, avoiding DisplayType materialization.
     // For primitives and special types, we use reserved TypeId constants
     // which require no arena access at all.
 

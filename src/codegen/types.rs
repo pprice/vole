@@ -137,7 +137,7 @@ pub(crate) struct CompileCtx<'a> {
     /// Interface vtable registry (interface + concrete type -> data id)
     pub interface_vtables: &'a RefCell<crate::codegen::interface_vtable::InterfaceVtableRegistry>,
     /// Current function's return type (needed for raise statements in fallible functions)
-    /// Stored as TypeId for O(1) equality; convert via arena.to_type() when needed
+    /// Stored as TypeId for O(1) equality; convert via arena.to_display() when needed
     pub current_function_return_type: Option<TypeId>,
     /// Registry of native functions for external method calls
     pub native_registry: &'a NativeRegistry,
@@ -195,7 +195,7 @@ impl<'a> CompileCtx<'a> {
 }
 
 /// Resolve a type expression to a TypeId (uses CompileCtx for full context)
-/// This is the TypeId-based version that avoids intermediate LegacyType allocation
+/// This is the TypeId-based version that avoids intermediate DisplayType allocation
 /// when callers only need a TypeId.
 pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
     let module_id = ctx
@@ -269,7 +269,7 @@ pub(crate) fn function_name_id_with_interner(
     namer.function(module, name)
 }
 
-/// Resolve a type expression directly to TypeId (no LegacyType intermediate).
+/// Resolve a type expression directly to TypeId (no DisplayType intermediate).
 /// Use this function when you don't need to handle generic interface method substitution.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_type_expr_to_id(
@@ -621,7 +621,7 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
     }
 }
 
-/// Get the size in bytes for a TypeId (no LegacyType conversion)
+/// Get the size in bytes for a TypeId (no DisplayType conversion)
 pub(crate) fn type_id_size(
     ty: TypeId,
     pointer_type: Type,
@@ -840,7 +840,7 @@ pub(crate) fn value_to_word(
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
     let arena_ref = arena.borrow();
-    // Use type_id_size to avoid LegacyType conversion for size calculation
+    // Use type_id_size to avoid DisplayType conversion for size calculation
     let value_size = type_id_size(value.type_id, pointer_type, entity_registry, &arena_ref);
     let needs_box = value_size > word_bytes;
 
@@ -906,7 +906,7 @@ pub(crate) fn value_to_word(
 }
 
 /// Convert a uniform word representation back into a typed value using TypeId.
-/// Native TypeId version that avoids LegacyType conversion.
+/// Native TypeId version that avoids DisplayType conversion.
 pub(crate) fn word_to_value_type_id(
     builder: &mut FunctionBuilder,
     word: Value,

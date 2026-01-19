@@ -33,7 +33,7 @@ impl Analyzer {
                 let obj_ty_id = self.check_expr(object, interner)?;
                 let field_name = interner.resolve(*field);
 
-                // Use arena queries to check class/record types (avoids LegacyType)
+                // Use arena queries to check class/record types (avoids DisplayType)
                 let struct_info = {
                     let arena = self.type_arena.borrow();
                     if let Some((id, args)) = arena.unwrap_class(obj_ty_id) {
@@ -291,7 +291,7 @@ impl Analyzer {
                 let obj_ty_id = self.check_expr(object, interner)?;
                 let field_name = interner.resolve(*field);
 
-                // Use arena queries to check class/record types (avoids LegacyType)
+                // Use arena queries to check class/record types (avoids DisplayType)
                 let struct_info = {
                     let arena = self.type_arena.borrow();
                     if let Some((id, args)) = arena.unwrap_class(obj_ty_id) {

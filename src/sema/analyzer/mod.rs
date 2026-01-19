@@ -30,7 +30,7 @@ use crate::sema::implement_registry::{
 use crate::sema::resolution::{MethodResolutions, ResolvedMethod};
 use crate::sema::resolve::resolve_type_to_id;
 use crate::sema::type_arena::{TypeArena, TypeId as ArenaTypeId};
-use crate::sema::types::{ConstantValue, LegacyType, ModuleType, NominalType, StructuralType};
+use crate::sema::types::{ConstantValue, DisplayType, ModuleType, NominalType, StructuralType};
 use crate::sema::{
     ErrorTypeInfo, FunctionType, PrimitiveType, RecordType,
     resolve::{TypeResolutionContext, resolve_type},
@@ -181,7 +181,7 @@ pub struct Analyzer {
     lambda_side_effects: Vec<bool>,
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their interned type handles for O(1) equality.
-    /// Converted to LegacyType at boundaries when passed to codegen.
+    /// Converted to DisplayType at boundaries when passed to codegen.
     expr_types: HashMap<NodeId, ArenaTypeId>,
     /// Methods added via implement blocks
     pub implement_registry: ImplementRegistry,
@@ -215,7 +215,7 @@ pub struct Analyzer {
     /// Entity registry for first-class type/method/field/function identity (includes type_table)
     pub entity_registry: EntityRegistry,
     /// Stack of type parameter scopes for nested generic contexts.
-    /// Used for resolving methods on LegacyType::TypeParam via constraint interfaces.
+    /// Used for resolving methods on DisplayType::TypeParam via constraint interfaces.
     type_param_stack: TypeParamScopeStack,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
@@ -305,7 +305,7 @@ impl Analyzer {
     // Type inference: inference.rs
 
     /// Get the resolved expression types as interned ArenaTypeId handles.
-    /// Use type_arena.to_type() to convert back to LegacyType if needed.
+    /// Use type_arena.to_display() to convert back to DisplayType if needed.
     pub fn expr_types(&self) -> &HashMap<NodeId, ArenaTypeId> {
         &self.expr_types
     }
@@ -331,7 +331,7 @@ impl Analyzer {
     /// Take ownership of analysis results (consuming self)
     pub fn into_analysis_results(self) -> AnalysisOutput {
         // Pass Types directly - ExpressionData now stores Type handles
-        // and has access to the shared arena for LegacyType conversion
+        // and has access to the shared arena for DisplayType conversion
         let expression_data = ExpressionData::from_analysis(
             self.expr_types,
             self.method_resolutions.into_inner(),
@@ -400,7 +400,7 @@ impl Analyzer {
         }
     }
 
-    fn register_named_type(&mut self, name: Symbol, ty: LegacyType, interner: &Interner) {
+    fn register_named_type(&mut self, name: Symbol, ty: DisplayType, interner: &Interner) {
         let name_id = self
             .name_table
             .intern(self.current_module, &[name], interner);
@@ -541,11 +541,7 @@ impl Analyzer {
         }
     }
 
-    fn resolve_type(&mut self, ty: &TypeExpr, interner: &Interner) -> LegacyType {
-        self.resolve_type_with_self(ty, interner, None)
-    }
-
-    /// Resolve a type expression directly to TypeId (no LegacyType intermediate)
+    /// Resolve a type expression directly to TypeId (no DisplayType intermediate)
     pub(crate) fn resolve_type_id(&mut self, ty: &TypeExpr, interner: &Interner) -> ArenaTypeId {
         self.resolve_type_id_with_self(ty, interner, None)
     }
@@ -570,45 +566,20 @@ impl Analyzer {
         resolve_type_to_id(ty, &mut ctx)
     }
 
-    /// Resolve a type expression with an optional Self type for method signatures
-    fn resolve_type_with_self(
-        &mut self,
-        ty: &TypeExpr,
-        interner: &Interner,
-        self_type: Option<LegacyType>,
-    ) -> LegacyType {
-        let module_id = self.current_module;
-        // Convert self_type from LegacyType to TypeId
-        let self_type_id = self_type
-            .as_ref()
-            .map(|t| self.type_arena.borrow_mut().from_type(t));
-        let mut ctx = TypeResolutionContext {
-            entity_registry: &self.entity_registry,
-            interner,
-            name_table: &mut self.name_table,
-            module_id,
-            // Propagate type param scope to nested contexts (lambdas, etc.)
-            type_params: self.type_param_stack.current(),
-            self_type: self_type_id,
-            type_arena: &self.type_arena,
-        };
-        resolve_type(ty, &mut ctx)
-    }
-
     /// Pass 0: Collect type aliases (so they're available for function signatures)
     fn collect_type_aliases(&mut self, program: &Program, interner: &Interner) {
         for decl in &program.declarations {
             if let Decl::Let(let_stmt) = decl {
                 match &let_stmt.init {
                     LetInit::TypeAlias(type_expr) => {
-                        let aliased_type = self.resolve_type(type_expr, interner);
-                        self.register_type_alias(let_stmt.name, aliased_type, interner);
+                        let aliased_type_id = self.resolve_type_id(type_expr, interner);
+                        self.register_type_alias_id(let_stmt.name, aliased_type_id, interner);
                     }
                     LetInit::Expr(init_expr) => {
                         // Legacy: handle let X: type = SomeType
                         if let ExprKind::TypeLiteral(type_expr) = &init_expr.kind {
-                            let aliased_type = self.resolve_type(type_expr, interner);
-                            self.register_type_alias(let_stmt.name, aliased_type, interner);
+                            let aliased_type_id = self.resolve_type_id(type_expr, interner);
+                            self.register_type_alias_id(let_stmt.name, aliased_type_id, interner);
                         }
                     }
                 }
@@ -617,7 +588,12 @@ impl Analyzer {
     }
 
     /// Register a type alias in EntityRegistry
-    fn register_type_alias(&mut self, name: Symbol, aliased_type: LegacyType, interner: &Interner) {
+    fn register_type_alias_id(
+        &mut self,
+        name: Symbol,
+        aliased_type_id: ArenaTypeId,
+        interner: &Interner,
+    ) {
         // Lookup shell registered in register_all_type_shells
         let name_id = self
             .name_table
@@ -626,15 +602,15 @@ impl Analyzer {
             .entity_registry
             .type_by_name(name_id)
             .expect("alias shell registered in register_all_type_shells");
-        // Convert to ArenaTypeId first, then use TypeId-native key_for_type_id
-        let aliased_type_id = self.type_arena.borrow_mut().from_type(&aliased_type);
+        // Use TypeId-native key_for_type_id (no DisplayType needed)
         let type_key = self
             .entity_registry
             .type_table
             .key_for_type_id(aliased_type_id, &self.type_arena.borrow());
         self.entity_registry
             .set_aliased_type(type_id, aliased_type_id, type_key);
-        // Also in type_table for display
+        // Also in type_table for display - materialize DisplayType on demand (transitional)
+        let aliased_type = self.type_arena.borrow().to_display(aliased_type_id);
         self.entity_registry
             .type_table
             .insert_named(aliased_type, name_id);
@@ -673,7 +649,7 @@ impl Analyzer {
                             }
                         }
 
-                        // Use TypeId throughout to avoid LegacyType materialization
+                        // Use TypeId throughout to avoid DisplayType materialization
                         let declared_type_id = let_stmt
                             .ty
                             .as_ref()
@@ -697,8 +673,8 @@ impl Analyzer {
                         if var_type_id == ArenaTypeId::METATYPE
                             && let ExprKind::TypeLiteral(type_expr) = &init_expr.kind
                         {
-                            let aliased_type = self.resolve_type(type_expr, interner);
-                            self.register_type_alias(let_stmt.name, aliased_type, interner);
+                            let aliased_type_id = self.resolve_type_id(type_expr, interner);
+                            self.register_type_alias_id(let_stmt.name, aliased_type_id, interner);
                         }
                         self.globals.insert(let_stmt.name, var_type_id);
                         self.scope.define(
@@ -914,7 +890,7 @@ impl Analyzer {
 
         self.register_named_type(
             decl.name,
-            LegacyType::Nominal(NominalType::Error(error_info.clone())),
+            DisplayType::Nominal(NominalType::Error(error_info.clone())),
             interner,
         );
 
@@ -982,7 +958,7 @@ impl Analyzer {
                         if type_def.kind == TypeDefKind::Alias
                             && let Some(aliased_type_id) = type_def.aliased_type
                         {
-                            // Use TypeId directly (avoids to_type conversion)
+                            // Use TypeId directly (avoids to_display conversion)
                             let arena = self.type_arena.borrow();
                             let type_ids =
                                 if let Some(variants) = arena.unwrap_union(aliased_type_id) {
@@ -1074,7 +1050,7 @@ impl Analyzer {
     }
 
     /// Check type param constraints (TypeId version - direct).
-    /// Works with TypeIds throughout where possible, avoiding LegacyType materialization.
+    /// Works with TypeIds throughout where possible, avoiding DisplayType materialization.
     fn check_type_param_constraints_id(
         &mut self,
         type_params: &[TypeParamInfo],
@@ -1131,7 +1107,7 @@ impl Analyzer {
                     // Convert union variants to TypeIds and check compatibility
                     let variant_ids: Vec<ArenaTypeId> = {
                         let mut arena = self.type_arena.borrow_mut();
-                        variants.iter().map(|v| arena.from_type(v)).collect()
+                        variants.iter().map(|v| arena.from_display(v)).collect()
                     };
                     let expected_id = self.type_arena.borrow_mut().union(variant_ids);
                     let is_compatible = {
@@ -1369,7 +1345,7 @@ impl Analyzer {
         Ok(())
     }
 
-    /// Extract the element type from an Iterator<T> type using TypeId (avoids LegacyType)
+    /// Extract the element type from an Iterator<T> type using TypeId (avoids DisplayType)
     fn extract_iterator_element_type_id(&self, ty_id: ArenaTypeId) -> Option<ArenaTypeId> {
         let interface_info = {
             let arena = self.type_arena.borrow();
@@ -1570,10 +1546,10 @@ impl Analyzer {
         import_path: &str,
         span: Span,
         _interner: &Interner,
-    ) -> Result<LegacyType, ()> {
+    ) -> Result<DisplayType, ()> {
         // Check cache first
         if let Some(module_type) = self.module_types.get(import_path) {
-            return Ok(LegacyType::Module(module_type.clone()));
+            return Ok(DisplayType::Module(module_type.clone()));
         }
 
         // Load the module
@@ -1641,7 +1617,9 @@ impl Analyzer {
                             .as_ref()
                             .map(|rt| resolve_type_to_id(rt, &mut ctx))
                             .unwrap_or_else(|| self.type_arena.borrow().void());
-                        self.type_arena.borrow_mut().function(param_ids, return_id, false)
+                        self.type_arena
+                            .borrow_mut()
+                            .function(param_ids, return_id, false)
                     };
 
                     // Store export by name string
@@ -1700,7 +1678,9 @@ impl Analyzer {
                                 .as_ref()
                                 .map(|rt| resolve_type_to_id(rt, &mut ctx))
                                 .unwrap_or_else(|| self.type_arena.borrow().void());
-                            self.type_arena.borrow_mut().function(param_ids, return_id, false)
+                            self.type_arena
+                                .borrow_mut()
+                                .function(param_ids, return_id, false)
                         };
 
                         let name_id =
@@ -1729,7 +1709,7 @@ impl Analyzer {
         self.module_programs
             .insert(import_path.to_string(), (program, module_interner));
 
-        Ok(LegacyType::Module(module_type))
+        Ok(DisplayType::Module(module_type))
     }
 }
 
