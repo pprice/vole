@@ -93,6 +93,13 @@ impl FunctionType {
             return_type_id: return_id,
         }
     }
+
+    /// Intern this FunctionType into the arena, returning its TypeId.
+    /// This consolidates the function type internment logic that was spread
+    /// across codegen. Use this instead of calling arena.function() directly.
+    pub fn intern(&self, arena: &mut TypeArena) -> TypeId {
+        arena.function(self.params_id.clone(), self.return_type_id, self.is_closure)
+    }
 }
 
 impl std::fmt::Display for FunctionType {

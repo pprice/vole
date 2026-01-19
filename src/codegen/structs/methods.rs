@@ -52,11 +52,7 @@ impl Cg<'_, '_, '_> {
             .query()
             .method_at_in_module(expr_id, self.ctx.current_module)
         {
-            let func_type_id = self.ctx.arena.borrow_mut().function(
-                func_type.params_id.clone(),
-                func_type.return_type_id,
-                func_type.is_closure,
-            );
+            let func_type_id = func_type.intern(&mut self.ctx.arena.borrow_mut());
             return self.static_method_call(*type_def_id, *method_id, func_type_id, mc, expr_id);
         }
 
