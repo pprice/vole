@@ -5,11 +5,9 @@ use crate::sema::type_arena::TypeId as ArenaTypeId;
 use crate::sema::types::LegacyType;
 use std::collections::HashSet;
 
-#[allow(dead_code)]
 impl Analyzer {
-    /// Check type compatibility using TypeId (Phase 3 version).
+    /// Check type compatibility using TypeId.
     /// Uses TypeId-based interface checks where possible.
-    #[allow(unused)] // Phase 3 infrastructure
     pub(crate) fn types_compatible_id(
         &mut self,
         from: ArenaTypeId,
@@ -83,27 +81,6 @@ impl Analyzer {
         }
 
         false
-    }
-
-    fn interface_extends_by_name_id(
-        &self,
-        derived: NameId,
-        base: NameId,
-        _interner: &Interner,
-    ) -> bool {
-        if derived == base {
-            return true;
-        }
-
-        // Look up TypeDefIds via EntityRegistry
-        let derived_id = self.entity_registry.type_by_name(derived);
-        let base_id = self.entity_registry.type_by_name(base);
-
-        let (Some(derived_id), Some(base_id)) = (derived_id, base_id) else {
-            return false;
-        };
-
-        self.interface_extends_by_type_def_id(derived_id, base_id)
     }
 
     fn interface_extends_by_type_def_id(&self, derived: TypeDefId, base: TypeDefId) -> bool {
