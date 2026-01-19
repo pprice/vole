@@ -4,7 +4,7 @@ use crate::frontend::Symbol;
 use crate::identity::NameId;
 use crate::sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
 use crate::sema::type_table::TypeTable;
-use crate::sema::types::{FunctionType, LegacyType, NominalType, PrimitiveType};
+use crate::sema::types::{FunctionType, PrimitiveType};
 use std::collections::HashMap;
 
 /// Identifier for primitive types
@@ -59,46 +59,7 @@ impl ImplTypeId {
         ImplTypeId(name_id)
     }
 
-    /// Convert a Type to an ImplTypeId for registry lookup
-    pub fn from_type(
-        ty: &LegacyType,
-        types: &TypeTable,
-        entity_registry: &crate::sema::entity_registry::EntityRegistry,
-    ) -> Option<Self> {
-        match ty {
-            LegacyType::Primitive(prim) => {
-                let prim_id = match prim {
-                    PrimitiveType::I8 => PrimitiveTypeId::I8,
-                    PrimitiveType::I16 => PrimitiveTypeId::I16,
-                    PrimitiveType::I32 => PrimitiveTypeId::I32,
-                    PrimitiveType::I64 => PrimitiveTypeId::I64,
-                    PrimitiveType::I128 => PrimitiveTypeId::I128,
-                    PrimitiveType::U8 => PrimitiveTypeId::U8,
-                    PrimitiveType::U16 => PrimitiveTypeId::U16,
-                    PrimitiveType::U32 => PrimitiveTypeId::U32,
-                    PrimitiveType::U64 => PrimitiveTypeId::U64,
-                    PrimitiveType::F32 => PrimitiveTypeId::F32,
-                    PrimitiveType::F64 => PrimitiveTypeId::F64,
-                    PrimitiveType::Bool => PrimitiveTypeId::Bool,
-                    PrimitiveType::String => PrimitiveTypeId::String,
-                };
-                types.primitive_name_id(prim_id).map(ImplTypeId)
-            }
-            LegacyType::Range => types
-                .primitive_name_id(PrimitiveTypeId::Range)
-                .map(ImplTypeId),
-            LegacyType::Array(_) => types.array_name_id().map(ImplTypeId),
-            LegacyType::Nominal(NominalType::Class(c)) => {
-                Some(ImplTypeId(entity_registry.class_name_id(c)))
-            }
-            LegacyType::Nominal(NominalType::Record(r)) => {
-                Some(ImplTypeId(entity_registry.record_name_id(r)))
-            }
-            _ => None,
-        }
-    }
-
-    /// Convert a TypeId to an ImplTypeId for registry lookup (no LegacyType conversion needed)
+    /// Convert a TypeId to an ImplTypeId for registry lookup
     pub fn from_type_id(
         ty: TypeId,
         arena: &TypeArena,
