@@ -751,15 +751,8 @@ impl Analyzer {
         // Get the method name_id
         let method_name_id = self.method_name_id(method_sym, interner);
 
-        // Create type keys for the type arguments using TypeId
-        let type_keys: Vec<_> = type_args_id
-            .iter()
-            .map(|&id| {
-                self.entity_registry
-                    .type_table
-                    .key_for_type_id(id, &self.type_arena.borrow())
-            })
-            .collect();
+        // Use TypeIds directly as keys
+        let type_keys: Vec<_> = type_args_id.iter().copied().collect();
 
         // Create the monomorph key
         let key = ClassMethodMonomorphKey::new(class_name_id, method_name_id, type_keys);
@@ -845,26 +838,16 @@ impl Analyzer {
         // Get the method name_id
         let method_name_id = self.method_name_id(method_sym, interner);
 
-        // Create type keys for class type params (in type param order) using TypeId
+        // Use TypeIds directly as keys for class type params
         let class_type_keys: Vec<_> = class_type_params
             .iter()
-            .filter_map(|tp| inferred.get(&tp.name_id))
-            .map(|&id| {
-                self.entity_registry
-                    .type_table
-                    .key_for_type_id(id, &self.type_arena.borrow())
-            })
+            .filter_map(|tp| inferred.get(&tp.name_id).copied())
             .collect();
 
-        // Create type keys for method type params (in type param order) using TypeId
+        // Use TypeIds directly as keys for method type params
         let method_type_keys: Vec<_> = method_type_params
             .iter()
-            .filter_map(|tp| inferred.get(&tp.name_id))
-            .map(|&id| {
-                self.entity_registry
-                    .type_table
-                    .key_for_type_id(id, &self.type_arena.borrow())
-            })
+            .filter_map(|tp| inferred.get(&tp.name_id).copied())
             .collect();
 
         // Create the monomorph key with separate class and method type keys

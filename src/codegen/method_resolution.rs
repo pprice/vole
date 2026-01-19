@@ -165,7 +165,6 @@ pub(crate) fn resolve_method_target_id(
                 let type_id = ImplTypeId::from_type_id(
                     input.object_type_id,
                     &input.analyzed.type_arena.borrow(),
-                    &input.analyzed.entity_registry.type_table,
                     &input.analyzed.entity_registry,
                 )
                 .ok_or_else(|| {
@@ -276,7 +275,6 @@ pub(crate) fn resolve_method_target_id(
         if let Some(type_id) = ImplTypeId::from_type_id(
             input.object_type_id,
             &input.analyzed.type_arena.borrow(),
-            &input.analyzed.entity_registry.type_table,
             &input.analyzed.entity_registry,
         ) && let Some(method_info) = input
             .impl_method_infos
@@ -293,7 +291,6 @@ pub(crate) fn resolve_method_target_id(
         if let Some(type_id) = ImplTypeId::from_type_id(
             input.object_type_id,
             &input.analyzed.type_arena.borrow(),
-            &input.analyzed.entity_registry.type_table,
             &input.analyzed.entity_registry,
         ) && let Some(method_info) = input
             .impl_method_infos
@@ -321,7 +318,6 @@ pub(crate) fn resolve_method_target_id(
     if let Some(type_id) = ImplTypeId::from_type_id(
         input.object_type_id,
         &input.analyzed.type_arena.borrow(),
-        &input.analyzed.entity_registry.type_table,
         &input.analyzed.entity_registry,
     ) && let Ok(method_info) = lookup_impl_method(type_id)
     {

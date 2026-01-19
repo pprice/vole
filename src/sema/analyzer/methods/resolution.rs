@@ -242,12 +242,7 @@ impl Analyzer {
         let method_name_id = self.method_name_id(method_name, interner);
         let impl_type_id = {
             let arena = self.type_arena.borrow();
-            ImplTypeId::from_type_id(
-                object_type_id,
-                &arena,
-                &self.entity_registry.type_table,
-                &self.entity_registry,
-            )
+            ImplTypeId::from_type_id(object_type_id, &arena, &self.entity_registry)
         };
         if let Some(impl_type_id) = impl_type_id
             && let Some(impl_) = self

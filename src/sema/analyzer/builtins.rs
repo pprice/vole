@@ -52,12 +52,10 @@ impl Analyzer {
         let method_iter = method_id("iter");
         let array_id = self
             .entity_registry
-            .type_table
             .array_name_id()
             .map(ImplTypeId::from_name_id);
         let string_id = self
             .entity_registry
-            .type_table
             .primitive_name_id(PrimitiveTypeId::String)
             .map(ImplTypeId::from_name_id);
 
@@ -106,7 +104,6 @@ impl Analyzer {
         // Range.iter() -> Iterator<i64>
         let range_id = self
             .entity_registry
-            .type_table
             .primitive_name_id(PrimitiveTypeId::Range)
             .map(ImplTypeId::from_name_id);
         if let Some(type_id) = range_id {
@@ -152,13 +149,9 @@ impl Analyzer {
             } else {
                 namer.intern_raw(builtin_module, &[prim.name()])
             };
-            self.entity_registry
-                .type_table
-                .register_primitive_name(prim, name_id);
+            self.entity_registry.register_primitive_name(prim, name_id);
         }
         let array_name = namer.intern_raw(builtin_module, &["array"]);
-        self.entity_registry
-            .type_table
-            .register_array_name(array_name);
+        self.entity_registry.register_array_name(array_name);
     }
 }

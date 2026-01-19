@@ -149,10 +149,7 @@ impl Analyzer {
                     type_args = ?type_args_id.iter().map(|&id| self.type_display_id(id)).collect::<Vec<_>>(),
                     "generic instantiation"
                 );
-                let type_keys = type_args_id
-                    .iter()
-                    .map(|&id| self.type_key_for_id(id))
-                    .collect();
+                let type_keys: Vec<_> = type_args_id.to_vec();
                 let module_id = self.name_table.main_module();
                 let name_id = {
                     let mut namer = Namer::new(&mut self.name_table, interner);

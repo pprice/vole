@@ -164,12 +164,7 @@ impl Analyzer {
         if type_def_id.is_none() {
             let impl_type_id = {
                 let arena = self.type_arena.borrow();
-                ImplTypeId::from_type_id(
-                    ty_id,
-                    &arena,
-                    &self.entity_registry.type_table,
-                    &self.entity_registry,
-                )
+                ImplTypeId::from_type_id(ty_id, &arena, &self.entity_registry)
             };
             if let Some(impl_type_id) = impl_type_id
                 && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
@@ -199,12 +194,7 @@ impl Analyzer {
         // Check implement registry (using TypeId)
         let impl_type_id = {
             let arena = self.type_arena.borrow();
-            ImplTypeId::from_type_id(
-                ty_id,
-                &arena,
-                &self.entity_registry.type_table,
-                &self.entity_registry,
-            )
+            ImplTypeId::from_type_id(ty_id, &arena, &self.entity_registry)
         };
         if let Some(impl_type_id) = impl_type_id
             && let Some(method_id) = self.method_name_id_by_str(method_name, interner)

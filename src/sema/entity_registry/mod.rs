@@ -19,8 +19,8 @@ use std::collections::{HashMap, HashSet};
 use crate::identity::{FieldId, FunctionId, MethodId, NameId, TypeDefId};
 use crate::sema::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 use crate::sema::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
-use crate::sema::type_arena::TypeIdVec;
-use crate::sema::type_table::{TypeKey, TypeTable};
+use crate::sema::implement_registry::PrimitiveTypeId;
+use crate::sema::type_arena::{TypeId as ArenaTypeId, TypeIdVec};
 
 /// Central registry for all language entities
 #[derive(Debug, Clone)]
@@ -43,11 +43,13 @@ pub struct EntityRegistry {
     // Static method lookups: (type, static_method_name) -> MethodId
     pub(crate) static_methods_by_type: HashMap<TypeDefId, HashMap<NameId, MethodId>>,
 
-    // Alias index: maps a TypeKey to all aliases that resolve to that type
-    pub(crate) alias_index: HashMap<TypeKey, Vec<TypeDefId>>,
+    // Alias index: maps a TypeId to all aliases that resolve to that type
+    pub(crate) alias_index: HashMap<ArenaTypeId, Vec<TypeDefId>>,
 
-    /// Type interning table for deduplication and display
-    pub type_table: TypeTable,
+    /// NameIds for primitive types (for method dispatch)
+    pub(crate) primitive_names: HashMap<PrimitiveTypeId, NameId>,
+    /// NameId for the array type (for method dispatch)
+    pub(crate) array_name: Option<NameId>,
 
     /// Cache of monomorphized generic function instances
     pub monomorph_cache: MonomorphCache,
@@ -74,7 +76,8 @@ impl EntityRegistry {
             fields_by_type: HashMap::new(),
             static_methods_by_type: HashMap::new(),
             alias_index: HashMap::new(),
-            type_table: TypeTable::new(),
+            primitive_names: HashMap::new(),
+            array_name: None,
             monomorph_cache: MonomorphCache::new(),
             class_method_monomorph_cache: ClassMethodMonomorphCache::new(),
             static_method_monomorph_cache: StaticMethodMonomorphCache::new(),
@@ -118,15 +121,13 @@ impl EntityRegistry {
     }
 
     /// Set the aliased type for a type alias
-    pub fn set_aliased_type(
-        &mut self,
-        type_id: TypeDefId,
-        aliased_type: crate::sema::type_arena::TypeId,
-        type_key: TypeKey,
-    ) {
+    pub fn set_aliased_type(&mut self, type_id: TypeDefId, aliased_type: ArenaTypeId) {
         self.type_defs[type_id.index() as usize].aliased_type = Some(aliased_type);
-        // Update the alias index for inverse lookups
-        self.alias_index.entry(type_key).or_default().push(type_id);
+        // Update the alias index for inverse lookups (use TypeId directly as key)
+        self.alias_index
+            .entry(aliased_type)
+            .or_default()
+            .push(type_id);
     }
 
     /// Check if derived extends base (transitive)
@@ -300,20 +301,16 @@ impl EntityRegistry {
 
     /// Get all type aliases that resolve to a given type.
     /// Returns an empty slice if no aliases point to this type.
-    pub fn aliases_for(&self, type_key: TypeKey) -> &[TypeDefId] {
-        self.alias_index
-            .get(&type_key)
-            .map_or(&[], |v| v.as_slice())
+    pub fn aliases_for(&self, type_id: ArenaTypeId) -> &[TypeDefId] {
+        self.alias_index.get(&type_id).map_or(&[], |v| v.as_slice())
     }
 
     /// Register a type alias and update the alias index.
-    /// The type_key should be obtained from TypeTable::key_for_type for the aliased type.
     pub fn register_alias(
         &mut self,
         name_id: NameId,
         module: crate::identity::ModuleId,
-        aliased_type: crate::sema::type_arena::TypeId,
-        type_key: TypeKey,
+        aliased_type: ArenaTypeId,
     ) -> TypeDefId {
         // Register the type with kind Alias
         let id = TypeDefId::new(self.type_defs.len() as u32);
@@ -337,8 +334,8 @@ impl EntityRegistry {
         self.fields_by_type.insert(id, HashMap::new());
         self.static_methods_by_type.insert(id, HashMap::new());
 
-        // Update the alias index for inverse lookups
-        self.alias_index.entry(type_key).or_default().push(id);
+        // Update the alias index for inverse lookups (use TypeId directly as key)
+        self.alias_index.entry(aliased_type).or_default().push(id);
 
         id
     }
@@ -493,11 +490,40 @@ impl EntityRegistry {
             }
         }
 
-        // Type table: take other's (it was cloned from ours, so it has all our types plus new ones)
-        self.type_table = other.type_table.clone();
+        // Primitive names and array name: merge from other
+        for (prim, name_id) in &other.primitive_names {
+            self.primitive_names.entry(*prim).or_insert(*name_id);
+        }
+        if self.array_name.is_none() {
+            self.array_name = other.array_name;
+        }
 
         // Monomorph cache: take other's (it was cloned from ours, so it has all our instances plus new ones)
         self.monomorph_cache = other.monomorph_cache.clone();
+    }
+
+    // ===== Primitive/Array Names =====
+
+    /// Register a NameId for a primitive type
+    pub fn register_primitive_name(&mut self, prim: PrimitiveTypeId, name_id: NameId) {
+        self.primitive_names.entry(prim).or_insert(name_id);
+    }
+
+    /// Register the NameId for the array type
+    pub fn register_array_name(&mut self, name_id: NameId) {
+        if self.array_name.is_none() {
+            self.array_name = Some(name_id);
+        }
+    }
+
+    /// Get the NameId for a primitive type
+    pub fn primitive_name_id(&self, prim: PrimitiveTypeId) -> Option<NameId> {
+        self.primitive_names.get(&prim).copied()
+    }
+
+    /// Get the NameId for the array type
+    pub fn array_name_id(&self) -> Option<NameId> {
+        self.array_name
     }
 }
 

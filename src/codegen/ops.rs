@@ -66,13 +66,9 @@ impl Cg<'_, '_, '_> {
     fn call_to_string(&mut self, val: &CompiledValue) -> Result<Value, String> {
         // Look up the to_string method in the implement registry (no DisplayType conversion)
         let arena = self.ctx.arena.borrow();
-        let impl_type_id = ImplTypeId::from_type_id(
-            val.type_id,
-            &arena,
-            &self.ctx.analyzed.entity_registry.type_table,
-            &self.ctx.analyzed.entity_registry,
-        )
-        .ok_or_else(|| format!("Cannot find ImplTypeId for type_id {:?}", val.type_id))?;
+        let impl_type_id =
+            ImplTypeId::from_type_id(val.type_id, &arena, &self.ctx.analyzed.entity_registry)
+                .ok_or_else(|| format!("Cannot find ImplTypeId for type_id {:?}", val.type_id))?;
         drop(arena);
 
         // Look up to_string method via query

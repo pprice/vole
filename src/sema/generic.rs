@@ -6,7 +6,6 @@
 
 use crate::frontend::Symbol;
 use crate::identity::{NameId, TypeParamId};
-use crate::sema::TypeKey;
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_arena::{InternedStructural, TypeId as ArenaTypeId};
 use crate::sema::types::FunctionType;
@@ -499,12 +498,12 @@ pub struct MonomorphKey {
     /// Original generic function name
     pub func_name: NameId,
     /// Opaque type keys for concrete types
-    pub type_keys: Vec<TypeKey>,
+    pub type_keys: Vec<ArenaTypeId>,
 }
 
 impl MonomorphKey {
     /// Create a key from function name and concrete type arguments
-    pub fn new(func_name: NameId, type_keys: Vec<TypeKey>) -> Self {
+    pub fn new(func_name: NameId, type_keys: Vec<ArenaTypeId>) -> Self {
         Self {
             func_name,
             type_keys,
@@ -568,12 +567,12 @@ pub struct ClassMethodMonomorphKey {
     /// The method's NameId
     pub method_name: NameId,
     /// Opaque type keys for the class's concrete type arguments
-    pub type_keys: Vec<TypeKey>,
+    pub type_keys: Vec<ArenaTypeId>,
 }
 
 impl ClassMethodMonomorphKey {
     /// Create a new key for a class method monomorphization
-    pub fn new(class_name: NameId, method_name: NameId, type_keys: Vec<TypeKey>) -> Self {
+    pub fn new(class_name: NameId, method_name: NameId, type_keys: Vec<ArenaTypeId>) -> Self {
         Self {
             class_name,
             method_name,
@@ -630,9 +629,9 @@ pub struct StaticMethodMonomorphKey {
     /// The method's NameId
     pub method_name: NameId,
     /// Opaque type keys for the class's concrete type arguments (e.g., T in Box<T>)
-    pub class_type_keys: Vec<TypeKey>,
+    pub class_type_keys: Vec<ArenaTypeId>,
     /// Opaque type keys for the method's concrete type arguments (e.g., U in func convert<U>)
-    pub method_type_keys: Vec<TypeKey>,
+    pub method_type_keys: Vec<ArenaTypeId>,
 }
 
 impl StaticMethodMonomorphKey {
@@ -640,8 +639,8 @@ impl StaticMethodMonomorphKey {
     pub fn new(
         class_name: NameId,
         method_name: NameId,
-        class_type_keys: Vec<TypeKey>,
-        method_type_keys: Vec<TypeKey>,
+        class_type_keys: Vec<ArenaTypeId>,
+        method_type_keys: Vec<ArenaTypeId>,
     ) -> Self {
         Self {
             class_name,
@@ -726,15 +725,11 @@ mod tests {
         let mut interner = crate::frontend::Interner::new();
         let func_sym = interner.intern("foo");
         let func_name = names.intern(names.main_module(), &[func_sym], &interner);
-        let mut table = crate::sema::TypeTable::new();
 
-        let key1 = MonomorphKey::new(func_name, vec![table.key_for_type_id(arena.i64(), &arena)]);
-        let key2 = MonomorphKey::new(
-            func_name,
-            vec![table.key_for_type_id(arena.string(), &arena)],
-        );
-        let key1_dup =
-            MonomorphKey::new(func_name, vec![table.key_for_type_id(arena.i64(), &arena)]);
+        // Use ArenaTypeId directly (TypeKey is no longer needed)
+        let key1 = MonomorphKey::new(func_name, vec![arena.i64()]);
+        let key2 = MonomorphKey::new(func_name, vec![arena.string()]);
+        let key1_dup = MonomorphKey::new(func_name, vec![arena.i64()]);
 
         assert!(!cache.contains(&key1));
 

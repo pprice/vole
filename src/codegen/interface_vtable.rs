@@ -105,7 +105,6 @@ impl InterfaceVtableRegistry {
                 let impl_type_id = ImplTypeId::from_type_id(
                     concrete_type_id,
                     &arena,
-                    &ctx.analyzed.entity_registry.type_table,
                     &ctx.analyzed.entity_registry,
                 )
                 .ok_or_else(|| {
@@ -222,7 +221,6 @@ impl InterfaceVtableRegistry {
                 let impl_type_id = ImplTypeId::from_type_id(
                     concrete_type_id,
                     &arena,
-                    &ctx.analyzed.entity_registry.type_table,
                     &ctx.analyzed.entity_registry,
                 )
                 .ok_or_else(|| {
@@ -907,7 +905,6 @@ fn resolve_vtable_target(
     let impl_type_id = ImplTypeId::from_type_id(
         concrete_type_id,
         &ctx.arena.borrow(),
-        &ctx.analyzed.entity_registry.type_table,
         &ctx.analyzed.entity_registry,
     )
     .ok_or_else(|| {

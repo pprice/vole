@@ -17,7 +17,6 @@ use crate::sema::generic::{
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_arena::TypeId;
-use crate::sema::type_table::TypeKey;
 
 /// Query interface for accessing analyzed program data.
 ///
@@ -194,12 +193,6 @@ impl<'a> ProgramQuery<'a> {
     #[must_use]
     pub fn try_type_def_id(&self, name_id: NameId) -> Option<TypeDefId> {
         self.registry.type_by_name(name_id)
-    }
-
-    /// Look up a TypeKey by NameId (for type_table lookups)
-    #[must_use]
-    pub fn type_key_by_name(&self, name_id: NameId) -> Option<TypeKey> {
-        self.registry.type_table.by_name(name_id)
     }
 
     /// Resolve a type alias to its underlying type.

@@ -4,8 +4,7 @@ use super::{TypeError, TypeWarning};
 use crate::errors::{SemanticError, SemanticWarning};
 use crate::frontend::Span;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::StructuralType;
-use crate::sema::{DisplayType, TypeKey};
+use crate::sema::type_display::display_type_id;
 
 use super::Analyzer;
 
@@ -21,21 +20,9 @@ impl Analyzer {
         self.warnings.push(TypeWarning::new(warning, span));
     }
 
-    pub(super) fn type_key_for_id(&mut self, id: ArenaTypeId) -> TypeKey {
-        self.entity_registry
-            .type_table
-            .key_for_type_id(id, &self.type_arena.borrow())
-    }
-
-    pub(super) fn type_display(&self, ty: &DisplayType) -> String {
-        self.entity_registry
-            .type_table
-            .display_type(ty, &self.name_table, &self.entity_registry)
-    }
-
     /// Display a type from TypeId (directly from SemaType, no DisplayType materialization)
     pub(super) fn type_display_id(&self, id: ArenaTypeId) -> String {
-        self.entity_registry.type_table.display_type_id_direct(
+        display_type_id(
             id,
             &self.type_arena.borrow(),
             &self.name_table,
@@ -49,33 +36,6 @@ impl Analyzer {
             self.type_display_id(left),
             self.type_display_id(right)
         )
-    }
-
-    /// Format a structural type for warning messages
-    #[allow(dead_code)] // Infrastructure for future warnings
-    pub(super) fn format_structural_type(&mut self, structural: &StructuralType) -> String {
-        let mut parts = Vec::new();
-
-        for field in &structural.fields {
-            let name = self
-                .name_table
-                .last_segment_str(field.name)
-                .unwrap_or_else(|| "<unknown>".to_string());
-            let ty = self.type_display(&field.ty);
-            parts.push(format!("{}: {}", name, ty));
-        }
-
-        for method in &structural.methods {
-            let name = self
-                .name_table
-                .last_segment_str(method.name)
-                .unwrap_or_else(|| "<unknown>".to_string());
-            let params: Vec<String> = method.params.iter().map(|p| self.type_display(p)).collect();
-            let ret = self.type_display(&method.return_type);
-            parts.push(format!("func {}({}) -> {}", name, params.join(", "), ret));
-        }
-
-        parts.join(", ")
     }
 
     /// Helper to add a type mismatch error (string version)

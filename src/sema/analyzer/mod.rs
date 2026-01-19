@@ -393,11 +393,9 @@ impl Analyzer {
         }
     }
 
-    fn register_named_type(&mut self, name: Symbol, ty: DisplayType, interner: &Interner) {
-        let name_id = self
-            .name_table
-            .intern(self.current_module, &[name], interner);
-        self.entity_registry.type_table.insert_named(ty, name_id);
+    fn register_named_type(&mut self, _name: Symbol, _ty: DisplayType, _interner: &Interner) {
+        // No-op: Named types are now displayed via EntityRegistry lookup
+        // This function is kept for API compatibility but does nothing
     }
 
     fn module_name_id(&self, module_id: ModuleId, name: &str) -> Option<NameId> {
@@ -595,18 +593,9 @@ impl Analyzer {
             .entity_registry
             .type_by_name(name_id)
             .expect("alias shell registered in register_all_type_shells");
-        // Use TypeId-native key_for_type_id (no DisplayType needed)
-        let type_key = self
-            .entity_registry
-            .type_table
-            .key_for_type_id(aliased_type_id, &self.type_arena.borrow());
+        // Set the aliased type (uses TypeId directly as alias index key)
         self.entity_registry
-            .set_aliased_type(type_id, aliased_type_id, type_key);
-        // Also in type_table for display - materialize DisplayType on demand (transitional)
-        let aliased_type = self.type_arena.borrow().to_display(aliased_type_id);
-        self.entity_registry
-            .type_table
-            .insert_named(aliased_type, name_id);
+            .set_aliased_type(type_id, aliased_type_id);
     }
 
     /// Process global let declarations (type check and add to scope)
@@ -1165,7 +1154,6 @@ impl Analyzer {
         let impl_type_id = match ImplTypeId::from_type_id(
             target_type_id,
             &self.type_arena.borrow(),
-            &self.entity_registry.type_table,
             &self.entity_registry,
         ) {
             Some(id) => id,

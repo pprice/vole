@@ -3,7 +3,6 @@
 use crate::frontend::Symbol;
 use crate::identity::NameId;
 use crate::sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
-use crate::sema::type_table::TypeTable;
 use crate::sema::types::{FunctionType, PrimitiveType};
 use std::collections::HashMap;
 
@@ -63,7 +62,6 @@ impl ImplTypeId {
     pub fn from_type_id(
         ty: TypeId,
         arena: &TypeArena,
-        types: &TypeTable,
         entity_registry: &crate::sema::entity_registry::EntityRegistry,
     ) -> Option<Self> {
         match arena.get(ty) {
@@ -83,12 +81,12 @@ impl ImplTypeId {
                     PrimitiveType::Bool => PrimitiveTypeId::Bool,
                     PrimitiveType::String => PrimitiveTypeId::String,
                 };
-                types.primitive_name_id(prim_id).map(ImplTypeId)
+                entity_registry.primitive_name_id(prim_id).map(ImplTypeId)
             }
-            ArenaType::Range => types
+            ArenaType::Range => entity_registry
                 .primitive_name_id(PrimitiveTypeId::Range)
                 .map(ImplTypeId),
-            ArenaType::Array(_) => types.array_name_id().map(ImplTypeId),
+            ArenaType::Array(_) => entity_registry.array_name_id().map(ImplTypeId),
             ArenaType::Class { type_def_id, .. } => {
                 Some(ImplTypeId(entity_registry.get_type(*type_def_id).name_id))
             }
@@ -212,9 +210,7 @@ mod tests {
         let method_id = names.intern(builtin, &[length_sym], &interner);
 
         let mut registry = ImplementRegistry::new();
-        let mut types = TypeTable::new();
         let array_name = names.intern_raw(builtin, &["array"]);
-        types.register_array_name(array_name);
         let type_id = ImplTypeId(array_name);
 
         registry.register_method(
@@ -242,9 +238,7 @@ mod tests {
         let method_id = names.intern(builtin, &[length_sym], &interner);
 
         let registry = ImplementRegistry::new();
-        let mut types = TypeTable::new();
         let array_name = names.intern_raw(builtin, &["array"]);
-        types.register_array_name(array_name);
         let method = registry.get_method(&ImplTypeId(array_name), method_id);
         assert!(method.is_none());
     }
@@ -255,31 +249,30 @@ mod tests {
 
         let mut arena = TypeArena::new();
         let mut names = crate::identity::NameTable::new();
-        let mut types = TypeTable::new();
-        let entity_registry = crate::sema::entity_registry::EntityRegistry::new();
+        let mut entity_registry = crate::sema::entity_registry::EntityRegistry::new();
         // Use pre-registered primitives from NameTable
         let i64_name = names.primitives.i64;
         let builtin = names.builtin_module();
         let array_name = names.intern_raw(builtin, &["array"]);
-        types.register_primitive_name(PrimitiveTypeId::I64, i64_name);
-        types.register_array_name(array_name);
+        entity_registry.register_primitive_name(PrimitiveTypeId::I64, i64_name);
+        entity_registry.register_array_name(array_name);
 
         // Test primitive type
         assert_eq!(
-            ImplTypeId::from_type_id(ArenaTypeId::I64, &arena, &types, &entity_registry),
+            ImplTypeId::from_type_id(ArenaTypeId::I64, &arena, &entity_registry),
             Some(ImplTypeId(i64_name))
         );
 
         // Test array type
         let array_id = arena.array(ArenaTypeId::I32);
         assert_eq!(
-            ImplTypeId::from_type_id(array_id, &arena, &types, &entity_registry),
+            ImplTypeId::from_type_id(array_id, &arena, &entity_registry),
             Some(ImplTypeId(array_name))
         );
 
         // Test void (not registerable)
         assert_eq!(
-            ImplTypeId::from_type_id(ArenaTypeId::VOID, &arena, &types, &entity_registry),
+            ImplTypeId::from_type_id(ArenaTypeId::VOID, &arena, &entity_registry),
             None
         );
     }
@@ -292,13 +285,11 @@ mod tests {
         let to_upper_sym = interner.intern("to_upper");
         let mut registry = ImplementRegistry::new();
         let mut names = crate::identity::NameTable::new();
-        let mut types = TypeTable::new();
         // Use pre-registered primitives from NameTable
         let string_name = names.primitives.string;
         let builtin = names.builtin_module();
         let length_id = names.intern(builtin, &[length_sym], &interner);
         let to_upper_id = names.intern(builtin, &[to_upper_sym], &interner);
-        types.register_primitive_name(PrimitiveTypeId::String, string_name);
         let type_id = ImplTypeId(string_name);
 
         registry.register_method(
@@ -338,13 +329,10 @@ mod tests {
 
         // Add method to registry1
         let mut names = crate::identity::NameTable::new();
-        let mut types = TypeTable::new();
         // Use pre-registered primitives from NameTable
         let i64_name = names.primitives.i64;
         let string_name = names.primitives.string;
         let builtin = names.builtin_module();
-        types.register_primitive_name(PrimitiveTypeId::I64, i64_name);
-        types.register_primitive_name(PrimitiveTypeId::String, string_name);
 
         let equals_id = names.intern(builtin, &[equals_sym], &interner);
         let length_id = names.intern(builtin, &[length_sym], &interner);

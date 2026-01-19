@@ -137,7 +137,6 @@ impl<'a> Compiler<'a> {
         ImplTypeId::from_type_id(
             ty,
             &self.analyzed.type_arena.borrow(),
-            &self.analyzed.entity_registry.type_table,
             &self.analyzed.entity_registry,
         )
     }
