@@ -299,12 +299,7 @@ impl Analyzer {
         };
 
         // Build FunctionType from substituted TypeIds
-        FunctionType::from_ids(
-            &new_params_id,
-            new_return_type_id,
-            func_type.is_closure,
-            &self.type_arena.borrow(),
-        )
+        FunctionType::from_ids(&new_params_id, new_return_type_id, func_type.is_closure)
     }
 
     /// Map primitive TypeId to NameId for method binding lookup
@@ -465,7 +460,6 @@ impl Analyzer {
             &method.signature.params_id,
             method.signature.return_type_id,
             true, // is_closure
-            &self.type_arena.borrow(),
         ))
     }
 }

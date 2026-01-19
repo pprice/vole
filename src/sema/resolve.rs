@@ -315,13 +315,11 @@ fn resolve_type_impl(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> Lega
             let param_types: Vec<LegacyType> =
                 params.iter().map(|p| resolve_type(p, ctx)).collect();
             let ret = resolve_type(return_type, ctx);
-            // Populate TypeId fields
+            // Intern types to get TypeIds
             let mut arena = ctx.type_arena.borrow_mut();
             let params_id: TypeIdVec = param_types.iter().map(|p| arena.from_type(p)).collect();
             let return_type_id = arena.from_type(&ret);
             LegacyType::Function(FunctionType {
-                params: param_types.into(),
-                return_type: Box::new(ret),
                 is_closure: false, // Type annotations don't know if it's a closure
                 params_id,
                 return_type_id,
@@ -575,10 +573,11 @@ mod tests {
             };
             let resolved = resolve_type(&func_expr, ctx);
             if let LegacyType::Function(ft) = resolved {
-                assert_eq!(ft.params.len(), 2);
-                assert_eq!(ft.params[0], LegacyType::Primitive(PrimitiveType::I32));
-                assert_eq!(ft.params[1], LegacyType::Primitive(PrimitiveType::I32));
-                assert_eq!(*ft.return_type, LegacyType::Primitive(PrimitiveType::Bool));
+                assert_eq!(ft.params_id.len(), 2);
+                let arena = ctx.type_arena.borrow();
+                assert_eq!(arena.to_type(ft.params_id[0]), LegacyType::Primitive(PrimitiveType::I32));
+                assert_eq!(arena.to_type(ft.params_id[1]), LegacyType::Primitive(PrimitiveType::I32));
+                assert_eq!(arena.to_type(ft.return_type_id), LegacyType::Primitive(PrimitiveType::Bool));
                 assert!(!ft.is_closure);
             } else {
                 panic!("Expected function type");
@@ -673,9 +672,10 @@ mod tests {
             let back = ctx.type_arena.borrow().to_type(type_id);
 
             if let LegacyType::Function(ft) = back {
-                assert_eq!(ft.params.len(), 1);
-                assert_eq!(ft.params[0], LegacyType::Primitive(PrimitiveType::I32));
-                assert_eq!(*ft.return_type, LegacyType::Primitive(PrimitiveType::Bool));
+                assert_eq!(ft.params_id.len(), 1);
+                let arena = ctx.type_arena.borrow();
+                assert_eq!(arena.to_type(ft.params_id[0]), LegacyType::Primitive(PrimitiveType::I32));
+                assert_eq!(arena.to_type(ft.return_type_id), LegacyType::Primitive(PrimitiveType::Bool));
             } else {
                 panic!("Expected function type, got {:?}", back);
             }

@@ -2,7 +2,6 @@ use super::super::*;
 use crate::identity::TypeDefId;
 use crate::sema::compatibility::types_compatible_core_id;
 use crate::sema::type_arena::TypeId as ArenaTypeId;
-use crate::sema::types::LegacyType;
 use std::collections::HashSet;
 
 impl Analyzer {
@@ -106,42 +105,50 @@ impl Analyzer {
         false
     }
 
-    /// Format a method signature for error messages
-    pub(crate) fn format_method_signature(
+    /// Format a method signature for error messages (TypeId-based)
+    pub(crate) fn format_method_signature_id(
         &mut self,
-        params: &[LegacyType],
-        return_type: &LegacyType,
-        _interner: &Interner,
+        params: &[ArenaTypeId],
+        return_type: ArenaTypeId,
     ) -> String {
-        let params_str: Vec<String> = params.iter().map(|t| self.type_display(t)).collect();
+        let params_str: Vec<String> = params.iter().map(|&t| self.type_display_id(t)).collect();
         format!(
             "({}) -> {}",
             params_str.join(", "),
-            self.type_display(return_type)
+            self.type_display_id(return_type)
         )
     }
 
-    /// Format a method signature for interface requirement messages.
-    /// Shows "Self" instead of "error" for LegacyType::Error (which represents Self in interfaces).
-    pub(crate) fn format_interface_method_signature(
+    /// Format a method signature for interface requirement messages (TypeId-based).
+    /// Shows "Self" for TypeId::INVALID (which represents Self in interfaces).
+    pub(crate) fn format_interface_method_signature_id(
         &mut self,
-        params: &[LegacyType],
-        return_type: &LegacyType,
+        params: &[ArenaTypeId],
+        return_type: ArenaTypeId,
     ) -> String {
+        // Collect invalid status first
+        let invalid_params: Vec<bool> = params
+            .iter()
+            .map(|&t| self.type_arena.borrow().is_invalid(t))
+            .collect();
+        let return_is_invalid = self.type_arena.borrow().is_invalid(return_type);
+
+        // Now format
         let params_str: Vec<String> = params
             .iter()
-            .map(|t| {
-                if t.is_invalid() {
+            .zip(invalid_params.iter())
+            .map(|(&t, &is_invalid)| {
+                if is_invalid {
                     "Self".to_string()
                 } else {
-                    self.type_display(t)
+                    self.type_display_id(t)
                 }
             })
             .collect();
-        let return_str = if return_type.is_invalid() {
+        let return_str = if return_is_invalid {
             "Self".to_string()
         } else {
-            self.type_display(return_type)
+            self.type_display_id(return_type)
         };
         format!("({}) -> {}", params_str.join(", "), return_str)
     }

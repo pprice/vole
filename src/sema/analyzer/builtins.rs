@@ -69,12 +69,12 @@ impl Analyzer {
             register_builtin!(
                 type_id,
                 method_len,
-                FunctionType::from_ids(&[], i64_type, false, &self.type_arena.borrow())
+                FunctionType::from_ids(&[], i64_type, false)
             );
             register_builtin!(
                 type_id,
                 method_iter,
-                FunctionType::from_ids(&[], unknown_type, false, &self.type_arena.borrow()),
+                FunctionType::from_ids(&[], unknown_type, false),
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "array_iter".to_string(),
@@ -90,12 +90,12 @@ impl Analyzer {
             register_builtin!(
                 type_id,
                 method_len,
-                FunctionType::from_ids(&[], i64_type, false, &self.type_arena.borrow())
+                FunctionType::from_ids(&[], i64_type, false)
             );
             register_builtin!(
                 type_id,
                 method_iter,
-                FunctionType::from_ids(&[], unknown_type, false, &self.type_arena.borrow()),
+                FunctionType::from_ids(&[], unknown_type, false),
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "string_chars_iter".to_string(),
@@ -117,7 +117,7 @@ impl Analyzer {
             register_builtin!(
                 type_id,
                 method_iter,
-                FunctionType::from_ids(&[], unknown_type, false, &self.type_arena.borrow()),
+                FunctionType::from_ids(&[], unknown_type, false),
                 Some(ExternalMethodInfo {
                     module_path: "std:intrinsics".to_string(),
                     native_name: "range_iter".to_string(),

@@ -132,12 +132,7 @@ impl Analyzer {
                 .map(|t| self.resolve_type_id(t, interner))
                 .unwrap_or_else(|| self.type_arena.borrow().void());
 
-            let signature = FunctionType::from_ids(
-                &params_id,
-                return_type_id,
-                false,
-                &self.type_arena.borrow(),
-            );
+            let signature = FunctionType::from_ids(&params_id, return_type_id, false);
 
             self.functions.insert(func.name, signature.clone());
 
@@ -211,12 +206,7 @@ impl Analyzer {
                 .unwrap_or_else(|| self.type_arena.borrow().void());
 
             // Create a FunctionType from TypeIds
-            let signature = FunctionType::from_ids(
-                &param_type_ids,
-                return_type_id,
-                false,
-                &self.type_arena.borrow(),
-            );
+            let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
 
             // Register in EntityRegistry
             let func_id = self.entity_registry.register_function(
@@ -335,12 +325,7 @@ impl Analyzer {
                     .as_ref()
                     .map(|t| self.resolve_type_id_with_self(t, interner, Some(self_type_id)))
                     .unwrap_or_else(|| self.type_arena.borrow().void());
-                let signature = FunctionType::from_ids(
-                    &params_id,
-                    return_type_id,
-                    false,
-                    &self.type_arena.borrow(),
-                );
+                let signature = FunctionType::from_ids(&params_id, return_type_id, false);
                 self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
@@ -371,12 +356,7 @@ impl Analyzer {
                         .as_ref()
                         .map(|t| self.resolve_type_id(t, interner))
                         .unwrap_or_else(|| self.type_arena.borrow().void());
-                    let signature = FunctionType::from_ids(
-                        &params_id,
-                        return_type_id,
-                        false,
-                        &self.type_arena.borrow(),
-                    );
+                    let signature = FunctionType::from_ids(&params_id, return_type_id, false);
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
                         entity_type_id,
@@ -409,12 +389,7 @@ impl Analyzer {
                         .as_ref()
                         .map(|t| self.resolve_type_id(t, interner))
                         .unwrap_or_else(|| self.type_arena.borrow().void());
-                    let signature = FunctionType::from_ids(
-                        &params_id,
-                        return_type_id,
-                        false,
-                        &self.type_arena.borrow(),
-                    );
+                    let signature = FunctionType::from_ids(&params_id, return_type_id, false);
                     let native_name = func
                         .native_name
                         .clone()
@@ -616,12 +591,7 @@ impl Analyzer {
                     })
                     .unwrap_or_else(|| self.type_arena.borrow().void());
 
-                let signature = FunctionType::from_ids(
-                    &params_id,
-                    return_type_id,
-                    false,
-                    &self.type_arena.borrow(),
-                );
+                let signature = FunctionType::from_ids(&params_id, return_type_id, false);
                 self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
@@ -716,12 +686,7 @@ impl Analyzer {
                         })
                         .unwrap_or_else(|| self.type_arena.borrow().void());
 
-                    let signature = FunctionType::from_ids(
-                        &params_id,
-                        return_type_id,
-                        false,
-                        &self.type_arena.borrow(),
-                    );
+                    let signature = FunctionType::from_ids(&params_id, return_type_id, false);
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
                         entity_type_id,
@@ -780,12 +745,7 @@ impl Analyzer {
                         })
                         .unwrap_or_else(|| self.type_arena.borrow().void());
 
-                    let signature = FunctionType::from_ids(
-                        &params_id,
-                        return_type_id,
-                        false,
-                        &self.type_arena.borrow(),
-                    );
+                    let signature = FunctionType::from_ids(&params_id, return_type_id, false);
                     let native_name = func
                         .native_name
                         .clone()
@@ -905,12 +865,7 @@ impl Analyzer {
                     .as_ref()
                     .map(|t| self.resolve_type_id_with_self(t, interner, Some(self_type_id)))
                     .unwrap_or_else(|| self.type_arena.borrow().void());
-                let signature = FunctionType::from_ids(
-                    &params_id,
-                    return_type_id,
-                    false,
-                    &self.type_arena.borrow(),
-                );
+                let signature = FunctionType::from_ids(&params_id, return_type_id, false);
                 self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
@@ -941,12 +896,7 @@ impl Analyzer {
                         .as_ref()
                         .map(|t| self.resolve_type_id(t, interner))
                         .unwrap_or_else(|| self.type_arena.borrow().void());
-                    let signature = FunctionType::from_ids(
-                        &params_id,
-                        return_type_id,
-                        false,
-                        &self.type_arena.borrow(),
-                    );
+                    let signature = FunctionType::from_ids(&params_id, return_type_id, false);
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
                         entity_type_id,
@@ -1163,12 +1113,7 @@ impl Analyzer {
                     self.current_module,
                     &[interner.resolve(record.name), method_name_str],
                 );
-                let signature = FunctionType::from_ids(
-                    &params_id,
-                    return_type_id,
-                    false,
-                    &self.type_arena.borrow(),
-                );
+                let signature = FunctionType::from_ids(&params_id, return_type_id, false);
                 self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
@@ -1263,12 +1208,7 @@ impl Analyzer {
                         })
                         .unwrap_or_else(|| self.type_arena.borrow().void());
 
-                    let signature = FunctionType::from_ids(
-                        &params_id,
-                        return_type_id,
-                        false,
-                        &self.type_arena.borrow(),
-                    );
+                    let signature = FunctionType::from_ids(&params_id, return_type_id, false);
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
                         entity_type_id,
@@ -1558,12 +1498,9 @@ impl Analyzer {
             let full_method_name_id = self
                 .name_table
                 .intern_raw(self.current_module, &[&name_str, method_name_str]);
-            let signature = FunctionType::from_ids(
-                params_id,
-                *return_type_id,
-                false,
-                &self.type_arena.borrow(),
-            );
+            let signature = FunctionType::from_ids(params_id,
+            *return_type_id,
+            false);
             // Look up external binding for this method
             let external_binding = external_methods.get(method_name_str).cloned();
             self.entity_registry.register_method_with_binding(
@@ -1638,12 +1575,7 @@ impl Analyzer {
                     || method.body.is_some()
                     || default_static_external_methods.contains(&method.name);
 
-                let signature = FunctionType::from_ids(
-                    &params_id,
-                    return_type_id,
-                    false,
-                    &self.type_arena.borrow(),
-                );
+                let signature = FunctionType::from_ids(&params_id, return_type_id, false);
 
                 let external_binding = static_external_methods.get(&method_name_str).cloned();
                 self.entity_registry.register_static_method_with_binding(
@@ -1759,12 +1691,7 @@ impl Analyzer {
                     .as_ref()
                     .map(|t| self.resolve_type_id(t, interner))
                     .unwrap_or_else(|| self.type_arena.borrow().void());
-                let func_type = FunctionType::from_ids(
-                    &params_id,
-                    return_type_id,
-                    false,
-                    &self.type_arena.borrow(),
-                );
+                let func_type = FunctionType::from_ids(&params_id, return_type_id, false);
 
                 let method_name_id = self.method_name_id(method.name, interner);
                 self.implement_registry.register_method(
@@ -1839,12 +1766,7 @@ impl Analyzer {
                             .map(|t| self.resolve_type_id(t, interner))
                             .unwrap_or_else(|| self.type_arena.borrow().void());
 
-                        let signature = FunctionType::from_ids(
-                            &params_id,
-                            return_type_id,
-                            false,
-                            &self.type_arena.borrow(),
-                        );
+                        let signature = FunctionType::from_ids(&params_id, return_type_id, false);
 
                         self.entity_registry.register_static_method(
                             entity_type_id,
@@ -1879,12 +1801,7 @@ impl Analyzer {
                                 .map(|t| self.resolve_type_id(t, interner))
                                 .unwrap_or_else(|| self.type_arena.borrow().void());
 
-                            let signature = FunctionType::from_ids(
-                                &params_id,
-                                return_type_id,
-                                false,
-                                &self.type_arena.borrow(),
-                            );
+                            let signature = FunctionType::from_ids(&params_id, return_type_id, false);
 
                             let native_name = func
                                 .native_name
@@ -1967,12 +1884,7 @@ impl Analyzer {
                     .unwrap_or_else(|| self.type_arena.borrow().void());
 
                 // Create signature from TypeIds
-                let signature = FunctionType::from_ids(
-                    &param_type_ids,
-                    return_type_id,
-                    false,
-                    &self.type_arena.borrow(),
-                );
+                let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
 
                 // Register in EntityRegistry (like regular generic functions)
                 let func_id = self.entity_registry.register_function(
@@ -2017,12 +1929,7 @@ impl Analyzer {
                     .map(|t| self.resolve_type_id(t, interner))
                     .unwrap_or_else(|| self.type_arena.borrow().void());
 
-                let func_type = FunctionType::from_ids(
-                    &params_id,
-                    return_type_id,
-                    false,
-                    &self.type_arena.borrow(),
-                );
+                let func_type = FunctionType::from_ids(&params_id, return_type_id, false);
 
                 // Register the function with its Vole name (Symbol)
                 self.functions.insert(func.vole_name, func_type.clone());

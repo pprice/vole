@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn resolved_method_func_type() {
         let arena = TypeArena::new();
-        let ft = FunctionType::from_ids(&[arena.i32()], arena.bool(), false, &arena);
+        let ft = FunctionType::from_ids(&[arena.i32()], arena.bool(), false);
 
         let direct = ResolvedMethod::Direct {
             func_type: ft.clone(),
@@ -147,7 +147,7 @@ mod tests {
         resolutions.insert(
             node_id,
             ResolvedMethod::Direct {
-                func_type: FunctionType::from_ids(&[], arena.void(), false, &arena),
+                func_type: FunctionType::from_ids(&[], arena.void(), false),
             },
         );
 

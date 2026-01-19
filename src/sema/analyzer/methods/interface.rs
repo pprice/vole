@@ -340,12 +340,7 @@ impl Analyzer {
                         };
 
                         // Build FunctionType from substituted TypeIds
-                        FunctionType::from_ids(
-                            &subst_params,
-                            subst_ret,
-                            sig.is_closure,
-                            &self.type_arena.borrow(),
-                        )
+                        FunctionType::from_ids(&subst_params, subst_ret, sig.is_closure)
                     };
                     (name, method.has_default, subst_sig)
                 })
@@ -387,22 +382,21 @@ impl Analyzer {
                             implementing_type_id,
                         ) {
                             // Use interface-specific formatter to show "Self" properly
-                            let expected = self.format_interface_method_signature(
-                                &signature.params,
-                                &signature.return_type,
+                            let expected = self.format_interface_method_signature_id(
+                                &signature.params_id,
+                                signature.return_type_id,
                             );
-                            let found = self.format_method_signature(
-                                &found_sig.params,
-                                &found_sig.return_type,
-                                interner,
+                            let found = self.format_method_signature_id(
+                                &found_sig.params_id,
+                                found_sig.return_type_id,
                             );
 
                             // Generate detailed mismatch information
-                            let details = self.describe_signature_mismatch(
-                                &signature.params,
-                                &signature.return_type,
+                            let details = self.describe_signature_mismatch_id(
+                                &signature.params_id,
+                                signature.return_type_id,
                                 found_sig,
-                                &implementing_type,
+                                implementing_type_id,
                             );
 
                             self.add_error(
@@ -469,41 +463,42 @@ impl Analyzer {
         effective_return == found.return_type_id
     }
 
-    /// Describe what specifically mismatches between required and found signatures.
+    /// Describe what specifically mismatches between required and found signatures (TypeId version).
     /// Returns a human-readable description of the differences.
-    fn describe_signature_mismatch(
+    fn describe_signature_mismatch_id(
         &mut self,
-        required_params: &[LegacyType],
-        required_return: &LegacyType,
+        required_params: &[ArenaTypeId],
+        required_return: ArenaTypeId,
         found: &FunctionType,
-        implementing_type: &LegacyType,
+        implementing_type_id: ArenaTypeId,
     ) -> String {
         let mut mismatches = Vec::new();
 
         // Check parameter count
-        if required_params.len() != found.params.len() {
+        if required_params.len() != found.params_id.len() {
             mismatches.push(format!(
                 "parameter count: expected {}, found {}",
                 required_params.len(),
-                found.params.len()
+                found.params_id.len()
             ));
         } else {
             // Check each parameter type
-            for (i, (req_param, found_param)) in
-                required_params.iter().zip(found.params.iter()).enumerate()
+            for (i, (&req_param, &found_param)) in
+                required_params.iter().zip(found.params_id.iter()).enumerate()
             {
-                let effective_req = if req_param.is_invalid() {
-                    implementing_type
+                let req_is_invalid = self.type_arena.borrow().is_invalid(req_param);
+                let effective_req = if req_is_invalid {
+                    implementing_type_id
                 } else {
                     req_param
                 };
                 if effective_req != found_param {
-                    let expected_str = if req_param.is_invalid() {
+                    let expected_str = if req_is_invalid {
                         "Self".to_string()
                     } else {
-                        self.type_display(req_param)
+                        self.type_display_id(req_param)
                     };
-                    let found_str = self.type_display(found_param);
+                    let found_str = self.type_display_id(found_param);
                     mismatches.push(format!(
                         "parameter {}: expected '{}', found '{}'",
                         i + 1,
@@ -515,18 +510,19 @@ impl Analyzer {
         }
 
         // Check return type
-        let effective_return = if required_return.is_invalid() {
-            implementing_type
+        let return_is_invalid = self.type_arena.borrow().is_invalid(required_return);
+        let effective_return = if return_is_invalid {
+            implementing_type_id
         } else {
             required_return
         };
-        if effective_return != &*found.return_type {
-            let expected_str = if required_return.is_invalid() {
+        if effective_return != found.return_type_id {
+            let expected_str = if return_is_invalid {
                 "Self".to_string()
             } else {
-                self.type_display(required_return)
+                self.type_display_id(required_return)
             };
-            let found_str = self.type_display(&found.return_type);
+            let found_str = self.type_display_id(found.return_type_id);
             mismatches.push(format!(
                 "return type: expected '{}', found '{}'",
                 expected_str, found_str
@@ -614,8 +610,8 @@ impl Analyzer {
 
             // Create a FunctionType from the structural method signature
             let expected_sig = FunctionType::new_with_arena(
-                method.params.clone(),
-                method.return_type.clone(),
+                method.params.iter(),
+                &method.return_type,
                 false,
                 &mut self.type_arena.borrow_mut(),
             );

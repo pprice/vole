@@ -1910,9 +1910,11 @@ mod tests {
         use crate::sema::types::{FunctionType, PrimitiveType};
 
         let mut arena = TypeArena::new();
+        let params = vec![LegacyType::Primitive(PrimitiveType::I32)];
+        let ret = LegacyType::Primitive(PrimitiveType::String);
         let original = LegacyType::Function(FunctionType::new_with_arena(
-            vec![LegacyType::Primitive(PrimitiveType::I32)],
-            LegacyType::Primitive(PrimitiveType::String),
+            params.iter(),
+            &ret,
             false,
             &mut arena,
         ));
@@ -1922,8 +1924,8 @@ mod tests {
 
         // Test with closure flag
         let closure = LegacyType::Function(FunctionType::new_with_arena(
-            vec![],
-            LegacyType::Void,
+            std::iter::empty::<&LegacyType>(),
+            &LegacyType::Void,
             true,
             &mut arena,
         ));
@@ -2035,12 +2037,14 @@ mod tests {
         let mut arena = TypeArena::new();
 
         // Array<(i32, string) -> bool>
+        let params = vec![
+            LegacyType::Primitive(PrimitiveType::I32),
+            LegacyType::Primitive(PrimitiveType::String),
+        ];
+        let ret = LegacyType::Primitive(PrimitiveType::Bool);
         let func = LegacyType::Function(FunctionType::new_with_arena(
-            vec![
-                LegacyType::Primitive(PrimitiveType::I32),
-                LegacyType::Primitive(PrimitiveType::String),
-            ],
-            LegacyType::Primitive(PrimitiveType::Bool),
+            params.iter(),
+            &ret,
             false,
             &mut arena,
         ));

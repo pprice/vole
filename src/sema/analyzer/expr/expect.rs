@@ -145,7 +145,7 @@ impl Analyzer {
                     let arena = self.type_arena.borrow();
                     if let Some((params, ret, _)) = arena.unwrap_function(exp_id) {
                         // Build FunctionType from TypeIds
-                        Some(FunctionType::from_ids(params, ret, false, &arena))
+                        Some(FunctionType::from_ids(params, ret, false))
                     } else if let Some((iface_id, _)) = arena.unwrap_interface(exp_id) {
                         drop(arena);
                         self.get_functional_interface_type_by_type_def_id(iface_id)

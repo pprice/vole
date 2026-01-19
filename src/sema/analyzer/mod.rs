@@ -1250,8 +1250,8 @@ impl Analyzer {
             };
 
             let func_type = FunctionType::new_with_arena(
-                param_types,
-                return_type,
+                param_types.iter(),
+                &return_type,
                 false,
                 &mut self.type_arena.borrow_mut(),
             );

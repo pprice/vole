@@ -20,12 +20,7 @@ impl Analyzer {
                     if !args.is_empty() {
                         self.add_wrong_arg_count(0, args.len(), args[0].span);
                     }
-                    Some(FunctionType::from_ids(
-                        &[],
-                        self.ty_i64_id(),
-                        false,
-                        &self.type_arena.borrow(),
-                    ))
+                    Some(FunctionType::from_ids(&[], self.ty_i64_id(), false))
                 }
                 // Array.iter() -> Iterator<T>
                 "iter" => {
@@ -34,12 +29,7 @@ impl Analyzer {
                     }
                     let iter_type_id =
                         self.interface_type_id("Iterator", &[elem_ty_id], interner)?;
-                    Some(FunctionType::from_ids(
-                        &[],
-                        iter_type_id,
-                        false,
-                        &self.type_arena.borrow(),
-                    ))
+                    Some(FunctionType::from_ids(&[], iter_type_id, false))
                 }
                 _ => None,
             };
@@ -55,12 +45,7 @@ impl Analyzer {
                     }
                     let iter_type_id =
                         self.interface_type_id("Iterator", &[self.ty_i64_id()], interner)?;
-                    Some(FunctionType::from_ids(
-                        &[],
-                        iter_type_id,
-                        false,
-                        &self.type_arena.borrow(),
-                    ))
+                    Some(FunctionType::from_ids(&[], iter_type_id, false))
                 }
                 _ => None,
             };
@@ -74,12 +59,7 @@ impl Analyzer {
                     if !args.is_empty() {
                         self.add_wrong_arg_count(0, args.len(), args[0].span);
                     }
-                    Some(FunctionType::from_ids(
-                        &[],
-                        self.ty_i64_id(),
-                        false,
-                        &self.type_arena.borrow(),
-                    ))
+                    Some(FunctionType::from_ids(&[], self.ty_i64_id(), false))
                 }
                 // String.iter() -> Iterator<string>
                 "iter" => {
@@ -88,12 +68,7 @@ impl Analyzer {
                     }
                     let iter_type_id =
                         self.interface_type_id("Iterator", &[self.ty_string_id()], interner)?;
-                    Some(FunctionType::from_ids(
-                        &[],
-                        iter_type_id,
-                        false,
-                        &self.type_arena.borrow(),
-                    ))
+                    Some(FunctionType::from_ids(&[], iter_type_id, false))
                 }
                 _ => None,
             };

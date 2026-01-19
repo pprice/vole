@@ -325,19 +325,9 @@ impl TypeTable {
         entity_registry: &crate::sema::entity_registry::EntityRegistry,
     ) -> String {
         match ty {
-            LegacyType::Function(ft) => {
-                let params = ft
-                    .params
-                    .iter()
-                    .map(|param| self.display_type_inner(param, names, entity_registry))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!(
-                    "({}) -> {}",
-                    params,
-                    self.display_type_inner(&ft.return_type, names, entity_registry)
-                )
-            }
+            // FunctionType only has TypeIds - use arena-based display_type_id_direct for proper names
+            // Here we just show the TypeId-based representation
+            LegacyType::Function(ft) => format!("{}", ft),
             LegacyType::Union(variants) => variants
                 .iter()
                 .map(|variant| self.display_type_inner(variant, names, entity_registry))

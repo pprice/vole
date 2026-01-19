@@ -174,12 +174,7 @@ impl Analyzer {
                     // Use inferred_id directly as substitutions (already TypeId-based)
                     // MonomorphInstance uses std HashMap
                     let substitutions: HashMap<NameId, ArenaTypeId> = inferred_id.clone();
-                    let func_type = FunctionType::from_ids(
-                        &concrete_param_ids,
-                        concrete_return_id,
-                        false,
-                        &self.type_arena.borrow(),
-                    );
+                    let func_type = FunctionType::from_ids(&concrete_param_ids, concrete_return_id, false);
                     self.entity_registry.monomorph_cache.insert(
                         key.clone(),
                         MonomorphInstance {

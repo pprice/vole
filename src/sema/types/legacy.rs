@@ -367,26 +367,9 @@ impl LegacyType {
                 }
             }
 
-            LegacyType::Function(ft) => {
-                let new_params = substitute_slice(&ft.params, substitutions);
-                let new_return = ft.return_type.substitute(substitutions);
-                let return_changed = &new_return != ft.return_type.as_ref();
-
-                if new_params.is_none() && !return_changed {
-                    self.clone()
-                } else {
-                    // Note: params_id/return_type_id are invalid placeholders here
-                    // because LegacyType::substitute doesn't have arena access.
-                    // Use arena.substitute() for proper TypeId-based substitution.
-                    LegacyType::Function(FunctionType {
-                        params: new_params.unwrap_or_else(|| ft.params.clone()),
-                        return_type: Box::new(new_return),
-                        is_closure: ft.is_closure,
-                        params_id: TypeIdVec::new(),
-                        return_type_id: TypeId::INVALID,
-                    })
-                }
-            }
+            // FunctionType only stores TypeIds - LegacyType::substitute can't substitute
+            // without arena access. Use arena.substitute() for proper substitution.
+            LegacyType::Function(_) => self.clone(),
 
             LegacyType::Tuple(elements) => {
                 let new_elements = substitute_slice(elements, substitutions);
@@ -682,18 +665,11 @@ impl LegacyType {
                 params,
                 ret,
                 is_closure,
-            } => {
-                let param_types: Vec<LegacyType> =
-                    params.iter().map(|&p| Self::from_arena(p, arena)).collect();
-                LegacyType::Function(FunctionType {
-                    params: param_types.into(),
-                    return_type: Box::new(Self::from_arena(*ret, arena)),
-                    is_closure: *is_closure,
-                    // Preserve TypeIds from arena
-                    params_id: params.clone(),
-                    return_type_id: *ret,
-                })
-            }
+            } => LegacyType::Function(FunctionType {
+                is_closure: *is_closure,
+                params_id: params.clone(),
+                return_type_id: *ret,
+            }),
 
             SemaType::Class {
                 type_def_id,
@@ -858,16 +834,8 @@ impl std::fmt::Display for LegacyType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LegacyType::Primitive(p) => write!(f, "{}", p),
-            LegacyType::Function(ft) => {
-                write!(f, "(")?;
-                for (i, param) in ft.params.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", param)?;
-                }
-                write!(f, ") -> {}", ft.return_type)
-            }
+            // FunctionType only has TypeIds - use arena-based display for proper names
+            LegacyType::Function(ft) => write!(f, "{}", ft),
             LegacyType::Union(types) => {
                 let parts: Vec<String> = types.iter().map(|t| format!("{}", t)).collect();
                 write!(f, "{}", parts.join(" | "))

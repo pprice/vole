@@ -362,7 +362,7 @@ impl Analyzer {
 
             // Build FunctionType for resolution storage (still needed for codegen)
             let func_type =
-                FunctionType::from_ids(&param_ids, return_id, false, &self.type_arena.borrow());
+                FunctionType::from_ids(&param_ids, return_id, false);
 
             // Get external_funcs from module metadata
             let is_external = self
@@ -918,12 +918,7 @@ impl Analyzer {
             };
 
             // Build substituted FunctionType from TypeIds
-            let substituted_func_type = FunctionType::from_ids(
-                &subst_param_ids,
-                subst_return_id,
-                func_type.is_closure,
-                &self.type_arena.borrow(),
-            );
+            let substituted_func_type = FunctionType::from_ids(&subst_param_ids, subst_return_id, func_type.is_closure);
 
             // Convert back to std::collections::HashMap for storage
             let substitutions: HashMap<NameId, ArenaTypeId> =

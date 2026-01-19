@@ -22,22 +22,18 @@ pub use nominal::{
 pub use primitive::PrimitiveType;
 pub use special::{AnalysisError, ConstantValue, FallibleType, ModuleType, PlaceholderKind};
 
-use std::sync::Arc;
-
 use crate::identity::NameId;
 use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 
 #[derive(Debug, Clone, Eq)]
 pub struct FunctionType {
-    pub params: Arc<[LegacyType]>,
-    pub return_type: Box<LegacyType>,
     /// If true, this function is a closure (has captures) and needs
     /// to be called with the closure pointer as the first argument.
-    /// The closure pointer is passed implicitly and is not included in `params`.
+    /// The closure pointer is passed implicitly and is not included in `params_id`.
     pub is_closure: bool,
-    /// Interned parameter types (parallel to params)
+    /// Interned parameter types
     pub params_id: TypeIdVec,
-    /// Interned return type (parallel to return_type)
+    /// Interned return type
     pub return_type_id: TypeId,
 }
 
@@ -73,17 +69,17 @@ impl FunctionType {
     /// Create a new FunctionType, interning types into the arena.
     /// This is the preferred constructor when you have LegacyTypes and an arena.
     pub fn new_with_arena(
-        params: impl Into<Arc<[LegacyType]>>,
-        return_type: LegacyType,
+        params: impl IntoIterator<Item = impl std::borrow::Borrow<LegacyType>>,
+        return_type: &LegacyType,
         is_closure: bool,
         arena: &mut TypeArena,
     ) -> Self {
-        let params: Arc<[LegacyType]> = params.into();
-        let params_id: TypeIdVec = params.iter().map(|p| arena.from_type(p)).collect();
-        let return_type_id = arena.from_type(&return_type);
+        let params_id: TypeIdVec = params
+            .into_iter()
+            .map(|p| arena.from_type(p.borrow()))
+            .collect();
+        let return_type_id = arena.from_type(return_type);
         Self {
-            params,
-            return_type: Box::new(return_type),
             is_closure,
             params_id,
             return_type_id,
@@ -92,17 +88,8 @@ impl FunctionType {
 
     /// Create a new FunctionType from TypeIds.
     /// This is the preferred constructor when you already have TypeIds (avoids LegacyType conversion).
-    pub fn from_ids(
-        param_ids: &[TypeId],
-        return_id: TypeId,
-        is_closure: bool,
-        arena: &TypeArena,
-    ) -> Self {
-        let params: Arc<[LegacyType]> = param_ids.iter().map(|&id| arena.to_type(id)).collect();
-        let return_type = Box::new(arena.to_type(return_id));
+    pub fn from_ids(param_ids: &[TypeId], return_id: TypeId, is_closure: bool) -> Self {
         Self {
-            params,
-            return_type,
             is_closure,
             params_id: param_ids.iter().copied().collect(),
             return_type_id: return_id,
@@ -112,13 +99,14 @@ impl FunctionType {
 
 impl std::fmt::Display for FunctionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(")?;
-        for (i, param) in self.params.iter().enumerate() {
+        // Display TypeIds - for proper type names, use arena-based display methods
+        write!(f, "fn(")?;
+        for (i, &param_id) in self.params_id.iter().enumerate() {
             if i > 0 {
                 write!(f, ", ")?;
             }
-            write!(f, "{}", param)?;
+            write!(f, "#{}", param_id.index())?;
         }
-        write!(f, ") -> {}", self.return_type)
+        write!(f, ") -> #{}", self.return_type_id.index())
     }
 }

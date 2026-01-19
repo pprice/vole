@@ -261,7 +261,7 @@ mod tests {
             method_id,
             MethodImpl {
                 trait_name: Some(sym(2)), // "Sized"
-                func_type: FunctionType::from_ids(&[], arena.i64(), false, &arena),
+                func_type: FunctionType::from_ids(&[], arena.i64(), false),
                 is_builtin: true,
                 external_info: None,
             },
@@ -345,7 +345,7 @@ mod tests {
             length_id,
             MethodImpl {
                 trait_name: None,
-                func_type: FunctionType::from_ids(&[], arena.i64(), false, &arena),
+                func_type: FunctionType::from_ids(&[], arena.i64(), false),
                 is_builtin: true,
                 external_info: None,
             },
@@ -356,7 +356,7 @@ mod tests {
             to_upper_id,
             MethodImpl {
                 trait_name: None,
-                func_type: FunctionType::from_ids(&[], arena.string(), false, &arena),
+                func_type: FunctionType::from_ids(&[], arena.string(), false),
                 is_builtin: true,
                 external_info: None,
             },
@@ -393,7 +393,7 @@ mod tests {
             equals_id,
             MethodImpl {
                 trait_name: Some(sym(20)), // "Equatable"
-                func_type: FunctionType::from_ids(&[arena.i64()], arena.bool(), false, &arena),
+                func_type: FunctionType::from_ids(&[arena.i64()], arena.bool(), false),
                 is_builtin: false,
                 external_info: None,
             },
@@ -405,7 +405,7 @@ mod tests {
             length_id,
             MethodImpl {
                 trait_name: None,
-                func_type: FunctionType::from_ids(&[], arena.i64(), false, &arena),
+                func_type: FunctionType::from_ids(&[], arena.i64(), false),
                 is_builtin: false,
                 external_info: None,
             },
