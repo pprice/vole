@@ -1298,7 +1298,7 @@ fn print_error_decl<'a>(
         // error Name {}
         arena.text("error ").append(name).append(" {}")
     } else {
-        // error Name { field1: LegacyType, field2: LegacyType }
+        // error Name { field1: Type, field2: Type }
         let fields: Vec<_> = error_decl
             .fields
             .iter()
