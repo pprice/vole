@@ -124,25 +124,6 @@ fn interface_instance(
 }
 
 impl<'a> TypeResolutionContext<'a> {
-    /// Create a context with type parameters in scope
-    pub fn with_type_params(
-        entity_registry: &'a EntityRegistry,
-        interner: &'a Interner,
-        name_table: &'a mut NameTable,
-        module_id: ModuleId,
-        type_params: &'a TypeParamScope,
-    ) -> Self {
-        Self {
-            entity_registry,
-            interner,
-            name_table,
-            module_id,
-            type_params: Some(type_params),
-            self_type: None,
-            type_arena: None,
-        }
-    }
-
     /// Create a context with type parameters and arena in scope
     pub fn with_type_params_and_arena(
         entity_registry: &'a EntityRegistry,
