@@ -32,7 +32,7 @@ pub struct ExpressionData {
     module_types: FxHashMap<String, HashMap<NodeId, TypeId>>,
     /// Per-module method resolutions (for multi-module compilation)
     module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
-    /// Shared type arena for converting TypeId handles back to LegacyType
+    /// Shared type arena for type queries
     type_arena: Rc<RefCell<TypeArena>>,
 }
 
