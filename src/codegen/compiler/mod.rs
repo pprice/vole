@@ -132,20 +132,8 @@ impl<'a> Compiler<'a> {
         self.query().method_name_id(name)
     }
 
-    /// Get ImplTypeId from a Type (wraps ImplTypeId::from_type with entity_registry.type_table)
-    fn impl_type_id_from_type(&self, ty: &crate::sema::LegacyType) -> Option<ImplTypeId> {
-        ImplTypeId::from_type(
-            ty,
-            &self.analyzed.entity_registry.type_table,
-            &self.analyzed.entity_registry,
-        )
-    }
-
-    /// Get ImplTypeId from a TypeId (no LegacyType conversion needed)
-    fn impl_type_id_from_type_id(
-        &self,
-        ty: crate::sema::type_arena::TypeId,
-    ) -> Option<ImplTypeId> {
+    /// Get ImplTypeId from a TypeId
+    fn impl_type_id_from_type_id(&self, ty: crate::sema::type_arena::TypeId) -> Option<ImplTypeId> {
         ImplTypeId::from_type_id(
             ty,
             &self.analyzed.type_arena.borrow(),

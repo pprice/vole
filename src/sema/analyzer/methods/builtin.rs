@@ -32,7 +32,8 @@ impl Analyzer {
                     if !args.is_empty() {
                         self.add_wrong_arg_count(0, args.len(), args[0].span);
                     }
-                    let iter_type_id = self.interface_type_id("Iterator", &[elem_ty_id], interner)?;
+                    let iter_type_id =
+                        self.interface_type_id("Iterator", &[elem_ty_id], interner)?;
                     Some(FunctionType::from_ids(
                         &[],
                         iter_type_id,

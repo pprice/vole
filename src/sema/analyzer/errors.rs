@@ -35,9 +35,12 @@ impl Analyzer {
 
     /// Display a type from TypeId (directly from SemaType, no LegacyType materialization)
     pub(super) fn type_display_id(&self, id: ArenaTypeId) -> String {
-        self.entity_registry
-            .type_table
-            .display_type_id_direct(id, &self.type_arena.borrow(), &self.name_table, &self.entity_registry)
+        self.entity_registry.type_table.display_type_id_direct(
+            id,
+            &self.type_arena.borrow(),
+            &self.name_table,
+            &self.entity_registry,
+        )
     }
 
     pub(super) fn type_display_pair_id(&self, left: ArenaTypeId, right: ArenaTypeId) -> String {

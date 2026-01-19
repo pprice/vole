@@ -5,8 +5,8 @@ use cranelift::prelude::*;
 use crate::codegen::types::CompileCtx;
 use crate::codegen::types::CompiledValue;
 use crate::errors::CodegenError;
-use crate::sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
 use crate::sema::PrimitiveType;
+use crate::sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
 
 /// Get field slot and type for a field access using TypeId (no LegacyType conversion)
 pub(crate) fn get_field_slot_and_type_id(

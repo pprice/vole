@@ -14,13 +14,11 @@ use crate::frontend::Symbol;
 use crate::runtime::native_registry::NativeType;
 use crate::sema::implement_registry::ExternalMethodInfo;
 use crate::sema::type_arena::{SemaType as ArenaType, TypeId};
-use crate::sema::{LegacyType, PrimitiveType};
+use crate::sema::PrimitiveType;
 use smallvec::SmallVec;
 
 use super::lambda::CaptureBinding;
-use super::types::{
-    CompileCtx, CompiledValue, native_type_to_cranelift, type_id_to_cranelift, type_to_cranelift,
-};
+use super::types::{CompileCtx, CompiledValue, native_type_to_cranelift, type_id_to_cranelift};
 
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
@@ -142,11 +140,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     // ========== Type interning helpers ==========
-
-    /// Intern a LegacyType to get a TypeId handle
-    pub fn intern_type(&self, ty: &LegacyType) -> TypeId {
-        self.ctx.arena.borrow_mut().from_type(ty)
-    }
 
     /// Get the interned void type
     pub fn void_type(&self) -> TypeId {
@@ -510,70 +503,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== External native function calls ==========
 
-    /// Call an external native function from the NativeRegistry.
-    /// Returns CompiledValue with the result, or error if function not found.
-    pub fn call_external(
-        &mut self,
-        external_info: &ExternalMethodInfo,
-        args: &[Value],
-        return_type: &LegacyType,
-    ) -> Result<CompiledValue, String> {
-        // Look up the native function in the registry
-        let native_func = self
-            .ctx
-            .native_registry
-            .lookup(&external_info.module_path, &external_info.native_name)
-            .ok_or_else(|| {
-                format!(
-                    "Native function {}::{} not found in registry",
-                    external_info.module_path, external_info.native_name
-                )
-            })?;
-
-        // Build the Cranelift signature from NativeSignature
-        let mut sig = self.ctx.module.make_signature();
-        for param_type in &native_func.signature.params {
-            sig.params.push(AbiParam::new(native_type_to_cranelift(
-                param_type,
-                self.ctx.pointer_type,
-            )));
-        }
-        if native_func.signature.return_type != NativeType::Nil {
-            sig.returns.push(AbiParam::new(native_type_to_cranelift(
-                &native_func.signature.return_type,
-                self.ctx.pointer_type,
-            )));
-        }
-
-        // Import the signature and emit an indirect call
-        let sig_ref = self.builder.import_signature(sig);
-        let func_ptr = native_func.ptr;
-
-        // Load the function pointer as a constant
-        let func_ptr_val = self
-            .builder
-            .ins()
-            .iconst(self.ctx.pointer_type, func_ptr as i64);
-
-        // Emit the indirect call
-        let call_inst = self
-            .builder
-            .ins()
-            .call_indirect(sig_ref, func_ptr_val, args);
-        let results = self.builder.inst_results(call_inst);
-
-        if results.is_empty() {
-            Ok(self.void_value())
-        } else {
-            Ok(CompiledValue {
-                value: results[0],
-                ty: type_to_cranelift(return_type, self.ctx.pointer_type),
-                type_id: self.intern_type(return_type),
-            })
-        }
-    }
-
-    /// Call an external native function using TypeId for return type (no LegacyType conversion).
+    /// Call an external native function using TypeId for return type.
     pub fn call_external_id(
         &mut self,
         external_info: &ExternalMethodInfo,

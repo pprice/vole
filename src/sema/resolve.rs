@@ -264,10 +264,10 @@ pub fn resolve_type_with_arena(
                 .resolve_type_or_interface(*sym, ctx.entity_registry)
             {
                 let type_def = ctx.entity_registry.get_type(type_def_id);
-                if type_def.kind == TypeDefKind::Alias {
-                    if let Some(aliased_type_id) = type_def.aliased_type {
-                        return aliased_type_id;
-                    }
+                if type_def.kind == TypeDefKind::Alias
+                    && let Some(aliased_type_id) = type_def.aliased_type
+                {
+                    return aliased_type_id;
                 }
             }
             // For other named types, fall back to Type-based resolution and convert

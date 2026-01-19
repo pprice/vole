@@ -24,15 +24,35 @@ impl Analyzer {
             ExprKind::IntLiteral(value) => {
                 // Check if expected is a union type
                 let union_variants = expected.and_then(|id| {
-                    self.type_arena.borrow().unwrap_union(id).map(|v| v.to_vec())
+                    self.type_arena
+                        .borrow()
+                        .unwrap_union(id)
+                        .map(|v| v.to_vec())
                 });
 
                 if let Some(variants) = union_variants {
-                    // Find an integer variant that fits this literal
+                    // Find the smallest integer variant that fits this literal.
+                    // When multiple integer types can hold a value, prefer the smallest
+                    // (e.g., prefer i32 over i64 for the literal 42).
+                    let mut best_variant: Option<ArenaTypeId> = None;
                     for variant_id in variants {
                         if variant_id.is_integer() && variant_id.fits_literal(*value) {
-                            return Ok(variant_id);
+                            best_variant = Some(match best_variant {
+                                None => variant_id,
+                                Some(current) => {
+                                    // Prefer smaller integer types
+                                    if variant_id.integer_bit_width() < current.integer_bit_width()
+                                    {
+                                        variant_id
+                                    } else {
+                                        current
+                                    }
+                                }
+                            });
                         }
+                    }
+                    if let Some(best) = best_variant {
+                        return Ok(best);
                     }
                     // No matching integer variant
                     let expected_str = self.type_display_id(expected.unwrap());
@@ -65,18 +85,18 @@ impl Analyzer {
                 Ok(ArenaTypeId::I64)
             }
             ExprKind::TypeLiteral(_) => {
-                if let Some(exp_id) = expected {
-                    if exp_id != ArenaTypeId::METATYPE {
-                        let expected_str = self.type_display_id(exp_id);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: expected_str,
-                                found: "type".to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                    }
+                if let Some(exp_id) = expected
+                    && exp_id != ArenaTypeId::METATYPE
+                {
+                    let expected_str = self.type_display_id(exp_id);
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: expected_str,
+                            found: "type".to_string(),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
                 }
                 Ok(ArenaTypeId::METATYPE)
             }
@@ -89,10 +109,10 @@ impl Analyzer {
                         return Ok(exp_id);
                     }
                     // Check if union contains f64
-                    if let Some(variants) = self.type_arena.borrow().unwrap_union(exp_id) {
-                        if variants.iter().any(|&v| v == ArenaTypeId::F64) {
-                            return Ok(ArenaTypeId::F64);
-                        }
+                    if let Some(variants) = self.type_arena.borrow().unwrap_union(exp_id)
+                        && variants.contains(&ArenaTypeId::F64)
+                    {
+                        return Ok(ArenaTypeId::F64);
                     }
                     let expected_str = self.type_display_id(exp_id);
                     self.add_error(
@@ -106,7 +126,9 @@ impl Analyzer {
                 }
                 Ok(ArenaTypeId::F64)
             }
-            ExprKind::Binary(bin) => self.check_binary_expr_expecting_id(expr, bin, expected, interner),
+            ExprKind::Binary(bin) => {
+                self.check_binary_expr_expecting_id(expr, bin, expected, interner)
+            }
             ExprKind::Unary(un) => self.check_unary_expr_expecting_id(expr, un, expected, interner),
             ExprKind::Grouping(inner) => self.check_expr_expecting_id(inner, expected, interner),
             ExprKind::ArrayLiteral(elements) => {
@@ -135,19 +157,19 @@ impl Analyzer {
             // All other cases: infer type, then check compatibility
             _ => {
                 let inferred_id = self.check_expr(expr, interner)?;
-                if let Some(expected_id) = expected {
-                    if !self.types_compatible_id(inferred_id, expected_id, interner) {
-                        let expected_str = self.type_display_id(expected_id);
-                        let found = self.type_display_id(inferred_id);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: expected_str,
-                                found,
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                    }
+                if let Some(expected_id) = expected
+                    && !self.types_compatible_id(inferred_id, expected_id, interner)
+                {
+                    let expected_str = self.type_display_id(expected_id);
+                    let found = self.type_display_id(inferred_id);
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: expected_str,
+                            found,
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
                 }
                 Ok(inferred_id)
             }
@@ -169,6 +191,9 @@ impl Analyzer {
 
                 // Handle string concatenation
                 if left_id == ArenaTypeId::STRING {
+                    // String is Stringable but check it explicitly since primitives
+                    // don't structurally implement interfaces
+                    #[allow(clippy::if_same_then_else)]
                     if right_id == ArenaTypeId::STRING {
                         return Ok(ArenaTypeId::STRING);
                     } else if self.satisfies_stringable_id(right_id, interner) {
@@ -188,12 +213,11 @@ impl Analyzer {
 
                 // Numeric addition
                 if left_id.is_numeric() && right_id.is_numeric() {
-                    if let Some(exp) = expected {
-                        if self.types_compatible_id(left_id, exp, interner)
-                            && self.types_compatible_id(right_id, exp, interner)
-                        {
-                            return Ok(exp);
-                        }
+                    if let Some(exp) = expected
+                        && self.types_compatible_id(left_id, exp, interner)
+                        && self.types_compatible_id(right_id, exp, interner)
+                    {
+                        return Ok(exp);
                     }
                     return Ok(self.numeric_result_type(left_id, right_id));
                 }
@@ -214,12 +238,11 @@ impl Analyzer {
                 let right_id = self.check_expr_expecting_id(&bin.right, expected, interner)?;
 
                 if left_id.is_numeric() && right_id.is_numeric() {
-                    if let Some(exp) = expected {
-                        if self.types_compatible_id(left_id, exp, interner)
-                            && self.types_compatible_id(right_id, exp, interner)
-                        {
-                            return Ok(exp);
-                        }
+                    if let Some(exp) = expected
+                        && self.types_compatible_id(left_id, exp, interner)
+                        && self.types_compatible_id(right_id, exp, interner)
+                    {
+                        return Ok(exp);
                     }
                     return Ok(self.numeric_result_type(left_id, right_id));
                 }
@@ -235,15 +258,22 @@ impl Analyzer {
                 Ok(ArenaTypeId::INVALID)
             }
             // Comparison ops
-            BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
+            BinaryOp::Eq
+            | BinaryOp::Ne
+            | BinaryOp::Lt
+            | BinaryOp::Gt
+            | BinaryOp::Le
+            | BinaryOp::Ge => {
                 let left_id = self.check_expr_expecting_id(&bin.left, None, interner)?;
                 self.check_expr_expecting_id(&bin.right, Some(left_id), interner)?;
                 Ok(ArenaTypeId::BOOL)
             }
             // Logical ops
             BinaryOp::And | BinaryOp::Or => {
-                let left_id = self.check_expr_expecting_id(&bin.left, Some(ArenaTypeId::BOOL), interner)?;
-                let right_id = self.check_expr_expecting_id(&bin.right, Some(ArenaTypeId::BOOL), interner)?;
+                let left_id =
+                    self.check_expr_expecting_id(&bin.left, Some(ArenaTypeId::BOOL), interner)?;
+                let right_id =
+                    self.check_expr_expecting_id(&bin.right, Some(ArenaTypeId::BOOL), interner)?;
 
                 if left_id == ArenaTypeId::BOOL && right_id == ArenaTypeId::BOOL {
                     Ok(ArenaTypeId::BOOL)
@@ -260,17 +290,20 @@ impl Analyzer {
                 }
             }
             // Bitwise ops
-            BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl | BinaryOp::Shr => {
+            BinaryOp::BitAnd
+            | BinaryOp::BitOr
+            | BinaryOp::BitXor
+            | BinaryOp::Shl
+            | BinaryOp::Shr => {
                 let left_id = self.check_expr_expecting_id(&bin.left, expected, interner)?;
                 let right_id = self.check_expr_expecting_id(&bin.right, expected, interner)?;
 
                 if left_id.is_integer() && right_id.is_integer() {
-                    if let Some(exp) = expected {
-                        if self.types_compatible_id(left_id, exp, interner)
-                            && self.types_compatible_id(right_id, exp, interner)
-                        {
-                            return Ok(exp);
-                        }
+                    if let Some(exp) = expected
+                        && self.types_compatible_id(left_id, exp, interner)
+                        && self.types_compatible_id(right_id, exp, interner)
+                    {
+                        return Ok(exp);
                     }
                     return Ok(self.integer_result_type(left_id, right_id));
                 }
@@ -300,11 +333,11 @@ impl Analyzer {
                 // Special case: -INT_LITERAL
                 if let ExprKind::IntLiteral(value) = &un.operand.kind {
                     let negated = value.wrapping_neg();
-                    if let Some(target) = expected {
-                        if self.type_arena.borrow().literal_fits_id(negated, target) {
-                            self.record_expr_type_id(&un.operand, target);
-                            return Ok(target);
-                        }
+                    if let Some(target) = expected
+                        && self.type_arena.borrow().literal_fits_id(negated, target)
+                    {
+                        self.record_expr_type_id(&un.operand, target);
+                        return Ok(target);
                     }
                     self.record_expr_type_id(&un.operand, ArenaTypeId::I64);
                     return Ok(ArenaTypeId::I64);
@@ -326,7 +359,8 @@ impl Analyzer {
                 }
             }
             UnaryOp::Not => {
-                let operand_id = self.check_expr_expecting_id(&un.operand, Some(ArenaTypeId::BOOL), interner)?;
+                let operand_id =
+                    self.check_expr_expecting_id(&un.operand, Some(ArenaTypeId::BOOL), interner)?;
                 if operand_id == ArenaTypeId::BOOL {
                     Ok(ArenaTypeId::BOOL)
                 } else {
@@ -402,7 +436,11 @@ impl Analyzer {
                 }
                 let mut elem_ids = Vec::with_capacity(elements.len());
                 for e in elements {
-                    elem_ids.push(self.check_expr_expecting_id(e, Some(elem_expected), interner)?);
+                    elem_ids.push(self.check_expr_expecting_id(
+                        e,
+                        Some(elem_expected),
+                        interner,
+                    )?);
                 }
                 return Ok(self.ty_array_id(elem_ids[0]));
             }
@@ -410,7 +448,10 @@ impl Analyzer {
 
         if elements.is_empty() {
             // Empty array with unknown element type
-            let unknown_id = self.type_arena.borrow_mut().from_type(&LegacyType::unknown());
+            let unknown_id = self
+                .type_arena
+                .borrow_mut()
+                .from_type(&LegacyType::unknown());
             return Ok(self.ty_array_id(unknown_id));
         }
 

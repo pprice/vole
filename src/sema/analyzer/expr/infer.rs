@@ -343,7 +343,8 @@ impl Analyzer {
                 // For non-literals, just check normally (no type coercion)
                 let value_type_id = if is_expr.value.is_literal() {
                     // Try to infer literal's type from tested type (won't error on mismatch)
-                    let inferred_id = self.infer_literal_type_id(&is_expr.value, tested_type_id, interner);
+                    let inferred_id =
+                        self.infer_literal_type_id(&is_expr.value, tested_type_id, interner);
                     // Record the inferred type so codegen uses it
                     self.record_expr_type_id(&is_expr.value, inferred_id);
                     inferred_id

@@ -95,8 +95,11 @@ impl Analyzer {
                     .collect::<Result<Vec<_>, _>>()?;
 
                 // Infer type parameters from argument types (using TypeId version)
-                let inferred_id =
-                    self.infer_type_params_id(&generic_def.type_params, &generic_def.param_types, &arg_type_ids);
+                let inferred_id = self.infer_type_params_id(
+                    &generic_def.type_params,
+                    &generic_def.param_types,
+                    &arg_type_ids,
+                );
                 self.check_type_param_constraints_id(
                     &generic_def.type_params,
                     &inferred_id,
@@ -106,7 +109,8 @@ impl Analyzer {
 
                 // Create the concrete function type by substituting via arena
                 // Convert std HashMap to hashbrown HashMap for arena.substitute
-                let subs_hashbrown: hashbrown::HashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
+                let subs_hashbrown: hashbrown::HashMap<_, _> =
+                    inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
                 let (concrete_param_ids, concrete_return_id) = {
                     let mut arena = self.type_arena.borrow_mut();
                     // Substitute all types using TypeId-based substitutions directly
@@ -126,7 +130,8 @@ impl Analyzer {
                 }
 
                 // Type check arguments against concrete params (using TypeId)
-                for (i, (arg, &expected_id)) in call.args.iter().zip(concrete_param_ids.iter()).enumerate()
+                for (i, (arg, &expected_id)) in
+                    call.args.iter().zip(concrete_param_ids.iter()).enumerate()
                 {
                     let arg_ty_id = arg_type_ids[i];
                     if !self.types_compatible_id(arg_ty_id, expected_id, interner) {
@@ -145,7 +150,10 @@ impl Analyzer {
                     type_args = ?type_args_id.iter().map(|&id| self.type_display_id(id)).collect::<Vec<_>>(),
                     "generic instantiation"
                 );
-                let type_keys = type_args_id.iter().map(|&id| self.type_key_for_id(id)).collect();
+                let type_keys = type_args_id
+                    .iter()
+                    .map(|&id| self.type_key_for_id(id))
+                    .collect();
                 let module_id = self.name_table.main_module();
                 let name_id = {
                     let mut namer = Namer::new(&mut self.name_table, interner);
@@ -196,19 +204,12 @@ impl Analyzer {
                 let arena = self.type_arena.borrow();
                 if let Some((params, ret, _is_closure)) = arena.unwrap_function(var_type_id) {
                     let params = params.clone();
-                    let ret = ret;
                     drop(arena);
                     // Calling a function-typed variable - conservatively mark side effects
                     if self.in_lambda() {
                         self.mark_lambda_has_side_effects();
                     }
-                    return self.check_call_args_id(
-                        &call.args,
-                        &params,
-                        ret,
-                        expr.span,
-                        interner,
-                    );
+                    return self.check_call_args_id(&call.args, &params, ret, expr.span, interner);
                 }
                 // Check if it's a variable with a functional interface type
                 if let Some((type_def_id, _type_args)) = arena.unwrap_interface(var_type_id) {

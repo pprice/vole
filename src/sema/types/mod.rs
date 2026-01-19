@@ -541,7 +541,7 @@ impl LegacyType {
         })
     }
 
-    /// Normalize a union: flatten nested unions, sort, dedupe, unwrap single-element
+    /// Normalize a union: flatten nested unions, sort descending, dedupe, unwrap single-element
     pub fn normalize_union(mut types: Vec<LegacyType>) -> LegacyType {
         // Flatten nested unions
         let mut flattened = Vec::new();
@@ -552,8 +552,9 @@ impl LegacyType {
             }
         }
 
-        // Sort for canonical representation (use debug string for now)
-        flattened.sort_by_key(|t| format!("{:?}", t));
+        // Sort descending - puts value types before sentinels (Nil, Done)
+        // e.g., "Primitive(I64)" > "Nil" > "Done"
+        flattened.sort_by_key(|t| std::cmp::Reverse(format!("{:?}", t)));
 
         // Dedupe
         flattened.dedup();

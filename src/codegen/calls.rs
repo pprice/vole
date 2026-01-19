@@ -244,16 +244,19 @@ impl Cg<'_, '_, '_> {
                 .is_functional(iface_type_def_id)
         {
             let method = self.ctx.analyzed.entity_registry.get_method(method_id);
-            // Create function TypeId directly from method signature
+            // Create function TypeId directly from method signature using TypeId fields
             let func_type_id = {
                 let mut arena = self.ctx.arena.borrow_mut();
-                let param_ids: crate::sema::type_arena::TypeIdVec = method
+                let param_ids = method
                     .signature
-                    .params
-                    .iter()
-                    .map(|p| arena.from_type(p))
-                    .collect();
-                let ret_id = arena.from_type(&method.signature.return_type);
+                    .params_id
+                    .as_ref()
+                    .expect("FunctionType.params_id not set for functional interface call")
+                    .clone();
+                let ret_id = method
+                    .signature
+                    .return_type_id
+                    .expect("FunctionType.return_type_id not set for functional interface call");
                 arena.function(param_ids, ret_id, false)
             };
             let method_name_id = method.name_id;
@@ -297,16 +300,19 @@ impl Cg<'_, '_, '_> {
                         self.ctx.analyzed.entity_registry.is_functional(type_def_id)
                 {
                     let method = self.ctx.analyzed.entity_registry.get_method(method_id);
-                    // Create function TypeId directly from method signature
+                    // Create function TypeId directly from method signature using TypeId fields
                     let func_type_id = {
                         let mut arena = self.ctx.arena.borrow_mut();
-                        let param_ids: crate::sema::type_arena::TypeIdVec = method
+                        let param_ids = method
                             .signature
-                            .params
-                            .iter()
-                            .map(|p| arena.from_type(p))
-                            .collect();
-                        let ret_id = arena.from_type(&method.signature.return_type);
+                            .params_id
+                            .as_ref()
+                            .expect("FunctionType.params_id not set for global functional interface")
+                            .clone();
+                        let ret_id = method
+                            .signature
+                            .return_type_id
+                            .expect("FunctionType.return_type_id not set for global functional interface");
                         arena.function(param_ids, ret_id, false)
                     };
                     let method_name_id = method.name_id;
@@ -338,16 +344,19 @@ impl Cg<'_, '_, '_> {
                     self.ctx.analyzed.entity_registry.is_functional(type_def_id)
             {
                 let method = self.ctx.analyzed.entity_registry.get_method(method_id);
-                // Create function TypeId directly from method signature
+                // Create function TypeId directly from method signature using TypeId fields
                 let func_type_id = {
                     let mut arena = self.ctx.arena.borrow_mut();
-                    let param_ids: crate::sema::type_arena::TypeIdVec = method
+                    let param_ids = method
                         .signature
-                        .params
-                        .iter()
-                        .map(|p| arena.from_type(p))
-                        .collect();
-                    let ret_id = arena.from_type(&method.signature.return_type);
+                        .params_id
+                        .as_ref()
+                        .expect("FunctionType.params_id not set for interface vtable call")
+                        .clone();
+                    let ret_id = method
+                        .signature
+                        .return_type_id
+                        .expect("FunctionType.return_type_id not set for interface vtable call");
                     arena.function(param_ids, ret_id, false)
                 };
                 let method_name_id = method.name_id;

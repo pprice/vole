@@ -9,7 +9,6 @@ use cranelift_jit::JITModule;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use crate::codegen::FunctionRegistry;
 use crate::commands::common::AnalyzedProgram;
@@ -22,11 +21,9 @@ use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::MonomorphCache;
 use crate::sema::implement_registry::ImplTypeId;
 use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
-use crate::sema::types::NominalType;
-use crate::sema::{EntityRegistry, LegacyType, PrimitiveType, TypeKey};
+use crate::sema::{EntityRegistry, PrimitiveType, TypeKey};
 
-// Re-export box_interface_value for centralized access to all boxing helpers
-pub(crate) use super::interface_vtable::box_interface_value;
+// Re-export box_interface_value_id for centralized access to boxing helper
 pub(crate) use super::interface_vtable::box_interface_value_id;
 
 /// Compiled value with its type
@@ -278,495 +275,8 @@ pub(crate) fn function_name_id_with_interner(
     namer.function(module, name)
 }
 
-/// Build an InterfaceType from EntityRegistry's TypeDef
-fn build_interface_type_from_entity(
-    type_def_id: TypeDefId,
-    entity_registry: &EntityRegistry,
-) -> LegacyType {
-    let type_def = entity_registry.get_type(type_def_id);
-
-    // Build methods from MethodDef
-    let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
-        .methods
-        .iter()
-        .map(|&method_id| {
-            let method = entity_registry.get_method(method_id);
-            crate::sema::types::InterfaceMethodType {
-                name: method.name_id,
-                params: method.signature.params.clone(),
-                return_type: Box::new((*method.signature.return_type).clone()),
-                has_default: method.has_default,
-                params_id: method.signature.params_id.clone(),
-                return_type_id: method.signature.return_type_id,
-            }
-        })
-        .collect();
-
-    // Keep extends as TypeDefIds directly
-    let extends = type_def.extends.clone();
-
-    LegacyType::Nominal(NominalType::Interface(crate::sema::types::InterfaceType {
-        type_def_id,
-        // Note: type_args_id not populated in codegen path - LegacyType is primary here
-        type_args_id: TypeIdVec::new(),
-        methods: methods.into(),
-        extends: extends.into(),
-    }))
-}
-
-/// Resolve a type expression using entity registry, error types, and type metadata
-/// This is the full resolution function that handles all named types including classes/records
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn resolve_type_expr_with_metadata(
-    ty: &TypeExpr,
-    entity_registry: &EntityRegistry,
-    type_metadata: &HashMap<Symbol, TypeMetadata>,
-    interner: &Interner,
-    name_table: &NameTable,
-    module_id: ModuleId,
-    arena: &RefCell<TypeArena>,
-) -> LegacyType {
-    // Create resolver for name lookups
-    let resolver = Resolver::new(interner, name_table, module_id, &[]);
-
-    match ty {
-        TypeExpr::Primitive(p) => LegacyType::from_primitive(*p),
-        TypeExpr::Named(sym) => {
-            // Check entity registry for type definition (aliases, interfaces, etc.)
-            let type_def_id = resolver.resolve_type_or_interface(*sym, entity_registry);
-
-            if let Some(type_def_id) = type_def_id {
-                let type_def = entity_registry.get_type(type_def_id);
-                match type_def.kind {
-                    TypeDefKind::Alias => {
-                        // Type alias - return the aliased type
-                        if let Some(aliased_id) = type_def.aliased_type {
-                            return arena.borrow().to_type(aliased_id);
-                        }
-                        panic!(
-                            "INTERNAL ERROR: type alias has no aliased_type\n\
-                             type_def_id: {:?}, name_id: {:?}",
-                            type_def_id, type_def.name_id
-                        )
-                    }
-                    TypeDefKind::Interface => {
-                        // Generic interface without type args is an error
-                        if !type_def.type_params.is_empty() {
-                            panic!(
-                                "INTERNAL ERROR: generic interface used without type args\n\
-                                 type_def_id: {:?}, name_id: {:?}, type_params: {:?}",
-                                type_def_id, type_def.name_id, type_def.type_params
-                            );
-                        }
-                        build_interface_type_from_entity(type_def_id, entity_registry)
-                    }
-                    TypeDefKind::ErrorType => {
-                        // Error type - get info from EntityRegistry
-                        if let Some(error_info) = type_def.error_info.clone() {
-                            LegacyType::Nominal(NominalType::Error(error_info))
-                        } else {
-                            panic!(
-                                "INTERNAL ERROR: error type has no error_info\n\
-                                 type_def_id: {:?}, name_id: {:?}",
-                                type_def_id, type_def.name_id
-                            )
-                        }
-                    }
-                    TypeDefKind::Record | TypeDefKind::Class => {
-                        // For Record and Class types, first try direct lookup by Symbol
-                        // This works when Symbol is from the main interner
-                        // IMPORTANT: Verify the type matches by type_def_id to avoid Symbol collisions
-                        // between different interners (module vs main)
-                        if let Some(metadata) = type_metadata.get(sym) {
-                            // Verify this is the right type by comparing type_def_ids
-                            let vole_type = arena.borrow().to_type(metadata.vole_type);
-                            let matches = match &vole_type {
-                                LegacyType::Nominal(NominalType::Record(r)) => {
-                                    r.type_def_id == type_def_id
-                                }
-                                LegacyType::Nominal(NominalType::Class(c)) => {
-                                    c.type_def_id == type_def_id
-                                }
-                                _ => false,
-                            };
-                            if matches {
-                                return vole_type;
-                            }
-                            // Symbol collision - fall through to build from entity registry
-                        }
-                        // Build from entity registry - handles module code where
-                        // Symbols are from module interners
-                        if type_def.kind == TypeDefKind::Record {
-                            if let Some(record_type) =
-                                entity_registry.build_record_type(type_def_id)
-                            {
-                                return LegacyType::Nominal(NominalType::Record(record_type));
-                            }
-                        } else if let Some(class_type) =
-                            entity_registry.build_class_type(type_def_id)
-                        {
-                            return LegacyType::Nominal(NominalType::Class(class_type));
-                        }
-                        panic!(
-                            "INTERNAL ERROR: failed to build record/class type\n\
-                             type_def_id: {:?}, kind: {:?}, name_id: {:?}",
-                            type_def_id, type_def.kind, type_def.name_id
-                        )
-                    }
-                    _ => {
-                        // Primitive or unknown - check type metadata
-                        if let Some(metadata) = type_metadata.get(sym) {
-                            arena.borrow().to_type(metadata.vole_type)
-                        } else {
-                            panic!(
-                                "INTERNAL ERROR: unknown type kind with no metadata\n\
-                                 type_def_id: {:?}, kind: {:?}, sym: {:?}",
-                                type_def_id, type_def.kind, sym
-                            )
-                        }
-                    }
-                }
-            } else if let Some(metadata) = type_metadata.get(sym) {
-                arena.borrow().to_type(metadata.vole_type)
-            } else {
-                // This is a type parameter (e.g., T in Box<T>).
-                // Type parameters are resolved when the generic is instantiated.
-                // Use Placeholder with the param name for debugging clarity.
-                let name = interner.resolve(*sym);
-                tracing::trace!(name, "type parameter in codegen, using Placeholder");
-                LegacyType::type_param_placeholder(name)
-            }
-        }
-        TypeExpr::Array(elem) => {
-            let elem_ty = resolve_type_expr_with_metadata(
-                elem,
-                entity_registry,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-                arena,
-            );
-            LegacyType::Array(Box::new(elem_ty))
-        }
-        TypeExpr::Optional(inner) => {
-            // T? desugars to T | nil
-            let inner_ty = resolve_type_expr_with_metadata(
-                inner,
-                entity_registry,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-                arena,
-            );
-            LegacyType::Union(vec![inner_ty, LegacyType::Nil].into())
-        }
-        TypeExpr::Union(variants) => {
-            let variant_types: Vec<LegacyType> = variants
-                .iter()
-                .map(|v| {
-                    resolve_type_expr_with_metadata(
-                        v,
-                        entity_registry,
-                        type_metadata,
-                        interner,
-                        name_table,
-                        module_id,
-                        arena,
-                    )
-                })
-                .collect();
-            LegacyType::normalize_union(variant_types)
-        }
-        TypeExpr::Nil => LegacyType::Nil,
-        TypeExpr::Done => LegacyType::Done,
-        TypeExpr::Function {
-            params,
-            return_type,
-        } => {
-            // Resolve param and return types first
-            let param_types: Vec<LegacyType> = params
-                .iter()
-                .map(|p| {
-                    resolve_type_expr_with_metadata(
-                        p,
-                        entity_registry,
-                        type_metadata,
-                        interner,
-                        name_table,
-                        module_id,
-                        arena,
-                    )
-                })
-                .collect();
-            let ret_type = resolve_type_expr_with_metadata(
-                return_type,
-                entity_registry,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-                arena,
-            );
-            // Build function TypeId via arena (avoids direct FunctionType construction)
-            let mut arena_mut = arena.borrow_mut();
-            let param_ids: TypeIdVec = param_types.iter().map(|t| arena_mut.from_type(t)).collect();
-            let ret_id = arena_mut.from_type(&ret_type);
-            let func_type_id = arena_mut.function(param_ids, ret_id, false);
-            arena_mut.to_type(func_type_id)
-        }
-        TypeExpr::SelfType => {
-            // Self type in interface signatures is resolved when the interface is implemented.
-            // For interface method signature compilation, we use a Self placeholder.
-            // The actual Self type is substituted when compiling implement blocks.
-            LegacyType::self_placeholder()
-        }
-        TypeExpr::Fallible {
-            success_type,
-            error_type,
-        } => {
-            let success = resolve_type_expr_with_metadata(
-                success_type,
-                entity_registry,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-                arena,
-            );
-            let error = resolve_type_expr_with_metadata(
-                error_type,
-                entity_registry,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-                arena,
-            );
-            LegacyType::Fallible(crate::sema::types::FallibleType {
-                success_type: Box::new(success),
-                error_type: Box::new(error),
-            })
-        }
-        TypeExpr::Generic { name, args } => {
-            // Resolve all type arguments
-            let resolved_args: Vec<LegacyType> = args
-                .iter()
-                .map(|a| {
-                    resolve_type_expr_with_metadata(
-                        a,
-                        entity_registry,
-                        type_metadata,
-                        interner,
-                        name_table,
-                        module_id,
-                        arena,
-                    )
-                })
-                .collect();
-            // Check entity registry for generic interface via Resolver
-            let type_def_id = resolver.resolve_type_or_interface(*name, entity_registry);
-
-            let name_str = interner.resolve(*name);
-            if let Some(type_def_id) = type_def_id {
-                let type_def = entity_registry.get_type(type_def_id);
-                match type_def.kind {
-                    TypeDefKind::Class => {
-                        // Convert resolved_args to TypeIdVec via arena
-                        let type_args_id: TypeIdVec = {
-                            let mut arena_mut = arena.borrow_mut();
-                            resolved_args
-                                .iter()
-                                .map(|t| arena_mut.from_type(t))
-                                .collect()
-                        };
-                        return LegacyType::Nominal(NominalType::Class(
-                            crate::sema::types::ClassType {
-                                type_def_id,
-                                type_args_id,
-                            },
-                        ));
-                    }
-                    TypeDefKind::Record => {
-                        // Convert resolved_args to TypeIdVec via arena
-                        let type_args_id: TypeIdVec = {
-                            let mut arena_mut = arena.borrow_mut();
-                            resolved_args
-                                .iter()
-                                .map(|t| arena_mut.from_type(t))
-                                .collect()
-                        };
-                        return LegacyType::Nominal(NominalType::Record(
-                            crate::sema::types::RecordType {
-                                type_def_id,
-                                type_args_id,
-                            },
-                        ));
-                    }
-                    TypeDefKind::Interface => {
-                        if !type_def.type_params.is_empty()
-                            && type_def.type_params.len() != resolved_args.len()
-                        {
-                            panic!(
-                                "INTERNAL ERROR: generic interface type arg count mismatch\n\
-                                 expected {} type args, got {}\n\
-                                 type_def_id: {:?}, name_id: {:?}",
-                                type_def.type_params.len(),
-                                resolved_args.len(),
-                                type_def_id,
-                                type_def.name_id
-                            );
-                        }
-
-                        // Build TypeId-based substitution map (fast path)
-                        let substitutions: hashbrown::HashMap<NameId, TypeId> = {
-                            let mut arena_mut = arena.borrow_mut();
-                            type_def
-                                .type_params
-                                .iter()
-                                .zip(resolved_args.iter())
-                                .map(|(name_id, arg)| (*name_id, arena_mut.from_type(arg)))
-                                .collect()
-                        };
-
-                        // Build methods with TypeId-based substitution
-                        let methods: Vec<crate::sema::types::InterfaceMethodType> = type_def
-                            .methods
-                            .iter()
-                            .map(|&method_id| {
-                                let method = entity_registry.get_method(method_id);
-                                let mut arena_mut = arena.borrow_mut();
-
-                                // Substitute using TypeId (fast arena-based)
-                                // Get params/return TypeIds - intern if not already present
-                                let new_params_id: TypeIdVec =
-                                    if let Some(params_id) = method.signature.params_id.as_ref() {
-                                        // Already interned - substitute directly
-                                        params_id
-                                            .iter()
-                                            .map(|&p| arena_mut.substitute(p, &substitutions))
-                                            .collect()
-                                    } else {
-                                        // Intern and substitute in one pass
-                                        method
-                                            .signature
-                                            .params
-                                            .iter()
-                                            .map(|p| {
-                                                let id = arena_mut.from_type(p);
-                                                arena_mut.substitute(id, &substitutions)
-                                            })
-                                            .collect()
-                                    };
-
-                                let new_return_id =
-                                    if let Some(return_id) = method.signature.return_type_id {
-                                        arena_mut.substitute(return_id, &substitutions)
-                                    } else {
-                                        let id = arena_mut.from_type(&method.signature.return_type);
-                                        arena_mut.substitute(id, &substitutions)
-                                    };
-
-                                // Convert to LegacyType for backwards compatibility
-                                let new_params: Arc<[LegacyType]> = new_params_id
-                                    .iter()
-                                    .map(|&id| arena_mut.to_type(id))
-                                    .collect::<Vec<_>>()
-                                    .into();
-                                let new_return = arena_mut.to_type(new_return_id);
-
-                                crate::sema::types::InterfaceMethodType {
-                                    name: method.name_id,
-                                    params: new_params,
-                                    return_type: Box::new(new_return),
-                                    has_default: method.has_default,
-                                    params_id: Some(new_params_id),
-                                    return_type_id: Some(new_return_id),
-                                }
-                            })
-                            .collect();
-
-                        // Keep extends as TypeDefIds directly
-                        let extends = type_def.extends.clone();
-
-                        // Convert resolved_args to TypeIdVec via arena
-                        let type_args_id: TypeIdVec = {
-                            let mut arena_mut = arena.borrow_mut();
-                            resolved_args
-                                .iter()
-                                .map(|t| arena_mut.from_type(t))
-                                .collect()
-                        };
-                        return LegacyType::Nominal(NominalType::Interface(
-                            crate::sema::types::InterfaceType {
-                                type_def_id,
-                                type_args_id,
-                                methods: methods.into(),
-                                extends: extends.into(),
-                            },
-                        ));
-                    }
-                    TypeDefKind::Alias | TypeDefKind::ErrorType | TypeDefKind::Primitive => {
-                        panic!(
-                            "INTERNAL ERROR: type '{}' cannot have type arguments\n\
-                             kind: {:?}, type_def_id: {:?}",
-                            name_str, type_def.kind, type_def_id
-                        );
-                    }
-                }
-            }
-            panic!(
-                "INTERNAL ERROR: unknown generic type '{}'\n\
-                 module_id: {:?}",
-                name_str, module_id
-            )
-        }
-        TypeExpr::Tuple(elements) => {
-            let resolved_elements: Vec<LegacyType> = elements
-                .iter()
-                .map(|e| {
-                    resolve_type_expr_with_metadata(
-                        e,
-                        entity_registry,
-                        type_metadata,
-                        interner,
-                        name_table,
-                        module_id,
-                        arena,
-                    )
-                })
-                .collect();
-            LegacyType::Tuple(resolved_elements.into())
-        }
-        TypeExpr::FixedArray { element, size } => {
-            let elem_ty = resolve_type_expr_with_metadata(
-                element,
-                entity_registry,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-                arena,
-            );
-            LegacyType::FixedArray {
-                element: Box::new(elem_ty),
-                size: *size,
-            }
-        }
-        TypeExpr::Structural { .. } => {
-            // Structural types are constraint-only, not concrete types for codegen
-            LegacyType::Void
-        }
-        TypeExpr::Combination(_) => {
-            // Type combinations are constraint-only, not concrete types for codegen
-            LegacyType::Void
-        }
-    }
-}
 
 /// Resolve a type expression directly to TypeId (no LegacyType intermediate).
-/// This is more efficient than resolve_type_expr_with_metadata when you need TypeId.
 /// Use this function when you don't need to handle generic interface method substitution.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_type_expr_to_id(
@@ -832,9 +342,7 @@ pub(crate) fn resolve_type_expr_to_id(
                         }
                         arena.borrow_mut().interface(type_def_id, TypeIdVec::new())
                     }
-                    TypeDefKind::ErrorType => {
-                        arena.borrow_mut().error_type(type_def_id)
-                    }
+                    TypeDefKind::ErrorType => arena.borrow_mut().error_type(type_def_id),
                     TypeDefKind::Record | TypeDefKind::Class => {
                         // For Record and Class types, first try direct lookup by Symbol
                         if let Some(metadata) = type_metadata.get(sym) {
@@ -864,13 +372,16 @@ pub(crate) fn resolve_type_expr_to_id(
                     }
                     _ => {
                         // Primitive or unknown - check type metadata
-                        type_metadata.get(sym).map(|m| m.vole_type).unwrap_or_else(|| {
-                            panic!(
-                                "INTERNAL ERROR: unknown type kind with no metadata\n\
+                        type_metadata
+                            .get(sym)
+                            .map(|m| m.vole_type)
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "INTERNAL ERROR: unknown type kind with no metadata\n\
                                  type_def_id: {:?}, kind: {:?}, sym: {:?}",
-                                type_def_id, type_def.kind, sym
-                            )
-                        })
+                                    type_def_id, type_def.kind, sym
+                                )
+                            })
                     }
                 }
             } else if let Some(metadata) = type_metadata.get(sym) {
@@ -1083,40 +594,7 @@ pub(crate) fn resolve_type_expr_to_id(
     }
 }
 
-/// Convert a Vole type to a Cranelift type
-pub(crate) fn type_to_cranelift(ty: &LegacyType, pointer_type: Type) -> Type {
-    match ty {
-        LegacyType::Primitive(PrimitiveType::I8) | LegacyType::Primitive(PrimitiveType::U8) => {
-            types::I8
-        }
-        LegacyType::Primitive(PrimitiveType::I16) | LegacyType::Primitive(PrimitiveType::U16) => {
-            types::I16
-        }
-        LegacyType::Primitive(PrimitiveType::I32) | LegacyType::Primitive(PrimitiveType::U32) => {
-            types::I32
-        }
-        LegacyType::Primitive(PrimitiveType::I64) | LegacyType::Primitive(PrimitiveType::U64) => {
-            types::I64
-        }
-        LegacyType::Primitive(PrimitiveType::I128) => types::I128,
-        LegacyType::Primitive(PrimitiveType::F32) => types::F32,
-        LegacyType::Primitive(PrimitiveType::F64) => types::F64,
-        LegacyType::Primitive(PrimitiveType::Bool) => types::I8,
-        LegacyType::Primitive(PrimitiveType::String) => pointer_type,
-        LegacyType::Nominal(NominalType::Interface(_)) => pointer_type,
-        LegacyType::Nil => types::I8, // Nil uses minimal representation
-        LegacyType::Done => types::I8, // Done uses minimal representation (like Nil)
-        LegacyType::Union(_) => pointer_type, // Unions are passed by pointer
-        LegacyType::Fallible(_) => pointer_type, // Fallibles are passed by pointer (tagged union)
-        LegacyType::Function(_) => pointer_type, // Function pointers
-        LegacyType::Range => pointer_type, // Ranges are passed by pointer (start, end)
-        LegacyType::Tuple(_) => pointer_type, // Tuples are passed by pointer
-        LegacyType::FixedArray { .. } => pointer_type, // Fixed arrays are passed by pointer
-        _ => types::I64,              // Default
-    }
-}
-
-/// Convert a TypeId to a Cranelift type (no LegacyType conversion needed)
+/// Convert a TypeId to a Cranelift type.
 pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: Type) -> Type {
     use crate::sema::type_arena::SemaType as ArenaType;
     match arena.get(ty) {
@@ -1315,21 +793,6 @@ pub(crate) fn fallible_error_tag_by_id(
     None
 }
 
-/// Convert a Cranelift type back to a Vole type (for return value inference)
-#[allow(dead_code)] // Used by compiler.rs during migration
-pub(crate) fn cranelift_to_vole_type(ty: Type) -> LegacyType {
-    match ty {
-        types::I8 => LegacyType::Primitive(PrimitiveType::I8),
-        types::I16 => LegacyType::Primitive(PrimitiveType::I16),
-        types::I32 => LegacyType::Primitive(PrimitiveType::I32),
-        types::I64 => LegacyType::Primitive(PrimitiveType::I64),
-        types::I128 => LegacyType::Primitive(PrimitiveType::I128),
-        types::F32 => LegacyType::Primitive(PrimitiveType::F32),
-        types::F64 => LegacyType::Primitive(PrimitiveType::F64),
-        _ => LegacyType::unknown(), // Pointer types, etc. use inference placeholder for now
-    }
-}
-
 /// Convert a compiled value to a target Cranelift type
 pub(crate) fn convert_to_type(
     builder: &mut FunctionBuilder,
@@ -1496,9 +959,7 @@ pub(crate) fn word_to_value_type_id(
         ArenaType::Primitive(PrimitiveType::I32) | ArenaType::Primitive(PrimitiveType::U32) => {
             builder.ins().ireduce(types::I32, word)
         }
-        ArenaType::Primitive(PrimitiveType::I64) | ArenaType::Primitive(PrimitiveType::U64) => {
-            word
-        }
+        ArenaType::Primitive(PrimitiveType::I64) | ArenaType::Primitive(PrimitiveType::U64) => word,
         ArenaType::Primitive(PrimitiveType::I128) => {
             let low = if word_type == types::I64 {
                 word

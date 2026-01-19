@@ -222,7 +222,10 @@ impl TypeTable {
                 )
             }
 
-            SemaType::Class { type_def_id, type_args } => {
+            SemaType::Class {
+                type_def_id,
+                type_args,
+            } => {
                 let type_def = entity_registry.get_type(*type_def_id);
                 let base = names.display(type_def.name_id);
                 if type_args.is_empty() {
@@ -237,7 +240,10 @@ impl TypeTable {
                 }
             }
 
-            SemaType::Record { type_def_id, type_args } => {
+            SemaType::Record {
+                type_def_id,
+                type_args,
+            } => {
                 let type_def = entity_registry.get_type(*type_def_id);
                 let base = names.display(type_def.name_id);
                 if type_args.is_empty() {
@@ -252,7 +258,10 @@ impl TypeTable {
                 }
             }
 
-            SemaType::Interface { type_def_id, type_args } => {
+            SemaType::Interface {
+                type_def_id,
+                type_args,
+            } => {
                 let name_id = entity_registry.name_id(*type_def_id);
                 let base = names.display(name_id);
                 if type_args.is_empty() {
@@ -267,9 +276,7 @@ impl TypeTable {
                 }
             }
 
-            SemaType::Error { type_def_id } => {
-                names.display(entity_registry.name_id(*type_def_id))
-            }
+            SemaType::Error { type_def_id } => names.display(entity_registry.name_id(*type_def_id)),
 
             SemaType::Fallible { success, error } => format!(
                 "fallible({}, {})",
@@ -302,7 +309,8 @@ impl TypeTable {
                         .iter()
                         .map(|&p| self.display_sema_type(p, arena, names, entity_registry))
                         .collect();
-                    let ret = self.display_sema_type(method.return_type, arena, names, entity_registry);
+                    let ret =
+                        self.display_sema_type(method.return_type, arena, names, entity_registry);
                     parts.push(format!("func {}({}) -> {}", name, params.join(", "), ret));
                 }
                 format!("{{ {} }}", parts.join(", "))

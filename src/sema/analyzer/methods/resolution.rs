@@ -75,24 +75,24 @@ impl Analyzer {
         if type_def_id.is_none() && object_type_id.is_primitive() {
             // Map primitive TypeId to NameId and look up method binding
             let primitive_name_id = self.name_id_for_primitive_type_id(object_type_id);
-            if let Some(name_id) = primitive_name_id {
-                if let Some(tdef_id) = self.entity_registry.type_by_name(name_id) {
-                    let method_name_id = self.method_name_id(method_name, interner);
-                    if let Some((interface_id, binding)) = self
-                        .entity_registry
-                        .find_method_binding_with_interface(tdef_id, method_name_id)
-                    {
-                        let trait_name = self
-                            .name_table
-                            .last_segment_str(self.entity_registry.get_type(interface_id).name_id)
-                            .and_then(|s| interner.lookup(&s));
-                        return Some(ResolvedMethod::Implemented {
-                            trait_name,
-                            func_type: binding.func_type.clone(),
-                            is_builtin: binding.is_builtin,
-                            external_info: binding.external_info.clone(),
-                        });
-                    }
+            if let Some(name_id) = primitive_name_id
+                && let Some(tdef_id) = self.entity_registry.type_by_name(name_id)
+            {
+                let method_name_id = self.method_name_id(method_name, interner);
+                if let Some((interface_id, binding)) = self
+                    .entity_registry
+                    .find_method_binding_with_interface(tdef_id, method_name_id)
+                {
+                    let trait_name = self
+                        .name_table
+                        .last_segment_str(self.entity_registry.get_type(interface_id).name_id)
+                        .and_then(|s| interner.lookup(&s));
+                    return Some(ResolvedMethod::Implemented {
+                        trait_name,
+                        func_type: binding.func_type.clone(),
+                        is_builtin: binding.is_builtin,
+                        external_info: binding.external_info.clone(),
+                    });
                 }
             }
         }
@@ -130,8 +130,7 @@ impl Analyzer {
                             && method_def.external_binding.is_some()
                             && !is_interface_type
                         {
-                            let type_name_id =
-                                self.entity_registry.get_type(type_def_id).name_id;
+                            let type_name_id = self.entity_registry.get_type(type_def_id).name_id;
                             let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner);
                             let interface_sym =
                                 self.get_type_symbol_by_name_id(defining_type.name_id, interner);
@@ -154,8 +153,7 @@ impl Analyzer {
                                 || arena.unwrap_record(object_type_id).is_some()
                         };
                         if method_def.has_default && is_class_or_record {
-                            let type_name_id =
-                                self.entity_registry.get_type(type_def_id).name_id;
+                            let type_name_id = self.entity_registry.get_type(type_def_id).name_id;
                             let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner);
                             let interface_sym =
                                 self.get_type_symbol_by_name_id(defining_type.name_id, interner);
@@ -251,18 +249,17 @@ impl Analyzer {
                 &self.entity_registry,
             )
         };
-        if let Some(impl_type_id) = impl_type_id {
-            if let Some(impl_) = self
+        if let Some(impl_type_id) = impl_type_id
+            && let Some(impl_) = self
                 .implement_registry
                 .get_method(&impl_type_id, method_name_id)
-            {
-                return Some(ResolvedMethod::Implemented {
-                    trait_name: impl_.trait_name,
-                    func_type: impl_.func_type.clone(),
-                    is_builtin: impl_.is_builtin,
-                    external_info: impl_.external_info.clone(),
-                });
-            }
+        {
+            return Some(ResolvedMethod::Implemented {
+                trait_name: impl_.trait_name,
+                func_type: impl_.func_type.clone(),
+                is_builtin: impl_.is_builtin,
+                external_info: impl_.external_info.clone(),
+            });
         }
 
         // No method found - return None

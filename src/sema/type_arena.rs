@@ -145,9 +145,23 @@ impl TypeId {
             Self::U8 => value >= 0 && value <= u8::MAX as i64,
             Self::U16 => value >= 0 && value <= u16::MAX as i64,
             Self::U32 => value >= 0 && value <= u32::MAX as i64,
-            Self::U64 => value >= 0, // i64 positive values fit
+            Self::U64 => value >= 0,       // i64 positive values fit
             Self::F32 | Self::F64 => true, // Integers can become floats
             _ => false,
+        }
+    }
+
+    /// Get the bit width of this integer type (no arena needed).
+    /// Returns u16::MAX for non-integer types (so they sort last).
+    #[inline]
+    pub fn integer_bit_width(self) -> u16 {
+        match self {
+            Self::I8 | Self::U8 => 8,
+            Self::I16 | Self::U16 => 16,
+            Self::I32 | Self::U32 => 32,
+            Self::I64 | Self::U64 => 64,
+            Self::I128 => 128,
+            _ => u16::MAX,
         }
     }
 }
@@ -518,14 +532,43 @@ impl TypeArena {
     // Compound type builders - intern on construction
     // ========================================================================
 
-    /// Create a union type from variants
+    /// Create a union type from variants.
+    /// Normalizes: flattens nested unions, sorts descending (value types before sentinels), dedupes.
     pub fn union(&mut self, variants: impl Into<TypeIdVec>) -> TypeId {
         let variants = variants.into();
         // Propagate invalid
         if variants.iter().any(|&v| self.is_invalid(v)) {
             return self.invalid();
         }
-        self.intern(SemaType::Union(variants))
+
+        // Empty union is invalid
+        if variants.is_empty() {
+            return self.invalid();
+        }
+
+        // Flatten nested unions
+        let mut flattened: Vec<TypeId> = Vec::new();
+        for &v in variants.iter() {
+            if let SemaType::Union(inner) = self.get(v) {
+                flattened.extend(inner.iter().copied());
+            } else {
+                flattened.push(v);
+            }
+        }
+
+        // Sort descending by Debug string - puts value types before sentinels
+        // e.g., "Primitive(I64)" > "Nil" > "Done" alphabetically reversed
+        flattened.sort_by_cached_key(|&v| std::cmp::Reverse(format!("{:?}", self.get(v))));
+
+        // Dedupe
+        flattened.dedup();
+
+        // Unwrap single-element union
+        if flattened.len() == 1 {
+            flattened[0]
+        } else {
+            self.intern(SemaType::Union(flattened.into()))
+        }
     }
 
     /// Create a tuple type from elements
@@ -2153,7 +2196,7 @@ mod tests {
         let mut arena = TypeArena::new();
         let type_def_id = TypeDefId::new(42);
         // Create type args with consistent LegacyType and TypeId representations
-        let type_args_legacy = vec![LegacyType::Primitive(PrimitiveType::I32)];
+        let type_args_legacy = [LegacyType::Primitive(PrimitiveType::I32)];
         let type_args_id: TypeIdVec = type_args_legacy
             .iter()
             .map(|t| arena.from_type(t))
@@ -2174,7 +2217,7 @@ mod tests {
         let mut arena = TypeArena::new();
         let type_def_id = TypeDefId::new(123);
         // Create type args
-        let type_args_legacy = vec![
+        let type_args_legacy = [
             LegacyType::Primitive(PrimitiveType::String),
             LegacyType::Primitive(PrimitiveType::Bool),
         ];

@@ -2,23 +2,20 @@ use cranelift::prelude::{Signature, Type as CraneliftType};
 use smallvec::{SmallVec, smallvec};
 
 use super::Compiler;
-use crate::codegen::types::{resolve_type_expr_with_metadata, type_id_to_cranelift, type_to_cranelift};
+use crate::codegen::types::{resolve_type_expr_to_id, type_id_to_cranelift};
 use crate::frontend::{Interner, Param, TypeExpr};
-use crate::sema::LegacyType;
 use crate::sema::type_arena::TypeId;
 
 /// SmallVec for function parameters - most functions have <= 8 params
 type ParamVec = SmallVec<[CraneliftType; 8]>;
 
 /// Describes how to handle the `self` parameter in method signatures
-pub enum SelfParam<'a> {
+pub enum SelfParam {
     /// No self parameter (functions, static methods)
     None,
     /// Self is a pointer (regular methods)
     Pointer,
-    /// Self has a specific type (implement blocks on primitives)
-    Typed(&'a LegacyType),
-    /// Self has a specific type using TypeId (no LegacyType conversion needed)
+    /// Self has a specific type using TypeId (implement blocks on primitives)
     TypedId(TypeId),
 }
 
@@ -32,6 +29,7 @@ pub enum TypeResolver<'a> {
 
 impl Compiler<'_> {
     /// Build a signature with configurable self parameter and type resolution strategy.
+    /// Uses TypeId-native resolution for all types.
     pub fn build_signature(
         &self,
         params: &[Param],
@@ -39,24 +37,22 @@ impl Compiler<'_> {
         self_param: SelfParam,
         resolver: TypeResolver,
     ) -> Signature {
-        // Start with self parameter if needed
-        let mut cranelift_params: ParamVec = match self_param {
-            SelfParam::None => SmallVec::new(),
-            SelfParam::Pointer => smallvec![self.pointer_type],
-            SelfParam::Typed(ty) => smallvec![type_to_cranelift(ty, self.pointer_type)],
-            SelfParam::TypedId(type_id) => {
-                smallvec![type_id_to_cranelift(type_id, &self.analyzed.type_arena.borrow(), self.pointer_type)]
-            }
+        // Collect TypeIds first (this borrows arena internally)
+        let self_type_id = match self_param {
+            SelfParam::None => None,
+            SelfParam::Pointer => None, // Use pointer_type directly
+            SelfParam::TypedId(type_id) => Some(type_id),
         };
 
-        // Resolve and add function parameters
-        match &resolver {
+        // Resolve param TypeIds
+        let param_type_ids: SmallVec<[TypeId; 8]> = match &resolver {
             TypeResolver::Query => {
                 let query = self.query();
                 let module_id = query.main_module();
-                for param in params {
-                    cranelift_params.push(type_to_cranelift(
-                        &resolve_type_expr_with_metadata(
+                params
+                    .iter()
+                    .map(|param| {
+                        resolve_type_expr_to_id(
                             &param.ty,
                             query.registry(),
                             &self.type_metadata,
@@ -64,16 +60,16 @@ impl Compiler<'_> {
                             query.name_table(),
                             module_id,
                             &self.analyzed.type_arena,
-                        ),
-                        self.pointer_type,
-                    ));
-                }
+                        )
+                    })
+                    .collect()
             }
             TypeResolver::Interner(interner) => {
                 let module_id = self.func_registry.main_module();
-                for param in params {
-                    cranelift_params.push(type_to_cranelift(
-                        &resolve_type_expr_with_metadata(
+                params
+                    .iter()
+                    .map(|param| {
+                        resolve_type_expr_to_id(
                             &param.ty,
                             &self.analyzed.entity_registry,
                             &self.type_metadata,
@@ -81,48 +77,63 @@ impl Compiler<'_> {
                             &self.analyzed.name_table,
                             module_id,
                             &self.analyzed.type_arena,
-                        ),
-                        self.pointer_type,
-                    ));
-                }
+                        )
+                    })
+                    .collect()
             }
-        }
+        };
 
-        // Resolve return type
-        let ret = return_type.map(|t| match &resolver {
+        // Resolve return TypeId
+        let return_type_id = return_type.map(|t| match &resolver {
             TypeResolver::Query => {
                 let query = self.query();
                 let module_id = query.main_module();
-                type_to_cranelift(
-                    &resolve_type_expr_with_metadata(
-                        t,
-                        query.registry(),
-                        &self.type_metadata,
-                        query.interner(),
-                        query.name_table(),
-                        module_id,
-                        &self.analyzed.type_arena,
-                    ),
-                    self.pointer_type,
+                resolve_type_expr_to_id(
+                    t,
+                    query.registry(),
+                    &self.type_metadata,
+                    query.interner(),
+                    query.name_table(),
+                    module_id,
+                    &self.analyzed.type_arena,
                 )
             }
             TypeResolver::Interner(interner) => {
                 let module_id = self.func_registry.main_module();
-                type_to_cranelift(
-                    &resolve_type_expr_with_metadata(
-                        t,
-                        &self.analyzed.entity_registry,
-                        &self.type_metadata,
-                        interner,
-                        &self.analyzed.name_table,
-                        module_id,
-                        &self.analyzed.type_arena,
-                    ),
-                    self.pointer_type,
+                resolve_type_expr_to_id(
+                    t,
+                    &self.analyzed.entity_registry,
+                    &self.type_metadata,
+                    interner,
+                    &self.analyzed.name_table,
+                    module_id,
+                    &self.analyzed.type_arena,
                 )
             }
         });
 
+        // Now convert TypeIds to Cranelift types (single arena borrow)
+        let arena_ref = self.analyzed.type_arena.borrow();
+
+        // Build cranelift params starting with self if needed
+        let mut cranelift_params: ParamVec = match (self_param, self_type_id) {
+            (SelfParam::None, _) => SmallVec::new(),
+            (SelfParam::Pointer, _) => smallvec![self.pointer_type],
+            (SelfParam::TypedId(_), Some(type_id)) => {
+                smallvec![type_id_to_cranelift(type_id, &arena_ref, self.pointer_type)]
+            }
+            (SelfParam::TypedId(_), None) => unreachable!(),
+        };
+
+        // Add param types
+        for type_id in param_type_ids {
+            cranelift_params.push(type_id_to_cranelift(type_id, &arena_ref, self.pointer_type));
+        }
+
+        // Convert return type
+        let ret = return_type_id.map(|id| type_id_to_cranelift(id, &arena_ref, self.pointer_type));
+
+        drop(arena_ref);
         self.jit.create_signature(&cranelift_params, ret)
     }
 }

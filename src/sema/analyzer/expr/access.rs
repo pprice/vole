@@ -361,12 +361,8 @@ impl Analyzer {
             )?;
 
             // Build FunctionType for resolution storage (still needed for codegen)
-            let func_type = FunctionType::from_ids(
-                &param_ids,
-                return_id,
-                false,
-                &self.type_arena.borrow(),
-            );
+            let func_type =
+                FunctionType::from_ids(&param_ids, return_id, false, &self.type_arena.borrow());
 
             // Get external_funcs from module metadata
             let is_external = self
@@ -404,30 +400,30 @@ impl Analyzer {
         if let Some(resolved) =
             self.resolve_method_via_entity_registry_id(object_type_id, method_call.method, interner)
         {
-            if resolved.is_builtin() {
-                if let Some(func_type) = self.check_builtin_method_id(
+            if resolved.is_builtin()
+                && let Some(func_type) = self.check_builtin_method_id(
                     object_type_id,
                     method_name,
                     &method_call.args,
                     interner,
-                ) {
-                    let updated = match resolved {
-                        ResolvedMethod::Implemented {
-                            trait_name,
-                            is_builtin,
-                            external_info,
-                            ..
-                        } => ResolvedMethod::Implemented {
-                            trait_name,
-                            func_type: func_type.clone(),
-                            is_builtin,
-                            external_info,
-                        },
-                        other => other,
-                    };
-                    self.method_resolutions.insert(expr.id, updated);
-                    return Ok(self.type_to_id(&func_type.return_type));
-                }
+                )
+            {
+                let updated = match resolved {
+                    ResolvedMethod::Implemented {
+                        trait_name,
+                        is_builtin,
+                        external_info,
+                        ..
+                    } => ResolvedMethod::Implemented {
+                        trait_name,
+                        func_type: func_type.clone(),
+                        is_builtin,
+                        external_info,
+                    },
+                    other => other,
+                };
+                self.method_resolutions.insert(expr.id, updated);
+                return Ok(self.type_to_id(&func_type.return_type));
             }
 
             let func_type = resolved.func_type().clone();
@@ -571,12 +567,18 @@ impl Analyzer {
                 ids.iter().copied().collect()
             } else {
                 let mut arena = self.type_arena.borrow_mut();
-                func_type.params.iter().map(|p| arena.from_type(p)).collect()
+                func_type
+                    .params
+                    .iter()
+                    .map(|p| arena.from_type(p))
+                    .collect()
             };
 
             // Get return TypeId
             let return_type_id: ArenaTypeId = func_type.return_type_id.unwrap_or_else(|| {
-                self.type_arena.borrow_mut().from_type(&func_type.return_type)
+                self.type_arena
+                    .borrow_mut()
+                    .from_type(&func_type.return_type)
             });
 
             // Get class-level type params (if any)
@@ -653,7 +655,7 @@ impl Analyzer {
 
                 (substituted_param_ids, substituted_return_id, Some(inferred))
             } else {
-                (param_type_ids.clone(), return_type_id, None)
+                (param_type_ids, return_type_id, None)
             };
 
             // Second pass: check argument types against (potentially substituted) param types
@@ -914,10 +916,16 @@ impl Analyzer {
                 ids.iter().copied().collect()
             } else {
                 let mut arena = self.type_arena.borrow_mut();
-                func_type.params.iter().map(|p| arena.from_type(p)).collect()
+                func_type
+                    .params
+                    .iter()
+                    .map(|p| arena.from_type(p))
+                    .collect()
             };
             let return_type_id: ArenaTypeId = func_type.return_type_id.unwrap_or_else(|| {
-                self.type_arena.borrow_mut().from_type(&func_type.return_type)
+                self.type_arena
+                    .borrow_mut()
+                    .from_type(&func_type.return_type)
             });
 
             // Create the substituted function type using arena substitution (TypeId-based)

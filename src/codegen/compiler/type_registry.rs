@@ -2,35 +2,36 @@ use std::collections::HashMap;
 
 use super::{Compiler, SelfParam, TypeResolver};
 use crate::codegen::types::{
-    MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_with_metadata,
+    MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_to_id,
 };
 use crate::frontend::{
     ClassDecl, Decl, InterfaceDecl, Interner, Program, RecordDecl, StaticsBlock, Symbol, TypeExpr,
 };
 use crate::runtime::type_registry::{FieldTypeTag, register_instance_type};
-use crate::sema::type_arena::TypeIdVec;
-use crate::sema::types::NominalType;
-use crate::sema::{ClassType, LegacyType, PrimitiveType, RecordType};
+use crate::sema::type_arena::{TypeId, TypeIdVec};
 
-/// Convert a Vole Type to a FieldTypeTag for runtime cleanup
-fn type_to_field_tag(ty: &LegacyType) -> FieldTypeTag {
-    match ty {
-        LegacyType::Primitive(PrimitiveType::String) => FieldTypeTag::String,
-        LegacyType::Array(_) => FieldTypeTag::Array,
-        LegacyType::Nominal(NominalType::Class(_))
-        | LegacyType::Nominal(NominalType::Record(_)) => FieldTypeTag::Instance,
-        // Optional types containing reference types also need cleanup
-        LegacyType::Union(variants) => {
-            // If any variant is a reference type, mark as needing cleanup
-            for variant in variants.iter() {
-                let tag = type_to_field_tag(variant);
-                if tag.needs_cleanup() {
-                    return tag;
-                }
+/// Convert a TypeId to a FieldTypeTag for runtime cleanup
+fn type_id_to_field_tag(
+    ty: TypeId,
+    arena: &crate::sema::type_arena::TypeArena,
+) -> FieldTypeTag {
+    if arena.is_string(ty) {
+        FieldTypeTag::String
+    } else if arena.is_array(ty) {
+        FieldTypeTag::Array
+    } else if arena.is_class(ty) || arena.is_record(ty) {
+        FieldTypeTag::Instance
+    } else if let Some(variants) = arena.unwrap_union(ty) {
+        // If any variant is a reference type, mark as needing cleanup
+        for &variant in variants.iter() {
+            let tag = type_id_to_field_tag(variant, arena);
+            if tag.needs_cleanup() {
+                return tag;
             }
-            FieldTypeTag::Value
         }
-        _ => FieldTypeTag::Value,
+        FieldTypeTag::Value
+    } else {
+        FieldTypeTag::Value
     }
 }
 
@@ -51,12 +52,11 @@ impl Compiler<'_> {
         None
     }
 
-    /// Resolve a type expression using type_metadata (for record/class field types)
-    /// This allows resolving types like `Person?` where Person is another record/class
-    pub(super) fn resolve_type_with_metadata(&self, ty: &TypeExpr) -> LegacyType {
+    /// Resolve a type expression to TypeId
+    pub(super) fn resolve_type_to_id(&self, ty: &TypeExpr) -> TypeId {
         let query = self.query();
         let module_id = query.main_module();
-        resolve_type_expr_with_metadata(
+        resolve_type_expr_to_id(
             ty,
             query.registry(),
             &self.type_metadata,
@@ -67,14 +67,13 @@ impl Compiler<'_> {
         )
     }
 
-    /// Resolve a type expression using a specific interner (for module types)
-    /// This is needed because module classes have symbols from their own interner
-    pub(super) fn resolve_type_with_interner(
+    /// Resolve a type expression to TypeId using a specific interner (for module types)
+    pub(super) fn resolve_type_to_id_with_interner(
         &self,
         ty: &TypeExpr,
         interner: &Interner,
-    ) -> LegacyType {
-        resolve_type_expr_with_metadata(
+    ) -> TypeId {
+        resolve_type_expr_to_id(
             ty,
             &self.analyzed.entity_registry,
             &self.type_metadata,
@@ -103,16 +102,12 @@ impl Compiler<'_> {
             .type_by_name(name_id)
             .expect("class should be registered in entity registry");
 
-        // Create a placeholder vole_type (will be replaced in finalize_class)
-        let placeholder_type = LegacyType::Nominal(NominalType::Class(ClassType {
-            type_def_id,
-            type_args_id: TypeIdVec::new(),
-        }));
+        // Create a placeholder vole_type_id (will be replaced in finalize_class)
         let vole_type_id = self
             .analyzed
             .type_arena
             .borrow_mut()
-            .from_type(&placeholder_type);
+            .class(type_def_id, TypeIdVec::new());
 
         self.type_metadata.insert(
             class.name,
@@ -139,14 +134,14 @@ impl Compiler<'_> {
         let query = self.query();
         let module_id = query.main_module();
 
-        // Build field slots map
+        // Build field slots map (TypeId-native)
         let mut field_slots = HashMap::new();
         let mut field_type_tags = Vec::new();
         for (i, field) in class.fields.iter().enumerate() {
             let field_name = query.resolve_symbol(field.name).to_string();
             field_slots.insert(field_name, i);
-            let field_type = self.resolve_type_with_metadata(&field.ty);
-            field_type_tags.push(type_to_field_tag(&field_type));
+            let field_type_id = self.resolve_type_to_id(&field.ty);
+            field_type_tags.push(type_id_to_field_tag(field_type_id, &self.analyzed.type_arena.borrow()));
         }
 
         // Register field types in runtime type registry for cleanup
@@ -160,26 +155,15 @@ impl Compiler<'_> {
             .type_by_name(name_id)
             .expect("class should be registered in entity registry");
 
-        // Create the Vole type
-        let vole_type = LegacyType::Nominal(NominalType::Class(ClassType {
-            type_def_id,
-            type_args_id: TypeIdVec::new(),
-        }));
-
-        // Collect method return types
+        // Collect method return types (TypeId-native)
         let func_module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
         for method in &class.methods {
-            let return_type_legacy = method
+            let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| self.resolve_type_with_metadata(t))
-                .unwrap_or(LegacyType::Void);
-            let return_type = self
-                .analyzed
-                .type_arena
-                .borrow_mut()
-                .from_type(&return_type_legacy);
+                .map(|t| self.resolve_type_to_id(t))
+                .unwrap_or(TypeId::VOID);
             let sig = self.build_signature(
                 &method.params,
                 method.return_type.as_ref(),
@@ -231,16 +215,11 @@ impl Compiler<'_> {
             if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
                 for method in &interface_decl.methods {
                     if method.body.is_some() && !direct_methods.contains(&method.name) {
-                        let return_type_legacy = method
+                        let return_type = method
                             .return_type
                             .as_ref()
-                            .map(|t| self.resolve_type_with_metadata(t))
-                            .unwrap_or(LegacyType::Void);
-                        let return_type = self
-                            .analyzed
-                            .type_arena
-                            .borrow_mut()
-                            .from_type(&return_type_legacy);
+                            .map(|t| self.resolve_type_to_id(t))
+                            .unwrap_or(TypeId::VOID);
                         let sig = self.build_signature(
                             &method.params,
                             method.return_type.as_ref(),
@@ -271,7 +250,11 @@ impl Compiler<'_> {
 
         let query = self.query();
         let name_id = query.name_id(module_id, &[class.name]);
-        let vole_type_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_type);
+        let vole_type_id = self
+            .analyzed
+            .type_arena
+            .borrow_mut()
+            .class(type_def_id, TypeIdVec::new());
         self.type_metadata.insert(
             class.name,
             TypeMetadata {
@@ -303,16 +286,12 @@ impl Compiler<'_> {
             .type_by_name(name_id)
             .expect("record should be registered in entity registry");
 
-        // Create a placeholder vole_type (will be replaced in finalize_record)
-        let placeholder_type = LegacyType::Nominal(NominalType::Record(RecordType {
-            type_def_id,
-            type_args_id: TypeIdVec::new(),
-        }));
+        // Create a placeholder vole_type_id (will be replaced in finalize_record)
         let vole_type_id = self
             .analyzed
             .type_arena
             .borrow_mut()
-            .from_type(&placeholder_type);
+            .record(type_def_id, TypeIdVec::new());
 
         self.type_metadata.insert(
             record.name,
@@ -339,14 +318,14 @@ impl Compiler<'_> {
         let query = self.query();
         let module_id = query.main_module();
 
-        // Build field slots map
+        // Build field slots map (TypeId-native)
         let mut field_slots = HashMap::new();
         let mut field_type_tags = Vec::new();
         for (i, field) in record.fields.iter().enumerate() {
             let field_name = query.resolve_symbol(field.name).to_string();
             field_slots.insert(field_name, i);
-            let field_type = self.resolve_type_with_metadata(&field.ty);
-            field_type_tags.push(type_to_field_tag(&field_type));
+            let field_type_id = self.resolve_type_to_id(&field.ty);
+            field_type_tags.push(type_id_to_field_tag(field_type_id, &self.analyzed.type_arena.borrow()));
         }
 
         // Register field types in runtime type registry for cleanup
@@ -360,26 +339,15 @@ impl Compiler<'_> {
             .type_by_name(name_id)
             .expect("record should be registered in entity registry");
 
-        // Create the Vole type
-        let vole_type = LegacyType::Nominal(NominalType::Record(RecordType {
-            type_def_id,
-            type_args_id: TypeIdVec::new(),
-        }));
-
-        // Collect method return types
+        // Collect method return types (TypeId-native)
         let func_module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
         for method in &record.methods {
-            let return_type_legacy = method
+            let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| self.resolve_type_with_metadata(t))
-                .unwrap_or(LegacyType::Void);
-            let return_type = self
-                .analyzed
-                .type_arena
-                .borrow_mut()
-                .from_type(&return_type_legacy);
+                .map(|t| self.resolve_type_to_id(t))
+                .unwrap_or(TypeId::VOID);
             let sig = self.build_signature(
                 &method.params,
                 method.return_type.as_ref(),
@@ -431,16 +399,11 @@ impl Compiler<'_> {
             if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
                 for method in &interface_decl.methods {
                     if method.body.is_some() && !direct_methods.contains(&method.name) {
-                        let return_type_legacy = method
+                        let return_type = method
                             .return_type
                             .as_ref()
-                            .map(|t| self.resolve_type_with_metadata(t))
-                            .unwrap_or(LegacyType::Void);
-                        let return_type = self
-                            .analyzed
-                            .type_arena
-                            .borrow_mut()
-                            .from_type(&return_type_legacy);
+                            .map(|t| self.resolve_type_to_id(t))
+                            .unwrap_or(TypeId::VOID);
                         let sig = self.build_signature(
                             &method.params,
                             method.return_type.as_ref(),
@@ -472,7 +435,11 @@ impl Compiler<'_> {
 
         let query = self.query();
         let name_id = query.name_id(module_id, &[record.name]);
-        let vole_type_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_type);
+        let vole_type_id = self
+            .analyzed
+            .type_arena
+            .borrow_mut()
+            .record(type_def_id, TypeIdVec::new());
         self.type_metadata.insert(
             record.name,
             TypeMetadata {
@@ -502,16 +469,11 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let return_type_legacy = method
+            let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| self.resolve_type_with_metadata(t))
-                .unwrap_or(LegacyType::Void);
-            let return_type = self
-                .analyzed
-                .type_arena
-                .borrow_mut()
-                .from_type(&return_type_legacy);
+                .map(|t| self.resolve_type_to_id(t))
+                .unwrap_or(TypeId::VOID);
 
             // Create signature without self parameter
             let sig = self.build_signature(
@@ -585,26 +547,20 @@ impl Compiler<'_> {
         let type_id = self.next_type_id;
         self.next_type_id += 1;
 
-        // Build field slots map
+        // Build field slots map (TypeId-native)
         let mut field_slots = HashMap::new();
         let mut field_type_tags = Vec::new();
         for (i, field) in class.fields.iter().enumerate() {
             let field_name = module_interner.resolve(field.name).to_string();
             field_slots.insert(field_name, i);
-            let field_type = self.resolve_type_with_interner(&field.ty, module_interner);
-            field_type_tags.push(type_to_field_tag(&field_type));
+            let field_type_id = self.resolve_type_to_id_with_interner(&field.ty, module_interner);
+            field_type_tags.push(type_id_to_field_tag(field_type_id, &self.analyzed.type_arena.borrow()));
         }
 
         // Register field types in runtime type registry
         register_instance_type(type_id, field_type_tags);
 
-        // Create the Vole type
-        let vole_type = LegacyType::Nominal(NominalType::Class(ClassType {
-            type_def_id,
-            type_args_id: TypeIdVec::new(),
-        }));
-
-        // Collect method info and declare methods
+        // Collect method info and declare methods (TypeId-native)
         let func_module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
 
@@ -613,16 +569,11 @@ impl Compiler<'_> {
             let method_name_str = module_interner.resolve(method.name);
             tracing::debug!(type_name = %type_name_str, method_name = %method_name_str, "Processing instance method");
 
-            let return_type_legacy = method
+            let return_type = method
                 .return_type
                 .as_ref()
-                .map(|t| self.resolve_type_with_interner(t, module_interner))
-                .unwrap_or(LegacyType::Void);
-            let return_type = self
-                .analyzed
-                .type_arena
-                .borrow_mut()
-                .from_type(&return_type_legacy);
+                .map(|t| self.resolve_type_to_id_with_interner(t, module_interner))
+                .unwrap_or(TypeId::VOID);
 
             let sig = self.build_signature(
                 &method.params,
@@ -672,7 +623,11 @@ impl Compiler<'_> {
             .lookup(type_name_str)
             .unwrap_or(class.name);
         tracing::debug!(type_name = %type_name_str, ?class.name, ?main_class_symbol, "Inserting type_metadata");
-        let vole_type_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_type);
+        let vole_type_id = self
+            .analyzed
+            .type_arena
+            .borrow_mut()
+            .class(type_def_id, TypeIdVec::new());
         self.type_metadata.insert(
             main_class_symbol,
             TypeMetadata {
@@ -692,16 +647,11 @@ impl Compiler<'_> {
                     continue;
                 }
 
-                let return_type_legacy = method
+                let return_type = method
                     .return_type
                     .as_ref()
-                    .map(|t| self.resolve_type_with_interner(t, module_interner))
-                    .unwrap_or(LegacyType::Void);
-                let return_type = self
-                    .analyzed
-                    .type_arena
-                    .borrow_mut()
-                    .from_type(&return_type_legacy);
+                    .map(|t| self.resolve_type_to_id_with_interner(t, module_interner))
+                    .unwrap_or(TypeId::VOID);
 
                 let sig = self.build_signature(
                     &method.params,

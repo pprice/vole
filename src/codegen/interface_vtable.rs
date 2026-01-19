@@ -16,8 +16,7 @@ use crate::identity::{MethodId, NameId, TypeDefId};
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
 use crate::sema::type_arena::{SemaType, TypeId};
-use crate::sema::types::NominalType;
-use crate::sema::{EntityRegistry, LegacyType};
+use crate::sema::EntityRegistry;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 enum InterfaceConcreteType {
@@ -773,110 +772,7 @@ fn collect_interface_methods_inner_entity_registry(
     }
 }
 
-#[tracing::instrument(skip(builder, ctx, value), fields(interface_type = ?interface_type))]
-pub(crate) fn box_interface_value(
-    builder: &mut FunctionBuilder,
-    ctx: &mut CompileCtx,
-    value: CompiledValue,
-    interface_type: &LegacyType,
-) -> Result<CompiledValue, String> {
-    let LegacyType::Nominal(NominalType::Interface(interface)) = interface_type else {
-        return Ok(value);
-    };
-
-    // Look up the interface Symbol name for vtable operations via EntityRegistry
-    let interface_type_id = interface.type_def_id;
-    let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_id);
-    // Get the interface Symbol by looking up the short name in the interner
-    let interface_name_str = ctx
-        .analyzed
-        .name_table
-        .last_segment_str(interface_def.name_id)
-        .ok_or_else(|| {
-            format!(
-                "cannot get interface name string for {:?}",
-                interface.type_def_id
-            )
-        })?;
-    let interface_name = ctx.interner.lookup(&interface_name_str).ok_or_else(|| {
-        format!(
-            "interface name '{}' not found in interner",
-            interface_name_str
-        )
-    })?;
-
-    tracing::debug!(
-        interface = %ctx.interner.resolve(interface_name),
-        value_type = ?value.type_id,
-        "boxing value as interface"
-    );
-
-    // Check if already an interface using TypeId unwrap
-    if ctx.arena.borrow().unwrap_interface(value.type_id).is_some() {
-        tracing::debug!("already interface, skip boxing");
-        return Ok(value);
-    }
-
-    // Check if this is an external-only interface via EntityRegistry
-    if ctx
-        .analyzed
-        .entity_registry
-        .is_external_only(interface_type_id)
-    {
-        tracing::debug!("external-only interface, skip boxing");
-        let interned_interface = ctx.arena.borrow_mut().from_type(interface_type);
-        return Ok(CompiledValue {
-            value: value.value,
-            ty: ctx.pointer_type,
-            type_id: interned_interface,
-        });
-    }
-
-    let heap_alloc_ref = runtime_heap_alloc_ref(ctx, builder)?;
-    let data_word = value_to_word(
-        builder,
-        &value,
-        ctx.pointer_type,
-        Some(heap_alloc_ref),
-        ctx.arena,
-        &ctx.analyzed.entity_registry,
-    )?;
-
-    // Phase 1: Declare vtable using TypeId (no LegacyType conversion)
-    let vtable_id = ctx.interface_vtables.borrow_mut().get_or_declare(
-        ctx,
-        interface_name,
-        &interface.type_args_id,
-        value.type_id,
-    )?;
-    // Phase 2+3: Compile wrappers and define vtable data
-    ctx.interface_vtables
-        .borrow_mut()
-        .ensure_compiled(ctx, interface_name, value.type_id)?;
-    let vtable_gv = ctx.module.declare_data_in_func(vtable_id, builder.func);
-    let vtable_ptr = builder.ins().global_value(ctx.pointer_type, vtable_gv);
-
-    let word_bytes = ctx.pointer_type.bytes() as i64;
-    let size_val = builder.ins().iconst(ctx.pointer_type, word_bytes * 2);
-    let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
-    let iface_ptr = builder.inst_results(alloc_call)[0];
-
-    builder
-        .ins()
-        .store(MemFlags::new(), data_word, iface_ptr, 0);
-    builder
-        .ins()
-        .store(MemFlags::new(), vtable_ptr, iface_ptr, word_bytes as i32);
-
-    let interned_interface = ctx.arena.borrow_mut().from_type(interface_type);
-    Ok(CompiledValue {
-        value: iface_ptr,
-        ty: ctx.pointer_type,
-        type_id: interned_interface,
-    })
-}
-
-/// Box a value as an interface type using TypeId (avoids LegacyType conversion at call site).
+/// Box a value as an interface type using TypeId.
 #[tracing::instrument(skip(builder, ctx, value), fields(interface_type_id = ?interface_type_id))]
 pub(crate) fn box_interface_value_id(
     builder: &mut FunctionBuilder,
@@ -980,28 +876,29 @@ fn resolve_vtable_target(
     // Apply substitutions to get concrete param/return types (using TypeId-based substitution)
     let (substituted_param_ids, substituted_return_id) = {
         let mut arena = ctx.arena.borrow_mut();
-        // Use TypeId fields if available, otherwise convert from LegacyType
-        let param_ids: Vec<TypeId> = if let Some(ref params_id) = interface_method.signature.params_id {
-            params_id.iter().map(|&p| arena.substitute(p, substitutions)).collect()
-        } else {
-            interface_method.signature.params.iter().map(|p| {
-                let id = arena.from_type(p);
-                arena.substitute(id, substitutions)
-            }).collect()
-        };
-        let ret_id = if let Some(ret_id) = interface_method.signature.return_type_id {
-            arena.substitute(ret_id, substitutions)
-        } else {
-            let id = arena.from_type(&interface_method.signature.return_type);
-            arena.substitute(id, substitutions)
-        };
+        let params_id = interface_method
+            .signature
+            .params_id
+            .as_ref()
+            .expect("FunctionType.params_id not set for interface method vtable");
+        let param_ids: Vec<TypeId> = params_id
+            .iter()
+            .map(|&p| arena.substitute(p, substitutions))
+            .collect();
+        let ret_id = interface_method
+            .signature
+            .return_type_id
+            .expect("FunctionType.return_type_id not set for interface method vtable");
+        let ret_id = arena.substitute(ret_id, substitutions);
         (param_ids, ret_id)
     };
 
     // Check if concrete type is a function/closure
-    let fn_info = ctx.arena.borrow().unwrap_function(concrete_type_id).map(|(params, ret, is_closure)| {
-        (params.to_vec(), ret, is_closure)
-    });
+    let fn_info = ctx
+        .arena
+        .borrow()
+        .unwrap_function(concrete_type_id)
+        .map(|(params, ret, is_closure)| (params.to_vec(), ret, is_closure));
     if let Some((param_ids, return_id, _)) = fn_info {
         let arena = ctx.arena.borrow();
         let returns_void = matches!(arena.get(return_id), SemaType::Void);
@@ -1037,22 +934,17 @@ fn resolve_vtable_target(
             .implement_registry
             .get_method(&impl_type_id, method_name_id)
     {
-        // Use TypeId fields if available for efficiency
-        let (param_type_ids, return_type_id) = if let (Some(params_id), Some(ret_id)) =
-            (&impl_.func_type.params_id, impl_.func_type.return_type_id)
-        {
-            (params_id.to_vec(), ret_id)
-        } else {
-            let mut arena = ctx.arena.borrow_mut();
-            let params: Vec<TypeId> = impl_
-                .func_type
-                .params
-                .iter()
-                .map(|p| arena.from_type(p))
-                .collect();
-            let ret = arena.from_type(&impl_.func_type.return_type);
-            (params, ret)
-        };
+        // Use TypeId fields (required - no fallback)
+        let param_type_ids = impl_
+            .func_type
+            .params_id
+            .as_ref()
+            .expect("FunctionType.params_id not set for implement method vtable")
+            .to_vec();
+        let return_type_id = impl_
+            .func_type
+            .return_type_id
+            .expect("FunctionType.return_type_id not set for implement method vtable");
         let returns_void = matches!(ctx.arena.borrow().get(return_type_id), SemaType::Void);
         if let Some(external_info) = impl_.external_info.clone() {
             return Ok(VtableMethod {
@@ -1083,7 +975,8 @@ fn resolve_vtable_target(
         let method_name_id = method_name_id?;
         // Get type_def_id from concrete_type_id using arena unwraps
         let arena = ctx.arena.borrow();
-        let type_def_id = arena.unwrap_class(concrete_type_id)
+        let type_def_id = arena
+            .unwrap_class(concrete_type_id)
             .map(|(id, _)| id)
             .or_else(|| arena.unwrap_record(concrete_type_id).map(|(id, _)| id))?;
         drop(arena);
@@ -1097,26 +990,24 @@ fn resolve_vtable_target(
         )?;
         let method_info = meta.method_infos.get(&method_name_id).copied()?;
 
-        // Look up method signature via EntityRegistry - prefer TypeId fields
+        // Look up method signature via EntityRegistry - require TypeId fields
         let (param_ids, ret_id) = ctx
             .analyzed
             .entity_registry
             .find_method_on_type(type_def_id, method_name_id)
-            .and_then(|m_id| {
+            .map(|m_id| {
                 let sig = &ctx.analyzed.entity_registry.get_method(m_id).signature;
-                // Use TypeId fields if available
-                if let (Some(params_id), Some(ret_id)) = (&sig.params_id, sig.return_type_id) {
-                    Some((params_id.to_vec(), ret_id))
-                } else {
-                    // Fall back to from_type conversion
-                    let mut arena = ctx.arena.borrow_mut();
-                    let params: Vec<TypeId> = sig.params.iter().map(|p| arena.from_type(p)).collect();
-                    let ret = arena.from_type(&sig.return_type);
-                    Some((params, ret))
-                }
+                let params_id = sig
+                    .params_id
+                    .as_ref()
+                    .expect("FunctionType.params_id not set for direct method vtable");
+                let ret_id = sig
+                    .return_type_id
+                    .expect("FunctionType.return_type_id not set for direct method vtable");
+                (params_id.to_vec(), ret_id)
             })
             .unwrap_or_else(|| {
-                // Use substituted types as fallback
+                // Use substituted types as fallback (from interface method)
                 (substituted_param_ids.clone(), substituted_return_id)
             });
         Some((method_info, param_ids, ret_id))
@@ -1150,22 +1041,16 @@ fn resolve_vtable_target(
         {
             // For external bindings, use the original interface method signature.
             // The Rust implementation handles type dispatch, so we don't need substituted types.
-            // Prefer TypeId fields if available
-            let (param_type_ids, return_type_id) = if let (Some(params_id), Some(ret_id)) =
-                (&interface_method.signature.params_id, interface_method.signature.return_type_id)
-            {
-                (params_id.to_vec(), ret_id)
-            } else {
-                let mut arena = ctx.arena.borrow_mut();
-                let params: Vec<TypeId> = interface_method
-                    .signature
-                    .params
-                    .iter()
-                    .map(|p| arena.from_type(p))
-                    .collect();
-                let ret = arena.from_type(&interface_method.signature.return_type);
-                (params, ret)
-            };
+            let param_type_ids = interface_method
+                .signature
+                .params_id
+                .as_ref()
+                .expect("FunctionType.params_id not set for external default method vtable")
+                .to_vec();
+            let return_type_id = interface_method
+                .signature
+                .return_type_id
+                .expect("FunctionType.return_type_id not set for external default method vtable");
             let returns_void = matches!(ctx.arena.borrow().get(return_type_id), SemaType::Void);
             return Ok(VtableMethod {
                 param_count: interface_method.signature.params.len(),

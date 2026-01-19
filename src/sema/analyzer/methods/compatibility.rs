@@ -61,9 +61,9 @@ impl Analyzer {
         // Check function type compatibility with functional interface
         let fn_info = {
             let arena = self.type_arena.borrow();
-            arena.unwrap_function(from).map(|(params, ret, _)| {
-                (params.to_vec(), ret)
-            })
+            arena
+                .unwrap_function(from)
+                .map(|(params, ret, _)| (params.to_vec(), ret))
         };
 
         if let Some((fn_param_ids, fn_ret)) = fn_info
@@ -71,11 +71,8 @@ impl Analyzer {
             && fn_param_ids.len() == iface_fn.params.len()
         {
             // Pre-compute interface param TypeIds
-            let iface_param_ids: Vec<ArenaTypeId> = iface_fn
-                .params
-                .iter()
-                .map(|p| self.type_to_id(p))
-                .collect();
+            let iface_param_ids: Vec<ArenaTypeId> =
+                iface_fn.params.iter().map(|p| self.type_to_id(p)).collect();
             let iface_ret_id = self.type_to_id(&iface_fn.return_type);
 
             // Now check compatibility

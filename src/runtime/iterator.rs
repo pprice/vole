@@ -570,7 +570,8 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
 /// Get next value from interface iterator by calling through the vtable.
 /// The boxed interface has layout: [data_ptr, vtable_ptr]
 /// The vtable has method pointers, with next() at slot 0.
-/// The next() wrapper returns a tagged union pointer where tag 0 = Done, tag 1 = value.
+/// The next() wrapper returns a tagged union pointer.
+/// Union variants are sorted descending: Primitive(T) > Done, so tag 0 = value, tag 1 = Done.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_interface_iter_next(iter: *mut UnifiedIterator, out_value: *mut i64) -> i64 {
@@ -603,9 +604,9 @@ pub extern "C" fn vole_interface_iter_next(iter: *mut UnifiedIterator, out_value
 
         // Parse the tagged union result
         // Layout: [tag:1][pad:7][payload:8]
-        // Tag 0 = Done, Tag 1 = value
+        // Tag 0 = value, Tag 1 = Done (descending sort order)
         let tag = *result_ptr;
-        if tag == 0 {
+        if tag == 1 {
             // Done - no more values
             0
         } else {
@@ -619,8 +620,7 @@ pub extern "C" fn vole_interface_iter_next(iter: *mut UnifiedIterator, out_value
 
 /// Get next value from any iterator and return a tagged union pointer.
 /// Layout: [tag:1][pad:7][payload:8].
-/// Tags are determined by the normalized union ordering: "Done" < "I64" alphabetically,
-/// so the union is [Done, I64] where tag 0 = Done, tag 1 = value.
+/// Union variants are sorted descending: Primitive(T) > Done, so tag 0 = value, tag 1 = Done.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_next(iter: *mut UnifiedIterator) -> *mut u8 {
     let mut value: i64 = 0;
@@ -636,8 +636,8 @@ pub extern "C" fn vole_iter_next(iter: *mut UnifiedIterator) -> *mut u8 {
         std::alloc::handle_alloc_error(layout);
     }
 
-    // Tag 0 = Done (first in sorted union), Tag 1 = value (second in sorted union)
-    let tag = if has_value == 0 { 0u8 } else { 1u8 };
+    // Tag 0 = value, Tag 1 = Done (descending sort order)
+    let tag = if has_value == 0 { 1u8 } else { 0u8 };
     unsafe {
         std::ptr::write(ptr, tag);
         let payload_ptr = ptr.add(8) as *mut i64;

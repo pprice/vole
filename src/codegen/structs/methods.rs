@@ -13,17 +13,15 @@ use crate::codegen::method_resolution::{
     MethodResolutionInputId, MethodTarget, resolve_method_target_id,
 };
 use crate::codegen::types::{
-    CompiledValue, box_interface_value, box_interface_value_id, module_name_id, type_id_size,
-    type_id_to_cranelift, type_to_cranelift, value_to_word, word_to_value_type_id,
+    CompiledValue, box_interface_value_id, module_name_id, type_id_size, type_id_to_cranelift,
+    value_to_word, word_to_value_type_id,
 };
 use crate::errors::CodegenError;
 use crate::frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use crate::identity::NamerLookup;
 use crate::identity::{MethodId, NameId, TypeDefId};
-use crate::sema::LegacyType;
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_arena::TypeId;
-use crate::sema::types::NominalType;
 
 impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
@@ -54,11 +52,11 @@ impl Cg<'_, '_, '_> {
             .query()
             .method_at_in_module(expr_id, self.ctx.current_module)
         {
-            let func_type_id = self
-                .ctx
-                .arena
-                .borrow_mut()
-                .from_type(&LegacyType::Function(func_type.clone()));
+            let func_type_id = self.ctx.arena.borrow_mut().function(
+                func_type.params_id.as_ref().expect("FunctionType.params_id not set").clone(),
+                func_type.return_type_id.expect("FunctionType.return_type_id not set"),
+                func_type.is_closure,
+            );
             return self.static_method_call(*type_def_id, *method_id, func_type_id, mc, expr_id);
         }
 
@@ -104,11 +102,12 @@ impl Cg<'_, '_, '_> {
                     args.push(compiled.value);
                 }
 
-                let return_type = (*func_type.return_type).clone();
+                let return_type_id = func_type.return_type_id
+                    .expect("FunctionType.return_type_id not set for module method");
 
                 if let Some(ext_info) = external_info {
                     // External FFI function
-                    return self.call_external(ext_info, &args, &return_type);
+                    return self.call_external_id(ext_info, &args, return_type_id);
                 } else {
                     // Pure Vole function - call by mangled name
                     let name_id = name_id.ok_or_else(|| {
@@ -134,7 +133,6 @@ impl Cg<'_, '_, '_> {
                     if results.is_empty() {
                         return Ok(self.void_value());
                     } else {
-                        let return_type_id = self.intern_type(&return_type);
                         return Ok(self.typed_value_interned(results[0], return_type_id));
                     }
                 }
@@ -229,18 +227,23 @@ impl Cg<'_, '_, '_> {
                 external_info,
                 return_type,
             } => {
-                let param_types = resolution.map(|resolved| resolved.func_type().params.clone());
+                // Use TypeId-based params for interface boxing check
+                let param_type_ids = resolution.map(|resolved| {
+                    resolved.func_type().params_id.as_ref()
+                        .expect("FunctionType.params_id not set for external method")
+                        .clone()
+                });
                 let mut args: ArgVec = smallvec![obj.value];
-                if let Some(param_types) = &param_types {
-                    for (arg, param_type) in mc.args.iter().zip(param_types.iter()) {
+                if let Some(param_type_ids) = &param_type_ids {
+                    for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                         let compiled = self.expr(arg)?;
-                        let compiled =
-                            if matches!(param_type, LegacyType::Nominal(NominalType::Interface(_)))
-                            {
-                                box_interface_value(self.builder, self.ctx, compiled, param_type)?
-                            } else {
-                                compiled
-                            };
+                        // Check if param is interface type using arena
+                        let is_interface = self.ctx.arena.borrow().unwrap_interface(param_type_id).is_some();
+                        let compiled = if is_interface {
+                            box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
+                        } else {
+                            compiled
+                        };
                         args.push(compiled.value);
                     }
                 } else {
@@ -320,17 +323,23 @@ impl Cg<'_, '_, '_> {
             (self.func_ref(method_info.func_key)?, is_generic_class)
         };
 
-        let param_types = resolution.map(|resolved| resolved.func_type().params.clone());
+        // Use TypeId-based params for interface boxing check
+        let param_type_ids = resolution.map(|resolved| {
+            resolved.func_type().params_id.as_ref()
+                .expect("FunctionType.params_id not set for direct method")
+                .clone()
+        });
         let mut args: ArgVec = smallvec![obj.value];
-        if let Some(param_types) = &param_types {
-            for (arg, param_type) in mc.args.iter().zip(param_types.iter()) {
+        if let Some(param_type_ids) = &param_type_ids {
+            for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                 let compiled = self.expr(arg)?;
-                let compiled =
-                    if matches!(param_type, LegacyType::Nominal(NominalType::Interface(_))) {
-                        box_interface_value(self.builder, self.ctx, compiled, param_type)?
-                    } else {
-                        compiled
-                    };
+                // Check if param is interface type using arena
+                let is_interface = self.ctx.arena.borrow().unwrap_interface(param_type_id).is_some();
+                let compiled = if is_interface {
+                    box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
+                } else {
+                    compiled
+                };
 
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
@@ -599,7 +608,10 @@ impl Cg<'_, '_, '_> {
             .iter()
             .map(|param| (*param, elem_type_id))
             .collect();
-        let method_return_id = self.intern_type(&method.signature.return_type);
+        let method_return_id = method
+            .signature
+            .return_type_id
+            .expect("MethodSignature.return_type_id not set for iterator method");
         let return_type_id = self
             .ctx
             .arena
@@ -935,17 +947,19 @@ impl Cg<'_, '_, '_> {
                 .static_method_monomorph_cache
                 .get(mono_key)
             {
-                // Compile arguments with substituted param types
+                // Compile arguments with substituted param types (TypeId-based)
+                let param_type_ids = instance.func_type.params_id.as_ref()
+                    .expect("MonomorphInstance.func_type.params_id not set for static method");
                 let mut args = Vec::new();
-                for (arg, param_ty) in mc.args.iter().zip(instance.func_type.params.iter()) {
+                for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                     let compiled = self.expr(arg)?;
-                    // Box interface values if needed
-                    let compiled =
-                        if matches!(param_ty, LegacyType::Nominal(NominalType::Interface(_))) {
-                            box_interface_value(self.builder, self.ctx, compiled, param_ty)?
-                        } else {
-                            compiled
-                        };
+                    // Box interface values if needed - check using arena
+                    let is_interface = self.ctx.arena.borrow().unwrap_interface(param_type_id).is_some();
+                    let compiled = if is_interface {
+                        box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
+                    } else {
+                        compiled
+                    };
                     args.push(compiled.value);
                 }
 
@@ -955,14 +969,16 @@ impl Cg<'_, '_, '_> {
                 let call = self.builder.ins().call(func_ref, &args);
                 let results = self.builder.inst_results(call);
 
-                let return_type = (*instance.func_type.return_type).clone();
+                let return_type_id = instance.func_type.return_type_id
+                    .expect("MonomorphInstance.func_type.return_type_id not set for static method");
                 if results.is_empty() {
                     return Ok(self.void_value());
                 } else {
+                    let arena_ref = self.ctx.analyzed.type_arena.borrow();
                     return Ok(CompiledValue {
                         value: results[0],
-                        ty: type_to_cranelift(&return_type, self.ctx.pointer_type),
-                        type_id: self.intern_type(&return_type),
+                        ty: type_id_to_cranelift(return_type_id, &arena_ref, self.ctx.pointer_type),
+                        type_id: return_type_id,
                     });
                 }
             }

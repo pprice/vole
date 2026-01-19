@@ -315,7 +315,11 @@ impl Analyzer {
                     .type_arena
                     .borrow_mut()
                     .substitute(field_type_id, &substitutions);
-                return self.types_compatible_id(substituted_field_type_id, expected_type_id, interner);
+                return self.types_compatible_id(
+                    substituted_field_type_id,
+                    expected_type_id,
+                    interner,
+                );
             }
         }
         false
@@ -405,12 +409,10 @@ impl Analyzer {
         // Try TypeId comparison first (faster)
         if let (Some(exp_params), Some(found_params)) =
             (expected.params_id.as_ref(), found.params_id.as_ref())
-        {
-            if let (Some(exp_ret), Some(found_ret)) =
+            && let (Some(exp_ret), Some(found_ret)) =
                 (expected.return_type_id, found.return_type_id)
-            {
-                return exp_params.as_slice() == found_params.as_slice() && exp_ret == found_ret;
-            }
+        {
+            return exp_params.as_slice() == found_params.as_slice() && exp_ret == found_ret;
         }
         // Fall back to LegacyType comparison
         expected.params.len() == found.params.len()
@@ -857,5 +859,4 @@ impl Analyzer {
             Some(mismatches.join(", "))
         }
     }
-
 }

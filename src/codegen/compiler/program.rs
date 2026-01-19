@@ -7,7 +7,7 @@ use super::{Compiler, ControlFlowCtx, SelfParam, TestInfo, TypeResolver};
 use crate::codegen::FunctionKey;
 use crate::codegen::stmt::compile_block;
 use crate::codegen::types::{
-    CompileCtx, function_name_id_with_interner, resolve_type_expr_with_metadata, type_to_cranelift,
+    CompileCtx, function_name_id_with_interner, resolve_type_expr_to_id, type_id_to_cranelift,
 };
 use crate::frontend::{
     Decl, FuncDecl, InterfaceMethod, Interner, LetStmt, Program, Symbol, TestCase, TestsDecl,
@@ -16,11 +16,9 @@ use crate::identity::NameId;
 use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::{
     ClassMethodMonomorphInstance, MonomorphInstance, MonomorphInstanceTrait,
-    StaticMethodMonomorphInstance, substitute_type,
+    StaticMethodMonomorphInstance,
 };
-use crate::sema::type_arena::TypeIdVec;
-use crate::sema::types::{ClassType, NominalType, RecordType};
-use crate::sema::{LegacyType, PrimitiveType};
+use crate::sema::type_arena::{TypeId, TypeIdVec};
 
 /// Compilation phase for monomorphization pipeline.
 /// Allows separating function declaration from body compilation for forward references.
@@ -138,19 +136,12 @@ impl Compiler<'_> {
                     let (func_key, display_name) = self.main_function_key_and_name(func.name);
                     let func_id = self.jit.declare_function(&display_name, &sig);
                     self.func_registry.set_func_id(func_key, func_id);
-                    // Record return type for use in call expressions
-                    // Note: Use resolve_type_with_metadata so that record types (like
-                    // generated generator records) are properly resolved from type_metadata
-                    let return_type = func
+                    // Record return type for use in call expressions (TypeId-native)
+                    let return_type_id = func
                         .return_type
                         .as_ref()
-                        .map(|t| self.resolve_type_with_metadata(t))
-                        .unwrap_or(LegacyType::Void);
-                    let return_type_id = self
-                        .analyzed
-                        .type_arena
-                        .borrow_mut()
-                        .from_type(&return_type);
+                        .map(|t| self.resolve_type_to_id(t))
+                        .unwrap_or(TypeId::VOID);
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
                 Decl::Tests(tests_decl) => {
@@ -294,27 +285,11 @@ impl Compiler<'_> {
                     self.func_registry.set_func_id(func_key, func_id);
 
                     // Record return type
-                    let query = self.query();
-                    let return_type = func
+                    let return_type_id = func
                         .return_type
                         .as_ref()
-                        .map(|t| {
-                            resolve_type_expr_with_metadata(
-                                t,
-                                query.registry(),
-                                &self.type_metadata,
-                                query.interner(),
-                                query.name_table(),
-                                module_id,
-                                &self.analyzed.type_arena,
-                            )
-                        })
-                        .unwrap_or(LegacyType::Void);
-                    let return_type_id = self
-                        .analyzed
-                        .type_arena
-                        .borrow_mut()
-                        .from_type(&return_type);
+                        .map(|t| self.resolve_type_to_id(t))
+                        .unwrap_or(TypeId::VOID);
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
             }
@@ -421,27 +396,11 @@ impl Compiler<'_> {
                     self.func_registry.set_func_id(func_key, func_id);
 
                     // Record return type
-                    let query = self.query();
-                    let return_type = func
+                    let return_type_id = func
                         .return_type
                         .as_ref()
-                        .map(|t| {
-                            resolve_type_expr_with_metadata(
-                                t,
-                                query.registry(),
-                                &self.type_metadata,
-                                query.interner(),
-                                query.name_table(),
-                                module_id,
-                                &self.analyzed.type_arena,
-                            )
-                        })
-                        .unwrap_or(LegacyType::Void);
-                    let return_type_id = self
-                        .analyzed
-                        .type_arena
-                        .borrow_mut()
-                        .from_type(&return_type);
+                        .map(|t| self.resolve_type_to_id(t))
+                        .unwrap_or(TypeId::VOID);
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
             }
@@ -508,57 +467,37 @@ impl Compiler<'_> {
         );
         self.jit.ctx.func.signature = sig;
 
-        // Collect param types
+        // Collect param type ids (TypeId-native)
         let query = self.query();
         let type_metadata = &self.type_metadata;
-        let arena = &self.analyzed.type_arena;
-        let param_types: Vec<types::Type> = func
+        let param_type_ids: Vec<TypeId> = func
             .params
             .iter()
             .map(|p| {
-                type_to_cranelift(
-                    &resolve_type_expr_with_metadata(
-                        &p.ty,
-                        query.registry(),
-                        type_metadata,
-                        query.interner(),
-                        query.name_table(),
-                        module_id,
-                        arena,
-                    ),
-                    self.pointer_type,
-                )
-            })
-            .collect();
-        let param_vole_types: Vec<LegacyType> = func
-            .params
-            .iter()
-            .map(|p| {
-                resolve_type_expr_with_metadata(
+                resolve_type_expr_to_id(
                     &p.ty,
                     query.registry(),
                     type_metadata,
                     query.interner(),
                     query.name_table(),
                     module_id,
-                    arena,
+                    &self.analyzed.type_arena,
                 )
             })
             .collect();
+        let arena_ref = self.analyzed.type_arena.borrow();
+        let param_types: Vec<types::Type> = param_type_ids
+            .iter()
+            .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
+            .collect();
+        drop(arena_ref);
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
-        // Get function return type
-        let return_type = func.return_type.as_ref().map(|t| {
-            resolve_type_expr_with_metadata(
-                t,
-                query.registry(),
-                &self.type_metadata,
-                query.interner(),
-                query.name_table(),
-                module_id,
-                &self.analyzed.type_arena,
-            )
-        });
+        // Get function return type id (TypeId-native)
+        let return_type_id = func
+            .return_type
+            .as_ref()
+            .map(|t| self.resolve_type_to_id(t));
 
         // Get source file pointer
         let source_file_ptr = self.source_file_ptr();
@@ -577,16 +516,15 @@ impl Compiler<'_> {
 
             // Bind parameters to variables
             let params = builder.block_params(entry_block).to_vec();
-            for (((name, ty), vole_ty), val) in param_names
+            for (((name, ty), type_id), val) in param_names
                 .iter()
                 .zip(param_types.iter())
-                .zip(param_vole_types)
+                .zip(param_type_ids.iter())
                 .zip(params.iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_ty);
-                variables.insert(*name, (var, vole_ty_id));
+                variables.insert(*name, (var, *type_id));
             }
 
             // Compile function body with module's interner
@@ -605,8 +543,7 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type
-                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: return_type_id,
                 native_registry: &self.native_registry,
                 current_module: Some(module_path), // We're compiling module code
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -637,7 +574,7 @@ impl Compiler<'_> {
     }
 
     fn compile_function(&mut self, func: &FuncDecl) -> Result<(), String> {
-        let module_id = self.query().main_module();
+        let _module_id = self.query().main_module();
         let (func_key, display_name) = self.main_function_key_and_name(func.name);
         let func_id = self
             .func_registry
@@ -653,57 +590,25 @@ impl Compiler<'_> {
         );
         self.jit.ctx.func.signature = sig;
 
-        // Collect param types before borrowing ctx.func
-        let query = self.query();
-        let type_metadata = &self.type_metadata;
-        let arena = &self.analyzed.type_arena;
-        let param_types: Vec<types::Type> = func
+        // Collect param type ids (TypeId-native)
+        let param_type_ids: Vec<TypeId> = func
             .params
             .iter()
-            .map(|p| {
-                type_to_cranelift(
-                    &resolve_type_expr_with_metadata(
-                        &p.ty,
-                        query.registry(),
-                        type_metadata,
-                        query.interner(),
-                        query.name_table(),
-                        module_id,
-                        arena,
-                    ),
-                    self.pointer_type,
-                )
-            })
+            .map(|p| self.resolve_type_to_id(&p.ty))
             .collect();
-        let param_vole_types: Vec<LegacyType> = func
-            .params
+        let arena_ref = self.analyzed.type_arena.borrow();
+        let param_types: Vec<types::Type> = param_type_ids
             .iter()
-            .map(|p| {
-                resolve_type_expr_with_metadata(
-                    &p.ty,
-                    query.registry(),
-                    type_metadata,
-                    query.interner(),
-                    query.name_table(),
-                    module_id,
-                    arena,
-                )
-            })
+            .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
             .collect();
+        drop(arena_ref);
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
-        // Get function return type (needed for raise statements in fallible functions)
-        let return_type = func.return_type.as_ref().map(|t| {
-            resolve_type_expr_with_metadata(
-                t,
-                query.registry(),
-                &self.type_metadata,
-                query.interner(),
-                query.name_table(),
-                module_id,
-                &self.analyzed.type_arena,
-            )
-        });
+        // Get function return type id (TypeId-native)
+        let return_type_id = func
+            .return_type
+            .as_ref()
+            .map(|t| self.resolve_type_to_id(t));
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -722,16 +627,15 @@ impl Compiler<'_> {
 
             // Bind parameters to variables
             let params = builder.block_params(entry_block).to_vec();
-            for (((name, ty), vole_ty), val) in param_names
+            for (((name, ty), type_id), val) in param_names
                 .iter()
                 .zip(param_types.iter())
-                .zip(param_vole_types)
+                .zip(param_type_ids.iter())
                 .zip(params.iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_ty);
-                variables.insert(*name, (var, vole_ty_id));
+                variables.insert(*name, (var, *type_id));
             }
 
             // Compile function body
@@ -750,8 +654,7 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type
-                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: return_type_id,
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -881,7 +784,7 @@ impl Compiler<'_> {
         writer: &mut W,
         include_tests: bool,
     ) -> Result<(), String> {
-        let module_id = self.query().main_module();
+        let _module_id = self.query().main_module();
         // First pass: declare all functions so they can reference each other
         let mut test_count = 0usize;
         for decl in &program.declarations {
@@ -897,27 +800,11 @@ impl Compiler<'_> {
                     let func_id = self.jit.declare_function(&display_name, &sig);
                     self.func_registry.set_func_id(func_key, func_id);
                     // Record return type for use in call expressions
-                    let query = self.query();
-                    let return_type = func
+                    let return_type_id = func
                         .return_type
                         .as_ref()
-                        .map(|t| {
-                            resolve_type_expr_with_metadata(
-                                t,
-                                query.registry(),
-                                &self.type_metadata,
-                                query.interner(),
-                                query.name_table(),
-                                module_id,
-                                &self.analyzed.type_arena,
-                            )
-                        })
-                        .unwrap_or(LegacyType::Void);
-                    let return_type_id = self
-                        .analyzed
-                        .type_arena
-                        .borrow_mut()
-                        .from_type(&return_type);
+                        .map(|t| self.resolve_type_to_id(t))
+                        .unwrap_or(TypeId::VOID);
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
                 Decl::Tests(tests_decl) if include_tests => {
@@ -964,7 +851,7 @@ impl Compiler<'_> {
     /// Build IR for a single function without defining it.
     /// Similar to compile_function but doesn't call define_function.
     fn build_function_ir(&mut self, func: &FuncDecl) -> Result<(), String> {
-        let module_id = self.query().main_module();
+        let _module_id = self.query().main_module();
         // Create function signature
         let sig = self.build_signature(
             &func.params,
@@ -974,57 +861,25 @@ impl Compiler<'_> {
         );
         self.jit.ctx.func.signature = sig;
 
-        // Collect param types before borrowing ctx.func
-        let query = self.query();
-        let type_metadata = &self.type_metadata;
-        let arena = &self.analyzed.type_arena;
-        let param_types: Vec<types::Type> = func
+        // Collect param type ids (TypeId-native)
+        let param_type_ids: Vec<TypeId> = func
             .params
             .iter()
-            .map(|p| {
-                type_to_cranelift(
-                    &resolve_type_expr_with_metadata(
-                        &p.ty,
-                        query.registry(),
-                        type_metadata,
-                        query.interner(),
-                        query.name_table(),
-                        module_id,
-                        arena,
-                    ),
-                    self.pointer_type,
-                )
-            })
+            .map(|p| self.resolve_type_to_id(&p.ty))
             .collect();
-        let param_vole_types: Vec<LegacyType> = func
-            .params
+        let arena_ref = self.analyzed.type_arena.borrow();
+        let param_types: Vec<types::Type> = param_type_ids
             .iter()
-            .map(|p| {
-                resolve_type_expr_with_metadata(
-                    &p.ty,
-                    query.registry(),
-                    type_metadata,
-                    query.interner(),
-                    query.name_table(),
-                    module_id,
-                    arena,
-                )
-            })
+            .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
             .collect();
+        drop(arena_ref);
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
-        // Get function return type (needed for raise statements in fallible functions)
-        let return_type = func.return_type.as_ref().map(|t| {
-            resolve_type_expr_with_metadata(
-                t,
-                query.registry(),
-                &self.type_metadata,
-                query.interner(),
-                query.name_table(),
-                module_id,
-                &self.analyzed.type_arena,
-            )
-        });
+        // Get function return type id (TypeId-native)
+        let return_type_id = func
+            .return_type
+            .as_ref()
+            .map(|t| self.resolve_type_to_id(t));
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -1043,16 +898,15 @@ impl Compiler<'_> {
 
             // Bind parameters to variables
             let params = builder.block_params(entry_block).to_vec();
-            for (((name, ty), vole_ty), val) in param_names
+            for (((name, ty), type_id), val) in param_names
                 .iter()
                 .zip(param_types.iter())
-                .zip(param_vole_types)
+                .zip(param_type_ids.iter())
                 .zip(params.iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_ty);
-                variables.insert(*name, (var, vole_ty_id));
+                variables.insert(*name, (var, *type_id));
             }
 
             // Compile function body
@@ -1072,8 +926,7 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type
-                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: return_type_id,
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -1180,19 +1033,31 @@ impl Compiler<'_> {
         let mangled_name = self.query().display_name(instance.mangled_name());
         let func_type = instance.func_type();
 
-        // Create signature from the concrete function type
+        // Get TypeId versions of params and return type
+        let param_type_ids: Vec<TypeId> = func_type
+            .params_id
+            .as_ref()
+            .expect("FunctionType.params_id not set for monomorph instance")
+            .to_vec();
+        let return_type_id = func_type
+            .return_type_id
+            .expect("FunctionType.return_type_id not set for monomorph instance");
+
+        // Create signature from the concrete function type (TypeId-native)
+        let arena_ref = self.analyzed.type_arena.borrow();
         let mut params = Vec::new();
         if has_self_param {
             params.push(self.pointer_type);
         }
-        for param_type in func_type.params.iter() {
-            params.push(type_to_cranelift(param_type, self.pointer_type));
+        for &param_type_id in &param_type_ids {
+            params.push(type_id_to_cranelift(param_type_id, &arena_ref, self.pointer_type));
         }
-        let ret = if *func_type.return_type == LegacyType::Void {
+        let ret = if return_type_id == TypeId::VOID {
             None
         } else {
-            Some(type_to_cranelift(&func_type.return_type, self.pointer_type))
+            Some(type_id_to_cranelift(return_type_id, &arena_ref, self.pointer_type))
         };
+        drop(arena_ref);
 
         let sig = self.jit.create_signature(&params, ret);
         let func_id = self.jit.declare_function(&mangled_name, &sig);
@@ -1200,11 +1065,6 @@ impl Compiler<'_> {
         self.func_registry.set_func_id(func_key, func_id);
 
         // Record return type for call expressions
-        let return_type_id = self
-            .analyzed
-            .type_arena
-            .borrow_mut()
-            .from_type(&func_type.return_type);
         self.func_registry.set_return_type(func_key, return_type_id);
     }
 
@@ -1314,34 +1174,34 @@ impl Compiler<'_> {
             .func_id(func_key)
             .ok_or_else(|| format!("Monomorphized function {} not declared", mangled_name))?;
 
-        // Create function signature from concrete types
-        let mut params = Vec::new();
-        for param_type in instance.func_type.params.iter() {
-            params.push(type_to_cranelift(param_type, self.pointer_type));
-        }
-        let ret = if *instance.func_type.return_type == LegacyType::Void {
+        // Get parameter names and concrete type ids (using FunctionType's TypeId fields)
+        let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
+        let param_type_ids: Vec<TypeId> = instance
+            .func_type
+            .params_id
+            .as_ref()
+            .expect("FunctionType.params_id not set for monomorph function")
+            .to_vec();
+        let return_type_id = instance
+            .func_type
+            .return_type_id
+            .expect("FunctionType.return_type_id not set for monomorph function");
+
+        // Create function signature from concrete types (TypeId-native)
+        let arena_ref = self.analyzed.type_arena.borrow();
+        let params: Vec<types::Type> = param_type_ids
+            .iter()
+            .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
+            .collect();
+        let ret = if return_type_id == TypeId::VOID {
             None
         } else {
-            Some(type_to_cranelift(
-                &instance.func_type.return_type,
-                self.pointer_type,
-            ))
+            Some(type_id_to_cranelift(return_type_id, &arena_ref, self.pointer_type))
         };
+        let param_types = params.clone();
+        drop(arena_ref);
         let sig = self.jit.create_signature(&params, ret);
         self.jit.ctx.func.signature = sig;
-
-        // Get parameter names and concrete types
-        let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
-        let param_types: Vec<types::Type> = instance
-            .func_type
-            .params
-            .iter()
-            .map(|t| type_to_cranelift(t, self.pointer_type))
-            .collect();
-        let param_vole_types: Vec<LegacyType> = instance.func_type.params.to_vec();
-
-        // Get return type
-        let return_type = Some((*instance.func_type.return_type).clone());
 
         // Get source file pointer
         let source_file_ptr = self.source_file_ptr();
@@ -1360,16 +1220,15 @@ impl Compiler<'_> {
 
             // Bind parameters to variables
             let params = builder.block_params(entry_block).to_vec();
-            for (((name, ty), vole_ty), val) in param_names
+            for (((name, ty), type_id), val) in param_names
                 .iter()
                 .zip(param_types.iter())
-                .zip(param_vole_types)
+                .zip(param_type_ids.iter())
                 .zip(params.iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_ty);
-                variables.insert(*name, (var, vole_ty_id));
+                variables.insert(*name, (var, *type_id));
             }
 
             // Compile function body
@@ -1388,8 +1247,7 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type
-                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: Some(return_type_id),
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -1566,47 +1424,42 @@ impl Compiler<'_> {
             .func_id(func_key)
             .ok_or_else(|| format!("Monomorphized class method {} not declared", mangled_name))?;
 
-        // Create method signature (self + params) with concrete types
+        // Get param and return type ids (TypeId-native)
+        let param_type_ids: Vec<TypeId> = instance
+            .func_type
+            .params_id
+            .as_ref()
+            .expect("FunctionType.params_id not set for monomorph class method")
+            .to_vec();
+        let return_type_id = instance
+            .func_type
+            .return_type_id
+            .expect("FunctionType.return_type_id not set for monomorph class method");
+
+        // Create method signature (self + params) with concrete types (TypeId-native)
+        let arena_ref = self.analyzed.type_arena.borrow();
         let mut params = vec![self.pointer_type]; // self
-        for param_type in instance.func_type.params.iter() {
-            params.push(type_to_cranelift(param_type, self.pointer_type));
+        for &param_type_id in &param_type_ids {
+            params.push(type_id_to_cranelift(param_type_id, &arena_ref, self.pointer_type));
         }
-        let ret = if *instance.func_type.return_type == LegacyType::Void {
+        let ret = if return_type_id == TypeId::VOID {
             None
         } else {
-            Some(type_to_cranelift(
-                &instance.func_type.return_type,
-                self.pointer_type,
-            ))
+            Some(type_id_to_cranelift(return_type_id, &arena_ref, self.pointer_type))
         };
+        let param_types: Vec<types::Type> = param_type_ids
+            .iter()
+            .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
+            .collect();
+        drop(arena_ref);
         let sig = self.jit.create_signature(&params, ret);
         self.jit.ctx.func.signature = sig;
 
-        // Get parameter names and concrete types
+        // Get parameter names
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
-        let param_types: Vec<types::Type> = instance
-            .func_type
-            .params
-            .iter()
-            .map(|t| type_to_cranelift(t, self.pointer_type))
-            .collect();
-        let param_vole_types: Vec<LegacyType> = instance.func_type.params.to_vec();
 
-        // Get return type
-        let return_type = Some((*instance.func_type.return_type).clone());
-
-        // Convert TypeId substitutions to LegacyType for codegen
-        let legacy_substitutions: HashMap<NameId, LegacyType> = {
-            let arena = self.analyzed.type_arena.borrow();
-            instance
-                .substitutions
-                .iter()
-                .map(|(k, v)| (*k, arena.to_type(*v)))
-                .collect()
-        };
-
-        // Build self type with concrete type args
-        let self_vole_type = self.build_concrete_self_type(type_name, &legacy_substitutions);
+        // Build self type with concrete type args (TypeId-native)
+        let self_type_id = self.build_concrete_self_type_id(type_name, &instance.substitutions);
 
         // Get source file pointer and self symbol
         let source_file_ptr = self.source_file_ptr();
@@ -1630,24 +1483,18 @@ impl Compiler<'_> {
             // Bind `self` as the first parameter
             let self_var = builder.declare_var(self.pointer_type);
             builder.def_var(self_var, block_params[0]);
-            let self_vole_type_id = self
-                .analyzed
-                .type_arena
-                .borrow_mut()
-                .from_type(&self_vole_type);
-            variables.insert(self_sym, (self_var, self_vole_type_id));
+            variables.insert(self_sym, (self_var, self_type_id));
 
-            // Bind remaining parameters with concrete types
-            for (((name, ty), vole_ty), val) in param_names
+            // Bind remaining parameters with concrete types (TypeId-native)
+            for (((name, ty), type_id), val) in param_names
                 .iter()
                 .zip(param_types.iter())
-                .zip(param_vole_types)
+                .zip(param_type_ids.iter())
                 .zip(block_params[1..].iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_ty);
-                variables.insert(*name, (var, vole_ty_id));
+                variables.insert(*name, (var, *type_id));
             }
 
             // Compile method body
@@ -1666,8 +1513,7 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type
-                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: Some(return_type_id),
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
@@ -1698,11 +1544,12 @@ impl Compiler<'_> {
     }
 
     /// Build the concrete self type with type arguments substituted
-    fn build_concrete_self_type(
+    /// Build a concrete self type for monomorphized class methods (TypeId-native)
+    fn build_concrete_self_type_id(
         &self,
         type_name: Symbol,
-        substitutions: &HashMap<NameId, LegacyType>,
-    ) -> LegacyType {
+        substitutions: &HashMap<NameId, TypeId>,
+    ) -> TypeId {
         let query = self.query();
         let module_id = query.main_module();
         let type_name_str = self.analyzed.interner.resolve(type_name);
@@ -1710,7 +1557,7 @@ impl Compiler<'_> {
         tracing::debug!(
             type_name = %type_name_str,
             substitutions = ?substitutions,
-            "build_concrete_self_type"
+            "build_concrete_self_type_id"
         );
 
         // Try to get NameId for this type
@@ -1732,43 +1579,26 @@ impl Compiler<'_> {
                         "using generic_info"
                     );
 
-                    // Build type_args from substituted type params
-                    let type_args: Vec<LegacyType> = generic_info
+                    // Build type_args from substituted type params (TypeId-native)
+                    let type_args_id: TypeIdVec = generic_info
                         .type_params
                         .iter()
                         .map(|param| {
                             substitutions
                                 .get(&param.name_id)
-                                .cloned()
-                                .unwrap_or(LegacyType::TypeParam(param.name_id))
+                                .copied()
+                                .unwrap_or_else(|| {
+                                    self.analyzed.type_arena.borrow_mut().type_param(param.name_id)
+                                })
                         })
                         .collect();
 
-                    // Convert to TypeIdVec
-                    let type_args_id: TypeIdVec = type_args
-                        .iter()
-                        .map(|t| self.analyzed.type_arena.borrow_mut().from_type(t))
-                        .collect();
-
                     // Determine if it's a class or record based on TypeDefKind
+                    let mut arena = self.analyzed.type_arena.borrow_mut();
                     return match &type_def.kind {
-                        TypeDefKind::Record => {
-                            LegacyType::Nominal(NominalType::Record(RecordType {
-                                type_def_id,
-                                type_args_id,
-                            }))
-                        }
-                        TypeDefKind::Class => LegacyType::Nominal(NominalType::Class(ClassType {
-                            type_def_id,
-                            type_args_id,
-                        })),
-                        _ => {
-                            // Fallback for other kinds
-                            LegacyType::Nominal(NominalType::Record(RecordType {
-                                type_def_id,
-                                type_args_id,
-                            }))
-                        }
+                        TypeDefKind::Record => arena.record(type_def_id, type_args_id),
+                        TypeDefKind::Class => arena.class(type_def_id, type_args_id),
+                        _ => arena.record(type_def_id, type_args_id), // Fallback
                     };
                 }
             }
@@ -1776,15 +1606,17 @@ impl Compiler<'_> {
 
         // Fallback: use type_metadata (for non-generic types)
         if let Some(metadata) = self.type_metadata.get(&type_name) {
-            let vole_type = self
-                .analyzed
+            // Apply substitutions to the stored vole_type
+            // Convert std HashMap to hashbrown HashMap for type_arena
+            let hashbrown_subs: hashbrown::HashMap<NameId, TypeId> =
+                substitutions.iter().map(|(&k, &v)| (k, v)).collect();
+            self.analyzed
                 .type_arena
-                .borrow()
-                .to_type(metadata.vole_type);
-            substitute_type(&vole_type, substitutions)
+                .borrow_mut()
+                .substitute(metadata.vole_type, &hashbrown_subs)
         } else {
             // Final fallback
-            LegacyType::Primitive(PrimitiveType::I64)
+            self.analyzed.type_arena.borrow().primitives.i64
         }
     }
 
@@ -1923,34 +1755,36 @@ impl Compiler<'_> {
             .func_id(func_key)
             .ok_or_else(|| format!("Monomorphized static method {} not declared", mangled_name))?;
 
-        // Create signature (no self parameter) with concrete types
-        let mut params = Vec::new();
-        for param_type in instance.func_type.params.iter() {
-            params.push(type_to_cranelift(param_type, self.pointer_type));
-        }
-        let ret = if *instance.func_type.return_type == LegacyType::Void {
+        // Get param and return type ids (TypeId-native)
+        let param_type_ids: Vec<TypeId> = instance
+            .func_type
+            .params_id
+            .as_ref()
+            .expect("FunctionType.params_id not set for monomorph static method")
+            .to_vec();
+        let return_type_id = instance
+            .func_type
+            .return_type_id
+            .expect("FunctionType.return_type_id not set for monomorph static method");
+
+        // Create signature (no self parameter) with concrete types (TypeId-native)
+        let arena_ref = self.analyzed.type_arena.borrow();
+        let params: Vec<types::Type> = param_type_ids
+            .iter()
+            .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
+            .collect();
+        let ret = if return_type_id == TypeId::VOID {
             None
         } else {
-            Some(type_to_cranelift(
-                &instance.func_type.return_type,
-                self.pointer_type,
-            ))
+            Some(type_id_to_cranelift(return_type_id, &arena_ref, self.pointer_type))
         };
+        let param_types = params.clone();
+        drop(arena_ref);
         let sig = self.jit.create_signature(&params, ret);
         self.jit.ctx.func.signature = sig;
 
-        // Get parameter names and concrete types
+        // Get parameter names
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
-        let param_types: Vec<types::Type> = instance
-            .func_type
-            .params
-            .iter()
-            .map(|t| type_to_cranelift(t, self.pointer_type))
-            .collect();
-        let param_vole_types: Vec<LegacyType> = instance.func_type.params.to_vec();
-
-        // Get return type
-        let return_type = Some((*instance.func_type.return_type).clone());
 
         // Get source file pointer
         let source_file_ptr = self.source_file_ptr();
@@ -1970,17 +1804,16 @@ impl Compiler<'_> {
             // Get entry block params (just user params, no self)
             let block_params = builder.block_params(entry_block).to_vec();
 
-            // Bind parameters with concrete types
-            for (((name, ty), vole_ty), val) in param_names
+            // Bind parameters with concrete types (TypeId-native)
+            for (((name, ty), type_id), val) in param_names
                 .iter()
                 .zip(param_types.iter())
-                .zip(param_vole_types)
+                .zip(param_type_ids.iter())
                 .zip(block_params.iter())
             {
                 let var = builder.declare_var(*ty);
                 builder.def_var(var, *val);
-                let vole_ty_id = self.analyzed.type_arena.borrow_mut().from_type(&vole_ty);
-                variables.insert(*name, (var, vole_ty_id));
+                variables.insert(*name, (var, *type_id));
             }
 
             // Compile method body
@@ -2003,8 +1836,7 @@ impl Compiler<'_> {
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
                 interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type
-                    .map(|rt| self.analyzed.type_arena.borrow_mut().from_type(&rt)),
+                current_function_return_type: Some(return_type_id),
                 native_registry: &self.native_registry,
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,

@@ -56,9 +56,10 @@ impl Analyzer {
         }
 
         // Array: unify element types
-        if let (Some(p_elem), Some(a_elem)) =
-            (arena.unwrap_array(pattern_id), arena.unwrap_array(actual_id))
-        {
+        if let (Some(p_elem), Some(a_elem)) = (
+            arena.unwrap_array(pattern_id),
+            arena.unwrap_array(actual_id),
+        ) {
             drop(arena);
             self.unify_types_id(p_elem, a_elem, type_params, inferred);
             return;
@@ -70,7 +71,11 @@ impl Analyzer {
             arena.unwrap_interface(actual_id),
         ) {
             if p_def_id == a_def_id {
-                let args: Vec<_> = p_args.iter().zip(a_args.iter()).map(|(&p, &a)| (p, a)).collect();
+                let args: Vec<_> = p_args
+                    .iter()
+                    .zip(a_args.iter())
+                    .map(|(&p, &a)| (p, a))
+                    .collect();
                 drop(arena);
                 for (p_arg, a_arg) in args {
                     self.unify_types_id(p_arg, a_arg, type_params, inferred);
@@ -80,9 +85,10 @@ impl Analyzer {
         }
 
         // Union: try to match each pattern variant
-        if let (Some(p_variants), Some(a_variants)) =
-            (arena.unwrap_union(pattern_id), arena.unwrap_union(actual_id))
-        {
+        if let (Some(p_variants), Some(a_variants)) = (
+            arena.unwrap_union(pattern_id),
+            arena.unwrap_union(actual_id),
+        ) {
             let pairs: Vec<_> = p_variants
                 .iter()
                 .zip(a_variants.iter())
@@ -115,11 +121,16 @@ impl Analyzer {
         }
 
         // Class: unify type args
-        if let (Some((p_def_id, p_args)), Some((a_def_id, a_args))) =
-            (arena.unwrap_class(pattern_id), arena.unwrap_class(actual_id))
-        {
+        if let (Some((p_def_id, p_args)), Some((a_def_id, a_args))) = (
+            arena.unwrap_class(pattern_id),
+            arena.unwrap_class(actual_id),
+        ) {
             if p_def_id == a_def_id {
-                let args: Vec<_> = p_args.iter().zip(a_args.iter()).map(|(&p, &a)| (p, a)).collect();
+                let args: Vec<_> = p_args
+                    .iter()
+                    .zip(a_args.iter())
+                    .map(|(&p, &a)| (p, a))
+                    .collect();
                 drop(arena);
                 for (p_arg, a_arg) in args {
                     self.unify_types_id(p_arg, a_arg, type_params, inferred);
@@ -129,17 +140,20 @@ impl Analyzer {
         }
 
         // Record: unify type args
-        if let (Some((p_def_id, p_args)), Some((a_def_id, a_args))) =
-            (arena.unwrap_record(pattern_id), arena.unwrap_record(actual_id))
+        if let (Some((p_def_id, p_args)), Some((a_def_id, a_args))) = (
+            arena.unwrap_record(pattern_id),
+            arena.unwrap_record(actual_id),
+        ) && p_def_id == a_def_id
         {
-            if p_def_id == a_def_id {
-                let args: Vec<_> = p_args.iter().zip(a_args.iter()).map(|(&p, &a)| (p, a)).collect();
-                drop(arena);
-                for (p_arg, a_arg) in args {
-                    self.unify_types_id(p_arg, a_arg, type_params, inferred);
-                }
+            let args: Vec<_> = p_args
+                .iter()
+                .zip(a_args.iter())
+                .map(|(&p, &a)| (p, a))
+                .collect();
+            drop(arena);
+            for (p_arg, a_arg) in args {
+                self.unify_types_id(p_arg, a_arg, type_params, inferred);
             }
-            return;
         }
 
         // Everything else: no type params to extract

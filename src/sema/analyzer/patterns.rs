@@ -188,7 +188,11 @@ impl Analyzer {
             }
             Pattern::Tuple { elements, span } => {
                 // Tuple pattern - check against tuple type
-                let tuple_elements = self.type_arena.borrow().unwrap_tuple(scrutinee_type_id).map(|v| v.to_vec());
+                let tuple_elements = self
+                    .type_arena
+                    .borrow()
+                    .unwrap_tuple(scrutinee_type_id)
+                    .map(|v| v.to_vec());
                 if let Some(elem_type_ids) = tuple_elements {
                     if elements.len() != elem_type_ids.len() {
                         self.add_error(
@@ -250,10 +254,8 @@ impl Analyzer {
                             TypeDefKind::Record => {
                                 if self.entity_registry.build_record_type(type_id).is_some() {
                                     let fields_ref = get_fields_id(type_def);
-                                    let record_type_id = self
-                                        .type_arena
-                                        .borrow_mut()
-                                        .record(type_id, Vec::new());
+                                    let record_type_id =
+                                        self.type_arena.borrow_mut().record(type_id, Vec::new());
                                     (Some(record_type_id), fields_ref)
                                 } else {
                                     (None, vec![])
@@ -262,10 +264,8 @@ impl Analyzer {
                             TypeDefKind::Class => {
                                 if self.entity_registry.build_class_type(type_id).is_some() {
                                     let fields_ref = get_fields_id(type_def);
-                                    let class_type_id = self
-                                        .type_arena
-                                        .borrow_mut()
-                                        .class(type_id, Vec::new());
+                                    let class_type_id =
+                                        self.type_arena.borrow_mut().class(type_id, Vec::new());
                                     (Some(class_type_id), fields_ref)
                                 } else {
                                     (None, vec![])
@@ -286,7 +286,8 @@ impl Analyzer {
                                         }
                                     })
                                     .collect();
-                                let error_type_id = self.type_arena.borrow_mut().error_type(type_id);
+                                let error_type_id =
+                                    self.type_arena.borrow_mut().error_type(type_id);
                                 (Some(error_type_id), fields_ref)
                             }
                             _ => {
@@ -329,7 +330,12 @@ impl Analyzer {
                     }
                 } else {
                     // Anonymous record pattern - check against scrutinee's fields
-                    self.check_anonymous_record_pattern_id(fields, scrutinee_type_id, *span, interner);
+                    self.check_anonymous_record_pattern_id(
+                        fields,
+                        scrutinee_type_id,
+                        *span,
+                        interner,
+                    );
                     None
                 }
             }
@@ -522,11 +528,13 @@ impl Analyzer {
     }
 
     /// Extract the TypeId that a pattern matches against, if it's a type pattern
-    fn get_pattern_type_id(&mut self, pattern: &Pattern, interner: &Interner) -> Option<ArenaTypeId> {
+    fn get_pattern_type_id(
+        &mut self,
+        pattern: &Pattern,
+        interner: &Interner,
+    ) -> Option<ArenaTypeId> {
         match pattern {
-            Pattern::Type { type_expr, .. } => {
-                Some(self.resolve_type_id(type_expr, interner))
-            }
+            Pattern::Type { type_expr, .. } => Some(self.resolve_type_id(type_expr, interner)),
             Pattern::Identifier { name, .. } => {
                 // Look up via Resolver
                 self.resolver(interner)
@@ -534,12 +542,16 @@ impl Analyzer {
                     .and_then(|type_def_id| {
                         let type_def = self.entity_registry.get_type(type_def_id);
                         match type_def.kind {
-                            TypeDefKind::Class => {
-                                self.type_arena.borrow_mut().class(type_def_id, vec![]).into()
-                            }
-                            TypeDefKind::Record => {
-                                self.type_arena.borrow_mut().record(type_def_id, vec![]).into()
-                            }
+                            TypeDefKind::Class => self
+                                .type_arena
+                                .borrow_mut()
+                                .class(type_def_id, vec![])
+                                .into(),
+                            TypeDefKind::Record => self
+                                .type_arena
+                                .borrow_mut()
+                                .record(type_def_id, vec![])
+                                .into(),
                             _ => None,
                         }
                     })
@@ -554,12 +566,16 @@ impl Analyzer {
                     .and_then(|type_def_id| {
                         let type_def = self.entity_registry.get_type(type_def_id);
                         match type_def.kind {
-                            TypeDefKind::Class => {
-                                self.type_arena.borrow_mut().class(type_def_id, vec![]).into()
-                            }
-                            TypeDefKind::Record => {
-                                self.type_arena.borrow_mut().record(type_def_id, vec![]).into()
-                            }
+                            TypeDefKind::Class => self
+                                .type_arena
+                                .borrow_mut()
+                                .class(type_def_id, vec![])
+                                .into(),
+                            TypeDefKind::Record => self
+                                .type_arena
+                                .borrow_mut()
+                                .record(type_def_id, vec![])
+                                .into(),
                             _ => None,
                         }
                     })

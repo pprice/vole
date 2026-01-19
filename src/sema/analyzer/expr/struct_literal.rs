@@ -56,7 +56,11 @@ impl Analyzer {
                             .iter()
                             .zip(gi.field_types.iter())
                             .enumerate()
-                            .map(|(i, (&name_id, &ty))| StructFieldId { name_id, ty, slot: i })
+                            .map(|(i, (&name_id, &ty))| StructFieldId {
+                                name_id,
+                                ty,
+                                slot: i,
+                            })
                             .collect()
                     })
                     .unwrap_or_default()
@@ -135,17 +139,17 @@ impl Analyzer {
             .collect();
 
         for field in &fields {
-            if let Some(field_name) = self.name_table.last_segment_str(field.name_id) {
-                if !provided_fields.contains(&field_name) {
-                    self.add_error(
-                        SemanticError::MissingField {
-                            ty: type_name.clone(),
-                            field: field_name,
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
-                }
+            if let Some(field_name) = self.name_table.last_segment_str(field.name_id)
+                && !provided_fields.contains(&field_name)
+            {
+                self.add_error(
+                    SemanticError::MissingField {
+                        ty: type_name.clone(),
+                        field: field_name,
+                        span: expr.span.into(),
+                    },
+                    expr.span,
+                );
             }
         }
 
@@ -155,15 +159,11 @@ impl Analyzer {
             if let Some(expected_field) = fields.iter().find(|f| {
                 self.name_table
                     .last_segment_str(f.name_id)
-                    .map_or(false, |n| n == field_init_name)
+                    .is_some_and(|n| n == field_init_name)
             }) {
                 // check_expr_expecting_id will report errors if types don't match
                 // Use TypeId directly - no LegacyType conversion
-                self.check_expr_expecting_id(
-                    &field_init.value,
-                    Some(expected_field.ty),
-                    interner,
-                )?;
+                self.check_expr_expecting_id(&field_init.value, Some(expected_field.ty), interner)?;
             } else {
                 self.add_error(
                     SemanticError::UnknownField {
@@ -216,8 +216,11 @@ impl Analyzer {
         }
 
         // Infer type parameters from field values (using TypeId version)
-        let inferred_id =
-            self.infer_type_params_id(&generic_info.type_params, &expected_type_ids, &actual_type_ids);
+        let inferred_id = self.infer_type_params_id(
+            &generic_info.type_params,
+            &expected_type_ids,
+            &actual_type_ids,
+        );
 
         // Check type parameter constraints
         self.check_type_param_constraints_id(
@@ -228,7 +231,8 @@ impl Analyzer {
         );
 
         // Substitute inferred types into field types to get concrete field types via arena
-        let subs_hashbrown: hashbrown::HashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
+        let subs_hashbrown: hashbrown::HashMap<_, _> =
+            inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
         let concrete_field_type_ids: Vec<ArenaTypeId> = {
             let mut arena = self.type_arena.borrow_mut();
             generic_info
@@ -296,7 +300,10 @@ impl Analyzer {
             .filter_map(|tp| inferred_id.get(&tp.name_id).copied())
             .collect();
 
-        Ok(self.type_arena.borrow_mut().record(type_def_id, type_args_id.to_vec()))
+        Ok(self
+            .type_arena
+            .borrow_mut()
+            .record(type_def_id, type_args_id.to_vec()))
     }
 
     /// Check a struct literal for a generic class, inferring type parameters from field values
@@ -333,8 +340,11 @@ impl Analyzer {
         }
 
         // Infer type parameters from field values (using TypeId version)
-        let inferred_id =
-            self.infer_type_params_id(&generic_info.type_params, &expected_type_ids, &actual_type_ids);
+        let inferred_id = self.infer_type_params_id(
+            &generic_info.type_params,
+            &expected_type_ids,
+            &actual_type_ids,
+        );
 
         // Check type parameter constraints
         self.check_type_param_constraints_id(
@@ -345,7 +355,8 @@ impl Analyzer {
         );
 
         // Substitute inferred types into field types to get concrete field types via arena
-        let subs_hashbrown: hashbrown::HashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
+        let subs_hashbrown: hashbrown::HashMap<_, _> =
+            inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
         let concrete_field_type_ids: Vec<ArenaTypeId> = {
             let mut arena = self.type_arena.borrow_mut();
             generic_info
@@ -426,7 +437,10 @@ impl Analyzer {
                             let scope_param_name =
                                 self.name_table.last_segment_str(scope_param.name_id);
                             if scope_param_name.as_deref() == Some(&param_name) {
-                                return self.type_arena.borrow_mut().type_param(scope_param.name_id);
+                                return self
+                                    .type_arena
+                                    .borrow_mut()
+                                    .type_param(scope_param.name_id);
                             }
                         }
                     }
@@ -435,6 +449,9 @@ impl Analyzer {
             })
             .collect();
 
-        Ok(self.type_arena.borrow_mut().class(type_def_id, type_args_id.to_vec()))
+        Ok(self
+            .type_arena
+            .borrow_mut()
+            .class(type_def_id, type_args_id.to_vec()))
     }
 }

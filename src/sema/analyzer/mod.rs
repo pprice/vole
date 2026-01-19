@@ -433,7 +433,8 @@ impl Analyzer {
         }
 
         // Create interface type directly in arena
-        let type_args_vec: crate::sema::type_arena::TypeIdVec = type_args_id.iter().copied().collect();
+        let type_args_vec: crate::sema::type_arena::TypeIdVec =
+            type_args_id.iter().copied().collect();
         let type_id = self
             .type_arena
             .borrow_mut()
@@ -982,14 +983,14 @@ impl Analyzer {
                         {
                             // Use TypeId directly (avoids to_type conversion)
                             let arena = self.type_arena.borrow();
-                            let type_ids = if let Some(variants) = arena.unwrap_union(aliased_type_id)
-                            {
-                                // It's a union - use the variant TypeIds
-                                variants.to_vec()
-                            } else {
-                                // Not a union - use the single TypeId
-                                vec![aliased_type_id]
-                            };
+                            let type_ids =
+                                if let Some(variants) = arena.unwrap_union(aliased_type_id) {
+                                    // It's a union - use the variant TypeIds
+                                    variants.to_vec()
+                                } else {
+                                    // Not a union - use the single TypeId
+                                    vec![aliased_type_id]
+                                };
                             return Some(crate::sema::generic::TypeConstraint::UnionId(type_ids));
                         }
                     }
@@ -1666,10 +1667,8 @@ impl Analyzer {
                     // Intern the function type directly as a TypeId
                     let func_type_id = {
                         let mut arena = self.type_arena.borrow_mut();
-                        let param_ids: crate::sema::type_arena::TypeIdVec = params
-                            .iter()
-                            .map(|p| arena.from_type(p))
-                            .collect();
+                        let param_ids: crate::sema::type_arena::TypeIdVec =
+                            params.iter().map(|p| arena.from_type(p)).collect();
                         let return_id = arena.from_type(&return_type);
                         arena.function(param_ids, return_id, false)
                     };
@@ -1735,10 +1734,8 @@ impl Analyzer {
                         // Intern the function type directly as a TypeId
                         let func_type_id = {
                             let mut arena = self.type_arena.borrow_mut();
-                            let param_ids: crate::sema::type_arena::TypeIdVec = params
-                                .iter()
-                                .map(|p| arena.from_type(p))
-                                .collect();
+                            let param_ids: crate::sema::type_arena::TypeIdVec =
+                                params.iter().map(|p| arena.from_type(p)).collect();
                             let return_id = arena.from_type(&return_type);
                             arena.function(param_ids, return_id, false)
                         };
