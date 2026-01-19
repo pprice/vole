@@ -400,7 +400,7 @@ impl Cg<'_, '_, '_> {
         if let Some(type_id) = inferred_type_id {
             let elem_type_ids = self.ctx.arena.borrow().unwrap_tuple(type_id).cloned();
             if let Some(elem_type_ids) = elem_type_ids {
-                return self.tuple_literal(elements, &elem_type_ids);
+                return self.tuple_literal(elements, &elem_type_ids, type_id);
             }
         }
 
@@ -438,8 +438,9 @@ impl Cg<'_, '_, '_> {
                 .call(array_push_ref, &[arr_ptr, tag_val, value_bits]);
         }
 
-        // Create array type directly using TypeId
-        let array_type_id = self.ctx.arena.borrow_mut().array(elem_type_id);
+        // Use type from ExpressionData if available, otherwise create it
+        let array_type_id =
+            inferred_type_id.unwrap_or_else(|| self.ctx.arena.borrow_mut().array(elem_type_id));
         Ok(CompiledValue {
             value: arr_ptr,
             ty: self.ctx.pointer_type,
@@ -452,6 +453,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         elements: &[Expr],
         elem_type_ids: &[TypeId],
+        tuple_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
         // Calculate layout using TypeId-based function
         let (total_size, offsets) = tuple_layout_id(
@@ -483,9 +485,7 @@ impl Cg<'_, '_, '_> {
             .ins()
             .stack_addr(self.ctx.pointer_type, slot, 0);
 
-        // Create tuple type directly in arena
-        let tuple_type_id = self.ctx.arena.borrow_mut().tuple(elem_type_ids.to_vec());
-
+        // Use TypeId from ExpressionData (passed from caller)
         Ok(CompiledValue {
             value: ptr,
             ty: self.ctx.pointer_type,
