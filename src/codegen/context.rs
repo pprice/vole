@@ -199,7 +199,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if type is a function
-    #[allow(dead_code)] // Will be useful for future migration
     pub fn is_function(&self, ty: TypeId) -> bool {
         self.ctx.arena.borrow().is_function(ty)
     }
@@ -209,36 +208,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.ctx.arena.borrow().is_interface(ty)
     }
 
-    /// Check if type is a class
-    #[allow(dead_code)] // Will be useful for future migration
-    pub fn is_class(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_class(ty)
-    }
-
-    /// Check if type is a record
-    #[allow(dead_code)] // Will be useful for future migration
-    pub fn is_record(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_record(ty)
-    }
-
-    /// Check if type is fallible
-    #[allow(dead_code)] // Will be useful for future migration
-    pub fn is_fallible(&self, ty: TypeId) -> bool {
-        self.ctx.arena.borrow().is_fallible(ty)
-    }
-
     /// Check if type is a runtime iterator
     pub fn is_runtime_iterator(&self, ty: TypeId) -> bool {
         self.ctx.arena.borrow().is_runtime_iterator(ty)
-    }
-
-    /// Get union variants as TypeIds (returns None if not a union)
-    #[allow(dead_code)] // Reserved for task 5.5 arena migration
-    pub fn get_union_variants(&self, ty: TypeId) -> Option<Vec<TypeId>> {
-        let arena = self.ctx.arena.borrow();
-        arena
-            .unwrap_union(ty)
-            .map(|variants| variants.iter().copied().collect())
     }
 
     /// Find the nil variant index in a union (for optional handling)
@@ -354,12 +326,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(result)
     }
 
-    /// Invalidate call cache (call before mutations)
-    #[allow(dead_code)]
-    pub fn invalidate_call_cache(&mut self) {
-        self.call_cache.clear();
-    }
-
     /// Get cached field value or call runtime and cache result
     pub fn get_field_cached(&mut self, instance: Value, slot: u32) -> Result<Value, String> {
         let key = (instance, slot);
@@ -418,13 +384,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ty: types::I64,
             type_id: self.i64_type(),
         }
-    }
-
-    /// Create an I64 constant
-    #[allow(dead_code)]
-    pub fn i64_const(&mut self, n: i64) -> CompiledValue {
-        let value = self.builder.ins().iconst(types::I64, n);
-        self.i64_value(value)
     }
 
     /// Create an integer constant with a specific Vole type

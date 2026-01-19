@@ -20,20 +20,6 @@ use crate::sema::generic::{
 };
 use crate::sema::type_arena::{TypeId, TypeIdVec};
 
-/// Compilation phase for monomorphization pipeline.
-/// Allows separating function declaration from body compilation for forward references.
-/// Currently infrastructure for potential future unified API.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MonomorphPhase {
-    /// Only declare function signatures (for forward reference support)
-    Declare,
-    /// Only compile function bodies (assumes already declared)
-    Compile,
-    /// Both declare and compile (original behavior)
-    All,
-}
-
 impl Compiler<'_> {
     fn main_function_key_and_name(&mut self, sym: Symbol) -> (FunctionKey, String) {
         // Collect info using query (immutable borrow)

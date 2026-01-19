@@ -90,7 +90,6 @@ impl Compiler<'_> {
         let query = self.query();
         let module_id = query.main_module();
         let name_id = query.name_id(module_id, &[class.name]);
-        let type_key = query.type_key_by_name(name_id);
 
         // Look up the TypeDefId from EntityRegistry
         let type_def_id = self
@@ -110,9 +109,7 @@ impl Compiler<'_> {
             class.name,
             TypeMetadata {
                 type_id,
-                type_key,
                 field_slots: HashMap::new(),
-                is_class: true,
                 vole_type: vole_type_id,
                 method_infos: HashMap::new(),
             },
@@ -248,8 +245,6 @@ impl Compiler<'_> {
             self.register_static_methods(statics, class.name);
         }
 
-        let query = self.query();
-        let name_id = query.name_id(module_id, &[class.name]);
         let vole_type_id = self
             .analyzed
             .type_arena
@@ -259,9 +254,7 @@ impl Compiler<'_> {
             class.name,
             TypeMetadata {
                 type_id,
-                type_key: query.type_key_by_name(name_id),
                 field_slots,
-                is_class: true,
                 vole_type: vole_type_id,
                 method_infos,
             },
@@ -277,7 +270,6 @@ impl Compiler<'_> {
         let query = self.query();
         let module_id = query.main_module();
         let name_id = query.name_id(module_id, &[record.name]);
-        let type_key = query.type_key_by_name(name_id);
 
         // Look up the TypeDefId from EntityRegistry
         let type_def_id = self
@@ -297,9 +289,7 @@ impl Compiler<'_> {
             record.name,
             TypeMetadata {
                 type_id,
-                type_key,
                 field_slots: HashMap::new(),
-                is_class: false,
                 vole_type: vole_type_id,
                 method_infos: HashMap::new(),
             },
@@ -436,8 +426,6 @@ impl Compiler<'_> {
             self.register_static_methods(statics, record.name);
         }
 
-        let query = self.query();
-        let name_id = query.name_id(module_id, &[record.name]);
         let vole_type_id = self
             .analyzed
             .type_arena
@@ -447,9 +435,7 @@ impl Compiler<'_> {
             record.name,
             TypeMetadata {
                 type_id,
-                type_key: query.type_key_by_name(name_id),
                 field_slots,
-                is_class: false,
                 vole_type: vole_type_id,
                 method_infos,
             },
@@ -611,14 +597,6 @@ impl Compiler<'_> {
         }
         tracing::debug!(type_name = %type_name_str, registered_count = method_infos.len(), "Finished registering instance methods");
 
-        // Get type_key from entity registry
-        let type_def = self.analyzed.entity_registry.get_type(type_def_id);
-        let type_key = self
-            .analyzed
-            .entity_registry
-            .type_table
-            .by_name(type_def.name_id);
-
         // Register type metadata
         // IMPORTANT: Use the main interner's Symbol for the class name, not the module's Symbol.
         // Module classes have Symbols from their own interners which may collide (e.g., both
@@ -638,9 +616,7 @@ impl Compiler<'_> {
             main_class_symbol,
             TypeMetadata {
                 type_id,
-                type_key,
                 field_slots,
-                is_class: true,
                 vole_type: vole_type_id,
                 method_infos,
             },

@@ -21,7 +21,7 @@ use crate::sema::entity_defs::TypeDefKind;
 use crate::sema::generic::MonomorphCache;
 use crate::sema::implement_registry::ImplTypeId;
 use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
-use crate::sema::{EntityRegistry, PrimitiveType, TypeKey};
+use crate::sema::{EntityRegistry, PrimitiveType};
 
 // Re-export box_interface_value_id for centralized access to boxing helper
 pub(crate) use super::interface_vtable::box_interface_value_id;
@@ -51,14 +51,8 @@ impl CompiledValue {
 pub(crate) struct TypeMetadata {
     /// Unique type ID for runtime
     pub type_id: u32,
-    /// Opaque type key from semantic analysis (when available)
-    #[allow(dead_code)]
-    pub type_key: Option<TypeKey>,
     /// Map from field name to slot index
     pub field_slots: HashMap<String, usize>,
-    /// Whether this is a class (true) or record (false)
-    #[allow(dead_code)]
-    pub is_class: bool,
     /// The Vole type (Class or Record) - interned TypeId handle
     pub vole_type: TypeId,
     /// Method info: method name -> method info
@@ -748,9 +742,6 @@ pub(crate) const FALLIBLE_TAG_OFFSET: i32 = 0;
 /// Offset of the payload field in a fallible value (always 8, after the i64 tag)
 pub(crate) const FALLIBLE_PAYLOAD_OFFSET: i32 = 8;
 
-/// Size of the tag field in bytes
-#[allow(dead_code)] // Will be used in subsequent codegen tasks
-pub(crate) const FALLIBLE_TAG_SIZE: u32 = 8;
 
 /// Get the error tag for a specific error type within a fallible type.
 /// Returns the 1-based index (tag 0 is reserved for success).
