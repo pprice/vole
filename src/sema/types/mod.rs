@@ -281,14 +281,6 @@ impl LegacyType {
         LegacyType::Primitive(PrimitiveType::from_ast(p))
     }
 
-    /// Get the primitive type if this is a primitive, None otherwise
-    pub fn as_primitive(&self) -> Option<PrimitiveType> {
-        match self {
-            LegacyType::Primitive(p) => Some(*p),
-            _ => None,
-        }
-    }
-
     /// Get TypeDefId for nominal types (Class, Record, Interface, ErrorType).
     /// Returns None for primitives, functions, unions, etc.
     pub fn type_def_id(&self) -> Option<TypeDefId> {
@@ -441,14 +433,6 @@ impl LegacyType {
         matches!(self, LegacyType::Placeholder(_))
     }
 
-    /// Get the analysis error if this is an invalid type
-    pub fn analysis_error(&self) -> Option<&AnalysisError> {
-        match self {
-            LegacyType::Invalid(err) => Some(err),
-            _ => None,
-        }
-    }
-
     /// Assert this type is valid (not Invalid). Panics with context if Invalid.
     /// Use in codegen where Invalid types indicate a compiler bug.
     #[track_caller]
@@ -465,23 +449,6 @@ impl LegacyType {
             );
         }
         self
-    }
-
-    /// Unwrap optional, panicking with context if it fails.
-    /// Use in codegen where unwrap failure indicates a compiler bug.
-    #[track_caller]
-    pub fn unwrap_optional_or_panic(&self, context: &str) -> LegacyType {
-        self.unwrap_optional().unwrap_or_else(|| {
-            panic!(
-                "INTERNAL ERROR: unwrap_optional failed\n\
-                 Context: {}\n\
-                 Type: {:?}\n\
-                 Location: {}",
-                context,
-                self,
-                std::panic::Location::caller()
-            )
-        })
     }
 
     /// Normalize a union: flatten nested unions, sort descending, dedupe, unwrap single-element
