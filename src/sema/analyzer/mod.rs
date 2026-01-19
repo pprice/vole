@@ -1228,25 +1228,20 @@ impl Analyzer {
         });
 
         for func in &external.functions {
-            // Resolve parameter types
-            let param_types: Vec<LegacyType> = func
+            // Resolve parameter types directly to TypeId
+            let param_type_ids: Vec<ArenaTypeId> = func
                 .params
                 .iter()
-                .map(|p| self.resolve_type(&p.ty, interner))
+                .map(|p| self.resolve_type_id(&p.ty, interner))
                 .collect();
 
-            // Resolve return type
-            let return_type = match &func.return_type {
-                Some(te) => self.resolve_type(te, interner),
-                None => LegacyType::Void,
+            // Resolve return type directly to TypeId
+            let return_type_id = match &func.return_type {
+                Some(te) => self.resolve_type_id(te, interner),
+                None => self.type_arena.borrow().void(),
             };
 
-            let func_type = FunctionType::new_with_arena(
-                param_types.iter(),
-                &return_type,
-                false,
-                &mut self.type_arena.borrow_mut(),
-            );
+            let func_type = FunctionType::from_ids(&param_type_ids, return_type_id, false);
 
             // Determine native name: explicit or default to vole_name
             let native_name = func
@@ -1628,8 +1623,8 @@ impl Analyzer {
         for decl in &program.declarations {
             match decl {
                 Decl::Function(f) => {
-                    // Build function type from signature
-                    let (params, return_type) = {
+                    // Build function type from signature - resolve directly to TypeId
+                    let func_type_id = {
                         let mut ctx = TypeResolutionContext {
                             entity_registry: &self.entity_registry,
                             interner: &module_interner,
@@ -1639,26 +1634,17 @@ impl Analyzer {
                             self_type: None,
                             type_arena: &self.type_arena,
                         };
-                        let params: Vec<LegacyType> = f
+                        let param_ids: crate::sema::type_arena::TypeIdVec = f
                             .params
                             .iter()
-                            .map(|p| resolve_type(&p.ty, &mut ctx))
+                            .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
                             .collect();
-                        let return_type = f
+                        let return_id = f
                             .return_type
                             .as_ref()
-                            .map(|rt| resolve_type(rt, &mut ctx))
-                            .unwrap_or(LegacyType::Void);
-                        (params, return_type)
-                    };
-
-                    // Intern the function type directly as a TypeId
-                    let func_type_id = {
-                        let mut arena = self.type_arena.borrow_mut();
-                        let param_ids: crate::sema::type_arena::TypeIdVec =
-                            params.iter().map(|p| arena.from_type(p)).collect();
-                        let return_id = arena.from_type(&return_type);
-                        arena.function(param_ids, return_id, false)
+                            .map(|rt| resolve_type_to_id(rt, &mut ctx))
+                            .unwrap_or_else(|| self.type_arena.borrow().void());
+                        self.type_arena.borrow_mut().function(param_ids, return_id, false)
                     };
 
                     // Store export by name string
@@ -1696,7 +1682,8 @@ impl Analyzer {
                 Decl::External(ext) => {
                     // External block functions become exports and are marked as external
                     for func in &ext.functions {
-                        let (params, return_type) = {
+                        // Resolve types directly to TypeId
+                        let func_type_id = {
                             let mut ctx = TypeResolutionContext {
                                 entity_registry: &self.entity_registry,
                                 interner: &module_interner,
@@ -1706,26 +1693,17 @@ impl Analyzer {
                                 self_type: None,
                                 type_arena: &self.type_arena,
                             };
-                            let params: Vec<LegacyType> = func
+                            let param_ids: crate::sema::type_arena::TypeIdVec = func
                                 .params
                                 .iter()
-                                .map(|p| resolve_type(&p.ty, &mut ctx))
+                                .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
                                 .collect();
-                            let return_type = func
+                            let return_id = func
                                 .return_type
                                 .as_ref()
-                                .map(|rt| resolve_type(rt, &mut ctx))
-                                .unwrap_or(LegacyType::Void);
-                            (params, return_type)
-                        };
-
-                        // Intern the function type directly as a TypeId
-                        let func_type_id = {
-                            let mut arena = self.type_arena.borrow_mut();
-                            let param_ids: crate::sema::type_arena::TypeIdVec =
-                                params.iter().map(|p| arena.from_type(p)).collect();
-                            let return_id = arena.from_type(&return_type);
-                            arena.function(param_ids, return_id, false)
+                                .map(|rt| resolve_type_to_id(rt, &mut ctx))
+                                .unwrap_or_else(|| self.type_arena.borrow().void());
+                            self.type_arena.borrow_mut().function(param_ids, return_id, false)
                         };
 
                         let name_id =
