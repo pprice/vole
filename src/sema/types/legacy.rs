@@ -9,9 +9,9 @@ use std::sync::Arc;
 use crate::frontend::PrimitiveType as AstPrimitiveType;
 use crate::frontend::Span;
 use crate::identity::{NameId, TypeDefId, TypeParamId};
-use crate::sema::type_arena::{TypeId, TypeIdVec};
+use crate::sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 
-use super::nominal::{InterfaceMethodType, InterfaceType, NominalType};
+use super::nominal::{ClassType, ErrorTypeInfo, InterfaceMethodType, InterfaceType, NominalType, RecordType};
 use super::special::{AnalysisError, FallibleType, ModuleType, PlaceholderKind};
 use super::{FunctionType, PrimitiveType};
 
@@ -519,6 +519,265 @@ impl LegacyType {
             | LegacyType::Invalid(_)
             | LegacyType::Module(_)
             | LegacyType::Nominal(NominalType::Error(_)) => self.clone(),
+        }
+    }
+
+    /// Intern this LegacyType into a TypeArena, returning a TypeId.
+    ///
+    /// This is the canonical conversion from LegacyType to TypeId.
+    /// TEMPORARY: For migration only - will be removed when LegacyType is deleted.
+    pub fn intern(&self, arena: &mut TypeArena) -> TypeId {
+        match self {
+            LegacyType::Primitive(p) => arena.primitive(*p),
+            LegacyType::Void => arena.void(),
+            LegacyType::Nil => arena.nil(),
+            LegacyType::Done => arena.done(),
+            LegacyType::Range => arena.range(),
+            LegacyType::MetaType => arena.metatype(),
+            LegacyType::Invalid(_) => arena.invalid(),
+
+            LegacyType::Array(elem) => {
+                let elem_id = elem.intern(arena);
+                arena.array(elem_id)
+            }
+
+            LegacyType::Union(variants) => {
+                let variant_ids: TypeIdVec = variants.iter().map(|v| v.intern(arena)).collect();
+                arena.union(variant_ids)
+            }
+
+            LegacyType::Tuple(elements) => {
+                let elem_ids: TypeIdVec = elements.iter().map(|e| e.intern(arena)).collect();
+                arena.tuple(elem_ids)
+            }
+
+            LegacyType::FixedArray { element, size } => {
+                let elem_id = element.intern(arena);
+                arena.fixed_array(elem_id, *size)
+            }
+
+            LegacyType::RuntimeIterator(elem) => {
+                let elem_id = elem.intern(arena);
+                arena.runtime_iterator(elem_id)
+            }
+
+            LegacyType::Function(ft) => {
+                // Use TypeId fields directly (they're now required)
+                arena.function(ft.params_id.clone(), ft.return_type_id, ft.is_closure)
+            }
+
+            LegacyType::Nominal(NominalType::Class(c)) => {
+                arena.class(c.type_def_id, c.type_args_id.clone())
+            }
+
+            LegacyType::Nominal(NominalType::Record(r)) => {
+                arena.record(r.type_def_id, r.type_args_id.clone())
+            }
+
+            LegacyType::Nominal(NominalType::Interface(i)) => {
+                arena.interface(i.type_def_id, i.type_args_id.clone())
+            }
+
+            LegacyType::Nominal(NominalType::Error(e)) => arena.error_type(e.type_def_id),
+
+            LegacyType::TypeParam(name_id) => arena.type_param(*name_id),
+
+            LegacyType::TypeParamRef(param_id) => arena.type_param_ref(*param_id),
+
+            LegacyType::Module(module_type) => {
+                // Exports are already TypeId - just collect them
+                let exports: smallvec::SmallVec<[(NameId, TypeId); 8]> = module_type
+                    .exports
+                    .iter()
+                    .map(|(&name_id, &ty_id)| (name_id, ty_id))
+                    .collect();
+
+                // Register module metadata (constants, external_funcs)
+                arena.register_module_metadata(
+                    module_type.module_id,
+                    crate::sema::type_arena::ModuleMetadata {
+                        constants: module_type.constants.clone(),
+                        external_funcs: module_type.external_funcs.clone(),
+                    },
+                );
+
+                arena.module(module_type.module_id, exports)
+            }
+
+            LegacyType::Placeholder(kind) => arena.placeholder(kind.clone()),
+
+            LegacyType::Fallible(ft) => {
+                let success_id = ft.success_type.intern(arena);
+                let error_id = ft.error_type.intern(arena);
+                arena.fallible(success_id, error_id)
+            }
+
+            LegacyType::Structural(st) => {
+                let fields: smallvec::SmallVec<[(NameId, TypeId); 4]> = st
+                    .fields
+                    .iter()
+                    .map(|f| (f.name, f.ty.intern(arena)))
+                    .collect();
+                let methods: smallvec::SmallVec<[crate::sema::type_arena::InternedStructuralMethod; 2]> = st
+                    .methods
+                    .iter()
+                    .map(|m| crate::sema::type_arena::InternedStructuralMethod {
+                        name: m.name,
+                        params: m.params.iter().map(|p| p.intern(arena)).collect(),
+                        return_type: m.return_type.intern(arena),
+                    })
+                    .collect();
+                arena.structural(fields, methods)
+            }
+        }
+    }
+
+    /// Create a LegacyType from a TypeId by reading from the arena.
+    ///
+    /// TEMPORARY: For migration only - will be removed when LegacyType is deleted.
+    pub fn from_arena(id: TypeId, arena: &TypeArena) -> Self {
+        use crate::sema::type_arena::SemaType;
+
+        match arena.get(id) {
+            SemaType::Primitive(p) => LegacyType::Primitive(*p),
+            SemaType::Void => LegacyType::Void,
+            SemaType::Nil => LegacyType::Nil,
+            SemaType::Done => LegacyType::Done,
+            SemaType::Range => LegacyType::Range,
+            SemaType::MetaType => LegacyType::MetaType,
+            SemaType::Invalid { kind } => LegacyType::invalid(kind),
+
+            SemaType::Array(elem) => LegacyType::Array(Box::new(Self::from_arena(*elem, arena))),
+
+            SemaType::Union(variants) => {
+                let types: Vec<LegacyType> = variants.iter().map(|&v| Self::from_arena(v, arena)).collect();
+                LegacyType::Union(types.into())
+            }
+
+            SemaType::Tuple(elements) => {
+                let types: Vec<LegacyType> = elements.iter().map(|&e| Self::from_arena(e, arena)).collect();
+                LegacyType::Tuple(types.into())
+            }
+
+            SemaType::FixedArray { element, size } => LegacyType::FixedArray {
+                element: Box::new(Self::from_arena(*element, arena)),
+                size: *size,
+            },
+
+            SemaType::RuntimeIterator(elem) => {
+                LegacyType::RuntimeIterator(Box::new(Self::from_arena(*elem, arena)))
+            }
+
+            SemaType::Function {
+                params,
+                ret,
+                is_closure,
+            } => {
+                let param_types: Vec<LegacyType> =
+                    params.iter().map(|&p| Self::from_arena(p, arena)).collect();
+                LegacyType::Function(FunctionType {
+                    params: param_types.into(),
+                    return_type: Box::new(Self::from_arena(*ret, arena)),
+                    is_closure: *is_closure,
+                    // Preserve TypeIds from arena
+                    params_id: params.clone(),
+                    return_type_id: *ret,
+                })
+            }
+
+            SemaType::Class {
+                type_def_id,
+                type_args,
+            } => LegacyType::Nominal(NominalType::Class(ClassType {
+                type_def_id: *type_def_id,
+                type_args_id: type_args.clone(),
+            })),
+
+            SemaType::Record {
+                type_def_id,
+                type_args,
+            } => LegacyType::Nominal(NominalType::Record(RecordType {
+                type_def_id: *type_def_id,
+                type_args_id: type_args.clone(),
+            })),
+
+            SemaType::Interface {
+                type_def_id,
+                type_args,
+            } => {
+                // Note: We lose methods/extends info here - lookup from EntityRegistry if needed
+                LegacyType::Nominal(NominalType::Interface(InterfaceType {
+                    type_def_id: *type_def_id,
+                    type_args_id: type_args.clone(),
+                    methods: vec![].into(),
+                    extends: vec![].into(),
+                }))
+            }
+
+            SemaType::Error { type_def_id } => {
+                LegacyType::Nominal(NominalType::Error(ErrorTypeInfo {
+                    type_def_id: *type_def_id,
+                }))
+            }
+
+            SemaType::TypeParam(name_id) => LegacyType::TypeParam(*name_id),
+
+            SemaType::TypeParamRef(param_id) => LegacyType::TypeParamRef(*param_id),
+
+            SemaType::Module(m) => {
+                let exports_map: std::collections::HashMap<NameId, TypeId> = m
+                    .exports
+                    .iter()
+                    .map(|(name_id, type_id)| (*name_id, *type_id))
+                    .collect();
+
+                let metadata = arena.module_metadata(m.module_id);
+                let (constants, external_funcs) = match metadata {
+                    Some(meta) => (meta.constants.clone(), meta.external_funcs.clone()),
+                    None => (
+                        std::collections::HashMap::new(),
+                        std::collections::HashSet::new(),
+                    ),
+                };
+
+                LegacyType::Module(ModuleType {
+                    module_id: m.module_id,
+                    exports: exports_map,
+                    constants,
+                    external_funcs,
+                })
+            }
+
+            SemaType::Fallible { success, error } => {
+                LegacyType::Fallible(FallibleType {
+                    success_type: Box::new(Self::from_arena(*success, arena)),
+                    error_type: Box::new(Self::from_arena(*error, arena)),
+                })
+            }
+
+            SemaType::Structural(st) => {
+                LegacyType::Structural(StructuralType {
+                    fields: st
+                        .fields
+                        .iter()
+                        .map(|(name, ty)| StructuralFieldType {
+                            name: *name,
+                            ty: Self::from_arena(*ty, arena),
+                        })
+                        .collect(),
+                    methods: st
+                        .methods
+                        .iter()
+                        .map(|m| StructuralMethodType {
+                            name: m.name,
+                            params: m.params.iter().map(|&p| Self::from_arena(p, arena)).collect(),
+                            return_type: Self::from_arena(m.return_type, arena),
+                        })
+                        .collect(),
+                })
+            }
+
+            SemaType::Placeholder(kind) => LegacyType::Placeholder(kind.clone()),
         }
     }
 }
