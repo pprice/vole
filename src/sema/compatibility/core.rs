@@ -333,120 +333,65 @@ pub fn function_compatible_with_interface(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sema::type_arena::{TypeArena, TypeId};
 
     #[test]
     fn test_literal_fits_signed() {
         // i8 range: -128 to 127
-        assert!(literal_fits(0, &LegacyType::Primitive(PrimitiveType::I8)));
-        assert!(literal_fits(127, &LegacyType::Primitive(PrimitiveType::I8)));
-        assert!(literal_fits(
-            -128,
-            &LegacyType::Primitive(PrimitiveType::I8)
-        ));
-        assert!(!literal_fits(
-            128,
-            &LegacyType::Primitive(PrimitiveType::I8)
-        ));
-        assert!(!literal_fits(
-            -129,
-            &LegacyType::Primitive(PrimitiveType::I8)
-        ));
+        assert!(TypeId::I8.fits_literal(0));
+        assert!(TypeId::I8.fits_literal(127));
+        assert!(TypeId::I8.fits_literal(-128));
+        assert!(!TypeId::I8.fits_literal(128));
+        assert!(!TypeId::I8.fits_literal(-129));
 
         // i16 range
-        assert!(literal_fits(
-            32767,
-            &LegacyType::Primitive(PrimitiveType::I16)
-        ));
-        assert!(!literal_fits(
-            32768,
-            &LegacyType::Primitive(PrimitiveType::I16)
-        ));
+        assert!(TypeId::I16.fits_literal(32767));
+        assert!(!TypeId::I16.fits_literal(32768));
 
         // i32 range
-        assert!(literal_fits(
-            2147483647,
-            &LegacyType::Primitive(PrimitiveType::I32)
-        ));
-        assert!(!literal_fits(
-            2147483648,
-            &LegacyType::Primitive(PrimitiveType::I32)
-        ));
+        assert!(TypeId::I32.fits_literal(2147483647));
+        assert!(!TypeId::I32.fits_literal(2147483648));
 
         // i64 always fits
-        assert!(literal_fits(
-            i64::MAX,
-            &LegacyType::Primitive(PrimitiveType::I64)
-        ));
-        assert!(literal_fits(
-            i64::MIN,
-            &LegacyType::Primitive(PrimitiveType::I64)
-        ));
+        assert!(TypeId::I64.fits_literal(i64::MAX));
+        assert!(TypeId::I64.fits_literal(i64::MIN));
     }
 
     #[test]
     fn test_literal_fits_unsigned() {
         // u8 range: 0 to 255
-        assert!(literal_fits(0, &LegacyType::Primitive(PrimitiveType::U8)));
-        assert!(literal_fits(255, &LegacyType::Primitive(PrimitiveType::U8)));
-        assert!(!literal_fits(
-            256,
-            &LegacyType::Primitive(PrimitiveType::U8)
-        ));
-        assert!(!literal_fits(-1, &LegacyType::Primitive(PrimitiveType::U8)));
+        assert!(TypeId::U8.fits_literal(0));
+        assert!(TypeId::U8.fits_literal(255));
+        assert!(!TypeId::U8.fits_literal(256));
+        assert!(!TypeId::U8.fits_literal(-1));
 
         // u16 range
-        assert!(literal_fits(
-            65535,
-            &LegacyType::Primitive(PrimitiveType::U16)
-        ));
-        assert!(!literal_fits(
-            65536,
-            &LegacyType::Primitive(PrimitiveType::U16)
-        ));
+        assert!(TypeId::U16.fits_literal(65535));
+        assert!(!TypeId::U16.fits_literal(65536));
 
         // u32 range
-        assert!(literal_fits(
-            4294967295,
-            &LegacyType::Primitive(PrimitiveType::U32)
-        ));
-        assert!(!literal_fits(
-            4294967296,
-            &LegacyType::Primitive(PrimitiveType::U32)
-        ));
+        assert!(TypeId::U32.fits_literal(4294967295));
+        assert!(!TypeId::U32.fits_literal(4294967296));
 
         // u64 accepts all positive i64 values
-        assert!(literal_fits(0, &LegacyType::Primitive(PrimitiveType::U64)));
-        assert!(literal_fits(
-            i64::MAX,
-            &LegacyType::Primitive(PrimitiveType::U64)
-        ));
-        assert!(!literal_fits(
-            -1,
-            &LegacyType::Primitive(PrimitiveType::U64)
-        ));
+        assert!(TypeId::U64.fits_literal(0));
+        assert!(TypeId::U64.fits_literal(i64::MAX));
+        assert!(!TypeId::U64.fits_literal(-1));
     }
 
     #[test]
     fn test_literal_fits_float() {
-        assert!(literal_fits(0, &LegacyType::Primitive(PrimitiveType::F32)));
-        assert!(literal_fits(
-            i64::MAX,
-            &LegacyType::Primitive(PrimitiveType::F64)
-        ));
+        assert!(TypeId::F32.fits_literal(0));
+        assert!(TypeId::F64.fits_literal(i64::MAX));
     }
 
     #[test]
     fn test_literal_fits_union() {
-        let union_ty = LegacyType::Union(
-            vec![
-                LegacyType::Primitive(PrimitiveType::I8),
-                LegacyType::Primitive(PrimitiveType::I32),
-            ]
-            .into(),
-        );
-        assert!(literal_fits(100, &union_ty)); // Fits in i8
-        assert!(literal_fits(1000, &union_ty)); // Fits in i32
-        assert!(!literal_fits(i64::MAX, &union_ty)); // Doesn't fit in either
+        let mut arena = TypeArena::new();
+        let union_id = arena.union(vec![TypeId::I8, TypeId::I32]);
+        assert!(arena.literal_fits_id(100, union_id)); // Fits in i8
+        assert!(arena.literal_fits_id(1000, union_id)); // Fits in i32
+        assert!(!arena.literal_fits_id(i64::MAX, union_id)); // Doesn't fit in either
     }
 
     #[test]

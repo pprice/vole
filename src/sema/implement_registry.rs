@@ -292,7 +292,10 @@ mod tests {
     }
 
     #[test]
-    fn type_id_from_type() {
+    fn impl_type_id_from_type_id() {
+        use crate::sema::type_arena::TypeId as ArenaTypeId;
+
+        let mut arena = TypeArena::new();
         let mut names = crate::identity::NameTable::new();
         let mut types = TypeTable::new();
         let entity_registry = crate::sema::entity_registry::EntityRegistry::new();
@@ -303,24 +306,22 @@ mod tests {
         types.register_primitive_name(PrimitiveTypeId::I64, i64_name);
         types.register_array_name(array_name);
 
+        // Test primitive type
         assert_eq!(
-            ImplTypeId::from_type(
-                &LegacyType::Primitive(PrimitiveType::I64),
-                &types,
-                &entity_registry
-            ),
+            ImplTypeId::from_type_id(ArenaTypeId::I64, &arena, &types, &entity_registry),
             Some(ImplTypeId(i64_name))
         );
+
+        // Test array type
+        let array_id = arena.array(ArenaTypeId::I32);
         assert_eq!(
-            ImplTypeId::from_type(
-                &LegacyType::Array(Box::new(LegacyType::Primitive(PrimitiveType::I32))),
-                &types,
-                &entity_registry
-            ),
+            ImplTypeId::from_type_id(array_id, &arena, &types, &entity_registry),
             Some(ImplTypeId(array_name))
         );
+
+        // Test void (not registerable)
         assert_eq!(
-            ImplTypeId::from_type(&LegacyType::Void, &types, &entity_registry),
+            ImplTypeId::from_type_id(ArenaTypeId::VOID, &arena, &types, &entity_registry),
             None
         );
     }
