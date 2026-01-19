@@ -616,9 +616,12 @@ impl Analyzer {
             .entity_registry
             .type_by_name(name_id)
             .expect("alias shell registered in register_all_type_shells");
-        let type_key = self.entity_registry.type_table.key_for_type(&aliased_type);
-        // Convert to ArenaTypeId for storage
+        // Convert to ArenaTypeId first, then use TypeId-native key_for_type_id
         let aliased_type_id = self.type_arena.borrow_mut().from_type(&aliased_type);
+        let type_key = self
+            .entity_registry
+            .type_table
+            .key_for_type_id(aliased_type_id, &self.type_arena.borrow());
         self.entity_registry
             .set_aliased_type(type_id, aliased_type_id, type_key);
         // Also in type_table for display

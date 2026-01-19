@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::identity::{NameId, NameTable, TypeDefId};
+use crate::identity::{NameId, NameTable};
 use crate::sema::implement_registry::PrimitiveTypeId;
 use crate::sema::type_arena::{SemaType, TypeArena, TypeId as ArenaTypeId};
 use crate::sema::types::{LegacyType, NominalType, PrimitiveType};
@@ -29,8 +29,6 @@ pub struct TypeInfo {
 pub struct TypeTable {
     types: Vec<TypeInfo>,
     name_lookup: HashMap<NameId, TypeKey>,
-    type_def_lookup: HashMap<TypeDefId, TypeKey>,
-    type_lookup: HashMap<LegacyType, TypeKey>,
     type_id_lookup: HashMap<ArenaTypeId, TypeKey>,
     primitive_names: HashMap<PrimitiveTypeId, NameId>,
     array_name: Option<NameId>,
@@ -41,8 +39,6 @@ impl TypeTable {
         Self {
             types: Vec::new(),
             name_lookup: HashMap::new(),
-            type_def_lookup: HashMap::new(),
-            type_lookup: HashMap::new(),
             type_id_lookup: HashMap::new(),
             primitive_names: HashMap::new(),
             array_name: None,
@@ -337,84 +333,10 @@ impl TypeTable {
         key
     }
 
-    pub fn key_for_type(&mut self, ty: &LegacyType) -> TypeKey {
-        match ty {
-            // Primitives: use registered name if available, otherwise intern by type
-            LegacyType::Primitive(prim) => {
-                let prim_id = match prim {
-                    PrimitiveType::I8 => PrimitiveTypeId::I8,
-                    PrimitiveType::I16 => PrimitiveTypeId::I16,
-                    PrimitiveType::I32 => PrimitiveTypeId::I32,
-                    PrimitiveType::I64 => PrimitiveTypeId::I64,
-                    PrimitiveType::I128 => PrimitiveTypeId::I128,
-                    PrimitiveType::U8 => PrimitiveTypeId::U8,
-                    PrimitiveType::U16 => PrimitiveTypeId::U16,
-                    PrimitiveType::U32 => PrimitiveTypeId::U32,
-                    PrimitiveType::U64 => PrimitiveTypeId::U64,
-                    PrimitiveType::F32 => PrimitiveTypeId::F32,
-                    PrimitiveType::F64 => PrimitiveTypeId::F64,
-                    PrimitiveType::Bool => PrimitiveTypeId::Bool,
-                    PrimitiveType::String => PrimitiveTypeId::String,
-                };
-                self.intern_primitive(prim_id, ty)
-            }
-            // Nominal types with TypeDefId: use type_def_lookup for deduplication
-            LegacyType::Nominal(NominalType::Class(class_type)) => {
-                self.intern_type_def(ty.clone(), class_type.type_def_id)
-            }
-            LegacyType::Nominal(NominalType::Record(record_type)) => {
-                self.intern_type_def(ty.clone(), record_type.type_def_id)
-            }
-            LegacyType::Nominal(NominalType::Interface(interface_type)) => {
-                // Non-generic interfaces use type_def_lookup, generic use type_lookup
-                if interface_type.type_args_id.is_empty() {
-                    self.intern_type_def(ty.clone(), interface_type.type_def_id)
-                } else {
-                    self.intern_type(ty.clone())
-                }
-            }
-            // All other types: use direct Type hashing
-            _ => self.intern_type(ty.clone()),
-        }
-    }
-
     fn insert(&mut self, info: TypeInfo) -> TypeKey {
         let id = TypeKey(self.types.len() as u32);
         self.types.push(info);
         id
-    }
-
-    fn intern_named(&mut self, ty: LegacyType, name_id: NameId) -> TypeKey {
-        if let Some(key) = self.name_lookup.get(&name_id) {
-            return *key;
-        }
-        self.insert_named(ty, name_id)
-    }
-
-    fn intern_type_def(&mut self, ty: LegacyType, type_def_id: TypeDefId) -> TypeKey {
-        if let Some(key) = self.type_def_lookup.get(&type_def_id) {
-            return *key;
-        }
-        let key = self.insert_anonymous(ty);
-        self.type_def_lookup.insert(type_def_id, key);
-        key
-    }
-
-    fn intern_type(&mut self, ty: LegacyType) -> TypeKey {
-        if let Some(key) = self.type_lookup.get(&ty) {
-            return *key;
-        }
-        let key = self.insert_anonymous(ty.clone());
-        self.type_lookup.insert(ty, key);
-        key
-    }
-
-    fn intern_primitive(&mut self, prim: PrimitiveTypeId, ty: &LegacyType) -> TypeKey {
-        if let Some(name_id) = self.primitive_names.get(&prim) {
-            self.intern_named(ty.clone(), *name_id)
-        } else {
-            self.intern_type(ty.clone())
-        }
     }
 
     fn display_type_inner(
