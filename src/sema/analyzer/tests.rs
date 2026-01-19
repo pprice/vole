@@ -1,7 +1,6 @@
 use super::*;
 use crate::frontend::Parser;
 use crate::frontend::ast::LambdaPurity;
-use crate::sema::types::NominalType;
 
 fn check(source: &str) -> Result<(), Vec<TypeError>> {
     let mut parser = Parser::new(source);
@@ -539,7 +538,7 @@ fn satisfies_interface_with_field() {
             age: i64,
         }
     "#;
-    let analyzer = analyze_and_check_interface(source);
+    let mut analyzer = analyze_and_check_interface(source);
 
     // Get the symbols for Person and Named
     let mut parser = Parser::new(source);
@@ -548,19 +547,15 @@ fn satisfies_interface_with_field() {
     let person_sym = interner.intern("Person");
     let named_sym = interner.intern("Named");
 
-    // Get the Person type via Resolver
+    // Get the Person type via Resolver and create TypeId
     let type_def_id = analyzer
         .resolver(&interner)
         .resolve_type(person_sym, &analyzer.entity_registry)
         .unwrap();
-    let person_type = analyzer
-        .entity_registry
-        .build_record_type(type_def_id)
-        .unwrap();
-    let ty = LegacyType::Nominal(NominalType::Record(person_type));
+    let ty_id = analyzer.type_arena.borrow_mut().record(type_def_id, smallvec::smallvec![]);
 
     // Check if Person satisfies Named
-    assert!(analyzer.satisfies_interface(&ty, named_sym, &interner));
+    assert!(analyzer.satisfies_interface_id(ty_id, named_sym, &interner));
 }
 
 #[test]
@@ -575,7 +570,7 @@ fn satisfies_interface_missing_field() {
             y: i64,
         }
     "#;
-    let analyzer = analyze_and_check_interface(source);
+    let mut analyzer = analyze_and_check_interface(source);
 
     let mut parser = Parser::new(source);
     let _ = parser.parse_program().unwrap();
@@ -583,19 +578,15 @@ fn satisfies_interface_missing_field() {
     let point_sym = interner.intern("Point");
     let named_sym = interner.intern("Named");
 
-    // Get the Point type via Resolver
+    // Get the Point type via Resolver and create TypeId
     let type_def_id = analyzer
         .resolver(&interner)
         .resolve_type(point_sym, &analyzer.entity_registry)
         .unwrap();
-    let point_type = analyzer
-        .entity_registry
-        .build_record_type(type_def_id)
-        .unwrap();
-    let ty = LegacyType::Nominal(NominalType::Record(point_type));
+    let ty_id = analyzer.type_arena.borrow_mut().record(type_def_id, smallvec::smallvec![]);
 
     // Point does NOT satisfy Named (missing name field)
-    assert!(!analyzer.satisfies_interface(&ty, named_sym, &interner));
+    assert!(!analyzer.satisfies_interface_id(ty_id, named_sym, &interner));
 }
 
 #[test]
@@ -612,7 +603,7 @@ fn satisfies_interface_with_method() {
             }
         }
     "#;
-    let analyzer = analyze_and_check_interface(source);
+    let mut analyzer = analyze_and_check_interface(source);
 
     let mut parser = Parser::new(source);
     let _ = parser.parse_program().unwrap();
@@ -620,18 +611,14 @@ fn satisfies_interface_with_method() {
     let user_sym = interner.intern("User");
     let hashable_sym = interner.intern("Hashable");
 
-    // Get the User type via Resolver
+    // Get the User type via Resolver and create TypeId
     let type_def_id = analyzer
         .resolver(&interner)
         .resolve_type(user_sym, &analyzer.entity_registry)
         .unwrap();
-    let user_type = analyzer
-        .entity_registry
-        .build_record_type(type_def_id)
-        .unwrap();
-    let ty = LegacyType::Nominal(NominalType::Record(user_type));
+    let ty_id = analyzer.type_arena.borrow_mut().record(type_def_id, smallvec::smallvec![]);
 
-    assert!(analyzer.satisfies_interface(&ty, hashable_sym, &interner));
+    assert!(analyzer.satisfies_interface_id(ty_id, hashable_sym, &interner));
 }
 
 #[test]
