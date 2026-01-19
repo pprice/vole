@@ -13,7 +13,6 @@ use crate::sema::TypeArena;
 use crate::sema::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_arena::TypeId;
-use crate::sema::types::LegacyType;
 
 /// Encapsulates all NodeId-keyed metadata from semantic analysis.
 /// This includes expression types, method resolutions, and generic instantiation info.
@@ -85,20 +84,6 @@ impl ExpressionData {
     /// Get the type of an expression by its NodeId (returns interned TypeId handle).
     pub fn get_type(&self, node: NodeId) -> Option<TypeId> {
         self.types.get(&node).copied()
-    }
-
-    /// Get the type of an expression, converting to LegacyType.
-    /// Use this when you need the full recursive type structure.
-    pub fn get_type_as_legacy(&self, node: NodeId) -> Option<LegacyType> {
-        self.types
-            .get(&node)
-            .map(|ty| self.type_arena.borrow().to_type(*ty))
-    }
-
-    /// Set the type of an expression (takes LegacyType, interns it)
-    pub fn set_type(&mut self, node: NodeId, ty: LegacyType) {
-        let type_id = self.type_arena.borrow_mut().from_type(&ty);
-        self.types.insert(node, type_id);
     }
 
     /// Set the type of an expression using a TypeId handle directly

@@ -18,7 +18,6 @@ use crate::sema::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::sema::resolution::ResolvedMethod;
 use crate::sema::type_arena::TypeId;
 use crate::sema::type_table::TypeKey;
-use crate::sema::types::LegacyType;
 
 /// Query interface for accessing analyzed program data.
 ///
@@ -62,13 +61,6 @@ impl<'a> ProgramQuery<'a> {
     #[must_use]
     pub fn type_of(&self, node: NodeId) -> Option<TypeId> {
         self.expr_data.get_type(node)
-    }
-
-    /// Get the type of an expression, converting to LegacyType.
-    /// Use this when you need the full recursive type structure.
-    #[must_use]
-    pub fn type_of_legacy(&self, node: NodeId) -> Option<LegacyType> {
-        self.expr_data.get_type_as_legacy(node)
     }
 
     /// Get the resolved method at a call site
