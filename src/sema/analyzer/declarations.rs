@@ -604,7 +604,7 @@ impl Analyzer {
                             module_id,
                             type_params: Some(&type_param_scope),
                             self_type: self_type_id,
-                            type_arena: Some(&*self.type_arena),
+                            type_arena: &self.type_arena,
                         };
                         resolve_type(&p.ty, &mut ctx)
                     })
@@ -622,7 +622,7 @@ impl Analyzer {
                             module_id,
                             type_params: Some(&type_param_scope),
                             self_type: self_type_id,
-                            type_arena: Some(&*self.type_arena),
+                            type_arena: &self.type_arena,
                         };
                         resolve_type(t, &mut ctx)
                     })
