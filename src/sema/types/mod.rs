@@ -188,21 +188,6 @@ impl std::hash::Hash for FunctionType {
 }
 
 impl FunctionType {
-    /// Create a new FunctionType (without interned TypeIds - use intern_ids to add them)
-    pub fn new(
-        params: impl Into<Arc<[LegacyType]>>,
-        return_type: LegacyType,
-        is_closure: bool,
-    ) -> Self {
-        Self {
-            params: params.into(),
-            return_type: Box::new(return_type),
-            is_closure,
-            params_id: None,
-            return_type_id: None,
-        }
-    }
-
     /// Intern the parameter and return types into the arena, populating params_id and return_type_id.
     /// This enables efficient TypeId-based substitution instead of cloning the entire type tree.
     pub fn intern_ids(&mut self, arena: &mut TypeArena) {
@@ -263,21 +248,6 @@ impl FunctionType {
             params_id: Some(param_ids.iter().copied().collect()),
             return_type_id: Some(return_id),
         }
-    }
-
-    /// Get the interned parameter TypeIds. Panics if not interned.
-    #[inline]
-    pub fn get_params_id(&self) -> &[TypeId] {
-        self.params_id
-            .as_ref()
-            .expect("FunctionType params_id not populated - call intern_ids first")
-    }
-
-    /// Get the interned return type TypeId. Panics if not interned.
-    #[inline]
-    pub fn get_return_type_id(&self) -> TypeId {
-        self.return_type_id
-            .expect("FunctionType return_type_id not populated - call intern_ids first")
     }
 
     /// Check if this function type is compatible with a functional interface signature.
@@ -456,23 +426,6 @@ impl LegacyType {
         LegacyType::Invalid(AnalysisError::at(kind, message, span))
     }
 
-    /// Propagate an invalid type, chaining to the source error with context
-    pub fn propagate_invalid(
-        source: &LegacyType,
-        context: impl Into<String>,
-        span: Option<Span>,
-    ) -> LegacyType {
-        if let LegacyType::Invalid(err) = source {
-            LegacyType::Invalid(AnalysisError::propagate(err, context, span))
-        } else {
-            // Shouldn't call this on non-invalid types
-            LegacyType::Invalid(AnalysisError::new(
-                "internal",
-                "propagate_invalid called on valid type",
-            ))
-        }
-    }
-
     /// Check if this type is invalid (analysis failed)
     pub fn is_invalid(&self) -> bool {
         matches!(self, LegacyType::Invalid(_))
@@ -481,16 +434,6 @@ impl LegacyType {
     /// Create an inference placeholder (for type inference during analysis)
     pub fn unknown() -> LegacyType {
         LegacyType::Placeholder(PlaceholderKind::Inference)
-    }
-
-    /// Create a type parameter placeholder (for generic type parameters like T)
-    pub fn type_param_placeholder(name: impl Into<String>) -> LegacyType {
-        LegacyType::Placeholder(PlaceholderKind::TypeParam(name.into()))
-    }
-
-    /// Create a Self type placeholder (for interface method signatures)
-    pub fn self_placeholder() -> LegacyType {
-        LegacyType::Placeholder(PlaceholderKind::SelfType)
     }
 
     /// Check if this is a placeholder type
