@@ -547,6 +547,16 @@ impl Analyzer {
 
     /// Resolve a type expression directly to TypeId (no LegacyType intermediate)
     pub(crate) fn resolve_type_id(&mut self, ty: &TypeExpr, interner: &Interner) -> ArenaTypeId {
+        self.resolve_type_id_with_self(ty, interner, None)
+    }
+
+    /// Resolve a type expression to TypeId with optional Self type for method signatures
+    pub(crate) fn resolve_type_id_with_self(
+        &mut self,
+        ty: &TypeExpr,
+        interner: &Interner,
+        self_type_id: Option<ArenaTypeId>,
+    ) -> ArenaTypeId {
         let module_id = self.current_module;
         let mut ctx = TypeResolutionContext {
             entity_registry: &self.entity_registry,
@@ -554,7 +564,7 @@ impl Analyzer {
             name_table: &mut self.name_table,
             module_id,
             type_params: self.type_param_stack.current(),
-            self_type: None,
+            self_type: self_type_id,
             type_arena: &self.type_arena,
         };
         resolve_type_to_id(ty, &mut ctx)

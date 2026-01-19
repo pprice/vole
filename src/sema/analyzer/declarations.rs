@@ -118,23 +118,23 @@ impl Analyzer {
             .name_table
             .intern(self.current_module, &[func.name], interner);
         if func.type_params.is_empty() {
-            // Non-generic function: resolve types normally
-            let params: Vec<LegacyType> = func
+            // Non-generic function: resolve types directly to TypeId
+            let params_id: Vec<_> = func
                 .params
                 .iter()
-                .map(|p| self.resolve_type(&p.ty, interner))
+                .map(|p| self.resolve_type_id(&p.ty, interner))
                 .collect();
-            let return_type = func
+            let return_type_id = func
                 .return_type
                 .as_ref()
-                .map(|t| self.resolve_type(t, interner))
-                .unwrap_or(LegacyType::Void);
+                .map(|t| self.resolve_type_id(t, interner))
+                .unwrap_or_else(|| self.type_arena.borrow().void());
 
-            let signature = FunctionType::new_with_arena(
-                params,
-                return_type,
+            let signature = FunctionType::from_ids(
+                &params_id,
+                return_type_id,
                 false,
-                &mut self.type_arena.borrow_mut(),
+                &self.type_arena.borrow(),
             );
 
             self.functions.insert(func.name, signature.clone());
@@ -196,23 +196,24 @@ impl Analyzer {
                 &type_param_scope,
                 &self.type_arena,
             );
-            let param_types: Vec<LegacyType> = func
+            // Resolve directly to TypeId
+            let param_type_ids: Vec<ArenaTypeId> = func
                 .params
                 .iter()
-                .map(|p| resolve_type(&p.ty, &mut ctx))
+                .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
                 .collect();
-            let return_type = func
+            let return_type_id = func
                 .return_type
                 .as_ref()
-                .map(|t| resolve_type(t, &mut ctx))
-                .unwrap_or(LegacyType::Void);
+                .map(|t| resolve_type_to_id(t, &mut ctx))
+                .unwrap_or_else(|| self.type_arena.borrow().void());
 
-            // Create a FunctionType with TypeParam placeholders for the signature
-            let signature = FunctionType::new_with_arena(
-                param_types.clone(),
-                return_type.clone(),
+            // Create a FunctionType from TypeIds
+            let signature = FunctionType::from_ids(
+                &param_type_ids,
+                return_type_id,
                 false,
-                &mut self.type_arena.borrow_mut(),
+                &self.type_arena.borrow(),
             );
 
             // Register in EntityRegistry
@@ -222,14 +223,6 @@ impl Analyzer {
                 self.current_module,
                 signature,
             );
-
-            // Set generic info on the function
-            // Convert LegacyTypes to ArenaTypeIds for storage
-            let param_type_ids: Vec<ArenaTypeId> = param_types
-                .iter()
-                .map(|t| self.type_arena.borrow_mut().from_type(t))
-                .collect();
-            let return_type_id = self.type_arena.borrow_mut().from_type(&return_type);
             self.entity_registry.set_function_generic_info(
                 func_id,
                 GenericFuncInfo {
@@ -265,15 +258,11 @@ impl Analyzer {
                     self.name_table.intern_raw(builtin_mod, &[name_str])
                 })
                 .collect();
-            let field_types: Vec<LegacyType> = class
+            // Resolve field types directly to TypeId
+            let field_type_ids: Vec<ArenaTypeId> = class
                 .fields
                 .iter()
-                .map(|f| self.resolve_type(&f.ty, interner))
-                .collect();
-            // Convert to ArenaTypeIds for storage
-            let field_type_ids: Vec<ArenaTypeId> = field_types
-                .iter()
-                .map(|t| self.type_arena.borrow_mut().from_type(t))
+                .map(|f| self.resolve_type_id(&f.ty, interner))
                 .collect();
 
             // Set generic_info (with empty type_params for non-generic classes)
@@ -321,9 +310,11 @@ impl Analyzer {
             );
 
             // Register methods in EntityRegistry (single source of truth)
-            // Use class_type as Self for resolving method signatures
-            let self_type_for_methods =
-                class_type.map(|c| LegacyType::Nominal(NominalType::Class(c)));
+            // Use class TypeId as Self for resolving method signatures
+            let self_type_id = self
+                .type_arena
+                .borrow_mut()
+                .class(entity_type_id, TypeIdVec::new());
             let builtin_mod = self.name_table.builtin_module();
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
@@ -332,25 +323,21 @@ impl Analyzer {
                     self.current_module,
                     &[interner.resolve(class.name), method_name_str],
                 );
-                let params: Vec<LegacyType> = method
+                let params_id: Vec<_> = method
                     .params
                     .iter()
-                    .map(|p| {
-                        self.resolve_type_with_self(&p.ty, interner, self_type_for_methods.clone())
-                    })
+                    .map(|p| self.resolve_type_id_with_self(&p.ty, interner, Some(self_type_id)))
                     .collect();
-                let return_type = method
+                let return_type_id = method
                     .return_type
                     .as_ref()
-                    .map(|t| {
-                        self.resolve_type_with_self(t, interner, self_type_for_methods.clone())
-                    })
-                    .unwrap_or(LegacyType::Void);
-                let signature = FunctionType::new_with_arena(
-                    params,
-                    return_type,
+                    .map(|t| self.resolve_type_id_with_self(t, interner, Some(self_type_id)))
+                    .unwrap_or_else(|| self.type_arena.borrow().void());
+                let signature = FunctionType::from_ids(
+                    &params_id,
+                    return_type_id,
                     false,
-                    &mut self.type_arena.borrow_mut(),
+                    &self.type_arena.borrow(),
                 );
                 self.entity_registry.register_method(
                     entity_type_id,
@@ -372,21 +359,21 @@ impl Analyzer {
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
-                    let params: Vec<LegacyType> = method
+                    let params_id: Vec<_> = method
                         .params
                         .iter()
-                        .map(|p| self.resolve_type(&p.ty, interner))
+                        .map(|p| self.resolve_type_id(&p.ty, interner))
                         .collect();
-                    let return_type = method
+                    let return_type_id = method
                         .return_type
                         .as_ref()
-                        .map(|t| self.resolve_type(t, interner))
-                        .unwrap_or(LegacyType::Void);
-                    let signature = FunctionType::new_with_arena(
-                        params,
-                        return_type,
+                        .map(|t| self.resolve_type_id(t, interner))
+                        .unwrap_or_else(|| self.type_arena.borrow().void());
+                    let signature = FunctionType::from_ids(
+                        &params_id,
+                        return_type_id,
                         false,
-                        &mut self.type_arena.borrow_mut(),
+                        &self.type_arena.borrow(),
                     );
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
@@ -410,21 +397,21 @@ impl Analyzer {
                     let full_method_name_id = self
                         .name_table
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
-                    let params: Vec<LegacyType> = func
+                    let params_id: Vec<_> = func
                         .params
                         .iter()
-                        .map(|p| self.resolve_type(&p.ty, interner))
+                        .map(|p| self.resolve_type_id(&p.ty, interner))
                         .collect();
-                    let return_type = func
+                    let return_type_id = func
                         .return_type
                         .as_ref()
-                        .map(|t| self.resolve_type(t, interner))
-                        .unwrap_or(LegacyType::Void);
-                    let signature = FunctionType::new_with_arena(
-                        params,
-                        return_type.clone(),
+                        .map(|t| self.resolve_type_id(t, interner))
+                        .unwrap_or_else(|| self.type_arena.borrow().void());
+                    let signature = FunctionType::from_ids(
+                        &params_id,
+                        return_type_id,
                         false,
-                        &mut self.type_arena.borrow_mut(),
+                        &self.type_arena.borrow(),
                     );
                     let native_name = func
                         .native_name
@@ -508,15 +495,11 @@ impl Analyzer {
                 &self.type_arena,
             );
 
-            let field_types: Vec<LegacyType> = class
+            // Resolve field types directly to TypeId
+            let field_type_ids: Vec<ArenaTypeId> = class
                 .fields
                 .iter()
-                .map(|f| resolve_type(&f.ty, &mut ctx))
-                .collect();
-            // Convert to ArenaTypeIds for storage
-            let field_type_ids: Vec<ArenaTypeId> = field_types
-                .iter()
-                .map(|t| self.type_arena.borrow_mut().from_type(t))
+                .map(|f| resolve_type_to_id(&f.ty, &mut ctx))
                 .collect();
 
             // Lookup shell registered in pass 0.5
@@ -577,12 +560,16 @@ impl Analyzer {
             );
 
             // Register methods in EntityRegistry with type params in scope
-            let self_type_for_methods =
-                class_type.map(|c| LegacyType::Nominal(NominalType::Class(c)));
-            // Convert to TypeId for use in TypeResolutionContext
-            let self_type_id = self_type_for_methods
-                .as_ref()
-                .map(|t| self.type_arena.borrow_mut().from_type(t));
+            // Build self_type_id directly from entity_type_id with type param placeholders
+            let type_arg_ids: Vec<ArenaTypeId> = type_param_scope
+                .params()
+                .iter()
+                .map(|tp| self.type_arena.borrow_mut().type_param(tp.name_id))
+                .collect();
+            let self_type_id = self
+                .type_arena
+                .borrow_mut()
+                .class(entity_type_id, type_arg_ids);
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
                 let method_name_id = self.name_table.intern_raw(builtin_mod, &[method_name_str]);
@@ -592,7 +579,7 @@ impl Analyzer {
                 );
 
                 // Resolve parameter types with type params and self in scope
-                let params: Vec<LegacyType> = method
+                let params_id: Vec<ArenaTypeId> = method
                     .params
                     .iter()
                     .map(|p| {
@@ -602,15 +589,15 @@ impl Analyzer {
                             name_table: &mut self.name_table,
                             module_id,
                             type_params: Some(&type_param_scope),
-                            self_type: self_type_id,
+                            self_type: Some(self_type_id),
                             type_arena: &self.type_arena,
                         };
-                        resolve_type(&p.ty, &mut ctx)
+                        resolve_type_to_id(&p.ty, &mut ctx)
                     })
                     .collect();
 
                 // Resolve return type with type params and self in scope
-                let return_type = method
+                let return_type_id = method
                     .return_type
                     .as_ref()
                     .map(|t| {
@@ -620,18 +607,18 @@ impl Analyzer {
                             name_table: &mut self.name_table,
                             module_id,
                             type_params: Some(&type_param_scope),
-                            self_type: self_type_id,
+                            self_type: Some(self_type_id),
                             type_arena: &self.type_arena,
                         };
-                        resolve_type(t, &mut ctx)
+                        resolve_type_to_id(t, &mut ctx)
                     })
-                    .unwrap_or(LegacyType::Void);
+                    .unwrap_or_else(|| self.type_arena.borrow().void());
 
-                let signature = FunctionType::new_with_arena(
-                    params,
-                    return_type,
+                let signature = FunctionType::from_ids(
+                    &params_id,
+                    return_type_id,
                     false,
-                    &mut self.type_arena.borrow_mut(),
+                    &self.type_arena.borrow(),
                 );
                 self.entity_registry.register_method(
                     entity_type_id,
@@ -694,7 +681,7 @@ impl Analyzer {
                         .collect();
 
                     // Resolve parameter types with merged type params in scope
-                    let params: Vec<LegacyType> = method
+                    let params_id: Vec<ArenaTypeId> = method
                         .params
                         .iter()
                         .map(|p| {
@@ -706,12 +693,12 @@ impl Analyzer {
                                 &merged_scope,
                                 &self.type_arena,
                             );
-                            resolve_type(&p.ty, &mut ctx)
+                            resolve_type_to_id(&p.ty, &mut ctx)
                         })
                         .collect();
 
                     // Resolve return type with merged type params in scope
-                    let return_type = method
+                    let return_type_id = method
                         .return_type
                         .as_ref()
                         .map(|t| {
@@ -723,15 +710,15 @@ impl Analyzer {
                                 &merged_scope,
                                 &self.type_arena,
                             );
-                            resolve_type(t, &mut ctx)
+                            resolve_type_to_id(t, &mut ctx)
                         })
-                        .unwrap_or(LegacyType::Void);
+                        .unwrap_or_else(|| self.type_arena.borrow().void());
 
-                    let signature = FunctionType::new_with_arena(
-                        params,
-                        return_type,
+                    let signature = FunctionType::from_ids(
+                        &params_id,
+                        return_type_id,
                         false,
-                        &mut self.type_arena.borrow_mut(),
+                        &self.type_arena.borrow(),
                     );
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
