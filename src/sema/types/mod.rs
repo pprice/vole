@@ -510,20 +510,6 @@ impl LegacyType {
         }
     }
 
-    /// Promote two numeric types to their common supertype
-    pub fn promote(left: &LegacyType, right: &LegacyType) -> LegacyType {
-        match (left, right) {
-            (LegacyType::Primitive(l), LegacyType::Primitive(r)) => {
-                if let Some(promoted) = PrimitiveType::promote(*l, *r) {
-                    LegacyType::Primitive(promoted)
-                } else {
-                    left.clone()
-                }
-            }
-            _ => left.clone(),
-        }
-    }
-
     /// Substitute type parameters with concrete types.
     ///
     /// This is the core operation for generic type instantiation. Given a map
