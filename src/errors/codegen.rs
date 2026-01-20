@@ -169,7 +169,7 @@ impl fmt::Display for CodegenError {
 
 impl std::error::Error for CodegenError {}
 
-// Convenience conversion from CodegenError to String for gradual migration
+// Convenience conversion from CodegenError to String
 impl From<CodegenError> for String {
     fn from(err: CodegenError) -> String {
         err.to_string()

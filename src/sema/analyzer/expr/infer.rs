@@ -19,16 +19,6 @@ impl Analyzer {
         Ok(self.record_expr_type_id(expr, type_id))
     }
 
-    /// Compatibility alias during migration
-    #[inline]
-    pub(crate) fn check_expr_id(
-        &mut self,
-        expr: &Expr,
-        interner: &Interner,
-    ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        self.check_expr(expr, interner)
-    }
-
     fn check_expr_inner(
         &mut self,
         expr: &Expr,

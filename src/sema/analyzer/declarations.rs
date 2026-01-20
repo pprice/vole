@@ -133,7 +133,7 @@ impl Analyzer {
 
             self.functions.insert(func.name, signature.clone());
 
-            // Register in EntityRegistry (parallel migration)
+            // Register in EntityRegistry
             self.entity_registry.register_function(
                 name_id,
                 name_id, // For top-level functions, name_id == full_name_id

@@ -128,7 +128,7 @@ pub struct AnalysisOutput {
     pub module_programs: FxHashMap<String, (Program, Interner)>,
     /// Fully-qualified name interner for printable identities
     pub name_table: NameTable,
-    /// Entity registry for first-class type/method/field/function identity (includes type_table)
+    /// Entity registry for type/method/field/function identity
     pub entity_registry: EntityRegistry,
     /// Shared type arena for interned types (needed by ExpressionData for type lookups)
     pub type_arena: Rc<RefCell<TypeArena>>,
@@ -204,7 +204,7 @@ pub struct Analyzer {
     name_table: NameTable,
     /// Current module being analyzed (for proper NameId registration)
     current_module: ModuleId,
-    /// Entity registry for first-class type/method/field/function identity (includes type_table)
+    /// Entity registry for type/method/field/function identity
     pub entity_registry: EntityRegistry,
     /// Stack of type parameter scopes for nested generic contexts.
     type_param_stack: TypeParamScopeStack,

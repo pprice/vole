@@ -93,7 +93,7 @@ impl Analyzer {
                 self.check_expr(&expr_stmt.expr, interner)?;
             }
             Stmt::While(while_stmt) => {
-                let cond_type_id = self.check_expr_id(&while_stmt.condition, interner)?;
+                let cond_type_id = self.check_expr(&while_stmt.condition, interner)?;
                 if !self.is_bool_id(cond_type_id) && !self.is_numeric_id(cond_type_id) {
                     let found = self.type_display_id(cond_type_id);
                     self.add_error(
@@ -113,7 +113,7 @@ impl Analyzer {
                 }
             }
             Stmt::If(if_stmt) => {
-                let cond_type_id = self.check_expr_id(&if_stmt.condition, interner)?;
+                let cond_type_id = self.check_expr(&if_stmt.condition, interner)?;
                 if !self.is_bool_id(cond_type_id) && !self.is_numeric_id(cond_type_id) {
                     let found = self.type_display_id(cond_type_id);
                     self.add_error(
@@ -195,7 +195,7 @@ impl Analyzer {
                 self.type_overrides = saved_overrides;
             }
             Stmt::For(for_stmt) => {
-                let iterable_ty_id = self.check_expr_id(&for_stmt.iterable, interner)?;
+                let iterable_ty_id = self.check_expr(&for_stmt.iterable, interner)?;
 
                 // Determine element type based on iterable type using TypeId
                 let elem_ty_id = if self.is_range_id(iterable_ty_id) {

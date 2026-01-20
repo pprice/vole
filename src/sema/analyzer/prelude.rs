@@ -170,9 +170,7 @@ impl Analyzer {
             for (name, func_type) in sub_analyzer.functions_by_name {
                 self.functions_by_name.insert(name, func_type);
             }
-            // Note: external_func_info is now part of implement_registry and merged via merge() above
-            // Keep name table in sync with prelude interned ids.
-            // Note: type_table is now in entity_registry and merged via merge() above
+            // Keep name table in sync with prelude interned ids
             self.name_table = sub_analyzer.name_table;
 
             // Store prelude program for codegen (needed for implement block compilation)

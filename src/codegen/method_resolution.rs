@@ -299,7 +299,7 @@ pub(crate) fn resolve_method_target_id(
         drop(arena);
     }
 
-    // Fallback: try impl_method_infos directly (legacy path)
+    // Fallback: try impl_method_infos directly
     if let Some(type_id) = ImplTypeId::from_type_id(
         input.object_type_id,
         &input.analyzed.type_arena.borrow(),
