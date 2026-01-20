@@ -100,7 +100,7 @@ tempfile = "3.10"
 
 [build-dependencies]
 vergen = { version = "9", features = ["build", "cargo"] }
-vergen-gitcl = { version = "1", features = ["build"] }
+vergen-gitcl = { version = "9", features = ["build"] }
 
 [profile.release]
 lto = true
