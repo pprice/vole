@@ -1407,32 +1407,89 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "comfy-table",
+ "glob",
+ "libc",
+ "miette",
+ "pretty",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "similar",
+ "sysinfo",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+ "vergen",
+ "vergen-gitcl",
+ "vole-codegen",
+ "vole-frontend",
+ "vole-identity",
+ "vole-runtime",
+ "vole-sema",
+]
+
+[[package]]
+name = "vole-codegen"
+version = "0.1.0"
+dependencies = [
  "cranelift",
  "cranelift-codegen",
  "cranelift-frontend",
  "cranelift-jit",
  "cranelift-module",
  "cranelift-native",
- "glob",
  "hashbrown 0.16.1",
- "libc",
  "miette",
- "pretty",
- "pretty_assertions",
  "rustc-hash",
- "serde",
- "serde_json",
- "similar",
  "smallvec",
- "sysinfo",
  "target-lexicon",
- "tempfile",
  "thiserror",
  "tracing",
- "tracing-subscriber",
+ "vole-frontend",
+ "vole-identity",
+ "vole-runtime",
+ "vole-sema",
+]
+
+[[package]]
+name = "vole-frontend"
+version = "0.1.0"
+dependencies = [
+ "miette",
+ "rustc-hash",
+ "smallvec",
+ "thiserror",
+ "tracing",
  "unicode-ident",
- "vergen",
- "vergen-gitcl",
+]
+
+[[package]]
+name = "vole-identity"
+version = "0.1.0"
+dependencies = [
+ "vole-frontend",
+]
+
+[[package]]
+name = "vole-runtime"
+version = "0.1.0"
+dependencies = [
+ "hashbrown 0.16.1",
+ "libc",
+]
+
+[[package]]
+name = "vole-sema"
+version = "0.1.0"
+dependencies = [
+ "hashbrown 0.16.1",
+ "miette",
+ "rustc-hash",
+ "smallvec",
+ "thiserror",
+ "tracing",
+ "vole-frontend",
+ "vole-identity",
 ]
 
 [[package]]

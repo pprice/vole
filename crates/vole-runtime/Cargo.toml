@@ -1,0 +1,15 @@
+[package]
+name = "vole-runtime"
+version = "0.1.0"
+edition = "2024"
+description = "Runtime library for the Vole programming language"
+
+[dependencies]
+# C library interop (for longjmp in test assertions)
+libc = "0.2"
+
+# High-performance hash map for Map<K,V> and Set<T> collections
+hashbrown = "0.16"
+
+[lints]
+workspace = true

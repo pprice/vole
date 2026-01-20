@@ -1,15 +1,15 @@
 // src/lib.rs
 pub mod bench;
 pub mod cli;
-pub mod codegen;
+pub use vole_codegen as codegen;
 pub mod commands;
 pub mod errors;
 pub mod fmt;
-pub mod frontend;
-pub mod identity;
-pub mod module;
-pub mod runtime;
-pub mod sema;
+pub use vole_frontend as frontend;
+pub use vole_identity as identity;
+pub use vole_runtime as runtime;
+pub use vole_sema as sema;
+pub use vole_sema::module;
 pub mod snap;
 pub mod transforms;
 pub mod util;

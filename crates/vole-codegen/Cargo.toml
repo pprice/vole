@@ -1,0 +1,40 @@
+[package]
+name = "vole-codegen"
+version = "0.1.0"
+edition = "2024"
+description = "Code generation for the Vole programming language (Cranelift JIT)"
+
+[dependencies]
+# Workspace crates
+vole-frontend = { path = "../vole-frontend" }
+vole-identity = { path = "../vole-identity" }
+vole-runtime = { path = "../vole-runtime" }
+vole-sema = { path = "../vole-sema" }
+
+# Cranelift for JIT compilation
+cranelift = "0.127"
+cranelift-jit = "0.127"
+cranelift-module = "0.127"
+cranelift-codegen = "0.127"
+cranelift-frontend = "0.127"
+cranelift-native = "0.127"
+target-lexicon = "0.13"
+
+# Fast hashing for internal compiler maps (non-cryptographic)
+rustc-hash = "2.1"
+
+# High-performance hash map
+hashbrown = "0.16"
+
+# Small vector optimization
+smallvec = "1.13"
+
+# Error handling
+thiserror = "2.0"
+miette = { version = "7.4", features = ["fancy"] }
+
+# Tracing/observability
+tracing = "0.1"
+
+[lints]
+workspace = true

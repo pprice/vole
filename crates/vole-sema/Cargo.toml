@@ -1,0 +1,29 @@
+[package]
+name = "vole-sema"
+version = "0.1.0"
+edition = "2024"
+description = "Semantic analysis for the Vole programming language"
+
+[dependencies]
+# Workspace crates
+vole-frontend = { path = "../vole-frontend" }
+vole-identity = { path = "../vole-identity" }
+
+# Small vector optimization for hot paths
+smallvec = "1.13"
+
+# Fast hashing for internal compiler maps (non-cryptographic)
+rustc-hash = "2.1"
+
+# High-performance hash map
+hashbrown = "0.16"
+
+# Error handling
+thiserror = "2.0"
+miette = { version = "7.4", features = ["fancy"] }
+
+# Tracing/observability
+tracing = "0.1"
+
+[lints]
+workspace = true

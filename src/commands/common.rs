@@ -5,67 +5,19 @@ use std::io::{self, IsTerminal, Read, Write};
 
 use miette::NamedSource;
 
-use rustc_hash::FxHashMap;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext};
 use crate::errors::{LexerError, render_to_stderr, render_to_writer};
-use crate::frontend::{AstPrinter, Interner, ParseError, Parser, ast::Program};
-use crate::identity::NameTable;
+use crate::frontend::{AstPrinter, ParseError, Parser};
 use crate::runtime::set_stdout_capture;
-use crate::sema::{
-    AnalysisOutput, Analyzer, EntityRegistry, ExpressionData, ImplementRegistry, ModuleCache,
-    ProgramQuery, TypeArena, TypeError, TypeWarning,
-};
+use crate::sema::{Analyzer, ModuleCache, TypeError, TypeWarning};
 use crate::transforms;
-use std::cell::RefCell;
-use std::rc::Rc;
 
-/// Result of parsing and analyzing a source file.
-pub struct AnalyzedProgram {
-    pub program: Program,
-    pub interner: Interner,
-    /// All expression-level metadata (types, method resolutions, generic calls)
-    pub expression_data: ExpressionData,
-    /// Methods added via implement blocks (includes external_func_info)
-    pub implement_registry: ImplementRegistry,
-    /// Parsed module programs for compiling pure Vole functions
-    pub module_programs: FxHashMap<String, (Program, Interner)>,
-    /// Qualified name interner for printable identities
-    pub name_table: NameTable,
-    /// Entity registry for type/method/field/function identity
-    pub entity_registry: EntityRegistry,
-    /// Shared type arena for interned types (same arena used by ExpressionData)
-    pub type_arena: Rc<RefCell<TypeArena>>,
-}
-
-impl AnalyzedProgram {
-    /// Construct AnalyzedProgram from parsed program and analysis output.
-    pub fn from_analysis(program: Program, interner: Interner, output: AnalysisOutput) -> Self {
-        Self {
-            program,
-            interner,
-            expression_data: output.expression_data,
-            implement_registry: output.implement_registry,
-            module_programs: output.module_programs,
-            name_table: output.name_table,
-            entity_registry: output.entity_registry,
-            type_arena: output.type_arena,
-        }
-    }
-
-    /// Get a query interface for accessing type information and analysis results.
-    pub fn query(&self) -> ProgramQuery<'_> {
-        ProgramQuery::new(
-            &self.entity_registry,
-            &self.expression_data,
-            &self.name_table,
-            &self.interner,
-            &self.implement_registry,
-            &self.module_programs,
-        )
-    }
-}
+// Re-export AnalyzedProgram from codegen
+pub use crate::codegen::AnalyzedProgram;
 
 /// Render a lexer error to stderr with source context
 fn render_lexer_error(err: &LexerError, file_path: &str, source: &str) {

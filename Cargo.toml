@@ -1,3 +1,39 @@
+[workspace]
+members = [".", "crates/vole-frontend", "crates/vole-identity", "crates/vole-runtime", "crates/vole-sema", "crates/vole-codegen"]
+resolver = "2"
+
+[workspace.lints.clippy]
+# Lint groups - errors for critical issues (lower priority so individual lints can override)
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+
+# Lint groups - warnings for code quality
+perf = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+
+# Allow multiple crate versions - caused by transitive dependencies we don't control
+multiple_crate_versions = "allow"
+
+# Allow missing metadata for internal crates
+cargo_common_metadata = "allow"
+
+# Additional useful lints
+redundant_clone = "warn"
+derive_partial_eq_without_eq = "warn"
+unused_peekable = "warn"
+collection_is_never_read = "warn"
+needless_for_each = "warn"
+manual_string_new = "warn"
+cloned_instead_of_copied = "warn"
+flat_map_option = "warn"
+
+[workspace.lints.rust]
+# Standard Rust lints
+unsafe_op_in_unsafe_fn = "warn"
+unused_qualifications = "warn"
+
 [package]
 name = "vole"
 version = "0.1.0"
@@ -23,30 +59,17 @@ name = "vole-snap"
 path = "src/bin/vole_snap.rs"
 
 [dependencies]
-# Cranelift for JIT compilation
-cranelift = "0.127"
-cranelift-jit = "0.127"
-cranelift-module = "0.127"
-cranelift-codegen = "0.127"
-cranelift-frontend = "0.127"
-cranelift-native = "0.127"
-target-lexicon = "0.13"
+# Workspace crates
+vole-frontend = { path = "crates/vole-frontend" }
+vole-identity = { path = "crates/vole-identity" }
+vole-runtime = { path = "crates/vole-runtime" }
+vole-sema = { path = "crates/vole-sema" }
+vole-codegen = { path = "crates/vole-codegen" }
 
-# C library interop (for longjmp in test assertions)
+# C library interop (for benchmark resource usage)
 libc = "0.2"
 
-# Small vector optimization for hot paths
-smallvec = "1.13"
-
-# Fast hashing for internal compiler maps (non-cryptographic)
-rustc-hash = "2.1"
-
-# High-performance hash map for Map<K,V> and Set<T> collections
-# HashTable provides low-level API for custom equality function injection
-hashbrown = "0.16"
-
 # Error handling
-thiserror = "2.0"
 miette = { version = "7.4", features = ["fancy"] }
 
 # CLI
@@ -70,7 +93,6 @@ serde_json = "1.0"
 # Tracing/observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-unicode-ident = "1.0.22"
 
 [dev-dependencies]
 pretty_assertions = "1.4"
@@ -84,31 +106,5 @@ vergen-gitcl = { version = "1", features = ["build"] }
 lto = true
 codegen-units = 1
 
-[lints.clippy]
-# Lint groups - errors for critical issues (lower priority so individual lints can override)
-correctness = { level = "deny", priority = -1 }
-suspicious = { level = "deny", priority = -1 }
-
-# Lint groups - warnings for code quality
-perf = { level = "warn", priority = -1 }
-style = { level = "warn", priority = -1 }
-complexity = { level = "warn", priority = -1 }
-cargo = { level = "warn", priority = -1 }
-
-# Allow multiple crate versions - caused by transitive dependencies we don't control
-multiple_crate_versions = "allow"
-
-# Additional useful lints
-redundant_clone = "warn"
-derive_partial_eq_without_eq = "warn"
-unused_peekable = "warn"
-collection_is_never_read = "warn"
-needless_for_each = "warn"
-manual_string_new = "warn"
-cloned_instead_of_copied = "warn"
-flat_map_option = "warn"
-
-[lints.rust]
-# Standard Rust lints
-unsafe_op_in_unsafe_fn = "warn"
-unused_qualifications = "warn"
+[lints]
+workspace = true
