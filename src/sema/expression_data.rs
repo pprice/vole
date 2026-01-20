@@ -32,6 +32,11 @@ pub struct ExpressionData {
     module_types: FxHashMap<String, HashMap<NodeId, TypeId>>,
     /// Per-module method resolutions (for multi-module compilation)
     module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
+    /// Substituted return types for generic method calls.
+    /// When sema resolves a call like `list.head()` on `List<i32>`, the generic
+    /// return type `T` is substituted to `i32`. This map stores the concrete type
+    /// so codegen doesn't need to recompute the substitution.
+    substituted_return_types: HashMap<NodeId, TypeId>,
     /// Shared type arena for type queries
     type_arena: Rc<RefCell<TypeArena>>,
 }
@@ -46,6 +51,7 @@ impl Default for ExpressionData {
             static_method_generics: HashMap::new(),
             module_types: FxHashMap::default(),
             module_methods: FxHashMap::default(),
+            substituted_return_types: HashMap::new(),
             type_arena: Rc::new(RefCell::new(TypeArena::new())),
         }
     }
@@ -67,6 +73,7 @@ impl ExpressionData {
         static_method_generics: HashMap<NodeId, StaticMethodMonomorphKey>,
         module_types: FxHashMap<String, HashMap<NodeId, TypeId>>,
         module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
+        substituted_return_types: HashMap<NodeId, TypeId>,
         type_arena: Rc<RefCell<TypeArena>>,
     ) -> Self {
         Self {
@@ -77,6 +84,7 @@ impl ExpressionData {
             static_method_generics,
             module_types,
             module_methods,
+            substituted_return_types,
             type_arena,
         }
     }
@@ -243,5 +251,26 @@ impl ExpressionData {
     /// Get all module method mappings
     pub fn all_module_methods(&self) -> &FxHashMap<String, HashMap<NodeId, ResolvedMethod>> {
         &self.module_methods
+    }
+
+    /// Get the substituted return type for a method call.
+    /// This is the concrete return type after generic substitution (e.g., `i32` instead of `T`).
+    pub fn get_substituted_return_type(&self, node: NodeId) -> Option<TypeId> {
+        self.substituted_return_types.get(&node).copied()
+    }
+
+    /// Set the substituted return type for a method call.
+    pub fn set_substituted_return_type(&mut self, node: NodeId, ty: TypeId) {
+        self.substituted_return_types.insert(node, ty);
+    }
+
+    /// Get all substituted return types
+    pub fn substituted_return_types(&self) -> &HashMap<NodeId, TypeId> {
+        &self.substituted_return_types
+    }
+
+    /// Get mutable access to substituted return types
+    pub fn substituted_return_types_mut(&mut self) -> &mut HashMap<NodeId, TypeId> {
+        &mut self.substituted_return_types
     }
 }

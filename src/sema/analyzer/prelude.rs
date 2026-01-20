@@ -123,6 +123,7 @@ impl Analyzer {
             generic_calls: HashMap::new(),
             class_method_calls: HashMap::new(),
             static_method_calls: HashMap::new(),
+            substituted_return_types: HashMap::new(),
             name_table: NameTable::new(),
             current_module: prelude_module, // Use the prelude module path!
             entity_registry: EntityRegistry::new(),

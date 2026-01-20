@@ -461,7 +461,40 @@ impl Analyzer {
                 interner,
             );
 
-            return Ok(func_type.return_type_id);
+            // Compute and store substituted return type for generic class methods
+            // so codegen doesn't need to recompute
+            let final_return_id = {
+                let arena = self.type_arena.borrow();
+                // Check if this is a generic class/record with type args that need substitution
+                let type_args_and_def = arena
+                    .unwrap_class(object_type_id)
+                    .or_else(|| arena.unwrap_record(object_type_id));
+                if let Some((type_def_id, type_args)) = type_args_and_def
+                    && !type_args.is_empty()
+                    && let Some(ref generic_info) =
+                        self.entity_registry.get_type(type_def_id).generic_info
+                {
+                    // Build substitution map: T -> i32, etc.
+                    let subs: hashbrown::HashMap<_, _> = generic_info
+                        .type_params
+                        .iter()
+                        .zip(type_args.iter())
+                        .map(|(param, &arg)| (param.name_id, arg))
+                        .collect();
+                    drop(arena);
+                    let substituted = self
+                        .type_arena
+                        .borrow_mut()
+                        .substitute(func_type.return_type_id, &subs);
+                    if substituted != func_type.return_type_id {
+                        self.substituted_return_types.insert(expr.id, substituted);
+                    }
+                    return Ok(substituted);
+                }
+                func_type.return_type_id
+            };
+
+            return Ok(final_return_id);
         }
 
         // No method found - report error
@@ -663,6 +696,12 @@ impl Analyzer {
                     func_type: func_type.clone(),
                 },
             );
+
+            // Record substituted return type if generic substitution occurred
+            if maybe_inferred.is_some() && final_return_id != return_type_id {
+                self.substituted_return_types
+                    .insert(expr.id, final_return_id);
+            }
 
             // Record static method monomorphization if there are any type params
             if let Some(ref inferred) = maybe_inferred

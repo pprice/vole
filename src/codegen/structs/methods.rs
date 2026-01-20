@@ -285,6 +285,12 @@ impl Cg<'_, '_, '_> {
             } => (method_info, return_type),
         };
 
+        // Use sema's cached substituted return type if available (avoids recomputation)
+        let return_type_id = self
+            .ctx
+            .get_substituted_return_type(&expr_id)
+            .unwrap_or(return_type_id);
+
         // Check if this is a monomorphized class method call
         // If so, use the monomorphized method's func_key instead
         let (method_func_ref, is_generic_class) = if let Some(monomorph_key) = self

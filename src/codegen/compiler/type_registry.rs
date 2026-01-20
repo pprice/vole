@@ -144,14 +144,6 @@ impl Compiler<'_> {
         // Register field types in runtime type registry for cleanup
         register_instance_type(type_id, field_type_tags);
 
-        // Look up the TypeDefId from EntityRegistry
-        let name_id = query.name_id(module_id, &[class.name]);
-        let type_def_id = self
-            .analyzed
-            .entity_registry
-            .type_by_name(name_id)
-            .expect("class should be registered in entity registry");
-
         // Collect method return types (TypeId-native)
         let func_module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
@@ -245,11 +237,12 @@ impl Compiler<'_> {
             self.register_static_methods(statics, class.name);
         }
 
+        // Reuse the vole_type_id from pre_register (already interned)
         let vole_type_id = self
-            .analyzed
-            .type_arena
-            .borrow_mut()
-            .class(type_def_id, TypeIdVec::new());
+            .type_metadata
+            .get(&class.name)
+            .expect("class should be pre-registered")
+            .vole_type;
         self.type_metadata.insert(
             class.name,
             TypeMetadata {
@@ -323,14 +316,6 @@ impl Compiler<'_> {
 
         // Register field types in runtime type registry for cleanup
         register_instance_type(type_id, field_type_tags);
-
-        // Look up the TypeDefId from EntityRegistry
-        let name_id = query.name_id(module_id, &[record.name]);
-        let type_def_id = self
-            .analyzed
-            .entity_registry
-            .type_by_name(name_id)
-            .expect("record should be registered in entity registry");
 
         // Collect method return types (TypeId-native)
         let func_module_id = self.func_registry.main_module();
@@ -426,11 +411,12 @@ impl Compiler<'_> {
             self.register_static_methods(statics, record.name);
         }
 
+        // Reuse the vole_type_id from pre_register (already interned)
         let vole_type_id = self
-            .analyzed
-            .type_arena
-            .borrow_mut()
-            .record(type_def_id, TypeIdVec::new());
+            .type_metadata
+            .get(&record.name)
+            .expect("record should be pre-registered")
+            .vole_type;
         self.type_metadata.insert(
             record.name,
             TypeMetadata {

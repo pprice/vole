@@ -148,16 +148,27 @@ pub(crate) struct CompileCtx<'a> {
     /// Type substitutions for monomorphized class method compilation
     /// Maps type param NameId -> concrete TypeId (interned for O(1) equality)
     pub type_substitutions: Option<&'a HashMap<NameId, TypeId>>,
+    /// Cache for substituted types (avoids repeated HashMap conversion and arena mutations)
+    /// Only populated when type_substitutions is Some
+    pub substitution_cache: RefCell<HashMap<TypeId, TypeId>>,
 }
 
 impl<'a> CompileCtx<'a> {
     /// Substitute type parameters with concrete types using TypeId directly.
+    /// Uses a cache to avoid repeated HashMap conversion and arena mutations.
     pub fn substitute_type_id(&self, ty: TypeId) -> TypeId {
         if let Some(substitutions) = self.type_substitutions {
+            // Check cache first
+            if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
+                return cached;
+            }
             // Convert std HashMap to hashbrown HashMap for arena compatibility
             let subs: hashbrown::HashMap<NameId, TypeId> =
                 substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-            self.arena.borrow_mut().substitute(ty, &subs)
+            let result = self.arena.borrow_mut().substitute(ty, &subs);
+            // Cache the result
+            self.substitution_cache.borrow_mut().insert(ty, result);
+            result
         } else {
             ty
         }
@@ -190,6 +201,15 @@ impl<'a> CompileCtx<'a> {
         }
         // Fall back to main program expr_types via query interface
         self.analyzed.query().type_of(*node_id)
+    }
+
+    /// Get the substituted return type for a generic method call, if one was computed by sema.
+    /// This avoids codegen having to recompute type substitution for generic method calls.
+    pub fn get_substituted_return_type(&self, node_id: &NodeId) -> Option<TypeId> {
+        self.analyzed
+            .query()
+            .expr_data()
+            .get_substituted_return_type(*node_id)
     }
 }
 

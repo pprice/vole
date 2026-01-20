@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
@@ -801,6 +802,7 @@ impl Compiler<'_> {
                     current_module: module_path,
                     monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                     type_substitutions: None,
+                    substitution_cache: RefCell::new(HashMap::new()),
                 };
                 let terminated =
                     compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -972,6 +974,7 @@ impl Compiler<'_> {
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: None,
+                substitution_cache: RefCell::new(HashMap::new()),
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1150,6 +1153,7 @@ impl Compiler<'_> {
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: None,
+                substitution_cache: RefCell::new(HashMap::new()),
             };
             let terminated = compile_block(
                 &mut builder,
@@ -1332,6 +1336,7 @@ impl Compiler<'_> {
                 current_module: None,
                 monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: None,
+                substitution_cache: RefCell::new(HashMap::new()),
             };
             let terminated =
                 compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -1467,6 +1472,7 @@ impl Compiler<'_> {
                     current_module: None,
                     monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                     type_substitutions: None,
+                    substitution_cache: RefCell::new(HashMap::new()),
                 };
                 let terminated =
                     compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
@@ -1646,6 +1652,7 @@ impl Compiler<'_> {
                     current_module: Some(module_path),
                     monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                     type_substitutions: None,
+                    substitution_cache: RefCell::new(HashMap::new()),
                 };
                 let terminated = compile_block(
                     &mut builder,
@@ -1792,6 +1799,7 @@ impl Compiler<'_> {
                         current_module: Some(module_path),
                         monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                         type_substitutions: None,
+                        substitution_cache: RefCell::new(HashMap::new()),
                     };
                     let terminated =
                         compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;

@@ -200,6 +200,10 @@ pub struct Analyzer {
     class_method_calls: HashMap<NodeId, ClassMethodMonomorphKey>,
     /// Mapping from static method call expression NodeId to StaticMethodMonomorphKey (for generic static method calls)
     static_method_calls: HashMap<NodeId, StaticMethodMonomorphKey>,
+    /// Substituted return types for generic method calls.
+    /// When a method like `list.head()` is called on `List<i32>`, the generic return type `T`
+    /// is substituted to `i32`. This map stores the concrete type so codegen doesn't recompute.
+    substituted_return_types: HashMap<NodeId, ArenaTypeId>,
     /// Fully-qualified name interner for printable identities
     name_table: NameTable,
     /// Current module being analyzed (for proper NameId registration)
@@ -256,6 +260,7 @@ impl Analyzer {
             generic_calls: HashMap::new(),
             class_method_calls: HashMap::new(),
             static_method_calls: HashMap::new(),
+            substituted_return_types: HashMap::new(),
             name_table,
             current_module: main_module,
             entity_registry: EntityRegistry::new(),
@@ -328,6 +333,7 @@ impl Analyzer {
             self.static_method_calls,
             self.module_expr_types,
             self.module_method_resolutions,
+            self.substituted_return_types,
             self.type_arena.clone(),
         );
         AnalysisOutput {
