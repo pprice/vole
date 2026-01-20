@@ -102,3 +102,70 @@ tests "lambda inference" {
         assert(result == 10)
     }
 }
+
+tests "void and nil returns" {
+    test "implicit void lambda block" {
+        let doNothing = (x: i64) => {
+            let y = x + 1
+        }
+        doNothing(1)
+        assert(true)
+    }
+
+    test "explicit void lambda block" {
+        let doNothing = (x: i64) -> void => {
+            let y = x + 1
+        }
+        doNothing(1)
+        assert(true)
+    }
+
+    test "return nil lambda block" {
+        let returnNil = () -> nil => {
+            return nil
+        }
+        assert(returnNil() == nil)
+    }
+
+    test "inferred nil return lambda block" {
+        let returnNil = () => {
+            return nil
+        }
+        assert(returnNil() == nil)
+    }
+
+    // Single expression variants
+    test "nil expression lambda" {
+        let returnNil = () -> nil => nil
+        assert(returnNil() == nil)
+    }
+
+    test "inferred nil expression lambda" {
+        let returnNil = () => nil
+        assert(returnNil() == nil)
+    }
+
+    // Block body with return - inferred return type
+    test "inferred return type from block" {
+        let double = (x: i64) => {
+            return x * 2
+        }
+        assert(double(21) == 42)
+    }
+
+    test "explicit return type block" {
+        let double = (x: i64) -> i64 => {
+            return x * 2
+        }
+        assert(double(21) == 42)
+    }
+
+    test "inferred i32 return from block" {
+        let add = (a: i32, b: i32) => {
+            return a + b
+        }
+        let x: i32 = 10
+        let y: i32 = 20
+        assert(add(x, y) == 30)
+    }
+}

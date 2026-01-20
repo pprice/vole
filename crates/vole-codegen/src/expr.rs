@@ -72,7 +72,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::Done => Ok(self.done_value()),
             ExprKind::Is(is_expr) => self.is_expr(is_expr),
             ExprKind::NullCoalesce(nc) => self.null_coalesce(nc),
-            ExprKind::Lambda(lambda) => self.lambda(lambda),
+            ExprKind::Lambda(lambda) => self.lambda(lambda, expr.id),
             ExprKind::TypeLiteral(_) => {
                 Err(CodegenError::unsupported("type expressions as runtime values").into())
             }

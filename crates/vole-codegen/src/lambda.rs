@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use vole_frontend::{BinaryOp, Expr, ExprKind, LambdaBody, LambdaExpr, Symbol};
+use vole_frontend::{BinaryOp, Expr, ExprKind, LambdaBody, LambdaExpr, NodeId, Symbol};
 use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 
 use super::RuntimeFn;
@@ -59,6 +59,37 @@ pub(crate) fn infer_lambda_return_type(
         LambdaBody::Expr(expr) => infer_expr_type(expr, param_types, ctx),
         LambdaBody::Block(_) => ctx.arena.borrow().primitives.i64,
     }
+}
+
+/// Get lambda param and return types from explicit annotations or codegen inference (fallback when sema type unavailable)
+fn get_lambda_types_fallback(lambda: &LambdaExpr, ctx: &CompileCtx) -> (Vec<TypeId>, TypeId) {
+    let primitives = ctx.arena.borrow().primitives;
+
+    // Build param type ids from AST annotations, defaulting to i64
+    let param_type_ids: Vec<TypeId> = lambda
+        .params
+        .iter()
+        .map(|p| {
+            p.ty.as_ref()
+                .map(|t| resolve_type_expr_id(t, ctx))
+                .unwrap_or(primitives.i64)
+        })
+        .collect();
+
+    // Get return type from annotation or infer from body
+    let return_type_id = if let Some(t) = &lambda.return_type {
+        resolve_type_expr_id(t, ctx)
+    } else {
+        let param_context: Vec<(Symbol, TypeId)> = lambda
+            .params
+            .iter()
+            .zip(param_type_ids.iter())
+            .map(|(p, &ty)| (p.name, ty))
+            .collect();
+        infer_lambda_return_type(&lambda.body, &param_context, ctx)
+    };
+
+    (param_type_ids, return_type_id)
 }
 
 /// Infer the type of an expression given parameter types as context.
@@ -177,6 +208,7 @@ pub(super) fn compile_lambda(
     lambda: &LambdaExpr,
     variables: &HashMap<Symbol, (Variable, TypeId)>,
     ctx: &mut CompileCtx,
+    node_id: NodeId,
 ) -> Result<CompiledValue, String> {
     let captures = lambda.captures.borrow();
     let has_captures = !captures.is_empty();
@@ -189,9 +221,9 @@ pub(super) fn compile_lambda(
     );
 
     if has_captures {
-        compile_lambda_with_captures(builder, lambda, variables, ctx)
+        compile_lambda_with_captures(builder, lambda, variables, ctx, node_id)
     } else {
-        compile_pure_lambda(builder, lambda, ctx)
+        compile_pure_lambda(builder, lambda, ctx, node_id)
     }
 }
 
@@ -200,21 +232,24 @@ fn compile_pure_lambda(
     builder: &mut FunctionBuilder,
     lambda: &LambdaExpr,
     ctx: &mut CompileCtx,
+    node_id: NodeId,
 ) -> Result<CompiledValue, String> {
     *ctx.lambda_counter += 1;
 
-    let primitives = ctx.arena.borrow().primitives;
-
-    // Build param type ids directly
-    let param_type_ids: Vec<TypeId> = lambda
-        .params
-        .iter()
-        .map(|p| {
-            p.ty.as_ref()
-                .map(|t| resolve_type_expr_id(t, ctx))
-                .unwrap_or(primitives.i64)
-        })
-        .collect();
+    // Try to get param and return types from sema analysis first
+    let (param_type_ids, return_type_id) =
+        if let Some(lambda_type_id) = ctx.get_expr_type(&node_id) {
+            let arena = ctx.arena.borrow();
+            if let Some((sema_params, ret_id, _)) = arena.unwrap_function(lambda_type_id) {
+                // Use sema-inferred types
+                (sema_params.to_vec(), ret_id)
+            } else {
+                drop(arena);
+                get_lambda_types_fallback(lambda, ctx)
+            }
+        } else {
+            get_lambda_types_fallback(lambda, ctx)
+        };
 
     // Convert to Cranelift types
     let param_types: Vec<Type> = {
@@ -224,20 +259,6 @@ fn compile_pure_lambda(
             .map(|&ty| type_id_to_cranelift(ty, &arena, ctx.pointer_type))
             .collect()
     };
-
-    // Build param context with TypeId for infer_lambda_return_type
-    let param_context_ids: Vec<(Symbol, TypeId)> = lambda
-        .params
-        .iter()
-        .zip(param_type_ids.iter())
-        .map(|(p, &ty)| (p.name, ty))
-        .collect();
-
-    let return_type_id = lambda
-        .return_type
-        .as_ref()
-        .map(|t| resolve_type_expr_id(t, ctx))
-        .unwrap_or_else(|| infer_lambda_return_type(&lambda.body, &param_context_ids, ctx));
 
     let return_type = type_id_to_cranelift(return_type_id, &ctx.arena.borrow(), ctx.pointer_type);
 
@@ -340,24 +361,27 @@ fn compile_lambda_with_captures(
     lambda: &LambdaExpr,
     variables: &HashMap<Symbol, (Variable, TypeId)>,
     ctx: &mut CompileCtx,
+    node_id: NodeId,
 ) -> Result<CompiledValue, String> {
     let captures = lambda.captures.borrow();
     let num_captures = captures.len();
 
     *ctx.lambda_counter += 1;
 
-    let primitives = ctx.arena.borrow().primitives;
-
-    // Build param type ids directly
-    let param_type_ids: Vec<TypeId> = lambda
-        .params
-        .iter()
-        .map(|p| {
-            p.ty.as_ref()
-                .map(|t| resolve_type_expr_id(t, ctx))
-                .unwrap_or(primitives.i64)
-        })
-        .collect();
+    // Try to get param and return types from sema analysis first
+    let (param_type_ids, return_type_id) =
+        if let Some(lambda_type_id) = ctx.get_expr_type(&node_id) {
+            let arena = ctx.arena.borrow();
+            if let Some((sema_params, ret_id, _)) = arena.unwrap_function(lambda_type_id) {
+                // Use sema-inferred types
+                (sema_params.to_vec(), ret_id)
+            } else {
+                drop(arena);
+                get_lambda_types_fallback(lambda, ctx)
+            }
+        } else {
+            get_lambda_types_fallback(lambda, ctx)
+        };
 
     // Convert to Cranelift types
     let param_types: Vec<Type> = {
@@ -367,20 +391,6 @@ fn compile_lambda_with_captures(
             .map(|&ty| type_id_to_cranelift(ty, &arena, ctx.pointer_type))
             .collect()
     };
-
-    // Build param context with TypeId for infer_lambda_return_type
-    let param_context_ids: Vec<(Symbol, TypeId)> = lambda
-        .params
-        .iter()
-        .zip(param_type_ids.iter())
-        .map(|(p, &ty)| (p.name, ty))
-        .collect();
-
-    let return_type_id = lambda
-        .return_type
-        .as_ref()
-        .map(|t| resolve_type_expr_id(t, ctx))
-        .unwrap_or_else(|| infer_lambda_return_type(&lambda.body, &param_context_ids, ctx));
 
     let return_type = type_id_to_cranelift(return_type_id, &ctx.arena.borrow(), ctx.pointer_type);
 
@@ -578,7 +588,7 @@ fn compile_lambda_body(
 
 impl Cg<'_, '_, '_> {
     /// Compile a lambda expression
-    pub fn lambda(&mut self, lambda: &LambdaExpr) -> Result<CompiledValue, String> {
-        compile_lambda(self.builder, lambda, self.vars, self.ctx)
+    pub fn lambda(&mut self, lambda: &LambdaExpr, node_id: NodeId) -> Result<CompiledValue, String> {
+        compile_lambda(self.builder, lambda, self.vars, self.ctx, node_id)
     }
 }
