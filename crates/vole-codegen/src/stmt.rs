@@ -35,6 +35,29 @@ pub(super) fn compile_block(
     let mut cg = Cg::new(builder, variables, ctx, &mut cf);
     cg.block(block)
 }
+
+/// Compile a function body - either a block or a single expression
+/// Returns (terminated, optional_return_value)
+pub(super) fn compile_func_body(
+    builder: &mut FunctionBuilder,
+    body: &vole_frontend::FuncBody,
+    variables: &mut HashMap<Symbol, (Variable, TypeId)>,
+    cf_ctx: &mut ControlFlowCtx,
+    ctx: &mut CompileCtx,
+) -> Result<(bool, Option<CompiledValue>), String> {
+    match body {
+        vole_frontend::FuncBody::Block(block) => {
+            let terminated = compile_block(builder, block, variables, cf_ctx, ctx)?;
+            Ok((terminated, None))
+        }
+        vole_frontend::FuncBody::Expr(expr) => {
+            let mut cf = ControlFlow::new();
+            let mut cg = Cg::new(builder, variables, ctx, &mut cf);
+            let value = cg.expr(expr)?;
+            Ok((true, Some(value)))
+        }
+    }
+}
 impl Cg<'_, '_, '_> {
     /// Compile a block of statements. Returns true if terminated (return/break).
     pub fn block(&mut self, block: &vole_frontend::Block) -> Result<bool, String> {

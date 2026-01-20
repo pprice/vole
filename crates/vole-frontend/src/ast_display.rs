@@ -4,9 +4,9 @@
 use std::fmt::Write;
 
 use crate::{
-    AssignTarget, BinaryOp, Block, CompoundOp, Decl, ErrorDecl, Expr, ExprKind, FuncDecl, Interner,
-    LetInit, LetStmt, Param, PrimitiveType, Program, Stmt, StringPart, TestCase, TestsDecl,
-    TypeExpr, UnaryOp,
+    AssignTarget, BinaryOp, Block, CompoundOp, Decl, ErrorDecl, Expr, ExprKind, FuncBody,
+    FuncDecl, Interner, LetInit, LetStmt, Param, PrimitiveType, Program, Stmt, StringPart,
+    TestCase, TestsDecl, TypeExpr, UnaryOp,
 };
 
 /// Pretty-printer for AST nodes that resolves symbols via an Interner.
@@ -107,7 +107,10 @@ impl<'a> AstPrinter<'a> {
         // Body
         inner.write_indent(out);
         out.push_str("body:\n");
-        inner.indented().write_block(out, &func.body);
+        match &func.body {
+            FuncBody::Block(block) => inner.indented().write_block(out, block),
+            FuncBody::Expr(expr) => inner.indented().write_expr(out, expr),
+        }
     }
 
     fn write_tests_decl(&self, out: &mut String, tests: &TestsDecl) {

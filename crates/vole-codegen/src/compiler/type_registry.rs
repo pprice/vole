@@ -321,14 +321,14 @@ impl Compiler<'_> {
         let func_module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
         for method in &record.methods {
-            let return_type = method
-                .return_type
-                .as_ref()
-                .map(|t| self.resolve_type_to_id(t))
+            // Get return type from sema (handles inferred types from expression-bodied methods)
+            let return_type = self
+                .query()
+                .method_return_type(record.name, method.name)
                 .unwrap_or(TypeId::VOID);
-            let sig = self.build_signature(
+            let sig = self.build_signature_with_return_type_id(
                 &method.params,
-                method.return_type.as_ref(),
+                Some(return_type),
                 SelfParam::Pointer,
                 TypeResolver::Query,
             );

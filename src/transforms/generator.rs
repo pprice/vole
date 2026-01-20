@@ -140,8 +140,15 @@ impl<'a> GeneratorTransformer<'a> {
         (count, std::mem::take(&mut self.errors))
     }
 
-    /// Check if a block contains any yield expressions
-    fn contains_yield(&self, block: &Block) -> bool {
+    /// Check if a function body contains any yield expressions
+    fn contains_yield(&self, body: &FuncBody) -> bool {
+        match body {
+            FuncBody::Block(block) => self.block_contains_yield(block),
+            FuncBody::Expr(expr) => self.expr_contains_yield(expr),
+        }
+    }
+
+    fn block_contains_yield(&self, block: &Block) -> bool {
         for stmt in &block.stmts {
             if self.stmt_contains_yield(stmt) {
                 return true;
@@ -159,18 +166,19 @@ impl<'a> GeneratorTransformer<'a> {
             },
             Stmt::While(while_stmt) => {
                 self.expr_contains_yield(&while_stmt.condition)
-                    || self.contains_yield(&while_stmt.body)
+                    || self.block_contains_yield(&while_stmt.body)
             }
             Stmt::For(for_stmt) => {
-                self.expr_contains_yield(&for_stmt.iterable) || self.contains_yield(&for_stmt.body)
+                self.expr_contains_yield(&for_stmt.iterable)
+                    || self.block_contains_yield(&for_stmt.body)
             }
             Stmt::If(if_stmt) => {
                 self.expr_contains_yield(&if_stmt.condition)
-                    || self.contains_yield(&if_stmt.then_branch)
+                    || self.block_contains_yield(&if_stmt.then_branch)
                     || if_stmt
                         .else_branch
                         .as_ref()
-                        .is_some_and(|b| self.contains_yield(b))
+                        .is_some_and(|b| self.block_contains_yield(b))
             }
             Stmt::Return(ret_stmt) => ret_stmt
                 .value
@@ -222,7 +230,7 @@ impl<'a> GeneratorTransformer<'a> {
             }
             ExprKind::Lambda(lambda) => match &lambda.body {
                 LambdaBody::Expr(e) => self.expr_contains_yield(e),
-                LambdaBody::Block(b) => self.contains_yield(b),
+                LambdaBody::Block(b) => self.block_contains_yield(b),
             },
             ExprKind::Try(inner) => self.expr_contains_yield(inner),
             ExprKind::InterpolatedString(parts) => parts.iter().any(|p| match p {
@@ -366,9 +374,12 @@ impl<'a> GeneratorTransformer<'a> {
     }
 
     /// Collect all yield expressions from a function body (in order).
-    fn collect_yields(&self, block: &Block) -> Vec<Expr> {
+    fn collect_yields(&self, body: &FuncBody) -> Vec<Expr> {
         let mut yields = Vec::new();
-        self.collect_yields_from_block(block, &mut yields);
+        match body {
+            FuncBody::Block(block) => self.collect_yields_from_block(block, &mut yields),
+            FuncBody::Expr(expr) => self.collect_yields_from_expr(expr, &mut yields),
+        }
         yields
     }
 
@@ -700,7 +711,10 @@ impl<'a> GeneratorTransformer<'a> {
     /// For now, we hoist all `let mut` bindings to be safe.
     fn find_hoisted_locals(&self, func: &FuncDecl) -> Vec<(Symbol, TypeExpr)> {
         let mut locals = Vec::new();
-        self.find_locals_in_block(&func.body, &mut locals);
+        // Expression-bodied functions have no local variables to hoist
+        if let FuncBody::Block(block) = &func.body {
+            self.find_locals_in_block(block, &mut locals);
+        }
         locals
     }
 
@@ -867,10 +881,10 @@ impl<'a> GeneratorTransformer<'a> {
             // it's added implicitly by codegen
             params: vec![],
             return_type: Some(return_type),
-            body: Block {
+            body: FuncBody::Block(Block {
                 stmts,
                 span: dummy_span,
-            },
+            }),
             span,
         }
     }
@@ -942,10 +956,10 @@ impl<'a> GeneratorTransformer<'a> {
             params: original.params.clone(),
             // Return type is the original Iterator<T> - codegen will box the record
             return_type: original.return_type.clone(),
-            body: Block {
+            body: FuncBody::Block(Block {
                 stmts: vec![return_stmt],
-                span: original.body.span,
-            },
+                span: dummy_span,
+            }),
             span: original.span,
         }
     }

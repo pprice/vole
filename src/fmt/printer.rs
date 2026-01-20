@@ -124,8 +124,7 @@ fn print_func_decl<'a>(
         .append(arena.text(name))
         .append(params)
         .append(return_type)
-        .append(arena.text(" "))
-        .append(print_block(arena, &func.body, interner))
+        .append(print_func_body(arena, &func.body, interner))
 }
 
 /// Print function parameters with grouping for line breaking.
@@ -173,6 +172,22 @@ fn print_param<'a>(
         .text(interner.resolve(param.name).to_string())
         .append(arena.text(": "))
         .append(print_type_expr(arena, &param.ty, interner))
+}
+
+/// Print a function body (block or expression).
+fn print_func_body<'a>(
+    arena: &'a Arena<'a>,
+    body: &FuncBody,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    match body {
+        FuncBody::Block(block) => {
+            arena.text(" ").append(print_block(arena, block, interner))
+        }
+        FuncBody::Expr(expr) => {
+            arena.text(" => ").append(print_expr(arena, expr, interner))
+        }
+    }
 }
 
 /// Print a block of statements.

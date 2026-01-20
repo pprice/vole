@@ -169,3 +169,6 @@ tests "void and nil returns" {
         assert(add(x, y) == 30)
     }
 }
+
+// Note: fallible lambda returns (i64?) have a codegen issue
+// tracked separately - TODO: add tests when fixed

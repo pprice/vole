@@ -156,6 +156,13 @@ impl EntityRegistry {
         &self.method_defs[id.index() as usize]
     }
 
+    /// Update the return type of a method (used for return type inference)
+    pub fn update_method_return_type(&mut self, method_id: MethodId, return_type: TypeId) {
+        self.method_defs[method_id.index() as usize]
+            .signature
+            .return_type_id = return_type;
+    }
+
     /// Get all methods defined directly on a type (not inherited)
     pub fn methods_on_type(&self, type_id: TypeDefId) -> impl Iterator<Item = MethodId> + '_ {
         self.type_defs[type_id.index() as usize]

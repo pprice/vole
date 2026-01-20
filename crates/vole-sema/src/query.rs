@@ -305,6 +305,19 @@ impl<'a> ProgramQuery<'a> {
         Some(func_def.signature.return_type_id)
     }
 
+    /// Get a method's return type from entity_registry
+    #[must_use]
+    pub fn method_return_type(&self, type_name: Symbol, method_name: Symbol) -> Option<TypeId> {
+        use vole_identity::NamerLookup;
+        let namer = NamerLookup::new(self.name_table, self.interner);
+        let type_name_id = namer.function(self.main_module(), type_name)?;
+        let type_def_id = self.registry.type_by_name(type_name_id)?;
+        let method_name_id = self.method_name_id(method_name);
+        let method_id = self.registry.find_method_on_type(type_def_id, method_name_id)?;
+        let method_def = self.registry.get_method(method_id);
+        Some(method_def.signature.return_type_id)
+    }
+
     // =========================================================================
     // Well-known type checks
     // =========================================================================

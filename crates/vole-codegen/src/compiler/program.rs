@@ -6,7 +6,7 @@ use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, t
 
 use super::{Compiler, ControlFlowCtx, SelfParam, TestInfo, TypeResolver};
 use crate::FunctionKey;
-use crate::stmt::compile_block;
+use crate::stmt::{compile_block, compile_func_body};
 use crate::types::{
     CompileCtx, function_name_id_with_interner, resolve_type_expr_to_id, type_id_to_cranelift,
 };
@@ -537,7 +537,7 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let terminated = compile_block(
+            let (terminated, expr_value) = compile_func_body(
                 &mut builder,
                 &func.body,
                 &mut variables,
@@ -546,7 +546,9 @@ impl Compiler<'_> {
             )?;
 
             // Add implicit return if no explicit return
-            if !terminated {
+            if let Some(value) = expr_value {
+                builder.ins().return_(&[value.value]);
+            } else if !terminated {
                 builder.ins().return_(&[]);
             }
 
@@ -646,7 +648,7 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let terminated = compile_block(
+            let (terminated, expr_value) = compile_func_body(
                 &mut builder,
                 &func.body,
                 &mut variables,
@@ -655,7 +657,9 @@ impl Compiler<'_> {
             )?;
 
             // Add implicit return if no explicit return
-            if !terminated {
+            if let Some(value) = expr_value {
+                builder.ins().return_(&[value.value]);
+            } else if !terminated {
                 builder.ins().return_(&[]);
             }
 
@@ -920,7 +924,7 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let terminated = compile_block(
+            let (terminated, expr_value) = compile_func_body(
                 &mut builder,
                 &func.body,
                 &mut variables,
@@ -929,7 +933,9 @@ impl Compiler<'_> {
             )?;
 
             // Add implicit return if no explicit return
-            if !terminated {
+            if let Some(value) = expr_value {
+                builder.ins().return_(&[value.value]);
+            } else if !terminated {
                 builder.ins().return_(&[]);
             }
 
@@ -1241,7 +1247,7 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let terminated = compile_block(
+            let (terminated, expr_value) = compile_func_body(
                 &mut builder,
                 &func.body,
                 &mut variables,
@@ -1250,7 +1256,9 @@ impl Compiler<'_> {
             )?;
 
             // Add implicit return if no explicit return
-            if !terminated {
+            if let Some(value) = expr_value {
+                builder.ins().return_(&[value.value]);
+            } else if !terminated {
                 builder.ins().return_(&[]);
             }
 
@@ -1508,7 +1516,7 @@ impl Compiler<'_> {
                 type_substitutions: Some(&instance.substitutions),
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let terminated = compile_block(
+            let (terminated, expr_value) = compile_func_body(
                 &mut builder,
                 &method.body,
                 &mut variables,
@@ -1517,7 +1525,9 @@ impl Compiler<'_> {
             )?;
 
             // Add implicit return if no explicit return
-            if !terminated {
+            if let Some(value) = expr_value {
+                builder.ins().return_(&[value.value]);
+            } else if !terminated {
                 builder.ins().return_(&[]);
             }
 

@@ -1323,7 +1323,7 @@ impl Analyzer {
         }
 
         // Check body
-        self.check_block(&func.body, interner)?;
+        self.check_func_body(&func.body, interner)?;
 
         // If we were inferring the return type, update the function signature
         if needs_inference {
@@ -1399,7 +1399,15 @@ impl Analyzer {
         let lookup = self
             .lookup_method(type_def_id, method.name, interner)
             .expect("method should be registered in EntityRegistry");
-        let saved_ctx = self.enter_function_context(lookup.signature.return_type_id);
+
+        // Determine if we need to infer the return type
+        let needs_inference = method.return_type.is_none();
+
+        let saved_ctx = if needs_inference {
+            self.enter_function_context_inferring()
+        } else {
+            self.enter_function_context(lookup.signature.return_type_id)
+        };
 
         // Create scope with 'self' and parameters
         let parent_scope = std::mem::take(&mut self.scope);
@@ -1443,7 +1451,33 @@ impl Analyzer {
         }
 
         // Check body
-        self.check_block(&method.body, interner)?;
+        self.check_func_body(&method.body, interner)?;
+
+        // If we were inferring the return type, update the method signature
+        if needs_inference {
+            let inferred_return_type = self.current_function_return.unwrap_or_else(|| {
+                self.type_arena.borrow().void()
+            });
+
+            // Update the method's return type in EntityRegistry
+            self.entity_registry
+                .update_method_return_type(lookup.method_id, inferred_return_type);
+        } else {
+            // Check for missing return statement when return type is explicit and non-void
+            let is_void = lookup.signature.return_type_id.is_void();
+            if !is_void && !self.found_return {
+                let method_name = interner.resolve(method.name).to_string();
+                let expected = self.type_display_id(lookup.signature.return_type_id);
+                self.add_error(
+                    SemanticError::MissingReturn {
+                        name: method_name,
+                        expected,
+                        span: method.span.into(),
+                    },
+                    method.span,
+                );
+            }
+        }
 
         // Restore scope
         if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
@@ -1452,6 +1486,43 @@ impl Analyzer {
         self.exit_function_context(saved_ctx);
 
         Ok(())
+    }
+
+    /// Check a function body - either a block or a single expression
+    fn check_func_body(
+        &mut self,
+        body: &FuncBody,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        match body {
+            FuncBody::Block(block) => self.check_block(block, interner),
+            FuncBody::Expr(expr) => {
+                // Expression body is implicitly a return
+                let expr_type = self.check_expr(expr, interner)?;
+                self.found_return = true;
+
+                // Handle return type inference or checking
+                if let Some(expected_return) = self.current_function_return {
+                    // Explicit return type - check for match
+                    if !self.types_compatible_id(expr_type, expected_return, interner) {
+                        let expected_str = self.type_display_id(expected_return);
+                        let found = self.type_display_id(expr_type);
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: expected_str,
+                                found,
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
+                } else {
+                    // Inference mode - set the return type
+                    self.current_function_return = Some(expr_type);
+                }
+                Ok(())
+            }
+        }
     }
 
     /// Check a static method body (no `self` access allowed)

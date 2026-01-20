@@ -26,6 +26,26 @@ func inferredNil() {
     return nil
 }
 
+// Expression-bodied functions
+func exprDouble(x: i64) -> i64 => x * 2
+
+// Expression-bodied with inferred return type
+func exprDoubleInferred(x: i64) => x * 2
+
+// Expression-bodied void (returns value of expression statement - usually nil)
+func exprVoid(x: i64) => x + 1
+
+// Expression-bodied multiple params
+func exprAdd(a: i64, b: i64) -> i64 => a + b
+
+// Fallible returns - block body
+func maybeDouble(x: i64) -> i64? {
+    if x < 0 {
+        return nil
+    }
+    return x * 2
+}
+
 tests "functions" {
     test "inferred return type" {
         assert(doubleA(21) == 42)
@@ -52,4 +72,30 @@ tests "functions" {
     test "inferred nil return" {
         assert(inferredNil() == nil)
     }
+
+    test "expression-bodied function" {
+        assert(exprDouble(21) == 42)
+    }
+
+    test "expression-bodied inferred return" {
+        assert(exprDoubleInferred(21) == 42)
+    }
+
+    test "expression-bodied void" {
+        let result = exprVoid(5)
+        assert(result == 6)
+    }
+
+    test "expression-bodied multiple params" {
+        assert(exprAdd(20, 22) == 42)
+    }
+
+    test "fallible return - some" {
+        assert(maybeDouble(5) == 10)
+    }
+
+    test "fallible return - nil" {
+        assert(maybeDouble(-1) == nil)
+    }
+
 }

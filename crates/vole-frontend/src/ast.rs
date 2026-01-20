@@ -71,8 +71,17 @@ pub struct FuncDecl {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub return_type: Option<TypeExpr>,
-    pub body: Block,
+    pub body: FuncBody,
     pub span: Span,
+}
+
+/// Function body - either a block or a single expression
+#[derive(Debug, Clone)]
+pub enum FuncBody {
+    /// Block body: `{ statements }`
+    Block(Block),
+    /// Expression body: `=> expr`
+    Expr(Box<Expr>),
 }
 
 /// Tests block declaration

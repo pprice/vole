@@ -68,8 +68,17 @@ impl<'src> Parser<'src> {
             None
         };
 
-        let body = self.block()?;
-        let span = start_span.merge(body.span);
+        // Parse body: either `=> expr` or `{ block }`
+        let (body, end_span) = if self.match_token(TokenType::FatArrow) {
+            let expr = self.expression(0)?;
+            let end = expr.span;
+            (FuncBody::Expr(Box::new(expr)), end)
+        } else {
+            let block = self.block()?;
+            let end = block.span;
+            (FuncBody::Block(block), end)
+        };
+        let span = start_span.merge(end_span);
 
         Ok(Decl::Function(FuncDecl {
             name,

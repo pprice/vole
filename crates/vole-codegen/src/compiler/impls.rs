@@ -5,7 +5,7 @@ use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, t
 use cranelift_module::Module;
 
 use super::{Compiler, ControlFlowCtx, SelfParam, TypeResolver};
-use crate::stmt::compile_block;
+use crate::stmt::{compile_block, compile_func_body};
 use crate::types::{
     CompileCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_to_id,
     type_id_to_cranelift,
@@ -976,7 +976,7 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let terminated = compile_block(
+            let (terminated, expr_value) = compile_func_body(
                 &mut builder,
                 &method.body,
                 &mut variables,
@@ -984,7 +984,10 @@ impl Compiler<'_> {
                 &mut ctx,
             )?;
 
-            if !terminated {
+            if let Some(value) = expr_value {
+                // Expression body - return the value
+                builder.ins().return_(&[value.value]);
+            } else if !terminated {
                 // Return void if no explicit return
                 builder.ins().return_(&[]);
             }
@@ -1014,25 +1017,26 @@ impl Compiler<'_> {
         let method_name_str = self.query().resolve_symbol(method.name).to_string();
         let module_id = self.query().main_module();
 
-        let func_key = metadata
+        let method_info = metadata
             .method_infos
             .get(&self.method_name_id(method.name))
-            .map(|info| info.func_key)
             .ok_or_else(|| {
                 format!(
                     "Internal error: method {} not registered on {}",
                     method_name_str, type_name_str
                 )
             })?;
+        let func_key = method_info.func_key;
+        let return_type_id_from_sema = method_info.return_type;
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             let display = self.func_registry.display(func_key);
             format!("Internal error: method {} not declared", display)
         })?;
 
-        // Create method signature (self + params)
-        let sig = self.build_signature(
+        // Create method signature (self + params) - use sema return type for inferred types
+        let sig = self.build_signature_with_return_type_id(
             &method.params,
-            method.return_type.as_ref(),
+            Some(return_type_id_from_sema),
             SelfParam::Pointer,
             TypeResolver::Query,
         );
@@ -1079,22 +1083,8 @@ impl Compiler<'_> {
         };
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
-        // Resolve return type for proper union/fallible wrapping (TypeId-native)
-        let method_return_type_id = method.return_type.as_ref().map(|t| {
-            if matches!(t, TypeExpr::SelfType) {
-                self_type_id
-            } else {
-                resolve_type_expr_to_id(
-                    t,
-                    registry,
-                    type_metadata,
-                    interner,
-                    name_table,
-                    module_id,
-                    arena,
-                )
-            }
-        });
+        // Use the return type from sema (handles inferred types)
+        let method_return_type_id = Some(return_type_id_from_sema);
 
         // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -1155,7 +1145,7 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let terminated = compile_block(
+            let (terminated, expr_value) = compile_func_body(
                 &mut builder,
                 &method.body,
                 &mut variables,
@@ -1164,7 +1154,9 @@ impl Compiler<'_> {
             )?;
 
             // Add implicit return if no explicit return
-            if !terminated {
+            if let Some(value) = expr_value {
+                builder.ins().return_(&[value.value]);
+            } else if !terminated {
                 builder.ins().return_(&[]);
             }
 
@@ -1190,25 +1182,26 @@ impl Compiler<'_> {
         let method_name_str = self.query().resolve_symbol(method.name).to_string();
         let module_id = self.query().main_module();
 
-        let func_key = metadata
+        let method_info = metadata
             .method_infos
             .get(&self.method_name_id(method.name))
-            .map(|info| info.func_key)
             .ok_or_else(|| {
                 format!(
                     "Internal error: default method {} not registered on {}",
                     method_name_str, type_name_str
                 )
             })?;
+        let func_key = method_info.func_key;
+        let return_type_id_from_sema = method_info.return_type;
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             let display = self.func_registry.display(func_key);
             format!("Internal error: default method {} not declared", display)
         })?;
 
-        // Create method signature (self + params)
-        let sig = self.build_signature(
+        // Create method signature (self + params) - use sema return type for inferred types
+        let sig = self.build_signature_with_return_type_id(
             &method.params,
-            method.return_type.as_ref(),
+            Some(return_type_id_from_sema),
             SelfParam::Pointer,
             TypeResolver::Query,
         );
@@ -1255,22 +1248,8 @@ impl Compiler<'_> {
         };
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
-        // Resolve return type for proper union/fallible wrapping (TypeId-native)
-        let method_return_type_id = method.return_type.as_ref().map(|t| {
-            if matches!(t, TypeExpr::SelfType) {
-                self_type_id
-            } else {
-                resolve_type_expr_to_id(
-                    t,
-                    registry,
-                    type_metadata,
-                    interner,
-                    name_table,
-                    module_id,
-                    arena,
-                )
-            }
-        });
+        // Use the return type from sema (handles inferred types)
+        let method_return_type_id = Some(return_type_id_from_sema);
 
         // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -1654,7 +1633,7 @@ impl Compiler<'_> {
                     type_substitutions: None,
                     substitution_cache: RefCell::new(HashMap::new()),
                 };
-                let terminated = compile_block(
+                let (terminated, expr_value) = compile_func_body(
                     &mut builder,
                     &method.body,
                     &mut variables,
@@ -1662,7 +1641,9 @@ impl Compiler<'_> {
                     &mut ctx,
                 )?;
 
-                if !terminated {
+                if let Some(value) = expr_value {
+                    builder.ins().return_(&[value.value]);
+                } else if !terminated {
                     builder.ins().return_(&[]);
                 }
 

@@ -7,6 +7,12 @@ record Point {
     func sum() -> i32 {
         return self.x + self.y
     }
+
+    // Expression-bodied method using self
+    func product() -> i32 => self.x * self.y
+
+    // Expression-bodied with inferred return type
+    func doubled() => Point { x: self.x * 2, y: self.y * 2 }
 }
 
 tests "records" {
@@ -24,6 +30,18 @@ tests "records" {
     test "method call" {
         let p = Point { x: 10, y: 20 }
         assert(p.sum() == 30)
+    }
+
+    test "expression-bodied method with self" {
+        let p = Point { x: 3, y: 4 }
+        assert(p.product() == 12)
+    }
+
+    test "expression-bodied method returning record" {
+        let p = Point { x: 5, y: 7 }
+        let d = p.doubled()
+        assert(d.x == 10)
+        assert(d.y == 14)
     }
 
     // Note: Record immutability is tested via expect-error in sema tests
