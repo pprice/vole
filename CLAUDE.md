@@ -17,11 +17,25 @@ Vole is a compiled language with JIT via Cranelift.
 
 **Pipeline:** frontend (lexer/parser/AST) → sema (type checking) → codegen (Cranelift IR) → runtime
 
-Key directories:
-- `frontend/` - lexer.rs, token.rs, parser/, ast.rs, intern.rs
-- `sema/` - analyzer/, types/, entity_registry/, generic.rs, resolve.rs
-- `codegen/` - compiler/ (patterns.rs, calls.rs, ops.rs, methods.rs), jit.rs
-- `errors/` - sema.rs (E2xxx), parser.rs (E1xxx), lexer.rs (E0xxx)
+### Workspace Structure
+
+```
+crates/
+├── vole-identity/   # NameId, NameTable, entity IDs
+├── vole-frontend/   # lexer, parser, AST, interner
+├── vole-sema/       # type checking, module loading
+├── vole-runtime/    # builtins, values, instance
+├── vole-codegen/    # Cranelift JIT (isolated - heavy deps)
+src/                 # CLI, commands, binaries
+```
+
+Key source locations:
+- `crates/vole-frontend/src/` - lexer.rs, token.rs, parser/, ast.rs, intern.rs
+- `crates/vole-sema/src/` - analyzer/, types/, entity_registry/, generic.rs, resolve.rs
+- `crates/vole-codegen/src/` - compiler/, jit.rs, calls.rs, ops.rs
+- `crates/vole-runtime/src/` - builtins.rs, value.rs, stdlib/
+- `crates/vole-identity/src/` - NameId, NameTable, entity IDs
+- Errors live in each crate: `crates/vole-*/src/errors/`
 
 ## Commands
 
@@ -72,17 +86,19 @@ Always test without `--update-all` first, then run `just check` after applying.
 
 ## Where to Edit
 
+All paths below are under `crates/`:
+
 | Task | Files |
 |------|-------|
-| New keyword/token | `frontend/lexer.rs`, `frontend/token.rs` |
-| New expression | `frontend/parser/parse_expr.rs`, `frontend/ast.rs` |
-| New statement | `frontend/parser/parse_stmt.rs`, `frontend/ast.rs` |
-| New operator | lexer → parser → `sema/analyzer/expr.rs` → `codegen/compiler/ops.rs` |
-| Type checking | `sema/analyzer/expr.rs`, `stmt.rs`, `patterns.rs` |
-| Generics/type params | `sema/generic.rs`, `sema/analyzer/inference.rs` |
-| New error code | `errors/sema.rs` or `errors/parser.rs` |
-| Codegen | `codegen/compiler/patterns.rs`, `calls.rs`, `methods.rs` |
-| Builtins | `runtime/builtins.rs`, register in `codegen/compiler/calls.rs` |
+| New keyword/token | `vole-frontend/src/lexer.rs`, `token.rs` |
+| New expression | `vole-frontend/src/parse_expr/`, `ast.rs` |
+| New statement | `vole-frontend/src/parse_stmt.rs`, `ast.rs` |
+| New operator | lexer → parser → `vole-sema/src/analyzer/expr/` → `vole-codegen/src/ops.rs` |
+| Type checking | `vole-sema/src/analyzer/expr/`, `stmt.rs`, `patterns.rs` |
+| Generics/type params | `vole-sema/src/generic.rs`, `analyzer/inference.rs` |
+| New error code | `vole-sema/src/errors/` or `vole-frontend/src/errors/` |
+| Codegen | `vole-codegen/src/compiler/`, `calls.rs`, `ops.rs` |
+| Builtins | `vole-runtime/src/builtins.rs`, register in `vole-codegen/src/calls.rs` |
 
 ## Testing
 
@@ -165,8 +181,8 @@ See `docs/language/cheatsheet.md` for full reference.
 
 ## Name Identity System
 
-- **Symbol** (frontend/intern.rs): u32 into Interner. AST layer only, NOT stable across interners.
-- **NameId** (identity.rs): u32 into NameTable. Cross-module safe, sema/codegen layer.
+- **Symbol** (`vole-frontend/src/intern.rs`): u32 into Interner. AST layer only, NOT stable across interners.
+- **NameId** (`vole-identity/src/`): u32 into NameTable. Cross-module safe, sema/codegen layer.
 
 Type structs use `name_id: NameId`, not Symbol. NameTable stores definition locations for diagnostics.
 
