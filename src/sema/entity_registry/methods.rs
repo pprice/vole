@@ -5,6 +5,7 @@ use crate::sema::FunctionType;
 use crate::sema::entity_defs::MethodDef;
 use crate::sema::generic::TypeParamInfo;
 use crate::sema::implement_registry::ExternalMethodInfo;
+use crate::sema::type_arena::TypeId;
 use std::collections::HashSet;
 
 use super::EntityRegistry;
@@ -17,6 +18,7 @@ impl EntityRegistry {
         name_id: NameId,
         full_name_id: NameId,
         signature: FunctionType,
+        signature_id: TypeId,
         has_default: bool,
     ) -> MethodId {
         self.register_method_with_binding(
@@ -24,18 +26,21 @@ impl EntityRegistry {
             name_id,
             full_name_id,
             signature,
+            signature_id,
             has_default,
             None,
         )
     }
 
     /// Register a new method on a type with optional external binding
+    #[allow(clippy::too_many_arguments)]
     pub fn register_method_with_binding(
         &mut self,
         defining_type: TypeDefId,
         name_id: NameId,
         full_name_id: NameId,
         signature: FunctionType,
+        signature_id: TypeId,
         has_default: bool,
         external_binding: Option<ExternalMethodInfo>,
     ) -> MethodId {
@@ -46,6 +51,7 @@ impl EntityRegistry {
             full_name_id,
             defining_type,
             signature,
+            signature_id,
             has_default,
             is_static: false,
             external_binding,
@@ -63,12 +69,14 @@ impl EntityRegistry {
     }
 
     /// Register a new static method on a type
+    #[allow(clippy::too_many_arguments)]
     pub fn register_static_method(
         &mut self,
         defining_type: TypeDefId,
         name_id: NameId,
         full_name_id: NameId,
         signature: FunctionType,
+        signature_id: TypeId,
         has_default: bool,
         method_type_params: Vec<TypeParamInfo>,
     ) -> MethodId {
@@ -77,6 +85,7 @@ impl EntityRegistry {
             name_id,
             full_name_id,
             signature,
+            signature_id,
             has_default,
             None,
             method_type_params,
@@ -91,6 +100,7 @@ impl EntityRegistry {
         name_id: NameId,
         full_name_id: NameId,
         signature: FunctionType,
+        signature_id: TypeId,
         has_default: bool,
         external_binding: Option<ExternalMethodInfo>,
         method_type_params: Vec<TypeParamInfo>,
@@ -102,6 +112,7 @@ impl EntityRegistry {
             full_name_id,
             defining_type,
             signature,
+            signature_id,
             has_default,
             is_static: true,
             external_binding,

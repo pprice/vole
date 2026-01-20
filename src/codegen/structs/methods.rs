@@ -45,15 +45,15 @@ impl Cg<'_, '_, '_> {
         if let Some(ResolvedMethod::Static {
             type_def_id,
             method_id,
-            func_type,
+            func_type_id,
+            ..
         }) = self
             .ctx
             .analyzed
             .query()
             .method_at_in_module(expr_id, self.ctx.current_module)
         {
-            let func_type_id = func_type.intern(&mut self.ctx.arena.borrow_mut());
-            return self.static_method_call(*type_def_id, *method_id, func_type_id, mc, expr_id);
+            return self.static_method_call(*type_def_id, *method_id, *func_type_id, mc, expr_id);
         }
 
         // Handle range.iter() specially since range expressions can't be compiled to values directly

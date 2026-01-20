@@ -360,6 +360,7 @@ impl Analyzer {
 
             // Build FunctionType for resolution storage (still needed for codegen)
             let func_type = FunctionType::from_ids(&param_ids, return_id, false);
+            let func_type_id = func_type.intern(&mut self.type_arena.borrow_mut());
 
             // Get external_funcs from module metadata
             let is_external = self
@@ -382,6 +383,7 @@ impl Analyzer {
                 ResolvedMethod::Implemented {
                     trait_name: None,
                     func_type,
+                    func_type_id,
                     is_builtin: false,
                     external_info,
                 },
@@ -410,12 +412,16 @@ impl Analyzer {
                         is_builtin,
                         external_info,
                         ..
-                    } => ResolvedMethod::Implemented {
-                        trait_name,
-                        func_type: func_type.clone(),
-                        is_builtin,
-                        external_info,
-                    },
+                    } => {
+                        let func_type_id = func_type.intern(&mut self.type_arena.borrow_mut());
+                        ResolvedMethod::Implemented {
+                            trait_name,
+                            func_type: func_type.clone(),
+                            func_type_id,
+                            is_builtin,
+                            external_info,
+                        }
+                    }
                     other => other,
                 };
                 self.method_resolutions.insert(expr.id, updated);
@@ -688,12 +694,14 @@ impl Analyzer {
             }
 
             // Record resolution for codegen
+            let func_type_id = func_type.intern(&mut self.type_arena.borrow_mut());
             self.method_resolutions.insert(
                 expr.id,
                 ResolvedMethod::Static {
                     type_def_id,
                     method_id,
                     func_type: func_type.clone(),
+                    func_type_id,
                 },
             );
 

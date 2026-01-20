@@ -555,7 +555,7 @@ mod tests {
 
     #[test]
     fn register_and_lookup_method() {
-        let arena = TypeArena::new();
+        let mut arena = TypeArena::new();
         let mut names = NameTable::new();
         let main_mod = names.main_module();
         let builtin_mod = names.builtin_module();
@@ -567,9 +567,16 @@ mod tests {
         let type_id = registry.register_type(type_name, TypeDefKind::Interface, main_mod);
 
         let signature = FunctionType::from_ids(&[], arena.i32(), false);
+        let signature_id = signature.intern(&mut arena);
 
-        let method_id =
-            registry.register_method(type_id, method_name, full_method_name, signature, false);
+        let method_id = registry.register_method(
+            type_id,
+            method_name,
+            full_method_name,
+            signature,
+            signature_id,
+            false,
+        );
 
         assert_eq!(
             registry.find_method_on_type(type_id, method_name),
@@ -652,7 +659,7 @@ mod tests {
 
     #[test]
     fn resolve_inherited_method() {
-        let arena = TypeArena::new();
+        let mut arena = TypeArena::new();
         let mut names = NameTable::new();
         let main_mod = names.main_module();
         let builtin_mod = names.builtin_module();
@@ -667,9 +674,16 @@ mod tests {
         let derived_id = registry.register_type(derived_name, TypeDefKind::Interface, main_mod);
 
         let signature = FunctionType::from_ids(&[], arena.void(), false);
+        let signature_id = signature.intern(&mut arena);
 
-        let method_id =
-            registry.register_method(base_id, method_name, full_method_name, signature, false);
+        let method_id = registry.register_method(
+            base_id,
+            method_name,
+            full_method_name,
+            signature,
+            signature_id,
+            false,
+        );
         registry.add_extends(derived_id, base_id);
 
         // Method should be found on base directly

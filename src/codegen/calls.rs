@@ -244,15 +244,7 @@ impl Cg<'_, '_, '_> {
                 .is_functional(iface_type_def_id)
         {
             let method = self.ctx.analyzed.entity_registry.get_method(method_id);
-            // Create function TypeId directly from method signature using TypeId fields
-            let func_type_id = {
-                let mut arena = self.ctx.arena.borrow_mut();
-                arena.function(
-                    method.signature.params_id.clone(),
-                    method.signature.return_type_id,
-                    false,
-                )
-            };
+            let func_type_id = method.signature_id;
             let method_name_id = method.name_id;
             let value = self.builder.use_var(*var);
             let obj = CompiledValue {
@@ -294,15 +286,7 @@ impl Cg<'_, '_, '_> {
                         self.ctx.analyzed.entity_registry.is_functional(type_def_id)
                 {
                     let method = self.ctx.analyzed.entity_registry.get_method(method_id);
-                    // Create function TypeId directly from method signature using TypeId fields
-                    let func_type_id = {
-                        let mut arena = self.ctx.arena.borrow_mut();
-                        arena.function(
-                            method.signature.params_id.clone(),
-                            method.signature.return_type_id,
-                            false,
-                        )
-                    };
+                    let func_type_id = method.signature_id;
                     let method_name_id = method.name_id;
                     // Box the lambda value to create the interface representation
                     let boxed = box_interface_value_id(
@@ -332,15 +316,7 @@ impl Cg<'_, '_, '_> {
                     self.ctx.analyzed.entity_registry.is_functional(type_def_id)
             {
                 let method = self.ctx.analyzed.entity_registry.get_method(method_id);
-                // Create function TypeId directly from method signature using TypeId fields
-                let func_type_id = {
-                    let mut arena = self.ctx.arena.borrow_mut();
-                    arena.function(
-                        method.signature.params_id.clone(),
-                        method.signature.return_type_id,
-                        false,
-                    )
-                };
+                let func_type_id = method.signature_id;
                 let method_name_id = method.name_id;
                 return self.interface_dispatch_call_args_by_type_def_id(
                     &lambda_val,

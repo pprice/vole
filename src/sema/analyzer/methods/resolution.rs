@@ -87,9 +87,12 @@ impl Analyzer {
                         .name_table
                         .last_segment_str(self.entity_registry.get_type(interface_id).name_id)
                         .and_then(|s| interner.lookup(&s));
+                    let func_type = binding.func_type.clone();
+                    let func_type_id = func_type.intern(&mut self.type_arena.borrow_mut());
                     return Some(ResolvedMethod::Implemented {
                         trait_name,
-                        func_type: binding.func_type.clone(),
+                        func_type,
+                        func_type_id,
                         is_builtin: binding.is_builtin,
                         external_info: binding.external_info.clone(),
                     });
@@ -115,6 +118,7 @@ impl Analyzer {
                     hashbrown::HashMap::new()
                 };
                 let func_type = self.apply_substitutions_id(&method_def.signature, &substitutions);
+                let func_type_id = func_type.intern(&mut self.type_arena.borrow_mut());
 
                 // Determine the resolution type based on the defining type's kind
                 match defining_type.kind {
@@ -141,6 +145,7 @@ impl Analyzer {
                                     type_name: type_sym,
                                     method_name,
                                     func_type,
+                                    func_type_id,
                                     external_info: method_def.external_binding.clone(),
                                 });
                             }
@@ -164,6 +169,7 @@ impl Analyzer {
                                     type_name: type_sym,
                                     method_name,
                                     func_type,
+                                    func_type_id,
                                     external_info: None,
                                 });
                             }
@@ -177,12 +183,16 @@ impl Analyzer {
                                 interface_name: interface_sym,
                                 method_name,
                                 func_type,
+                                func_type_id,
                             });
                         }
                     }
                     TypeDefKind::Class | TypeDefKind::Record => {
                         // Direct method on class/record
-                        return Some(ResolvedMethod::Direct { func_type });
+                        return Some(ResolvedMethod::Direct {
+                            func_type,
+                            func_type_id,
+                        });
                     }
                     _ => {}
                 }
@@ -197,9 +207,12 @@ impl Analyzer {
                     .name_table
                     .last_segment_str(self.entity_registry.get_type(interface_id).name_id)
                     .and_then(|s| interner.lookup(&s));
+                let func_type = binding.func_type.clone();
+                let func_type_id = func_type.intern(&mut self.type_arena.borrow_mut());
                 return Some(ResolvedMethod::Implemented {
                     trait_name,
-                    func_type: binding.func_type.clone(),
+                    func_type,
+                    func_type_id,
                     is_builtin: binding.is_builtin,
                     external_info: binding.external_info.clone(),
                 });
@@ -225,11 +238,14 @@ impl Analyzer {
                             .and_then(|s| interner.lookup(&s))
                             .unwrap_or(Symbol(0));
                         if let Some(type_sym) = type_sym {
+                            let func_type = method.signature.clone();
+                            let func_type_id = func_type.intern(&mut self.type_arena.borrow_mut());
                             return Some(ResolvedMethod::DefaultMethod {
                                 interface_name,
                                 type_name: type_sym,
                                 method_name,
-                                func_type: method.signature.clone(),
+                                func_type,
+                                func_type_id,
                                 external_info: method.external_binding.clone(),
                             });
                         }
@@ -249,9 +265,12 @@ impl Analyzer {
                 .implement_registry
                 .get_method(&impl_type_id, method_name_id)
         {
+            let func_type = impl_.func_type.clone();
+            let func_type_id = func_type.intern(&mut self.type_arena.borrow_mut());
             return Some(ResolvedMethod::Implemented {
                 trait_name: impl_.trait_name,
-                func_type: impl_.func_type.clone(),
+                func_type,
+                func_type_id,
                 is_builtin: impl_.is_builtin,
                 external_info: impl_.external_info.clone(),
             });
@@ -423,10 +442,13 @@ impl Analyzer {
                         );
                         // Found the method - return InterfaceMethod resolution
                         // The actual dispatch will happen at runtime via vtable
+                        let func_type = method_def.signature.clone();
+                        let func_type_id = func_type.intern(&mut self.type_arena.borrow_mut());
                         return Some(ResolvedMethod::InterfaceMethod {
                             interface_name: *interface_sym,
                             method_name,
-                            func_type: method_def.signature.clone(),
+                            func_type,
+                            func_type_id,
                         });
                     }
                 }

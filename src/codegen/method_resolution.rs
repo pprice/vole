@@ -101,7 +101,7 @@ pub(crate) fn resolve_method_target_id(
 
     if let Some(resolution) = effective_resolution {
         return match resolution {
-            ResolvedMethod::Direct { func_type } => {
+            ResolvedMethod::Direct { func_type, .. } => {
                 let arena = input.analyzed.type_arena.borrow();
                 let type_name_id = get_type_name_id_from_type_id(
                     input.object_type_id,
@@ -116,6 +116,7 @@ pub(crate) fn resolve_method_target_id(
             }
             ResolvedMethod::Implemented {
                 func_type,
+                func_type_id,
                 is_builtin,
                 external_info,
                 ..
@@ -143,12 +144,10 @@ pub(crate) fn resolve_method_target_id(
                     .ok_or_else(|| {
                         format!("method name {} not found as NameId", input.method_name_str)
                     })?;
-                    let func_type_id =
-                        func_type.intern(&mut input.analyzed.type_arena.borrow_mut());
                     return Ok(MethodTarget::InterfaceDispatch {
                         interface_type_id,
                         method_name_id,
-                        func_type_id,
+                        func_type_id: *func_type_id,
                     });
                 }
 
@@ -173,9 +172,10 @@ pub(crate) fn resolve_method_target_id(
                     return_type: func_type.return_type_id,
                 })
             }
-            ResolvedMethod::FunctionalInterface { func_type } => {
-                let func_type_id = func_type.intern(&mut input.analyzed.type_arena.borrow_mut());
-                Ok(MethodTarget::FunctionalInterface { func_type_id })
+            ResolvedMethod::FunctionalInterface { func_type_id, .. } => {
+                Ok(MethodTarget::FunctionalInterface {
+                    func_type_id: *func_type_id,
+                })
             }
             ResolvedMethod::DefaultMethod {
                 func_type,
@@ -200,7 +200,7 @@ pub(crate) fn resolve_method_target_id(
                     return_type: func_type.return_type_id,
                 })
             }
-            ResolvedMethod::InterfaceMethod { func_type, .. } => {
+            ResolvedMethod::InterfaceMethod { func_type_id, .. } => {
                 // This branch is only taken when object_type is an interface
                 let (interface_type_id, _) = input
                     .analyzed
@@ -216,25 +216,22 @@ pub(crate) fn resolve_method_target_id(
                 .ok_or_else(|| {
                     format!("method name {} not found as NameId", input.method_name_str)
                 })?;
-                let func_type_id = func_type.intern(&mut input.analyzed.type_arena.borrow_mut());
                 Ok(MethodTarget::InterfaceDispatch {
                     interface_type_id,
                     method_name_id,
-                    func_type_id,
+                    func_type_id: *func_type_id,
                 })
             }
             ResolvedMethod::Static {
                 type_def_id,
                 method_id,
-                func_type,
-            } => {
-                let func_type_id = func_type.intern(&mut input.analyzed.type_arena.borrow_mut());
-                Ok(MethodTarget::StaticMethod {
-                    type_def_id: *type_def_id,
-                    method_id: *method_id,
-                    func_type_id,
-                })
-            }
+                func_type_id,
+                ..
+            } => Ok(MethodTarget::StaticMethod {
+                type_def_id: *type_def_id,
+                method_id: *method_id,
+                func_type_id: *func_type_id,
+            }),
         };
     }
 

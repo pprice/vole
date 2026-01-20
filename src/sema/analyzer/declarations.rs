@@ -313,11 +313,13 @@ impl Analyzer {
                     .map(|t| self.resolve_type_id_with_self(t, interner, Some(self_type_id)))
                     .unwrap_or_else(|| self.type_arena.borrow().void());
                 let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
                 self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
                     full_method_name_id,
                     signature,
+                    signature_id,
                     false, // class methods don't have defaults
                 );
             }
@@ -344,12 +346,14 @@ impl Analyzer {
                         .map(|t| self.resolve_type_id(t, interner))
                         .unwrap_or_else(|| self.type_arena.borrow().void());
                     let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                    let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
                         entity_type_id,
                         method_name_id,
                         full_method_name_id,
                         signature,
+                        signature_id,
                         has_default,
                         Vec::new(), // Non-generic class, no method type params
                     );
@@ -377,6 +381,7 @@ impl Analyzer {
                         .map(|t| self.resolve_type_id(t, interner))
                         .unwrap_or_else(|| self.type_arena.borrow().void());
                     let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                    let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
                     let native_name = func
                         .native_name
                         .clone()
@@ -386,6 +391,7 @@ impl Analyzer {
                         method_name_id,
                         full_method_name_id,
                         signature,
+                        signature_id,
                         false, // external methods don't have defaults
                         Some(ExternalMethodInfo {
                             module_path: external.module_path.clone(),
@@ -569,11 +575,13 @@ impl Analyzer {
                     .unwrap_or_else(|| self.type_arena.borrow().void());
 
                 let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
                 self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
                     full_method_name_id,
                     signature,
+                    signature_id,
                     false,
                 );
             }
@@ -664,12 +672,14 @@ impl Analyzer {
                         .unwrap_or_else(|| self.type_arena.borrow().void());
 
                     let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                    let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
                         entity_type_id,
                         method_name_id,
                         full_method_name_id,
                         signature,
+                        signature_id,
                         has_default,
                         method_type_params,
                     );
@@ -723,6 +733,7 @@ impl Analyzer {
                         .unwrap_or_else(|| self.type_arena.borrow().void());
 
                     let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                    let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
                     let native_name = func
                         .native_name
                         .clone()
@@ -732,6 +743,7 @@ impl Analyzer {
                         method_name_id,
                         full_method_name_id,
                         signature,
+                        signature_id,
                         false, // external methods don't have defaults
                         Some(ExternalMethodInfo {
                             module_path: external.module_path.clone(),
@@ -833,11 +845,13 @@ impl Analyzer {
                     .map(|t| self.resolve_type_id_with_self(t, interner, Some(self_type_id)))
                     .unwrap_or_else(|| self.type_arena.borrow().void());
                 let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
                 self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
                     full_method_name_id,
                     signature,
+                    signature_id,
                     false,
                 );
             }
@@ -864,12 +878,14 @@ impl Analyzer {
                         .map(|t| self.resolve_type_id(t, interner))
                         .unwrap_or_else(|| self.type_arena.borrow().void());
                     let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                    let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
                         entity_type_id,
                         method_name_id,
                         full_method_name_id,
                         signature,
+                        signature_id,
                         has_default,
                         Vec::new(), // Non-generic record, no method type params
                     );
@@ -1049,11 +1065,13 @@ impl Analyzer {
                     &[interner.resolve(record.name), method_name_str],
                 );
                 let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
                 self.entity_registry.register_method(
                     entity_type_id,
                     method_name_id,
                     full_method_name_id,
                     signature,
+                    signature_id,
                     false,
                 );
             }
@@ -1144,12 +1162,14 @@ impl Analyzer {
                         .unwrap_or_else(|| self.type_arena.borrow().void());
 
                     let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                    let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
                     let has_default = method.is_default || method.body.is_some();
                     self.entity_registry.register_static_method(
                         entity_type_id,
                         method_name_id,
                         full_method_name_id,
                         signature,
+                        signature_id,
                         has_default,
                         method_type_params,
                     );
@@ -1428,6 +1448,7 @@ impl Analyzer {
                 .name_table
                 .intern_raw(self.current_module, &[&name_str, method_name_str]);
             let signature = FunctionType::from_ids(params_id, *return_type_id, false);
+            let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
             // Look up external binding for this method
             let external_binding = external_methods.get(method_name_str).cloned();
             self.entity_registry.register_method_with_binding(
@@ -1435,6 +1456,7 @@ impl Analyzer {
                 method_name_id,
                 full_method_name_id,
                 signature,
+                signature_id,
                 *has_default,
                 external_binding,
             );
@@ -1503,6 +1525,7 @@ impl Analyzer {
                     || default_static_external_methods.contains(&method.name);
 
                 let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
 
                 let external_binding = static_external_methods.get(&method_name_str).cloned();
                 self.entity_registry.register_static_method_with_binding(
@@ -1510,6 +1533,7 @@ impl Analyzer {
                     method_name_id,
                     full_method_name_id,
                     signature,
+                    signature_id,
                     has_default,
                     external_binding,
                     Vec::new(), // Interface static methods, no method type params
@@ -1689,12 +1713,14 @@ impl Analyzer {
                             .unwrap_or_else(|| self.type_arena.borrow().void());
 
                         let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+                        let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
 
                         self.entity_registry.register_static_method(
                             entity_type_id,
                             method_name_id,
                             full_method_name_id,
                             signature,
+                            signature_id,
                             false,      // implement block methods don't have defaults
                             Vec::new(), // implement block static methods, no method type params
                         );
@@ -1725,6 +1751,7 @@ impl Analyzer {
 
                             let signature =
                                 FunctionType::from_ids(&params_id, return_type_id, false);
+                            let signature_id = signature.intern(&mut self.type_arena.borrow_mut());
 
                             let native_name = func
                                 .native_name
@@ -1736,6 +1763,7 @@ impl Analyzer {
                                 method_name_id,
                                 full_method_name_id,
                                 signature,
+                                signature_id,
                                 false,
                                 Some(ExternalMethodInfo {
                                     module_path: external.module_path.clone(),
