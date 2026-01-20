@@ -417,7 +417,7 @@ impl Compiler<'_> {
         let (self_type_id, impl_type_id) = match &impl_block.target_type {
             TypeExpr::Primitive(p) => {
                 let prim_type = crate::sema::PrimitiveType::from_ast(*p);
-                let type_id = self.analyzed.type_arena.borrow_mut().primitive(prim_type);
+                let type_id = self.analyzed.type_arena.borrow().primitive(prim_type);
                 let impl_id = self.impl_type_id_from_type_id(type_id);
                 (type_id, impl_id)
             }
@@ -589,7 +589,7 @@ impl Compiler<'_> {
         let self_type_id = match &impl_block.target_type {
             TypeExpr::Primitive(p) => {
                 let prim_type = crate::sema::PrimitiveType::from_ast(*p);
-                self.analyzed.type_arena.borrow_mut().primitive(prim_type)
+                self.analyzed.type_arena.borrow().primitive(prim_type)
             }
             TypeExpr::Named(sym) => self
                 .type_metadata
