@@ -130,6 +130,7 @@ impl Analyzer {
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None, // Sub-analyzers don't need the cache
             type_arena: self.type_arena.clone(), // Share arena so TypeIds are valid
+            found_return: false,
         };
 
         // Copy existing registries so prelude files can reference earlier definitions

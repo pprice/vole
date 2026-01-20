@@ -1,0 +1,4 @@
+// Test: E1025 - missing type annotation on function parameter
+func add(a, b) {
+    return a + b
+}

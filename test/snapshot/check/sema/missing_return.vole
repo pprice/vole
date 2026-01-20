@@ -1,0 +1,5 @@
+// Test: E2083 - missing return statement in function with explicit return type
+
+func no_return() -> i64 {
+    let x = 42
+}

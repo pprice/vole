@@ -114,9 +114,13 @@ impl Compiler<'_> {
                     if !func.type_params.is_empty() {
                         continue;
                     }
-                    let sig = self.build_signature(
+                    // Get return type from entity_registry (supports inferred types)
+                    let return_type_id = self
+                        .query()
+                        .function_return_type(self.query().main_module(), func.name);
+                    let sig = self.build_signature_with_return_type_id(
                         &func.params,
-                        func.return_type.as_ref(),
+                        return_type_id,
                         SelfParam::None,
                         TypeResolver::Query,
                     );
@@ -124,12 +128,8 @@ impl Compiler<'_> {
                     let func_id = self.jit.declare_function(&display_name, &sig);
                     self.func_registry.set_func_id(func_key, func_id);
                     // Record return type for use in call expressions (TypeId-native)
-                    let return_type_id = func
-                        .return_type
-                        .as_ref()
-                        .map(|t| self.resolve_type_to_id(t))
-                        .unwrap_or(TypeId::VOID);
-                    self.func_registry.set_return_type(func_key, return_type_id);
+                    self.func_registry
+                        .set_return_type(func_key, return_type_id.unwrap_or(TypeId::VOID));
                 }
                 Decl::Tests(tests_decl) => {
                     // Declare each test with a generated name and signature () -> i64
@@ -562,17 +562,20 @@ impl Compiler<'_> {
     }
 
     fn compile_function(&mut self, func: &FuncDecl) -> Result<(), String> {
-        let _module_id = self.query().main_module();
+        let main_module = self.query().main_module();
         let (func_key, display_name) = self.main_function_key_and_name(func.name);
         let func_id = self
             .func_registry
             .func_id(func_key)
             .ok_or_else(|| format!("Function {} not declared", display_name))?;
 
+        // Get return type from entity_registry (supports inferred types)
+        let return_type_id = self.query().function_return_type(main_module, func.name);
+
         // Create function signature
-        let sig = self.build_signature(
+        let sig = self.build_signature_with_return_type_id(
             &func.params,
-            func.return_type.as_ref(),
+            return_type_id,
             SelfParam::None,
             TypeResolver::Query,
         );
@@ -591,12 +594,6 @@ impl Compiler<'_> {
             .collect();
         drop(arena_ref);
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
-
-        // Get function return type id (TypeId-native)
-        let return_type_id = func
-            .return_type
-            .as_ref()
-            .map(|t| self.resolve_type_to_id(t));
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();

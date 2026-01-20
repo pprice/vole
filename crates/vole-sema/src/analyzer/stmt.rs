@@ -245,6 +245,9 @@ impl Analyzer {
                 // Could validate we're in a loop, skip for now
             }
             Stmt::Return(ret) => {
+                // Mark that we found a return statement
+                self.found_return = true;
+
                 // Determine expected type for bidirectional type checking (TypeId-based)
                 let expected_value_type_id = self.current_function_return.map(|expected| {
                     // If expected is fallible, extract success type for comparison
@@ -264,7 +267,10 @@ impl Analyzer {
                     self.ty_void_id()
                 };
 
-                if let Some(expected_id) = expected_value_type_id
+                // If in inference mode (current_function_return is None), set it from this return
+                if self.current_function_return.is_none() {
+                    self.current_function_return = Some(ret_type_id);
+                } else if let Some(expected_id) = expected_value_type_id
                     && !self.types_compatible_id(ret_type_id, expected_id, interner)
                 {
                     let expected_str = self.type_display_id(expected_id);
@@ -280,6 +286,8 @@ impl Analyzer {
                 }
             }
             Stmt::Raise(raise_stmt) => {
+                // Mark that we found a terminating statement (raise is like return for error path)
+                self.found_return = true;
                 self.analyze_raise_stmt(raise_stmt, interner);
             }
             Stmt::LetTuple(let_tuple) => {

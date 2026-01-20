@@ -296,6 +296,15 @@ impl<'a> ProgramQuery<'a> {
         namer.function(module, name)
     }
 
+    /// Get a function's return type from entity_registry
+    #[must_use]
+    pub fn function_return_type(&self, module: ModuleId, name: Symbol) -> Option<TypeId> {
+        let name_id = self.try_function_name_id(module, name)?;
+        let func_id = self.registry.function_by_name(name_id)?;
+        let func_def = self.registry.get_function(func_id);
+        Some(func_def.signature.return_type_id)
+    }
+
     // =========================================================================
     // Well-known type checks
     // =========================================================================

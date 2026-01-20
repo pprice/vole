@@ -142,6 +142,8 @@ struct FunctionCheckContext {
     static_method: Option<String>,
     /// How many scopes were on the stack when we entered this context
     type_param_stack_depth: usize,
+    /// Whether a return/raise statement was found (simple check, not control flow analysis)
+    found_return: bool,
 }
 
 pub struct Analyzer {
@@ -151,6 +153,8 @@ pub struct Analyzer {
     functions_by_name: FxHashMap<String, FunctionType>,
     globals: HashMap<Symbol, ArenaTypeId>,
     current_function_return: Option<ArenaTypeId>,
+    /// Whether a return/raise was found (simple check, not full control flow analysis)
+    found_return: bool,
     /// Current function's error type (if fallible)
     current_function_error_type: Option<ArenaTypeId>,
     /// Generator context: if inside a generator function, this holds the Iterator element type.
@@ -238,6 +242,7 @@ impl Analyzer {
             functions_by_name: FxHashMap::default(),
             globals: HashMap::new(),
             current_function_return: None,
+            found_return: false,
             current_function_error_type: None,
             current_generator_element_type: None,
             current_static_method: None,
@@ -1227,9 +1232,11 @@ impl Analyzer {
             generator_element_type: self.current_generator_element_type.take(),
             static_method: self.current_static_method.take(),
             type_param_stack_depth: self.type_param_stack.depth(),
+            found_return: self.found_return,
         };
 
         self.current_function_return = Some(return_type_id);
+        self.found_return = false; // Reset for new function
 
         // Set error type context if this is a fallible function
         if let Some((_success, error)) = self.type_arena.borrow().unwrap_fallible(return_type_id) {
@@ -1244,9 +1251,28 @@ impl Analyzer {
         saved
     }
 
+    /// Enter a function context for return type inference (no known return type).
+    /// The first return statement will set current_function_return; subsequent returns check against it.
+    fn enter_function_context_inferring(&mut self) -> FunctionCheckContext {
+        let saved = FunctionCheckContext {
+            return_type: self.current_function_return.take(),
+            error_type: self.current_function_error_type.take(),
+            generator_element_type: self.current_generator_element_type.take(),
+            static_method: self.current_static_method.take(),
+            type_param_stack_depth: self.type_param_stack.depth(),
+            found_return: self.found_return,
+        };
+
+        // current_function_return stays None to signal inference mode
+        self.found_return = false; // Reset for new function
+
+        saved
+    }
+
     /// Exit function/method check context, restoring saved state.
     fn exit_function_context(&mut self, saved: FunctionCheckContext) {
         self.current_function_return = saved.return_type;
+        self.found_return = saved.found_return;
         self.current_function_error_type = saved.error_type;
         self.current_generator_element_type = saved.generator_element_type;
         self.current_static_method = saved.static_method;
@@ -1272,7 +1298,15 @@ impl Analyzer {
             .get(&func.name)
             .cloned()
             .expect("function registered in signature collection pass");
-        let saved_ctx = self.enter_function_context(func_type.return_type_id);
+
+        // Determine if we need to infer the return type
+        let needs_inference = func.return_type.is_none();
+
+        let saved_ctx = if needs_inference {
+            self.enter_function_context_inferring()
+        } else {
+            self.enter_function_context(func_type.return_type_id)
+        };
 
         // Create new scope with parameters
         let parent_scope = std::mem::take(&mut self.scope);
@@ -1290,6 +1324,42 @@ impl Analyzer {
 
         // Check body
         self.check_block(&func.body, interner)?;
+
+        // If we were inferring the return type, update the function signature
+        if needs_inference {
+            let inferred_return_type = self.current_function_return.unwrap_or_else(|| {
+                self.type_arena.borrow().void()
+            });
+
+            // Update the function signature with the inferred return type
+            if let Some(existing) = self.functions.get_mut(&func.name) {
+                existing.return_type_id = inferred_return_type;
+            }
+
+            // Also update in entity_registry
+            let name_id = self
+                .name_table
+                .intern(self.current_module, &[func.name], interner);
+            if let Some(func_id) = self.entity_registry.function_by_name(name_id) {
+                self.entity_registry
+                    .update_function_return_type(func_id, inferred_return_type);
+            }
+        } else {
+            // Check for missing return statement when return type is explicit and non-void
+            let is_void = func_type.return_type_id.is_void();
+            if !is_void && !self.found_return {
+                let func_name = interner.resolve(func.name).to_string();
+                let expected = self.type_display_id(func_type.return_type_id);
+                self.add_error(
+                    SemanticError::MissingReturn {
+                        name: func_name,
+                        expected,
+                        span: func.span.into(),
+                    },
+                    func.span,
+                );
+            }
+        }
 
         // Restore scope
         if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {

@@ -1,0 +1,55 @@
+// Function tests
+
+// Return type inference - should infer i64 from return expression
+func doubleA(x: i64) { return x * 2 }
+
+// Explicit return type
+func doubleB(x: i64) -> i64 { return x * 2 }
+
+// Implicit void - no return type, no return statement
+func implicitVoid(x: i64) {
+    let y = x + 1
+}
+
+// Explicit void return type
+func explicitVoid(x: i64) -> void {
+    let y = x + 1
+}
+
+// Return nil explicitly
+func returnNil() -> nil {
+    return nil
+}
+
+// Inferred nil return
+func inferredNil() {
+    return nil
+}
+
+tests "functions" {
+    test "inferred return type" {
+        assert(doubleA(21) == 42)
+    }
+
+    test "explicit return type" {
+        assert(doubleB(21) == 42)
+    }
+
+    test "implicit void" {
+        implicitVoid(1)
+        assert(true)
+    }
+
+    test "explicit void" {
+        explicitVoid(1)
+        assert(true)
+    }
+
+    test "return nil" {
+        assert(returnNil() == nil)
+    }
+
+    test "inferred nil return" {
+        assert(inferredNil() == nil)
+    }
+}

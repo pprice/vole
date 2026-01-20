@@ -108,4 +108,12 @@ pub enum ParserError {
         #[label("second statics block")]
         span: SourceSpan,
     },
+
+    #[error("missing type annotation for parameter '{name}'")]
+    #[diagnostic(code(E1025), help("add a type annotation: {name}: Type"))]
+    MissingTypeAnnotation {
+        name: String,
+        #[label("type annotation required")]
+        span: SourceSpan,
+    },
 }

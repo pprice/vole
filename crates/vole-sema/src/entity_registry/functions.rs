@@ -46,4 +46,15 @@ impl EntityRegistry {
     ) {
         self.function_defs[func_id.index() as usize].generic_info = Some(info);
     }
+
+    /// Update the return type of a function (used for return type inference)
+    pub fn update_function_return_type(
+        &mut self,
+        func_id: FunctionId,
+        return_type: crate::type_arena::TypeId,
+    ) {
+        self.function_defs[func_id.index() as usize]
+            .signature
+            .return_type_id = return_type;
+    }
 }

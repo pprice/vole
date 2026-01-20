@@ -465,6 +465,26 @@ pub enum SemanticError {
         #[label("structural constraint not satisfied")]
         span: SourceSpan,
     },
+
+    #[error("cannot infer return type for function '{name}'")]
+    #[diagnostic(code(E2082), help("add explicit return type: func {name}(...) -> Type"))]
+    CannotInferReturnType {
+        name: String,
+        #[label("return type cannot be inferred")]
+        span: SourceSpan,
+    },
+
+    #[error("missing return statement in function '{name}'")]
+    #[diagnostic(
+        code(E2083),
+        help("add a return statement, or change return type to void")
+    )]
+    MissingReturn {
+        name: String,
+        expected: String,
+        #[label("function expects to return {expected}")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

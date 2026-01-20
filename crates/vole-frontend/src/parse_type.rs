@@ -15,7 +15,17 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::Identifier, "expected parameter name")?;
         let name = self.interner.intern(&name_token.lexeme);
 
-        self.consume(TokenType::Colon, "expected ':' after parameter name")?;
+        // Check for missing type annotation
+        if !self.check(TokenType::Colon) {
+            return Err(ParseError::new(
+                ParserError::MissingTypeAnnotation {
+                    name: name_token.lexeme.to_string(),
+                    span: name_token.span.into(),
+                },
+                name_token.span,
+            ));
+        }
+        self.advance(); // consume ':'
         let ty = self.parse_type()?;
 
         Ok(Param {
