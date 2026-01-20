@@ -76,4 +76,15 @@ tests "functions" {
         increment()
         assert(count == 2)
     }
+
+    // WIP: Recursive nested functions don't work yet
+    // The lambda isn't in scope during its own analysis
+    // Tracked by: vole-81vm
+    test "nested recursive function" {
+        func factorial(n: i64) -> i64 {
+            if n <= 1 { return 1 }
+            return n * factorial(n - 1)
+        }
+        assert(factorial(5) == 120)
+    }
 }

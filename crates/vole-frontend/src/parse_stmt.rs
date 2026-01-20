@@ -115,8 +115,92 @@ impl<'src> Parser<'src> {
             TokenType::KwContinue => self.continue_stmt(),
             TokenType::KwReturn => self.return_stmt(),
             TokenType::KwRaise => self.raise_stmt(),
+            TokenType::KwFunc => self.nested_func_stmt(),
             _ => self.expr_stmt(),
         }
+    }
+
+    /// Parse a nested function declaration as a let-bound lambda
+    /// `func foo(x: i64) -> i64 { ... }` becomes `let foo = (x: i64) -> i64 => { ... }`
+    fn nested_func_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'func'
+
+        // Parse function name
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected function name")?;
+        let name = self.interner.intern(&name_token.lexeme);
+
+        // Parse parameters (convert Param to LambdaParam)
+        self.consume(TokenType::LParen, "expected '(' after function name")?;
+        let mut params = Vec::new();
+        if !self.check(TokenType::RParen) {
+            loop {
+                let param = self.parse_param()?;
+                // Convert Param (required type) to LambdaParam (optional type)
+                params.push(LambdaParam {
+                    name: param.name,
+                    ty: Some(param.ty),
+                    span: param.span,
+                });
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+                if self.check(TokenType::RParen) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RParen, "expected ')' after parameters")?;
+
+        // Parse optional return type
+        let return_type = if self.match_token(TokenType::Arrow) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        // Parse body - block or expression
+        let body = if self.match_token(TokenType::FatArrow) {
+            let expr = self.expression(0)?;
+            LambdaBody::Expr(Box::new(expr))
+        } else {
+            let block = self.block()?;
+            LambdaBody::Block(block)
+        };
+
+        let end_span = match &body {
+            LambdaBody::Expr(e) => e.span,
+            LambdaBody::Block(b) => b.span,
+        };
+        let lambda_span = start_span.merge(end_span);
+
+        // Create lambda expression
+        let lambda = LambdaExpr {
+            type_params: Vec::new(),
+            params,
+            return_type,
+            body,
+            captures: std::cell::RefCell::new(Vec::new()),
+            has_side_effects: std::cell::Cell::new(false),
+            span: lambda_span,
+        };
+
+        let lambda_expr = Expr {
+            id: self.next_id(),
+            kind: ExprKind::Lambda(Box::new(lambda)),
+            span: lambda_span,
+        };
+
+        // Create let statement
+        let span = start_span.merge(end_span);
+        Ok(Stmt::Let(LetStmt {
+            name,
+            ty: None,
+            mutable: false,
+            init: LetInit::Expr(lambda_expr),
+            span,
+        }))
     }
 
     /// Parse a let statement (as a Stmt)

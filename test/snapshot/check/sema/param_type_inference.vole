@@ -1,0 +1,6 @@
+// Error: parameter type inference not yet supported
+// Functions require explicit type annotations on parameters
+
+func add(a, b) {
+    return a + b
+}

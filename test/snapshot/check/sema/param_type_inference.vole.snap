@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  x [E1025]: missing type annotation for parameter 'a'
+   ,-[<path>/param_type_inference.vole:4:10]
+ 3 | 
+ 4 | func add(a, b) {
+   :          |
+   :          `-- type annotation required
+ 5 |     return a + b
+   `----
+  help: add a type annotation: a: Type

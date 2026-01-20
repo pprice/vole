@@ -147,3 +147,42 @@ tests "functions" {
         assert(safeDouble(-1) == 0)
     }
 }
+
+tests "nested functions" {
+    test "nested function declaration" {
+        func localAdd(a: i64, b: i64) -> i64 {
+            return a + b
+        }
+        assert(localAdd(10, 20) == 30)
+    }
+
+    test "nested function with no params" {
+        func getValue() -> i64 {
+            return 42
+        }
+        assert(getValue() == 42)
+    }
+
+    test "function in function" {
+        func outer() -> i64 {
+            func inner() -> i64 {
+                return 42
+            }
+            return inner()
+        }
+        assert(outer() == 42)
+    }
+
+    test "nested function with closure" {
+        let x = 10
+        func addX(y: i64) -> i64 {
+            return x + y
+        }
+        assert(addX(5) == 15)
+    }
+
+    test "nested expression-bodied function" {
+        func double(x: i64) -> i64 => x * 2
+        assert(double(21) == 42)
+    }
+}
