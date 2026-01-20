@@ -313,6 +313,7 @@ fn compile_pure_lambda(
             None,
             &mut lambda_cf,
             ctx,
+            return_type_id,
         )?;
 
         if let Some(result_val) = result {
@@ -449,6 +450,7 @@ fn compile_lambda_with_captures(
             Some(closure_var),
             &mut lambda_cf,
             ctx,
+            return_type_id,
         )?;
 
         if let Some(result_val) = result {
@@ -544,7 +546,11 @@ fn compile_lambda_body(
     closure_var: Option<Variable>,
     cf: &mut ControlFlow,
     ctx: &mut CompileCtx,
+    return_type_id: TypeId,
 ) -> Result<Option<CompiledValue>, String> {
+    // Set up function context for raise/try statements (same as regular functions)
+    let old_return_type = ctx.current_function_return_type;
+    ctx.current_function_return_type = Some(return_type_id);
     match body {
         LambdaBody::Expr(expr) => {
             let result = if capture_bindings.is_empty() {
@@ -558,6 +564,8 @@ fn compile_lambda_body(
                 let mut cg = Cg::with_captures(builder, variables, ctx, cf, captures);
                 cg.expr(expr)?
             };
+            // Restore old context
+            ctx.current_function_return_type = old_return_type;
             Ok(Some(result))
         }
         LambdaBody::Block(block) => {
@@ -572,6 +580,8 @@ fn compile_lambda_body(
                 let mut cg = Cg::with_captures(builder, variables, ctx, cf, captures);
                 cg.block(block)?
             };
+            // Restore old context
+            ctx.current_function_return_type = old_return_type;
             if terminated {
                 Ok(None)
             } else {

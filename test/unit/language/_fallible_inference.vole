@@ -1,0 +1,188 @@
+// WIP: Fallible return type inference
+//
+// Currently, functions using `raise` or `try` require explicit `-> fallible(T, E)`
+// return type annotations. This file tests the desired behavior where the compiler
+// infers the fallible return type from the function body.
+//
+// Status: Not implemented
+// Error: E2054 "raise must be in a function with fallible return type"
+//
+// Implementation notes:
+// - Sema currently checks `current_function_error_type` which is only set when
+//   the declared return type is fallible (see enter_function_context in analyzer/mod.rs)
+// - For inference, sema would need to:
+//   1. Track raise statements encountered during function body analysis
+//   2. Collect the error types raised
+//   3. Build the fallible(T, E) or fallible(T, E1 | E2) return type
+//   4. Handle `try` expressions similarly - propagate their error types
+// - Codegen would then use the inferred fallible type from sema
+
+error DivByZero {}
+error Overflow { value: i64, max: i64 }
+
+// Test 1: Infer fallible from single raise
+// Should infer: -> fallible(i64, DivByZero)
+func inferredDivide(a: i64, b: i64) {
+    if b == 0 {
+        raise DivByZero {}
+    }
+    return a / b
+}
+
+// Test 2: Infer fallible from multiple raise of same error
+// Should infer: -> fallible(i64, DivByZero)
+func inferredMultiRaise(a: i64, b: i64) {
+    if b == 0 {
+        raise DivByZero {}
+    }
+    if a == 0 {
+        raise DivByZero {}
+    }
+    return a / b
+}
+
+// Test 3: Infer union error type from different raises
+// Should infer: -> fallible(i64, DivByZero | Overflow)
+func inferredUnionError(a: i64, b: i64, max: i64) {
+    if b == 0 {
+        raise DivByZero {}
+    }
+    let result = a / b
+    if result > max {
+        raise Overflow { value: result, max: max }
+    }
+    return result
+}
+
+// Test 4: Infer from try expression
+// Should infer: -> fallible(i64, DivByZero) (propagated from divide)
+func explicitDivide(a: i64, b: i64) -> fallible(i64, DivByZero) {
+    if b == 0 {
+        raise DivByZero {}
+    }
+    return a / b
+}
+
+func inferredFromTry(a: i64, b: i64, c: i64) {
+    let x = try explicitDivide(a, b)
+    let y = try explicitDivide(x, c)
+    return y
+}
+
+// Test 5: Lambda with inferred fallible
+// Should infer lambda type: (i64, i64) -> fallible(i64, DivByZero)
+func testLambdaInference() {
+    let divide = (a: i64, b: i64) => {
+        if b == 0 {
+            raise DivByZero {}
+        }
+        return a / b
+    }
+    return divide
+}
+
+tests "fallible inference - functions" {
+    test "infer from single raise - success" {
+        let result = match inferredDivide(10, 2) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 5)
+    }
+
+    test "infer from single raise - error" {
+        let result = match inferredDivide(10, 0) {
+            success x => x
+            error DivByZero => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "infer union error - success" {
+        let result = match inferredUnionError(10, 2, 100) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 5)
+    }
+
+    test "infer union error - div by zero" {
+        let result = match inferredUnionError(10, 0, 100) {
+            success x => x
+            error DivByZero => -1
+            error Overflow => -2
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "infer union error - overflow" {
+        let result = match inferredUnionError(100, 1, 50) {
+            success x => x
+            error DivByZero => -1
+            error Overflow => -2
+            error => -999
+            _ => -888
+        }
+        assert(result == -2)
+    }
+
+    test "infer from try - success" {
+        let result = match inferredFromTry(100, 2, 5) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 10)
+    }
+
+    test "infer from try - error" {
+        let result = match inferredFromTry(100, 0, 5) {
+            success x => x
+            error DivByZero => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+}
+
+tests "fallible inference - lambdas" {
+    test "lambda with inferred fallible - success" {
+        let divide = (a: i64, b: i64) => {
+            if b == 0 {
+                raise DivByZero {}
+            }
+            return a / b
+        }
+
+        let result = match divide(10, 2) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 5)
+    }
+
+    test "lambda with inferred fallible - error" {
+        let divide = (a: i64, b: i64) => {
+            if b == 0 {
+                raise DivByZero {}
+            }
+            return a / b
+        }
+
+        let result = match divide(10, 0) {
+            success x => x
+            error DivByZero => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+}

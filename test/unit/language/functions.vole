@@ -38,12 +38,33 @@ func exprVoid(x: i64) => x + 1
 // Expression-bodied multiple params
 func exprAdd(a: i64, b: i64) -> i64 => a + b
 
-// Fallible returns - block body
+// Fallible returns - block body with explicit type
 func maybeDouble(x: i64) -> i64? {
     if x < 0 {
         return nil
     }
     return x * 2
+}
+
+// Fallible with early nil return
+func maybeQuad(x: i64) -> i64? {
+    if x < 0 { return nil }
+    if x == 0 { return nil }
+    return x * 4
+}
+
+// Chained fallible - uses another fallible result
+func doubleIfPositive(x: i64) -> i64? {
+    let result = maybeDouble(x)
+    if result == nil {
+        return nil
+    }
+    return result
+}
+
+// Nil coalesce with fallible
+func safeDouble(x: i64) -> i64 {
+    return maybeDouble(x) ?? 0
 }
 
 tests "functions" {
@@ -98,4 +119,31 @@ tests "functions" {
         assert(maybeDouble(-1) == nil)
     }
 
+    test "multiple early nil returns - some" {
+        assert(maybeQuad(2) == 8)
+    }
+
+    test "multiple early nil returns - first nil" {
+        assert(maybeQuad(-1) == nil)
+    }
+
+    test "multiple early nil returns - second nil" {
+        assert(maybeQuad(0) == nil)
+    }
+
+    test "chained fallible - some" {
+        assert(doubleIfPositive(5) == 10)
+    }
+
+    test "chained fallible - nil" {
+        assert(doubleIfPositive(-1) == nil)
+    }
+
+    test "nil coalesce with fallible - some" {
+        assert(safeDouble(5) == 10)
+    }
+
+    test "nil coalesce with fallible - nil case" {
+        assert(safeDouble(-1) == 0)
+    }
 }

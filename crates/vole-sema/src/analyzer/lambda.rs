@@ -100,26 +100,47 @@ impl Analyzer {
         let expected_return_id = expected_type.map(|ft| ft.return_type_id);
 
         // Analyze body and infer return type
+        // Use the same function context mechanism as regular functions
+        // This ensures fallible (raise/try) and generator (yield) contexts work
+        let return_type_for_context = declared_return_id.or(expected_return_id);
+
         let body_type_id = match &lambda.body {
             LambdaBody::Expr(expr) => {
-                // For expression body, analyze and use as return type
-                match self.check_expr(expr, interner) {
+                // For expression body, set up context if we have a declared/expected type
+                let saved = if let Some(ret_id) = return_type_for_context {
+                    Some(self.enter_function_context(ret_id))
+                } else {
+                    None
+                };
+
+                let ty_id = match self.check_expr(expr, interner) {
                     Ok(ty_id) => ty_id,
                     Err(_) => self.ty_invalid_traced_id("fallback"),
+                };
+
+                if let Some(saved) = saved {
+                    self.exit_function_context(saved);
                 }
+                ty_id
             }
             LambdaBody::Block(block) => {
-                // For blocks, set up return type context
-                let old_return = self.current_function_return.take();
-                self.current_function_return = declared_return_id.or(expected_return_id);
+                // For blocks, use the same function context as regular functions
+                let (saved, inferring) = if let Some(ret_id) = return_type_for_context {
+                    (self.enter_function_context(ret_id), false)
+                } else {
+                    (self.enter_function_context_inferring(), true)
+                };
 
                 let _ = self.check_block(block, interner);
 
-                let ret = self
-                    .current_function_return
-                    .take()
-                    .unwrap_or(ArenaTypeId::VOID);
-                self.current_function_return = old_return;
+                let ret = if inferring {
+                    self.current_function_return
+                        .unwrap_or(ArenaTypeId::VOID)
+                } else {
+                    return_type_for_context.unwrap_or(ArenaTypeId::VOID)
+                };
+
+                self.exit_function_context(saved);
                 ret
             }
         };

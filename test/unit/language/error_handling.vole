@@ -437,3 +437,107 @@ tests "guards on patterns" {
         assert(result == -1)
     }
 }
+
+// Expression-bodied fallible functions - return fallible directly (no try needed)
+func exprDivide(a: i64, b: i64) -> fallible(i64, DivByZero) => divide(a, b)
+func exprDouble(x: i64) -> fallible(i64, DivByZero) => divide(x * 2, 1)
+
+tests "expression-bodied fallible" {
+    test "expr-bodied success" {
+        let result = match exprDivide(10, 2) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 5)
+    }
+
+    test "expr-bodied error" {
+        let result = match exprDivide(10, 0) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == -999)
+    }
+
+    test "expr-bodied with arithmetic" {
+        let result = match exprDouble(21) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 42)
+    }
+}
+
+// Lambdas with fallible returns
+let fallibleLambda = (a: i64, b: i64) -> fallible(i64, DivByZero) => {
+    if b == 0 {
+        raise DivByZero {}
+    }
+    return a / b
+}
+
+let fallibleLambdaExpr = (a: i64, b: i64) -> fallible(i64, DivByZero) => divide(a, b)
+
+tests "fallible lambdas" {
+    test "lambda block body success" {
+        let result = match fallibleLambda(10, 2) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 5)
+    }
+
+    test "lambda block body error" {
+        let result = match fallibleLambda(10, 0) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == -999)
+    }
+
+    test "lambda expr-bodied success" {
+        let result = match fallibleLambdaExpr(10, 2) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 5)
+    }
+
+    test "lambda expr-bodied error" {
+        let result = match fallibleLambdaExpr(10, 0) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == -999)
+    }
+
+    test "local lambda fallible" {
+        let localFallible = (x: i64) -> fallible(i64, DivByZero) => {
+            if x == 0 {
+                raise DivByZero {}
+            }
+            return 100 / x
+        }
+
+        let r1 = match localFallible(5) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(r1 == 20)
+
+        let r2 = match localFallible(0) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(r2 == -999)
+    }
+}
